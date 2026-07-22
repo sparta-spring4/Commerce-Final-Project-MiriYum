@@ -413,8 +413,8 @@
 
 ### 확정
 
-- `tastelock-service-blueprint.md`: 최초 아이디어 초안이며, 파일명은 유지한 채 본문 브랜드 표기만 MiriYum으로 정렬한다.
-- `tastelock-service-decisions.md`: 확정, 변경 및 보류 이력을 누적한다.
+- `miriyum-service-blueprint.md`: 최초 아이디어 초안이며, 파일명과 본문 브랜드 표기를 MiriYum으로 정렬한다.
+- `miriyum-service-decisions.md`: 확정, 변경 및 보류 이력을 누적한다.
 - `docs/service-definition.md`: 현재 공식 서비스 전체 구상과 제품 경계를 관리한다.
 - `docs/technical-architecture.md`: 현재 공식 기술 방향을 관리한다.
 - `docs/service-policies/README.md`: 전체 정책 항목과 진행 상태를 관리한다.

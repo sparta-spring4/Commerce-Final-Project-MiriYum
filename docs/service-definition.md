@@ -3,7 +3,7 @@
 > 문서 상태: 정책 재분류·위임 추천 확정·사용자 직접 운영 결정 반영 완료
 > 기준일: 2026-07-22
 > 역할: 현재까지 합의된 서비스 전체 구상과 제품 경계를 설명한다.
-> 참고: `tastelock-service-blueprint.md`는 최초 초안이며 이 문서의 공식 기준이 아니다.
+> 참고: `miriyum-service-blueprint.md`는 최초 초안이며 이 문서의 공식 기준이 아니다.
 
 ## 1. 서비스 정의
 
@@ -242,8 +242,8 @@ MiriYum은 사용자에게 식당 탐색, 방문 예약, 웨이팅과 한정 메
 
 ## 11. 문서 관계
 
-- 최초 아이디어: `tastelock-service-blueprint.md`
-- 결정 이력: `tastelock-service-decisions.md`
+- 최초 아이디어: `miriyum-service-blueprint.md`
+- 결정 이력: `miriyum-service-decisions.md`
 - 현재 서비스 기준: 이 문서
 - 기술 기준: `docs/technical-architecture.md`
 - 상세 운영 정책: `docs/service-policies/`

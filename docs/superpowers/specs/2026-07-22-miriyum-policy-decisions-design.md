@@ -161,7 +161,7 @@
 
 - 사용자에게 보이는 프로젝트 명칭과 문서 본문은 `MiriYum`으로 통일한다.
 - 최초 blueprint에 남아 있던 이전 브랜드명 표기 4곳도 사용자의 후속 승인에 따라 `MiriYum`으로 변경한다.
-- 실제 파일명인 `tastelock-service-decisions.md`, `tastelock-service-blueprint.md`와 이를 가리키는 링크는 이번 범위에서 이름을 바꾸지 않는다. 파일명 변경은 별도 마이그레이션으로 다룬다.
+- 문서 파일명과 이를 가리키는 링크는 후속 MiriYum 명칭 마이그레이션에서 `miriyum-service-decisions.md`, `miriyum-service-blueprint.md`로 변경됐다.
 
 ## 8. 문서 반영 및 검증 기준
 

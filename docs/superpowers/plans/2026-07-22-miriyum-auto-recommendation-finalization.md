@@ -19,7 +19,7 @@
 - When a row contains an existing confirmed sub-scope and unresolved broader scope, preserve the confirmed sub-scope exactly and finalize only the remaining delegated non-core scope.
 - When safe baselines coexist with a TODO fragment, finalize only the safe baseline and keep the provider/legal/future/numeric fragment explicitly TODO; do not falsely mark the TODO fragment confirmed.
 - Do not introduce paid services, unnecessarily complex infrastructure, additional personal-data collection, or single-instance assumptions.
-- Use MiriYum naming; at the time of this plan, do not modify `tastelock-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
+- Use MiriYum naming; at the time of this plan, do not modify `miriyum-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
 - Preserve all pre-existing user changes and work on the current `dev`-based `codex/` branch.
 
 ---
@@ -118,8 +118,8 @@
 - Modify: `docs/service-policies/00-policy-template.md`
 - Modify: `docs/service-definition.md`
 - Modify: `docs/technical-architecture.md`
-- Modify: `tastelock-service-decisions.md`
-- Modify if needed: `docs/superpowers/specs/2026-07-21-tastelock-policy-documentation-design.md`
+- Modify: `miriyum-service-decisions.md`
+- Modify if needed: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
 
 **Interfaces:**
 - Consumes: all independently approved domain details and confirmation records.
@@ -135,7 +135,7 @@
 
 **Files:**
 - Verify: every file above
-- Verify unchanged: `tastelock-service-blueprint.md`
+- Verify unchanged: `miriyum-service-blueprint.md`
 
 **Interfaces:**
 - Consumes: the complete finalized policy corpus.
