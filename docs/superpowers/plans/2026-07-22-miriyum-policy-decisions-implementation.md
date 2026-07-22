@@ -132,4 +132,4 @@
 - [x] Resolve every reviewer finding and repeat review until approved.
 - [x] Run fresh final checks: `git diff --check`, 217 unique master rows, `184/18/0/15`, `19/181/17`, 18 domain/master agreement, zero staged surprises, and zero old brand-copy occurrences.
 - [x] Stage only the reviewed documentation files, inspect `git diff --cached --name-only` and `git diff --cached --check`, then commit with an intentional documentation message.
-- [ ] Push `codex/miriyum-policy-decisions` to `origin` and report the remote branch without creating a pull request unless requested.
+- [x] Push `codex/miriyum-policy-decisions` to `origin` and report the remote branch without creating a pull request unless requested.
