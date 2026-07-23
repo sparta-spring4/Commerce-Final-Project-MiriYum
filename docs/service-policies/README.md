@@ -27,7 +27,7 @@
 - `TODO`에 미정 부분이 있어도 최소 권한, 중복 처리 방지, 암호화 백업, 감사 기록 같은 안전 기본선은 경계를 분리해 함께 명시하고 별도 절차로 확정할 수 있다.
 - 대규모 트래픽과 다중 서버·다중 인스턴스를 전제로 하되, 유료 서비스 도입·불필요하게 복잡한 인프라·추가 개인정보 수집은 자동 기본값으로 선택하지 않는다.
 - 상세 정책이 끝나면 예외, 악용, 동시성, 장애 및 테스트 관점으로 재검토한다.
-- 제품 범위 변경은 `docs/service-definition.md`, 기술 방향 변경은 `docs/technical-architecture.md`에 반영한다.
+- 제품 범위 변경은 `docs/01-product-vision.md`, 기술 방향 변경은 `docs/06-system-architecture.md`에 반영한다.
 - 결정 및 변경 이력은 `miriyum-service-decisions.md`에 남긴다.
 
 ## 01. 회원·인증·계정 — `01-member-auth.md`

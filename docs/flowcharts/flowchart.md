@@ -1,6 +1,6 @@
 # MiriYum 비즈니스 플로우
 
-> 기준 문서: [서비스 정의](../service-definition.md), [서비스 정책](../service-policies/README.md)
+> 기준 문서: [제품 비전](../01-product-vision.md), [서비스 정책](../service-policies/README.md)
 >
 > 작성 기준일: 2026-07-23
 >
@@ -28,7 +28,8 @@ MiriYum의 핵심 사용자 여정을 플로우차트 중심으로 정리한다.
 
 ### Dependencies
 
-- 서비스 범위와 참여자: [서비스 정의](../service-definition.md)
+- 서비스 범위: [제품 비전](../01-product-vision.md)
+- 참여자와 권한: [사용자와 권한](../02-users-and-permissions.md)
 - 예약 정책: [방문 예약](../service-policies/04-reservation.md)
 - 웨이팅 정책: [현장·원격 웨이팅](../service-policies/05-waiting.md)
 - 메뉴 수량 정책: [메뉴 홀드](../service-policies/06-menu-hold.md)
