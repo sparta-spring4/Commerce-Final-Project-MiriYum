@@ -6,8 +6,8 @@ MiriYum의 최초 블루프린트를 보존하면서, 실제 구현에 사용할
 
 ## 2. 문서 구성
 
-- `tastelock-service-blueprint.md`: 최초 아이디어 초안이다. 파일명은 유지하며 본문 브랜드 표기만 MiriYum으로 정렬한다.
-- `tastelock-service-decisions.md`: `확정`, `자동 추천 예정`, `TODO`, `팀원 상의 필요` 및 변경 이력을 누적한다.
+- `miriyum-service-blueprint.md`: 최초 아이디어 초안이다. 파일명과 본문 브랜드 표기를 MiriYum으로 정렬한다.
+- `miriyum-service-decisions.md`: `확정`, `자동 추천 예정`, `TODO`, `팀원 상의 필요` 및 변경 이력을 누적한다.
 - `docs/service-definition.md`: 현재 공식 서비스 구상과 제품 경계를 관리한다.
 - `docs/technical-architecture.md`: 확정된 정책을 구현하는 공식 기술 방향을 관리한다.
 - `docs/service-policies/README.md`: 전체 정책 항목과 진행 상태를 관리한다.
