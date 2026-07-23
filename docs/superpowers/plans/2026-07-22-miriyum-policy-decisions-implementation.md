@@ -100,9 +100,9 @@
 - Modify: `docs/service-policies/00-policy-template.md`
 - Modify: `docs/service-definition.md`
 - Modify: `docs/technical-architecture.md`
-- Modify: `tastelock-service-decisions.md`
-- Modify: `docs/superpowers/specs/2026-07-21-tastelock-policy-documentation-design.md`
-- Modify: `tastelock-service-blueprint.md`
+- Modify: `miriyum-service-decisions.md`
+- Modify: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
+- Modify: `miriyum-service-blueprint.md`
 - Modify: `docs/superpowers/plans/2026-07-22-miriyum-policy-reclassification.md`
 - Modify: `docs/superpowers/plans/2026-07-22-miriyum-auto-recommendation-finalization.md`
 

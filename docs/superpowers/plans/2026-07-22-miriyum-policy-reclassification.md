@@ -16,7 +16,7 @@
 - Keep standard security, authorization, idempotency, concurrency, state-transition, failure, retry, notification, and audit details in `자동 추천 예정` when they do not alter product direction.
 - Keep paid-provider selection, final legal/privacy/terms review, future expansion, empirically tuned numbers, and out-of-scope complexity in `TODO`.
 - Do not convert any `자동 추천 예정` item to `확정` during this task.
-- Use `MiriYum` as the project name; at the time of this plan, do not modify `tastelock-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
+- Use `MiriYum` as the project name; at the time of this plan, do not modify `miriyum-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
 - Preserve pre-existing user changes and work on the current `dev`-based `codex/` feature branch.
 - Assume large traffic and multi-server/multi-instance operation, while avoiding paid services, unnecessarily complex infrastructure, and additional personal-data collection in recommendations.
 
@@ -25,7 +25,7 @@
 ### Task 1: Canonical 217-Policy Audit Matrix
 
 **Files:**
-- Read: `tastelock-service-decisions.md`
+- Read: `miriyum-service-decisions.md`
 - Read: `docs/service-definition.md`
 - Read: `docs/technical-architecture.md`
 - Read: `docs/service-policies/README.md`
@@ -79,7 +79,7 @@
 **Files:**
 - Modify: `docs/service-definition.md`
 - Modify: `docs/technical-architecture.md`
-- Modify: `tastelock-service-decisions.md`
+- Modify: `miriyum-service-decisions.md`
 
 **Interfaces:**
 - Consumes: the canonical README ledger and synchronized domain documents.
@@ -95,7 +95,7 @@
 
 **Files:**
 - Verify: all files above
-- Verify unchanged: `tastelock-service-blueprint.md`
+- Verify unchanged: `miriyum-service-blueprint.md`
 
 **Interfaces:**
 - Consumes: the complete working-tree result.
@@ -104,5 +104,5 @@
 - [x] Recompute the 217-row status totals and before/after transition matrix from source text.
 - [x] Compare the final 31 confirmed IDs and their status/importance/content against the Task 1 immutable set.
 - [x] Scan every policy ID and every status-bearing sentence for cross-document mismatch.
-- [x] Run `git diff --check`, report the current branch, and verify `tastelock-service-blueprint.md` has no tracked diff caused by this task.
+- [x] Run `git diff --check`, report the current branch, and verify `miriyum-service-blueprint.md` has no tracked diff caused by this task.
 - [x] Conduct a broad independent review of scope, classification correctness, confirmed-policy preservation, and final-report evidence.
