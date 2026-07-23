@@ -479,14 +479,18 @@
 
 ### 확정
 
-- `miriyum-service-blueprint.md`: 최초 아이디어 초안이며, 파일명과 본문 브랜드 표기를 MiriYum으로 정렬한다.
-- `miriyum-service-decisions.md`: 확정, 변경 및 보류 이력을 누적한다.
-- `docs/service-definition.md`: 현재 공식 서비스 전체 구상과 제품 경계를 관리한다.
-- `docs/technical-architecture.md`: 현재 공식 기술 방향을 관리한다.
-- `docs/service-policies/README.md`: 전체 정책 항목과 진행 상태를 관리한다.
-- `docs/service-policies/00-policy-template.md`: 상세 정책의 공통 검토 양식이다.
+- `miriyum-service-blueprint.md`: 최초 아이디어를 보존하는 역사적 입력이며 현재 기준을 소유하지 않는다.
+- `miriyum-service-decisions.md`: 확정, 변경 및 보류 이력을 누적하는 역사적 결정 기록이며 현재 제품·기술 기준을 소유하지 않는다.
+- [문서 색인](docs/00-index.md): 현재 공식 문서 진입점과 문서별 단일 소유권을 관리한다.
+- [제품 비전](docs/01-product-vision.md): 현재 제품 목적, 가치, 초기 범위와 비목표를 관리한다.
+- [사용자·권한](docs/02-users-and-permissions.md), [도메인](docs/03-domain-model.md), [사용자 흐름](docs/04-user-flows.md), [기능 요구사항](docs/05-functional-requirements.md): 사용자·권한 개요, 도메인, 사용자 흐름과 기능 요구사항 색인을 관리한다.
+- [시스템 구조](docs/06-system-architecture.md), [데이터·API 계약](docs/07-data-and-api-contracts.md), [UI·프론트엔드 기준](docs/08-ui-and-frontend-guidelines.md), [품질·운영 규칙](docs/09-quality-operations-and-rules.md): 시스템 구조, 데이터·API 계약, UI·프론트엔드 기준과 품질·운영 게이트를 관리한다.
+- [ADR](docs/adr/): 여러 문서에 영향을 주는 지속적인 아키텍처·기술 결정 이유를 관리한다.
+- [기능 명세](docs/specs/README.md): 기능별 durable behavior, 계약과 인수 조건을 관리한다.
+- [정책 색인](docs/service-policies/README.md): 전체 정책 항목과 진행 상태를 관리한다.
+- [정책 템플릿](docs/service-policies/00-policy-template.md): 상세 정책의 공통 검토 양식이다.
 - `docs/service-policies/01-*.md`부터 `18-*.md`: 도메인별 상세 정책을 관리한다.
 
-행 단위 상태·중요도가 충돌하면 `docs/service-policies/README.md`를 기준으로 한다. 정책 내용은 최신 확정 상세 정책, 공식 서비스 정의·기술 아키텍처, 의사결정 기록, 최초 블루프린트 순으로 적용하되, 미래 자동 추천 후보 또는 `TODO` 행의 남은 범위가 이미 확정된 하위 결정을 덮어쓰지 않고 확정 안전 기본선도 `TODO` 조각을 해소한 것으로 해석하지 않는다.
+행 단위 정책 상태·중요도가 충돌하면 [정책 색인](docs/service-policies/README.md)을 기준으로 한다. 현재 제품·기술 기준은 [문서 색인](docs/00-index.md)의 소유권에 따라 `docs/01`부터 `docs/09`, 상세 정책, ADR과 기능 명세에서 확인한다. 이 결정 기록과 최초 블루프린트는 역사적 입력으로만 사용하며 현재 정본을 덮어쓰지 않는다. 미래 자동 추천 후보 또는 `TODO` 행의 남은 범위가 이미 확정된 하위 결정을 덮어쓰지 않고, 확정 안전 기본선도 `TODO` 조각을 해소한 것으로 해석하지 않는다.
 
 정책 상태는 `미논의`, `논의 중`, `자동 추천 예정`, `TODO`, `팀원 상의 필요`, `확정`, `변경 검토`로 구분한다. `자동 추천 예정`은 제품 방향을 바꾸지 않는 새 표준 보안·권한·멱등성·동시성·상태 전이·실패·재시도·알림·감사 후보이며, 상세안을 작성하는 동안 이 상태를 유지하고 명시적 위임·세부 완성·독립 검토·결정 기록 없이 확정하지 않는다. 현재 대기 행은 0개지만 미래 후보에 이 상태를 계속 사용한다. `TODO`는 외부 계약·최종 법률·개인정보·약관 검토·미래 기능·실측 수치처럼 지금 확정하지 않을 항목, `팀원 상의 필요`는 제품 방향·주요 흐름·금전 책임·공정성·되돌리기 어려운 약속의 대표 결정을 뜻한다. `확정`은 사용자가 직접 승인했거나 비핵심 추천안이 명시적인 추천 위임 기준 안에서 세부 내용과 인수 조건까지 완성되고 독립 검토를 거쳐 정책 ID별 의사결정 기록에 `확정`으로 남은 항목이다. 자동 추천 후보를 단순히 문서화하거나 구현한 것만으로는 충분하지 않는다. `TODO`의 미정 조각과 확정 안전 기본선은 같은 정책 행 또는 연계 섹션에 공존할 수 있다.
