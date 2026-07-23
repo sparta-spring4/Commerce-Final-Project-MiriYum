@@ -1,0 +1,52 @@
+# 00. 프로젝트 지식 색인
+
+## 목적
+
+이 문서는 MiriYum의 기준 문서로 들어가는 순서와 문서별 소유 책임을 안내한다. 제품·정책·설계의 상세 내용은 각 정본에 두고, 이 문서는 그 내용을 복제하지 않는다.
+
+## 처음 읽는 순서
+
+1. [README.md](../README.md)
+2. 기여, Issue 또는 Pull Request 작업이라면 [기여 가이드](../CONTRIBUTING.md)
+3. [01. 제품 비전](01-product-vision.md)
+4. `03. 도메인 모델`
+5. `05. 기능 요구사항`
+6. `06. 시스템 아키텍처`
+7. `07. 데이터·API 계약`
+8. `09. 품질·운영·규칙`
+9. 관련 [서비스 정책](service-policies/README.md)
+10. 관련 [아키텍처 결정 기록](adr/)
+11. 관련 기능 [명세](specs/README.md)
+
+## 문서별 소유 책임
+
+- `README.md`는 프로젝트의 짧은 진입점과 현재 단계를 소유한다.
+- `CONTRIBUTING.md`는 사람과 AI 협업자의 Issue·Project Status·PR·위임 흐름을 소유한다.
+- `00-index.md`는 읽기 경로, 문서 책임, 연결 규칙을 소유한다.
+- `01-product-vision.md`는 제품 정의, 가치와 초기 범위를 소유한다.
+- `02-users-and-permissions.md`는 참여자·계정 분리와 역할별 권한 경계를 소유한다.
+- 번호가 붙은 후속 제품·도메인·흐름·아키텍처·운영 문서는 각각의 전문 영역을 소유한다.
+- `service-policies/`는 정책 ID별 상세 규칙의 단일 원본이다.
+- `adr/`는 여러 문서에 영향을 주는 지속적인 아키텍처·기술 결정을 소유한다.
+- `specs/`는 기능별 durable한 사용자 행위, 계약과 인수 조건을 소유한다.
+
+## 상세 정책 연결
+
+정책의 상태, 예외, 전이, 승인, 보존 기간과 인수 조건은 [서비스 정책 마스터](service-policies/README.md) 및 해당 정책 문서에서 확인한다. 이 색인과 상위 제품 문서는 필요한 정책을 요약해 연결할 뿐 상세 규칙을 다시 쓰지 않는다.
+
+## ADR과 기능 명세 사용 기준
+
+여러 문서에 영향을 주는 지속적인 결정은 [ADR](adr/)에 기록하고, 기능별 사용자 행위·경계·인수 조건은 [기능 명세](specs/README.md)에 기록한다. 저장소 기준 경로는 각각 `docs/adr/`, `docs/specs/`다. 제품 비전과 상세 정책의 기준을 ADR이나 명세에 복제하지 않으며, 필요할 때 정본으로 연결한다.
+
+## 문서 중복 금지 규칙
+
+같은 정책을 여러 문서에 전체 규칙으로 반복하지 않는다. 상위 문서는 왜 필요한지와 적용 경계만 적고, 절차·예외·상태·권한 세부는 하나의 상세 정책 문서가 소유한다.
+
+## 변경 시 함께 확인할 문서
+
+- 제품 범위나 비목표를 바꾸면 `01-product-vision.md`, 관련 서비스 정책, 기능 명세를 함께 확인한다.
+- 참여자나 권한 경계를 바꾸면 `02-users-and-permissions.md`, [회원·인증 정책](service-policies/01-member-auth.md), [매장 입점 정책](service-policies/02-store-onboarding.md), [운영자 정책](service-policies/15-admin-operation.md), [개인정보·보안 정책](service-policies/17-privacy-security.md)을 함께 확인한다.
+- 지속적인 아키텍처·기술 결정을 바꾸면 [ADR](adr/)와 `06-system-architecture.md`, `09-quality-operations-and-rules.md`를 함께 확인한다.
+- 기능의 사용자 행위·계약·인수 조건을 바꾸면 [기능 명세](specs/README.md)와 관련 정책을 함께 확인한다.
+- 문서 책임이나 읽기 경로를 바꾸면 이 색인과 연결된 문서를 함께 갱신한다.
+- 기여, Issue, PR 또는 위임 흐름을 바꾸면 [기여 가이드](../CONTRIBUTING.md)를 함께 갱신한다.
