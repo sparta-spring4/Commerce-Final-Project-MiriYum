@@ -14,7 +14,8 @@
 6. `07. 데이터·API 계약`
 7. `09. 품질·운영·규칙`
 8. 관련 [서비스 정책](service-policies/README.md)
-9. 관련 기능 [명세](superpowers/specs/)
+9. 관련 [아키텍처 결정 기록](adr/)
+10. 관련 기능 [명세](specs/README.md)
 
 ## 문서별 소유 책임
 
@@ -23,7 +24,9 @@
 - `01-product-vision.md`는 제품 정의, 가치와 초기 범위를 소유한다.
 - `02-users-and-permissions.md`는 참여자·계정 분리와 역할별 권한 경계를 소유한다.
 - 번호가 붙은 후속 제품·도메인·흐름·아키텍처·운영 문서는 각각의 전문 영역을 소유한다.
-- `service-policies/`는 정책 ID별 상세 규칙의 단일 원본이며, `superpowers/specs/`는 기능별 검증 가능한 명세를 소유한다.
+- `service-policies/`는 정책 ID별 상세 규칙의 단일 원본이다.
+- `adr/`는 여러 문서에 영향을 주는 지속적인 아키텍처·기술 결정을 소유한다.
+- `specs/`는 기능별 durable한 사용자 행위, 계약과 인수 조건을 소유한다.
 
 ## 상세 정책 연결
 
@@ -31,7 +34,7 @@
 
 ## ADR과 기능 명세 사용 기준
 
-여러 문서에 영향을 주는 지속적인 결정은 ADR에 기록하고, 기능별 사용자 행위·경계·인수 조건은 관련 명세에 기록한다. 제품 비전과 상세 정책의 기준을 ADR이나 명세에 복제하지 않으며, 필요할 때 정본으로 연결한다.
+여러 문서에 영향을 주는 지속적인 결정은 [ADR](adr/)에 기록하고, 기능별 사용자 행위·경계·인수 조건은 [기능 명세](specs/README.md)에 기록한다. 저장소 기준 경로는 각각 `docs/adr/`, `docs/specs/`다. 제품 비전과 상세 정책의 기준을 ADR이나 명세에 복제하지 않으며, 필요할 때 정본으로 연결한다.
 
 ## 문서 중복 금지 규칙
 
@@ -41,4 +44,6 @@
 
 - 제품 범위나 비목표를 바꾸면 `01-product-vision.md`, 관련 서비스 정책, 기능 명세를 함께 확인한다.
 - 참여자나 권한 경계를 바꾸면 `02-users-and-permissions.md`, [회원·인증 정책](service-policies/01-member-auth.md), [매장 입점 정책](service-policies/02-store-onboarding.md), [운영자 정책](service-policies/15-admin-operation.md), [개인정보·보안 정책](service-policies/17-privacy-security.md)을 함께 확인한다.
+- 지속적인 아키텍처·기술 결정을 바꾸면 [ADR](adr/)와 `06-system-architecture.md`, `09-quality-operations-and-rules.md`를 함께 확인한다.
+- 기능의 사용자 행위·계약·인수 조건을 바꾸면 [기능 명세](specs/README.md)와 관련 정책을 함께 확인한다.
 - 문서 책임이나 읽기 경로를 바꾸면 이 색인과 연결된 문서를 함께 갱신한다.
