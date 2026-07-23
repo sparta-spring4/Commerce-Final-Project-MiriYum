@@ -10,8 +10,11 @@ MiriYum은 사용자가 식당을 탐색하고 방문 예약·웨이팅·한정 
 
 - `docs/`: 제품, 도메인, 흐름, 아키텍처와 운영의 기준 문서
 - `docs/service-policies/`: 상세 서비스 정책의 단일 원본
-- `docs/superpowers/`: 문서 설계와 작업 계획
+
+실행 가능한 backend와 frontend는 다음 단계의 스캐폴딩과 검증을 함께 마친 뒤 추가합니다. 현재는 문서에 등장하는 계획이나 경로를 실행 가능한 runtime으로 간주하지 않습니다.
 
 ## 문서 시작
 
 [프로젝트 지식 색인](docs/00-index.md)에서 읽기 순서와 각 문서의 소유 책임을 확인합니다.
+
+Issue, Pull Request 또는 기여 작업은 [기여 가이드](CONTRIBUTING.md)에서 범위, lifecycle, 검증 증거와 인계 원칙을 확인합니다.

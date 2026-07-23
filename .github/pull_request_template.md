@@ -1,7 +1,11 @@
 # 연결
 
 - Issue:
+- GitHub Project:
+- 현재 담당자:
 - 작은 변경 예외 사유:
+
+Issue는 범위·담당자·인수 조건·검증 계획을 소유하고, GitHub Project의 단일 `Status` field만 lifecycle을 소유합니다. 이 PR이나 저장소 work log에 lifecycle 상태를 복제하지 않습니다.
 
 ## 변경 요약과 범위
 
@@ -15,7 +19,9 @@
 
 ## 실제로 실행한 명령과 결과
 
-| 실행한 명령 | 결과 (`PASS` / `FAIL` / `BLOCKED`) | 증거 또는 링크 |
+Allowed results: `PASS | FAIL | BLOCKED | NOT RUN | NOT CONFIGURED | NOT APPLICABLE`
+
+| 실행한 명령 | 관찰한 결과 | 증거 또는 링크 |
 |---|---|---|
 |  |  |  |
 
@@ -41,6 +47,15 @@
 
 -
 
+## 완료 증거 요약
+
+- Commands:
+- Results:
+- Risks:
+- Evidence:
+
+계획된 명령, 템플릿, 구성되지 않은 runtime 또는 문서의 존재만으로 성공·활성 CI·완료를 주장하지 않습니다. PR과 CI가 실제 명령·결과·위험·증거를 소유합니다.
+
 ## 리뷰어가 집중할 부분
 
 -
@@ -48,7 +63,9 @@
 ## Reviewer checklist
 
 - [ ] 요구사항 및 인수 조건과 구현 범위가 정렬되어 있는가?
+- [ ] Issue의 범위·담당자와 Project의 단일 lifecycle 소유권이 유지되는가?
 - [ ] 모듈 경계, 계층 책임과 의존 방향을 준수하는가?
 - [ ] 데이터 정합성, 보안·개인정보, migration·rollback 위험을 검토했는가?
 - [ ] 변경 유형에 맞는 테스트와 깨끗한 checkout CI 증거가 있는가?
 - [ ] 기준 문서, 상세 정책, feature spec과 ADR의 단일 소유권 및 필요한 갱신이 있는가?
+- [ ] 명령·결과·위험·증거가 실제 관찰 내용과 일치하고, 영구 work log나 상태 mirror를 만들지 않았는가?

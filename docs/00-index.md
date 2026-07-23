@@ -7,19 +7,21 @@
 ## 처음 읽는 순서
 
 1. [README.md](../README.md)
-2. [01. 제품 비전](01-product-vision.md)
-3. `03. 도메인 모델`
-4. `05. 기능 요구사항`
-5. `06. 시스템 아키텍처`
-6. `07. 데이터·API 계약`
-7. `09. 품질·운영·규칙`
-8. 관련 [서비스 정책](service-policies/README.md)
-9. 관련 [아키텍처 결정 기록](adr/)
-10. 관련 기능 [명세](specs/README.md)
+2. 기여, Issue 또는 Pull Request 작업이라면 [기여 가이드](../CONTRIBUTING.md)
+3. [01. 제품 비전](01-product-vision.md)
+4. `03. 도메인 모델`
+5. `05. 기능 요구사항`
+6. `06. 시스템 아키텍처`
+7. `07. 데이터·API 계약`
+8. `09. 품질·운영·규칙`
+9. 관련 [서비스 정책](service-policies/README.md)
+10. 관련 [아키텍처 결정 기록](adr/)
+11. 관련 기능 [명세](specs/README.md)
 
 ## 문서별 소유 책임
 
 - `README.md`는 프로젝트의 짧은 진입점과 현재 단계를 소유한다.
+- `CONTRIBUTING.md`는 사람과 AI 협업자의 Issue·Project Status·PR·위임 흐름을 소유한다.
 - `00-index.md`는 읽기 경로, 문서 책임, 연결 규칙을 소유한다.
 - `01-product-vision.md`는 제품 정의, 가치와 초기 범위를 소유한다.
 - `02-users-and-permissions.md`는 참여자·계정 분리와 역할별 권한 경계를 소유한다.
@@ -47,3 +49,4 @@
 - 지속적인 아키텍처·기술 결정을 바꾸면 [ADR](adr/)와 `06-system-architecture.md`, `09-quality-operations-and-rules.md`를 함께 확인한다.
 - 기능의 사용자 행위·계약·인수 조건을 바꾸면 [기능 명세](specs/README.md)와 관련 정책을 함께 확인한다.
 - 문서 책임이나 읽기 경로를 바꾸면 이 색인과 연결된 문서를 함께 갱신한다.
+- 기여, Issue, PR 또는 위임 흐름을 바꾸면 [기여 가이드](../CONTRIBUTING.md)를 함께 갱신한다.
