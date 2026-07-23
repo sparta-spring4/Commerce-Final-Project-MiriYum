@@ -81,3 +81,5 @@ AWS 배포는 애플리케이션 경계, 데이터베이스 마이그레이션, 
 ## 관련 ADR
 
 후속 결정은 모듈러 모놀리스 유지 또는 분리, 조건부 기술 도입, AWS 배포 구성, 외부 연동과 이벤트 전달 정책을 ADR로 기록한다. 이 문서는 초기 기준이며, ADR가 승인되기 전에는 조건부·초기 제외 항목을 현재 구성으로 해석하지 않는다.
+
+backend·frontend 최소 스캐폴드의 exact toolchain과 초기 DB 테스트 경계는 [ADR-004](adr/ADR-004-scaffold-toolchain-and-test-baseline.md)를 따른다.
