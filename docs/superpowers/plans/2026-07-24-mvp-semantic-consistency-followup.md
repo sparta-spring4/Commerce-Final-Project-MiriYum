@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Align the four remaining important MVP semantic contradictions in the user-flow and store-onboarding documents with the approved functional requirements and detailed policies.
+**Goal:** Align the previously identified MVP contradictions and remove the entire review feature set from the first MVP while preserving its policies as future implementation criteria.
 
-**Architecture:** Keep `docs/05-functional-requirements.md` and the detailed service policies as canonical boundaries. Change only the two downstream documents that currently misstate those boundaries, then verify the exact semantic invariants and repository hygiene.
+**Architecture:** Use the product vision and explicit user decisions as the current product-scope boundary. Keep detailed review policies as future safety contracts, remove review activation from current product, domain, flow, requirement, architecture, and authentication documents, then verify all scope mirrors together.
 
 **Tech Stack:** Markdown, PowerShell assertions, Git
 
@@ -16,6 +16,8 @@
 - Cancellation-resource transfer remains an initial core feature governed by `TRANSFER-001` through `TRANSFER-009`.
 - Current waiting includes both onsite and remote waiting.
 - Free basic operating statistics are current MVP; Pro comparison, interpretation, recommendation, automatic reports, and export remain excluded.
+- Review creation, publication, editing, deletion, ratings, tags, media, reporting, moderation, store replies, abuse detection, trust scoring, sanctions, and false-positive recovery are all outside the first MVP.
+- `TRUST-001` through `TRUST-012` remain confirmed future policy criteria; confirmation does not activate current review functionality, permissions, APIs, UI, or storage.
 - Modify only the files in the design allowlist.
 
 ---
@@ -190,3 +192,97 @@ git diff main -- docs/04-user-flows.md docs/service-policies/02-store-onboarding
 ```
 
 Expected: only the four approved semantic corrections.
+
+### Task 5: Remove review activation from the first MVP
+
+**Files:**
+- Modify: `docs/01-product-vision.md`
+- Modify: `docs/02-users-and-permissions.md`
+- Modify: `docs/03-domain-model.md`
+- Modify: `docs/04-user-flows.md`
+- Modify: `docs/05-functional-requirements.md`
+- Modify: `docs/06-system-architecture.md`
+- Modify: `docs/service-policies/01-member-auth.md`
+- Modify: `docs/service-policies/12-review-trust.md`
+- Modify: `docs/service-policies/README.md`
+- Modify: `miriyum-service-decisions.md`
+
+**Interfaces:**
+- Consumes: The user's decision that the entire review feature group is outside the first MVP.
+- Produces: Product, permission, domain, flow, requirement, architecture, authentication, and policy documents that preserve review policies without activating review functionality.
+
+- [ ] **Step 1: Run the failing review-scope assertions**
+
+```powershell
+$vision = Get-Content -LiteralPath 'docs\01-product-vision.md' -Raw -Encoding UTF8
+$permissions = Get-Content -LiteralPath 'docs\02-users-and-permissions.md' -Raw -Encoding UTF8
+$domain = Get-Content -LiteralPath 'docs\03-domain-model.md' -Raw -Encoding UTF8
+$flow = Get-Content -LiteralPath 'docs\04-user-flows.md' -Raw -Encoding UTF8
+$requirements = Get-Content -LiteralPath 'docs\05-functional-requirements.md' -Raw -Encoding UTF8
+$architecture = Get-Content -LiteralPath 'docs\06-system-architecture.md' -Raw -Encoding UTF8
+$auth = Get-Content -LiteralPath 'docs\service-policies\01-member-auth.md' -Raw -Encoding UTF8
+$reviewPolicy = Get-Content -LiteralPath 'docs\service-policies\12-review-trust.md' -Raw -Encoding UTF8
+$master = Get-Content -LiteralPath 'docs\service-policies\README.md' -Raw -Encoding UTF8
+$checks = @(
+  $vision.Contains('리뷰 작성·공개·상호작용 기능은 초기 제공 범위에 포함하지 않는다'),
+  -not $permissions.Contains('결제와 리뷰 등 이용자 경험을 관리'),
+  -not $domain.Contains('## `review`'),
+  -not $flow.Contains('## 8. 리뷰 작성'),
+  $requirements.Contains('| 리뷰·신뢰·어뷰징 | TRUST-001') -and $requirements.Contains('| 비초기 | review |'),
+  -not $architecture.Contains('├─ review/'),
+  -not $auth.Contains('일반 식당 탐색·예약·웨이팅·리뷰를 이용할 수 있으나'),
+  $reviewPolicy.Contains('현재 리뷰 기능·권한·API·UI·저장소를 활성화하지 않는다'),
+  $master.Contains('리뷰 정책은 확정했지만 현재 1차 MVP 구현 범위에는 포함하지 않는다')
+)
+if (@($checks | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
+```
+
+Expected: exit code `1`; the current documents still activate review in the first MVP.
+
+- [ ] **Step 2: Align product, permission, domain, flow, requirement, and architecture documents**
+
+- Mark post-visit review evaluation as a future product value and add the full review feature group to initial non-goals.
+- Remove review from current general-user permissions.
+- Remove the `review` section and review dependencies from the initial domain model, changing the initial domain count from six to five.
+- Remove the review user flow, renumber notification to section 8, and remove review events from its current start condition.
+- Change the `TRUST-001` through `TRUST-012` functional group from `초기 핵심` to `비초기` with an explicit full-feature exclusion boundary.
+- Remove `review/` from the initial backend package structure.
+
+- [ ] **Step 3: Align authentication and review policy boundaries**
+
+- Remove review from the AUTH-009 sentence that lists current non-alcohol services for users aged 14 or older.
+- Add a first-MVP boundary to `12-review-trust.md` that keeps all detailed policy decisions but activates no current review functionality, permissions, API, UI, or storage.
+- Add the same boundary note below the review section in the policy master.
+- Record the user's current review exclusion decision in `miriyum-service-decisions.md`.
+
+- [ ] **Step 4: Run the review-scope assertions**
+
+Run the Step 1 command.
+
+Expected: exit code `0`; all nine scope assertions pass.
+
+### Task 6: Reverify the expanded MVP consistency scope
+
+**Files:**
+- Verify every path in the expanded design allowlist.
+
+**Interfaces:**
+- Consumes: The completed five semantic consistency corrections.
+- Produces: Evidence for semantic scope, policy ID coverage, links, encoding, formatting, and exact changed-path allowlist.
+
+- [ ] **Step 1: Run all existing semantic checks and the Task 5 review assertions**
+
+Expected: all checks pass.
+
+- [ ] **Step 2: Verify policy IDs, relative links, encoding, and diff formatting**
+
+```powershell
+git diff --check main
+git diff --name-only main
+```
+
+Expected: exit code `0`, no formatting findings, and only expanded allowlist paths.
+
+- [ ] **Step 3: Request independent review**
+
+The reviewer must compare `main..HEAD`, verify that review policy confirmation is not confused with current MVP activation, and report Critical, Important, and Minor findings.
