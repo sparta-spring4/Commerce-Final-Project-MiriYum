@@ -29,7 +29,6 @@ backend/src/main/java/com/miriyum
 ├─ store/
 ├─ booking/
 ├─ payment/
-├─ review/
 ├─ notification/
 └─ global/
    ├─ config/
