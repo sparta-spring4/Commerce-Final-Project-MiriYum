@@ -74,6 +74,7 @@
 - 회원·인증 정책이 리뷰를 현재 이용 가능한 기능으로 서술하지 않는다.
 - 리뷰 상세 정책과 정책 마스터는 정책 확정과 현재 MVP 활성화를 구분하고, 현재 리뷰 기능·권한·API·UI·저장소를 활성화하지 않는다.
 - 현재 경계 변경이 결정 기록에 추가된다.
+- 최초 블루프린트는 역사적 입력임을 파일 자체에서 명시하고 현재 정본보다 우선하지 않는다.
 - 기존 네 정합성 수정의 기능 요구사항·상세 정책 경계는 유지되고, 리뷰 범위만 사용자의 현재 제외 결정에 맞게 정렬된다.
 - 변경 파일에 UTF-8 BOM이나 여러 개의 끝 개행이 없고 `git diff --check`가 통과한다.
 
@@ -89,6 +90,7 @@
 - `docs/service-policies/02-store-onboarding.md`
 - `docs/service-policies/12-review-trust.md`
 - `docs/service-policies/README.md`
+- `miriyum-service-blueprint.md`
 - `miriyum-service-decisions.md`
 - 이 설계 문서
 - 대응 구현 계획

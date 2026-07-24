@@ -205,6 +205,7 @@ Expected: only the four approved semantic corrections.
 - Modify: `docs/service-policies/01-member-auth.md`
 - Modify: `docs/service-policies/12-review-trust.md`
 - Modify: `docs/service-policies/README.md`
+- Modify: `miriyum-service-blueprint.md`
 - Modify: `miriyum-service-decisions.md`
 
 **Interfaces:**
@@ -223,6 +224,7 @@ $architecture = Get-Content -LiteralPath 'docs\06-system-architecture.md' -Raw -
 $auth = Get-Content -LiteralPath 'docs\service-policies\01-member-auth.md' -Raw -Encoding UTF8
 $reviewPolicy = Get-Content -LiteralPath 'docs\service-policies\12-review-trust.md' -Raw -Encoding UTF8
 $master = Get-Content -LiteralPath 'docs\service-policies\README.md' -Raw -Encoding UTF8
+$blueprint = Get-Content -LiteralPath 'miriyum-service-blueprint.md' -Raw -Encoding UTF8
 $checks = @(
   $vision.Contains('리뷰 작성·공개·상호작용 기능은 초기 제공 범위에 포함하지 않는다'),
   -not $permissions.Contains('결제와 리뷰 등 이용자 경험을 관리'),
@@ -232,7 +234,8 @@ $checks = @(
   -not $architecture.Contains('├─ review/'),
   -not $auth.Contains('일반 식당 탐색·예약·웨이팅·리뷰를 이용할 수 있으나'),
   $reviewPolicy.Contains('현재 리뷰 기능·권한·API·UI·저장소를 활성화하지 않는다'),
-  $master.Contains('리뷰 정책은 확정했지만 현재 1차 MVP 구현 범위에는 포함하지 않는다')
+  $master.Contains('리뷰 정책은 확정했지만 현재 1차 MVP 구현 범위에는 포함하지 않는다'),
+  $blueprint.Contains('역사적 입력(Draft v0.1) — 현재 기준 아님')
 )
 if (@($checks | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
 ```
@@ -254,12 +257,13 @@ Expected: exit code `1`; the current documents still activate review in the firs
 - Add a first-MVP boundary to `12-review-trust.md` that keeps all detailed policy decisions but activates no current review functionality, permissions, API, UI, or storage.
 - Add the same boundary note below the review section in the policy master.
 - Record the user's current review exclusion decision in `miriyum-service-decisions.md`.
+- Mark `miriyum-service-blueprint.md` as a historical input that cannot activate or expand the current MVP.
 
 - [x] **Step 4: Run the review-scope assertions**
 
 Run the Step 1 command.
 
-Expected: exit code `0`; all nine scope assertions pass.
+Expected: exit code `0`; all ten scope assertions pass.
 
 ### Task 6: Reverify the expanded MVP consistency scope
 
