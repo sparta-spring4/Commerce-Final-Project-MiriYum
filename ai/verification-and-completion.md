@@ -38,7 +38,7 @@ Until repeatable QA work has an independent verified workflow or owner, this sec
 
 CI owns the result and logs of its actual run. A workflow is active only after it exists and reproduces the required gates on a clean checkout. A check is required only after repository settings are also verified. Configuration text, a local run, or a planned workflow is insufficient to claim active/required CI.
 
-Phase 1 CI status is `NOT CONFIGURED`. Pull Requests link to CI evidence rather than copying logs into a permanent work log.
+CI status is `NOT CONFIGURED`. Local endpoint verification and root command composition do not activate CI. Pull Requests link to CI evidence rather than copying logs into a permanent work log.
 
 ## reviewer
 
@@ -101,10 +101,10 @@ The initial state of all seven skill contracts and the deferred `ai/skills/READM
 - `docs-sync.md`: recurring canonical-document drift has a verifiable reconciliation workflow.
 - `review-gate.md`: recurring review inputs and outputs can be enforced without duplicating the Pull Request.
 
-## Phase 2 and later boundary
+## Endpoint scaffold and later boundary
 
-The next Phase 2 backend·frontend scaffolding plan must create real endpoint scaffolds, local AI contracts, wrapper/package scripts, and execution evidence together. Only then may endpoint contracts and the root command registry be activated.
+The backend and frontend scaffolds, local AI contracts, wrapper/package scripts, and endpoint execution evidence now exist. Their `CONFIGURED` command IDs may be composed through `ai/command-registry.md`. Root composition is delegation and evidence aggregation only; it does not activate a runner, CI, API smoke, or cross-end integration runtime.
 
-Runner, schema, CI, skill, `lazycodex-runbook.md`, cache, or adapter work moves to a separate plan only after the corresponding repeated workflow or failure evidence satisfies the matrix. Phase 1 does not create those artifacts.
+Runner, schema, CI, skill, `lazycodex-runbook.md`, cache, or adapter work moves to a separate plan only after the corresponding repeated workflow or failure evidence satisfies the matrix. The endpoint scaffold work does not create those artifacts.
 
 A mandatory Git hook is prohibited. Consider an optional thin wrapper only after a common script is verified and repeated local mistakes are documented; it must not own policy or replace CI.
