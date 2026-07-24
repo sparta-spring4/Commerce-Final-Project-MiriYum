@@ -10,7 +10,7 @@
 
 React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당하며, Spring Security는 인증·인가 경계를 제공한다.
 
-이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수, 배포 토폴로지, 외부 연동 방식은 실제 요구가 확정되기 전에는 정하지 않는다.
+이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수와 배포 토폴로지는 실제 요구가 확정되기 전에는 정하지 않는다. 현재 외부 결제 연동은 아래의 PortOne V2 어댑터 경계를 따른다.
 
 ## 저장소 구조
 
@@ -55,6 +55,14 @@ controller에서 repository를 직접 호출하거나, DTO·엔티티를 도메�
 
 초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
 
+## 현재 확정 외부 결제
+
+`payment` 도메인은 외부 결제 SDK·API 타입과 분리된 내부 포트 `PaymentClient`를 소유한다. 운영 및 Docker 프로필은 PortOne V2 어댑터 `PortOnePaymentClient`를 사용하고, 로컬 프로필은 실제 외부 결제를 만들지 않는 `LocalPaymentClient`를 사용한다. 실제 PG 채널과 개별 결제수단은 계약·심사·운영 구성이 완료된 항목만 외부 설정으로 활성화한다.
+
+프런트엔드가 사용하는 PortOne Store ID와 Channel Key는 공개 설정이고, API Base URL·API Secret·Webhook Secret은 서버 비밀이다. 브라우저 결제 성공은 확정 근거가 아니며 서버 조회와 검증된 웹훅은 제공자 결제 ID·`PAID`·금액·통화·내부 주문을 확인한 뒤 같은 멱등 확정 경로를 호출한다.
+
+확정 경로는 중앙 상태를 `CONFIRMING`으로 조건부 선점한다. PortOne 조회 예외에는 이전 상태로 롤백하고, 결과가 불명확하거나 장시간 남은 `CONFIRMING`은 서버 조회와 중앙 복구 작업으로 수렴시킨다. 상세 결정은 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
+
 ## 조건부 도입 기술
 
 QueryDSL은 동적·복합 조회가 JPA 메서드 이름이나 명시적 쿼리로 읽기 어렵고 유지하기 어려워질 때 도입을 검토한다. Redis는 측정된 성능 병목이나 명확한 캐시·세션·조율 요구가 있을 때만 검토한다.
@@ -82,3 +90,5 @@ AWS 배포는 애플리케이션 경계, 데이터베이스 마이그레이션, 
 후속 결정은 모듈러 모놀리스 유지 또는 분리, 조건부 기술 도입, AWS 배포 구성, 외부 연동과 이벤트 전달 정책을 ADR로 기록한다. 이 문서는 초기 기준이며, ADR가 승인되기 전에는 조건부·초기 제외 항목을 현재 구성으로 해석하지 않는다.
 
 backend·frontend 최소 스캐폴드의 exact toolchain과 초기 DB 테스트 경계는 [ADR-004](adr/ADR-004-scaffold-toolchain-and-test-baseline.md)를 따른다.
+
+외부 결제 어댑터와 확정·복구 경계는 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
