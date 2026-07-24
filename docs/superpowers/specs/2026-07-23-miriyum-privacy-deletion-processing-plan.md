@@ -29,7 +29,7 @@
 - [회원·인증·계정 정책](../../service-policies/01-member-auth.md)의 `AUTH-010`
 - [개인정보·보안 정책](../../service-policies/17-privacy-security.md)의 `PRIV-005`, `PRIV-006`, `PRIV-013`
 - [대규모 트래픽·분산 환경·장애 복구 정책](../../service-policies/18-scale-reliability.md)의 `SCALE-009`, `SCALE-010`
-- [공식 기술 방향](../../technical-architecture.md)
+- [공식 기술 방향](../../06-system-architecture.md)
 
 ## 2. 세 줄 요약
 
