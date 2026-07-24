@@ -147,7 +147,7 @@ Add a 2026-07-24 `HOLD-005` decision row naming `이병우` as the direct decisi
 ```markdown
 #### DOC-20260724-002 · 카페·베이커리 단독 픽업 홀드 범위 정정
 
-- 변경 일시: `2026-07-24 KST`
+- 변경 일시: `2026-07-24 22:27 KST`
 - 요청·결정자: 이병우
 - 수정 작업자: Codex
 - 대상 문서·정책: `docs/03-domain-model.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `STORE-007`, `HOLD-005`

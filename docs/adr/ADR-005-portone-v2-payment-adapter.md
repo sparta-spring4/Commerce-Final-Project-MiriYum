@@ -11,11 +11,11 @@
 
 결제 도메인은 내부 포트 `PaymentClient`를 소유한다. 운영 및 Docker 프로필은 `PortOnePaymentClient`를 사용하고, 로컬 프로필은 실제 외부 결제를 생성하지 않는 `LocalPaymentClient`를 사용한다. PortOne SDK·API 타입은 어댑터 경계에서 내부 모델로 변환하며 도메인 로직에 직접 노출하지 않는다.
 
-프런트엔드는 PortOne V2 브라우저 SDK를 로드하고 Store ID, Channel Key, 내부 주문 ID 기반 `paymentId`, 주문명, 최소 통화 단위 정수 금액과 통화, 활성화된 결제수단, 최소 고객 정보 및 복귀 URL로 결제를 요청한다. 브라우저의 성공 응답은 내부 결제 성공의 권위 있는 근거가 아니다.
+서버는 MiriYum 내부 결제 레코드 ID와 내부 주문 ID를 먼저 만든다. 고객사가 채번하는 PortOne `paymentId`는 준비된 내부 주문 ID에서 일대일로 파생하고, 하나의 `paymentId`에 여러 결제 시도가 생길 수 있지만 최종 성공은 한 번만 허용한다. PortOne이 개별 결제 시도에 부여하는 `transactionId`는 하나의 `paymentId` 아래 시도마다 달라질 수 있다. 프런트엔드는 PortOne V2 브라우저 SDK를 로드하고 Store ID, Channel Key, 준비된 `paymentId`, 주문명, 최소 통화 단위 정수 금액과 통화, 활성화된 결제수단, 최소 고객 정보 및 복귀 URL로 결제를 요청한다.
 
-서버는 제공자 결제 ID를 조회해 응답의 결제 ID, `PAID` 상태, 정확한 금액·통화와 내부 주문의 일치 여부를 검증한다. 검증된 웹훅도 사용자 확정 요청과 같은 멱등 확정 경로를 호출한다. 확정 처리는 중앙 상태를 `CONFIRMING`으로 조건부 선점하고, 조회 예외가 발생하면 이전 상태로 되돌린다. 장시간 남은 `CONFIRMING`은 중앙 복구 작업이 서버 조회를 거쳐 결제 가능 상태 또는 확정 가능한 다음 상태로 수렴시킨다.
+브라우저 확정 요청은 이미 준비된 PortOne `paymentId`와 인증된 내부 결제 참조만 조회 선택자로 전달하며 둘 다 성공 근거가 아니다. 서버는 브라우저가 주장한 상태·금액·`transactionId`를 무시하고 알려진 `paymentId`를 PortOne V2 API에서 조회해 상태, 정확한 금액·통화와 내부 주문 매핑을 검증한다. `transactionId`는 인증된 서버 조회 또는 검증된 웹훅에서만 신뢰해 시도별로 저장한다. 검증된 웹훅은 `paymentId`, `transactionId`, 이벤트 유형과 타임스탬프 또는 메시지 식별자를 구분해 상관·중복 제거한 뒤 사용자 확정 요청과 같은 멱등 확정 경로를 호출한다. 확정 처리는 중앙 상태를 `CONFIRMING`으로 조건부 선점하고, 조회 예외가 발생하면 이전 상태로 되돌린다. 장시간 남은 `CONFIRMING`은 중앙 복구 작업이 서버 조회를 거쳐 결제 가능 상태 또는 확정 가능한 다음 상태로 수렴시킨다.
 
-Store ID와 Channel Key는 공개 프런트엔드 설정이다. API Base URL, API Secret과 Webhook Secret은 서버 설정으로만 보관하며 프런트엔드, 로그 또는 저장소에 노출하지 않는다.
+Store ID와 Channel Key는 프런트엔드 공개 설정이다. API Base URL은 서버 전용 비밀이 아닌 설정이고, API Secret과 Webhook Secret은 서버 비밀이다. 서버 전용 설정과 비밀을 프런트엔드에 노출하지 않으며 비밀은 로그 또는 저장소에도 노출하지 않는다.
 
 ## 검토한 대안
 
@@ -46,6 +46,8 @@ PortOne V2의 지원·보안·계약 조건이 현재 요구를 충족하지 못
 - [Agora 결제 프런트 API](https://github.com/sparta-spring4/Commerce-live-chat-system-Agora/blob/bf662e2888c625fd27f751ad932022dbb6dc0e2d/frontend/src/api/paymentApi.js)
 - [Agora PortOne 서버 클라이언트](https://github.com/sparta-spring4/Commerce-live-chat-system-Agora/blob/bf662e2888c625fd27f751ad932022dbb6dc0e2d/src/main/java/com/team7/agora/domain/payment/client/PortOnePaymentClient.java)
 - [Agora PortOne 웹훅 컨트롤러](https://github.com/sparta-spring4/Commerce-live-chat-system-Agora/blob/bf662e2888c625fd27f751ad932022dbb6dc0e2d/src/main/java/com/team7/agora/domain/payment/controller/PaymentWebhookController.java)
+- [PortOne V2 인증 결제 연동](https://developers.portone.io/opi/ko/integration/start/v2/checkout?v=v2)
+- [PortOne V2 웹훅 연동](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2)
 - [PortOne V2 결제 연동 정책 정합성 설계](../superpowers/specs/2026-07-24-portone-v2-policy-alignment-design.md)
 - [시스템 아키텍처](../06-system-architecture.md)
 - [데이터 및 API 계약](../07-data-and-api-contracts.md)

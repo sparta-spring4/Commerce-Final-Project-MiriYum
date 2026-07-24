@@ -15,6 +15,10 @@
 - Do not confirm Toss Payments or any individual payment method.
 - Keep `PAY-012` as `TODO`.
 - Record the requester/decision maker as `이병우` and the editor as `Codex`.
+- Keep identifiers distinct: MiriYum creates the internal payment record ID and internal order ID; the customer-assigned PortOne `paymentId` is derived one-to-one from the prepared internal order ID; PortOne assigns a separate `transactionId` to each attempt under that payment case.
+- A browser confirmation sends only the prepared `paymentId` and authenticated internal payment reference as lookup selectors. Ignore browser claims of status, amount and `transactionId`; trust a `transactionId` only after authenticated server lookup or verified webhook and store it per attempt.
+- Correlate and deduplicate verified webhooks using distinct `paymentId`, `transactionId`, event type and timestamp or message identifier fields.
+- Store ID와 Channel Key는 프런트엔드 공개 설정이고, API Base URL은 서버 전용 비밀이 아닌 설정이며, API Secret과 Webhook Secret은 서버 비밀이다.
 
 ---
 
@@ -49,7 +53,7 @@ Create a normal `PAY-003` section before `PAY-004` with:
 > 정책 상태: 확정
 
 - 현재 결제 연동 어댑터는 PortOne V2다. 서버가 내부 결제와 고유 주문 ID를 먼저 만들고 프론트엔드는 PortOne V2 브라우저 SDK에 Store ID, Channel Key, 내부 주문 ID 기반 `paymentId`, 주문명, 금액, 통화, 활성 결제수단, 최소 고객 정보와 복귀 URL을 전달한다.
-- 클라이언트 성공 응답만으로 확정하지 않는다. 서버는 PortOne V2 API로 제공자 결제 ID, `PAID` 상태와 내부 주문 금액을 대조하고 검증된 웹훅도 같은 멱등 확정 경로로 처리한다.
+- 클라이언트 성공 응답만으로 확정하지 않는다. 브라우저는 준비된 PortOne `paymentId`와 인증된 내부 결제 참조만 조회 선택자로 보내고, 서버는 알려진 `paymentId`를 PortOne V2 API에서 조회해 상태·정확한 금액과 통화·내부 주문 매핑을 대조한다. PortOne이 결제 시도별로 부여한 `transactionId`는 인증된 조회 또는 검증된 웹훅에서만 신뢰해 시도별로 저장하고, 웹훅도 같은 멱등 확정 경로로 처리한다.
 - 실제 PG 채널과 결제수단은 PortOne 콘솔 구성, 계약·심사와 운영 환경 설정이 완료된 항목만 노출한다. PortOne V2 선택은 특정 PG·결제수단·수수료·분쟁 조건의 확정이 아니다.
 ```
 
@@ -116,22 +120,22 @@ The ADR must state:
 - 상태: Accepted
 - 결정일: 2026-07-24
 - 결정: PortOne V2 adapter behind the payment-domain port; production/Docker uses the PortOne client and local development uses a local client.
-- Verification: browser response is non-authoritative; server lookup checks provider payment ID, `PAID`, amount and internal order; verified webhooks invoke the same path.
+- Verification: browser response is non-authoritative; server lookup uses the prepared customer-assigned PortOne `paymentId` and checks status, exact amount/currency and internal-order mapping; the PortOne-assigned per-attempt `transactionId` is trusted only from authenticated lookup or a verified webhook; verified webhooks invoke the same path.
 - Recovery: `CONFIRMING` acquisition, rollback on lookup exception, central timeout recovery.
-- Secrets: Store ID/Channel Key are public frontend configuration; API Secret/Webhook Secret remain server-side.
+- Configuration: Store ID/Channel Key are public frontend configuration; API Base URL is server-only non-secret configuration; API Secret/Webhook Secret are server secrets.
 - Rejected: V1 `window.IMP`, direct SDK coupling in domain logic, fixed Toss Payments/payment methods, Agora marketplace settlement model.
 ```
 
 - [ ] **Step 3: Align architecture and data/API contracts**
 
-Add the exact named port implementations and configuration split to `docs/06-system-architecture.md`. Add provider-ID, internal-order-ID, integer amount/currency, signature/timestamp, idempotency and same-confirmation-path boundaries to `docs/07-data-and-api-contracts.md` without inventing final endpoint URLs.
+Add the exact named port implementations and configuration split to `docs/06-system-architecture.md`. Add the internal payment record ID, internal order ID, customer-assigned PortOne `paymentId`, PortOne-assigned per-attempt `transactionId`, integer amount/currency, signature/timestamp, idempotency and same-confirmation-path boundaries to `docs/07-data-and-api-contracts.md` without inventing final endpoint URLs.
 
 - [ ] **Step 4: Expand the payment user flow**
 
 Use this sequence:
 
 ```markdown
-내부 결제 준비 → PortOne V2 SDK 결제 요청 → 서버의 제공자 결제 ID·`PAID`·금액 검증 → 동일 멱등 확정 경로로 예약 반영
+내부 결제·주문과 PortOne `paymentId` 준비 → PortOne V2 SDK 결제 요청 → 서버의 알려진 `paymentId` 조회·상태·정확한 금액/통화·내부 주문 매핑과 시도별 `transactionId` 검증 → 동일 멱등 확정 경로로 예약 반영
 ```
 
 State that verified webhooks call the same path and ambiguous/long-running `CONFIRMING` results remain isolated for lookup/recovery.
@@ -143,7 +147,7 @@ Add:
 ```markdown
 #### DOC-20260724-001 · PortOne V2 결제 연동 확정
 
-- 변경 일시: `2026-07-24 KST`
+- 변경 일시: `2026-07-24 22:56 KST`
 - 요청·결정자: 이병우
 - 수정 작업자: Codex
 - 대상 문서·정책: `PAY-003`, 결제 사용자 흐름, 시스템 아키텍처, 데이터·API 계약, `ADR-005`
