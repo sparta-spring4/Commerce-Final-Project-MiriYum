@@ -2,7 +2,7 @@
 
 이 색인은 정책 범위를 구현 약속으로 바꾸지 않는다. 상세 규칙, 상태 전이, 예외 및 인수 조건은 각 [서비스 정책 문서](service-policies/README.md)가 단일 원본이다. `정책 연계·비초기` 항목은 추적을 위한 연결이며 초기 구현 확정이 아니다.
 
-| Requirement group | Policy IDs | Initial delivery | Owning domain | Feature spec |
+| 요구사항 그룹 | 정책 ID | 초기 제공 | 소유 도메인 | 기능 명세 |
 |---|---|---:|---|---|
 | 도메인 경계 기준 | DOMAIN-000 | 초기 기준 | 모든 초기 도메인 | [정책 원본](service-policies/00-policy-template.md) |
 | 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 초기 기준 | auth | [정책 원본](service-policies/01-member-auth.md) |

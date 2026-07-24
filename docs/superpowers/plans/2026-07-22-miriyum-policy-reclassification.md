@@ -1,108 +1,108 @@
-# MiriYum Policy Reclassification Implementation Plan (historical completion record)
+# MiriYum 정책 재분류 구현 계획 (과거 완료 기록)
 
-> **Historical snapshot (2026-07-22):** This completed plan records the prior reclassification state; current policy totals and queues are maintained in `docs/service-policies/README.md`.
+> **과거 스냅샷(2026-07-22):** 이 완료된 계획은 이전 재분류 상태를 기록하며, 현재 정책 총계와 대기열은 `docs/service-policies/README.md`에서 관리한다.
 
-**Goal:** Preserve the 31 explicitly confirmed policies and re-audit all 186 unconfirmed MiriYum policies so every policy document uses the same defensible status and importance classification.
+**목표:** 명시적으로 확정된 정책 31개를 보존하고 미확정 MiriYum 정책 186개를 모두 재감사하여, 모든 정책 문서가 동일한 타당한 상태 및 중요도 분류를 사용하게 한다.
 
-**Architecture:** Treat `docs/service-policies/README.md` as the canonical 217-row classification ledger. Build an evidence-backed audit matrix before editing, then synchronize domain policy documents and the three cross-cutting service documents from that ledger. Use independent reviews after each task and a final repository-wide consistency check; do not implement code or promote `자동 추천 예정` items to `확정`.
+**아키텍처:** `docs/service-policies/README.md`를 정본 217행 분류 원장으로 취급한다. 편집 전 증거 기반 감사 매트릭스를 작성하고, 원장에서 도메인 정책 문서와 3개의 횡단 서비스 문서를 동기화한다. 각 작업 뒤 독립 검토와 마지막 저장소 전체 일관성 검사를 사용하며, 코드를 구현하거나 `자동 추천 예정` 항목을 `확정`으로 승격하지 않는다.
 
-**Tech Stack:** Markdown, PowerShell, ripgrep, Git read-only inspection.
+**기술 스택:** Markdown, PowerShell, ripgrep, Git 읽기 전용 점검.
 
-## Global Constraints
+## 전역 제약
 
-- Preserve all 31 existing `확정` policy IDs without changing their status, importance, or content except to correct an unmistakable cross-document contradiction.
-- Reclassify every one of the remaining 186 policy IDs using the user's five decision criteria and additional review principles, without trusting the current status.
-- Keep product-direction, primary-flow, financial-liability, fairness-allocation, and hard-to-reverse promises in `팀원 상의 필요` only when a reasonable default cannot be selected safely.
-- Keep standard security, authorization, idempotency, concurrency, state-transition, failure, retry, notification, and audit details in `자동 추천 예정` when they do not alter product direction.
-- Keep paid-provider selection, final legal/privacy/terms review, future expansion, empirically tuned numbers, and out-of-scope complexity in `TODO`.
-- Do not convert any `자동 추천 예정` item to `확정` during this task.
-- Use `MiriYum` as the project name; at the time of this plan, do not modify `miriyum-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
-- Preserve pre-existing user changes and work on the current `dev`-based `codex/` feature branch.
-- Assume large traffic and multi-server/multi-instance operation, while avoiding paid services, unnecessarily complex infrastructure, and additional personal-data collection in recommendations.
+- 명백한 문서 간 모순을 바로잡는 경우를 제외하고 기존 `확정` 정책 ID 31개를 상태, 중요도 또는 내용 변경 없이 보존한다.
+- 현재 상태를 신뢰하지 않고 사용자 5개 결정 기준과 추가 검토 원칙을 사용하여 남은 정책 ID 186개를 모두 재분류한다.
+- 합리적인 기본값을 안전하게 선택할 수 없는 경우에만 제품 방향, 주요 흐름, 재무 책임, 공정한 배정 및 되돌리기 어려운 약속을 `팀원 상의 필요`로 유지한다.
+- 제품 방향을 변경하지 않는 표준 보안, 권한, 멱등성, 동시성, 상태 전이, 실패, 재시도, 알림 및 감사 상세는 `자동 추천 예정`으로 유지한다.
+- 유료 제공자 선택, 최종 법률/개인정보 보호/약관 검토, 미래 확장, 경험적으로 조정된 수치 및 범위 밖 복잡성은 `TODO`로 유지한다.
+- 이 작업 중 어떤 `자동 추천 예정` 항목도 `확정`으로 변환하지 않는다.
+- 프로젝트 이름으로 `MiriYum`을 사용한다. 이 계획 당시에는 `miriyum-service-blueprint.md`를 수정하지 않고, 구현 코드를 작성하거나 stage, commit, push하지 않는다.
+- 기존 사용자 변경을 보존하고 현재 `dev` 기반 `codex/` 기능 브랜치에서 작업한다.
+- 추천에서 유료 서비스, 불필요하게 복잡한 인프라 및 추가 개인 데이터 수집을 피하면서 대규모 트래픽과 다중 서버/다중 인스턴스 운영을 가정한다.
 
 ---
 
-### Task 1: Canonical 217-Policy Audit Matrix
+### Task 1: 정본 217개 정책 감사 매트릭스
 
-**Files:**
-- Read: `miriyum-service-decisions.md`
-- Read: `docs/service-definition.md`
-- Read: `docs/technical-architecture.md`
-- Read: `docs/service-policies/README.md`
-- Read: `docs/service-policies/00-policy-template.md`
-- Read: `docs/service-policies/01-member-auth.md` through `docs/service-policies/18-scale-reliability.md`
-- Create: `.superpowers/sdd/miriyum-policy-audit.md`
+**파일:**
+- 읽기: `miriyum-service-decisions.md`
+- 읽기: `docs/service-definition.md`
+- 읽기: `docs/technical-architecture.md`
+- 읽기: `docs/service-policies/README.md`
+- 읽기: `docs/service-policies/00-policy-template.md`
+- 읽기: `docs/service-policies/01-member-auth.md`부터 `docs/service-policies/18-scale-reliability.md`까지
+- 생성: `.superpowers/sdd/miriyum-policy-audit.md`
 
-**Interfaces:**
-- Consumes: the user's classification rules and the current working-tree versions of every policy document.
-- Produces: exactly 217 unique policy IDs with original status, proposed status, importance, concise reason, confirmed-preservation flag, plus before/after totals and explicit final lists for `팀원 상의 필요` and `TODO`.
+**인터페이스:**
+- 소비: 사용자의 분류 규칙 및 모든 정책 문서의 현재 작업 트리 버전.
+- 산출: 원래 상태, 제안 상태, 중요도, 간결한 이유, 확정 보존 플래그와 전후 총계, `팀원 상의 필요`, `TODO`의 명시적 최종 목록을 가진 정확히 217개의 고유 정책 ID.
 
-- [x] Read every required document completely and inventory all policy rows.
-- [x] Identify exactly 31 current `확정` IDs and mark them immutable.
-- [x] Reassess each of the other 186 IDs independently against the supplied criteria, including dependency collapsing from derived decisions into `자동 추천 예정`.
-- [x] Verify the matrix has 217 unique IDs, totals sum to 217, confirmed remains 31, and reassessed rows sum to 186.
-- [x] Record cross-document contradictions and stale queue/summary language requiring later synchronization.
+- [x] 필요한 모든 문서를 완전히 읽고 모든 정책 행을 목록화한다.
+- [x] 현재 `확정` ID 정확히 31개를 식별하고 변경 불가로 표시한다.
+- [x] 파생 결정에서 `자동 추천 예정`으로의 의존성 축소를 포함하여 다른 ID 186개 각각을 제공된 기준에 따라 독립적으로 재평가한다.
+- [x] 매트릭스에 고유 ID 217개가 있고 총계가 217이며 확정은 31개로 유지되고 재평가 행 합계가 186인지 검증한다.
+- [x] 나중 동기화가 필요한 문서 간 모순과 오래된 대기열/요약 문구를 기록한다.
 
-### Task 2: Canonical Checklist and Governance Rules
+### Task 2: 정본 체크리스트 및 거버넌스 규칙
 
-**Files:**
-- Modify: `docs/service-policies/README.md`
-- Modify: `docs/service-policies/00-policy-template.md`
+**파일:**
+- 수정: `docs/service-policies/README.md`
+- 수정: `docs/service-policies/00-policy-template.md`
 
-**Interfaces:**
-- Consumes: `.superpowers/sdd/miriyum-policy-audit.md`.
-- Produces: the canonical 217-row ledger, corrected importance/status counts, revised core-discussion queue, state definitions, and operating rules that all later documents follow.
+**인터페이스:**
+- 소비: `.superpowers/sdd/miriyum-policy-audit.md`.
+- 산출: 정본 217행 원장, 수정된 중요도/상태 수, 개정된 핵심 논의 대기열, 상태 정의 및 이후 모든 문서가 따를 운영 규칙.
 
-- [x] Apply the audit matrix status and importance values to all 217 checklist rows without altering the 31 confirmed policies.
-- [x] Rewrite status definitions and governance rules to encode the supplied classification criteria and the rule that importance alone does not imply team discussion.
-- [x] Replace the core-discussion queue with only the final representative product decisions and remove derivative technical details.
-- [x] Update totals, next-step text, and summary wording; confirm no `자동 추천 예정` row was promoted to `확정`.
-- [x] Run mechanical uniqueness and count checks against the README tables.
+- [x] 확정 정책 31개를 바꾸지 않고 감사 매트릭스의 상태와 중요도 값을 체크리스트 행 217개 모두에 적용한다.
+- [x] 제공된 분류 기준과 중요도만으로 팀 논의를 뜻하지 않는다는 규칙을 담도록 상태 정의와 거버넌스 규칙을 다시 작성한다.
+- [x] 핵심 논의 대기열을 최종 대표 제품 결정만으로 교체하고 파생 기술 상세는 제거한다.
+- [x] 총계, 다음 단계 텍스트 및 요약 문구를 업데이트하고, 어떤 `자동 추천 예정` 행도 `확정`으로 승격되지 않았는지 확인한다.
+- [x] README 표를 대상으로 기계적인 고유성 및 수 검사를 실행한다.
 
-### Task 3: Domain Policy Documents
+### Task 3: 도메인 정책 문서
 
-**Files:**
-- Modify as needed: `docs/service-policies/01-member-auth.md` through `docs/service-policies/18-scale-reliability.md`
+**파일:**
+- 필요에 따라 수정: `docs/service-policies/01-member-auth.md`부터 `docs/service-policies/18-scale-reliability.md`까지
 
-**Interfaces:**
-- Consumes: the updated canonical README ledger and the audit matrix.
-- Produces: domain documents whose policy status, importance, TODO/team-discussion distinctions, next steps, and summaries agree with the canonical ledger.
+**인터페이스:**
+- 소비: 업데이트된 정본 README 원장과 감사 매트릭스.
+- 산출: 정책 상태, 중요도, TODO/팀 논의 구분, 다음 단계 및 요약이 정본 원장과 일치하는 도메인 문서.
 
-- [x] Inspect each domain document in full, including short placeholder documents.
-- [x] Synchronize every explicit policy status and importance marker with the canonical README.
-- [x] Reword TODO and team-discussion sections so they use the correct classification reason and do not imply automatic confirmation.
-- [x] Preserve confirmed policy substance and all unrelated pre-existing user edits.
-- [x] Verify all 18 domain documents contain no status contradiction with the canonical ledger.
+- [x] 짧은 자리표시자 문서를 포함해 각 도메인 문서를 전체 점검한다.
+- [x] 모든 명시적 정책 상태와 중요도 표식을 정본 README와 동기화한다.
+- [x] TODO와 팀 논의 섹션이 올바른 분류 이유를 사용하고 자동 확정을 암시하지 않도록 문구를 바꾼다.
+- [x] 확정 정책의 실체와 관련 없는 기존 사용자 편집을 모두 보존한다.
+- [x] 18개 도메인 문서 모두 정본 원장과 상태 모순이 없는지 검증한다.
 
-### Task 4: Cross-Cutting Service Documents
+### Task 4: 횡단 서비스 문서
 
-**Files:**
-- Modify: `docs/service-definition.md`
-- Modify: `docs/technical-architecture.md`
-- Modify: `miriyum-service-decisions.md`
+**파일:**
+- 수정: `docs/service-definition.md`
+- 수정: `docs/technical-architecture.md`
+- 수정: `miriyum-service-decisions.md`
 
-**Interfaces:**
-- Consumes: the canonical README ledger and synchronized domain documents.
-- Produces: consistent state definitions, decision summaries, next actions, and references across the service definition, technical architecture, and decision history.
+**인터페이스:**
+- 소비: 정본 README 원장과 동기화된 도메인 문서.
+- 산출: 서비스 정의, 기술 아키텍처, 결정 이력 전반에서 일관된 상태 정의, 결정 요약, 다음 조치 및 참조.
 
-- [x] Replace stale counts, queue descriptions, and status semantics with the final canonical classification.
-- [x] Correct policy references that confuse `TODO`, `팀원 상의 필요`, and `자동 추천 예정` while retaining all confirmed decisions.
-- [x] Ensure MiriYum naming, large-scale/multi-instance assumptions, and no-paid/no-extra-personal-data constraints remain explicit where relevant.
-- [x] Keep the decision log historical record accurate without claiming that automatic recommendations were confirmed in this task.
-- [x] Compare all three documents against the README and domain documents for contradictions.
+- [x] 오래된 수, 대기열 설명 및 상태 의미를 최종 정본 분류로 교체한다.
+- [x] 모든 확정 결정을 유지하면서 `TODO`, `팀원 상의 필요`, `자동 추천 예정`을 혼동하는 정책 참조를 수정한다.
+- [x] 관련된 곳에서 MiriYum 명칭, 대규모/다중 인스턴스 가정 및 유료 없음/추가 개인 데이터 없음 제약이 명시적으로 유지되게 한다.
+- [x] 자동 추천이 이 작업에서 확정되었다고 주장하지 않고 결정 로그의 과거 기록을 정확히 유지한다.
+- [x] 세 문서를 모두 README 및 도메인 문서와 비교해 모순을 확인한다.
 
-### Task 5: Final Integrity and Scope Verification
+### Task 5: 최종 무결성 및 범위 검증
 
-**Files:**
-- Verify: all files above
-- Verify unchanged: `miriyum-service-blueprint.md`
+**파일:**
+- 검증: 위의 모든 파일
+- 변경되지 않았는지 검증: `miriyum-service-blueprint.md`
 
-**Interfaces:**
-- Consumes: the complete working-tree result.
-- Produces: evidence for the final report, including counts, retained core/TODO IDs with reasons, major automatic-recommendation moves, inconsistency fixes, `git diff --check`, branch name, and blueprint unchanged status.
+**인터페이스:**
+- 소비: 완성된 작업 트리 결과.
+- 산출: 수, 이유가 있는 유지된 핵심/TODO ID, 주요 자동 추천 이동, 불일치 수정, `git diff --check`, 브랜치 이름 및 blueprint 변경 없음 상태를 포함한 최종 보고서 증거.
 
-- [x] Recompute the 217-row status totals and before/after transition matrix from source text.
-- [x] Compare the final 31 confirmed IDs and their status/importance/content against the Task 1 immutable set.
-- [x] Scan every policy ID and every status-bearing sentence for cross-document mismatch.
-- [x] Run `git diff --check`, report the current branch, and verify `miriyum-service-blueprint.md` has no tracked diff caused by this task.
-- [x] Conduct a broad independent review of scope, classification correctness, confirmed-policy preservation, and final-report evidence.
+- [x] 소스 텍스트에서 217행 상태 총계와 전후 전이 매트릭스를 다시 계산한다.
+- [x] 최종 확정 ID 31개와 그 상태/중요도/내용을 Task 1 변경 불가 집합과 비교한다.
+- [x] 모든 정책 ID와 상태를 나타내는 모든 문장을 검사하여 문서 간 불일치를 찾는다.
+- [x] `git diff --check`를 실행하고 현재 브랜치를 보고하며 `miriyum-service-blueprint.md`에 이 작업으로 인한 추적 diff가 없는지 검증한다.
+- [x] 범위, 분류 정확성, 확정 정책 보존 및 최종 보고서 증거에 대한 광범위한 독립 검토를 수행한다.

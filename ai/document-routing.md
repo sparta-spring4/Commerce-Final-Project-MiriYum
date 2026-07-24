@@ -1,32 +1,32 @@
-# Document routing
+# 문서 라우팅
 
-Contract status: ACTIVE
+계약 상태: ACTIVE
 
 ## 목적과 최소 읽기
 
-이 문서는 작업의 route, 기준 문서 소유자, 문서 확장 시점을 결정한다. 저장소에 파일이 있다는 이유만으로 읽지 않으며 현재 질문, feature, 주제, 작업 단계에 필요한 최소 읽기만 선택한다. 제품·정책·아키텍처 내용을 이 문서에 복제하지 않는다.
+이 문서는 작업의 경로(route), 기준 문서 소유자, 문서 확장 시점을 결정한다. 저장소에 파일이 있다는 이유만으로 읽지 않으며 현재 질문, 기능(feature), 주제, 작업 단계에 필요한 최소 읽기만 선택한다. 제품·정책·아키텍처 내용을 이 문서에 복제하지 않는다.
 
 다섯 가지 기본 동작을 유지한다.
 
-1. Answer Mode, Light Route, Work Route 중 하나로 route를 분류한다.
-2. feature와 주제 소유자를 먼저 정한다.
+1. 답변 모드(Answer Mode), 간단 경로(Light Route), 작업 경로(Work Route) 중 하나로 경로(route)를 분류한다.
+2. 기능(feature)과 주제 소유자를 먼저 정한다.
 3. 단계별 진입 시점에 필요한 문서를 늦게 확장한다.
-4. 실제 실행 파일과 성공 증거가 확인된 명령만 후속 registry에 등록한다.
+4. 실제 실행 파일과 성공 증거가 확인된 명령만 후속 레지스트리(registry)에 등록한다.
 5. 명령·결과·위험·증거가 없는 완료 주장을 차단한다.
 
-## Route 분류
+## 경로(route) 분류
 
-### Answer Mode
+### 답변 모드(Answer Mode)
 
-저장소 변경, 규범 결정, 실행 또는 검증 주장 없이 작은 질문에 답할 때 사용한다. 질문에 직접 필요한 파일만 읽고 전체 제품 문서, feature spec, 실행 문서와 완료 문서를 기본으로 열지 않는다.
+저장소 변경, 규범 결정, 실행 또는 검증 주장 없이 작은 질문에 답할 때 사용한다. 질문에 직접 필요한 파일만 읽고 전체 제품 문서, 기능 명세(feature spec), 실행 문서와 완료 문서를 기본으로 열지 않는다.
 
-### Light Route
+### 간단 경로(Light Route)
 
-좁은 구조 탐색, 최초 방향 파악, 비규범 문구 또는 색인 유지보수에 사용한다. 변경이 요구사항, 동작, 계약, 아키텍처, 보안 또는 완료 기준에 영향을 주면 계속하기 전에 Work Route로 재라우팅한다.
+좁은 구조 탐색, 최초 방향 파악, 비규범 문구 또는 색인 유지보수에 사용한다. 변경이 요구사항, 동작, 계약, 아키텍처, 보안 또는 완료 기준에 영향을 주면 계속하기 전에 작업 경로(Work Route)로 재라우팅한다.
 
-### Work Route
+### 작업 경로(Work Route)
 
-계획, 규범 문서, 기능 결정, 코드 변경, review, 검증 또는 완료 작업에 사용한다. Issue의 범위와 담당자를 확인하고, feature 및 주제 소유 문서를 선택한 뒤 현재 단계에 필요한 문서만 추가한다.
+계획, 규범 문서, 기능 결정, 코드 변경, 검토(review), 검증 또는 완료 작업에 사용한다. Issue의 범위와 담당자를 확인하고, 기능(feature) 및 주제 소유 문서를 선택한 뒤 현재 단계에 필요한 문서만 추가한다.
 
 ## 작업 범위 분류
 
@@ -36,7 +36,7 @@ Contract status: ACTIVE
 | frontend-only | 관련 `docs/` 정본과 `frontend/AGENTS.md` | `frontend/ai/document-routing.md`에서 선택하는 엔드 문서 | frontend 범위를 구현하거나 검증함 |
 | cross-end | `ai/integration-contracts.md`, `docs/07-data-and-api-contracts.md` | 관련 `docs/specs/<feature>/spec.md`와 활성화된 엔드 문서 | API·인증·오류·데이터 handoff 또는 통합 검증이 범위에 포함됨 |
 
-검증된 엔드 스캐폴드와 로컬 AI 계약이 존재하므로 backend-only는 `backend/AGENTS.md -> backend/ai/document-routing.md`, frontend-only는 `frontend/AGENTS.md -> frontend/ai/document-routing.md`로 라우팅한다. cross-end는 `ai/integration-contracts.md`와 필요한 엔드 문서로 라우팅한다. 엔드 경로가 활성화됐다는 사실만으로 API 또는 cross-end runtime이 구성됐다고 추론하지 않는다.
+검증된 엔드 스캐폴드(scaffold)와 로컬 AI 계약이 존재하므로 backend-only는 `backend/AGENTS.md -> backend/ai/document-routing.md`, frontend-only는 `frontend/AGENTS.md -> frontend/ai/document-routing.md`로 라우팅한다. cross-end는 `ai/integration-contracts.md`와 필요한 엔드 문서로 라우팅한다. 엔드 경로가 활성화됐다는 사실만으로 API 또는 cross-end runtime이 구성됐다고 추론하지 않는다.
 
 ## 주제 소유자 선택
 
@@ -62,22 +62,22 @@ Contract status: ACTIVE
 ## 단계별 문서 확장
 
 1. **계획:** Issue의 결과, 정확한 경로, 인수 조건, 검증 계획과 위험을 확인한다. 기능 동작이나 계약을 바꿀 때만 관련 기능 명세를 확장한다.
-2. **구현:** 선택한 feature와 주제의 정본 및 실제 수정 경로의 로컬 지침만 읽는다.
+2. **구현:** 선택한 기능(feature)과 주제의 정본 및 실제 수정 경로의 로컬 지침만 읽는다.
 3. **검증:** 변경 유형에 맞는 gate를 결정할 때 `ai/verification-and-completion.md`를 읽는다. 실제 명령만 실행하고 관찰 결과를 보존한다.
-4. **review:** 인수 조건, diff, 문서 단일 원본, 위험과 검증 증거를 대조한다.
+4. **검토(review):** 인수 조건, diff, 문서 단일 원본, 위험과 검증 증거를 대조한다.
 5. **완료:** 명령·결과·위험·증거가 모두 있을 때만 완료 문구를 작성한다.
 
 단계가 바뀌었다는 이유로 관련 없는 단계 문서를 미리 읽지 않는다.
 
 ## 검증 및 완료 확장
 
-검증, QA, CI, reviewer, Issue completion 또는 done claim 단계에 진입할 때만 `ai/verification-and-completion.md`를 확장한다. 실행하지 않은 검사를 성공으로 쓰지 않고, 구성되지 않은 runtime은 `NOT CONFIGURED`, 현재 범위에 적용되지 않는 검사는 이유와 함께 `NOT APPLICABLE`로 기록한다.
+검증, QA, CI, reviewer, Issue completion 또는 완료 주장(done claim) 단계에 진입할 때만 `ai/verification-and-completion.md`를 확장한다. 실행하지 않은 검사를 성공으로 쓰지 않고, 구성되지 않은 runtime은 `NOT CONFIGURED`, 현재 범위에 적용되지 않는 검사는 이유와 함께 `NOT APPLICABLE`로 기록한다.
 
 ## 문서 변경 라우팅
 
 - 제품·정책·아키텍처·기능·품질 사실은 해당 `docs/` 정본에서만 변경하고 다른 문서는 링크만 갱신한다.
 - 사람의 저장소 진입과 기여 흐름은 `README.md`, `docs/00-index.md`, `CONTRIBUTING.md`가 소유한다.
-- route와 읽기 trigger 변경은 이 문서가 소유한다.
+- 경로(route)와 읽기 trigger 변경은 이 문서가 소유한다.
 - 검증된 엔드 command ID의 루트 실행 순서와 위임은 `ai/command-registry.md`가 소유한다.
 - cross-end 분류와 handoff 증거 경계 변경은 `ai/integration-contracts.md`가 소유한다.
 - 검증 결과 vocabulary와 완료 증거 변경은 `ai/verification-and-completion.md`가 소유한다.
@@ -91,7 +91,7 @@ Contract status: ACTIVE
 
 ## 범위 변경과 재라우팅
 
-새 feature, 주제, endpoint, 외부 부작용, 실행 capability 또는 완료 기준이 범위에 들어오면 편집을 멈추고 route, 소유자, 최소 필독, 조건부 문서와 allowlist를 재평가한다. Light Route의 규범 영향이나 단일 엔드 작업의 cross-end 영향도 같은 방식으로 Work Route 또는 통합 경계로 재라우팅한다.
+새 기능(feature), 주제, endpoint, 외부 부작용, 실행 capability 또는 완료 기준이 범위에 들어오면 편집을 멈추고 경로(route), 소유자, 최소 필독, 조건부 문서와 allowlist를 재평가한다. 간단 경로(Light Route)의 규범 영향이나 단일 엔드 작업의 cross-end 영향도 같은 방식으로 작업 경로(Work Route) 또는 통합 경계로 재라우팅한다.
 
 ## Backend·frontend 스캐폴드 연결
 

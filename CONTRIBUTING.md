@@ -1,42 +1,42 @@
-# Contributing to MiriYum
+# MiriYum 기여 가이드
 
-This workflow applies to people and AI collaborators. It keeps scope, lifecycle, implementation evidence, and canonical documentation under distinct owners.
+이 작업 흐름(workflow)은 사람과 AI 협업자에게 적용된다. 범위, 수명 주기(lifecycle), 구현 증거 및 정본 문서의 소유자를 각각 분리한다.
 
-## Start with an Issue
+## Issue로 시작하기
 
-Except for a clearly explained small-change exception, create or select a GitHub Issue before implementation. The Issue owns:
+명확히 설명된 작은 변경 예외를 제외하면 구현 전에 GitHub Issue를 생성하거나 선택한다. Issue는 다음을 소유한다.
 
-- the intended outcome and exact in-scope and out-of-scope paths;
-- the current assignee and any delegated work;
-- acceptance criteria;
-- the verification plan and known risks.
+- 의도한 결과와 정확한 포함·제외 경로
+- 현재 담당자와 위임된 작업
+- 인수 조건
+- 검증 계획과 알려진 위험
 
-Fix the exact change paths before editing. Discovery patterns may help identify paths, but the Issue or an ignored `.superpowers/sdd/` inventory must freeze the resulting file list.
+편집 전에 정확한 변경 경로를 확정한다. 탐색 패턴은 경로 식별에 도움이 될 수 있지만, Issue 또는 무시되는 `.superpowers/sdd/` 목록에서 최종 파일 목록을 확정해야 한다.
 
-## Track lifecycle once
+## 수명 주기(lifecycle)는 한 곳에서만 추적하기
 
-Use the single GitHub Project `Status` field as the only lifecycle state, from backlog through completion. Do not mirror that status in repository work logs, checklists, or AI documents.
+백로그부터 완료까지 GitHub Project의 단일 `Status` field만 수명 주기(lifecycle) 상태로 사용한다. 저장소 작업 로그, 체크리스트 또는 AI 문서에 이 상태를 복제하지 않는다.
 
-An Issue describes the work contract; it does not prove implementation or verification. Move it to the completed lifecycle state only after the acceptance criteria and completion evidence have been reviewed.
+Issue는 작업 계약을 설명할 뿐 구현이나 검증을 증명하지 않는다. 인수 조건과 완료 증거를 검토한 후에만 완료 수명 주기(lifecycle) 상태로 변경한다.
 
-## Submit a Pull Request
+## Pull Request 제출하기
 
-The Pull Request owns the change summary and the evidence produced by implementation. Record:
+Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유한다. 다음을 기록한다.
 
-- acceptance-criterion-to-change mapping;
-- commands actually run and their observed results;
-- tests or checks not run and why;
-- risks, rollback considerations, and document impacts;
-- links to CI evidence and the requested reviewer focus.
+- 인수 조건과 변경의 대응 관계
+- 실제로 실행한 명령과 관찰한 결과
+- 실행하지 않은 테스트 또는 검사와 그 이유
+- 위험, rollback 고려 사항 및 문서 영향
+- CI 증거 링크와 요청하는 검토자(reviewer) 중점 검토 사항
 
-CI owns its own run output. Do not transcribe it into a permanent repository log. A configured workflow or planned check is not proof that a clean checkout passed or that a repository check is required.
+CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow나 계획된 검사는 깨끗한 checkout이 통과했거나 저장소 검사가 필수라는 증거가 아니다.
 
-## Delegation and handoff
+## 위임과 인계(handoff)
 
-The current task assignee retains responsibility for integration, verification, and the final completion claim. A delegate receives an explicit bounded scope, required inputs, expected outputs, and evidence format. Reconcile the returned work against the Issue and current repository state before integrating it.
+현재 작업 담당자는 통합, 검증 및 최종 완료 주장에 대한 책임을 유지한다. delegate에게는 명시적으로 제한된 범위, 필수 입력, 예상 출력 및 증거 형식을 제공한다. 반환된 작업을 통합하기 전에 Issue 및 현재 저장소 상태와 대조한다.
 
-If a temporary delegation artifact or path inventory is necessary, place it only under the ignored `.superpowers/sdd/` path. Do not create a durable work-log or lifecycle mirror in the repository.
+임시 위임 artifact나 경로 목록이 필요하면 무시되는 `.superpowers/sdd/` 경로 아래에만 둔다. 저장소에 영구 work-log 또는 수명 주기(lifecycle) 복제본을 만들지 않는다.
 
-## Documentation ownership
+## 문서 소유권
 
-Update the canonical product, policy, architecture, feature, or quality document when behavior or a lasting decision changes. Link to the owner instead of copying its rules into the Issue, Pull Request, or AI workflow documents.
+동작이나 지속적인 결정이 바뀌면 정본 제품, 정책, 아키텍처, 기능 또는 품질 문서를 갱신한다. 해당 규칙을 Issue, Pull Request 또는 AI 작업 흐름(workflow) 문서에 복사하지 말고 소유자 문서로 링크한다.
