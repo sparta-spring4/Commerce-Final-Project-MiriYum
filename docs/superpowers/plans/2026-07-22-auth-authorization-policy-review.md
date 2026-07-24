@@ -1,64 +1,64 @@
-# Authentication and Authorization Policy Review Implementation Plan
+# 인증 및 권한 부여 정책 검토 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
+> **에이전트 작업자용:** 필수 하위 스킬: 이 계획을 작업별로 구현하려면 superpowers:subagent-driven-development(권장) 또는 superpowers:executing-plans를 사용한다. 단계 추적에는 체크박스(- [ ]) 구문을 사용한다.
 
-**Goal:** Clarify account boundaries, Kakao account linking, central-session revocation and reuse handling in the MiriYum member authentication policy without changing the approved server-session architecture.
+**목표:** 승인된 서버 세션 아키텍처를 바꾸지 않고 MiriYum 회원 인증 정책의 계정 경계, 카카오 계정 연결, 중앙 세션 폐기 및 재사용 처리를 명확히 한다.
 
-**Architecture:** Keep Spring Security and Spring Session Data Redis with Valkey as the central session authority, and continue to reject browser JWTs. Update only the member-authentication policy so account type, per-store authorization, provider identity linking, session invalidation and takeover-risk inputs form one consistent policy.
+**아키텍처:** Spring Security 및 Valkey가 포함된 Spring Session Data Redis를 중앙 세션 권한 주체로 유지하고 브라우저 JWT는 계속 거부한다. 계정 유형, 매장별 권한 부여, 제공자 신원 연결, 세션 무효화 및 탈취 위험 입력이 하나의 일관된 정책을 이루도록 회원 인증 정책만 업데이트한다.
 
-**Tech Stack:** Markdown policy documents, Git, ripgrep, PowerShell.
+**기술 스택:** Markdown 정책 문서, Git, ripgrep, PowerShell.
 
-## Global Constraints
+## 전역 제약
 
-- The policy body change is limited to docs/service-policies/01-member-auth.md.
-- docs/technical-architecture.md is a read-only consistency reference.
-- Use 식당 대표자 consistently; do not introduce a store employee or shared store account.
-- Public role values, Kakao login and login-method linking must never promote an account type.
-- Browser authentication remains a central server session; Access and Refresh JWTs remain unused.
-- Existing idle expiry, absolute expiry and concurrent-session limits remain unchanged.
-- Do not create a separate review-report document; record final verification in the conversation and pull request.
-- Preserve unrelated policy decisions and follow-up review boundaries.
-
----
-
-## File Map
-
-- Modify: docs/service-policies/01-member-auth.md
-  - AUTH-001: account types, representative-login state and per-store authorization.
-  - AUTH-002 and AUTH-005: Kakao login and safe existing-account linking.
-  - AUTH-007: logout, revocation, revoked-session reuse and observable acceptance conditions.
-  - AUTH-012: revoked-session reuse as an account-takeover risk input.
-  - Whole file: duplicated AUTH-006 linkage block, terminology and typographical cleanup.
-- Read only: docs/technical-architecture.md
-  - Confirm Spring Security, Spring Session Data Redis, Valkey, secure session cookie and browser-JWT exclusion.
-- Existing specification: docs/superpowers/specs/2026-07-22-auth-authorization-policy-review-design.md
-  - Source of the approved scope, flows, failure behavior and acceptance conditions.
+- 정책 본문 변경은 docs/service-policies/01-member-auth.md로 제한한다.
+- docs/technical-architecture.md는 읽기 전용 일관성 참조다.
+- 식당 대표자를 일관되게 사용하고 매장 직원 또는 공유 매장 계정을 도입하지 않는다.
+- 공개 역할 값, 카카오 로그인 및 로그인 수단 연결로 계정 유형이 절대 승격되어서는 안 된다.
+- 브라우저 인증은 중앙 서버 세션으로 유지하고 Access 및 Refresh JWT는 계속 사용하지 않는다.
+- 기존 유휴 만료, 절대 만료 및 동시 세션 제한은 변경하지 않는다.
+- 별도 검토 보고서 문서를 만들지 않고 최종 검증은 대화와 pull request에 기록한다.
+- 관련 없는 정책 결정과 후속 검토 경계를 보존한다.
 
 ---
 
-### Task 1: Clarify account-type and per-store authorization boundaries
+## 파일 맵
 
-**Files:**
-- Modify: docs/service-policies/01-member-auth.md:19-85
-- Test: docs/service-policies/01-member-auth.md
+- 수정: docs/service-policies/01-member-auth.md
+  - AUTH-001: 계정 유형, 대표자 로그인 상태 및 매장별 권한 부여.
+  - AUTH-002 및 AUTH-005: 카카오 로그인과 안전한 기존 계정 연결.
+  - AUTH-007: 로그아웃, 폐기, 폐기 세션 재사용 및 관측 가능한 인수 조건.
+  - AUTH-012: 계정 탈취 위험 입력으로서의 폐기 세션 재사용.
+  - 전체 파일: 중복된 AUTH-006 연결 블록, 용어 및 오탈자 정리.
+- 읽기 전용: docs/technical-architecture.md
+  - Spring Security, Spring Session Data Redis, Valkey, 보안 세션 쿠키 및 브라우저 JWT 배제를 확인한다.
+- 기존 명세: docs/superpowers/specs/2026-07-22-auth-authorization-policy-review-design.md
+  - 승인된 범위, 흐름, 실패 동작 및 인수 조건의 출처.
 
-**Interfaces:**
-- Consumes: AUTH-001 account types, STORE-003 and STORE-005 verification outcomes, central account and store-membership state.
-- Produces: explicit representative login versus per-store authorization rules used by AUTH-005, AUTH-007 and all store-management requests.
+---
 
-- [ ] **Step 1: Run the policy-gap search**
+### Task 1: 계정 유형 및 매장별 권한 부여 경계 명확화
 
-Run:
+**파일:**
+- 수정: docs/service-policies/01-member-auth.md:19-85
+- 테스트: docs/service-policies/01-member-auth.md
+
+**인터페이스:**
+- 소비: AUTH-001 계정 유형, STORE-003 및 STORE-005 검증 결과, 중앙 계정 및 매장 소속 상태.
+- 산출: AUTH-005, AUTH-007 및 모든 매장 관리 요청이 사용하는 명시적인 대표자 로그인과 매장별 권한 부여 규칙.
+
+- [ ] **단계 1: 정책 공백 검색 실행**
+
+실행:
 
 ~~~powershell
 rg -n "가입·로그인 가능 상태와 매장별 운영 권한|클라이언트가 전달한 역할|모든 매장 관리 요청" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: no matches, demonstrating that the current policy does not state these authorization boundaries explicitly.
+예상: 일치 항목이 없어 현재 정책이 이 권한 경계를 명시적으로 규정하지 않음을 보여준다.
 
-- [ ] **Step 2: Replace the ambiguous representative-account bullet**
+- [ ] **단계 2: 모호한 대표자 계정 항목 교체**
 
-In AUTH-001 현재 확정 사항, replace the sentence saying that a representative account is simply a business-verified account with the following exact policy text:
+AUTH-001 현재 확정 사항에서 대표자 계정이 단순히 사업자 검증된 계정이라고 말하는 문장을 다음 정확한 정책 텍스트로 교체한다:
 
 ~~~markdown
 - 식당 대표자 계정의 가입·로그인 가능 상태와 매장별 운영 권한은 구분한다.
@@ -67,20 +67,20 @@ In AUTH-001 현재 확정 사항, replace the sentence saying that a representat
 - 모든 매장 관리 요청은 중앙의 계정 유형, 계정 상태, 매장 소속 관계와 해당 매장의 승인 상태를 함께 검증한다. 어느 하나라도 확인할 수 없거나 유효하지 않으면 실패 폐쇄한다.
 ~~~
 
-Keep the existing rules that staff accounts and shared accounts are unsupported, that the representative account is one-person-one-account, and that account types never share or auto-promote authentication state.
+직원 계정과 공유 계정은 지원하지 않고, 대표자 계정은 1인 1계정이며, 계정 유형은 인증 상태를 공유하거나 자동 승격하지 않는다는 기존 규칙을 유지한다.
 
-- [ ] **Step 3: Tighten the multi-instance authorization rule**
+- [ ] **단계 3: 다중 인스턴스 권한 부여 규칙 강화**
 
-Add the following exact bullets to AUTH-001 다중 서버·다중 인스턴스 원칙:
+AUTH-001 다중 서버·다중 인스턴스 원칙에 다음 정확한 항목을 추가한다:
 
 ~~~markdown
 - 공개 가입·로그인·계정 연결 API는 요청 본문의 역할 값을 권한 근거로 사용하지 않으며, 서버가 허용한 계정 유형별 흐름과 중앙 상태만 신뢰한다.
 - 매장 관리 요청은 매번 중앙 권한 버전과 매장별 소속·승인 상태를 확인한다. 권한 회수 또는 승인 상태 변경 뒤에는 캐시·기존 세션·인스턴스 로컬 상태로 이전 권한을 계속 인정하지 않는다.
 ~~~
 
-- [ ] **Step 4: Add observable acceptance conditions and a decision record**
+- [ ] **단계 4: 관측 가능한 인수 조건 및 결정 기록 추가**
 
-Add this subsection immediately before AUTH-001 결정 기록:
+AUTH-001 결정 기록 바로 앞에 이 하위 섹션을 추가한다:
 
 ~~~markdown
 ### 관측 가능한 인수 조건
@@ -90,69 +90,69 @@ Add this subsection immediately before AUTH-001 결정 기록:
 - 직원·공용 계정 생성 요청과 대표자 인증정보 공유를 전제로 한 권한 추가 요청은 거부되고 감사 가능한 보안 사건으로 남는다.
 ~~~
 
-Append this decision-record row:
+이 결정 기록 행을 추가한다:
 
 ~~~markdown
 | 2026-07-22 | AUTH-001 | 대표자 로그인 상태와 매장별 운영 권한을 분리하고 공개 역할 값·계정 연결·카카오 로그인에 의한 자가 승격 차단 | 확정 | 계정 유형과 매장 귀속을 중앙 상태로 검증하여 권한 탈취·승격 방지 |
 ~~~
 
-- [ ] **Step 5: Verify Task 1**
+- [ ] **단계 5: Task 1 검증**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "가입·로그인 가능 상태와 매장별 운영 권한|클라이언트가 전달한 역할|모든 매장 관리 요청|관측 가능한 인수 조건" docs/service-policies/01-member-auth.md
 git diff --check
 ~~~
 
-Expected: all four policy phrases are present under AUTH-001 and git diff --check prints no errors.
+예상: 정책 문구 4개가 모두 AUTH-001 아래에 존재하고 git diff --check는 오류를 출력하지 않는다.
 
-- [ ] **Step 6: Commit Task 1**
+- [ ] **단계 6: Task 1 커밋**
 
-Run:
+실행:
 
 ~~~powershell
 git add docs/service-policies/01-member-auth.md
 git commit -m "docs: clarify representative authorization boundary"
 ~~~
 
-Expected: one commit containing only the AUTH-001 policy change.
+예상: AUTH-001 정책 변경만 포함한 커밋 하나.
 
 ---
 
-### Task 2: Make Kakao existing-account linking explicit and non-promoting
+### Task 2: 카카오 기존 계정 연결을 명시하고 승격 방지
 
-**Files:**
-- Modify: docs/service-policies/01-member-auth.md:87-144, 252-325
-- Test: docs/service-policies/01-member-auth.md
+**파일:**
+- 수정: docs/service-policies/01-member-auth.md:87-144, 252-325
+- 테스트: docs/service-policies/01-member-auth.md
 
-**Interfaces:**
-- Consumes: authenticated existing general-user account, Kakao provider identifier, verified contact ownership, central account state.
-- Produces: one immutable provider-to-account link for general-user authentication without account-type or permission changes.
+**인터페이스:**
+- 소비: 인증된 기존 일반 사용자 계정, 카카오 제공자 식별자, 검증된 연락처 소유권, 중앙 계정 상태.
+- 산출: 계정 유형이나 권한 변경 없는 일반 사용자 인증용 불변 제공자-계정 연결 하나.
 
-- [ ] **Step 1: Run the Kakao-linking gap search**
+- [ ] **단계 1: 카카오 연결 공백 검색 실행**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "카카오 제공자 식별자|제공자와 제공자 식별자|다른 계정에 이미 연결|대표자나 플랫폼 운영자 권한" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: no complete set of matches; the current policy describes safe linking generally but does not specify provider-identifier uniqueness and non-promotion together.
+예상: 완전한 일치 집합이 없다. 현재 정책은 안전한 연결을 일반적으로 설명하지만 제공자 식별자 고유성과 승격 방지를 함께 지정하지 않는다.
 
-- [ ] **Step 2: Resolve the AUTH-002 scope contradiction**
+- [ ] **단계 2: AUTH-002 범위 모순 해결**
 
-In AUTH-002 향후 계획, remove the two bullets that defer adding email-password login to a Kakao-only account, because AUTH-005 already confirms this linking flow. Preserve the future-provider review for Naver, Google and Apple and the current rule that individual login-method unlinking is not provided.
+AUTH-002 향후 계획에서 AUTH-005가 이미 이 연결 흐름을 확정하므로 카카오 전용 계정에 이메일-비밀번호 로그인을 추가하는 일을 미루는 두 항목을 제거한다. Naver, Google, Apple의 미래 제공자 검토와 개별 로그인 수단 연결 해제를 제공하지 않는 현재 규칙은 보존한다.
 
-Add this bullet to AUTH-002 현재 확정 사항:
+AUTH-002 현재 확정 사항에 이 항목을 추가한다:
 
 ~~~markdown
 - 카카오 로그인과 이메일·비밀번호 로그인 수단의 추가 연결은 AUTH-005의 기존 계정 재인증·중복 충돌·멱등 연결 기준을 따르며, 연결 결과는 일반 사용자 계정 유형과 권한을 바꾸지 않는다.
 ~~~
 
-- [ ] **Step 3: Add exact Kakao provider-link rules to AUTH-005**
+- [ ] **단계 3: AUTH-005에 정확한 카카오 제공자 연결 규칙 추가**
 
-Add these bullets after the current rule requiring authentication of the existing account:
+기존 계정 인증을 요구하는 현재 규칙 뒤에 이 항목을 추가한다:
 
 ~~~markdown
 - 카카오 로그인과 카카오 제공자 식별자 연결은 일반 사용자 계정에만 허용하며 식당 대표자·플랫폼 운영자 계정의 로그인 수단이나 권한 부여 경로로 사용하지 않는다.
@@ -162,9 +162,9 @@ Add these bullets after the current rule requiring authentication of the existin
 - 로그인 수단 연결은 계정 유형과 서비스 권한을 변경하지 않으며, 일반 사용자 계정에 카카오를 연결한 결과로 식당 대표자·플랫폼 운영자 권한이 생기지 않는다.
 ~~~
 
-- [ ] **Step 4: Add central uniqueness and idempotency rules**
+- [ ] **단계 4: 중앙 고유성 및 멱등성 규칙 추가**
 
-Add these bullets to AUTH-005 다중 서버·다중 인스턴스 원칙:
+AUTH-005 다중 서버·다중 인스턴스 원칙에 이 항목을 추가한다:
 
 ~~~markdown
 - 외부 로그인 연결은 제공자와 제공자 식별자의 복합 유일성 제약으로 보호하고, 같은 카카오 식별자가 둘 이상의 중앙 계정에 연결되지 않게 한다.
@@ -172,9 +172,9 @@ Add these bullets to AUTH-005 다중 서버·다중 인스턴스 원칙:
 - 카카오 연결 확정 전후에 계정 유형과 권한 버전이 같음을 검증하며, 불일치하거나 중앙 상태를 확인할 수 없으면 연결을 실패 폐쇄한다.
 ~~~
 
-- [ ] **Step 5: Add acceptance conditions and a decision record**
+- [ ] **단계 5: 인수 조건 및 결정 기록 추가**
 
-Add this subsection before AUTH-005의 AUTH-006 연계 subsection:
+AUTH-005의 AUTH-006 연계 하위 섹션 전에 이 하위 섹션을 추가한다:
 
 ~~~markdown
 ### 관측 가능한 인수 조건
@@ -184,59 +184,59 @@ Add this subsection before AUTH-005의 AUTH-006 연계 subsection:
 - 다른 계정에 연결된 카카오 식별자는 이동·병합되지 않고, 일반 사용자 계정에 카카오를 연결해도 계정 유형과 식당 대표자·플랫폼 운영자 권한이 바뀌지 않는다.
 ~~~
 
-Append this decision-record row:
+이 결정 기록 행을 추가한다:
 
 ~~~markdown
 | 2026-07-22 | AUTH-002·AUTH-005 | 카카오 제공자 식별자의 중앙 유일성·기존 계정 재인증·추정 연결 금지와 계정 유형 불변 기준 확정 | 확정 | 계정 탈취·중복 연결·로그인 수단을 통한 권한 승격 방지 |
 ~~~
 
-- [ ] **Step 6: Verify Task 2**
+- [ ] **단계 6: Task 2 검증**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "카카오 제공자 식별자|복합 유일성 제약|기존 일반 사용자 계정의 유효한 재인증|계정 유형과 서비스 권한을 변경하지" docs/service-policies/01-member-auth.md
 git diff --check
 ~~~
 
-Expected: all Kakao uniqueness, reauthentication and non-promotion rules are present and git diff --check prints no errors.
+예상: 카카오 고유성, 재인증 및 승격 방지 규칙이 모두 존재하고 git diff --check는 오류를 출력하지 않는다.
 
-- [ ] **Step 7: Commit Task 2**
+- [ ] **단계 7: Task 2 커밋**
 
-Run:
+실행:
 
 ~~~powershell
 git add docs/service-policies/01-member-auth.md
 git commit -m "docs: secure Kakao account linking"
 ~~~
 
-Expected: one commit containing the AUTH-002 and AUTH-005 policy changes.
+예상: AUTH-002 및 AUTH-005 정책 변경을 포함한 커밋 하나.
 
 ---
 
-### Task 3: Define idempotent logout and revoked-session reuse handling
+### Task 3: 멱등 로그아웃 및 폐기 세션 재사용 처리 정의
 
-**Files:**
-- Modify: docs/service-policies/01-member-auth.md:529-589
-- Test: docs/service-policies/01-member-auth.md
+**파일:**
+- 수정: docs/service-policies/01-member-auth.md:529-589
+- 테스트: docs/service-policies/01-member-auth.md
 
-**Interfaces:**
-- Consumes: Spring Session Data Redis session state, account session index or version, session revocation reason, common clock.
-- Produces: deterministic logout, immediate denial of revoked IDs and privacy-preserving reuse security events.
+**인터페이스:**
+- 소비: Spring Session Data Redis 세션 상태, 계정 세션 인덱스 또는 버전, 세션 폐기 사유, 공통 시계.
+- 산출: 결정적 로그아웃, 폐기 ID의 즉시 거부 및 개인정보 보호형 재사용 보안 사건.
 
-- [ ] **Step 1: Run the session-reuse gap search**
+- [ ] **단계 1: 세션 재사용 공백 검색 실행**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "폐기된 세션 ID|파생 식별값|반복 로그아웃|AUTH-012의 위험 판정 입력" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: no matches, demonstrating that the current policy revokes sessions but does not fully define replay observation.
+예상: 일치 항목이 없어 현재 정책이 세션을 폐기하지만 재생 관측을 완전히 정의하지 않음을 보여준다.
 
-- [ ] **Step 2: Add logout and revoked-ID behavior to AUTH-007**
+- [ ] **단계 2: AUTH-007에 로그아웃 및 폐기 ID 동작 추가**
 
-Add these bullets after the current logout rule:
+현재 로그아웃 규칙 뒤에 이 항목을 추가한다:
 
 ~~~markdown
 - 로그아웃은 현재 중앙 세션의 존재 여부와 관계없이 멱등하게 처리한다. 유효한 세션은 한 번만 폐기하고 이미 만료·폐기됐거나 존재하지 않는 세션도 새 세션을 만들지 않은 채 같은 종료 응답으로 수렴하며 브라우저 쿠키를 삭제한다.
@@ -245,9 +245,9 @@ Add these bullets after the current logout rule:
 - 일반적인 세션 ID 교체 직후의 단발성 오래된 요청만으로 계정을 자동 잠그지 않는다. 비밀번호 재설정·수동 복구·탈퇴·제재·보안 잠금이나 사용자 전체 세션 종료 뒤 폐기 ID가 반복 사용되면 AUTH-012의 위험 판정 입력으로 연결한다.
 ~~~
 
-- [ ] **Step 3: Add multi-instance and failure-closed rules**
+- [ ] **단계 3: 다중 인스턴스 및 실패 폐쇄 규칙 추가**
 
-Add these bullets to AUTH-007 다중 서버·다중 인스턴스 원칙:
+AUTH-007 다중 서버·다중 인스턴스 원칙에 이 항목을 추가한다:
 
 ~~~markdown
 - 세션 폐기와 폐기 사유·파생 식별값 기록은 중앙 세션 상태를 기준으로 한 번만 확정한다. 여러 인스턴스의 반복 로그아웃·동시 요청은 폐기된 세션을 되살리지 않고 같은 종료 결과로 수렴한다.
@@ -255,9 +255,9 @@ Add these bullets to AUTH-007 다중 서버·다중 인스턴스 원칙:
 - 세션 폐기는 확정됐지만 감사·알림 같은 후속 처리가 실패한 경우에도 세션을 다시 유효하게 만들지 않는다. 후속 실패만 내구성 작업으로 재시도하고 장기 실패는 운영자 경보로 남긴다.
 ~~~
 
-- [ ] **Step 4: Add observable acceptance conditions**
+- [ ] **단계 4: 관측 가능한 인수 조건 추가**
 
-Add this subsection immediately before AUTH-007 결정 기록:
+AUTH-007 결정 기록 바로 앞에 이 하위 섹션을 추가한다:
 
 ~~~markdown
 ### 관측 가능한 인수 조건
@@ -268,59 +268,59 @@ Add this subsection immediately before AUTH-007 결정 기록:
 - 세션 만료시간과 계정 유형별 동시 세션 상한은 기존 확정값을 유지한다.
 ~~~
 
-Append this decision-record row:
+이 결정 기록 행을 추가한다:
 
 ~~~markdown
 | 2026-07-22 | AUTH-007·AUTH-012 | 로그아웃 멱등성·폐기 세션 재사용 거부·원문 없는 보안 사건과 반복 재사용 위험 연계 확정 | 확정 | 중앙 세션 구조에서 Refresh Token 폐기·재사용 통제와 동등한 보안 경계 명시 |
 ~~~
 
-- [ ] **Step 5: Verify Task 3**
+- [ ] **단계 5: Task 3 검증**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "로그아웃은 현재 중앙 세션의 존재 여부와 관계없이 멱등|폐기되거나 세션 ID 교체로 무효화|서버 비밀키 기반 파생 식별값|세션 만료시간과 계정 유형별 동시 세션 상한" docs/service-policies/01-member-auth.md
 git diff --check
 ~~~
 
-Expected: logout, reuse, privacy and unchanged-limit acceptance rules are present and git diff --check prints no errors.
+예상: 로그아웃, 재사용, 개인정보 보호 및 변경 없는 제한 인수 규칙이 존재하고 git diff --check는 오류를 출력하지 않는다.
 
-- [ ] **Step 6: Commit Task 3**
+- [ ] **단계 6: Task 3 커밋**
 
-Run:
+실행:
 
 ~~~powershell
 git add docs/service-policies/01-member-auth.md
 git commit -m "docs: define revoked session reuse handling"
 ~~~
 
-Expected: one commit containing only the AUTH-007 session-policy change.
+예상: AUTH-007 세션 정책 변경만 포함한 커밋 하나.
 
 ---
 
-### Task 4: Connect revoked-session reuse to account-takeover risk
+### Task 4: 폐기 세션 재사용을 계정 탈취 위험에 연결
 
-**Files:**
-- Modify: docs/service-policies/01-member-auth.md:797-850
-- Test: docs/service-policies/01-member-auth.md
+**파일:**
+- 수정: docs/service-policies/01-member-auth.md:797-850
+- 테스트: docs/service-policies/01-member-auth.md
 
-**Interfaces:**
-- Consumes: AUTH-007 revoked-session reuse event, revocation reason, repetition, account security event.
-- Produces: low-risk recording for ordinary stale requests and high-confidence escalation input after security-sensitive revocation.
+**인터페이스:**
+- 소비: AUTH-007 폐기 세션 재사용 사건, 폐기 사유, 반복, 계정 보안 사건.
+- 산출: 일반 오래된 요청의 낮은 위험 기록과 보안 민감 폐기 후 높은 신뢰도 승격 입력.
 
-- [ ] **Step 1: Run the AUTH-012 linkage gap search**
+- [ ] **단계 1: AUTH-012 연결 공백 검색 실행**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "폐기 세션 재사용|세션 교체 직후|전체 세션 철회 뒤 반복" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: AUTH-012 has no explicit rules matching all three concepts.
+예상: AUTH-012에는 세 개념 모두에 일치하는 명시적 규칙이 없다.
 
-- [ ] **Step 2: Add risk-classification inputs**
+- [ ] **단계 2: 위험 분류 입력 추가**
 
-Add these bullets to AUTH-012 현재 확정 사항:
+AUTH-012 현재 확정 사항에 이 항목을 추가한다:
 
 ~~~markdown
 - AUTH-007에서 전달한 폐기 세션 재사용 사건을 위험 판정 입력으로 사용하되 세션 ID 원문은 사용하지 않는다.
@@ -329,18 +329,18 @@ Add these bullets to AUTH-012 현재 확정 사항:
 - 높은 위험 후보는 기존 로그인 실패·연락처 변경·사용자 신고와 함께 중앙 위험 사건에서 평가하며, 정책 버전의 판정 조건을 충족하면 기존 높은 위험 절차에 따라 모든 세션 철회와 보안 잠금을 적용한다.
 ~~~
 
-- [ ] **Step 3: Add multi-instance event convergence**
+- [ ] **단계 3: 다중 인스턴스 사건 수렴 추가**
 
-Add these bullets to AUTH-012 다중 서버·다중 인스턴스 원칙:
+AUTH-012 다중 서버·다중 인스턴스 원칙에 이 항목을 추가한다:
 
 ~~~markdown
 - 폐기 세션 재사용 사건은 계정, 세션 파생 식별값, 원 폐기 사건과 정책 버전을 기준으로 중앙 위험 사건에 멱등 연결한다. 여러 인스턴스가 같은 재사용을 감지해도 위험 횟수와 잠금 전이가 중복 반영되지 않는다.
 - 중앙 폐기 사유나 위험 상태를 확인할 수 없으면 재사용 요청은 계속 인증 거부하되 근거 없이 자동 잠금을 확정하지 않고 위험 사건을 보류·경보 상태로 남긴다.
 ~~~
 
-- [ ] **Step 4: Add acceptance conditions and a decision record**
+- [ ] **단계 4: 인수 조건 및 결정 기록 추가**
 
-Add this subsection before AUTH-012 향후 계획:
+AUTH-012 향후 계획 전에 이 하위 섹션을 추가한다:
 
 ~~~markdown
 ### 관측 가능한 인수 조건
@@ -350,80 +350,80 @@ Add this subsection before AUTH-012 향후 계획:
 - 다중 인스턴스가 같은 재사용을 동시에 감지해도 보안 잠금과 전체 세션 철회는 한 번만 확정되며 세션 ID 원문은 위험·감사 기록에 남지 않는다.
 ~~~
 
-Append this decision-record row:
+이 결정 기록 행을 추가한다:
 
 ~~~markdown
 | 2026-07-22 | AUTH-012 | 단발성 교체 세션은 낮은 위험 기록, 보안상 전체 철회 뒤 반복 재사용은 높은 위험 후보로 분리 | 확정 | 정상 동시 요청 오탐을 줄이면서 탈취 세션의 반복 사용을 탐지 |
 ~~~
 
-- [ ] **Step 5: Verify Task 4**
+- [ ] **단계 5: Task 4 검증**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "AUTH-007에서 전달한 폐기 세션 재사용|단발성 오래된 요청은 낮은 위험|같은 폐기 세션 파생 식별값이 반복|중앙 위험 사건에 멱등 연결" docs/service-policies/01-member-auth.md
 git diff --check
 ~~~
 
-Expected: all four risk-classification and convergence phrases are present and git diff --check prints no errors.
+예상: 위험 분류 및 수렴 문구 4개가 모두 존재하고 git diff --check는 오류를 출력하지 않는다.
 
-- [ ] **Step 6: Commit Task 4**
+- [ ] **단계 6: Task 4 커밋**
 
-Run:
+실행:
 
 ~~~powershell
 git add docs/service-policies/01-member-auth.md
 git commit -m "docs: link revoked sessions to takeover risk"
 ~~~
 
-Expected: one commit containing only the AUTH-012 policy change.
+예상: AUTH-012 정책 변경만 포함한 커밋 하나.
 
 ---
 
-### Task 5: Remove duplication, normalize terminology and complete verification
+### Task 5: 중복 제거, 용어 정규화 및 검증 완료
 
-**Files:**
-- Modify: docs/service-policies/01-member-auth.md:1-850
-- Read only: docs/technical-architecture.md:162-309, 443-453
-- Test: repository policy-document diff
+**파일:**
+- 수정: docs/service-policies/01-member-auth.md:1-850
+- 읽기 전용: docs/technical-architecture.md:162-309, 443-453
+- 테스트: 저장소 정책 문서 diff
 
-**Interfaces:**
-- Consumes: completed AUTH-001, AUTH-002, AUTH-005, AUTH-007 and AUTH-012 changes from Tasks 1-4.
-- Produces: one internally consistent member-auth policy aligned with the approved technical architecture.
+**인터페이스:**
+- 소비: Tasks 1-4에서 완료한 AUTH-001, AUTH-002, AUTH-005, AUTH-007, AUTH-012 변경.
+- 산출: 승인된 기술 아키텍처에 부합하는 내부적으로 일관된 회원 인증 정책 하나.
 
-- [ ] **Step 1: Prove the duplicated AUTH-006 linkage block exists**
+- [ ] **단계 1: 중복 AUTH-006 연결 블록 존재 증명**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "^## AUTH-006 연계" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected before cleanup: one match at the current line 326. The intended AUTH-005 linkage is the level-three heading at the current line 298 and must remain.
+정리 전 예상: 현재 326행에 일치 하나. 의도된 AUTH-005 연결은 현재 298행의 레벨 3 제목이며 유지해야 한다.
 
-- [ ] **Step 2: Remove the repeated AUTH-005 tail**
+- [ ] **단계 2: 반복된 AUTH-005 꼬리 제거**
 
-Delete the complete repeated block from the current line 326 level-two heading AUTH-006 연계 — 확정 through the final repeated AUTH-005 decision-record row at the current line 352. Stop immediately before the real top-level AUTH-006 비밀번호·복구·계정 잠금 policy heading at the current line 354.
+현재 326행의 레벨 2 제목 AUTH-006 연계 — 확정부터 현재 352행의 마지막 반복 AUTH-005 결정 기록 행까지 완전한 반복 블록을 삭제한다. 현재 354행의 실제 최상위 AUTH-006 비밀번호·복구·계정 잠금 정책 제목 바로 앞에서 멈춘다.
 
-Retain the intended level-three AUTH-006 연계 — 확정 subsection at the current line 298, its four follow-up review entries and the first AUTH-005 decision-record table ending at the current line 324.
+현재 298행의 의도된 레벨 3 AUTH-006 연계 — 확정 하위 섹션, 그 4개 후속 검토 항목, 현재 324행에서 끝나는 첫 AUTH-005 결정 기록 표는 유지한다.
 
-- [ ] **Step 3: Normalize terminology and correct known sentence defects**
+- [ ] **단계 3: 용어 정규화 및 알려진 문장 결함 수정**
 
-Across docs/service-policies/01-member-auth.md:
+docs/service-policies/01-member-auth.md 전체에서:
 
-- Replace 매장 대표자 with 식당 대표자 where it refers to the account type or person.
-- Preserve 매장 when it refers to a physical store, store membership or per-store approval.
-- Correct 공용 게정 to 공용 계정.
-- Correct 앙니라 to 아니라.
-- Correct 카카오 로그인을ㄹ to 카카오 로그인을.
-- Correct 안전정인 to 안전한.
-- Correct 소셜 로그인을 기본으로 씌되 to 소셜 로그인을 기본으로 쓰되.
-- Remove the incomplete AUTH-002 sentence 현재 로그인 방식은 카카오와 이메일·비밀번호로 확정했고, because the surrounding bullets already state the complete policy.
-- Keep policy identifiers, status values, timeouts, session limits and approved numeric values unchanged.
+- 계정 유형 또는 사람을 뜻하는 매장 대표자를 식당 대표자로 바꾼다.
+- 물리 매장, 매장 소속 또는 매장별 승인을 의미하는 매장은 보존한다.
+- 공용 게정을 공용 계정으로 수정한다.
+- 앙니라를 아니라로 수정한다.
+- 카카오 로그인을ㄹ을 카카오 로그인을으로 수정한다.
+- 안전정인을 안전한으로 수정한다.
+- 소셜 로그인을 기본으로 씌되를 소셜 로그인을 기본으로 쓰되로 수정한다.
+- 주변 항목이 이미 완전한 정책을 설명하므로 불완전한 AUTH-002 문장 현재 로그인 방식은 카카오와 이메일·비밀번호로 확정했고,를 제거한다.
+- 정책 식별자, 상태 값, 시간 제한, 세션 제한 및 승인된 수치 값은 변경하지 않는다.
 
-- [ ] **Step 4: Run structural and terminology checks**
+- [ ] **단계 4: 구조 및 용어 검사 실행**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "^## AUTH-[0-9]{3}" docs/service-policies/01-member-auth.md
@@ -431,25 +431,25 @@ rg -n "매장 대표자|공용 게정|앙니라|로그인을ㄹ|안전정인|기
 rg -n "식당 대표자|카카오 제공자 식별자|폐기 세션|AUTH-012" docs/service-policies/01-member-auth.md
 ~~~
 
-Expected:
+예상:
 
-- Each top-level AUTH-001 through AUTH-012 heading appears once.
-- The malformed or obsolete terminology search prints no matches.
-- The required representative, Kakao, revoked-session and takeover-risk terms are present.
+- 최상위 AUTH-001부터 AUTH-012까지의 제목이 각각 한 번 나타난다.
+- 잘못되었거나 오래된 용어 검색은 일치 항목을 출력하지 않는다.
+- 필요한 대표자, 카카오, 폐기 세션 및 탈취 위험 용어가 존재한다.
 
-- [ ] **Step 5: Compare against the technical architecture**
+- [ ] **단계 5: 기술 아키텍처와 비교**
 
-Run:
+실행:
 
 ~~~powershell
 rg -n "Spring Security|Spring Session Data Redis|JWT를 사용하지|로그아웃|세션 ID 재발급|계정 유형|직원용 계정" docs/technical-architecture.md docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: both documents consistently state central Spring sessions, no browser JWT, ID rotation and invalidation, independent account types, and no staff account.
+예상: 두 문서 모두 중앙 Spring 세션, 브라우저 JWT 미사용, ID 회전 및 무효화, 독립적인 계정 유형 및 직원 계정 없음을 일관되게 명시한다.
 
-- [ ] **Step 6: Run final repository verification**
+- [ ] **단계 6: 최종 저장소 검증 실행**
 
-Run:
+실행:
 
 ~~~powershell
 git diff --check origin/main...HEAD
@@ -457,45 +457,45 @@ git diff --name-only origin/main...HEAD
 git status --short
 ~~~
 
-Expected:
+예상:
 
-- git diff --check prints no errors.
-- Changed policy body is limited to docs/service-policies/01-member-auth.md.
-- Other changed files are only the approved design and implementation-plan documents.
-- No unstaged or untracked implementation files remain.
+- git diff --check는 오류를 출력하지 않는다.
+- 변경된 정책 본문은 docs/service-policies/01-member-auth.md로 제한된다.
+- 그 외 변경 파일은 승인된 설계 및 구현 계획 문서뿐이다.
+- stage되지 않았거나 추적되지 않는 구현 파일이 남아 있지 않다.
 
-- [ ] **Step 7: Review the final policy diff**
+- [ ] **단계 7: 최종 정책 diff 검토**
 
-Run:
+실행:
 
 ~~~powershell
 git diff origin/main...HEAD -- docs/service-policies/01-member-auth.md
 ~~~
 
-Expected: the diff contains the approved authorization, Kakao, session and risk changes plus duplicate/typographical cleanup, with no changes to session timeout values or concurrent-session limits.
+예상: diff에는 승인된 권한, 카카오, 세션 및 위험 변경과 중복/오탈자 정리가 포함되며 세션 시간 제한 값이나 동시 세션 제한 변경은 없다.
 
-- [ ] **Step 8: Commit final cleanup if Step 2 or Step 3 changed the file**
+- [ ] **단계 8: 단계 2 또는 단계 3이 파일을 변경했다면 최종 정리 커밋**
 
-Run:
+실행:
 
 ~~~powershell
 git add docs/service-policies/01-member-auth.md
 git commit -m "docs: finalize auth policy consistency"
 ~~~
 
-Expected: one cleanup commit; if no cleanup remains after prior task commits, record that no additional commit was necessary.
+예상: 정리 커밋 하나. 이전 작업 커밋 뒤에 정리할 것이 남지 않으면 추가 커밋이 필요하지 않았음을 기록한다.
 
 ---
 
-## Completion Evidence for Conversation and Pull Request
+## 대화 및 Pull Request용 완료 증거
 
-Report these facts without creating a separate report file:
+별도 보고서 파일을 만들지 않고 이 사실을 보고한다:
 
-- Base commit and working branch.
-- Policy sections changed: AUTH-001, AUTH-002, AUTH-005, AUTH-007 and AUTH-012.
-- Confirmation that staff/shared accounts remain unsupported.
-- Confirmation that account linking cannot promote account type or store permissions.
-- Confirmation that browser JWT remains unused and central-session revocation/reuse behavior is defined.
-- Duplicate-block and terminology cleanup performed.
-- Exact final verification commands and their outputs.
-- Final changed-file list and commit list.
+- 기준 커밋 및 작업 브랜치.
+- 변경된 정책 섹션: AUTH-001, AUTH-002, AUTH-005, AUTH-007, AUTH-012.
+- 직원/공유 계정이 계속 지원되지 않는다는 확인.
+- 계정 연결로 계정 유형이나 매장 권한을 승격할 수 없다는 확인.
+- 브라우저 JWT는 계속 미사용이며 중앙 세션 폐기/재사용 동작이 정의되었다는 확인.
+- 중복 블록 및 용어 정리 수행.
+- 정확한 최종 검증 명령과 출력.
+- 최종 변경 파일 목록 및 커밋 목록.

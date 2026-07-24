@@ -11,19 +11,19 @@
 
 초기 기술은 최소 구성으로 유지한다. QueryDSL, Redis, SSE, Outbox, Testcontainers는 각각의 도입 필요와 대체안의 한계를 기록한 뒤에만 추가한다.
 
-Testcontainers는 다음 중 하나가 처음으로 필요한 통합 테스트가 생기고 in-memory 또는 fake로 해당 동작을 검증할 수 없을 때 도입한다.
+Testcontainers는 다음 중 하나가 처음으로 필요한 통합 테스트가 생기고 인메모리 또는 가짜 구현으로 해당 동작을 검증할 수 없을 때 도입한다.
 
 - MySQL 고유 동작
-- Flyway migration
-- transaction 또는 isolation 동작
+- Flyway 마이그레이션
+- 트랜잭션 또는 격리 동작
 - 실제 DB 제약
 
-Docker Compose를 수동으로 실행하는 것만으로는 Pull Request 재현성과 테스트 격리를 보장할 수 없는 경우도 같은 도입 trigger로 기록한다.
+Docker Compose를 수동으로 실행하는 것만으로는 Pull Request 재현성과 테스트 격리를 보장할 수 없는 경우도 같은 도입 조건으로 기록한다.
 
 ## 검토한 대안
 
 - 모든 조건부 기술을 초기 의존성으로 추가: 검증되지 않은 복잡성과 유지 비용을 앞당긴다.
-- in-memory 또는 fake만으로 모든 통합 검증 수행: 실제 MySQL 및 migration·격리·제약 동작을 재현하지 못할 수 있다.
+- 인메모리 또는 가짜 구현만으로 모든 통합 검증 수행: 실제 MySQL 및 마이그레이션·격리·제약 동작을 재현하지 못할 수 있다.
 - Docker Compose 수동 실행만 사용: Pull Request 재현성과 테스트 격리를 자동으로 보장하지 못한다.
 
 ## 긍정적 결과
