@@ -1,63 +1,63 @@
 ---
-name: Work item
-about: Define an implementation or documentation change before work starts
+name: 작업 항목
+about: 작업 시작 전에 구현 또는 문서 변경을 정의합니다
 title: ""
 labels: ""
 assignees: ""
 ---
 
-# Outcome
+# 결과
 
-Describe the user or repository outcome, not the proposed activity.
+제안한 활동이 아니라 사용자 또는 저장소의 결과를 설명합니다.
 
-## Ownership
+## 소유권
 
-- Assignee:
-- Delegated scope and owner, if any:
+- 담당자:
+- 위임 범위와 소유자(해당하는 경우):
 - GitHub Project:
 
-The Issue owns scope, assignee, acceptance criteria, and verification planning. The Project's single `Status` field owns lifecycle; do not mirror it in this Issue body or a repository work log.
+Issue는 범위, 담당자, 인수 조건 및 검증 계획을 소유합니다. Project의 단일 `Status` 필드가 수명 주기를 소유하므로 이 Issue 본문이나 저장소 작업 로그에 이를 복제하지 않습니다.
 
-## Scope
+## 범위
 
-### In scope
+### 포함 범위
 
-- Exact file paths:
-- Behavior or documentation boundary:
+- 정확한 파일 경로:
+- 동작 또는 문서 경계:
 
-### Out of scope
+### 제외 범위
 
 -
 
-### Small-change exception
+### 작은 변경 예외
 
-- Not applicable, or reason no preceding Issue was practical:
+- 해당 없음 또는 선행 Issue가 실용적이지 않았던 이유:
 
-## Acceptance criteria
+## 인수 조건
 
 - [ ]
 
-## Verification plan
+## 검증 계획
 
-| Acceptance criterion | Planned command or review | Expected evidence |
+| 인수 조건 | 계획된 명령 또는 검토 | 예상 증거 |
 |---|---|---|
 |  |  |  |
 
-Planned checks are not execution evidence. Record actual commands, observed results, risks, and evidence in the Pull Request and CI.
+계획된 검사는 실행 증거가 아닙니다. 실제 명령, 관찰 결과, 위험 및 증거는 Pull Request와 CI에 기록합니다.
 
-## Risks and dependencies
+## 위험과 의존성
 
 -
 
-## Canonical document impact
+## 정본 문서 영향
 
-- Product, policy, architecture, feature spec, or quality owner:
-- Expected update or reason no update is needed:
+- 제품, 정책, 아키텍처, 기능 명세 또는 품질 소유자:
+- 예상 갱신 또는 갱신이 필요 없는 이유:
 
-## Handoff
+## 인계(handoff)
 
-- Required inputs:
-- Expected outputs:
-- Evidence format:
+- 필수 입력:
+- 예상 출력:
+- 증거 형식:
 
-Temporary delegation artifacts belong only under ignored `.superpowers/sdd/`. The current assignee remains responsible for integration and completion.
+임시 위임 산출물은 무시되는 `.superpowers/sdd/` 아래에만 둡니다. 현재 담당자는 통합과 완료에 대한 책임을 유지합니다.

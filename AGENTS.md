@@ -1,10 +1,10 @@
-# Repository AI rules
+# 저장소 AI 규칙
 
-Before repository work, read `ai/document-routing.md` and select only the route and documents required for the current scope.
+저장소 작업 전에는 `ai/document-routing.md`를 읽고 현재 범위에 필요한 경로(route)와 문서만 선택한다.
 
-- Preserve the worktree and unrelated user changes; do not overwrite, delete, stage, or commit outside the task allowlist.
-- Do not guess missing requirements, repository state, commands, credentials, or external-system state. Stop or report the uncertainty when it affects the result.
-- Do not expose sensitive information or cause external side effects without explicit scope and authority.
-- Report only commands actually run and results actually observed. A document, template, or planned command is not execution evidence.
-- Stage and commit only the frozen task allowlist after the required verification and scope checks pass.
-- Keep product, policy, architecture, and quality facts in their canonical documents under `docs/`; link to those owners instead of duplicating them here.
+- 작업 트리(worktree)와 관련 없는 사용자의 변경 사항을 보존한다. 작업 허용 목록 밖의 파일을 덮어쓰기, 삭제, stage 또는 commit하지 않는다.
+- 누락된 요구사항, 저장소 상태, 명령, 자격 증명 또는 외부 시스템 상태를 추측하지 않는다. 결과에 영향을 미치면 작업을 멈추거나 불확실성을 보고한다.
+- 명시적인 범위와 권한 없이 민감한 정보를 노출하거나 외부 부작용을 일으키지 않는다.
+- 실제로 실행한 명령과 실제로 관찰한 결과만 보고한다. 문서, 템플릿 또는 계획된 명령은 실행 증거가 아니다.
+- 필수 검증과 범위 검사를 통과한 뒤에만 확정된 작업 허용 목록을 stage 및 commit한다.
+- 제품, 정책, 아키텍처 및 품질 관련 사실은 `docs/` 아래의 정본 문서에 유지한다. 이 문서에 복제하지 말고 해당 소유자 문서로 링크한다.

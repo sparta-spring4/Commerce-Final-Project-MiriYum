@@ -1,148 +1,148 @@
-# MiriYum Automatic Recommendation Finalization Plan (historical completion record)
+# MiriYum 자동 추천 확정 계획 (과거 완료 기록)
 
-> **Historical snapshot (2026-07-22):** This completed plan records the 139-row delegated-finalization result; current policy totals and queues are maintained in `docs/service-policies/README.md`.
+> **과거 스냅샷(2026-07-22):** 이 완료된 계획은 위임 확정된 139개 행의 결과를 기록하며, 현재 정책 총계와 대기열은 `docs/service-policies/README.md`에서 관리한다.
 
-**Historical goal:** Write implementable detailed policies for all 139 `자동 추천 예정` rows and finalize them under the user's delegated recommendation standard, producing the then-current `확정 170 / 팀원 상의 필요 19 / TODO 28 / 자동 추천 예정 0` snapshot.
+**과거 목표:** 139개 `자동 추천 예정` 행 모두에 구현 가능한 상세 정책을 작성하고 사용자가 위임한 추천 기준에 따라 확정하여, 당시의 `확정 170 / 팀원 상의 필요 19 / TODO 28 / 자동 추천 예정 0` 스냅샷을 만든다.
 
-**Architecture:** Finalize recommendations inside their existing domain documents, using each policy ID as the stable unit. Every finalized row must state a concrete rule plus the relevant authorization, precondition, state transition, concurrency/idempotency, failure/recovery, notification/audit, privacy, and verification behavior; irrelevant dimensions may be explicitly marked not applicable rather than invented. After domain-level independent reviews, synchronize the master ledger and cross-cutting documents and run a whole-repository review.
+**아키텍처:** 각 정책 ID를 안정적인 단위로 사용하여 기존 도메인 문서 안에서 추천을 확정한다. 확정된 모든 행은 구체적인 규칙과 관련된 권한, 사전 조건, 상태 전이, 동시성/멱등성, 실패/복구, 알림/감사, 개인정보 보호 및 검증 동작을 명시해야 하며, 관련 없는 차원은 새로 만들기보다 해당 없음으로 명시할 수 있다. 도메인 수준의 독립 검토 후 마스터 원장과 횡단 문서를 동기화하고 저장소 전체 검토를 실행한다.
 
-**Tech Stack:** Markdown, PowerShell, ripgrep, Git read-only verification.
+**기술 스택:** Markdown, PowerShell, ripgrep, Git 읽기 전용 검증.
 
-## Global Constraints
+## 전역 제약
 
-- Preserve the existing 31 confirmed policy rows and all confirmed sub-decisions without changing their substance, status, or importance.
-- Preserve exactly 19 `팀원 상의 필요` rows and exactly 28 `TODO` rows; do not decide product direction, financial responsibility, fairness allocation, paid-provider contracts, final legal/privacy/terms questions, future expansion, or empirical numeric targets on their behalf.
-- Finalize exactly the current 139 `자동 추천 예정` rows using the explicitly delegated non-core recommendation standard, and record the completed detail and confirmation decision for every row.
-- A policy is not detailed merely because its status changed. Each row must contain an actionable normative recommendation, affected actor/data/state, failure and concurrency behavior where relevant, audit/notification/privacy constraints where relevant, and observable acceptance criteria.
-- Use safe standard recommendations for authorization, least privilege, idempotency, concurrency, state machines, error handling, retries, notifications, auditing, privacy minimization, and multi-instance consistency.
-- When a finalized row depends on one of the 19 team decisions, define a safe current default that does not pre-empt that decision and state how the finalized detail consumes the later decision. `TRANSFER-003` may only implement `TRANSFER-002`; `SUB-009` must provide no preferential allocation until `SUB-001`–`SUB-003` authorize it.
-- When a row contains an existing confirmed sub-scope and unresolved broader scope, preserve the confirmed sub-scope exactly and finalize only the remaining delegated non-core scope.
-- When safe baselines coexist with a TODO fragment, finalize only the safe baseline and keep the provider/legal/future/numeric fragment explicitly TODO; do not falsely mark the TODO fragment confirmed.
-- Do not introduce paid services, unnecessarily complex infrastructure, additional personal-data collection, or single-instance assumptions.
-- Use MiriYum naming; at the time of this plan, do not modify `miriyum-service-blueprint.md`; do not write implementation code; do not stage, commit, or push.
-- Preserve all pre-existing user changes and work on the current `dev`-based `codex/` branch.
+- 기존 확정 정책 행 31개와 확정된 모든 하위 결정을 내용, 상태 또는 중요도 변경 없이 보존한다.
+- 정확히 19개 `팀원 상의 필요` 행과 정확히 28개 `TODO` 행을 보존한다. 해당 행들을 대신해 제품 방향, 재무 책임, 공정한 배정, 유료 제공자 계약, 최종 법률/개인정보 보호/약관 문제, 미래 확장 또는 경험적 수치 목표를 결정하지 않는다.
+- 명시적으로 위임된 비핵심 추천 기준을 사용해 현재의 139개 `자동 추천 예정` 행을 정확히 확정하고, 모든 행의 완료된 상세와 확정 결정을 기록한다.
+- 상태가 바뀌었다고 해서 정책이 상세화된 것은 아니다. 각 행에는 실행 가능한 규범적 추천, 영향받는 행위자/데이터/상태, 해당되는 실패 및 동시성 동작, 해당되는 감사/알림/개인정보 보호 제약 및 관측 가능한 인수 기준이 포함되어야 한다.
+- 권한, 최소 권한, 멱등성, 동시성, 상태 기계, 오류 처리, 재시도, 알림, 감사, 개인정보 최소화 및 다중 인스턴스 일관성에는 안전한 표준 추천을 사용한다.
+- 확정 행이 19개 팀 결정 중 하나에 의존하면 그 결정을 선점하지 않는 안전한 현재 기본값을 정의하고, 확정 상세가 이후 결정을 어떻게 소비하는지 명시한다. `TRANSFER-003`은 `TRANSFER-002`만 구현할 수 있으며, `SUB-009`는 `SUB-001`–`SUB-003`이 승인하기 전까지 우선 배정을 제공해서는 안 된다.
+- 행에 기존 확정 하위 범위와 미해결의 더 넓은 범위가 함께 있으면 확정 하위 범위를 정확히 보존하고, 남은 위임 비핵심 범위만 확정한다.
+- 안전한 기준선과 TODO 조각이 함께 있으면 안전한 기준선만 확정하고 제공자/법률/미래/수치 조각은 명시적으로 TODO로 유지한다. TODO 조각을 거짓으로 확정 표시하지 않는다.
+- 유료 서비스, 불필요하게 복잡한 인프라, 추가 개인 데이터 수집 또는 단일 인스턴스 가정을 도입하지 않는다.
+- MiriYum 명칭을 사용한다. 이 계획 당시에는 `miriyum-service-blueprint.md`를 수정하지 않고, 구현 코드를 작성하거나 stage, commit, push하지 않는다.
+- 기존의 모든 사용자 변경을 보존하고 현재 `dev` 기반 `codex/` 브랜치에서 작업한다.
 
 ---
 
-### Task 1: Store and Store-Operation Recommendations (10 policies)
+### Task 1: 매장 및 매장 운영 추천(정책 10개)
 
-**Files:**
-- Modify: `docs/service-policies/02-store-onboarding.md`
-- Modify: `docs/service-policies/03-store-operation.md`
+**파일:**
+- 수정: `docs/service-policies/02-store-onboarding.md`
+- 수정: `docs/service-policies/03-store-operation.md`
 
-**Interfaces:**
-- Consumes: current master rows and existing confirmed store policies.
-- Produces: finalized detailed policies for `STORE-014` and `OPER-002`–`OPER-010`.
+**인터페이스:**
+- 소비: 현재 마스터 행 및 기존 확정 매장 정책.
+- 산출: `STORE-014` 및 `OPER-002`–`OPER-010`의 확정된 상세 정책.
 
-- [x] Write one implementable, ID-addressable detailed policy for each of the 10 rows.
-- [x] Preserve STORE ownership safeguards and make STORE-014 transitions, evidence, conflict handling, audit, and multi-instance behavior explicit.
-- [x] Define operating-hours, closure, menu-version, stock/content, legal-display, lifecycle, and emergency-stop behavior without selecting TODO providers or numeric thresholds.
-- [x] Add a dated confirmation record for all 10 delegated recommendations and change only these rows from automatic to confirmed in the two domain summaries.
-- [x] Verify 10/10 rows have concrete rules and acceptance criteria.
+- [x] 10개 행 각각에 ID로 참조 가능한 구현 가능한 상세 정책 하나를 작성한다.
+- [x] STORE 소유권 보호 장치를 보존하고 STORE-014 전이, 증거, 충돌 처리, 감사 및 다중 인스턴스 동작을 명시한다.
+- [x] TODO 제공자나 수치 임계값을 선택하지 않고 영업시간, 휴점, 메뉴 버전, 재고/콘텐츠, 법적 표시, 수명 주기 및 긴급 중지 동작을 정의한다.
+- [x] 위임 추천 10개 모두에 날짜가 있는 확정 기록을 추가하고, 두 도메인 요약에서 이 행들만 자동에서 확정으로 변경한다.
+- [x] 10/10개 행에 구체적 규칙과 인수 기준이 있는지 검증한다.
 
-### Task 2: Reservation, Waiting, and Menu-Hold Recommendations (34 policies)
+### Task 2: 예약, 웨이팅 및 메뉴 홀드 추천(정책 34개)
 
-**Files:**
-- Modify: `docs/service-policies/04-reservation.md`
-- Modify: `docs/service-policies/05-waiting.md`
-- Modify: `docs/service-policies/06-menu-hold.md`
+**파일:**
+- 수정: `docs/service-policies/04-reservation.md`
+- 수정: `docs/service-policies/05-waiting.md`
+- 수정: `docs/service-policies/06-menu-hold.md`
 
-**Interfaces:**
-- Consumes: preserved team decisions and TODO boundaries for reservation, waiting, and hold.
-- Produces: finalized detailed policies for the 12 reservation, 11 waiting, and 11 hold automatic rows.
+**인터페이스:**
+- 소비: 보존된 예약, 웨이팅 및 홀드의 팀 결정과 TODO 경계.
+- 산출: 예약 자동 행 12개, 웨이팅 자동 행 11개 및 홀드 자동 행 11개의 확정된 상세 정책.
 
-- [x] Write concrete rules for every automatic row, including permissions, validation, state transitions, idempotency/concurrency, failures, audit/notification, and acceptance criteria where applicable.
-- [x] Keep `RES-001`, `RES-009`, `WAIT-009`, `WAIT-015`, and `HOLD-004` unresolved and avoid embedding choices that decide them indirectly.
-- [x] Keep `RES-006`, `WAIT-003`, `WAIT-011`, and `HOLD-007` TODO numeric fragments unresolved while finalizing their surrounding safe baselines only where another row owns them.
-- [x] Preserve WAIT-001 authenticated current scope and future nonmember exception boundary; finalize WAIT-004 safe fallback without weakening location/privacy rules.
-- [x] Add confirmation records and change exactly these 34 automatic rows to confirmed in domain summaries.
+- [x] 권한, 검증, 상태 전이, 멱등성/동시성, 실패, 감사/알림 및 해당되는 인수 기준을 포함하여 모든 자동 행에 구체적인 규칙을 작성한다.
+- [x] `RES-001`, `RES-009`, `WAIT-009`, `WAIT-015`, `HOLD-004`를 미해결로 유지하고 이들을 간접적으로 결정하는 선택을 포함하지 않는다.
+- [x] `RES-006`, `WAIT-003`, `WAIT-011`, `HOLD-007`의 TODO 수치 조각은 미해결로 유지하되, 다른 행이 소유한 경우에만 주변의 안전한 기준선을 확정한다.
+- [x] WAIT-001의 인증된 현재 범위와 미래 비회원 예외 경계를 보존하고, 위치/개인정보 보호 규칙을 약화하지 않고 WAIT-004 안전 대체안을 확정한다.
+- [x] 확정 기록을 추가하고 도메인 요약에서 정확히 이 34개 자동 행을 확정으로 변경한다.
 
-### Task 3: Tasting, Payment, Check-in, and Transfer Recommendations (34 policies)
+### Task 3: 시식, 결제, 체크인 및 양도 추천(정책 34개)
 
-**Files:**
-- Modify: `docs/service-policies/07-course-tasting.md`
-- Modify: `docs/service-policies/08-payment-refund.md`
-- Modify: `docs/service-policies/09-checkin-noshow.md`
-- Modify: `docs/service-policies/10-waitlist-transfer.md`
+**파일:**
+- 수정: `docs/service-policies/07-course-tasting.md`
+- 수정: `docs/service-policies/08-payment-refund.md`
+- 수정: `docs/service-policies/09-checkin-noshow.md`
+- 수정: `docs/service-policies/10-waitlist-transfer.md`
 
-**Interfaces:**
-- Consumes: preserved financial/fairness team decisions and provider/numeric TODO boundaries.
-- Produces: finalized detailed policies for 9 tasting, 10 payment, 8 check-in, and 7 transfer automatic rows.
+**인터페이스:**
+- 소비: 보존된 재무/공정성 팀 결정과 제공자/수치 TODO 경계.
+- 산출: 시식 자동 행 9개, 결제 자동 행 10개, 체크인 자동 행 8개 및 양도 자동 행 7개의 확정된 상세 정책.
 
-- [x] Write implementable rules for all 34 rows, emphasizing monetary integrity, webhook verification, idempotency, state reconciliation, evidence, notification, and multi-instance concurrency.
-- [x] Preserve confirmed TASTE-001/TASTE-005 sub-scopes while completing only remaining delegated details.
-- [x] Do not decide TASTE/PAY/CHECK/TRANSFER team rows or PAY-003/PAY-012/CHECK-005/TRANSFER-004 TODO fragments.
-- [x] Make TRANSFER-003 consume only the future TRANSFER-002 priority policy and never create an independent subscriber/lottery advantage.
-- [x] Add confirmation records and change exactly these 34 automatic rows to confirmed in domain summaries.
+- [x] 금전 무결성, webhook 검증, 멱등성, 상태 조정, 증거, 알림 및 다중 인스턴스 동시성을 강조하여 34개 행 모두에 구현 가능한 규칙을 작성한다.
+- [x] 확정된 TASTE-001/TASTE-005 하위 범위를 보존하면서 남은 위임 상세만 완료한다.
+- [x] TASTE/PAY/CHECK/TRANSFER 팀 행 또는 PAY-003/PAY-012/CHECK-005/TRANSFER-004 TODO 조각을 결정하지 않는다.
+- [x] TRANSFER-003이 미래의 TRANSFER-002 우선순위 정책만 소비하게 하고, 독립적인 구독자/추첨 이점을 절대 만들지 않는다.
+- [x] 확정 기록을 추가하고 도메인 요약에서 정확히 이 34개 자동 행을 확정으로 변경한다.
 
-### Task 4: Subscription, Trust, Advertising, and Analytics Recommendations (28 policies)
+### Task 4: 구독, 신뢰, 광고 및 분석 추천(정책 28개)
 
-**Files:**
-- Modify: `docs/service-policies/11-subscription.md`
-- Modify: `docs/service-policies/12-review-trust.md`
-- Modify: `docs/service-policies/13-ad-recommendation.md`
-- Modify: `docs/service-policies/14-analytics-report.md`
+**파일:**
+- 수정: `docs/service-policies/11-subscription.md`
+- 수정: `docs/service-policies/12-review-trust.md`
+- 수정: `docs/service-policies/13-ad-recommendation.md`
+- 수정: `docs/service-policies/14-analytics-report.md`
 
-**Interfaces:**
-- Consumes: preserved subscription/advertising team decisions and contract/privacy TODO fragments.
-- Produces: finalized detailed policies for 4 subscription, 12 trust, 3 advertising, and 9 analytics automatic rows.
+**인터페이스:**
+- 소비: 보존된 구독/광고 팀 결정과 계약/개인정보 보호 TODO 조각.
+- 산출: 구독 자동 행 4개, 신뢰 자동 행 12개, 광고 자동 행 3개 및 분석 자동 행 9개의 확정된 상세 정책.
 
-- [x] Write implementable rules for all 28 rows, including entitlements, snapshotting, fraud/abuse recovery, moderation evidence, ranking transparency, aggregation correctness, privacy, and reprocessing.
-- [x] Keep SUB-001–003/SUB-007 and ADS-001 unresolved; keep SUB-004/SUB-006 and ADS-003–005 TODO boundaries intact.
-- [x] Set SUB-009 to no preferential inventory or early access until the subscription team decisions expressly authorize it.
-- [x] Preserve ADS-004/ADS-005 confirmed youth-alcohol safeguards without treating their broader legal/provider TODO scope as confirmed.
-- [x] Add confirmation records and change exactly these 28 automatic rows to confirmed in domain summaries.
+- [x] 권한, 스냅샷, 사기/남용 복구, 검토 증거, 순위 투명성, 집계 정확성, 개인정보 보호 및 재처리를 포함하여 28개 행 모두에 구현 가능한 규칙을 작성한다.
+- [x] SUB-001–003/SUB-007 및 ADS-001을 미해결로 유지하고, SUB-004/SUB-006 및 ADS-003–005 TODO 경계를 유지한다.
+- [x] 구독 팀 결정이 명시적으로 승인할 때까지 SUB-009에 우선 재고 또는 조기 접근을 제공하지 않도록 설정한다.
+- [x] ADS-004/ADS-005의 확정된 청소년-주류 보호 장치를 보존하되, 더 넓은 법률/제공자 TODO 범위를 확정으로 취급하지 않는다.
+- [x] 확정 기록을 추가하고 도메인 요약에서 정확히 이 28개 자동 행을 확정으로 변경한다.
 
-### Task 5: Administration, Notification, Privacy, and Scale Recommendations (33 policies)
+### Task 5: 관리, 알림, 개인정보 보호 및 확장성 추천(정책 33개)
 
-**Files:**
-- Modify: `docs/service-policies/15-admin-operation.md`
-- Modify: `docs/service-policies/16-notification.md`
-- Modify: `docs/service-policies/17-privacy-security.md`
-- Modify: `docs/service-policies/18-scale-reliability.md`
+**파일:**
+- 수정: `docs/service-policies/15-admin-operation.md`
+- 수정: `docs/service-policies/16-notification.md`
+- 수정: `docs/service-policies/17-privacy-security.md`
+- 수정: `docs/service-policies/18-scale-reliability.md`
 
-**Interfaces:**
-- Consumes: existing confirmed security sub-scopes and explicit legal/provider/numeric TODO fragments.
-- Produces: finalized detailed policies for 8 administration, 9 notification, 9 privacy, and 7 scale automatic rows.
+**인터페이스:**
+- 소비: 기존 확정 보안 하위 범위와 명시적인 법률/제공자/수치 TODO 조각.
+- 산출: 관리 자동 행 8개, 알림 자동 행 9개, 개인정보 보호 자동 행 9개 및 확장성 자동 행 7개의 확정된 상세 정책.
 
-- [x] Write implementable safe-baseline rules for all 33 rows, including least privilege, dual control, durable audit, retries/deduplication, consent/privacy minimization, encryption, deletion propagation, distributed consistency, isolation, observability, and deployment compatibility.
-- [x] Preserve confirmed ADMIN-001/007/012 and PRIV-001/005/006/008/011 sub-scopes while completing only remaining delegated scope.
-- [x] Keep ADMIN-002/004/006/009, NOTI-009, PRIV-005/006/010/012, and SCALE-001/002/003/005/013 TODO fragments unresolved.
-- [x] Finalize the safe baselines that coexist with ADMIN-002/009, PRIV-012, and SCALE-013 without claiming their WebAuthn rollout, retention/legal notice, or RPO/RTO numbers are confirmed.
-- [x] Add confirmation records and change exactly these 33 automatic rows to confirmed in domain summaries.
+- [x] 최소 권한, 이중 통제, 내구성 감사, 재시도/중복 제거, 동의/개인정보 최소화, 암호화, 삭제 전파, 분산 일관성, 격리, 관측성 및 배포 호환성을 포함하여 33개 행 모두에 구현 가능한 안전 기준선 규칙을 작성한다.
+- [x] 확정된 ADMIN-001/007/012 및 PRIV-001/005/006/008/011 하위 범위를 보존하면서 남은 위임 범위만 완료한다.
+- [x] ADMIN-002/004/006/009, NOTI-009, PRIV-005/006/010/012 및 SCALE-001/002/003/005/013 TODO 조각을 미해결로 유지한다.
+- [x] WebAuthn 출시, 보존/법률 고지 또는 RPO/RTO 수치가 확정되었다고 주장하지 않고 ADMIN-002/009, PRIV-012, SCALE-013과 공존하는 안전 기준선을 확정한다.
+- [x] 확정 기록을 추가하고 도메인 요약에서 정확히 이 33개 자동 행을 확정으로 변경한다.
 
-### Task 6: Master and Cross-Cutting Synchronization
+### Task 6: 마스터 및 횡단 동기화
 
-**Files:**
-- Modify: `docs/service-policies/README.md`
-- Modify: `docs/service-policies/00-policy-template.md`
-- Modify: `docs/service-definition.md`
-- Modify: `docs/technical-architecture.md`
-- Modify: `miriyum-service-decisions.md`
-- Modify if needed: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
+**파일:**
+- 수정: `docs/service-policies/README.md`
+- 수정: `docs/service-policies/00-policy-template.md`
+- 수정: `docs/service-definition.md`
+- 수정: `docs/technical-architecture.md`
+- 수정: `miriyum-service-decisions.md`
+- 필요 시 수정: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
 
-**Interfaces:**
-- Consumes: all independently approved domain details and confirmation records.
-- Produces: canonical totals `170/19/0/28`, consistent status semantics, decision history, and next actions.
+**인터페이스:**
+- 소비: 독립적으로 승인된 모든 도메인 상세 및 확정 기록.
+- 산출: 정본 총계 `170/19/0/28`, 일관된 상태 의미, 결정 이력 및 다음 조치.
 
-- [x] Change exactly the 139 completed rows from `자동 추천 예정` to `확정`, retaining their existing importance values.
-- [x] Keep all 31 prior confirmed, 19 team, and 28 TODO rows unchanged.
-- [x] Record that the user's explicit delegated recommendation standard was applied only after detailed policy completion and independent review.
-- [x] Update counts, summaries, queues, service definition, architecture references, template guidance, and decision history without representing TODO fragments as confirmed.
-- [x] Verify the master has 217 unique rows with `확정 170 / 팀원 상의 필요 19 / TODO 28 / 자동 추천 예정 0` and domain summaries match exactly.
+- [x] 완료된 139개 행을 정확히 `자동 추천 예정`에서 `확정`으로 변경하고 기존 중요도 값은 유지한다.
+- [x] 이전 확정 31개, 팀 19개 및 TODO 28개 행 모두를 변경 없이 유지한다.
+- [x] 상세 정책 완료와 독립 검토 후에만 사용자의 명시적 위임 추천 기준이 적용되었음을 기록한다.
+- [x] TODO 조각을 확정으로 표시하지 않고 수치, 요약, 대기열, 서비스 정의, 아키텍처 참조, 템플릿 지침 및 결정 이력을 업데이트한다.
+- [x] 마스터에 `확정 170 / 팀원 상의 필요 19 / TODO 28 / 자동 추천 예정 0`인 고유 행 217개가 있고 도메인 요약이 정확히 일치하는지 검증한다.
 
-### Task 7: Final Integrity Review
+### Task 7: 최종 무결성 검토
 
-**Files:**
-- Verify: every file above
-- Verify unchanged: `miriyum-service-blueprint.md`
+**파일:**
+- 검증: 위의 모든 파일
+- 변경되지 않았는지 검증: `miriyum-service-blueprint.md`
 
-**Interfaces:**
-- Consumes: the complete finalized policy corpus.
-- Produces: completion evidence and an independent whole-work verdict.
+**인터페이스:**
+- 소비: 완전히 확정된 정책 코퍼스.
+- 산출: 완료 증거 및 독립적인 전체 작업 판정.
 
-- [x] Verify every one of the original 139 automatic IDs has ID-addressable detailed policy content and a confirmation record.
-- [x] Verify the 31 original confirmed policies, 19 team decisions, and 28 TODO rows and fragments remain preserved.
-- [x] Recompute all state/importance totals and domain/master consistency.
-- [x] Scan for stale `자동 추천 예정` claims, placeholder-only policies, product/fairness/financial decisions embedded in confirmed recommendations, and paid/complex/extra-PII defaults.
-- [x] Run `git diff --check`, confirm the branch and staged state, verify blueprint has no task-caused diff, and conduct a final independent review.
+- [x] 원래 자동 ID 139개 각각에 ID로 참조 가능한 상세 정책 내용과 확정 기록이 있는지 검증한다.
+- [x] 원래 확정 정책 31개, 팀 결정 19개 및 TODO 행과 조각 28개가 보존되었는지 검증한다.
+- [x] 모든 상태/중요도 총계와 도메인/마스터 일관성을 다시 계산한다.
+- [x] 오래된 `자동 추천 예정` 주장, 자리표시자 전용 정책, 확정 추천에 포함된 제품/공정성/재무 결정, 유료/복잡/추가 PII 기본값을 검사한다.
+- [x] `git diff --check`를 실행하고 브랜치와 staged 상태를 확인하며, blueprint에 이 작업으로 인한 diff가 없는지 검증하고 최종 독립 검토를 수행한다.

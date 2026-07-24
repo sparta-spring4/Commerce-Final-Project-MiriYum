@@ -1,135 +1,135 @@
-# MiriYum Policy Decisions Documentation Implementation Plan
+# MiriYum 정책 결정 문서 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **에이전트 작업자용:** 필수 하위 스킬: 이 계획을 작업별로 구현하려면 superpowers:subagent-driven-development(권장) 또는 superpowers:executing-plans를 사용한다. 단계 추적에는 체크박스(`- [ ]`) 구문을 사용한다.
 
-**Goal:** Reflect the user-approved operating numbers, waiting fairness, payment/settlement target architecture, and user/store subscription candidates across the MiriYum policy corpus, then publish the verified documentation on the dedicated branch.
+**목표:** 사용자 승인 운영 수치, 웨이팅 공정성, 결제/정산 목표 아키텍처 및 사용자/매장 구독 후보를 MiriYum 정책 코퍼스 전반에 반영한 뒤, 검증된 문서를 전용 브랜치에 게시한다.
 
-**Architecture:** `docs/service-policies/README.md` remains the canonical row-level state and importance index. Domain documents own implementable details and dated decision records; service definition, technical architecture, the decision ledger, and policy operating rules summarize those facts without resolving external contracts or unanswered launch decisions. Exactly 13 numeric `TODO` rows and `WAIT-009` move to `확정`; conditional payment and subscription scopes remain unresolved at row level.
+**아키텍처:** `docs/service-policies/README.md`는 행 수준 상태와 중요도의 정본 색인으로 유지한다. 도메인 문서는 구현 가능한 상세와 날짜가 있는 결정 기록을 소유하며, 서비스 정의, 기술 아키텍처, 결정 원장 및 정책 운영 규칙은 외부 계약이나 미답변 출시 결정을 해결하지 않고 해당 사실을 요약한다. 수치 `TODO` 행 13개와 `WAIT-009`만 `확정`으로 이동하며, 조건부 결제 및 구독 범위는 행 수준에서 미해결로 유지한다.
 
-**Tech Stack:** Markdown policy documents, PowerShell verification, Git, independent subagent reviews.
+**기술 스택:** Markdown 정책 문서, PowerShell 검증, Git, 독립 하위 에이전트 검토.
 
-## Global Constraints
+## 전역 제약
 
-- Work only on `codex/miriyum-policy-decisions`.
-- Do not write implementation code; modify Markdown documentation only.
-- Preserve all previously confirmed policy content and unrelated user changes.
-- Final master state must be `확정 184 / 팀원 상의 필요 18 / 자동 추천 예정 0 / TODO 15`, total 217.
-- Importance must remain `핵심 19 / 필수 181 / 권장 17`.
-- Move only `RES-006`, `WAIT-003`, `WAIT-009`, `WAIT-011`, `HOLD-007`, `CHECK-005`, `TRANSFER-004`, `ADMIN-004`, `ADMIN-006`, `SCALE-001`, `SCALE-002`, `SCALE-003`, `SCALE-005`, and `SCALE-013` to `확정`.
-- Keep `PAY-003`, `PAY-012`, `SUB-004`, and `SUB-006` unresolved while recording their approved target subscopes and remaining external conditions.
-- Keep `SUB-001`, `SUB-002`, `SUB-003`, and `SUB-007` at `팀원 상의 필요`; user subscription is not launching initially and the store Pro launch time is unanswered.
-- Use `MiriYum` for brand copy. Keep the lowercase former-name token only where it is part of an existing filename or link.
-- Preserve multi-server/multi-instance consistency, no new personal data, and no uncontracted paid provider as an active production dependency.
+- `codex/miriyum-policy-decisions`에서만 작업한다.
+- 구현 코드를 작성하지 않고 Markdown 문서만 수정한다.
+- 이전에 확정된 모든 정책 내용과 관련 없는 사용자 변경을 보존한다.
+- 최종 마스터 상태는 합계 217인 `확정 184 / 팀원 상의 필요 18 / 자동 추천 예정 0 / TODO 15`여야 한다.
+- 중요도는 `핵심 19 / 필수 181 / 권장 17`로 유지해야 한다.
+- `RES-006`, `WAIT-003`, `WAIT-009`, `WAIT-011`, `HOLD-007`, `CHECK-005`, `TRANSFER-004`, `ADMIN-004`, `ADMIN-006`, `SCALE-001`, `SCALE-002`, `SCALE-003`, `SCALE-005`, `SCALE-013`만 `확정`으로 이동한다.
+- `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`은 승인된 목표 하위 범위와 남은 외부 조건을 기록하면서 미해결로 유지한다.
+- `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`은 `팀원 상의 필요`로 유지한다. 사용자 구독은 처음에 출시하지 않고 매장 Pro 출시 시점은 미답변이다.
+- 브랜드 문구에는 `MiriYum`을 사용한다. 소문자 이전 이름 토큰은 기존 파일명이나 링크의 일부인 경우에만 유지한다.
+- 다중 서버/다중 인스턴스 일관성, 새 개인 데이터 없음, 계약되지 않은 유료 제공자를 활성 프로덕션 의존성으로 사용하지 않음을 보존한다.
 
 ---
 
-### Task 1: Reservation, Waiting, Hold, Check-in, and Transfer Decisions
+### Task 1: 예약, 웨이팅, 홀드, 체크인 및 양도 결정
 
-**Files:**
-- Modify: `docs/service-policies/04-reservation.md`
-- Modify: `docs/service-policies/05-waiting.md`
-- Modify: `docs/service-policies/06-menu-hold.md`
-- Modify: `docs/service-policies/09-checkin-noshow.md`
-- Modify: `docs/service-policies/10-waitlist-transfer.md`
+**파일:**
+- 수정: `docs/service-policies/04-reservation.md`
+- 수정: `docs/service-policies/05-waiting.md`
+- 수정: `docs/service-policies/06-menu-hold.md`
+- 수정: `docs/service-policies/09-checkin-noshow.md`
+- 수정: `docs/service-policies/10-waitlist-transfer.md`
 
-**Interfaces:**
-- Consumes: Sections 2 and 3 of `docs/superpowers/specs/2026-07-22-miriyum-policy-decisions-design.md`.
-- Produces: Implementable confirmed detail, observable acceptance criteria, domain classification rows, and dated decision records for seven affected policy IDs.
+**인터페이스:**
+- 소비: `docs/superpowers/specs/2026-07-22-miriyum-policy-decisions-design.md`의 섹션 2 및 3.
+- 산출: 영향받는 정책 ID 7개에 대한 구현 가능한 확정 상세, 관측 가능한 인수 기준, 도메인 분류 행 및 날짜가 있는 결정 기록.
 
-- [x] Update `RES-006` to 10 minutes with a two-minute warning, central time, no user extension, exact-once release, and payment-result-unknown recovery.
-- [x] Update `WAIT-003` to a 500m default and store-configurable 300m–1km range with poor-GPS retry/fallback behavior.
-- [x] Update `WAIT-011` to two calls of three minutes each, separating delivery retry from call count and routing final nonresponse to store-confirmed `호출 실패` handling.
-- [x] Resolve `WAIT-009` with store-selected vacant table, system-filtered first compatible FIFO team, no commercial priority, and one pre-call defer by five compatible teams.
-- [x] Align `WAIT-012`, `WAIT-013`, `WAIT-016`, and `WAIT-017` wording and state transitions with the new versioned `WAIT-009` and `WAIT-011` decisions without creating a second ordering rule.
-- [x] Update `HOLD-007` to a 10-minute hold and one shared expiry for combined seat/menu resources with all-or-nothing confirmation or release.
-- [x] Update `CHECK-005` to default 10 minutes, store range 3–15 minutes, reservation-time snapshot, and handoff to `CHECK-006` rather than automatic no-show.
-- [x] Update `TRANSFER-004` to five minutes for response and ten minutes after acceptance for completion, with conditional transitions for response/payment races.
-- [x] Add one 2026-07-22 direct-user decision record per affected ID and observable acceptance criteria that exercise boundary times and multi-instance races.
-- [x] Recompute the five domain summaries and run `git diff --check` on the five files; expected result is exit 0.
+- [x] `RES-006`을 2분 전 경고, 중앙 시간, 사용자 연장 없음, 정확히 한 번의 해제 및 결제 결과 미상 복구를 포함한 10분으로 업데이트한다.
+- [x] `WAIT-003`을 GPS 불량 재시도/대체 동작이 있는 기본 500m 및 매장 설정 가능 300m–1km 범위로 업데이트한다.
+- [x] `WAIT-011`을 각각 3분인 두 번의 호출로 업데이트하고, 전달 재시도를 호출 횟수와 분리하며 최종 미응답은 매장 확정 `호출 실패` 처리로 연결한다.
+- [x] `WAIT-009`을 매장 선택 빈 테이블, 시스템 필터링된 최초 호환 FIFO 팀, 상업적 우선순위 없음 및 호환 팀 5개만큼의 호출 전 1회 연기로 해결한다.
+- [x] 두 번째 정렬 규칙을 만들지 않고 `WAIT-012`, `WAIT-013`, `WAIT-016`, `WAIT-017`의 문구와 상태 전이를 새 버전의 `WAIT-009`, `WAIT-011` 결정에 맞춘다.
+- [x] `HOLD-007`을 결합 좌석/메뉴 자원에 대한 10분 홀드와 하나의 공유 만료, 전부 확정 또는 해제로 업데이트한다.
+- [x] `CHECK-005`를 기본 10분, 매장 범위 3–15분, 예약 시점 스냅샷 및 자동 노쇼 대신 `CHECK-006`으로의 이관으로 업데이트한다.
+- [x] `TRANSFER-004`를 응답 5분 및 수락 후 완료 10분으로 업데이트하고, 응답/결제 경합의 조건부 전이를 포함한다.
+- [x] 영향받는 ID마다 2026-07-22 직접 사용자 결정 기록 하나와 경계 시간 및 다중 인스턴스 경합을 검증하는 관측 가능한 인수 기준을 추가한다.
+- [x] 5개 도메인 요약을 다시 계산하고 5개 파일에서 `git diff --check`를 실행한다. 예상 결과는 exit 0이다.
 
-### Task 2: Administration and Scale Targets
+### Task 2: 관리 및 확장성 목표
 
-**Files:**
-- Modify: `docs/service-policies/15-admin-operation.md`
-- Modify: `docs/service-policies/18-scale-reliability.md`
-- Modify: `docs/technical-architecture.md`
+**파일:**
+- 수정: `docs/service-policies/15-admin-operation.md`
+- 수정: `docs/service-policies/18-scale-reliability.md`
+- 수정: `docs/technical-architecture.md`
 
-**Interfaces:**
-- Consumes: Section 2 of the approved design spec.
-- Produces: Confirmed operational SLAs, approval thresholds, capacity/SLO/rate-limit/DR targets and architecture references.
+**인터페이스:**
+- 소비: 승인된 설계 명세의 섹션 2.
+- 산출: 확정 운영 SLA, 승인 임계값, 용량/SLO/속도 제한/DR 목표 및 아키텍처 참조.
 
-- [x] Update `ADMIN-004` with 1-business-day acknowledgment, 3-business-day general resolution, 7-business-day payment/refund resolution, and a maximum 14-business-day complex-event target with delay notice.
-- [x] Update `ADMIN-006` so a payment manager approves at or below KRW 200,000, a super administrator adds approval above KRW 200,000, and any compensation above original payment requires super-administrator approval.
-- [x] Require an audit record for every amount containing the approved minimal fields while excluding raw payment methods and unnecessary personal data.
-- [x] Update `SCALE-001`, `SCALE-002`, and `SCALE-003` with 100,000 MAU, 5,000 stores, 50,000 daily core transactions, 200 normal RPS, 1,000 RPS for ten minutes, 99.9% monthly availability, read p95 500ms, write p95 1s, and critical p99 2s.
-- [x] Update `SCALE-005` with the exact five rate-limit classes from the spec, shared multi-instance enforcement, `429`, and retry timing.
-- [x] Update `SCALE-013` with transaction RPO 5m/RTO 1h, config/document RPO 24h/RTO 4h, analytics RPO/RTO 24h, plus restore verification and failure reporting.
-- [x] Synchronize architecture capacity, SLO, rate-limit, backup, and approval examples without introducing a new paid infrastructure selection.
-- [x] Add dated direct-user decision records and observable acceptance tests for thresholds, boundary values, failover, and concurrent approval/recovery.
-- [x] Run `git diff --check` on the three files; expected result is exit 0.
+- [x] `ADMIN-004`를 영업일 1일 내 접수 확인, 영업일 3일 내 일반 해결, 영업일 7일 내 결제/환불 해결 및 지연 통지가 있는 최대 영업일 14일의 복합 사건 목표로 업데이트한다.
+- [x] `ADMIN-006`에서 KRW 200,000 이하를 결제 관리자가 승인하고, KRW 200,000 초과에는 최고 관리자가 추가 승인하며, 원 결제액을 초과하는 모든 보상은 최고 관리자 승인을 요구하도록 업데이트한다.
+- [x] 원시 결제 수단과 불필요한 개인 데이터는 제외하면서 승인된 최소 필드를 포함한 금액별 감사 기록을 요구한다.
+- [x] `SCALE-001`, `SCALE-002`, `SCALE-003`을 MAU 100,000, 매장 5,000개, 일일 핵심 거래 50,000건, 일반 RPS 200, 10분간 RPS 1,000, 월 가용성 99.9%, 읽기 p95 500ms, 쓰기 p95 1s, 핵심 p99 2s로 업데이트한다.
+- [x] `SCALE-005`를 명세의 정확한 5개 속도 제한 등급, 공유 다중 인스턴스 적용, `429`, 재시도 시점으로 업데이트한다.
+- [x] `SCALE-013`을 거래 RPO 5m/RTO 1h, 구성/문서 RPO 24h/RTO 4h, 분석 RPO/RTO 24h 및 복원 검증과 실패 보고로 업데이트한다.
+- [x] 새로운 유료 인프라 선택을 도입하지 않고 아키텍처 용량, SLO, 속도 제한, 백업 및 승인 예시를 동기화한다.
+- [x] 임계값, 경계값, 장애 조치 및 동시 승인/복구를 위한 날짜가 있는 직접 사용자 결정 기록과 관측 가능한 인수 테스트를 추가한다.
+- [x] 3개 파일에서 `git diff --check`를 실행한다. 예상 결과는 exit 0이다.
 
-### Task 3: Payment, Settlement, and Subscription Candidate Boundaries
+### Task 3: 결제, 정산 및 구독 후보 경계
 
-**Files:**
-- Modify: `docs/service-policies/08-payment-refund.md`
-- Modify: `docs/service-policies/11-subscription.md`
-- Modify: `docs/service-policies/13-ad-recommendation.md`
-- Modify: `docs/service-policies/14-analytics-report.md`
-- Modify: `docs/technical-architecture.md`
+**파일:**
+- 수정: `docs/service-policies/08-payment-refund.md`
+- 수정: `docs/service-policies/11-subscription.md`
+- 수정: `docs/service-policies/13-ad-recommendation.md`
+- 수정: `docs/service-policies/14-analytics-report.md`
+- 수정: `docs/technical-architecture.md`
 
-**Interfaces:**
-- Consumes: Sections 4, 5, and 6 of the approved design spec.
-- Produces: Confirmed sub-scope records and explicit unresolved contract/launch boundaries without changing the affected row states.
+**인터페이스:**
+- 소비: 승인된 설계 명세의 섹션 4, 5, 6.
+- 산출: 영향받는 행 상태를 변경하지 않는 확정 하위 범위 기록과 명시적인 미해결 계약/출시 경계.
 
-- [x] Record PortOne V2 plus Toss Payments as the selected target adapter/channel and cards plus Toss Pay, Kakao Pay, and Naver Pay as initial target methods.
-- [x] Keep `PAY-003` at `TODO` until PG contracts, payment-method review, fees, and dispute/cancellation terms are complete; distinguish test adapters from production activation.
-- [x] Record platform settlement with a Monday–Sunday cycle paid the following Wednesday or next business day, holding only disputed transaction amounts.
-- [x] Keep `PAY-012` at `TODO` until payout agency, tax, legal, and actual fund-flow approvals are complete.
-- [x] Document the single user subscription candidate: KRW 3,900 monthly/KRW 39,000 annually including VAT, five free alerts versus subscriber unlimited app/web alerts, enhanced recommendations/calendar, subscriber-only events, 40% maximum 24-hour early event allocation, ad removal, three-day failed-payment grace, and period-end cancellation.
-- [x] Explicitly prohibit user-subscription priority for ordinary reservations, general waiting, and cancellation-seat allocation; keep the product initially unlaunched.
-- [x] Document store Free and Pro: core reservation/waiting management free, actual aggregates free, derived reports/rule-based recommendations and menu/event automation in Pro, per-store pricing of KRW 29,000 monthly or KRW 290,000 annually before VAT, seven-day/three-retry grace, and period-end cancellation.
-- [x] Preserve statutory withdrawal, duplicate/wrong payment, non-provision, and MiriYum-fault exceptions despite the no-voluntary-prorated-refund disclosure.
-- [x] Keep `SUB-001`–`SUB-003` and `SUB-007` at `팀원 상의 필요` and `SUB-004`/`SUB-006` at `TODO` because user subscription is deferred and store Pro launch time/production recurring-payment contract remain unresolved.
-- [x] Align advertising and analytics entitlements so ad removal and Pro reports activate only if their product plans launch; do not grant current report access or suppress non-existent ads.
-- [x] Add dated records that distinguish approved candidate design from unresolved launch/contract conditions and run `git diff --check` on all five files; expected result is exit 0.
+- [x] PortOne V2와 Toss Payments를 선택한 목표 어댑터/채널로, 카드와 Toss Pay, Kakao Pay, Naver Pay를 초기 목표 수단으로 기록한다.
+- [x] PG 계약, 결제 수단 검토, 수수료, 분쟁/취소 조건이 완료될 때까지 `PAY-003`을 `TODO`로 유지하고 테스트 어댑터와 프로덕션 활성화를 구분한다.
+- [x] 월요일–일요일 주기를 다음 수요일 또는 다음 영업일에 지급하고, 분쟁 거래 금액만 보류하는 플랫폼 정산을 기록한다.
+- [x] 지급 대행, 세금, 법률 및 실제 자금 흐름 승인이 완료될 때까지 `PAY-012`를 `TODO`로 유지한다.
+- [x] 단일 사용자 구독 후보를 문서화한다. VAT 포함 월 KRW 3,900/연 KRW 39,000, 무료 알림 5회 대 구독자 앱/웹 무제한 알림, 향상된 추천/캘린더, 구독자 전용 이벤트, 24시간 조기 이벤트 배정 최대 40%, 광고 제거, 결제 실패 3일 유예 및 기간 종료 취소이다.
+- [x] 일반 예약, 일반 웨이팅, 취소 좌석 배정에서 사용자 구독 우선순위를 명시적으로 금지하고 제품은 초기 미출시로 유지한다.
+- [x] 매장 Free와 Pro를 문서화한다. 핵심 예약/웨이팅 관리는 무료, 실제 집계는 무료, 파생 보고서/규칙 기반 추천과 메뉴/이벤트 자동화는 Pro, 매장당 가격은 VAT 전 월 KRW 29,000 또는 연 KRW 290,000, 7일/3회 재시도 유예 및 기간 종료 취소이다.
+- [x] 자발적 일할 환불 없음 고지에도 법정 철회, 중복/오결제, 미제공 및 MiriYum 귀책 예외를 보존한다.
+- [x] 사용자 구독이 연기되고 매장 Pro 출시 시점/프로덕션 정기 결제 계약이 미해결이므로 `SUB-001`–`SUB-003`, `SUB-007`은 `팀원 상의 필요`로, `SUB-004`/`SUB-006`은 `TODO`로 유지한다.
+- [x] 광고 제거와 Pro 보고서는 해당 상품 플랜이 출시되는 경우에만 활성화되도록 광고 및 분석 권한을 정렬한다. 현재 보고서 접근 권한을 부여하거나 존재하지 않는 광고를 억제하지 않는다.
+- [x] 승인된 후보 설계와 미해결 출시/계약 조건을 구별하는 날짜가 있는 기록을 추가하고 5개 파일 모두에서 `git diff --check`를 실행한다. 예상 결과는 exit 0이다.
 
-### Task 4: Master, Cross-Document State, and Brand Synchronization
+### Task 4: 마스터, 문서 간 상태 및 브랜드 동기화
 
-**Files:**
-- Modify: `docs/service-policies/README.md`
-- Modify: `docs/service-policies/00-policy-template.md`
-- Modify: `docs/service-definition.md`
-- Modify: `docs/technical-architecture.md`
-- Modify: `miriyum-service-decisions.md`
-- Modify: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
-- Modify: `miriyum-service-blueprint.md`
-- Modify: `docs/superpowers/plans/2026-07-22-miriyum-policy-reclassification.md`
-- Modify: `docs/superpowers/plans/2026-07-22-miriyum-auto-recommendation-finalization.md`
+**파일:**
+- 수정: `docs/service-policies/README.md`
+- 수정: `docs/service-policies/00-policy-template.md`
+- 수정: `docs/service-definition.md`
+- 수정: `docs/technical-architecture.md`
+- 수정: `miriyum-service-decisions.md`
+- 수정: `docs/superpowers/specs/2026-07-21-miriyum-policy-documentation-design.md`
+- 수정: `miriyum-service-blueprint.md`
+- 수정: `docs/superpowers/plans/2026-07-22-miriyum-policy-reclassification.md`
+- 수정: `docs/superpowers/plans/2026-07-22-miriyum-auto-recommendation-finalization.md`
 
-**Interfaces:**
-- Consumes: Approved Task 1–3 domain details and status transitions.
-- Produces: One consistent 217-row master, current summary, queue, history, next steps, and zero old brand-copy occurrences.
+**인터페이스:**
+- 소비: 승인된 Task 1–3 도메인 상세와 상태 전이.
+- 산출: 일관된 217행 마스터 하나, 현재 요약, 대기열, 이력, 다음 단계 및 이전 브랜드 문구 0건.
 
-- [x] Change exactly the 14 IDs in Global Constraints to `확정`, preserving importance and all other row states.
-- [x] Recompute final master and domain totals to `확정 184 / 팀원 상의 필요 18 / 자동 추천 예정 0 / TODO 15`; keep importance at `핵심 19 / 필수 181 / 권장 17`.
-- [x] List the remaining 18 team IDs and 15 TODO IDs exactly, and separate selected-but-contract-pending payment scopes from entirely unanswered decisions.
-- [x] Synchronize service definition, architecture, policy operating rules, decision history, core queue, TODO queue, and next-step wording to the new current state while labeling older totals as historical snapshots.
-- [x] Use `MiriYum` for all brand copy, including the four approved blueprint substitutions; keep lowercase filename/link references intact.
-- [x] Verify case-sensitive old brand-copy count is zero across all Markdown and that the lowercase former-name token occurs only in actual filenames or links.
-- [x] Run a mechanical master/domain comparison for 217 unique IDs, state, and importance; expected mismatches are zero.
-- [x] Run `git diff --check`; expected result is exit 0.
+- [x] 전역 제약의 14개 ID만 `확정`으로 변경하고 중요도와 그 외 모든 행 상태를 보존한다.
+- [x] 최종 마스터 및 도메인 총계를 `확정 184 / 팀원 상의 필요 18 / 자동 추천 예정 0 / TODO 15`로 다시 계산하고, 중요도는 `핵심 19 / 필수 181 / 권장 17`로 유지한다.
+- [x] 남은 팀 ID 18개와 TODO ID 15개를 정확히 나열하고, 선택되었으나 계약 대기 중인 결제 범위와 완전히 미답변인 결정을 분리한다.
+- [x] 이전 총계는 과거 스냅샷으로 표시하면서 서비스 정의, 아키텍처, 정책 운영 규칙, 결정 이력, 핵심 대기열, TODO 대기열 및 다음 단계 문구를 새 현재 상태로 동기화한다.
+- [x] 승인된 blueprint 대체 4건을 포함한 모든 브랜드 문구에 `MiriYum`을 사용하고 소문자 파일명/링크 참조는 그대로 유지한다.
+- [x] 모든 Markdown에서 대소문자를 구분한 이전 브랜드 문구 수가 0이고, 소문자 이전 이름 토큰은 실제 파일명이나 링크에만 있는지 검증한다.
+- [x] 고유 ID 217개, 상태 및 중요도에 대해 기계적인 마스터/도메인 비교를 실행한다. 예상 불일치는 0이다.
+- [x] `git diff --check`를 실행한다. 예상 결과는 exit 0이다.
 
-### Task 5: Independent Review, Commit, and GitHub Publication
+### Task 5: 독립 검토, 커밋 및 GitHub 게시
 
-**Files:**
-- Review: all modified and newly added Markdown files
+**파일:**
+- 검토: 수정 및 새로 추가된 모든 Markdown 파일
 
-**Interfaces:**
-- Consumes: Completed Tasks 1–4.
-- Produces: Reviewed commits and a pushed `codex/miriyum-policy-decisions` branch.
+**인터페이스:**
+- 소비: 완료된 Tasks 1–4.
+- 산출: 검토된 커밋과 push된 `codex/miriyum-policy-decisions` 브랜치.
 
-- [x] Dispatch an independent whole-work reviewer to verify spec coverage, exact state sets, mixed-scope boundaries, monetary/fairness decisions, multi-instance behavior, brand count, and absence of implementation-code changes.
-- [x] Resolve every reviewer finding and repeat review until approved.
-- [x] Run fresh final checks: `git diff --check`, 217 unique master rows, `184/18/0/15`, `19/181/17`, 18 domain/master agreement, zero staged surprises, and zero old brand-copy occurrences.
-- [x] Stage only the reviewed documentation files, inspect `git diff --cached --name-only` and `git diff --cached --check`, then commit with an intentional documentation message.
-- [x] Push `codex/miriyum-policy-decisions` to `origin` and report the remote branch without creating a pull request unless requested.
+- [x] 독립적인 전체 작업 검토자를 배정하여 명세 범위, 정확한 상태 집합, 혼합 범위 경계, 금전/공정성 결정, 다중 인스턴스 동작, 브랜드 수 및 구현 코드 변경 부재를 검증한다.
+- [x] 모든 검토자 발견 사항을 해결하고 승인될 때까지 검토를 반복한다.
+- [x] 새로운 최종 검사를 실행한다: `git diff --check`, 고유 마스터 행 217개, `184/18/0/15`, `19/181/17`, 도메인/마스터 일치 18개, staged 예기치 않은 항목 0개, 이전 브랜드 문구 0건.
+- [x] 검토된 문서 파일만 stage하고 `git diff --cached --name-only`, `git diff --cached --check`를 검사한 뒤 의도적인 문서 메시지로 commit한다.
+- [x] 요청하지 않는 한 pull request를 만들지 않고 `codex/miriyum-policy-decisions`를 `origin`에 push하고 원격 브랜치를 보고한다.
