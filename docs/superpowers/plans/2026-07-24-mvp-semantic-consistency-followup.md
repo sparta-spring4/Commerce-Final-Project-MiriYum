@@ -15,7 +15,7 @@
 - Reservations confirm immediately and do not expose an approval-pending state.
 - Cancellation-resource transfer remains an initial core feature governed by `TRANSFER-001` through `TRANSFER-009`.
 - Current waiting includes both onsite and remote waiting.
-- Free basic operating statistics are current MVP; Pro comparison, interpretation, recommendation, and automatic reports remain excluded.
+- Free basic operating statistics are current MVP; Pro comparison, interpretation, recommendation, automatic reports, and export remain excluded.
 - Modify only the files in the design allowlist.
 
 ---
@@ -121,7 +121,7 @@ In the STORE-007 activation list, replace the onsite-only waiting wording with `
 
 - [x] **Step 2: Narrow the excluded analytics scope**
 
-Replace the broad exclusion of `수요 분석` with the exact future scope `Pro 비교·해석·추천·자동 리포트`.
+Replace the broad exclusion of `수요 분석` with the exact future scope `Pro 비교·해석·추천·자동 리포트·내보내기`.
 
 - [x] **Step 3: Align the limiting sentence**
 
