@@ -38,7 +38,7 @@ $store = Get-Content -LiteralPath 'docs\service-policies\02-store-onboarding.md'
 $checks = @(
   @{ Name = 'general recommendation only'; Pass = $flow.Contains('검색 결과와 일반 추천 결과를 제시한다') -and -not $flow.Contains('추천 또는 광고는 구분해 표시한다') },
   @{ Name = 'no approval pending'; Pass = $flow.Contains('유효한 요청은 즉시 확정한다') -and -not $flow.Contains('승인 대기 상태로 만든다') },
-  @{ Name = 'transfer flow'; Pass = $flow.Contains('TRANSFER-001, TRANSFER-002, TRANSFER-003, TRANSFER-004, TRANSFER-005, TRANSFER-006, TRANSFER-007, TRANSFER-008, TRANSFER-009') },
+  @{ Name = 'transfer flow'; Pass = $flow.Contains('TRANSFER-001, TRANSFER-002, TRANSFER-003, TRANSFER-004, TRANSFER-005, TRANSFER-006, TRANSFER-007, TRANSFER-008, TRANSFER-009') -and $flow.Contains('5분') -and $flow.Contains('10분') -and $flow.Contains('결제 결과가 불명확하면') },
   @{ Name = 'remote waiting and free statistics'; Pass = $store.Contains('현장·원격 웨이팅') -and $store.Contains('Free 기본 운영 통계') }
 )
 $failed = @($checks | Where-Object { -not $_.Pass })
@@ -84,10 +84,10 @@ Insert a new section after payment and cancellation:
 ```markdown
 ## 7. 취소 자리·수량 자동 승계
 
-- **시작 조건:** 취소로 예약 수용량이나 메뉴 수량이 반환되고 해당 자원을 기다리는 사용자가 있다.
-- **주요 흐름:** 서비스는 대기 등록 순서에 따라 FIFO로 다음 대상에게 제한 시간 제안을 보낸다. 사용자가 기한 안에 수락하면 해당 자원을 선점해 예약 또는 주문으로 전환한다. 거절하거나 제안 시간이 만료되면 다음 대상에게 순차 제안한다.
-- **성공 종료:** 수락한 사용자의 예약 또는 주문 전환이 확정되고 다른 대기 사용자에게 결과가 일관되게 반영된다.
-- **실패 종료:** 전환 전에 자원이 유효하지 않거나 결제·확정이 실패하면 선점을 해제하고 정책에 따라 다음 대상 진행 또는 자원 복구를 수행한다.
+- **시작 조건:** 자동 승계가 활성이고, 취소로 예약 수용량이나 메뉴 수량이 반환됐으며 해당 자원에 유효한 대기 등록자가 있다.
+- **주요 흐름:** 서비스는 등록 순번이 가장 빠른 유효 후보에게 5분 제안을 보낸다. 사용자가 기한 안에 수락하면 자원을 10분 동안 선점하고 원 거래와 같은 예약·홀드의 검증·결제·확정 흐름으로 전환한다.
+- **성공 종료:** 수락한 사용자의 예약 또는 홀드 전환이 최종 확정되고 사용하고 남은 인원·수량은 일반 가용으로 반환된다.
+- **실패 종료:** 명시적 거절, 제안 만료, 자격 재검증 실패 또는 검증된 결제 실패에는 정책과 날짜 경계에 따라 다음 유효 후보 제안 또는 일반 가용 처분으로 진행한다. 결제 결과가 불명확하면 자원을 공개하거나 다음 후보로 넘기지 않고 대사·복구 상태로 유지한다.
 - **관련 정책 ID:** TRANSFER-001, TRANSFER-002, TRANSFER-003, TRANSFER-004, TRANSFER-005, TRANSFER-006, TRANSFER-007, TRANSFER-008, TRANSFER-009.
 ```
 
