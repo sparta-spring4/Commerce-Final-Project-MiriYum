@@ -178,23 +178,33 @@
 
 #### DOC-20260724-001 · PortOne V2 결제 연동 확정
 
-- 변경 일시: `2026-07-24 23:12 KST`
+- 변경 일시: `2026-07-24 22:56 KST`
 - 요청·결정자: 이병우
 - 수정 작업자: Codex
 - 대상 문서·정책: `PAY-003`, 결제 사용자 흐름, 시스템 아키텍처, 데이터·API 계약, `ADR-005`
 - 변경 내용: PortOne V2를 현재 결제 어댑터로 확정하고 Agora 참조 구조의 SDK 요청, 서버 재검증, 웹훅 검증, 동일 확정 경로와 `CONFIRMING` 복구를 문서화했다.
 - 변경 이유: 선택된 결제 연동 방식이 후보·TODO로 남아 있던 모순을 제거하고, 어댑터 선택과 실제 PG·결제수단 계약 및 식당 정산을 분리하기 위해서다.
-- 추적 정보: PR `#23`, Agora 기준 커밋 `bf662e2888c625fd27f751ad932022dbb6dc0e2d`, 반영 커밋은 Git 이력을 참조한다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [Agora 기준 커밋 `bf662e2888c625fd27f751ad932022dbb6dc0e2d`](https://github.com/sparta-spring4/Commerce-live-chat-system-Agora/commit/bf662e2888c625fd27f751ad932022dbb6dc0e2d), [정책 커밋 `0b7cd76a6b469641e760f7afec851f43bca6defc`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/0b7cd76a6b469641e760f7afec851f43bca6defc), [아키텍처·흐름 커밋 `453552aae6b124c609d30a5f6303a28efb1c0353`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/453552aae6b124c609d30a5f6303a28efb1c0353)
 
 #### DOC-20260724-002 · 카페·베이커리 단독 픽업 홀드 범위 정정
 
-- 변경 일시: `2026-07-24 23:12 KST`
+- 변경 일시: `2026-07-24 22:27 KST`
 - 요청·결정자: 이병우
 - 수정 작업자: Codex
 - 대상 문서·정책: `docs/03-domain-model.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `STORE-007`, `HOLD-005`
 - 변경 내용: 카페·베이커리는 홀 운영 여부와 관계없이 단독 픽업 홀드를 사용할 수 있고 일반 식당·다른 업종은 사용할 수 없도록 정렬했다. 기능 소유권은 `booking`으로 유지하고 방문 예약 수용량만 할당하지 않는다.
 - 변경 이유: 카페·베이커리에 테이크아웃 중심 매장이 많아 일반 식당과 구분되는 픽업 흐름이 필요하며, 이를 홀 없는 매장만의 기능으로 제한하려는 결정은 아니기 때문이다.
-- 추적 정보: PR `#23`, 커밋은 반영 커밋을 참조한다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [픽업 커밋 `d39643ff8f4f55b3d892f62583df92ce34313174`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/d39643ff8f4f55b3d892f62583df92ce34313174)
+
+#### DOC-20260724-003 · 최종 독립 검토 정합성 보완
+
+- 변경 일시: `2026-07-24 23:38 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: PortOne 식별자·설정·후속 처리 계약, 정책 템플릿 집계, `AUTH-009`, 중앙 변경 이력
+- 변경 내용: PortOne `paymentId`·`transactionId`와 내부 식별자를 분리하고, Outbox 도입 경계·설정 비밀 분류·인증 기능 범위·문서 이력 추적 정보를 최종 독립 검토 결과에 맞춰 정렬했다.
+- 변경 이유: 구현 전에 식별자 신뢰 경계와 아키텍처 상태를 명확히 하고, 복사된 집계·기능 누락·실제 변경 시각 및 커밋 추적 오류를 제거하기 위해서다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad)
 
 ### 2026-07-23 이전 누적 기록
 
@@ -505,9 +515,9 @@
 
 - 마스터 체크리스트의 `RES-003`~`RES-005` 상태명 `개정 확정`을 공식 상태 목록에 있는 `확정`으로 정규화한다. 정책 내용과 확정 시점은 변경하지 않는다.
 - 이전 요약에 다시 등장한 `STORE-007`은 2026-07-21에 이미 확정된 일반 기능 즉시 활성화 정책이므로 현재 팀 논의 큐에서 제거한다.
-- 현재 상태: `확정` 194개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 15개, 합계 217개
-- 현재 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
-- 현재 TODO: `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+- 이 변경 직후 상태: `확정` 194개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 15개, 합계 217개
+- 이 변경 직후 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
+- 이 변경 직후 TODO: `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
 - 체크인·노쇼의 현재 MVP는 회전형 QR, 권한 있는 매장 운영자의 보조 방문 완료, 공통 5분 경과 뒤 매장 직접 노쇼 확정이다. 일회 확인번호, 6시간 후보·24시간 자동 확정, 정식 이의 제기는 후속 구현으로 유지한다.
 - 웨이팅의 현재 MVP는 로그인한 대표자와 입력 인원수로 만든 단일 팀, 공통 3km, 좌석 조건 없는 단일 FIFO, 실제 호출 한 번과 10분 도착 제한이다. 일행 계정 연결·대표자 변경, 좌석 호환 호출과 미루기는 후속 구현으로 유지한다.
 
@@ -520,10 +530,10 @@ PR #19에서 `AUTH-004`와 `STORE-014`의 현재 MVP 제외 경계를 반영한 
 - 취소 자리·수량 자동 승계는 제품 비전과 `TRANSFER-001`~`TRANSFER-009`에 따라 1차 MVP의 초기 핵심 기능으로 분류한다.
 - 일반 검색·자연어·취향·품절 대체 추천과 매장 Free 기본 운영 통계는 초기 범위로 유지하고, 광고 상품과 Pro 비교·해석·추천·자동 리포트·내보내기만 비초기로 분리한다.
 - 운영자·개인정보·보안·신뢰성 정책은 별도 초기 업무 도메인을 추가하지 않고 관련 초기 기능에 적용하는 공통 구현 기준으로 분류한다. 명시적 `TODO`와 미래 기능은 이 분류만으로 활성화하지 않는다.
-- 현재 상태: `확정` 193개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 16개, 합계 217개
-- 현재 중요도: `핵심` 19개, `필수` 179개, `권장` 18개, `검토` 1개
-- 현재 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
-- 현재 TODO: `AUTH-004`, `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+- 이 변경 직후 상태: `확정` 193개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 16개, 합계 217개
+- 이 변경 직후 중요도: `핵심` 19개, `필수` 179개, `권장` 18개, `검토` 1개
+- 이 변경 직후 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
+- 이 변경 직후 TODO: `AUTH-004`, `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
 
 ## 7.11 2026-07-24 리뷰 기능 1차 MVP 제외 확정
 
