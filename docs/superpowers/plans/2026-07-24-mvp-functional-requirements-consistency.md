@@ -197,7 +197,7 @@ git diff -- docs/03-domain-model.md docs/05-functional-requirements.md docs/serv
 
 예상 결과: 허용 목록 밖의 변경이 없다.
 
-- [ ] **단계 2: 명시적 파일만 스테이징하고 커밋**
+- [x] **단계 2: 명시적 파일만 스테이징하고 커밋**
 
 커밋 메시지:
 
@@ -205,7 +205,7 @@ git diff -- docs/03-domain-model.md docs/05-functional-requirements.md docs/serv
 docs: align MVP requirement boundaries
 ```
 
-- [ ] **단계 3: 원격 브랜치 푸시**
+- [x] **단계 3: 원격 브랜치 푸시**
 
 실행:
 
@@ -215,7 +215,7 @@ git push -u origin codex/mvp-functional-requirements-consistency
 
 예상 결과: 원격 추적 브랜치가 생성된다.
 
-- [ ] **단계 4: Draft PR 생성**
+- [x] **단계 4: Draft PR 생성**
 
 PR 제목:
 
