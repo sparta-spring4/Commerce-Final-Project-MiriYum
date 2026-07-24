@@ -287,6 +287,6 @@ git diff --name-only main
 
 Expected: exit code `0`, no formatting findings, and only expanded allowlist paths.
 
-- [ ] **Step 3: Request independent review**
+- [x] **Step 3: Request independent review**
 
 The reviewer must compare `main..HEAD`, verify that review policy confirmation is not confused with current MVP activation, and report Critical, Important, and Minor findings.
