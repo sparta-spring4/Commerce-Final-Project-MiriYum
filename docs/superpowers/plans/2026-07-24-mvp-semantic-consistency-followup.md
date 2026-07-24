@@ -211,7 +211,7 @@ Expected: only the four approved semantic corrections.
 - Consumes: The user's decision that the entire review feature group is outside the first MVP.
 - Produces: Product, permission, domain, flow, requirement, architecture, authentication, and policy documents that preserve review policies without activating review functionality.
 
-- [ ] **Step 1: Run the failing review-scope assertions**
+- [x] **Step 1: Run the failing review-scope assertions**
 
 ```powershell
 $vision = Get-Content -LiteralPath 'docs\01-product-vision.md' -Raw -Encoding UTF8
@@ -239,7 +239,7 @@ if (@($checks | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
 
 Expected: exit code `1`; the current documents still activate review in the first MVP.
 
-- [ ] **Step 2: Align product, permission, domain, flow, requirement, and architecture documents**
+- [x] **Step 2: Align product, permission, domain, flow, requirement, and architecture documents**
 
 - Mark post-visit review evaluation as a future product value and add the full review feature group to initial non-goals.
 - Remove review from current general-user permissions.
@@ -248,14 +248,14 @@ Expected: exit code `1`; the current documents still activate review in the firs
 - Change the `TRUST-001` through `TRUST-012` functional group from `초기 핵심` to `비초기` with an explicit full-feature exclusion boundary.
 - Remove `review/` from the initial backend package structure.
 
-- [ ] **Step 3: Align authentication and review policy boundaries**
+- [x] **Step 3: Align authentication and review policy boundaries**
 
 - Remove review from the AUTH-009 sentence that lists current non-alcohol services for users aged 14 or older.
 - Add a first-MVP boundary to `12-review-trust.md` that keeps all detailed policy decisions but activates no current review functionality, permissions, API, UI, or storage.
 - Add the same boundary note below the review section in the policy master.
 - Record the user's current review exclusion decision in `miriyum-service-decisions.md`.
 
-- [ ] **Step 4: Run the review-scope assertions**
+- [x] **Step 4: Run the review-scope assertions**
 
 Run the Step 1 command.
 
@@ -270,11 +270,11 @@ Expected: exit code `0`; all nine scope assertions pass.
 - Consumes: The completed five semantic consistency corrections.
 - Produces: Evidence for semantic scope, policy ID coverage, links, encoding, formatting, and exact changed-path allowlist.
 
-- [ ] **Step 1: Run all existing semantic checks and the Task 5 review assertions**
+- [x] **Step 1: Run all existing semantic checks and the Task 5 review assertions**
 
 Expected: all checks pass.
 
-- [ ] **Step 2: Verify policy IDs, relative links, encoding, and diff formatting**
+- [x] **Step 2: Verify policy IDs, relative links, encoding, and diff formatting**
 
 ```powershell
 git diff --check main
