@@ -30,7 +30,7 @@
 - Consumes: Current Markdown text on `main`.
 - Produces: A reproducible PowerShell assertion command that exits nonzero while the four contradictions remain.
 
-- [ ] **Step 1: Run assertions against the current documents**
+- [x] **Step 1: Run assertions against the current documents**
 
 ```powershell
 $flow = Get-Content -LiteralPath 'docs\04-user-flows.md' -Raw -Encoding UTF8
@@ -59,7 +59,7 @@ Expected: exit code `1`; all four named checks fail before the document edits.
 - Consumes: MVP boundaries from `docs/05-functional-requirements.md`, `docs/service-policies/04-reservation.md`, `docs/service-policies/10-waitlist-transfer.md`, and `docs/service-policies/13-ad-recommendation.md`.
 - Produces: Current user flows for general recommendation, immediate reservation confirmation, and cancellation-resource transfer.
 
-- [ ] **Step 1: Replace the discovery flow**
+- [x] **Step 1: Replace the discovery flow**
 
 Use this exact main-flow sentence:
 
@@ -69,15 +69,15 @@ Use this exact main-flow sentence:
 
 Remove `ADS-002` and `ADS-006` from the discovery flow's related policy IDs while preserving `ADS-007` and `ADS-008`.
 
-- [ ] **Step 2: Replace the reservation main flow**
+- [x] **Step 2: Replace the reservation main flow**
 
 Use this exact sentence:
 
 ```markdown
-- **주요 흐름:** 서비스는 영업시간·예약 가능 수량·중복 예약 여부를 검증하고, 유효한 요청은 즉시 확정한다. 확정할 수 없으면 사용자에게 실패 사유를 안내한다.
+- **주요 흐름:** 서비스는 영업시간·예약 가능 수량·중복 예약 여부, 임시 선점 및 필요한 메뉴 홀드·결제 조건을 검증하고, 유효한 요청은 즉시 확정한다. 확정할 수 없으면 사용자에게 실패 사유를 안내한다.
 ```
 
-- [ ] **Step 3: Add the cancellation-resource transfer flow**
+- [x] **Step 3: Add the cancellation-resource transfer flow**
 
 Insert a new section after payment and cancellation:
 
@@ -93,13 +93,13 @@ Insert a new section after payment and cancellation:
 
 Renumber the following review and notification sections from `7`, `8` to `8`, `9`.
 
-- [ ] **Step 4: Run the user-flow assertions**
+- [x] **Step 4: Run the user-flow assertions**
 
 Run the Task 1 command.
 
 Expected: the general recommendation, no approval pending, and transfer flow checks pass; the store activation check still fails.
 
-- [ ] **Step 5: Commit the user-flow alignment**
+- [x] **Step 5: Commit the user-flow alignment**
 
 ```powershell
 git add -- docs/04-user-flows.md
@@ -115,25 +115,25 @@ git commit -m "docs: align current MVP user flows"
 - Consumes: Current MVP boundaries from `docs/service-policies/05-waiting.md`, `docs/service-policies/14-analytics-report.md`, and `docs/05-functional-requirements.md`.
 - Produces: A STORE-007 activation inventory that includes onsite and remote waiting plus Free basic operating statistics while excluding Pro analytics.
 
-- [ ] **Step 1: Expand the current activation list**
+- [x] **Step 1: Expand the current activation list**
 
 In the STORE-007 activation list, replace the onsite-only waiting wording with `현장·원격 웨이팅` and add `Free 기본 운영 통계`.
 
-- [ ] **Step 2: Narrow the excluded analytics scope**
+- [x] **Step 2: Narrow the excluded analytics scope**
 
 Replace the broad exclusion of `수요 분석` with the exact future scope `Pro 비교·해석·추천·자동 리포트`.
 
-- [ ] **Step 3: Align the limiting sentence**
+- [x] **Step 3: Align the limiting sentence**
 
 Update the sentence that limits currently supported functions so it refers to the corrected STORE-007 list and keeps linked hold/deposit boundaries without excluding remote waiting or Free basic statistics.
 
-- [ ] **Step 4: Run all semantic assertions**
+- [x] **Step 4: Run all semantic assertions**
 
 Run the Task 1 command.
 
 Expected: exit code `0`; all four named checks pass.
 
-- [ ] **Step 5: Commit the store activation alignment**
+- [x] **Step 5: Commit the store activation alignment**
 
 ```powershell
 git add -- docs/service-policies/02-store-onboarding.md
@@ -152,7 +152,7 @@ git commit -m "docs: align store activation MVP scope"
 - Consumes: The completed Markdown changes.
 - Produces: Evidence that the four contradictions are resolved without changing canonical MVP boundaries or unrelated files.
 
-- [ ] **Step 1: Verify the canonical boundary text remains unchanged**
+- [x] **Step 1: Verify the canonical boundary text remains unchanged**
 
 ```powershell
 git diff main -- docs/05-functional-requirements.md docs/service-policies/04-reservation.md docs/service-policies/05-waiting.md docs/service-policies/10-waitlist-transfer.md docs/service-policies/13-ad-recommendation.md docs/service-policies/14-analytics-report.md
@@ -160,7 +160,7 @@ git diff main -- docs/05-functional-requirements.md docs/service-policies/04-res
 
 Expected: no output.
 
-- [ ] **Step 2: Verify formatting**
+- [x] **Step 2: Verify formatting**
 
 ```powershell
 git diff --check main
@@ -168,7 +168,7 @@ git diff --check main
 
 Expected: exit code `0` with no output.
 
-- [ ] **Step 3: Verify the allowlist**
+- [x] **Step 3: Verify the allowlist**
 
 ```powershell
 git diff --name-only main
@@ -183,7 +183,7 @@ docs/superpowers/plans/2026-07-24-mvp-semantic-consistency-followup.md
 docs/superpowers/specs/2026-07-24-mvp-semantic-consistency-followup-design.md
 ```
 
-- [ ] **Step 4: Review the final diff**
+- [x] **Step 4: Review the final diff**
 
 ```powershell
 git diff main -- docs/04-user-flows.md docs/service-policies/02-store-onboarding.md
