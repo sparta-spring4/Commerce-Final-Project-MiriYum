@@ -17,7 +17,8 @@ and concise evidence for every gate. A nonzero command is `FAIL`; an unavailable
 runtime or required external input is `BLOCKED`. Lint is `NOT CONFIGURED`.
 
 Task 4 may compose only these five `CONFIGURED` command IDs. It must exclude
-`frontend.dev`, whose state is `NOT RUN`, and must not promote lint from
+`frontend.dev`, whose registry state is `NOT CONFIGURED` because startup and
+explicit shutdown are unverified, and must not promote lint from
 `NOT CONFIGURED`.
 
 ## Completion checks

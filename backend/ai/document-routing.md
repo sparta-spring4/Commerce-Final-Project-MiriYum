@@ -2,7 +2,9 @@
 
 Contract status: ACTIVE
 
-Backend runtime status: CONFIGURED
+Backend scaffold verification surface status: CONFIGURED
+
+Backend application/product runtime status: NOT CONFIGURED
 
 ## Entry route
 

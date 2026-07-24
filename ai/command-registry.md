@@ -33,8 +33,10 @@ workflow, cross-end runtime, or the current invocation has passed.
   available in a deterministic order. It does not establish API compatibility,
   authentication behavior, data handoff, or an integrated user flow.
 
-`frontend.dev` is excluded because its state is `NOT RUN`. Lint is excluded
-because it is `NOT CONFIGURED`.
+`frontend.dev` is excluded because its registry state is `NOT CONFIGURED`;
+startup and explicit shutdown remain unverified. `NOT RUN` is reserved for an
+invocation result, including a configured delegate skipped after a prior stop
+condition. Lint is excluded because it is `NOT CONFIGURED`.
 
 ## Result and evidence rules
 
