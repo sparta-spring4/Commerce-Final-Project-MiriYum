@@ -198,13 +198,23 @@
 
 #### DOC-20260724-003 · 최종 독립 검토 정합성 보완
 
-- 변경 일시: `2026-07-24 23:38 KST`
+- 변경 일시: `2026-07-24 23:51 KST`
 - 요청·결정자: 이병우
 - 수정 작업자: Codex
 - 대상 문서·정책: PortOne 식별자·설정·후속 처리 계약, 정책 템플릿 집계, `AUTH-009`, 중앙 변경 이력
 - 변경 내용: PortOne `paymentId`·`transactionId`와 내부 식별자를 분리하고, Outbox 도입 경계·설정 비밀 분류·인증 기능 범위·문서 이력 추적 정보를 최종 독립 검토 결과에 맞춰 정렬했다.
 - 변경 이유: 구현 전에 식별자 신뢰 경계와 아키텍처 상태를 명확히 하고, 복사된 집계·기능 누락·실제 변경 시각 및 커밋 추적 오류를 제거하기 위해서다.
 - 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad)
+
+#### DOC-20260725-004 · 내구성 후속 작업·결제 확인 복구 경계 정렬
+
+- 변경 일시: `2026-07-25 00:16 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: PortOne `CONFIRMING` 복구, `PAY-003`, `SCALE-006`·`SCALE-008`·`SCALE-009`·`SCALE-011`·`SCALE-012`, 연계 도메인의 후속 작업 기록
+- 변경 내용: 외부 결과가 불명확한 결제를 재결제 가능 상태로 열지 않고 중앙 대사까지 격리하도록 고쳤으며, 초기 아키텍처가 Outbox를 활성화하지 않은 상태와 맞게 연계 정책을 구현 중립적인 영속 후속 작업·사건 기록으로 통일했다.
+- 변경 이유: 외부 승인이 끝났을 수 있는 거래의 중복 청구를 방지하고, 현재 아키텍처와 상세 신뢰성 정책이 서로 다른 구현 기술을 동시에 강제하던 충돌을 제거하기 위해서다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `5189100fbb6d68e0d7cbd4913bfe13a899a2f89a`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/5189100fbb6d68e0d7cbd4913bfe13a899a2f89a)
 
 ### 2026-07-23 이전 누적 기록
 
