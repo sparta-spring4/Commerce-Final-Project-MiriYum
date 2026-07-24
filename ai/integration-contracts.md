@@ -1,19 +1,22 @@
 # Root integration contracts
 
 Contract status: ACTIVE
-Runtime status: NOT CONFIGURED
+Combined cross-end integration runtime status: NOT CONFIGURED
 Canonical owner: Root cross-end classification, handoff boundaries, and combined integration evidence
 Activation trigger: A scoped change crosses the backend and frontend boundary or changes their shared contract
 Required inputs: The owning Issue, canonical data/API documents, relevant feature specification, and verified endpoint outputs when available
 Expected outputs: An explicit backend/frontend handoff and combined evidence mapped to the shared acceptance criteria
-Do not infer: Endpoint scaffolds, commands, command IDs, deployed services, or successful integration
+Do not infer: Deployed services, product API behavior, or successful cross-end integration from endpoint scaffold verification
 
 ## Runtime boundary
 
-Backend runtime: NOT CONFIGURED
-Frontend runtime: NOT CONFIGURED
+Backend scaffold verification surface: CONFIGURED
+Frontend scaffold verification surface: CONFIGURED
+Combined cross-end integration runtime: NOT CONFIGURED
 
-Phase 1 provides no endpoint execution surface. Treat both ends as unavailable until Phase 2 creates and verifies their scaffolds, local AI contracts, wrapper/package scripts, and observable success and failure behavior.
+Both endpoint scaffolds, local AI contracts, wrapper/package scripts, and verification command IDs now exist and have successful activation evidence. Use the [root command composition registry](command-registry.md) only to compose those endpoint verification IDs.
+
+No product API, authentication exchange, shared data handoff, or integrated user-flow surface has been created or verified. Endpoint scaffold availability therefore does not change the combined cross-end integration runtime from `NOT CONFIGURED`.
 
 ## Work classification
 
@@ -47,6 +50,8 @@ Do not hand off guessed payloads, invented commands, or undocumented error behav
 
 Endpoint evidence stays with the endpoint command or CI run. The Pull Request combines links and maps them to shared acceptance criteria without duplicating logs.
 
+`root.verify.scaffold` combines backend and frontend scaffold-verification evidence only. It is not combined contract, smoke, API, or user-flow evidence.
+
 A complete cross-end evidence set contains:
 
 - the canonical contract or specification revision;
@@ -59,4 +64,6 @@ Missing endpoint or combined runtime evidence must remain `NOT RUN` or `NOT CONF
 
 ## Activation boundary
 
-Phase 2 must create each endpoint scaffold and its local ownership documents together. Only verified endpoint command IDs may later be referenced by a root command registry; this document never owns framework rules or literal endpoint command strings.
+Each endpoint scaffold and its local ownership documents were created and verified together. The root command registry may reference only the resulting `CONFIGURED` endpoint command IDs; this document never owns framework rules or literal endpoint command strings.
+
+Cross-end integration execution may activate only after a real shared runtime, safe inputs, success and failure behavior, and combined evidence are verified. Until then, cross-end work may define or review contracts but must report integration execution as `NOT CONFIGURED`.
