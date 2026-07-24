@@ -29,6 +29,7 @@
 - 상세 정책이 끝나면 예외, 악용, 동시성, 장애 및 테스트 관점으로 재검토한다.
 - 제품 범위 변경은 `docs/01-product-vision.md`, 기술 방향 변경은 `docs/06-system-architecture.md`에 반영한다.
 - 결정 및 변경 이력은 `miriyum-service-decisions.md`에 남긴다.
+- 정본 문서를 수정하면 `miriyum-service-decisions.md`의 중앙 변경 이력도 함께 갱신한다. 정책 문서의 결정 기록은 정책 의미·상태·근거를, 중앙 변경 이력은 요청·결정자·수정 작업자·대상·내용·이유를 소유한다.
 
 ## 01. 회원·인증·계정 — `01-member-auth.md`
 
