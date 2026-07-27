@@ -4,7 +4,7 @@
 
 `적용 단계`는 다음 네 값 또는 필요한 조합으로 구분한다.
 
-- `1차 MVP`: 계정·입점·기본 탐색과 예약·메뉴 홀드·픽업 예약의 기본 거래.
+- `1차 MVP`: 계정, 구조화 사업자 정보의 자동 입점, 텍스트 기반 매장·메뉴 탐색과 예약·메뉴 홀드·픽업 예약의 기본 거래.
 - `2차 MVP`: AI 없는 규칙 해석, QueryDSL 조회, 이력 기반 결정적 추천, 품절 대안과 지도 탐색.
 - `고도화`: 웨이팅·SSE, 결제·환불, 체크인·노쇼, 일반 취소 승계, Free 기본 통계, 플랫폼 운영자와 알림.
 - `향후 고도화`: 코스·구독·리뷰·광고 상품·Pro 및 AI 설명·채팅.
@@ -19,8 +19,8 @@
 |---|---|---|---|---|---|---|
 | 도메인 경계 기준 | DOMAIN-000 | 확정 | 전 단계 공통 | 모든 도메인 | [정책 원본](service-policies/00-policy-template.md) | 각 단계 기능이 정책 소유권과 공통 검토 항목을 따른다. |
 | 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 확정·검토 혼재 | `1차 MVP`, `고도화` | auth | [정책 원본](service-policies/01-member-auth.md) | 1차는 계정별 무저장 Access/Refresh JWT, 고도화는 Valkey 회전·폐기·재사용 탐지와 일반 사용자 카카오 로그인이다. 토큰 세부 6건은 팀 합의 전 고정하지 않는다. |
-| 매장 입점·매장 운영자 권한 | STORE-001, STORE-002, STORE-003, STORE-004, STORE-005, STORE-006, STORE-007, STORE-008, STORE-009, STORE-010, STORE-011, STORE-012, STORE-013, STORE-014 | 확정·TODO 혼재 | `1차 MVP`, 일부 `고도화` | store | [정책 원본](service-policies/02-store-onboarding.md) | 입점·소속·기본 운영은 1차다. 플랫폼 심사 업무 화면과 뒤 단계 기능의 활성화 절차는 해당 기능 단계 전에는 진입시키지 않는다. |
-| 매장 운영·영업시간·메뉴 | OPER-001, OPER-002, OPER-003, OPER-004, OPER-005, OPER-006, OPER-007, OPER-008, OPER-009, OPER-010 | 확정 | `1차 MVP` | store | [정책 원본](service-policies/03-store-operation.md) | 매장·영업시간·메뉴와 세 거래별 운영 모드의 기본 운영을 제공한다. |
+| 매장 입점·매장 운영자 권한 | STORE-001, STORE-002, STORE-003, STORE-004, STORE-005, STORE-006, STORE-007, STORE-008, STORE-009, STORE-010, STORE-011, STORE-012, STORE-013, STORE-014 | 확정·TODO 혼재 | `1차 MVP`, 일부 `고도화` | store | [정책 원본](service-policies/02-store-onboarding.md) | 1차는 구조화 사업자 정보·무료 공공 조회·중앙 고유성 검사로 정상 신청을 자동 확정하고 중복·불일치를 실패 폐쇄한다. 파일·S3·플랫폼 운영자 승인/반려·심사 UI·사건 큐는 고도화의 신규·중대한 변경 경로이며 기존 1차 확정 매장 일괄 재심사는 별도 마이그레이션 결정 전 추측하지 않는다. |
+| 매장 운영·영업시간·메뉴 | OPER-001, OPER-002, OPER-003, OPER-004, OPER-005, OPER-006, OPER-007, OPER-008, OPER-009, OPER-010 | 확정 | `1차 MVP`, 일부 `고도화` | store | [정책 원본](service-policies/03-store-operation.md) | 1차는 텍스트 기반 매장·영업시간·메뉴와 세 거래별 운영 모드를 제공한다. 매장·메뉴 이미지 업로드·S3·플랫폼 운영자 콘텐츠 검수는 고도화에서 활성화한다. |
 | 예약 | RES-001, RES-002, RES-003, RES-004, RES-005, RES-006, RES-007, RES-008, RES-009, RES-010, RES-011, RES-012, RES-013, RES-014, RES-015 | 확정 | `1차 MVP`, 일부 `고도화` | booking | [정책 원본](service-policies/04-reservation.md) | 1차는 결제 없는 즉시 확정 예약이다. 예약금·취소·환불 연결은 고도화에서만 진입한다. |
 | 현장·원격 웨이팅 | WAIT-001, WAIT-002, WAIT-003, WAIT-004, WAIT-005, WAIT-006, WAIT-007, WAIT-008, WAIT-009, WAIT-010, WAIT-011, WAIT-012, WAIT-013, WAIT-014, WAIT-015, WAIT-016, WAIT-017 | 확정 | `고도화` | booking | [정책 원본](service-policies/05-waiting.md) | 로그인 사용자, 공통 3km, 단일 FIFO, 호출·종결과 SSE 상태 전달을 고도화에서 제공한다. |
 | 메뉴 홀드·픽업 예약 | HOLD-001, HOLD-002, HOLD-003, HOLD-004, HOLD-005, HOLD-006, HOLD-007, HOLD-008, HOLD-009, HOLD-010, HOLD-011, HOLD-012, HOLD-013 | 확정 | `1차 MVP` | booking | [정책 원본](service-policies/06-menu-hold.md) | 메뉴 선택은 건너뛸 수 있으며, 픽업 예약은 카페·베이커리에만 허용하고 예약 인원·팀 수를 만들지 않는다. |
@@ -34,5 +34,5 @@
 | 분석·수요 리포트 | ANALYTICS-001, ANALYTICS-002, ANALYTICS-003, ANALYTICS-004, ANALYTICS-005, ANALYTICS-006, ANALYTICS-007, ANALYTICS-008, ANALYTICS-009 | 확정 | `고도화`, `향후 고도화` | store | [정책 원본](service-policies/14-analytics-report.md) | Free 기본 운영 통계는 고도화, Pro 비교·해석·추천·자동 리포트·내보내기는 향후 고도화다. |
 | 플랫폼 운영자·분쟁·수동 복구 | ADMIN-001, ADMIN-002, ADMIN-003, ADMIN-004, ADMIN-005, ADMIN-006, ADMIN-007, ADMIN-008, ADMIN-009, ADMIN-010, ADMIN-011, ADMIN-012 | 확정·TODO 혼재 | `고도화` | 모든 고도화 도메인 | [정책 원본](service-policies/15-admin-operation.md) | 별도 플랫폼 운영자 계정의 심사·분쟁·복구·장애 기능은 고도화에서만 진입한다. 뒤 단계 기능용 절차는 그 기능보다 먼저 활성화하지 않는다. |
 | 알림 | NOTI-001, NOTI-002, NOTI-003, NOTI-004, NOTI-005, NOTI-006, NOTI-007, NOTI-008, NOTI-009, NOTI-010 | 확정·TODO 혼재 | `고도화` | notification | [정책 원본](service-policies/16-notification.md) | 거래·웨이팅·결제·체크인·운영 알림과 실패 처리를 고도화에서 제공한다. `NOTI-009` 보관 기간은 TODO다. |
-| 개인정보·보안 | PRIV-001, PRIV-002, PRIV-003, PRIV-004, PRIV-005, PRIV-006, PRIV-007, PRIV-008, PRIV-009, PRIV-010, PRIV-011, PRIV-012, PRIV-013 | 확정·TODO 혼재 | 전 단계 공통 | 모든 도메인 | [정책 원본](service-policies/17-privacy-security.md) | 활성 단계의 최소 수집·암호화·접근·삭제 기준만 적용하고 뒤 단계 데이터는 선수집하지 않는다. |
+| 개인정보·보안 | PRIV-001, PRIV-002, PRIV-003, PRIV-004, PRIV-005, PRIV-006, PRIV-007, PRIV-008, PRIV-009, PRIV-010, PRIV-011, PRIV-012, PRIV-013 | 확정·TODO 혼재 | 전 단계 공통 | 모든 도메인 | [정책 원본](service-policies/17-privacy-security.md) | 활성 단계의 최소 수집·암호화·접근·삭제 기준만 적용한다. 1차 입점은 파일 개인정보를 수집하지 않고 사업자 증빙·매장/메뉴 이미지 파일 통제는 고도화에서만 적용한다. |
 | 대규모 트래픽·분산 환경·장애 복구 | SCALE-001, SCALE-002, SCALE-003, SCALE-004, SCALE-005, SCALE-006, SCALE-007, SCALE-008, SCALE-009, SCALE-010, SCALE-011, SCALE-012, SCALE-013, SCALE-014, SCALE-015, SCALE-016 | 확정 | 전 단계 공통 | 모든 도메인 | [정책 원본](service-policies/18-scale-reliability.md) | 활성 단계의 동시성·복구 불변식을 적용하며 뒤 단계 인프라는 선도입하지 않는다. |
