@@ -14,6 +14,25 @@
 4. 실제 실행 파일과 성공 증거가 확인된 명령만 후속 레지스트리(registry)에 등록한다.
 5. 명령·결과·위험·증거가 없는 완료 주장을 차단한다.
 
+## 활성 정본 allowlist와 제외 경로
+
+제품·정책·아키텍처·품질 사실을 읽고 변경할 때의 allowlist는 다음과 같다.
+
+1. `docs/00-index.md`~`docs/09-quality-operations-and-rules.md`
+2. 현재 승인 기준과 단계가 정렬된 `docs/service-policies/`
+3. 상태와 날짜별 개정 이력상 현재 유효한 `docs/adr/`
+4. `docs/05-functional-requirements.md` 또는 소유 서비스 정책이 명시적으로 연결한 `docs/specs/<feature>/spec.md`
+
+`docs/specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 제품 사실이 아니라 사람·AI 진입, 라우팅, 명령과 증거 경계를 소유한다.
+
+루트의 과거 종합 문서, `docs/superpowers/`, `.superpowers/sdd/` 아래의 계획·spec·draft·report는 기본 라우팅에서 제외한다. 현재 정본이 특정 근거를 확인하라고 명시적으로 연결하지 않은 한, 과거 기록의 문구로 현재 승인 기준을 덮어쓰거나 완료를 주장하지 않는다.
+
+## 단계 선택
+
+기능·정책·기술 결정의 적용 단계는 `1차 MVP`, `2차 MVP`, `고도화`, `향후 고도화` 중 하나다. 단계는 정책 결정 상태와 독립적이다. `확정` 정책도 뒤 단계일 수 있고, 현재 단계의 세부가 미결정일 수 있다.
+
+작업을 시작할 때 소유 정본에서 현재 적용 단계를 확인한다. 단계가 없거나 문서 간 표기가 다르면 구현을 추측하지 않고 소유 문서와 관련 정책·ADR의 날짜별 개정 필요성을 먼저 보고한다. 뒤 단계 기술은 현재 단계의 의존성, 설정, 빈 패키지 또는 구성된 runtime으로 선도입하지 않는다.
+
 ## 경로(route) 분류
 
 ### 답변 모드(Answer Mode)
@@ -45,7 +64,7 @@
 | 제품 목적·범위 | `docs/01-product-vision.md` | 관련 서비스 정책 | 사용자 가치, 범위 또는 비목표가 바뀜 |
 | 사용자·권한·보안 | `docs/02-users-and-permissions.md` | 관련 보안·개인정보 서비스 정책 | 역할, 인증, 인가 또는 개인정보 경계가 바뀜 |
 | 도메인·사용자 흐름 | `docs/03-domain-model.md` 또는 `docs/04-user-flows.md` | 관련 기능 명세와 서비스 정책 | 상태, 관계, 성공·실패 흐름이 바뀜 |
-| 기능 요구사항 | `docs/05-functional-requirements.md` | 관련 `docs/specs/<feature>/spec.md`와 서비스 정책 | 영구 동작, 계약 또는 인수 조건을 결정함 |
+| 기능 요구사항 | `docs/05-functional-requirements.md` | `docs/05` 또는 소유 정책이 연결한 실제 `docs/specs/<feature>/spec.md` | 영구 동작, 계약 또는 인수 조건을 결정함 |
 | 아키텍처 | `docs/06-system-architecture.md` | 관련 `docs/adr/` 기록 | 지속적이고 여러 영역에 영향을 주는 기술 결정을 함 |
 | 데이터·API | `docs/07-data-and-api-contracts.md` | 관련 기능 명세와 `ai/integration-contracts.md` | 데이터 원본, API, 이벤트 또는 cross-end handoff가 바뀜 |
 | UI·frontend | `docs/08-ui-and-frontend-guidelines.md` | 관련 기능 명세 | 화면 구조, 상태 처리 또는 접근성 계약이 바뀜 |
@@ -57,7 +76,7 @@
 
 문서 계약과 실행 capability를 구분한다. `ACTIVE`는 문서 계약이 적용됨을 뜻하고, `TEMPLATE`은 환경 의존 입력이 아직 채워지지 않은 계약을 뜻한다. runtime의 `CONFIGURED`는 실제 실행 surface와 성공·실패 증거가 검증된 경우에만 사용한다. `NOT CONFIGURED`는 대응 명령이나 스크립트가 아직 없다는 뜻이며 성공이 아니다. `NOT APPLICABLE`은 현재 범위에 적용되지 않는 이유가 기록된 상태다.
 
-조건부 문서는 해당 trigger가 충족되고 현재 범위에 필요할 때만 읽는다. 계획, wrapper/package script 또는 경로 이름만으로 runtime, 명령, CI, skill, cache나 hook의 존재를 추론하지 않는다.
+조건부 문서는 해당 trigger가 충족되고 현재 범위에 필요할 때만 읽는다. 기능 명세 템플릿, 계획, wrapper/package script 또는 경로 이름만으로 runtime, 명령, CI, skill, cache나 hook의 존재를 추론하지 않는다.
 
 ## 단계별 문서 확장
 
@@ -76,7 +95,7 @@
 ## 문서 변경 라우팅
 
 - 제품·정책·아키텍처·기능·품질 사실은 해당 `docs/` 정본에서만 변경하고 다른 문서는 링크만 갱신한다.
-- 사람의 저장소 진입과 기여 흐름은 `README.md`, `docs/00-index.md`, `CONTRIBUTING.md`가 소유한다.
+- 사람의 저장소 진입과 기여 흐름은 `README.md`, `docs/00-index.md`, `CONTRIBUTING.md`가 소유하며 제품 사실을 소유하지 않는다.
 - 경로(route)와 읽기 trigger 변경은 이 문서가 소유한다.
 - 검증된 엔드 command ID의 루트 실행 순서와 위임은 `ai/command-registry.md`가 소유한다.
 - cross-end 분류와 handoff 증거 경계 변경은 `ai/integration-contracts.md`가 소유한다.
