@@ -216,6 +216,36 @@
 - 변경 이유: 외부 승인이 끝났을 수 있는 거래의 중복 청구를 방지하고, 현재 아키텍처와 상세 신뢰성 정책이 서로 다른 구현 기술을 동시에 강제하던 충돌을 제거하기 위해서다.
 - 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `5189100fbb6d68e0d7cbd4913bfe13a899a2f89a`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/5189100fbb6d68e0d7cbd4913bfe13a899a2f89a)
 
+#### DOC-20260727-006 · JWT·Valkey 인증 구조 확정
+
+- 변경 일시: `2026-07-27 11:05 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 결정 상태: 확정
+- MVP 포함 여부: 포함
+- 대상 문서·정책: `AUTH-007`, 인증 흐름·아키텍처·계약, `ADR-006`
+- 변경 내용: 세 역할의 인증을 Spring Security 기반 액세스 JWT와 Valkey의 리프레시 토큰 서버 상태 관리 구조로 전환했다.
+- 변경 이유: JWT의 요청 독립성을 유지하면서 로그아웃·회전·탈취 대응처럼 사용자 상태에 따른 즉시 제어가 필요하고, 이미 웨이팅·분산 잠금·캐시에 사용하는 Valkey를 재사용할 수 있기 때문이다.
+- 상세 근거: [ADR-006](docs/adr/ADR-006-jwt-valkey-refresh-token.md)
+- 영향 문서: `docs/service-policies/01-member-auth.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `docs/06-system-architecture.md`, `docs/07-data-and-api-contracts.md`, `docs/service-policies/18-scale-reliability.md`
+- 변경 근거: [인증 정책 정렬 커밋 `663e247a16f445ef2b3128ffa595368d87515efe`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/663e247a16f445ef2b3128ffa595368d87515efe)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
+#### DOC-20260727-007 · 하나의 검색창과 MySQL 직접 조회 확정
+
+- 변경 일시: `2026-07-27 11:05 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 결정 상태: 확정
+- MVP 포함 여부: 통합 검색은 포함, OpenSearch·Meilisearch는 제외
+- 대상 문서·정책: `ADS-007`·`ADS-008`, 탐색 흐름·아키텍처·계약, `ADR-007`
+- 변경 내용: 한 입력에서 검색어와 구조화 조건을 함께 추출하고 규칙 우선·미해석 표현만 AI 보조·MySQL 최종 조회로 통일했다.
+- 변경 이유: 일반 검색과 자연어 검색을 억지로 분류하지 않으면서도 외부 AI의 비용·지연·오판 범위를 제한하고, 현재 규모에서는 별도 검색 색인 없이 MySQL 원본 정합성을 유지할 수 있기 때문이다.
+- 상세 근거: [ADR-007](docs/adr/ADR-007-unified-search-mysql.md)
+- 영향 문서: `docs/service-policies/13-ad-recommendation.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `docs/06-system-architecture.md`, `docs/07-data-and-api-contracts.md`, `docs/service-policies/18-scale-reliability.md`
+- 변경 근거: [통합 검색 정책 정렬 커밋 `d67f2b9643f0a7fea2b11efa64a1abccb61e57da`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/d67f2b9643f0a7fea2b11efa64a1abccb61e57da)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
 ### 2026-07-23 이전 누적 기록
 
 | 날짜 | 변경 내용 | 상태 |
