@@ -41,7 +41,7 @@ CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 �
 
 동작이나 지속적인 결정이 바뀌면 정본 제품, 정책, 아키텍처, 기능 또는 품질 문서를 갱신한다. 해당 규칙을 Issue, Pull Request 또는 AI 작업 흐름(workflow) 문서에 복사하지 말고 소유자 문서로 링크한다.
 
-`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 기능 명세로 제한한다. 기능 명세 템플릿과 과거 문서, 계획·spec·draft·report는 정본으로 취급하지 않는다.
+`README.md`, 이 문서와 `ai/`는 사람·AI의 진입, 라우팅, 명령·증거 경계를 소유하며 제품 사실을 소유하지 않는다. 제품 사실의 활성 정본 allowlist는 `docs/00-index.md`부터 `docs/09-quality-operations-and-rules.md`, 현재 승인 기준과 정렬된 서비스 정책, 현재 유효 ADR, `docs/05` 또는 소유 정책이 연결한 기능 명세로 제한한다. 기능 명세 템플릿, `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`의 계획·spec·draft·report는 정본으로 취급하지 않는다.
 
 ## 단계 표기
 
@@ -64,4 +64,4 @@ CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 �
 - [ ] 관련 서비스 정책과 현재 유효 ADR을 함께 검토하고 필요한 날짜별 개정을 반영했다.
 - [ ] 기능 명세는 `docs/05` 또는 소유 정책이 연결한 실제 `docs/specs/<feature>/spec.md`이며 템플릿이 아니다.
 - [ ] 실제 실행한 명령, 관찰 결과, 실행하지 않은 검사와 이유, 남은 위험을 PR 증거에 기록했다.
-- [ ] 과거 문서와 계획·spec·draft·report를 현재 제품 결정의 근거 또는 완료 증거로 사용하지 않았다.
+- [ ] `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/`의 계획·spec·draft·report를 현재 제품 결정의 근거 또는 완료 증거로 사용하지 않았다.

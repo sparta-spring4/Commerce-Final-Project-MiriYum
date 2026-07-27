@@ -25,7 +25,7 @@
 
 `docs/specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 제품 사실이 아니라 사람·AI 진입, 라우팅, 명령과 증거 경계를 소유한다.
 
-루트의 과거 종합 문서, `docs/superpowers/`, `.superpowers/sdd/` 아래의 계획·spec·draft·report는 기본 라우팅에서 제외한다. 현재 정본이 특정 근거를 확인하라고 명시적으로 연결하지 않은 한, 과거 기록의 문구로 현재 승인 기준을 덮어쓰거나 완료를 주장하지 않는다.
+`docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/` 아래의 계획·spec·draft·report는 기본 라우팅에서 제외한다. 현재 정본이 특정 근거를 확인하라고 명시적으로 연결하지 않은 한, 과거 기록의 문구로 현재 승인 기준을 덮어쓰거나 완료를 주장하지 않는다.
 
 ## 단계 선택
 

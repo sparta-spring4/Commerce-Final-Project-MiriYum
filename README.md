@@ -1,6 +1,6 @@
 # MiriYum
 
-MiriYum은 사용자가 식당을 탐색하고 방문 예약·웨이팅·한정 메뉴 확보를 한 흐름으로 경험하며, 식당은 필요한 운영 기능을 선택해 운영할 수 있는 양면 다이닝 플랫폼입니다.
+MiriYum은 사용자가 식당을 탐색하고 예약·웨이팅·한정 메뉴 확보를 한 흐름으로 경험하며, 식당은 필요한 운영 기능을 선택해 운영할 수 있는 양면 다이닝 플랫폼입니다.
 
 ## 현재 단계
 
@@ -30,4 +30,4 @@ Issue, Pull Request 또는 기여 작업은 [기여 가이드](CONTRIBUTING.md)�
 3. 상태와 날짜별 개정 이력상 현재 유효한 `docs/adr/` 결정
 4. `docs/05-functional-requirements.md` 또는 소유 서비스 정책이 명시적으로 연결한 `docs/specs/<feature>/spec.md`
 
-`docs/specs/_template/` 아래의 기능 명세 템플릿은 정본이 아닙니다. 루트의 과거 종합 문서, `docs/superpowers/`, `.superpowers/sdd/`의 계획·spec·draft·report는 실행 과정 또는 과거 기록이므로 기본 라우팅에서 제외합니다. 현재 정본이 명시적으로 근거를 확인하라고 연결한 경우가 아니면 제품 결정의 근거로 사용하지 않습니다.
+`docs/specs/_template/` 아래의 기능 명세 템플릿은 정본이 아닙니다. `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/`의 계획·spec·draft·report는 실행 과정 또는 과거 기록이므로 기본 라우팅에서 제외합니다. 현재 정본이 명시적으로 근거를 확인하라고 연결한 경우가 아니면 제품 결정의 근거로 사용하지 않습니다.

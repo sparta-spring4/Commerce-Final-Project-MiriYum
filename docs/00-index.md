@@ -15,7 +15,7 @@
 
 `specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 사람·AI의 진입, 라우팅, 명령과 증거 경계를 소유하며 제품 사실을 소유하지 않는다.
 
-루트의 과거 종합 문서, `docs/superpowers/`, `.superpowers/sdd/`의 계획·spec·draft·report는 기본 읽기 경로에서 제외한다. 현재 정본의 명시적 근거 링크가 없는 과거 기록으로 현재 승인 기준을 정하지 않는다.
+`docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/`의 계획·spec·draft·report는 기본 읽기 경로에서 제외한다. 현재 정본의 명시적 근거 링크가 없는 과거 기록으로 현재 승인 기준을 정하지 않는다.
 
 ## 처음 읽는 순서
 
@@ -62,7 +62,7 @@
 ## 변경 시 함께 확인할 문서
 
 - 제품 범위나 비목표를 바꾸면 `01-product-vision.md`, 관련 서비스 정책, 연결된 실제 기능 명세를 함께 확인한다.
-- 참여자나 권한 경계를 바꾸면 `02-users-and-permissions.md`, [회원·인증 정책](service-policies/01-member-auth.md), [매장 입점 정책](service-policies/02-store-onboarding.md), [운영자 정책](service-policies/15-admin-operation.md), [개인정보·보안 정책](service-policies/17-privacy-security.md)을 함께 확인한다.
+- 참여자나 권한 경계를 바꾸면 `02-users-and-permissions.md`, [회원·인증 정책](service-policies/01-member-auth.md), [매장 입점 정책](service-policies/02-store-onboarding.md), [플랫폼 운영자 정책](service-policies/15-admin-operation.md), [개인정보·보안 정책](service-policies/17-privacy-security.md)을 함께 확인한다.
 - 지속적인 아키텍처·기술 결정을 바꾸면 현재 유효 [ADR](adr/)의 날짜별 개정과 `06-system-architecture.md`, `09-quality-operations-and-rules.md`를 함께 확인한다.
 - 기능의 사용자 행위·계약·인수 조건을 바꾸면 연결된 실제 기능 명세와 관련 정책을 함께 확인한다.
 - 문서 책임이나 읽기 경로를 바꾸면 이 색인과 연결된 문서를 함께 갱신한다.
