@@ -56,3 +56,28 @@ Redis 일반 후보 가운데 인증 상태 저장 요구는 [ADR-006](ADR-006-j
 - [ADR 템플릿](ADR-000-template.md)
 - [액세스 JWT와 Valkey 리프레시 토큰 상태 관리](ADR-006-jwt-valkey-refresh-token.md)
 - [단일 검색창과 MySQL 기반 통합 검색](ADR-007-unified-search-mysql.md)
+
+## 2026-07-27 날짜별 개정
+
+### 현재 단계 결정
+
+기존 본문과 최초 결정은 당시 판단 기록으로 보존한다. 현재 합의에서는 다음 네 단계를 적용하며, 같은 날짜의 과거 기술 시점 표현보다 이 절의 단계가 우선한다.
+
+| 단계 | 활성 기술과 역할 | 제외 기술 |
+|---|---|---|
+| 1차 MVP | Java 21, Spring Boot 4.1.0, Gradle 9.6.1, MVC, JPA, Security, Flyway, MySQL, Testcontainers MySQL, stateless Access/Refresh JWT | Valkey, QueryDSL, Kakao 지도·로그인, S3, PortOne, SSE, 메시지 브로커, 검색 엔진 |
+| 2차 MVP | 방식 A·MySQL 유지, `RuleInterpreter`, QueryDSL, 동기 `BulkAvailabilityPort`, 매장 주소 등록·변경 시 Kakao Local API와 지도 SDK | AI/LLM, Spring AI, 벡터 DB, 검색 엔진, 추천 캐시, 메시지 브로커 |
+| 고도화 | Valkey Refresh Token 상태, Kakao 로그인, S3, 웨이팅·SSE, PortOne, 알림, 플랫폼 운영 기능, 기능별 MySQL durable task | 증거 없는 범용 분산 인프라 |
+| 향후 고도화 | 별도 승인된 AI/LLM 또는 측정된 병목을 해결하는 인프라 | 승인 전 Kafka, 범용 Outbox, MSA, WebSocket, 검색 클러스터 |
+
+### Testcontainers 전환 근거
+
+- 과거의 초기 Testcontainers 미도입 결정은 실제 DB 상호작용이 없던 스캐폴딩 시점에는 유효했다.
+- 1차 MVP가 Flyway 마이그레이션, MySQL 제약, 예약 수용량·회차별 팀 수·메뉴 홀드 경합, 잠금과 조건부 SQL을 구현하므로 기존 재검토 조건이 충족되었다. 이에 따라 Testcontainers MySQL을 1차 MVP 필수 검증 게이트로 활성화한다.
+- H2나 인메모리 대체 DB는 MySQL 잠금·격리·제약 의미를 증명하지 못하므로 해당 통합 테스트의 대체재로 사용하지 않는다.
+
+### 증거 게이트와 이행
+
+- 새 기술은 현재 단계의 단순 구조로 재현한 병목·실패, 대안 비교, 운영 책임, 비용, 마이그레이션·되돌림 계획과 검증 명령을 승인한 뒤 도입한다.
+- 고도화의 외부 효과는 결제·알림처럼 기능 목적이 명확한 MySQL durable task로 구현한다. 이 결정은 범용 Outbox 패턴이나 Kafka를 미리 승인하지 않는다.
+- 단계 경계는 초기 기능 수를 줄이는 대신 후속 마이그레이션 비용을 만든다. 각 전환은 스키마 호환, 실패 복구, 보안 회귀와 미사용 단계의 의존성 부재를 함께 검증한다.

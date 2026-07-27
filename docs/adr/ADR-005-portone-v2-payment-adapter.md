@@ -55,3 +55,17 @@ PortOne V2의 지원·보안·계약 조건이 현재 요구를 충족하지 못
 - [데이터 및 API 계약](../07-data-and-api-contracts.md)
 - [결제·환불·정산 정책](../service-policies/08-payment-refund.md)
 - [ADR-002](ADR-002-staged-technology-adoption.md)
+
+## 2026-07-27 날짜별 개정
+
+### 개정 결정
+
+- 최초 PortOne V2 어댑터 결정과 결제 계약 본문은 목표 설계 기록으로 보존한다.
+- PortOne 결제는 **고도화**에서 활성화한다. 1차 MVP와 2차 MVP에는 PortOne SDK, API secret, 결제 route·버튼, Webhook endpoint, 결제·환불 durable task를 두지 않는다.
+- 활성화 뒤에도 도메인은 제공자 중립 결제 포트와 내부 결제 상태를 소유한다. PortOne V2 어댑터만 외부 요청·응답·Webhook 서명 검증을 담당하며 외부 응답만으로 내부 예약·결제 원장을 확정하지 않는다.
+
+### 활성화 게이트와 이행
+
+- 실제 계약·가격·법률 검토, V2 sandbox 승인·취소·결과 불명 시나리오, Webhook 서명·중복·역순 검증, 멱등 키와 정기 대사, 비밀·개인정보 마스킹을 통과해야 한다.
+- 결제 상태와 기능별 MySQL durable task를 일관성 경계에서 기록하고, 임대·fencing·제한 재시도·격리·수동 복구·대사로 외부 장애에 수렴한다. 이 기능별 작업은 Kafka나 범용 Outbox 도입을 뜻하지 않는다.
+- 단계 지연으로 초기에는 결제 완료 사용자 흐름을 제공하지 못하지만, 계약이 확정되기 전에 UI·서버·비밀 관리가 특정 PG에 결합되는 위험을 피한다.
