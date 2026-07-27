@@ -8,7 +8,7 @@
 
 ## 초기 런타임 구조
 
-React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당한다. Spring Security 기반 액세스 JWT는 인증·인가 경계를 제공하고, Valkey는 리프레시 토큰의 회전·만료·폐기 상태를 공유한다.
+React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당한다. Spring Security 기반 액세스 JWT는 인증·인가 경계를 제공하고, Valkey는 리프레시 토큰의 회전·만료·폐기 상태를 공유한다. 통합 검색은 애플리케이션의 규칙 해석과 선택적 Spring AI 기반 외부 AI 보조를 거쳐 MySQL을 직접 조회한다.
 
 이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수와 배포 토폴로지는 실제 요구가 확정되기 전에는 정하지 않는다. 현재 외부 결제 연동은 아래의 PortOne V2 어댑터 경계를 따른다.
 
@@ -53,9 +53,15 @@ controller에서 repository를 직접 호출하거나, DTO·엔티티를 도메�
 
 ## 초기 확정 기술
 
-초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, Valkey 8.1.x, Spring Data Redis, Lettuce, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, Spring Data Redis와 Lettuce는 애플리케이션에서 Valkey에 접근하며, 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
+초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, Spring AI, Valkey 8.1.x, Spring Data Redis, Lettuce, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, Spring Data Redis와 Lettuce는 애플리케이션에서 Valkey에 접근하며, Spring AI는 규칙으로 해석하지 못한 검색 표현의 외부 AI 어댑터 경계를 제공한다. 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
 
 Valkey의 현재 책임은 리프레시 토큰 상태, 속도 제한, 짧은 캐시, 임시 선점과 실시간 전달 보조로 한정한다. 계정·권한과 거래의 업무 원장은 MySQL에 유지하며 Valkey를 업무 원장으로 사용하지 않는다.
+
+## 통합 검색 경로
+
+하나의 검색창에서 받은 입력은 일반 검색과 자연어 검색으로 나누지 않는다. 애플리케이션은 검색어와 구조화 조건을 함께 추출하고 숫자·단위·시각·지역·카테고리·태그를 결정 규칙으로 먼저 해석한다. 규칙으로 해석하지 못한 표현만 Spring AI 기반 외부 AI 어댑터에 보내며, 서버가 허용한 필드·연산자·코드·값 범위의 조건 제안만 검증해 받아들인다.
+
+검증된 조건과 검색어를 병합한 현재 조회 경로는 MySQL 직접 검색이다. 짧은 Valkey 파생 캐시는 비권위 최적화일 뿐이며 결과 표시와 예약·웨이팅·홀드 전환 전에 최신 MySQL 상태를 다시 검증한다. OpenSearch와 Meilisearch는 `확정 + MVP 제외` 기술이며, 오탈자·자동완성·전문 검색 품질 또는 대규모 검색 부하의 MySQL 측정 결과가 기준을 넘을 때만 [ADR-007](adr/ADR-007-unified-search-mysql.md)에 따라 재검토한다.
 
 ## 현재 확정 외부 결제
 
@@ -79,7 +85,7 @@ SSE는 사용자에게 실시간 상태 전달이 실제 요구되고 연결 복
 
 ## 초기 제외 기술
 
-초기 제외 기술에는 마이크로서비스 분리, Kafka, Debezium, Kafka Connect, OpenSearch, AWS MSK, ElastiCache가 포함된다. 이들은 초기 제외 상태이며, 현재 구성에 도입하지 않는다. 규모·검색·이벤트 처리·캐시 요구가 측정되어 재평가 조건을 충족하기 전에는 추가하지 않는다.
+초기 제외 기술에는 마이크로서비스 분리, Kafka, Debezium, Kafka Connect, OpenSearch, Meilisearch, AWS MSK, ElastiCache가 포함된다. 이들은 초기 제외 상태이며 현재 구성에 도입하지 않는다. 특히 OpenSearch와 Meilisearch는 미결정 TODO가 아니라 `확정 + MVP 제외` 기술이다. 규모·검색·이벤트 처리·캐시 요구가 측정되어 재평가 조건을 충족하기 전에는 추가하지 않는다.
 
 ## 후속 AWS 배포 단계
 
@@ -100,3 +106,5 @@ backend·frontend 최소 스캐폴드의 exact toolchain과 초기 DB 테스트 
 외부 결제 어댑터와 확정·복구 경계는 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
 
 액세스 JWT와 Valkey 리프레시 토큰 상태의 선택 이유와 책임 경계는 [ADR-006](adr/ADR-006-jwt-valkey-refresh-token.md)을 따른다.
+
+하나의 검색창, 규칙 우선·선택적 외부 AI 보조와 MySQL 직접 조회의 선택 이유는 [ADR-007](adr/ADR-007-unified-search-mysql.md)을 따른다.
