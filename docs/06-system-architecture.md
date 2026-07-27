@@ -8,7 +8,7 @@
 
 ## 초기 런타임 구조
 
-React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당하며, Spring Security는 인증·인가 경계를 제공한다.
+React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당한다. Spring Security 기반 액세스 JWT는 인증·인가 경계를 제공하고, Valkey는 리프레시 토큰의 회전·만료·폐기 상태를 공유한다.
 
 이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수와 배포 토폴로지는 실제 요구가 확정되기 전에는 정하지 않는다. 현재 외부 결제 연동은 아래의 PortOne V2 어댑터 경계를 따른다.
 
@@ -53,7 +53,9 @@ controller에서 repository를 직접 호출하거나, DTO·엔티티를 도메�
 
 ## 초기 확정 기술
 
-초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
+초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, Valkey 8.1.x, Spring Data Redis, Lettuce, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, Spring Data Redis와 Lettuce는 애플리케이션에서 Valkey에 접근하며, 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
+
+Valkey의 현재 책임은 리프레시 토큰 상태, 속도 제한, 짧은 캐시, 임시 선점과 실시간 전달 보조로 한정한다. 계정·권한과 거래의 업무 원장은 MySQL에 유지하며 Valkey를 업무 원장으로 사용하지 않는다.
 
 ## 현재 확정 외부 결제
 
@@ -69,7 +71,7 @@ Store ID와 Channel Key는 프런트엔드 공개 설정이다. API Base URL은 
 
 ## 조건부 도입 기술
 
-QueryDSL은 동적·복합 조회가 JPA 메서드 이름이나 명시적 쿼리로 읽기 어렵고 유지하기 어려워질 때 도입을 검토한다. Redis는 측정된 성능 병목이나 명확한 캐시·세션·조율 요구가 있을 때만 검토한다.
+QueryDSL은 동적·복합 조회가 JPA 메서드 이름이나 명시적 쿼리로 읽기 어렵고 유지하기 어려워질 때 도입을 검토한다. Redis 호환 프로토콜과 접근 라이브러리는 현재 선택된 Valkey 경계 안에서 사용하며 별도의 Redis 서버 도입을 일반 후보로 두지 않는다.
 
 SSE는 사용자에게 실시간 상태 전달이 실제 요구되고 연결 복구·권한·운영 부담을 감당할 기준이 마련될 때 검토한다. 결제·자원 DB 상태와 영속 후속 작업 레코드를 같은 트랜잭션 또는 일관된 처리 경계에 기록해야 한다. 이 불변식만으로 Outbox 패턴을 활성화하지 않는다. 정확한 Outbox 채택은 외부 부작용 또는 비동기 전달에서 데이터 변경과 발행의 원자성·재시도 요구가 확인될 때 별도 결정으로 검토한다. Testcontainers는 실제 MySQL 호환성 검증이 필요하고 로컬·CI 환경에서 재현 가능한 컨테이너 실행 조건이 갖춰질 때 검토한다.
 
@@ -96,3 +98,5 @@ AWS 배포는 애플리케이션 경계, 데이터베이스 마이그레이션, 
 backend·frontend 최소 스캐폴드의 exact toolchain과 초기 DB 테스트 경계는 [ADR-004](adr/ADR-004-scaffold-toolchain-and-test-baseline.md)를 따른다.
 
 외부 결제 어댑터와 확정·복구 경계는 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
+
+액세스 JWT와 Valkey 리프레시 토큰 상태의 선택 이유와 책임 경계는 [ADR-006](adr/ADR-006-jwt-valkey-refresh-token.md)을 따른다.

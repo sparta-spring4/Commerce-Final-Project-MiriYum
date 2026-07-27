@@ -12,7 +12,7 @@
 | 요구사항 그룹 | 정책 ID | MVP 관계 | 소유 도메인 | 기능 명세 | MVP 경계 |
 |---|---|---:|---|---|---|
 | 도메인 경계 기준 | DOMAIN-000 | 초기 공통 기준 | 모든 초기 도메인 | [정책 원본](service-policies/00-policy-template.md) | 모든 초기 기능이 정책 소유권과 공통 검토 항목을 따른다. |
-| 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 부분 초기 | auth | [정책 원본](service-policies/01-member-auth.md) | 현재 계정·인증 흐름은 초기 범위다. `AUTH-004` 주류 연령 확인과 각 정책의 명시적 미래·TODO 조각은 제외한다. |
+| 회원·인증·계정 | AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-005, AUTH-006, AUTH-007, AUTH-008, AUTH-009, AUTH-010, AUTH-011, AUTH-012 | 부분 초기 | auth | [정책 원본](service-policies/01-member-auth.md) | 현재 계정·인증 흐름과 Spring Security 기반 액세스 JWT·리프레시 토큰·Valkey 리프레시 상태 관리는 초기 범위다. `AUTH-004` 주류 연령 확인과 각 정책의 명시적 미래·TODO 조각은 제외한다. |
 | 매장 입점·대표자 권한 | STORE-001, STORE-002, STORE-003, STORE-004, STORE-005, STORE-006, STORE-007, STORE-008, STORE-009, STORE-010, STORE-011, STORE-012, STORE-013, STORE-014 | 부분 초기 | store | [정책 원본](service-policies/02-store-onboarding.md) | 신규 입점과 현재 운영 권한은 초기 범위다. `STORE-013` 본사·지점 예외와 `STORE-014` 폐업·양도·대표자 변경 절차는 제외한다. |
 | 매장 운영·영업시간·메뉴 | OPER-001, OPER-002, OPER-003, OPER-004, OPER-005, OPER-006, OPER-007, OPER-008, OPER-009, OPER-010 | 초기 핵심 | store | [정책 원본](service-policies/03-store-operation.md) | 매장·영업시간·메뉴의 기본 운영을 제공하며 주류 등 비초기 기능에만 필요한 명령은 활성화하지 않는다. |
 | 방문 예약 | RES-001, RES-002, RES-003, RES-004, RES-005, RES-006, RES-007, RES-008, RES-009, RES-010, RES-011, RES-012, RES-013, RES-014, RES-015 | 부분 초기 | booking | [정책 원본](service-policies/04-reservation.md) | 즉시 확정 예약 흐름을 제공하며 매장 승인제 등 상세 정책이 후속으로 정한 진입 경로는 제외한다. |
