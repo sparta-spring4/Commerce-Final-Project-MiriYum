@@ -1,36 +1,36 @@
-# Document History and Pickup Hold Implementation Plan
+# 문서 변경 이력과 픽업 홀드 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **에이전트 작업자 필수 지침:** 이 계획은 `superpowers:subagent-driven-development` 사용을 권장하며, 같은 세션에서 직접 실행할 때는 `superpowers:executing-plans`를 사용해 작업별로 구현한다. 각 단계는 확인란(`- [ ]`)으로 추적한다.
 
-**Goal:** Make document changes traceable through the existing central decision history and align standalone pickup holds as a `booking`-owned exception available only to cafes and bakeries regardless of dine-in operation.
+**목표:** 기존 중앙 결정 이력에서 문서 변경을 추적할 수 있게 하고, 단독 픽업 홀드를 홀 운영 여부와 관계없이 카페·베이커리에만 제공하는 `booking` 소유 예외로 정렬한다.
 
-**Architecture:** `miriyum-service-decisions.md` remains the only central historical record; current policy truth stays in its owning `docs/` files. Standalone pickup holds share the booking/menu-hold orchestration and inventory invariants but omit visit-capacity allocation.
+**구조:** `miriyum-service-decisions.md`를 유일한 중앙 변경 이력으로 유지하고 현재 정책의 정본은 각 소유 `docs/` 파일에 둔다. 단독 픽업 홀드는 예약·메뉴 홀드 조정과 재고 불변식을 공유하지만 방문 수용량은 할당하지 않는다.
 
-**Tech Stack:** Markdown, PowerShell text assertions, Git
+**기술 구성:** Markdown, PowerShell 텍스트 검증, Git
 
-## Global Constraints
+## 공통 제약
 
-- Do not create a permanent work-log or lifecycle mirror.
-- Record the requester/decision maker as `이병우` and the editor as `Codex`.
-- Cafe/bakery eligibility does not depend on whether the store has dine-in seating.
-- General restaurants and other categories cannot enable standalone pickup holds.
-- Preserve historical records; do not rewrite old decisions as if they were made today.
+- 영구 작업 로그나 수명 주기 복제본을 만들지 않는다.
+- 요청·결정자는 `이병우`, 수정자는 `Codex`로 기록한다.
+- 카페·베이커리 자격은 매장의 홀 좌석 운영 여부에 의존하지 않는다.
+- 일반 식당과 다른 업종은 단독 픽업 홀드를 활성화할 수 없다.
+- 과거 기록을 보존하고 이전 결정을 오늘 내린 것처럼 다시 쓰지 않는다.
 
 ---
 
-### Task 1: Central document-change history format
+### 작업 1: 중앙 문서 변경 이력 형식
 
-**Files:**
-- Modify: `docs/00-index.md`
-- Modify: `docs/service-policies/README.md`
-- Modify: `docs/service-policies/00-policy-template.md`
-- Modify: `miriyum-service-decisions.md`
+**파일:**
+- 수정: `docs/00-index.md`
+- 수정: `docs/service-policies/README.md`
+- 수정: `docs/service-policies/00-policy-template.md`
+- 수정: `miriyum-service-decisions.md`
 
-**Interfaces:**
-- Consumes: Existing `miriyum-service-decisions.md` historical decision ownership.
-- Produces: One date-card template for all later documentation changes.
+**연결:**
+- 입력: 기존 `miriyum-service-decisions.md`의 과거 결정 소유권
+- 출력: 이후 모든 문서 변경에 사용할 하나의 날짜 카드 템플릿
 
-- [ ] **Step 1: Run the history-format assertions before editing**
+- [ ] **1단계: 편집 전에 변경 이력 형식 검증 실행**
 
 ```powershell
 $history = Get-Content miriyum-service-decisions.md -Raw -Encoding UTF8
@@ -38,19 +38,19 @@ $history = Get-Content miriyum-service-decisions.md -Raw -Encoding UTF8
   ForEach-Object { if (-not $history.Contains($_)) { throw "missing: $_" } }
 ```
 
-Expected: FAIL on the first missing field because the new card format is not present.
+기대 결과: 새 카드 형식이 없으므로 처음 누락된 필드에서 실패한다.
 
-- [ ] **Step 2: Add the central-history governance links**
+- [ ] **2단계: 중앙 변경 이력 관리 연결 추가**
 
-Add the following rule to `docs/00-index.md` and equivalent role separation to the policy master/template:
+다음 규칙을 `docs/00-index.md`에 추가하고 정책 마스터와 템플릿에도 같은 역할 분리를 반영한다.
 
 ```markdown
 - 정본 문서를 수정하면 `miriyum-service-decisions.md`의 중앙 변경 이력도 함께 갱신한다. 정책 문서의 결정 기록은 정책 의미·상태·근거를, 중앙 변경 이력은 요청·결정자·수정 작업자·대상·내용·이유를 소유한다.
 ```
 
-- [ ] **Step 3: Introduce the date-card template without deleting history**
+- [ ] **3단계: 과거 이력을 삭제하지 않고 날짜 카드 템플릿 도입**
 
-At the start of `## 7. 변경 기록`, add:
+`## 7. 변경 기록` 시작 부분에 다음 내용을 추가한다.
 
 ```markdown
 ### 2026-07-24 이후 기록 형식
@@ -70,36 +70,36 @@ At the start of `## 7. 변경 기록`, add:
 ### 2026-07-23 이전 누적 기록
 ```
 
-Keep the existing table and later numbered history sections below this heading.
+기존 표와 뒤의 번호가 있는 변경 이력 절은 이 제목 아래에 그대로 보존한다.
 
-- [ ] **Step 4: Re-run the history-format assertions**
+- [ ] **4단계: 변경 이력 형식 검증 다시 실행**
 
-Run the Step 1 PowerShell block.
+1단계의 PowerShell 블록을 실행한다.
 
-Expected: PASS with exit code 0.
+기대 결과: 종료 코드 0으로 통과한다.
 
-- [ ] **Step 5: Commit the history-governance change**
+- [ ] **5단계: 변경 이력 관리 규칙 커밋**
 
 ```powershell
 git add docs/00-index.md docs/service-policies/README.md docs/service-policies/00-policy-template.md miriyum-service-decisions.md docs/superpowers/specs/2026-07-24-document-history-and-pickup-hold-design.md docs/superpowers/plans/2026-07-24-document-history-and-pickup-hold.md
 git commit -m "docs: centralize document change history"
 ```
 
-### Task 2: Cafe and bakery standalone pickup eligibility
+### 작업 2: 카페·베이커리 단독 픽업 자격
 
-**Files:**
-- Modify: `docs/03-domain-model.md`
-- Modify: `docs/04-user-flows.md`
-- Modify: `docs/05-functional-requirements.md`
-- Modify: `docs/service-policies/02-store-onboarding.md`
-- Modify: `docs/service-policies/06-menu-hold.md`
-- Modify: `miriyum-service-decisions.md`
+**파일:**
+- 수정: `docs/03-domain-model.md`
+- 수정: `docs/04-user-flows.md`
+- 수정: `docs/05-functional-requirements.md`
+- 수정: `docs/service-policies/02-store-onboarding.md`
+- 수정: `docs/service-policies/06-menu-hold.md`
+- 수정: `miriyum-service-decisions.md`
 
-**Interfaces:**
-- Consumes: `booking`, `HOLD-004`, `HOLD-005`, `HOLD-007`, `HOLD-010`.
-- Produces: One consistent eligibility and resource-allocation rule across domain, flow, requirement and detailed policy documents.
+**연결:**
+- 입력: `booking`, `HOLD-004`, `HOLD-005`, `HOLD-007`, `HOLD-010`
+- 출력: 도메인·흐름·요구사항·상세 정책 문서에 일관된 하나의 자격 및 자원 할당 규칙
 
-- [ ] **Step 1: Run negative assertions against the current policy**
+- [ ] **1단계: 현재 정책에 부정 검증 실행**
 
 ```powershell
 $hold = Get-Content docs/service-policies/06-menu-hold.md -Raw -Encoding UTF8
@@ -109,11 +109,11 @@ if ($hold.Contains('식당 대표자가 메뉴별로 `단독 픽업 홀드`를')
 if ($onboarding.Contains('베이커리는 방문 예약 개념을 두지 않으므로')) { throw 'bakery-only assumption remains' }
 ```
 
-Expected: FAIL because cafe/bakery eligibility is missing.
+기대 결과: 카페·베이커리 자격이 누락되어 실패한다.
 
-- [ ] **Step 2: Align the detailed policies**
+- [ ] **2단계: 상세 정책 정렬**
 
-Use this exact policy boundary in `HOLD-005` and summarize it in `STORE-007`:
+다음 정확한 정책 경계를 `HOLD-005`에 사용하고 `STORE-007`에 요약한다.
 
 ```markdown
 - 카페·베이커리 업종으로 승인된 매장은 홀 운영 여부와 관계없이 메뉴별 단독 픽업 홀드를 활성화할 수 있다. 일반 식당과 다른 업종은 활성화할 수 없다.
@@ -122,11 +122,11 @@ Use this exact policy boundary in `HOLD-005` and summarize it in `STORE-007`:
 - 단독 픽업 홀드는 `booking` 내부에서 메뉴 수량과 픽업 제공 구간만 선점하며 방문 예약 레코드·좌석·인원 수용량을 만들지 않는다.
 ```
 
-Replace “independent flow/domain” wording with “visit-capacity-independent path inside booking”.
+“독립 흐름·도메인”이라는 표현을 “`booking` 내부의 방문 수용량 비의존 경로”로 교체한다.
 
-- [ ] **Step 3: Align domain, functional requirement and user flow**
+- [ ] **3단계: 도메인·기능 요구사항·사용자 흐름 정렬**
 
-Add a user flow with:
+다음 사용자 흐름을 추가한다.
 
 ```markdown
 ## 5. 카페·베이커리 단독 픽업 홀드
@@ -138,11 +138,11 @@ Add a user flow with:
 - **관련 정책 ID:** HOLD-001, HOLD-003, HOLD-005, HOLD-007, HOLD-009, HOLD-010, HOLD-013.
 ```
 
-Renumber later user flows. Add matching one-sentence ownership/eligibility summaries to the domain and functional-requirements documents.
+뒤의 사용자 흐름 번호를 다시 매긴다. 도메인과 기능 요구사항 문서에는 같은 소유권·자격을 한 문장으로 요약해 추가한다.
 
-- [ ] **Step 4: Add the decision record and central change card**
+- [ ] **4단계: 결정 기록과 중앙 변경 카드 추가**
 
-Add a 2026-07-24 `HOLD-005` decision row naming `이병우` as the direct decision source. Add:
+직접 결정자를 `이병우`로 명시한 2026-07-24 `HOLD-005` 결정 행을 추가하고 다음 카드를 추가한다.
 
 ```markdown
 #### DOC-20260724-002 · 카페·베이커리 단독 픽업 홀드 범위 정정
@@ -156,9 +156,9 @@ Add a 2026-07-24 `HOLD-005` decision row naming `이병우` as the direct decisi
 - 추적 정보: PR `#23`, 커밋은 반영 커밋을 참조한다.
 ```
 
-- [ ] **Step 5: Run pickup consistency assertions**
+- [ ] **5단계: 픽업 정합성 검증 실행**
 
-Run the Step 1 block, then:
+1단계 블록을 실행한 뒤 다음을 실행한다.
 
 ```powershell
 $all = Get-Content docs/03-domain-model.md,docs/04-user-flows.md,docs/05-functional-requirements.md,docs/service-policies/02-store-onboarding.md,docs/service-policies/06-menu-hold.md -Raw -Encoding UTF8
@@ -166,9 +166,9 @@ $all = Get-Content docs/03-domain-model.md,docs/04-user-flows.md,docs/05-functio
   ForEach-Object { if (-not $all.Contains($_)) { throw "missing: $_" } }
 ```
 
-Expected: both commands PASS.
+기대 결과: 두 명령이 모두 통과한다.
 
-- [ ] **Step 6: Commit the pickup policy alignment**
+- [ ] **6단계: 픽업 정책 정렬 커밋**
 
 ```powershell
 git add docs/03-domain-model.md docs/04-user-flows.md docs/05-functional-requirements.md docs/service-policies/02-store-onboarding.md docs/service-policies/06-menu-hold.md miriyum-service-decisions.md

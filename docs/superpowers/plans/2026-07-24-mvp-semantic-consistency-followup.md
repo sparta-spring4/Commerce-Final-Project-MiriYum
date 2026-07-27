@@ -1,38 +1,38 @@
-# MVP Semantic Consistency Follow-up Implementation Plan
+# MVP 의미 정합성 후속 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **에이전트 작업자 필수 지침:** 이 계획은 `superpowers:subagent-driven-development` 사용을 권장하며, 같은 세션에서 직접 실행할 때는 `superpowers:executing-plans`를 사용해 작업별로 구현한다. 각 단계는 확인란(`- [ ]`)으로 추적한다.
 
-**Goal:** Align the previously identified MVP contradictions and remove the entire review feature set from the first MVP while preserving its policies as future implementation criteria.
+**목표:** 앞서 확인한 MVP 모순을 정렬하고, 리뷰 정책은 미래 구현 기준으로 보존하면서 리뷰 기능 전체를 1차 MVP에서 제외한다.
 
-**Architecture:** Use the product vision and explicit user decisions as the current product-scope boundary. Keep detailed review policies as future safety contracts, remove review activation from current product, domain, flow, requirement, architecture, and authentication documents, then verify all scope mirrors together.
+**구조:** 제품 비전과 명시적 사용자 결정을 현재 제품 범위 경계로 사용한다. 상세 리뷰 정책은 미래 안전 계약으로 유지하되 현재 제품·도메인·흐름·요구사항·아키텍처·인증 문서에서 리뷰 활성화를 제거하고 모든 범위 복제본을 함께 검증한다.
 
-**Tech Stack:** Markdown, PowerShell assertions, Git
+**기술 구성:** Markdown, PowerShell 검증, Git
 
-## Global Constraints
+## 공통 제약
 
-- Do not add a new product feature or policy decision.
-- Advertising products, billing, and ad removal remain outside the first MVP.
-- Reservations confirm immediately and do not expose an approval-pending state.
-- Cancellation-resource transfer remains an initial core feature governed by `TRANSFER-001` through `TRANSFER-009`.
-- Current waiting includes both onsite and remote waiting.
-- Free basic operating statistics are current MVP; Pro comparison, interpretation, recommendation, automatic reports, and export remain excluded.
-- Review creation, publication, editing, deletion, ratings, tags, media, reporting, moderation, store replies, abuse detection, trust scoring, sanctions, and false-positive recovery are all outside the first MVP.
-- `TRUST-001` through `TRUST-012` remain confirmed future policy criteria; confirmation does not activate current review functionality, permissions, APIs, UI, or storage.
-- Modify only the files in the design allowlist.
+- 새 제품 기능이나 정책 결정을 추가하지 않는다.
+- 광고 상품·과금·광고 제거는 계속 1차 MVP에서 제외한다.
+- 예약은 즉시 확정하며 승인 대기 상태를 노출하지 않는다.
+- 취소 자원 자동 승계는 `TRANSFER-001`~`TRANSFER-009`가 관리하는 초기 핵심 기능으로 유지한다.
+- 현재 웨이팅에는 현장과 원격 웨이팅이 모두 포함된다.
+- Free 기본 운영 통계는 현재 MVP이고 Pro 비교·해석·추천·자동 리포트·내보내기는 제외한다.
+- 리뷰 생성·공개·수정·삭제, 별점·태그·미디어, 신고·검수·매장 답글, 어뷰징 탐지·신뢰 점수·제재·오탐 복구는 모두 1차 MVP에서 제외한다.
+- `TRUST-001`~`TRUST-012`는 확정된 미래 정책 기준으로 유지한다. 확정 상태는 현재 리뷰 기능·권한·API·UI·저장소를 활성화하지 않는다.
+- 설계 허용 목록의 파일만 수정한다.
 
 ---
 
-### Task 1: Add failing semantic assertions
+### 작업 1: 실패하는 의미 검증 추가
 
-**Files:**
-- Inspect: `docs/04-user-flows.md`
-- Inspect: `docs/service-policies/02-store-onboarding.md`
+**파일:**
+- 검사: `docs/04-user-flows.md`
+- 검사: `docs/service-policies/02-store-onboarding.md`
 
-**Interfaces:**
-- Consumes: Current Markdown text on `main`.
-- Produces: A reproducible PowerShell assertion command that exits nonzero while the four contradictions remain.
+**연결:**
+- 입력: `main`의 현재 Markdown 텍스트
+- 출력: 네 가지 모순이 남아 있는 동안 0이 아닌 종료 코드를 반환하는 재현 가능한 PowerShell 검증 명령
 
-- [x] **Step 1: Run assertions against the current documents**
+- [x] **1단계: 현재 문서에 검증 실행**
 
 ```powershell
 $flow = Get-Content -LiteralPath 'docs\04-user-flows.md' -Raw -Encoding UTF8
@@ -50,38 +50,38 @@ if ($failed.Count -gt 0) {
 }
 ```
 
-Expected: exit code `1`; all four named checks fail before the document edits.
+기대 결과: 종료 코드 `1`이며 문서 편집 전에는 이름이 지정된 네 검사가 모두 실패한다.
 
-### Task 2: Align discovery, reservation, and transfer user flows
+### 작업 2: 탐색·예약·승계 사용자 흐름 정렬
 
-**Files:**
-- Modify: `docs/04-user-flows.md`
+**파일:**
+- 수정: `docs/04-user-flows.md`
 
-**Interfaces:**
-- Consumes: MVP boundaries from `docs/05-functional-requirements.md`, `docs/service-policies/04-reservation.md`, `docs/service-policies/10-waitlist-transfer.md`, and `docs/service-policies/13-ad-recommendation.md`.
-- Produces: Current user flows for general recommendation, immediate reservation confirmation, and cancellation-resource transfer.
+**연결:**
+- 입력: `docs/05-functional-requirements.md`, `docs/service-policies/04-reservation.md`, `docs/service-policies/10-waitlist-transfer.md`, `docs/service-policies/13-ad-recommendation.md`의 MVP 경계
+- 출력: 일반 추천, 예약 즉시 확정과 취소 자원 자동 승계의 현재 사용자 흐름
 
-- [x] **Step 1: Replace the discovery flow**
+- [x] **1단계: 탐색 흐름 교체**
 
-Use this exact main-flow sentence:
+다음 주요 흐름 문장을 정확히 사용한다.
 
 ```markdown
 - **주요 흐름:** 서비스는 공개 가능한 매장·영업·메뉴 정보를 바탕으로 검색 결과와 일반 추천 결과를 제시한다.
 ```
 
-Remove `ADS-002` and `ADS-006` from the discovery flow's related policy IDs while preserving `ADS-007` and `ADS-008`.
+탐색 흐름의 관련 정책 ID에서 `ADS-002`와 `ADS-006`을 제거하되 `ADS-007`과 `ADS-008`은 유지한다.
 
-- [x] **Step 2: Replace the reservation main flow**
+- [x] **2단계: 예약 주요 흐름 교체**
 
-Use this exact sentence:
+다음 문장을 정확히 사용한다.
 
 ```markdown
 - **주요 흐름:** 서비스는 영업시간·예약 가능 수량·중복 예약 여부, 임시 선점 및 필요한 메뉴 홀드·결제 조건을 검증하고, 유효한 요청은 즉시 확정한다. 확정할 수 없으면 사용자에게 실패 사유를 안내한다.
 ```
 
-- [x] **Step 3: Add the cancellation-resource transfer flow**
+- [x] **3단계: 취소 자원 자동 승계 흐름 추가**
 
-Insert a new section after payment and cancellation:
+결제와 취소 뒤에 다음 새 절을 삽입한다.
 
 ```markdown
 ## 7. 취소 자리·수량 자동 승계
@@ -93,90 +93,90 @@ Insert a new section after payment and cancellation:
 - **관련 정책 ID:** TRANSFER-001, TRANSFER-002, TRANSFER-003, TRANSFER-004, TRANSFER-005, TRANSFER-006, TRANSFER-007, TRANSFER-008, TRANSFER-009.
 ```
 
-Renumber the following review and notification sections from `7`, `8` to `8`, `9`.
+뒤의 리뷰·알림 절 번호를 `7`, `8`에서 `8`, `9`로 다시 매긴다.
 
-- [x] **Step 4: Run the user-flow assertions**
+- [x] **4단계: 사용자 흐름 검증 실행**
 
-Run the Task 1 command.
+작업 1의 명령을 실행한다.
 
-Expected: the general recommendation, no approval pending, and transfer flow checks pass; the store activation check still fails.
+기대 결과: 일반 추천, 승인 대기 없음, 승계 흐름 검사는 통과하고 매장 활성화 검사는 계속 실패한다.
 
-- [x] **Step 5: Commit the user-flow alignment**
+- [x] **5단계: 사용자 흐름 정렬 커밋**
 
 ```powershell
 git add -- docs/04-user-flows.md
 git commit -m "docs: align current MVP user flows"
 ```
 
-### Task 3: Align the store activation feature boundary
+### 작업 3: 매장 활성화 기능 경계 정렬
 
-**Files:**
-- Modify: `docs/service-policies/02-store-onboarding.md`
+**파일:**
+- 수정: `docs/service-policies/02-store-onboarding.md`
 
-**Interfaces:**
-- Consumes: Current MVP boundaries from `docs/service-policies/05-waiting.md`, `docs/service-policies/14-analytics-report.md`, and `docs/05-functional-requirements.md`.
-- Produces: A STORE-007 activation inventory that includes onsite and remote waiting plus Free basic operating statistics while excluding Pro analytics.
+**연결:**
+- 입력: `docs/service-policies/05-waiting.md`, `docs/service-policies/14-analytics-report.md`, `docs/05-functional-requirements.md`의 현재 MVP 경계
+- 출력: 현장·원격 웨이팅과 Free 기본 운영 통계를 포함하고 Pro 분석을 제외하는 `STORE-007` 활성화 목록
 
-- [x] **Step 1: Expand the current activation list**
+- [x] **1단계: 현재 활성화 목록 확장**
 
-In the STORE-007 activation list, replace the onsite-only waiting wording with `현장·원격 웨이팅` and add `Free 기본 운영 통계`.
+`STORE-007` 활성화 목록에서 현장 전용 웨이팅 표현을 `현장·원격 웨이팅`으로 바꾸고 `Free 기본 운영 통계`를 추가한다.
 
-- [x] **Step 2: Narrow the excluded analytics scope**
+- [x] **2단계: 제외 분석 범위 축소**
 
-Replace the broad exclusion of `수요 분석` with the exact future scope `Pro 비교·해석·추천·자동 리포트·내보내기`.
+넓은 `수요 분석` 제외 표현을 정확한 미래 범위인 `Pro 비교·해석·추천·자동 리포트·내보내기`로 교체한다.
 
-- [x] **Step 3: Align the limiting sentence**
+- [x] **3단계: 제한 문장 정렬**
 
-Update the sentence that limits currently supported functions so it refers to the corrected STORE-007 list and keeps linked hold/deposit boundaries without excluding remote waiting or Free basic statistics.
+현재 지원 기능을 제한하는 문장이 수정된 `STORE-007` 목록을 가리키게 한다. 연결된 홀드·보증금 경계는 유지하되 원격 웨이팅이나 Free 기본 통계를 제외하지 않게 한다.
 
-- [x] **Step 4: Run all semantic assertions**
+- [x] **4단계: 모든 의미 검증 실행**
 
-Run the Task 1 command.
+작업 1의 명령을 실행한다.
 
-Expected: exit code `0`; all four named checks pass.
+기대 결과: 종료 코드 `0`이며 이름이 지정된 네 검사가 모두 통과한다.
 
-- [x] **Step 5: Commit the store activation alignment**
+- [x] **5단계: 매장 활성화 정렬 커밋**
 
 ```powershell
 git add -- docs/service-policies/02-store-onboarding.md
 git commit -m "docs: align store activation MVP scope"
 ```
 
-### Task 4: Verify scope and document hygiene
+### 작업 4: 범위와 문서 위생 검증
 
-**Files:**
-- Verify: `docs/04-user-flows.md`
-- Verify: `docs/service-policies/02-store-onboarding.md`
-- Verify: `docs/superpowers/specs/2026-07-24-mvp-semantic-consistency-followup-design.md`
-- Verify: `docs/superpowers/plans/2026-07-24-mvp-semantic-consistency-followup.md`
+**파일:**
+- 검증: `docs/04-user-flows.md`
+- 검증: `docs/service-policies/02-store-onboarding.md`
+- 검증: `docs/superpowers/specs/2026-07-24-mvp-semantic-consistency-followup-design.md`
+- 검증: `docs/superpowers/plans/2026-07-24-mvp-semantic-consistency-followup.md`
 
-**Interfaces:**
-- Consumes: The completed Markdown changes.
-- Produces: Evidence that the four contradictions are resolved without changing canonical MVP boundaries or unrelated files.
+**연결:**
+- 입력: 완료된 Markdown 변경
+- 출력: 정본 MVP 경계나 관련 없는 파일을 바꾸지 않고 네 모순을 해소했다는 증거
 
-- [x] **Step 1: Verify the canonical boundary text remains unchanged**
+- [x] **1단계: 정본 경계 텍스트가 바뀌지 않았는지 검증**
 
 ```powershell
 git diff main -- docs/05-functional-requirements.md docs/service-policies/04-reservation.md docs/service-policies/05-waiting.md docs/service-policies/10-waitlist-transfer.md docs/service-policies/13-ad-recommendation.md docs/service-policies/14-analytics-report.md
 ```
 
-Expected: no output.
+기대 결과: 출력이 없다.
 
-- [x] **Step 2: Verify formatting**
+- [x] **2단계: 형식 검증**
 
 ```powershell
 git diff --check main
 ```
 
-Expected: exit code `0` with no output.
+기대 결과: 출력 없이 종료 코드 `0`이다.
 
-- [x] **Step 3: Verify the allowlist**
+- [x] **3단계: 허용 목록 검증**
 
 ```powershell
 git diff --name-only main
 ```
 
-Expected paths:
+기대 경로:
 
 ```text
 docs/04-user-flows.md
@@ -185,34 +185,34 @@ docs/superpowers/plans/2026-07-24-mvp-semantic-consistency-followup.md
 docs/superpowers/specs/2026-07-24-mvp-semantic-consistency-followup-design.md
 ```
 
-- [x] **Step 4: Review the final diff**
+- [x] **4단계: 최종 변경 내역 검토**
 
 ```powershell
 git diff main -- docs/04-user-flows.md docs/service-policies/02-store-onboarding.md
 ```
 
-Expected: only the four approved semantic corrections.
+기대 결과: 승인된 네 가지 의미 보정만 있다.
 
-### Task 5: Remove review activation from the first MVP
+### 작업 5: 1차 MVP의 리뷰 활성화 제거
 
-**Files:**
-- Modify: `docs/01-product-vision.md`
-- Modify: `docs/02-users-and-permissions.md`
-- Modify: `docs/03-domain-model.md`
-- Modify: `docs/04-user-flows.md`
-- Modify: `docs/05-functional-requirements.md`
-- Modify: `docs/06-system-architecture.md`
-- Modify: `docs/service-policies/01-member-auth.md`
-- Modify: `docs/service-policies/12-review-trust.md`
-- Modify: `docs/service-policies/README.md`
-- Modify: `miriyum-service-blueprint.md`
-- Modify: `miriyum-service-decisions.md`
+**파일:**
+- 수정: `docs/01-product-vision.md`
+- 수정: `docs/02-users-and-permissions.md`
+- 수정: `docs/03-domain-model.md`
+- 수정: `docs/04-user-flows.md`
+- 수정: `docs/05-functional-requirements.md`
+- 수정: `docs/06-system-architecture.md`
+- 수정: `docs/service-policies/01-member-auth.md`
+- 수정: `docs/service-policies/12-review-trust.md`
+- 수정: `docs/service-policies/README.md`
+- 수정: `miriyum-service-blueprint.md`
+- 수정: `miriyum-service-decisions.md`
 
-**Interfaces:**
-- Consumes: The user's decision that the entire review feature group is outside the first MVP.
-- Produces: Product, permission, domain, flow, requirement, architecture, authentication, and policy documents that preserve review policies without activating review functionality.
+**연결:**
+- 입력: 리뷰 기능 그룹 전체를 1차 MVP에서 제외한다는 사용자 결정
+- 출력: 리뷰 기능을 활성화하지 않고 리뷰 정책을 보존하는 제품·권한·도메인·흐름·요구사항·아키텍처·인증·정책 문서
 
-- [x] **Step 1: Run the failing review-scope assertions**
+- [x] **1단계: 실패하는 리뷰 범위 검증 실행**
 
 ```powershell
 $vision = Get-Content -LiteralPath 'docs\01-product-vision.md' -Raw -Encoding UTF8
@@ -240,53 +240,53 @@ $checks = @(
 if (@($checks | Where-Object { -not $_ }).Count -gt 0) { exit 1 }
 ```
 
-Expected: exit code `1`; the current documents still activate review in the first MVP.
+기대 결과: 종료 코드 `1`이며 현재 문서가 여전히 1차 MVP에서 리뷰를 활성화한다.
 
-- [x] **Step 2: Align product, permission, domain, flow, requirement, and architecture documents**
+- [x] **2단계: 제품·권한·도메인·흐름·요구사항·아키텍처 문서 정렬**
 
-- Mark post-visit review evaluation as a future product value and add the full review feature group to initial non-goals.
-- Remove review from current general-user permissions.
-- Remove the `review` section and review dependencies from the initial domain model, changing the initial domain count from six to five.
-- Remove the review user flow, renumber notification to section 8, and remove review events from its current start condition.
-- Change the `TRUST-001` through `TRUST-012` functional group from `초기 핵심` to `비초기` with an explicit full-feature exclusion boundary.
-- Remove `review/` from the initial backend package structure.
+- 방문 후 리뷰 평가를 미래 제품 가치로 표시하고 리뷰 기능 전체를 초기 비목표에 추가한다.
+- 현재 일반 사용자 권한에서 리뷰를 제거한다.
+- 초기 도메인 모델에서 `review` 절과 리뷰 의존성을 제거하고 초기 도메인 수를 6개에서 5개로 바꾼다.
+- 리뷰 사용자 흐름을 제거하고 알림을 8절로 다시 매기며 현재 시작 조건에서 리뷰 사건을 제거한다.
+- `TRUST-001`~`TRUST-012` 기능 그룹을 `초기 핵심`에서 `비초기`로 바꾸고 전체 기능 제외 경계를 명시한다.
+- 초기 백엔드 패키지 구조에서 `review/`를 제거한다.
 
-- [x] **Step 3: Align authentication and review policy boundaries**
+- [x] **3단계: 인증과 리뷰 정책 경계 정렬**
 
-- Remove review from the AUTH-009 sentence that lists current non-alcohol services for users aged 14 or older.
-- Add a first-MVP boundary to `12-review-trust.md` that keeps all detailed policy decisions but activates no current review functionality, permissions, API, UI, or storage.
-- Add the same boundary note below the review section in the policy master.
-- Record the user's current review exclusion decision in `miriyum-service-decisions.md`.
-- Mark `miriyum-service-blueprint.md` as a historical input that cannot activate or expand the current MVP.
+- 만 14세 이상 사용자의 현재 비주류 서비스를 나열하는 `AUTH-009` 문장에서 리뷰를 제거한다.
+- 모든 상세 정책 결정을 유지하되 현재 리뷰 기능·권한·API·UI·저장소를 활성화하지 않는 1차 MVP 경계를 `12-review-trust.md`에 추가한다.
+- 정책 마스터의 리뷰 절 아래에도 같은 경계 문구를 추가한다.
+- 사용자의 현재 리뷰 제외 결정을 `miriyum-service-decisions.md`에 기록한다.
+- `miriyum-service-blueprint.md`를 현재 MVP를 활성화하거나 확장할 수 없는 역사적 입력으로 표시한다.
 
-- [x] **Step 4: Run the review-scope assertions**
+- [x] **4단계: 리뷰 범위 검증 실행**
 
-Run the Step 1 command.
+1단계의 명령을 실행한다.
 
-Expected: exit code `0`; all ten scope assertions pass.
+기대 결과: 종료 코드 `0`이며 범위 검증 10개가 모두 통과한다.
 
-### Task 6: Reverify the expanded MVP consistency scope
+### 작업 6: 확장된 MVP 정합성 범위 재검증
 
-**Files:**
-- Verify every path in the expanded design allowlist.
+**파일:**
+- 확장된 설계 허용 목록의 모든 경로를 검증한다.
 
-**Interfaces:**
-- Consumes: The completed five semantic consistency corrections.
-- Produces: Evidence for semantic scope, policy ID coverage, links, encoding, formatting, and exact changed-path allowlist.
+**연결:**
+- 입력: 완료된 다섯 가지 의미 정합성 보정
+- 출력: 의미 범위·정책 ID 범위·링크·인코딩·형식·정확한 변경 경로 허용 목록의 증거
 
-- [x] **Step 1: Run all existing semantic checks and the Task 5 review assertions**
+- [x] **1단계: 기존 의미 검사와 작업 5의 리뷰 검증 모두 실행**
 
-Expected: all checks pass.
+기대 결과: 모든 검사가 통과한다.
 
-- [x] **Step 2: Verify policy IDs, relative links, encoding, and diff formatting**
+- [x] **2단계: 정책 ID·상대 링크·인코딩·변경 형식 검증**
 
 ```powershell
 git diff --check main
 git diff --name-only main
 ```
 
-Expected: exit code `0`, no formatting findings, and only expanded allowlist paths.
+기대 결과: 종료 코드 `0`, 형식 지적 없음, 확장된 허용 목록 경로만 표시된다.
 
-- [x] **Step 3: Request independent review**
+- [x] **3단계: 독립 검토 요청**
 
-The reviewer must compare `main..HEAD`, verify that review policy confirmation is not confused with current MVP activation, and report Critical, Important, and Minor findings.
+검토자는 `main..HEAD`를 비교하고 리뷰 정책 확정과 현재 MVP 활성화가 혼동되지 않았는지 확인한 뒤 치명적·중요·경미 지적을 보고해야 한다.
