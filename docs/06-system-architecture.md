@@ -4,13 +4,13 @@
 
 초기 시스템은 기능별 경계를 유지하는 모듈러 모놀리스로 시작한다. 예약과 결제처럼 정합성이 중요한 흐름을 한 애플리케이션과 하나의 트랜잭션 모델 안에서 명확히 구현하고, 이후 요구가 검증될 때만 운영 복잡도를 늘린다.
 
-초기 목표는 도메인별 책임 분리, 예측 가능한 데이터 정합성, 테스트 가능한 백엔드 경계다. 초기에는 마이크로서비스 분리, 비동기 메시지 기반 통합, 별도 검색·캐시 클러스터를 도입하지 않는다.
+초기 목표는 도메인별 책임 분리, 예측 가능한 데이터 정합성, 테스트 가능한 백엔드 경계다. 초기에는 마이크로서비스 분리, 비동기 메시지 기반 통합, 별도 검색 클러스터와 Valkey 외 추가 캐시 클러스터를 도입하지 않는다.
 
 ## 초기 런타임 구조
 
-React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당하며, Spring Security는 인증·인가 경계를 제공한다.
+React·TypeScript·Vite 프런트엔드는 HTTP API를 통해 Spring Boot 애플리케이션과 통신하고, 애플리케이션은 MySQL을 영속성 원본으로 사용한다. Spring MVC는 웹 계층을, Spring Data JPA는 영속성 접근을 담당한다. Spring Security 기반 액세스 JWT는 인증·인가 경계를 제공하고, Valkey는 리프레시 토큰의 회전·만료·폐기 상태를 공유한다. 통합 검색은 애플리케이션의 규칙 해석과 선택적 Spring AI 기반 외부 AI 보조를 거쳐 MySQL을 직접 조회한다.
 
-이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수, 배포 토폴로지, 외부 연동 방식은 실제 요구가 확정되기 전에는 정하지 않는다.
+이 구조는 하나의 배포 단위 안에서 도메인 모듈을 분리하는 초기 기준이다. 서비스 수와 배포 토폴로지는 실제 요구가 확정되기 전에는 정하지 않는다. 현재 외부 결제 연동은 아래의 PortOne V2 어댑터 경계를 따른다.
 
 ## 저장소 구조
 
@@ -29,7 +29,6 @@ backend/src/main/java/com/miriyum
 ├─ store/
 ├─ booking/
 ├─ payment/
-├─ review/
 ├─ notification/
 └─ global/
    ├─ config/
@@ -54,19 +53,39 @@ controller에서 repository를 직접 호출하거나, DTO·엔티티를 도메�
 
 ## 초기 확정 기술
 
-초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
+초기 확정 기술은 Java 21, Spring Boot, Spring MVC, Spring Data JPA, MySQL, Flyway, Spring Security, Spring AI, Valkey 8.1.x, Spring Data Redis, Lettuce, React, TypeScript, Vite 및 기본 테스트 도구다. Flyway는 데이터베이스 변경 이력을 관리하고, Spring Data Redis와 Lettuce는 애플리케이션에서 Valkey에 접근하며, Spring AI는 규칙으로 해석하지 못한 검색 표현의 외부 AI 어댑터 경계를 제공한다. 기본 테스트 도구는 각 계층의 단위·통합 테스트를 지원한다.
+
+Valkey의 현재 책임은 리프레시 토큰 상태, 속도 제한, 짧은 캐시, 임시 선점과 실시간 전달 보조로 한정한다. 계정·권한과 거래의 업무 원장은 MySQL에 유지하며 Valkey를 업무 원장으로 사용하지 않는다.
+
+## 통합 검색 경로
+
+하나의 검색창에서 받은 입력은 일반 검색과 자연어 검색으로 나누지 않는다. 애플리케이션은 검색어와 구조화 조건을 함께 추출하고 숫자·단위·시각·지역·카테고리·태그를 결정 규칙으로 먼저 해석한다. 규칙으로 해석하지 못한 표현만 Spring AI 기반 외부 AI 어댑터에 보내며, 서버가 허용한 필드·연산자·코드·값 범위의 조건 제안만 검증해 받아들인다.
+
+검증된 조건과 검색어를 병합한 현재 조회 경로는 MySQL 직접 검색이다. 짧은 Valkey 파생 캐시는 비권위 최적화일 뿐이며 결과 표시와 예약·웨이팅·홀드 전환 전에 최신 MySQL 상태를 다시 검증한다. OpenSearch와 Meilisearch는 `확정 + MVP 제외` 기술이며, 오탈자·자동완성·전문 검색 품질 또는 대규모 검색 부하의 MySQL 측정 결과가 기준을 넘을 때만 [ADR-007](adr/ADR-007-unified-search-mysql.md)에 따라 재검토한다.
+
+## 현재 확정 외부 결제
+
+`payment` 도메인은 외부 결제 SDK·API 타입과 분리된 내부 포트 `PaymentClient`를 소유한다. 운영 및 Docker 프로필은 PortOne V2 어댑터 `PortOnePaymentClient`를 사용하고, 로컬 프로필은 실제 외부 결제를 만들지 않는 `LocalPaymentClient`를 사용한다. 실제 PG 채널과 개별 결제수단은 계약·심사·운영 구성이 완료된 항목만 외부 설정으로 활성화한다.
+
+MiriYum은 내부 결제 레코드 ID와 내부 주문 ID를 서버에서 생성한다. 고객사가 채번하는 PortOne `paymentId`는 준비된 내부 주문 ID에서 일대일로 파생하며, 하나의 `paymentId`에 여러 결제 시도가 생겨도 최종 성공은 한 번만 허용한다. PortOne `transactionId`는 PortOne이 개별 결제 시도에 부여하므로 하나의 `paymentId` 아래 시도마다 달라질 수 있다.
+
+브라우저 확정 요청은 이미 준비된 `paymentId`와 인증된 내부 결제 참조만 조회 선택자로 전달하며 둘 다 성공 근거가 아니다. 서버는 브라우저가 주장한 상태·금액·`transactionId`를 무시하고 알려진 `paymentId`를 PortOne V2 API에서 조회해 상태, 정확한 금액·통화와 내부 주문 매핑을 검증한다. `transactionId`는 인증된 서버 조회 또는 검증된 웹훅에서만 신뢰해 시도별로 저장한다. 검증된 웹훅은 `paymentId`, `transactionId`, 이벤트 유형과 타임스탬프 또는 메시지 식별자를 구분해 상관·중복 제거한 뒤 같은 멱등 확정 경로를 호출한다.
+
+Store ID와 Channel Key는 프런트엔드 공개 설정이다. API Base URL은 서버 전용 비밀이 아닌 설정이고, API Secret과 Webhook Secret은 서버 비밀이다. 서버 전용 설정과 비밀을 프런트에 노출하지 않으며 비밀은 로그·저장소에도 노출하지 않는다.
+
+확정 경로는 중앙 `CONFIRMING` 상태와 작업 임대를 조건부 선점한다. PortOne 조회 예외에는 거래를 `결과 불명확`·`확인 대기`로 격리하고 작업 임대만 해제하며, 장시간 남은 `CONFIRMING`은 중앙 대사 작업자만 임대를 인수해 알려진 `paymentId`를 다시 조회한다. 인증된 조회가 `PAID`를 확인하면 같은 멱등 확정 경로를 호출하고, 실패·취소·결제 없음 같은 명시적 비성공 종결을 확인한 뒤에만 결제·재시도 가능 상태를 복원한다. 대기·알 수 없음은 격리를 유지하고 새 결제 시도·청구를 노출하지 않으며, 자동 해소할 수 없는 모호성은 `PAY-014` 대사와 `PAY-015` 수동 복구로 보낸다. 상세 결정은 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
 
 ## 조건부 도입 기술
 
-QueryDSL은 동적·복합 조회가 JPA 메서드 이름이나 명시적 쿼리로 읽기 어렵고 유지하기 어려워질 때 도입을 검토한다. Redis는 측정된 성능 병목이나 명확한 캐시·세션·조율 요구가 있을 때만 검토한다.
+QueryDSL은 동적·복합 조회가 JPA 메서드 이름이나 명시적 쿼리로 읽기 어렵고 유지하기 어려워질 때 도입을 검토한다. Redis 호환 프로토콜과 접근 라이브러리는 현재 선택된 Valkey 경계 안에서 사용하며 별도의 Redis 서버 도입을 일반 후보로 두지 않는다.
 
-SSE는 사용자에게 실시간 상태 전달이 실제 요구되고 연결 복구·권한·운영 부담을 감당할 기준이 마련될 때 검토한다. Outbox는 외부 부작용 또는 비동기 전달에서 데이터 변경과 발행의 원자성·재시도 요구가 확인될 때 검토한다. Testcontainers는 실제 MySQL 호환성 검증이 필요하고 로컬·CI 환경에서 재현 가능한 컨테이너 실행 조건이 갖춰질 때 검토한다.
+SSE는 사용자에게 실시간 상태 전달이 실제 요구되고 연결 복구·권한·운영 부담을 감당할 기준이 마련될 때 검토한다. 결제·자원 DB 상태와 영속 후속 작업 레코드를 같은 트랜잭션 또는 일관된 처리 경계에 기록해야 한다. 이 불변식만으로 Outbox 패턴을 활성화하지 않는다. 정확한 Outbox 채택은 외부 부작용 또는 비동기 전달에서 데이터 변경과 발행의 원자성·재시도 요구가 확인될 때 별도 결정으로 검토한다. Testcontainers는 실제 MySQL 호환성 검증이 필요하고 로컬·CI 환경에서 재현 가능한 컨테이너 실행 조건이 갖춰질 때 검토한다.
 
 이 기술들은 초기 의존성으로 자동 추가하지 않는다. 도입 시에는 요구, 운영 비용, 테스트 전략과 대체안을 기록한 뒤 결정한다.
 
 ## 초기 제외 기술
 
-초기 제외 기술에는 마이크로서비스 분리, Kafka, Debezium, Kafka Connect, OpenSearch, AWS MSK, ElastiCache가 포함된다. 이들은 초기 제외 상태이며, 현재 구성에 도입하지 않는다. 규모·검색·이벤트 처리·캐시 요구가 측정되어 재평가 조건을 충족하기 전에는 추가하지 않는다.
+초기 제외 기술에는 마이크로서비스 분리, Kafka, Debezium, Kafka Connect, OpenSearch, Meilisearch, AWS MSK, ElastiCache가 포함된다. 이들은 초기 제외 상태이며 현재 구성에 도입하지 않는다. 특히 OpenSearch와 Meilisearch는 미결정 TODO가 아니라 `확정 + MVP 제외` 기술이다. 규모·검색·이벤트 처리·캐시 요구가 측정되어 재평가 조건을 충족하기 전에는 추가하지 않는다.
 
 ## 후속 AWS 배포 단계
 
@@ -83,3 +102,9 @@ AWS 배포는 애플리케이션 경계, 데이터베이스 마이그레이션, 
 후속 결정은 모듈러 모놀리스 유지 또는 분리, 조건부 기술 도입, AWS 배포 구성, 외부 연동과 이벤트 전달 정책을 ADR로 기록한다. 이 문서는 초기 기준이며, ADR가 승인되기 전에는 조건부·초기 제외 항목을 현재 구성으로 해석하지 않는다.
 
 backend·frontend 최소 스캐폴드의 exact toolchain과 초기 DB 테스트 경계는 [ADR-004](adr/ADR-004-scaffold-toolchain-and-test-baseline.md)를 따른다.
+
+외부 결제 어댑터와 확정·복구 경계는 [ADR-005](adr/ADR-005-portone-v2-payment-adapter.md)를 따른다.
+
+액세스 JWT와 Valkey 리프레시 토큰 상태의 선택 이유와 책임 경계는 [ADR-006](adr/ADR-006-jwt-valkey-refresh-token.md)을 따른다.
+
+하나의 검색창, 규칙 우선·선택적 외부 AI 보조와 MySQL 직접 조회의 선택 이유는 [ADR-007](adr/ADR-007-unified-search-mysql.md)을 따른다.

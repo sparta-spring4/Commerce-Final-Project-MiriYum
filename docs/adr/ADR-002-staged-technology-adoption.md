@@ -20,6 +20,14 @@ Testcontainers는 다음 중 하나가 처음으로 필요한 통합 테스트�
 
 Docker Compose를 수동으로 실행하는 것만으로는 Pull Request 재현성과 테스트 격리를 보장할 수 없는 경우도 같은 도입 조건으로 기록한다.
 
+### 2026-07-27 후속 결정
+
+Redis 일반 후보 가운데 인증 상태 저장 요구는 [ADR-006](ADR-006-jwt-valkey-refresh-token.md)에 따라 Valkey 도입으로 구체화했다. Valkey는 리프레시 토큰 상태와 캐시, 속도 제한, 임시 선점과 실시간 전달을 위한 보조 기반 시설이며 MySQL 업무 원장을 대체하지 않는다.
+
+별도 검색 엔진은 [ADR-007](ADR-007-unified-search-mysql.md)에 따라 OpenSearch와 Meilisearch 모두 `확정 + MVP 제외` 상태를 유지한다. 오타, 자동완성, 전문 검색 품질 또는 검색 부하의 측정 결과가 MySQL 기준을 넘을 때만 다시 검토한다.
+
+이 후속 결정은 나머지 조건부 기술을 실제 요구와 검증 전략에 따라 단계적으로 도입한다는 기존 원칙을 변경하지 않는다.
+
 ## 검토한 대안
 
 - 모든 조건부 기술을 초기 의존성으로 추가: 검증되지 않은 복잡성과 유지 비용을 앞당긴다.
@@ -46,3 +54,5 @@ Docker Compose를 수동으로 실행하는 것만으로는 Pull Request 재현�
 - [시스템 아키텍처](../06-system-architecture.md)
 - [품질·운영·규칙](../09-quality-operations-and-rules.md)
 - [ADR 템플릿](ADR-000-template.md)
+- [액세스 JWT와 Valkey 리프레시 토큰 상태 관리](ADR-006-jwt-valkey-refresh-token.md)
+- [단일 검색창과 MySQL 기반 통합 검색](ADR-007-unified-search-mysql.md)

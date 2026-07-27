@@ -162,6 +162,104 @@
 
 ## 7. 변경 기록
 
+### 2026-07-24 이후 기록 형식
+
+새 문서 변경은 날짜별 카드로 기록한다. 현재 정책 내용은 관련 `docs/` 정본에서 확인하고, 이 절에는 변경의 추적 정보만 남긴다.
+
+#### DOC-YYYYMMDD-NNN · 변경 제목
+
+- 변경 일시: `YYYY-MM-DD HH:mm KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: 변경한 정본과 정책 ID
+- 변경 내용: 이전 기준과 새 기준
+- 변경 이유: 변경이 필요했던 제품·정책·정합성 근거
+- 추적 정보: 관련 PR과 커밋
+
+#### DOC-20260724-001 · PortOne V2 결제 연동 확정
+
+- 변경 일시: `2026-07-24 22:56 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: `PAY-003`, 결제 사용자 흐름, 시스템 아키텍처, 데이터·API 계약, `ADR-005`
+- 변경 내용: PortOne V2를 현재 결제 어댑터로 확정하고 Agora 참조 구조의 SDK 요청, 서버 재검증, 웹훅 검증, 동일 확정 경로와 `CONFIRMING` 복구를 문서화했다.
+- 변경 이유: 선택된 결제 연동 방식이 후보·TODO로 남아 있던 모순을 제거하고, 어댑터 선택과 실제 PG·결제수단 계약 및 식당 정산을 분리하기 위해서다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [Agora 기준 커밋 `bf662e2888c625fd27f751ad932022dbb6dc0e2d`](https://github.com/sparta-spring4/Commerce-live-chat-system-Agora/commit/bf662e2888c625fd27f751ad932022dbb6dc0e2d), [정책 커밋 `0b7cd76a6b469641e760f7afec851f43bca6defc`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/0b7cd76a6b469641e760f7afec851f43bca6defc), [아키텍처·흐름 커밋 `453552aae6b124c609d30a5f6303a28efb1c0353`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/453552aae6b124c609d30a5f6303a28efb1c0353)
+
+#### DOC-20260724-002 · 카페·베이커리 단독 픽업 홀드 범위 정정
+
+- 변경 일시: `2026-07-24 22:27 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: `docs/03-domain-model.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `STORE-007`, `HOLD-005`
+- 변경 내용: 카페·베이커리는 홀 운영 여부와 관계없이 단독 픽업 홀드를 사용할 수 있고 일반 식당·다른 업종은 사용할 수 없도록 정렬했다. 기능 소유권은 `booking`으로 유지하고 방문 예약 수용량만 할당하지 않는다.
+- 변경 이유: 카페·베이커리에 테이크아웃 중심 매장이 많아 일반 식당과 구분되는 픽업 흐름이 필요하며, 이를 홀 없는 매장만의 기능으로 제한하려는 결정은 아니기 때문이다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [픽업 커밋 `d39643ff8f4f55b3d892f62583df92ce34313174`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/d39643ff8f4f55b3d892f62583df92ce34313174)
+
+#### DOC-20260724-003 · 최종 독립 검토 정합성 보완
+
+- 변경 일시: `2026-07-24 23:51 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: PortOne 식별자·설정·후속 처리 계약, 정책 템플릿 집계, `AUTH-009`, 중앙 변경 이력
+- 변경 내용: PortOne `paymentId`·`transactionId`와 내부 식별자를 분리하고, Outbox 도입 경계·설정 비밀 분류·인증 기능 범위·문서 이력 추적 정보를 최종 독립 검토 결과에 맞춰 정렬했다.
+- 변경 이유: 구현 전에 식별자 신뢰 경계와 아키텍처 상태를 명확히 하고, 복사된 집계·기능 누락·실제 변경 시각 및 커밋 추적 오류를 제거하기 위해서다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/453eeab0ef5afde4a2002e5ee08b7e0ea8d0fbad)
+
+#### DOC-20260725-004 · 내구성 후속 작업·결제 확인 복구 경계 정렬
+
+- 변경 일시: `2026-07-25 00:16 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 대상 문서·정책: PortOne `CONFIRMING` 복구, `PAY-003`, `SCALE-006`·`SCALE-008`·`SCALE-009`·`SCALE-011`·`SCALE-012`, 연계 도메인의 후속 작업 기록
+- 변경 내용: 외부 결과가 불명확한 결제를 재결제 가능 상태로 열지 않고 중앙 대사까지 격리하도록 고쳤으며, 초기 아키텍처가 Outbox를 활성화하지 않은 상태와 맞게 연계 정책을 구현 중립적인 영속 후속 작업·사건 기록으로 통일했다.
+- 변경 이유: 외부 승인이 끝났을 수 있는 거래의 중복 청구를 방지하고, 현재 아키텍처와 상세 신뢰성 정책이 서로 다른 구현 기술을 동시에 강제하던 충돌을 제거하기 위해서다.
+- 추적 정보: [PR #23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23), [반영 커밋 `5189100fbb6d68e0d7cbd4913bfe13a899a2f89a`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/5189100fbb6d68e0d7cbd4913bfe13a899a2f89a)
+
+#### DOC-20260727-006 · JWT·Valkey 인증 구조 확정
+
+- 변경 일시: `2026-07-27 11:05 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 결정 상태: 확정
+- MVP 포함 여부: 포함
+- 대상 문서·정책: `AUTH-007`, 인증 흐름·아키텍처·계약, `ADR-006`
+- 변경 내용: 세 역할의 인증을 Spring Security 기반 액세스 JWT와 Valkey의 리프레시 토큰 서버 상태 관리 구조로 전환했다.
+- 변경 이유: JWT의 요청 독립성을 유지하면서 로그아웃·회전·탈취 대응처럼 사용자 상태에 따른 즉시 제어가 필요하고, 이미 웨이팅·분산 잠금·캐시에 사용하는 Valkey를 재사용할 수 있기 때문이다.
+- 상세 근거: [ADR-006](docs/adr/ADR-006-jwt-valkey-refresh-token.md)
+- 영향 문서: `docs/service-policies/01-member-auth.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `docs/06-system-architecture.md`, `docs/07-data-and-api-contracts.md`, `docs/service-policies/18-scale-reliability.md`
+- 변경 근거: [인증 정책 정렬 커밋 `663e247a16f445ef2b3128ffa595368d87515efe`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/663e247a16f445ef2b3128ffa595368d87515efe)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
+#### DOC-20260727-007 · 하나의 검색창과 MySQL 직접 조회 확정
+
+- 변경 일시: `2026-07-27 11:05 KST`
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 결정 상태: 확정
+- MVP 포함 여부: 통합 검색은 포함, OpenSearch·Meilisearch는 제외
+- 대상 문서·정책: `ADS-007`·`ADS-008`, 탐색 흐름·아키텍처·계약, `ADR-007`
+- 변경 내용: 한 입력에서 검색어와 구조화 조건을 함께 추출하고 규칙 우선·미해석 표현만 AI 보조·MySQL 최종 조회로 통일했다.
+- 변경 이유: 일반 검색과 자연어 검색을 억지로 분류하지 않으면서도 외부 AI의 비용·지연·오판 범위를 제한하고, 현재 규모에서는 별도 검색 색인 없이 MySQL 원본 정합성을 유지할 수 있기 때문이다.
+- 상세 근거: [ADR-007](docs/adr/ADR-007-unified-search-mysql.md)
+- 영향 문서: `docs/service-policies/13-ad-recommendation.md`, `docs/04-user-flows.md`, `docs/05-functional-requirements.md`, `docs/06-system-architecture.md`, `docs/07-data-and-api-contracts.md`, `docs/service-policies/18-scale-reliability.md`
+- 변경 근거: [통합 검색 정책 정렬 커밋 `d67f2b9643f0a7fea2b11efa64a1abccb61e57da`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/d67f2b9643f0a7fea2b11efa64a1abccb61e57da)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
+#### DOC-20260727-008 · 최종 독립 검수 정합성 보완
+
+- 변경일: 2026-07-27
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 상태: 확정
+- 대상 문서·정책: 정책 상태·MVP 분류는 `docs/service-policies/01-member-auth.md`, `docs/service-policies/07-course-tasting.md`, `docs/service-policies/11-subscription.md`, `docs/service-policies/13-ad-recommendation.md`, `docs/service-policies/README.md`, `docs/05-functional-requirements.md`; 외부 AI 전송은 `docs/service-policies/13-ad-recommendation.md`; 예약 취소·노쇼 자원 처분은 `docs/service-policies/04-reservation.md`, `docs/service-policies/09-checkin-noshow.md`, `docs/service-policies/10-waitlist-transfer.md`; 아키텍처와 실행 계획 정합성은 `docs/06-system-architecture.md`와 관련 계획 4개
+- 변경 내용: 정책 결정 상태와 MVP 포함 여부, 외부 AI 최소 전송, 일반 예약 취소만의 예약 자동 승계와 노쇼 자원 반환 금지, 과거 계획 한글화와 메타데이터 정합성을 보완했다.
+- 변경 이유: PR #23 전체 독립 검수에서 발견된 현재형 모순과 분류 역전을 제거하기 위해서다.
+- 변경 근거: [정책·계획 보완 커밋 `05d0876958872e54021d965e756899b9519b3a27`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/05d0876958872e54021d965e756899b9519b3a27), [비초기 미결 정책 상태 정렬 커밋 `a14c9a7c7f612034511821c6c3216f7eb0618b89`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/a14c9a7c7f612034511821c6c3216f7eb0618b89)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
+### 2026-07-23 이전 누적 기록
+
 | 날짜 | 변경 내용 | 상태 |
 |---|---|---|
 | 2026-07-21 | 프로젝트 목표를 실제 운영 가능한 포트폴리오 수준으로 결정 | 확정 |
@@ -469,9 +567,9 @@
 
 - 마스터 체크리스트의 `RES-003`~`RES-005` 상태명 `개정 확정`을 공식 상태 목록에 있는 `확정`으로 정규화한다. 정책 내용과 확정 시점은 변경하지 않는다.
 - 이전 요약에 다시 등장한 `STORE-007`은 2026-07-21에 이미 확정된 일반 기능 즉시 활성화 정책이므로 현재 팀 논의 큐에서 제거한다.
-- 현재 상태: `확정` 194개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 15개, 합계 217개
-- 현재 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
-- 현재 TODO: `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+- 이 변경 직후 상태: `확정` 194개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 15개, 합계 217개
+- 이 변경 직후 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
+- 이 변경 직후 TODO: `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
 - 체크인·노쇼의 현재 MVP는 회전형 QR, 권한 있는 매장 운영자의 보조 방문 완료, 공통 5분 경과 뒤 매장 직접 노쇼 확정이다. 일회 확인번호, 6시간 후보·24시간 자동 확정, 정식 이의 제기는 후속 구현으로 유지한다.
 - 웨이팅의 현재 MVP는 로그인한 대표자와 입력 인원수로 만든 단일 팀, 공통 3km, 좌석 조건 없는 단일 FIFO, 실제 호출 한 번과 10분 도착 제한이다. 일행 계정 연결·대표자 변경, 좌석 호환 호출과 미루기는 후속 구현으로 유지한다.
 
@@ -482,12 +580,31 @@ PR #19에서 `AUTH-004`와 `STORE-014`의 현재 MVP 제외 경계를 반영한 
 - `AUTH-004`는 주류 기능 도입 시 적용할 정책 방향을 보존하는 `TODO`이며 현재 1차 MVP에서는 연령 파생값의 생성·저장·조회와 주류 거래 권한을 활성화하지 않는다. 과거의 확정 기록은 주류 기능 도입 시 적용할 최소 수집·현장 책임·차단 방향의 역사적 합의로 보존한다.
 - `STORE-014`는 정책 방향이 확정되어 있지만 폐업·양도·대표자 변경 절차는 현재 1차 MVP에서 제외하고 추가 구현 시 적용한다.
 - 취소 자리·수량 자동 승계는 제품 비전과 `TRANSFER-001`~`TRANSFER-009`에 따라 1차 MVP의 초기 핵심 기능으로 분류한다.
-- 일반 검색·자연어·취향·품절 대체 추천과 매장 Free 기본 운영 통계는 초기 범위로 유지하고, 광고 상품과 Pro 비교·해석·추천·자동 리포트만 비초기로 분리한다.
+- 일반 검색·자연어·취향·품절 대체 추천과 매장 Free 기본 운영 통계는 초기 범위로 유지하고, 광고 상품과 Pro 비교·해석·추천·자동 리포트·내보내기만 비초기로 분리한다.
 - 운영자·개인정보·보안·신뢰성 정책은 별도 초기 업무 도메인을 추가하지 않고 관련 초기 기능에 적용하는 공통 구현 기준으로 분류한다. 명시적 `TODO`와 미래 기능은 이 분류만으로 활성화하지 않는다.
-- 현재 상태: `확정` 193개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 16개, 합계 217개
-- 현재 중요도: `핵심` 19개, `필수` 179개, `권장` 18개, `검토` 1개
-- 현재 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
-- 현재 TODO: `AUTH-004`, `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+- 이 변경 직후 상태: `확정` 193개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 16개, 합계 217개
+- 이 변경 직후 중요도: `핵심` 19개, `필수` 179개, `권장` 18개, `검토` 1개
+- 이 변경 직후 팀원 상의 필요: `TASTE-003`, `TASTE-008`, `TASTE-012`, `SUB-001`, `SUB-002`, `SUB-003`, `SUB-007`, `ADS-001`
+- 이 변경 직후 TODO: `AUTH-004`, `STORE-013`, `PAY-003`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+
+## 7.11 2026-07-24 리뷰 기능 1차 MVP 제외 확정
+
+사용자가 리뷰 기능 전체를 현재 1차 MVP에서 제외한다고 직접 확정했다. `TRUST-001`~`TRUST-012`의 정책 상태와 세부 안전 기준은 향후 도입 기준으로 보존하되 현재 구현 약속이나 권한 활성화로 해석하지 않는다.
+
+- 1차 MVP에서는 리뷰 작성·공개·수정·삭제, 별점·태그, 사진·텍스트, 신고·숨김·검수, 식당 답글·분쟁, 리뷰 보상·광고 표시, 조작 탐지, 신뢰 점수, 제재와 오탐 복구를 제공하지 않는다.
+- 현재 제품 비전·권한·도메인·사용자 흐름·기능 요구사항·아키텍처와 인증 정책에서 `review` 기능·도메인·패키지·권한을 활성화하지 않는다.
+- 리뷰 상세 정책과 정책 마스터의 `확정` 상태는 미래 구현 시 적용할 정책 기준이 완성됐다는 뜻이며 현재 리뷰 기능·API·UI·저장소가 존재하거나 필수라는 뜻이 아니다.
+- 2026-07-21 `AUTH-001` 기록의 리뷰 로그인 필수 조건은 향후 리뷰 기능을 도입할 때 적용할 인증 경계로만 유지하며, 현재 리뷰 기능 제공을 의미하지 않는다.
+
+## 7.12 2026-07-24 PortOne V2 결제 연동 확정
+
+이병우가 `PAY-003`의 현재 결제 연동 어댑터를 PortOne V2로 직접 확정했다. 실제 PG 채널과 개별 결제수단은 계약·심사·운영 구성이 끝난 항목만 활성화하며, PortOne V2 선택만으로 Toss Payments나 특정 결제수단을 확정하지 않는다.
+
+- `PAY-003`: PortOne V2 결제 연동 `확정`
+- `PAY-012`: 지급대행·세무·법률·실제 자금 흐름 승인이 남은 식당 정산 `TODO`
+- 현재 상태: `확정` 194개, `팀원 상의 필요` 8개, `자동 추천 예정` 0개, `TODO` 15개, 합계 217개
+- 현재 TODO: `AUTH-004`, `STORE-013`, `PAY-012`, `SUB-004`, `SUB-006`, `ADS-003`, `ADS-004`, `ADS-005`, `ADMIN-002`, `ADMIN-009`, `NOTI-009`, `PRIV-005`, `PRIV-006`, `PRIV-010`, `PRIV-012`
+- 기존 날짜별 상태와 후보 문구는 당시 스냅샷으로 보존하며 현재 기준은 정책 정본과 이 절을 따른다.
 
 ---
 
