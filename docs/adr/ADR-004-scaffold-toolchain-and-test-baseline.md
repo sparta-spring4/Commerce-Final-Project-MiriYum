@@ -52,3 +52,18 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 - [UI 및 프론트엔드 가이드라인](../08-ui-and-frontend-guidelines.md)
 - [품질 운영 및 규칙](../09-quality-operations-and-rules.md)
 - [ADR-002](ADR-002-staged-technology-adoption.md)
+
+## 2026-07-27 날짜별 개정
+
+### 재검토 조건 충족과 현재 결정
+
+- 최초 스캐폴딩 결정과 Testcontainers 초기 미도입 본문은 DB 상호작용이 없던 시점의 기록으로 보존한다.
+- 1차 MVP가 Flyway 마이그레이션, MySQL 제약, 예약 수용량·회차별 팀 수·메뉴 홀드 경합, 잠금과 조건부 SQL을 실제 구현하므로 본문의 “첫 DB 마이그레이션” 재검토 조건이 충족되었다.
+- 따라서 **Testcontainers MySQL을 1차 MVP 필수 테스트 기준선으로 활성화**한다. H2 또는 인메모리 대체 DB의 성공으로 MySQL 통합 테스트를 대신하지 않는다.
+- 기존에 확정한 Java 21, Spring Boot 4.1.0, Gradle 9.6.1과 프론트엔드 Node 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10, React Testing Library 16.3.2 기준을 유지한다.
+
+### 검증과 결과
+
+- 백엔드 게이트는 컴파일·단위 테스트에 더해 실제 MySQL 컨테이너에서 Flyway clean-start, 제약 위반, 트랜잭션 롤백, 동시 조건부 갱신, 중복 멱등 키를 검증한다.
+- 개발 머신에 설치된 임의 MySQL 인스턴스나 공유 DB 상태에 의존하지 않고 테스트마다 재현 가능한 스키마와 데이터를 만든다.
+- 컨테이너 시작 시간과 Docker 실행 환경이라는 비용이 추가된다. 빠른 단위 테스트와 MySQL 통합 테스트를 분리하되, DB 의미에 의존하는 변경은 통합 게이트를 생략할 수 없다.
