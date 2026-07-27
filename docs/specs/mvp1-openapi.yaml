@@ -1,0 +1,149 @@
+openapi: 3.1.0
+info:
+  title: MiriYum 1차 MVP 통합 API
+  version: 1.0.0
+  description: |
+    1차 MVP의 공개 HTTP 계약을 기능별 OpenAPI 원본에서 모은 통합 진입점이다.
+    기능별 파일이 각 경로의 단일 소유자이며 이 파일에는 중복 정의하지 않는다.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경의 동일 origin
+security: []
+tags:
+  - name: Consumer Auth
+    description: 일반 사용자 가입·로그인·토큰·세션
+  - name: Store Operator Auth
+    description: 매장 운영자 가입·로그인·토큰·세션
+  - name: Account
+    description: 계정 유형별 본인 정보
+  - name: My Page
+    description: 일반 사용자 마이페이지
+  - name: Store Search
+    description: 공개 매장·메뉴 탐색
+  - name: Catalog
+    description: 검색·입력 허용 코드
+  - name: Store Management
+    description: 매장 운영자 기본 관리
+  - name: Reservation
+    description: 일반 사용자 예약
+  - name: Reservation Management
+    description: 매장 운영자 예약 관리
+  - name: Reservation Capacity
+    description: 날짜·시간 구간별 인원·팀 수
+  - name: Menu Hold Availability
+    description: 일반 예약 선택 메뉴 가용량
+  - name: Pickup
+    description: 일반 사용자 픽업 예약
+  - name: Pickup Management
+    description: 매장 운영자 픽업 관리
+  - name: Menu Inventory
+    description: 매장 운영자 시간대별 메뉴 수량 관리
+paths:
+  /api/v1/consumer-auth/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-auth~1accounts"
+  /api/v1/consumer-auth/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-auth~1sessions"
+  /api/v1/consumer-auth/token-refreshes:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-auth~1token-refreshes"
+  /api/v1/consumer-auth/csrf-tokens/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-auth~1csrf-tokens~1current"
+  /api/v1/consumer-auth/sessions/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-auth~1sessions~1current"
+  /api/v1/store-operator-auth/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-auth~1accounts"
+  /api/v1/store-operator-auth/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-auth~1sessions"
+  /api/v1/store-operator-auth/token-refreshes:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-auth~1token-refreshes"
+  /api/v1/store-operator-auth/csrf-tokens/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-auth~1csrf-tokens~1current"
+  /api/v1/store-operator-auth/sessions/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-auth~1sessions~1current"
+  /api/v1/consumer-accounts/me:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-accounts~1me"
+  /api/v1/store-operator-accounts/me:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operator-accounts~1me"
+  /api/v1/consumer-accounts/me/reservations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumer-accounts~1me~1reservations"
+
+  /api/v1/stores:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores"
+  /api/v1/stores/{storeId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}"
+  /api/v1/stores/{storeId}/menus:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus"
+  /api/v1/store-categories:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-categories"
+  /api/v1/menu-categories:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1menu-categories"
+  /api/v1/store-tags:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-tags"
+  /api/v1/store-operator/stores:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores"
+  /api/v1/store-operator/stores/{storeId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}"
+  /api/v1/store-operator/stores/{storeId}/operating-hours:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1operating-hours"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-slots:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-time-slots"
+  /api/v1/store-operator/stores/{storeId}/menus:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1menus"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1menus~1{menuId}"
+
+  /api/v1/reservations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1reservations"
+  /api/v1/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1reservations~1{reservationId}"
+  /api/v1/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1reservations~1{reservationId}~1cancellations"
+  /api/v1/store-operator/stores/{storeId}/reservations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservations"
+  /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservations~1{reservationId}"
+  /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservations~1{reservationId}~1cancellations"
+  /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservations~1{reservationId}~1fulfillments"
+  /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-capacities~1{serviceDate}"
+
+  /api/v1/stores/{storeId}/menu-hold-availability:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menu-hold-availability"
+  /api/v1/stores/{storeId}/pickup-availability:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1pickup-availability"
+  /api/v1/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1pickup-reservations"
+  /api/v1/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1pickup-reservations"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}~1fulfillments"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1menu-inventory-buckets"
+  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1menu-inventory-buckets~1{inventoryBucketId}"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "./mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+    consumerRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_CONSUMER_REFRESH
+      description: 일반 사용자 Refresh JWT HttpOnly 쿠키
+    storeOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_STORE_OPERATOR_REFRESH
+      description: 매장 운영자 Refresh JWT HttpOnly 쿠키

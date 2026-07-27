@@ -1,0 +1,865 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Menu Hold and Pickup API
+  version: 1.0.0
+  description: 메뉴 시간대별 수량, 홀드 가용성과 픽업 예약 계약
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경의 동일 origin
+security: []
+tags:
+  - name: Menu Hold Availability
+    description: 일반 예약 선택 메뉴 가용량
+  - name: Pickup
+    description: 일반 사용자 픽업 예약
+  - name: Pickup Management
+    description: 매장 운영자 픽업 관리
+  - name: Menu Inventory
+    description: 매장 운영자 시간대별 메뉴 수량 관리
+paths:
+  /api/v1/stores/{storeId}/menu-hold-availability:
+    get:
+      tags: [Menu Hold Availability]
+      summary: 예약 선택 메뉴 홀드 가능 수량 조회
+      operationId: getMenuHoldAvailability
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: serviceDate
+          in: query
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        - name: startTime
+          in: query
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        - name: endTime
+          in: query
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+      responses:
+        "200":
+          description: 메뉴별 온라인 홀드 가용량
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuAvailabilityListSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+  /api/v1/stores/{storeId}/pickup-availability:
+    get:
+      tags: [Pickup]
+      summary: 픽업 가능 시간과 메뉴 수량 조회
+      operationId: getPickupAvailability
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: pickupDate
+          in: query
+          required: true
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+      responses:
+        "200":
+          description: 픽업 시간대별 메뉴 가용량
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupAvailabilitySuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/PickupEligibilityConflict"
+  /api/v1/pickup-reservations:
+    post:
+      tags: [Pickup]
+      summary: 픽업 예약 생성
+      operationId: createPickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickupReservationCreateRequest"
+      responses:
+        "201":
+          description: 즉시 확정된 픽업 예약
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/PickupConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/pickup-reservations/{pickupReservationId}:
+    get:
+      tags: [Pickup]
+      summary: 본인 픽업 예약 상세 조회
+      operationId: getPickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PickupReservationId"
+      responses:
+        "200":
+          description: 본인 픽업 예약
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PickupNotFound"
+  /api/v1/pickup-reservations/{pickupReservationId}/cancellations:
+    post:
+      tags: [Pickup]
+      summary: 본인 픽업 예약 취소
+      operationId: cancelPickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PickupReservationId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickupCancellationRequest"
+      responses:
+        "200":
+          description: 취소된 픽업 예약과 수량 복구 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PickupNotFound"
+        "409":
+          $ref: "#/components/responses/PickupStateConflict"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations:
+    get:
+      tags: [Pickup Management]
+      summary: 매장 픽업 예약 목록 조회
+      operationId: getStorePickupReservations
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: pickupDate
+          in: query
+          required: false
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PickupStatus"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - "pickupDate,asc"
+              - "pickupDate,desc"
+              - "createdAt,asc"
+              - "createdAt,desc"
+      responses:
+        "200":
+          description: 대상 매장 픽업 예약 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationPageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}:
+    get:
+      tags: [Pickup Management]
+      summary: 매장 픽업 예약 상세 조회
+      operationId: getStorePickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/PickupReservationId"
+      responses:
+        "200":
+          description: 대상 매장 픽업 예약
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/PickupNotFound"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
+    post:
+      tags: [Pickup Management]
+      summary: 픽업 수령 완료
+      operationId: fulfillPickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/PickupReservationId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyCommandRequest"
+      responses:
+        "200":
+          description: 수령 완료된 픽업 예약
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/PickupNotFound"
+        "409":
+          $ref: "#/components/responses/PickupStateConflict"
+  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
+    post:
+      tags: [Pickup Management]
+      summary: 운영자 픽업 예약 취소
+      operationId: cancelStorePickupReservation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/PickupReservationId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StorePickupCancellationRequest"
+      responses:
+        "200":
+          description: 취소된 픽업 예약과 수량 복구 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupReservationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/PickupNotFound"
+        "409":
+          $ref: "#/components/responses/PickupStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets:
+    get:
+      tags: [Menu Inventory]
+      summary: 운영자 메뉴 재고 버킷 목록 조회
+      operationId: getMenuInventoryBuckets
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: serviceDate
+          in: query
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        - name: menuId
+          in: query
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+      responses:
+        "200":
+          description: 메뉴 재고 버킷 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuInventoryPageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+    post:
+      tags: [Menu Inventory]
+      summary: 메뉴 재고 버킷 생성
+      operationId: createMenuInventoryBucket
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuInventoryCreateRequest"
+      responses:
+        "201":
+          description: 생성된 메뉴 재고 버킷
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuInventorySuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "409":
+          $ref: "#/components/responses/MenuInventoryConflict"
+  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
+    patch:
+      tags: [Menu Inventory]
+      summary: 메뉴 재고 수량·풀·품절 상태 수정
+      operationId: updateMenuInventoryBucket
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/InventoryBucketId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuInventoryUpdateRequest"
+      responses:
+        "200":
+          description: 새 버전의 메뉴 재고 버킷
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuInventorySuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuInventoryNotFound"
+        "409":
+          $ref: "#/components/responses/MenuInventoryConflict"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  parameters:
+    StoreId:
+      name: storeId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    PickupReservationId:
+      name: pickupReservationId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    InventoryBucketId:
+      name: inventoryBucketId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+  schemas:
+    InventoryAvailabilityStatus:
+      type: string
+      enum: [AVAILABLE, SOLD_OUT]
+    InventoryPools:
+      type: object
+      additionalProperties: false
+      required: [onlineHold, onsite, shared]
+      properties:
+        onlineHold:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        onsite:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        shared:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+    MenuAvailability:
+      type: object
+      additionalProperties: false
+      required:
+        - menuId
+        - menuName
+        - unitPrice
+        - serviceDate
+        - startTime
+        - endTime
+        - availabilityStatus
+        - availableQuantity
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        menuName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        unitPrice:
+          type: integer
+          format: int64
+          minimum: 0
+        serviceDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        startTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        availabilityStatus:
+          $ref: "#/components/schemas/InventoryAvailabilityStatus"
+        availableQuantity:
+          type: integer
+          minimum: 0
+    MenuAvailabilityListData:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuAvailability"
+    PickupSlotAvailability:
+      type: object
+      additionalProperties: false
+      required: [pickupTime, menus]
+      properties:
+        pickupTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        menus:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuAvailability"
+    PickupAvailabilityData:
+      type: object
+      additionalProperties: false
+      required: [storeId, pickupDate, slots]
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        pickupDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/PickupSlotAvailability"
+    MenuSelectionRequest:
+      type: object
+      additionalProperties: false
+      required: [menuId, quantity]
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+    PickupReservationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [storeId, pickupDate, pickupTime, menuSelections]
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        pickupDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        pickupTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        menuSelections:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/MenuSelectionRequest"
+    PickupCancellationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    StorePickupCancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    EmptyCommandRequest:
+      type: object
+      additionalProperties: false
+    PickupStatus:
+      type: string
+      enum: [CONFIRMED, PICKED_UP, CANCELLED]
+    PickupItem:
+      type: object
+      additionalProperties: false
+      required: [menuId, menuName, unitPrice, quantity]
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        menuName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        unitPrice:
+          type: integer
+          format: int64
+          minimum: 0
+        quantity:
+          type: integer
+          minimum: 1
+    PickupReservation:
+      type: object
+      additionalProperties: false
+      required:
+        - pickupReservationId
+        - storeId
+        - storeName
+        - pickupDate
+        - pickupTime
+        - status
+        - items
+        - createdAt
+      properties:
+        pickupReservationId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        pickupDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        pickupTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        status:
+          $ref: "#/components/schemas/PickupStatus"
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PickupItem"
+        cancelledBy:
+          type:
+            - string
+            - "null"
+          enum: [CONSUMER, STORE_OPERATOR, null]
+        cancellationReason:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    PickupReservationPageData:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PickupReservation"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    MenuInventoryCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - menuId
+        - serviceDate
+        - startTime
+        - endTime
+        - totalSupply
+        - pools
+        - availabilityStatus
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        serviceDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        startTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        totalSupply:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        pools:
+          $ref: "#/components/schemas/InventoryPools"
+        availabilityStatus:
+          $ref: "#/components/schemas/InventoryAvailabilityStatus"
+    MenuInventoryUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [totalSupply, pools, availabilityStatus]
+      properties:
+        totalSupply:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        pools:
+          $ref: "#/components/schemas/InventoryPools"
+        availabilityStatus:
+          $ref: "#/components/schemas/InventoryAvailabilityStatus"
+    MenuInventoryBucket:
+      type: object
+      additionalProperties: false
+      required:
+        - inventoryBucketId
+        - menuId
+        - serviceDate
+        - startTime
+        - endTime
+        - policyVersion
+        - totalSupply
+        - pools
+        - availableOnlineQuantity
+        - availabilityStatus
+      properties:
+        inventoryBucketId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        serviceDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        startTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        policyVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        totalSupply:
+          type: integer
+          minimum: 0
+        pools:
+          $ref: "#/components/schemas/InventoryPools"
+        availableOnlineQuantity:
+          type: integer
+          minimum: 0
+        availabilityStatus:
+          $ref: "#/components/schemas/InventoryAvailabilityStatus"
+    MenuAvailabilityListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/MenuAvailabilityListData"
+    PickupAvailabilitySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PickupAvailabilityData"
+    PickupReservationSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PickupReservation"
+    PickupReservationPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PickupReservationPageData"
+    MenuInventorySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/MenuInventoryBucket"
+    MenuInventoryPageData:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuInventoryBucket"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    MenuInventoryPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/MenuInventoryPageData"
+  responses:
+    StoreNotFound:
+      description: 매장을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    StoreAccessDenied:
+      description: 대상 매장 운영 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_003
+            message: 대상 매장의 운영 권한이 없습니다.
+    PickupEligibilityConflict:
+      description: 중앙 픽업 자격이 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PICKUP_002
+            message: 이 매장은 픽업 예약을 제공할 수 없습니다.
+    PickupConflict:
+      description: 픽업 자격·제공 구간·메뉴 수량 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PICKUP_004
+            message: 요청한 메뉴 수량을 확보할 수 없습니다.
+    PickupNotFound:
+      description: 본인 또는 대상 매장 범위에서 픽업 예약을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PICKUP_001
+            message: 픽업 예약을 찾을 수 없습니다.
+    PickupStateConflict:
+      description: 현재 픽업 상태 또는 취소 정책에서 명령 불가
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PICKUP_005
+            message: 현재 픽업 상태에서 처리할 수 없습니다.
+    MenuInventoryNotFound:
+      description: 메뉴 재고 버킷을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: MENU_HOLD_003
+            message: 메뉴 재고 구간을 찾을 수 없습니다.
+    MenuInventoryConflict:
+      description: 총 공급·풀 배분·사용 중 수량 또는 상태 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: MENU_HOLD_004
+            message: 총 공급 수량과 수량 풀 배분을 확인해 주세요.

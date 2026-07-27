@@ -1,0 +1,181 @@
+# 기능 명세: 인증·계정·마이페이지
+
+> 문서 상태: 4단계 승인
+> 적용 단계: 1차 MVP
+> 도메인 소유자: 1번 팀원 — 인증·계정
+> 협업 검토: 3번 팀원 — 마이페이지 예약 상태·조회 DTO
+> 관련 정책 ID: AUTH-001, AUTH-002, AUTH-003, AUTH-006, AUTH-007, AUTH-008, AUTH-009, S-006, D-002~D-007, C-001~C-013
+> OpenAPI: `docs/specs/auth-account/openapi.yaml`
+> 최종 승인일: 2026-07-28
+
+## 범위
+
+### 포함
+
+- 일반 사용자와 매장 운영자의 분리된 이메일·비밀번호 가입·로그인
+- Access JWT 발급, Refresh JWT 재발급과 클라이언트 로그아웃
+- 계정 유형별 본인 정보 조회·기본 표시 정보 수정
+- 일반 사용자 마이페이지의 예약 내역 조회
+
+### 제외
+
+- 플랫폼 운영자 가입·로그인·API
+- 카카오와 그 밖의 소셜 로그인
+- Valkey Refresh Token 회전·폐기·재사용 탐지
+- 활성 로그인 목록·기기별 종료·전체 로그인 종료
+- 비밀번호 재설정·수동 복구·회원 탈퇴
+- 프로필 이미지 업로드
+- 결제·환불·노쇼 정보
+
+## API 경로 결정과 이유
+
+일반 사용자와 매장 운영자의 인증 경로를 각각 `/consumer-auth`와 `/store-operator-auth`로 분리한다. 요청 본문의 `role`로 계정 유형을 선택하는 단일 로그인 API는 사용하지 않는다.
+
+| 결정 | 채택안 | 대안 | 선택 이유 |
+| --- | --- | --- | --- |
+| 가입 | `POST .../accounts` | `/sign-up` 동사 경로 | 계정 collection 생성이라는 HTTP 의미를 유지한다. |
+| 로그인 | `POST .../sessions` | `/login` 동사 경로 | 현재 브라우저 인증 상태 생성으로 표현한다. |
+| 재발급 | `POST .../token-refreshes` | `/refresh` 동사 경로 | 재발급 명령의 결과가 새 토큰이라는 의미를 명시한다. |
+| 로그아웃 | `DELETE .../sessions/current` | `/logout` 동사 경로 | 현재 브라우저 shell의 인증 상태 제거로 표현한다. |
+| 내 정보 | `GET/PATCH ...-accounts/me` | 요청에 accountId 전달 | JWT subject가 소유자를 결정해 수평 권한 상승을 막는다. |
+| 내 예약 내역 | `GET /consumer-accounts/me/reservations` | 예약과 마이페이지가 각각 API 제공 | O-009에 따라 1번이 공개 경로를 관리하고 3번의 조회 계약을 사용한다. |
+
+이 경로는 C-008의 소문자·kebab-case·리소스 중심 원칙을 적용한다. 클라이언트가 계정 유형, 역할이나 accountId를 본문으로 보내 인증 주체를 바꾸지 못한다.
+
+## 계정과 가입
+
+- 일반 사용자는 `consumer_accounts`, 매장 운영자는 `store_operator_accounts`에 생성한다.
+- 두 테이블은 같은 이메일·휴대전화 값을 각각 가질 수 있지만 각 테이블 내부에서는 정규화 값이 유일하다.
+- 가입 요청은 이메일 확인과 휴대전화 본인 확인이 성공한 일회성 참조를 함께 제출해야 한다.
+- 서버는 참조가 현재 가입 namespace·이메일·본인 정보와 일치하고 아직 사용되지 않았는지 확인한 뒤에만 계정을 생성한다.
+- 본인 확인 결과에서 만 14세 이상 여부를 확인할 수 없는 일반 사용자는 계정을 생성하지 않는다.
+- 본인 확인 실패·만료·중복 사용에는 활성 계정 행을 만들지 않는다.
+
+### 공급자 중립 확인 참조
+
+정확한 이메일 발송·휴대전화 본인확인 제공업체가 아직 승인되지 않았으므로 OpenAPI는 `emailVerificationReference`, `identityVerificationReference`라는 불투명 일회성 문자열만 정의한다. 제공업체 토큰 구조, 콜백 payload와 비밀 키를 MiriYum 공개 API로 노출하지 않는다.
+
+이 방식은 확인 절차를 생략하는 안과 특정 유료 업체를 문서만으로 선도입하는 안을 모두 피한다. 실제 구현을 시작하기 전에 선택한 어댑터가 다음을 증명해야 한다.
+
+- 성공 결과의 서명 또는 서버 대 서버 진위
+- 대상 이메일 또는 본인확인 주체와 가입 namespace의 결합
+- 만료·일회성 소비·중복 콜백 멱등성
+- 만 14세 이상 여부만 보존하고 생년월일 원본을 저장하지 않는 경계
+
+이 조건을 충족하는 외부 연동 surface가 없으면 가입 runtime은 `NOT CONFIGURED`이며 개발 편의를 이유로 확인을 우회한 운영 계정을 생성하지 않는다.
+
+## 토큰과 브라우저 계약
+
+| 항목 | 일반 사용자 | 매장 운영자 |
+| --- | --- | --- |
+| Access JWT namespace | `consumer` | `store-operator` |
+| subject | `consumer:{id}` | `store-operator:{id}` |
+| Access JWT 수명 | 1시간 | 1시간 |
+| Refresh JWT 수명 | 14일 | 14일 |
+| Refresh 쿠키 | `MIRIYUM_CONSUMER_REFRESH` | `MIRIYUM_STORE_OPERATOR_REFRESH` |
+| Refresh 쿠키 Path | `/api/v1/consumer-auth` | `/api/v1/store-operator-auth` |
+| CSRF 쿠키 | `MIRIYUM_CONSUMER_XSRF_TOKEN` | `MIRIYUM_STORE_OPERATOR_XSRF_TOKEN` |
+| CSRF 쿠키 Path | `/api/v1/consumer-auth` | `/api/v1/store-operator-auth` |
+| CSRF 헤더 | `X-CSRF-TOKEN` | `X-CSRF-TOKEN` |
+
+- Access JWT는 로그인·재발급 성공 응답의 `data.accessToken`으로 전달하며 프론트엔드는 계정 shell 메모리에만 보관한다.
+- Refresh JWT는 `HttpOnly`, `Secure`, `SameSite=Lax`, host-only 쿠키로만 전달하고 JSON 응답·Web Storage·로그에 넣지 않는다.
+- CSRF 쿠키는 프론트엔드가 헤더로 되돌려 보내야 하므로 Refresh 쿠키와 달리 JavaScript 읽기를 허용한다. 인증 토큰으로 사용하거나 서버 로그에 기록하지 않는다.
+- 재발급은 namespace별 Refresh 쿠키, `POST` JSON, 같은 Origin을 요구한다. `Origin`이 없으면 `Referer`를 확인하고 둘 다 없거나 허용 Origin과 다르면 실패 폐쇄한다.
+- 로그아웃은 namespace별 Refresh 쿠키와 `X-CSRF-TOKEN`을 검증하고 같은 이름·Path로 쿠키를 만료시킨다.
+- 1차 MVP 로그아웃은 서버에 저장된 Refresh 상태를 폐기했다고 응답하지 않는다.
+- 일반 보호 API는 Refresh 쿠키를 Access JWT 대체 수단으로 사용하지 않는다.
+
+### CSRF 토큰 준비
+
+각 shell은 `GET .../csrf-tokens/current`로 namespace별 CSRF 토큰을 준비한다. 응답 `data.token`과 같은 값이 해당 namespace의 CSRF 쿠키에 설정된다. CSRF 토큰은 인증 자격이나 비밀 값이 아니며 Refresh JWT와 분리한다.
+
+## 멱등성과 요청 제한
+
+- 본인 정보 `PATCH`는 C-006의 `Idempotency-Key`를 요구한다.
+- 가입·로그인·재발급·로그아웃은 인증 전 또는 무저장 토큰 경계이므로 C-006의 “인증 주체 namespace + 주체 ID” 업무 멱등 레코드를 적용하지 않는다.
+- 가입 중복은 계정 유형별 정규화 이메일·휴대전화 유일 제약과 확인 참조의 일회성 소비로 막는다.
+- 로그인·재발급·CSRF 준비는 계정·IP 등 활성 보안 정책 기준으로 요청 제한할 수 있으며 초과 시 `AUTH` 오류가 아니라 공통 `COMMON_010`을 사용한다.
+- 로그인과 재발급의 성공 응답 유실 뒤 같은 요청을 다시 보내면 새 JWT가 발급될 수 있다. 1차 MVP는 중앙 토큰 상태가 없으므로 이전 JWT를 폐기했다고 표시하지 않는다.
+
+인증 endpoint에 억지로 업무 멱등 저장소를 적용하는 대안은 인증 전 주체 식별과 무저장 JWT 정책을 왜곡하므로 채택하지 않았다.
+
+## 본인 정보
+
+- 일반 사용자는 이메일, 휴대전화, 공개 닉네임과 계정 상태를 조회한다.
+- 1차 MVP의 일반 사용자 수정은 닉네임만 지원한다. 닉네임은 NFC 정규화 후 2~20자, 허용 문자·예약어·7일 변경 제한을 적용한다.
+- 매장 운영자는 이메일, 휴대전화, 표시 이름과 계정 상태를 조회하고 표시 이름만 수정한다.
+- 이메일·휴대전화·비밀번호 변경은 기존 정책을 삭제하지 않지만 이번 팀 분담의 명시적인 1차 API에 포함하지 않는다. 별도 확인·재인증 계약 없이 범용 PATCH로 열지 않는다.
+- 프로필 응답의 accountId는 문자열이며 다른 계정 유형의 ID로 변환하지 않는다.
+
+## 마이페이지 예약 내역
+
+- `auth-account`가 `GET /api/v1/consumer-accounts/me/reservations` 경로와 페이지 응답을 관리한다.
+- 인증된 `consumer_account_id`를 예약 도메인의 `ReservationHistoryQueryService`에 전달한다.
+- 예약 도메인은 상태·날짜 필터, 정렬, 예약 스냅샷 DTO와 개인 자원 404 규칙을 소유한다.
+- 다른 사용자의 예약이나 매장 전체 예약을 이 경로로 조회할 수 없다.
+- 결과가 없으면 `200 OK`, `items: []`와 페이지 메타데이터를 반환한다.
+- `status` 필터는 1차 MVP `CONFIRMED`, `CANCELLED`, `FULFILLED`, `REJECTED`, `EXPIRED`만 공개한다.
+- 결제·환불·노쇼·체크인 필드는 포함하지 않는다.
+
+## 오류 코드
+
+| 외부 코드 | HTTP | 의미 |
+| --- | --- | --- |
+| `AUTH_001` | 401 | Access Token이 필요함 |
+| `AUTH_002` | 401 | Access Token 만료 |
+| `AUTH_003` | 401 | Access Token 형식·서명·일반 유효성 오류 |
+| `AUTH_004` | 401 | 토큰 namespace가 API와 일치하지 않음 |
+| `AUTH_005` | 401 | 이메일 또는 비밀번호 불일치 |
+| `AUTH_006` | 403 | 인증됐지만 요청 권한이 없음 |
+| `AUTH_007` | 401 | Refresh Token 쿠키가 필요함 |
+| `AUTH_008` | 401 | Refresh Token이 만료됐거나 유효하지 않음 |
+| `AUTH_009` | 403 | CSRF 토큰 검증 실패 |
+| `AUTH_010` | 403 | Origin·Referer 검증 실패 |
+| `AUTH_011` | 403 | 현재 계정 상태가 이용을 허용하지 않음 |
+| `ACCOUNT_001` | 409 | 같은 계정 유형의 이메일 중복 |
+| `ACCOUNT_002` | 409 | 같은 계정 유형의 휴대전화 중복 |
+| `ACCOUNT_003` | 400 | 이메일 확인 참조가 없거나 유효하지 않음 |
+| `ACCOUNT_004` | 400 | 본인확인 참조가 없거나 유효하지 않음 |
+| `ACCOUNT_005` | 409 | 닉네임 변경 가능 시각 전 재변경 |
+
+로그인 실패는 이메일 존재 여부를 구분하지 않고 항상 `AUTH_005`를 사용한다. 토큰 원문, 비밀번호, 확인 참조와 거절된 실제 값은 오류 응답에 넣지 않는다.
+
+## 트랜잭션과 동시성
+
+- 가입은 확인 참조 소비, 계정 유형별 유일성 검사와 계정 생성을 하나의 트랜잭션에서 확정한다.
+- 같은 확인 참조나 정규화 식별자로 동시에 가입해도 DB 유일 제약과 조건부 소비로 한 계정만 생성한다.
+- 본인 정보 수정은 현재 계정 상태와 프로필 버전을 조건부로 확인한다.
+- 마이페이지 조회는 예약 상태나 거래를 변경하지 않는다.
+- 인증 도메인은 예약 entity·repository를 직접 조회하지 않는다.
+
+## Migration·호환성 요구
+
+- 공통 `users` 테이블이나 `role` discriminator를 만들지 않는다.
+- 계정 유형별 같은 숫자 ID를 하나의 전역 ID로 해석하지 않는다.
+- 2차·고도화에서 Valkey를 도입해도 공개 계정 ID, 인증 namespace와 경로는 유지한다.
+- Refresh Token 회전을 추가할 때 쿠키 이름·Path를 유지할 수 있으나 서버 저장·폐기 의미 변경은 별도 계약 변경으로 기록한다.
+
+## 인수 조건
+
+- 일반 사용자와 매장 운영자 가입·로그인 경로, 테이블, subject와 Refresh 쿠키가 분리된다.
+- 요청 본문의 역할 값으로 다른 계정 유형을 생성하거나 로그인할 수 없다.
+- 확인 성공 참조 없이 활성 계정이 생성되지 않는다.
+- 로그인·재발급 응답 본문에 Refresh JWT가 없다.
+- Access JWT는 응답 본문과 Bearer 헤더, Refresh JWT는 namespace별 쿠키에만 존재한다.
+- 다른 namespace 쿠키·JWT로 갱신하거나 보호 API를 호출하면 `401`이다.
+- 로그아웃의 CSRF 검증 실패와 재발급의 교차 Origin 요청은 `403`이다.
+- 일반 사용자 닉네임 수정과 매장 운영자 표시 이름 수정이 상대 계정 테이블을 변경하지 않는다.
+- 마이페이지 예약 내역이 예약 도메인의 공개 조회 계약을 사용하고 빈 결과를 200으로 반환한다.
+- OpenAPI와 코드에 플랫폼 운영자·카카오·Valkey·결제·노쇼 API가 없다.
+
+## 추천안 결정 이력
+
+| 날짜 | 결정 | 선택 이유 |
+| --- | --- | --- |
+| 2026-07-28 | 인증 경로를 계정 namespace별로 분리 | 물리 계정·토큰 분리 정책을 URL과 Security 계약까지 일관되게 적용 |
+| 2026-07-28 | 리소스 중심 `accounts`, `sessions`, `token-refreshes` 경로 사용 | 기능명 동사 경로의 확산을 막고 HTTP 의미를 명확히 유지 |
+| 2026-07-28 | Refresh·CSRF 쿠키 이름과 Path를 namespace별로 분리 | 같은 Vite 빌드의 두 shell 사이 자동 쿠키 혼용 차단 |
+| 2026-07-28 | 공급자 중립 이메일·본인확인 참조 사용 | 확인 정책을 지키면서 미선정 유료 제공업체와 payload를 선도입하지 않음 |
+| 2026-07-28 | 인증 endpoint에 업무 멱등 레코드 미적용 | 인증 전 주체 식별과 1차 무저장 JWT 경계를 왜곡하는 억지 기술 적용 방지 |
+| 2026-07-28 | 마이페이지 경로는 1번, 예약 DTO·조회 규칙은 3번 소유 | 화면 담당과 데이터 도메인 소유를 분리하고 중복 API 방지 |

@@ -1,0 +1,6 @@
+apis:
+  mvp1:
+    root: docs/specs/mvp1-openapi.yaml
+extends:
+  - recommended-strict
+telemetry: off
