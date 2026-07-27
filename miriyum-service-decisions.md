@@ -246,6 +246,18 @@
 - 변경 근거: [통합 검색 정책 정렬 커밋 `d67f2b9643f0a7fea2b11efa64a1abccb61e57da`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/d67f2b9643f0a7fea2b11efa64a1abccb61e57da)
 - PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
 
+#### DOC-20260727-008 · 최종 독립 검수 정합성 보완
+
+- 변경일: 2026-07-27
+- 요청·결정자: 이병우
+- 수정 작업자: Codex
+- 상태: 확정
+- 대상 문서·정책: 정책 상태·MVP 분류는 `docs/service-policies/01-member-auth.md`, `docs/service-policies/README.md`, `docs/05-functional-requirements.md`; 외부 AI 전송은 `docs/service-policies/13-ad-recommendation.md`; 예약 취소·노쇼 자원 처분은 `docs/service-policies/04-reservation.md`, `docs/service-policies/09-checkin-noshow.md`, `docs/service-policies/10-waitlist-transfer.md`; 아키텍처와 실행 계획 정합성은 `docs/06-system-architecture.md`와 관련 계획 4개
+- 변경 내용: 정책 결정 상태와 MVP 포함 여부, 외부 AI 최소 전송, 일반 예약 취소만의 예약 자동 승계와 노쇼 자원 반환 금지, 과거 계획 한글화와 메타데이터 정합성을 보완했다.
+- 변경 이유: PR #23 전체 독립 검수에서 발견된 현재형 모순과 분류 역전을 제거하기 위해서다.
+- 변경 근거: [정책·계획 보완 커밋 `05d0876958872e54021d965e756899b9519b3a27`](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/commit/05d0876958872e54021d965e756899b9519b3a27)
+- PR: [#23](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/pull/23)
+
 ### 2026-07-23 이전 누적 기록
 
 | 날짜 | 변경 내용 | 상태 |
