@@ -19,10 +19,15 @@
 - 이메일·휴대전화·외부 로그인 식별자의 일치는 교차 계정 병합·전환·승격 근거가 아니다.
 - 매장 명령은 매장 운영자 계정 상태, `store_operator_store_affiliations`, 대상 매장의 승인·운영 상태를 MySQL에서 함께 검증한다.
 - API가 받은 역할 값이나 다른 namespace의 JWT를 권한 근거로 사용하지 않는다.
+- 회원가입·로그인·재발급·로그아웃 API는 계정 유형별 진입 경로와 스키마를 사용하고 요청의 `role`·`accountType`으로 계정 유형을 선택하거나 변경하지 않는다.
+- 예약·예약 결합 메뉴 홀드·사용자 픽업 예약은 `consumer_account_id`, 매장 소속은 `store_operator_account_id`를 참조하며 범용 `user_id` FK를 사용하지 않는다.
+- `1차 MVP` Flyway에는 `consumer_accounts`와 `store_operator_accounts`만 포함한다. `platform_operator_accounts`와 해당 API는 `고도화`에서 다른 계정 테이블의 역할 열이나 PK를 변경하지 않고 추가한다.
 
 ## 단계별 인증 전달 계약
 
-`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. 헤더·쿠키·브라우저 저장 위치, 토큰 수명과 CSRF 경계는 AUTH-007과 인증 기능 계약에서 결정하기 전 추측하지 않는다.
+`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. Access JWT 유효기간은 발급 시각부터 1시간, Refresh JWT 유효기간은 발급 시각부터 14일이며 모든 계정 유형과 런타임 프로필에 같은 값을 적용한다.
+
+로그인·재발급 성공 응답은 Access JWT를 응답 본문으로 전달하고 프런트엔드는 shell별 메모리에만 보관한다. 보호 API는 `Authorization: Bearer` 헤더를 사용한다. Refresh JWT는 계정 namespace별로 이름과 경로가 분리된 `HttpOnly`, `Secure`, `SameSite=Lax` 쿠키로만 전달하며 응답 본문이나 Web Storage에 원문을 노출하지 않는다. 토큰 재발급은 동일 Origin의 `POST` JSON 요청과 `Origin`·`Referer` 검증을 요구하고, 로그아웃에는 Spring Security CSRF 보호를 적용한다. 상세 계약과 인수 조건은 [1차 MVP 공통 명세 D-003](specs/mvp1-common/spec.md#d-003-브라우저-토큰-전달저장과-csrf-경계)을 따른다.
 
 `고도화`에서는 Refresh Token 원문이 아닌 해시와 계정·로그인 단위·토큰 계열·만료·폐기·교체 상태를 Valkey에 둔다. 회전·폐기·재사용 탐지와 로그인 단위 종료는 원자적으로 처리한다. Valkey 장애 중 로그인·갱신·로그아웃은 실패 폐쇄하고, 기존 Access JWT는 현재 계정·권한 검증 경계를 통과한 경우에만 처리한다.
 

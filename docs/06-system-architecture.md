@@ -15,6 +15,8 @@ MiriYum은 `1차 MVP`, `2차 MVP`와 `고도화`까지 **방식 A**를 유지한
 
 React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한다. Spring MVC는 웹 경계, Spring Security는 계정 유형별 인증·인가, Spring Data JPA와 좁은 명시적 SQL은 MySQL 접근, Flyway는 스키마 이력을 담당한다.
 
+`1차 MVP` 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
+
 ```text
 frontend/
   일반 사용자 shell
