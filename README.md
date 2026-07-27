@@ -30,4 +30,4 @@ Issue, Pull Request 또는 기여 작업은 [기여 가이드](CONTRIBUTING.md)�
 3. 상태와 날짜별 개정 이력상 현재 유효한 `docs/adr/` 결정
 4. `docs/05-functional-requirements.md` 또는 소유 서비스 정책이 명시적으로 연결한 `docs/specs/<feature>/spec.md`
 
-`docs/specs/_template/` 아래의 기능 명세 템플릿은 정본이 아닙니다. `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/`의 계획·spec·draft·report는 실행 과정 또는 과거 기록이므로 기본 라우팅에서 제외합니다. 현재 정본이 명시적으로 근거를 확인하라고 연결한 경우가 아니면 제품 결정의 근거로 사용하지 않습니다.
+`docs/specs/_template/` 아래의 기능 명세 템플릿은 정본이 아닙니다. `docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 다른 ADR이 링크해도 기본 라우팅에서 절대 제외합니다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 읽고 현재 제품 결정이나 완료 증거로 사용하지 않습니다. 제외 경로의 링크는 이 금지를 해제하지 않으며, 기능 문서 예외는 `docs/05-functional-requirements.md` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`뿐입니다.

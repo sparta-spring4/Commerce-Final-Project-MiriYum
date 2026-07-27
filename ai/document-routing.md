@@ -25,11 +25,11 @@
 
 `docs/specs/_template/`은 작성 형식이며 정본이 아니다. `README.md`, `CONTRIBUTING.md`, `AGENTS.md`와 `ai/`는 제품 사실이 아니라 사람·AI 진입, 라우팅, 명령과 증거 경계를 소유한다.
 
-`docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`와 `.superpowers/sdd/` 아래의 계획·spec·draft·report는 기본 라우팅에서 제외한다. 현재 정본이 특정 근거를 확인하라고 명시적으로 연결하지 않은 한, 과거 기록의 문구로 현재 승인 기준을 덮어쓰거나 완료를 주장하지 않는다.
+`docs/superpowers/specs/`, `docs/superpowers/plans/`, `miriyum-service-blueprint.md`, `miriyum-service-decisions.md`, `.superpowers/sdd/`와 상태가 `Superseded` 또는 `Deprecated`인 ADR은 활성 정본이나 다른 ADR이 링크해도 기본 라우팅에서 절대 제외한다. 링크는 예외 승인이 아니다. 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구한 경우에만 해당 기록을 읽고 현재 승인 기준이나 완료 증거로 사용하지 않는다. 제외 경로와 별개로 허용되는 기능 문서는 `docs/05-functional-requirements.md` 또는 소유 정책이 연결한 활성 `docs/specs/<feature>/spec.md`뿐이다.
 
 ## 단계 선택
 
-기능·정책·기술 결정의 적용 단계는 `1차 MVP`, `2차 MVP`, `고도화`, `향후 고도화` 중 하나다. 단계는 정책 결정 상태와 독립적이다. `확정` 정책도 뒤 단계일 수 있고, 현재 단계의 세부가 미결정일 수 있다.
+기능·정책·기술 결정의 적용 단계는 `1차 MVP`, `2차 MVP`, `고도화`, `향후 고도화` 중 하나다. 단계는 정책 결정 상태와 독립적이다. `고도화`는 진입 시 승인 기능을 모두 구현·활성화·검증하는 필수 단계이고, 시간 여유에 따라 선택하는 후보는 `향후 고도화`뿐이다. 공급자 버전·수치·토폴로지 같은 세부 결정 게이트는 미정일 수 있으나 승인 기능 자체를 생략하는 근거가 아니다.
 
 작업을 시작할 때 소유 정본에서 현재 적용 단계를 확인한다. 단계가 없거나 문서 간 표기가 다르면 구현을 추측하지 않고 소유 문서와 관련 정책·ADR의 날짜별 개정 필요성을 먼저 보고한다. 뒤 단계 기술은 현재 단계의 의존성, 설정, 빈 패키지 또는 구성된 runtime으로 선도입하지 않는다.
 
@@ -106,7 +106,7 @@
 
 ## 위임 경로
 
-현재 담당자는 위임 범위, 필수 입력, 예상 출력, 금지 주장과 증거 형식을 명시한다. delegate 결과는 원래 Issue, 현재 diff, 정본과 검증 gate에 다시 대조한 뒤 통합한다. 임시 artifact가 필요하면 ignored `.superpowers/sdd/` 아래에만 두며 현재 담당자가 통합·검증·완료 책임을 유지한다.
+현재 담당자는 위임 범위, 필수 입력, 예상 출력, 금지 주장과 증거 형식을 명시한다. delegate 결과는 직접 반환된 결과를 원래 Issue, 현재 diff, 정본과 검증 gate에 다시 대조한 뒤 통합한다. 임시 artifact가 필요하면 ignored `.superpowers/sdd/` 아래에 기록할 수 있지만 기본 라우팅 입력으로 다시 읽지 않으며, 사용자가 과거 감사·결정 이력 검토를 명시적으로 요구할 때만 연다. 현재 담당자가 통합·검증·완료 책임을 유지한다.
 
 ## 범위 변경과 재라우팅
 
