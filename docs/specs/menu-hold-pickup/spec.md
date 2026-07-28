@@ -117,7 +117,7 @@
 - `PATCH /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}`로 총 공급·풀 배분·가용 상태의 새 버전을 게시한다.
 - 요청의 menuId는 2번 매장 도메인의 현재 메뉴와 대상 매장 귀속을 검증한다.
 - 수정 요청은 전체 풀 배분을 함께 제출해 부분 필드 병합으로 합계 불변식이 달라지지 않게 한다.
-- 모든 명령은 대상 매장 소속과 `Idempotency-Key`를 검증한다.
+- 모든 운영자 명령은 대상 매장의 대표 운영자 FK 일치와 `Idempotency-Key`를 검증한다.
 
 ## 오류 코드
 

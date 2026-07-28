@@ -35,7 +35,7 @@
 | 예약 생성 | `POST /api/v1/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
 | 본인 상세 | `GET /api/v1/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
-| 운영자 목록·상세 | `/store-operator/stores/{storeId}/reservations` | 매장 소속 검증 범위를 경로에 명시 |
+| 운영자 목록·상세 | `/store-operator/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
@@ -98,7 +98,7 @@
 - 일반 사용자 상세는 `reservationId + authenticatedConsumerAccountId`로 한 번에 조회한다.
 - 실제 부재와 다른 사용자 소유는 모두 `RESERVATION_001` 404를 반환한다.
 - 다른 사용자 소유인지 알아보기 위한 두 번째 ID 단독 조회를 하지 않는다.
-- 매장 운영자 조회는 먼저 계정·대상 매장 소속을 검증하고, 이후 `storeId + reservationId`로 조회한다.
+- 매장 운영자 조회는 먼저 계정 상태와 대상 매장의 대표 운영자 FK 일치를 검증하고, 이후 `storeId + reservationId`로 조회한다.
 - 매장 운영자 목록은 날짜·상태 필터와 0 기반 페이지를 지원한다.
 
 ## 취소

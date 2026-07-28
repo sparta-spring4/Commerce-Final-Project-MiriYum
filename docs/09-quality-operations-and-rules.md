@@ -63,7 +63,7 @@ Controller class·public endpoint, Service class·public method, cross-domain �
 첫 단계부터 Testcontainers MySQL로 다음을 검증한다.
 
 - Flyway가 빈 DB와 지원되는 이전 스키마에서 같은 최종 상태로 수렴한다.
-- 계정 유형별 유일 제약과 매장 소속 제약이 애플리케이션 우회 쓰기를 거부한다.
+- 계정 유형별 유일 제약과 `stores.store_operator_account_id` FK가 애플리케이션 우회 쓰기를 거부한다.
 - 예약 인원·팀 수와 메뉴 수량의 비음수 조건·조건부 SQL이 실제 MySQL에서 동작한다.
 - 고정 잠금 순서, 교착·병렬 요청과 제한 재시도가 초과 판매를 만들지 않는다.
 - `예약+메뉴 홀드`의 일부 자원 실패가 전체 롤백되고 픽업 예약이 예약 인원·팀 수를 차감하지 않는다.

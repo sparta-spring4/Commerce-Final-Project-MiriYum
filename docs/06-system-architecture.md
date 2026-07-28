@@ -57,7 +57,7 @@ frontend/
 
 일반 조회는 JPA를 사용한다. 예약 인원·팀 수와 메뉴 수량처럼 경합이 큰 쓰기는 repository 안의 DB 유일 제약, 비음수 조건, 고정 잠금 순서, 조건부 SQL과 멱등 키로 보호한다. `예약+메뉴 홀드`는 선택된 모든 자원을 하나의 MySQL 트랜잭션으로 확정하며 부분 성공을 남기지 않는다. 픽업 예약은 메뉴 수량과 픽업 시간대만 사용한다.
 
-계정 유형별 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록 없이 검증한다. 토큰 유형·서명·만료·발급자·대상·계정 namespace를 확인하고 보호 명령은 현재 계정 상태, 매장 운영자-매장 소속과 매장 상태를 MySQL에서 다시 검증한다. `1차 MVP`에는 Valkey·Spring Data Redis를 넣지 않는다.
+계정 유형별 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록 없이 검증한다. 토큰 유형·서명·만료·발급자·대상·계정 namespace를 확인하고 보호 명령은 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 다시 검증한다. `1차 MVP`에는 Valkey·Spring Data Redis를 넣지 않는다.
 
 ## `2차 MVP` 기술 확장
 

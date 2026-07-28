@@ -11,8 +11,8 @@
 관계의 기준은 다음과 같다.
 
 - 일반 사용자 계정은 자신이 생성한 예약, 메뉴 홀드와 픽업 예약의 소유자다.
-- 매장 운영자 계정은 `매장 운영자-매장 소속` 관계를 통해 하나 이상의 매장과 연결될 수 있다.
-- 매장 관리 권한은 매장 운영자 계정 자체가 아니라 유효한 계정 상태, 유효한 소속 관계와 대상 매장 상태를 함께 충족할 때 성립한다.
+- 1차 MVP의 매장은 `store_operator_account_id`로 대표 운영자 계정 하나를 직접 참조하며, 한 운영자 계정은 여러 매장에서 참조될 수 있다.
+- 매장 관리 권한은 유효한 운영자 계정, 대상 매장의 대표 운영자 FK 일치와 대상 매장 상태를 함께 충족할 때 성립한다.
 - 플랫폼 운영자 계정은 매장 소속이 아니라 별도로 부여된 플랫폼 업무 권한으로 심사·지원·복구를 수행한다.
 
 ```mermaid
@@ -20,8 +20,7 @@ erDiagram
     CONSUMER_ACCOUNT ||--o{ RESERVATION : creates
     CONSUMER_ACCOUNT ||--o{ MENU_HOLD : owns
     CONSUMER_ACCOUNT ||--o{ PICKUP_RESERVATION : creates
-    STORE_OPERATOR_ACCOUNT ||--o{ STORE_AFFILIATION : has
-    STORE ||--o{ STORE_AFFILIATION : grants
+    STORE_OPERATOR_ACCOUNT ||--o{ STORE : operates
     STORE ||--o{ RESERVATION : receives
     STORE ||--o{ MENU : publishes
     RESERVATION ||--o{ MENU_HOLD : may_include

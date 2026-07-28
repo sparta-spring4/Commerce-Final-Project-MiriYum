@@ -17,10 +17,10 @@
 - 공통 계정 행과 역할 열로 세 유형을 합치지 않는다.
 - 감사·멱등·외부 참조에는 계정 유형과 해당 PK를 함께 기록한다.
 - 이메일·휴대전화·외부 로그인 식별자의 일치는 교차 계정 병합·전환·승격 근거가 아니다.
-- 매장 명령은 매장 운영자 계정 상태, `store_operator_store_affiliations`, 대상 매장의 승인·운영 상태를 MySQL에서 함께 검증한다.
+- 매장 명령은 매장 운영자 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 승인·운영 상태를 MySQL에서 함께 검증한다.
 - API가 받은 역할 값이나 다른 namespace의 JWT를 권한 근거로 사용하지 않는다.
 - 회원가입·로그인·재발급·로그아웃 API는 계정 유형별 진입 경로와 스키마를 사용하고 요청의 `role`·`accountType`으로 계정 유형을 선택하거나 변경하지 않는다.
-- 예약·예약 결합 메뉴 홀드·사용자 픽업 예약은 `consumer_account_id`, 매장 소속은 `store_operator_account_id`를 참조하며 범용 `user_id` FK를 사용하지 않는다.
+- 예약·예약 결합 메뉴 홀드·사용자 픽업 예약은 `consumer_account_id`를 참조하고, 1차 MVP의 `stores`는 `store_operator_account_id`를 직접 참조한다. 범용 `user_id` FK는 사용하지 않는다.
 - `1차 MVP` Flyway에는 `consumer_accounts`와 `store_operator_accounts`만 포함한다. `platform_operator_accounts`와 해당 API는 `고도화`에서 다른 계정 테이블의 역할 열이나 PK를 변경하지 않고 추가한다.
 
 ## 단계별 인증 전달 계약
