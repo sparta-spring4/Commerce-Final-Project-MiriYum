@@ -1,0 +1,1073 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Store and Search API
+  version: 1.0.0
+  description: 공개 매장 탐색과 매장 운영자 기본 관리 계약
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경의 동일 origin
+security: []
+tags:
+  - name: Store Search
+    description: 공개 매장·메뉴 탐색
+  - name: Catalog
+    description: 검색·입력 허용 코드
+  - name: Store Management
+    description: 매장 운영자 기본 관리
+paths:
+  /api/v1/stores:
+    get:
+      tags: [Store Search]
+      summary: 매장 목록 검색
+      operationId: searchStores
+      parameters:
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: region
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Region"
+        - name: storeCategoryCode
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CatalogCode"
+        - name: serviceDate
+          in: query
+          required: false
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        - name: startTime
+          in: query
+          required: false
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        - name: partySize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: availableOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: sort
+          in: query
+          description: 매장 목록 정렬. 아래 허용값 외에는 400을 반환한다.
+          schema:
+            type: string
+            enum:
+              - "name,asc"
+              - "name,desc"
+              - "createdAt,desc"
+              - "createdAt,asc"
+            default: "name,asc"
+      responses:
+        "200":
+          description: 매장 검색 결과 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorePageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+  /api/v1/stores/{storeId}:
+    get:
+      tags: [Store Search]
+      summary: 매장 상세 조회
+      operationId: getStore
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - name: serviceDate
+          in: query
+          required: false
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        - name: startTime
+          in: query
+          required: false
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        - name: partySize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: 매장 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreDetailSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+  /api/v1/stores/{storeId}/menus:
+    get:
+      tags: [Store Search]
+      summary: 매장 공개 메뉴 조회
+      operationId: getStoreMenus
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 공개 메뉴 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuListSuccessResponse"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+  /api/v1/store-categories:
+    get:
+      tags: [Catalog]
+      summary: 매장 카테고리 조회
+      operationId: getStoreCategories
+      responses:
+        "200":
+          description: 매장 주 카테고리 catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogListSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/menu-categories:
+    get:
+      tags: [Catalog]
+      summary: 메뉴 카테고리 조회
+      operationId: getMenuCategories
+      responses:
+        "200":
+          description: 메뉴 카테고리 catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogListSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-tags:
+    get:
+      tags: [Catalog]
+      summary: 매장 태그 조회
+      operationId: getStoreTags
+      responses:
+        "200":
+          description: 매장 태그 catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogListSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operator/stores:
+    post:
+      tags: [Store Management]
+      summary: 매장 등록
+      operationId: createStore
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreCreateRequest"
+      responses:
+        "201":
+          description: 매장 신청 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedStoreSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/StoreConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operator/stores/{storeId}:
+    get:
+      tags: [Store Management]
+      summary: 운영 매장 정보 조회
+      operationId: getManagedStore
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 운영 매장 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedStoreSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+    patch:
+      tags: [Store Management]
+      summary: 매장 기본정보 수정
+      operationId: updateStore
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 매장 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedStoreSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/StoreStateConflict"
+  /api/v1/store-operator/stores/{storeId}/operating-hours:
+    put:
+      tags: [Store Management]
+      summary: 주간 영업시간 전체 게시
+      operationId: replaceOperatingHours
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WeeklyOperatingHoursRequest"
+      responses:
+        "200":
+          description: 게시된 영업시간
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatingHoursSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "409":
+          $ref: "#/components/responses/ScheduleConflict"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-slots:
+    put:
+      tags: [Store Management]
+      summary: 주간 예약 접수 시간대 전체 게시
+      operationId: replaceReservationTimeSlots
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WeeklyReservationTimeSlotsRequest"
+      responses:
+        "200":
+          description: 게시된 예약 접수 시간대
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationTimeSlotsSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "409":
+          $ref: "#/components/responses/ScheduleConflict"
+  /api/v1/store-operator/stores/{storeId}/menus:
+    post:
+      tags: [Store Management]
+      summary: 메뉴 기본정보 등록
+      operationId: createMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuWriteRequest"
+      responses:
+        "201":
+          description: 생성된 메뉴
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}:
+    put:
+      tags: [Store Management]
+      summary: 메뉴 기본정보와 상태의 새 버전 등록
+      operationId: updateMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuWriteRequest"
+      responses:
+        "200":
+          description: 수정된 메뉴 버전
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  parameters:
+    StoreId:
+      name: storeId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    MenuId:
+      name: menuId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+  schemas:
+    Region:
+      type: string
+      enum: [SEOUL, BUSAN, DAEGU, DAEJEON, GWANGJU]
+    CatalogCode:
+      type: string
+      pattern: "^[A-Z][A-Z0-9_]{1,49}$"
+    ReservationAvailability:
+      type: string
+      enum: [NOT_REQUESTED, AVAILABLE, UNAVAILABLE]
+    VerificationStatus:
+      type: string
+      enum: [APPROVED]
+    OperationStatus:
+      type: string
+      enum: [OPEN, TEMPORARILY_CLOSED, CLOSED]
+    PickupEligibility:
+      type: string
+      enum: [ELIGIBLE, INELIGIBLE]
+    BusinessType:
+      type: string
+      description: 매장 등록 신청에서 선택하는 업종 구분. CAFE와 BAKERY만 픽업 자격을 얻는다.
+      enum: [CAFE, BAKERY, OTHER]
+    StoreModes:
+      type: object
+      description: 등록 업종이 OTHER이면 pickupEnabled는 false여야 한다. true 요청은 일반 등록으로 자동 보정하지 않고 STORE_008로 거절한다.
+      additionalProperties: false
+      required: [reservationEnabled, menuHoldEnabled, pickupEnabled]
+      properties:
+        reservationEnabled:
+          type: boolean
+        menuHoldEnabled:
+          type: boolean
+        pickupEnabled:
+          type: boolean
+    StoreSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - name
+        - region
+        - address
+        - storeCategoryCode
+        - operationStatus
+        - modes
+        - reservationAvailability
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        operationStatus:
+          $ref: "#/components/schemas/OperationStatus"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+        reservationAvailability:
+          $ref: "#/components/schemas/ReservationAvailability"
+    StoreDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - name
+        - description
+        - region
+        - address
+        - storeCategoryCode
+        - tags
+        - operationStatus
+        - pickupEligibility
+        - modes
+        - operatingHours
+        - reservationTimeSlots
+        - representativeMenus
+        - reservationAvailability
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        tags:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        operationStatus:
+          $ref: "#/components/schemas/OperationStatus"
+        pickupEligibility:
+          $ref: "#/components/schemas/PickupEligibility"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+        operatingHours:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailySchedule"
+        reservationTimeSlots:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTimeSlots"
+        representativeMenus:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicMenu"
+        reservationAvailability:
+          $ref: "#/components/schemas/ReservationAvailability"
+    ManagedStore:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - name
+        - region
+        - address
+        - storeCategoryCode
+        - verificationStatus
+        - operationStatus
+        - pickupEligibility
+        - modes
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        verificationStatus:
+          $ref: "#/components/schemas/VerificationStatus"
+        operationStatus:
+          $ref: "#/components/schemas/OperationStatus"
+        pickupEligibility:
+          $ref: "#/components/schemas/PickupEligibility"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+    PublicMenu:
+      type: object
+      additionalProperties: false
+      required:
+        - menuId
+        - name
+        - description
+        - price
+        - representative
+        - primaryCategoryCode
+        - secondaryCategoryCodes
+        - localTags
+        - holdEnabled
+        - pickupEnabled
+        - saleStatus
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+        representative:
+          type: boolean
+        primaryCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        secondaryCategoryCodes:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        localTags:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+        holdEnabled:
+          type: boolean
+        pickupEnabled:
+          type: boolean
+        saleStatus:
+          type: string
+          enum: [SELLING, PAUSED]
+    ManagedMenu:
+      type: object
+      additionalProperties: false
+      required: [menu, versionStatus, visibility]
+      properties:
+        menu:
+          $ref: "#/components/schemas/PublicMenu"
+        versionStatus:
+          type: string
+          enum: [DRAFT, SCHEDULED, PUBLISHED, RETIRED]
+        visibility:
+          type: string
+          enum: [VISIBLE, HIDDEN]
+    CatalogItem:
+      type: object
+      additionalProperties: false
+      required: [code, displayName]
+      properties:
+        code:
+          $ref: "#/components/schemas/CatalogCode"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+    CatalogListData:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogItem"
+    TimeRange:
+      type: object
+      additionalProperties: false
+      required: [startTime, endTime]
+      properties:
+        startTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endTime:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+    DailySchedule:
+      type: object
+      additionalProperties: false
+      required: [dayOfWeek, businessHours, breakTimes]
+      properties:
+        dayOfWeek:
+          type: string
+          enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]
+        businessHours:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRange"
+        breakTimes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRange"
+    DailyTimeSlots:
+      type: object
+      additionalProperties: false
+      required: [dayOfWeek, slots]
+      properties:
+        dayOfWeek:
+          type: string
+          enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRange"
+    StoreCreateRequest:
+      type: object
+      description: 1차 MVP는 사업자등록번호 형식과 활성 중복만 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. OTHER도 일반 등록·예약을 사용할 수 있지만 modes.pickupEnabled=true 조합은 STORE_008로 거절하며 매장을 생성하지 않는다.
+      additionalProperties: false
+      required:
+        - businessRegistrationNumber
+        - businessType
+        - name
+        - description
+        - region
+        - address
+        - storeCategoryCode
+        - tagCodes
+        - modes
+      properties:
+        businessRegistrationNumber:
+          type: string
+          pattern: "^[0-9]{10}$"
+        businessType:
+          $ref: "#/components/schemas/BusinessType"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        tagCodes:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+    StoreUpdateRequest:
+      type: object
+      description: OTHER 매장에서 modes.pickupEnabled=true를 요청하면 STORE_008로 거절하고 기존 매장 설정을 유지한다.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        tagCodes:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+        operationStatus:
+          $ref: "#/components/schemas/OperationStatus"
+    WeeklyOperatingHoursRequest:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: "#/components/schemas/DailySchedule"
+    WeeklyReservationTimeSlotsRequest:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: "#/components/schemas/DailyTimeSlots"
+    MenuWriteRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - price
+        - representative
+        - primaryCategoryCode
+        - secondaryCategoryCodes
+        - localTags
+        - holdEnabled
+        - pickupEnabled
+        - versionStatus
+        - visibility
+        - saleStatus
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+        representative:
+          type: boolean
+        primaryCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        secondaryCategoryCodes:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        localTags:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+        holdEnabled:
+          type: boolean
+        pickupEnabled:
+          type: boolean
+        versionStatus:
+          type: string
+          enum: [DRAFT, SCHEDULED, PUBLISHED, RETIRED]
+        visibility:
+          type: string
+          enum: [VISIBLE, HIDDEN]
+        saleStatus:
+          type: string
+          enum: [SELLING, PAUSED]
+    StorePageData:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreSummary"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    MenuListData:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicMenu"
+    OperatingHoursData:
+      type: object
+      additionalProperties: false
+      required: [version, days]
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailySchedule"
+    ReservationTimeSlotsData:
+      type: object
+      additionalProperties: false
+      required: [version, days]
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTimeSlots"
+    StorePageSuccessResponse:
+      $ref: "#/components/schemas/SuccessStorePage"
+    SuccessStorePage:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/StorePageData"
+    StoreDetailSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/StoreDetail"
+    MenuListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/MenuListData"
+    CatalogListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/CatalogListData"
+    ManagedStoreSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ManagedStore"
+    OperatingHoursSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/OperatingHoursData"
+    ReservationTimeSlotsSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ReservationTimeSlotsData"
+    ManagedMenuSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ManagedMenu"
+  responses:
+    StoreNotFound:
+      description: 매장을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_001
+            message: 매장을 찾을 수 없습니다.
+    StoreConflict:
+      description: 활성 사업자등록번호 중복 또는 등록 업종의 픽업 자격 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            activeBusinessNumberDuplicate:
+              value:
+                code: STORE_002
+                message: 이미 활성 매장에 등록된 사업자등록번호입니다.
+            pickupIneligible:
+              value:
+                code: STORE_008
+                message: 등록 업종에 픽업 자격이 없습니다.
+    StoreAccessDenied:
+      description: 대상 매장 운영 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_003
+            message: 대상 매장의 운영 권한이 없습니다.
+    StoreStateConflict:
+      description: 현재 매장 상태 또는 등록 업종의 픽업 자격 때문에 변경 불가
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidStoreState:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 변경할 수 없습니다.
+            pickupIneligible:
+              value:
+                code: STORE_008
+                message: 등록 업종에 픽업 자격이 없습니다.
+    ScheduleConflict:
+      description: 영업·브레이크·예약 접수 구간 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_006
+            message: 영업시간과 예약 접수 시간대를 확인해 주세요.
+    MenuNotFound:
+      description: 메뉴를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_009
+            message: 메뉴를 찾을 수 없습니다.
+    MenuStateConflict:
+      description: 현재 메뉴 상태에서 변경 불가
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_010
+            message: 현재 메뉴 상태에서 변경할 수 없습니다.

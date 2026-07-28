@@ -17,12 +17,17 @@
 - 공통 계정 행과 역할 열로 세 유형을 합치지 않는다.
 - 감사·멱등·외부 참조에는 계정 유형과 해당 PK를 함께 기록한다.
 - 이메일·휴대전화·외부 로그인 식별자의 일치는 교차 계정 병합·전환·승격 근거가 아니다.
-- 매장 명령은 매장 운영자 계정 상태, `store_operator_store_affiliations`, 대상 매장의 승인·운영 상태를 MySQL에서 함께 검증한다.
+- 매장 명령은 매장 운영자 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 승인·운영 상태를 MySQL에서 함께 검증한다.
 - API가 받은 역할 값이나 다른 namespace의 JWT를 권한 근거로 사용하지 않는다.
+- 회원가입·로그인·재발급·로그아웃 API는 계정 유형별 진입 경로와 스키마를 사용하고 요청의 `role`·`accountType`으로 계정 유형을 선택하거나 변경하지 않는다.
+- 예약·예약 결합 메뉴 홀드·사용자 픽업 예약은 `consumer_account_id`를 참조하고, 1차 MVP의 `stores`는 `store_operator_account_id`를 직접 참조한다. 범용 `user_id` FK는 사용하지 않는다.
+- `1차 MVP` Flyway에는 `consumer_accounts`와 `store_operator_accounts`만 포함한다. `platform_operator_accounts`와 해당 API는 `고도화`에서 다른 계정 테이블의 역할 열이나 PK를 변경하지 않고 추가한다.
 
 ## 단계별 인증 전달 계약
 
-`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. 헤더·쿠키·브라우저 저장 위치, 토큰 수명과 CSRF 경계는 AUTH-007과 인증 기능 계약에서 결정하기 전 추측하지 않는다.
+`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. Access JWT 유효기간은 발급 시각부터 1시간, Refresh JWT 유효기간은 발급 시각부터 14일이며 1차 MVP의 일반 사용자·매장 운영자와 모든 런타임 프로필에 같은 값을 적용한다. 고도화에서 플랫폼 운영자 인증을 추가할 때도 같은 기본 수명을 적용한다.
+
+로그인·재발급 성공 응답은 Access JWT를 응답 본문으로 전달하고 프런트엔드는 shell별 메모리에만 보관한다. 보호 API는 `Authorization: Bearer` 헤더를 사용한다. Refresh JWT는 계정 namespace별로 이름과 경로가 분리된 `HttpOnly`, `Secure`, `SameSite=Lax` 쿠키로만 전달하며 응답 본문이나 Web Storage에 원문을 노출하지 않는다. 토큰 재발급은 동일 Origin의 `POST` JSON 요청과 `Origin`·`Referer` 검증을 요구하고, 로그아웃에는 Spring Security CSRF 보호를 적용한다. 상세 계약과 인수 조건은 [1차 MVP 공통 명세 D-003](specs/mvp1-common/spec.md#d-003-브라우저-토큰-전달저장과-csrf-경계)을 따른다.
 
 `고도화`에서는 Refresh Token 원문이 아닌 해시와 계정·로그인 단위·토큰 계열·만료·폐기·교체 상태를 Valkey에 둔다. 회전·폐기·재사용 탐지와 로그인 단위 종료는 원자적으로 처리한다. Valkey 장애 중 로그인·갱신·로그아웃은 실패 폐쇄하고, 기존 Access JWT는 현재 계정·권한 검증 경계를 통과한 경우에만 처리한다.
 
@@ -45,7 +50,7 @@
 
 ## 멱등성과 오류 응답
 
-재전송 가능한 상태 변경은 클라이언트 멱등 키 또는 도메인 고유 요청 식별자를 검증한다. 동일 주체·명령·payload의 재전송은 기존 결과를 반환하고 다른 payload의 키 재사용은 거부한다. 정확한 전달 위치·보관기간은 기능 계약에서 결정한다.
+재전송 가능한 상태 변경은 클라이언트 멱등 키 또는 도메인 고유 요청 식별자를 검증한다. 요청 지문은 HTTP method, 정규화된 route, 실제 path parameter, 승인된 query와 body field를 포함한다. 동일 주체·명령·키·전체 요청 지문의 재전송은 업무 트랜잭션과 함께 저장한 최초 HTTP 상태·응답 코드·정규화 결과 payload를 반환하고, 다른 전체 요청 지문의 키 재사용은 거부한다. 정확한 전달 위치·보관기간은 기능 계약에서 결정한다.
 
 오류 응답은 기계 판독 가능한 `code`, 사용자용 `message`, 필요한 경우에만 필드별 `details`를 가진 JSON 객체다. 내부 예외·스택 추적·비밀·개인정보는 응답에 넣지 않는다. `충돌`, `가용성 부족`, `권한 없음`, `결과 불명`, `외부 의존성 실패`를 서로 다른 의미로 유지한다.
 
@@ -55,7 +60,7 @@
 
 QueryDSL은 선택 조합과 projection을 만들고 최종 후보는 MySQL에서 읽는다. 유효한 과거 예약과 확정 메뉴 선택만 이력 신호이며 취소·실패·단순 조회와 노쇼는 선호 신호가 아니다. Java 점수 계산은 같은 스냅샷에 같은 순위·설명을 만들어야 한다.
 
-품절 또는 마지막 수량 경합 실패 뒤 예약 모듈의 공개 `BulkAvailabilityPort`가 같은 매장 메뉴를 동기 검증한다. 같은 매장 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
+`1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 품절 또는 마지막 수량 경합 실패 뒤 같은 매장 메뉴를 검증하는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약만 1차에서 선구현하지 않으며, `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다. 같은 매장 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
 
 AI/LLM, Spring AI, 벡터 DB와 검색 클러스터는 `2차 MVP` 계약에 없다. 정확한 사전·가중치·동률 규칙은 고정 평가셋 검증과 승인 전 추측하지 않는다.
 

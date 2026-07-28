@@ -18,10 +18,27 @@
 
 - 방식 A의 단일 Spring Boot·단일 MySQL 경계를 확인한다.
 - 모듈 간 repository/entity 직접 접근, controller→repository 직접 호출과 순환 의존을 구조 테스트로 차단한다.
-- 일반 사용자·매장 운영자·플랫폼 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다.
+- 1차 MVP에서는 일반 사용자·매장 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다. 플랫폼 운영자 계정·JWT 검증 gate는 해당 기능을 구현하는 고도화에서 추가한다.
 - 교차 namespace JWT, 클라이언트 역할 값, 이메일·외부 로그인에 의한 자가 승격을 거부한다.
-- 매장 명령이 현재 계정·소속·매장 상태를 MySQL에서 재검증하는지 확인한다.
+- 매장 명령이 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 재검증하는지 확인한다.
 - 로그·응답·지표에 토큰·비밀·연락처·정밀 위치·증빙·결제수단 원문이 남지 않는지 검사한다.
+
+## 코드 구현 gate
+
+### 코드 형식 자동화
+
+- 최소 형식 계약은 루트 `.editorconfig`가 소유한다.
+- Checkstyle, Spotless와 Git hook 같은 빌드 강제 도구는 반복 문제와 도입 효과의 근거가 생긴 뒤 별도 Issue로 검토한다. 현재 상태는 `NOT CONFIGURED`다.
+
+## 구현 테스트 gate
+
+- 핵심 Service 성공·실패와 상태 전이·인가·정원·재고·날짜·시간은 unit test로 검증한다.
+- 공통 응답·인증·검증·멱등성 계약은 Controller 테스트로 검증한다.
+- Flyway·DB constraint·조건부 갱신·동시성·멱등성·rollback·취소 복구·픽업 분리는 Testcontainers MySQL로 검증한다.
+- given/when/then, camelCase test method와 한국어 `@DisplayName`을 사용한다.
+- 시간은 `Clock`, 동시성은 barrier/latch로 제어하고 임의 `sleep`에 의존하지 않는다.
+- H2 통과만으로 MySQL 고유 동작이나 동시성을 증명하지 않는다.
+- DB 검증이 인수 조건인데 Testcontainers가 구성되지 않았으면 `NOT CONFIGURED` 또는 `BLOCKED`이며 완료·병합 가능으로 판정하지 않는다.
 
 ## `1차 MVP` 검증 gate
 
@@ -30,7 +47,7 @@
 첫 단계부터 Testcontainers MySQL로 다음을 검증한다.
 
 - Flyway가 빈 DB와 지원되는 이전 스키마에서 같은 최종 상태로 수렴한다.
-- 계정 유형별 유일 제약과 매장 소속 제약이 애플리케이션 우회 쓰기를 거부한다.
+- 계정 유형별 유일 제약과 `stores.store_operator_account_id` FK가 애플리케이션 우회 쓰기를 거부한다.
 - 예약 인원·팀 수와 메뉴 수량의 비음수 조건·조건부 SQL이 실제 MySQL에서 동작한다.
 - 고정 잠금 순서, 교착·병렬 요청과 제한 재시도가 초과 판매를 만들지 않는다.
 - `예약+메뉴 홀드`의 일부 자원 실패가 전체 롤백되고 픽업 예약이 예약 인원·팀 수를 차감하지 않는다.
@@ -78,7 +95,7 @@
 ### UI·권한
 
 - 단계별 shell·라우트·SDK·환경변수 노출을 검사한다.
-- 매장 운영자와 플랫폼 운영자의 UI·권한·개인정보 조회 경계를 분리한다.
+- 1차 MVP에서는 일반 사용자와 매장 운영자의 UI·권한·개인정보 조회 경계를 분리하고 플랫폼 운영자 shell·라우트·SDK를 만들지 않는다. 플랫폼 운영자 UI 검증은 고도화에서 해당 기능을 구현할 때 추가한다.
 - 파일·SSE·결제의 중간·오류·결과 불명 상태를 확정으로 표시하지 않는지 검증한다.
 
 ## 금지 기술 gate

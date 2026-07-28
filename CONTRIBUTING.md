@@ -4,12 +4,16 @@
 
 ## Issue로 시작하기
 
-명확히 설명된 작은 변경 예외를 제외하면 구현 전에 GitHub Issue를 생성하거나 선택한다. Issue는 다음을 소유한다.
+단계 5 확정 이후 시작한 저장소 변경은 크기와 관계없이 구현 전에 GitHub Issue를 생성하거나 선택한다. 저장소를 변경하지 않는 질문·조사는 Issue 대상이 아니다. Issue는 다음을 소유한다.
 
 - 의도한 결과와 정확한 포함·제외 경로
 - 현재 담당자와 위임된 작업
 - 인수 조건
 - 검증 계획과 알려진 위험
+
+Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
+
+둘 이상의 도메인 계약이 필요한 작업은 Issue에 `contract-first`, `blocks`, `blocked by` 관계를 기록한다. 소유자는 동작하는 최소 공개 Service 메서드·DTO·오류·테스트 계약을 먼저 제공하고 선행 PR을 `dev`에 병합한다. 소비자는 최신 `dev`를 반영한 뒤 그 계약을 사용한다. 준비되지 않은 계약은 `return null`, 가짜 성공 응답, 빈 구현 또는 `UnsupportedOperationException`으로 대신하지 않고 `BLOCKED`로 보고한다.
 
 편집 전에 정확한 변경 경로를 확정한다. 탐색 패턴은 경로 식별에 도움이 될 수 있지만, Issue·사용자의 현재 작업 요청과 활성 정본에서 최종 파일 목록을 확정해야 한다. 무시되는 작업 artifact를 기본 라우팅이나 제품 사실의 근거로 읽지 않는다.
 
@@ -29,7 +33,36 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 - 위험, rollback 고려 사항 및 문서 영향
 - CI 증거 링크와 요청하는 검토자(reviewer) 중점 검토 사항
 
+### 브랜치와 병합
+
+- 유일한 기본·통합 개발 브랜치는 `dev`다. `develop`은 사용하지 않는다.
+- `main`은 배포·최종 제출 브랜치이며 일반 작업의 PR 대상이 아니다.
+- 작업 브랜치는 최신 `dev`에서 만들고 `feature/{issue}-{slug}`, `fix/{issue}-{slug}`, `docs/{issue}-{slug}`, `chore/{issue}-{slug}` 형식을 사용한다.
+- 한 브랜치는 하나의 주 Issue를 중심으로 유지한다. 하루가 지났다는 이유만으로 브랜치나 PR을 나누거나 폐기하지 않는다.
+- 작업이 하루를 넘길 가능성이 있으면 Draft PR로 조기에 공유한다.
+- 작업 브랜치에서 `dev`로는 squash merge하고, `dev`에서 `main`으로는 merge commit을 사용한다.
+- 병합 뒤 작업 브랜치는 삭제한다. `dev` 직접 push·force push·삭제는 금지한다.
+
+### 커밋과 PR 제목
+
+커밋과 PR 제목은 `<type>(<scope>): <한글 요약>` 형식을 사용한다.
+
+- type: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`
+- 선택 scope: `auth`, `store`, `reservation`, `menu-hold`, `pickup`, `global`, `frontend`, `api`, `docs`
+- `update`, `add`, `bugfix`, `gitfix`, `script` 같은 임의 분류와 emoji 접두어는 사용하지 않는다.
+
+### 검토와 승인
+
+- PR 작성자를 제외한 2명 이상의 승인이 필요하며 요구사항 담당자의 검토 참여를 허용한다.
+- 변경한 도메인의 소유자 확인은 다른 승인 인원의 검토와 별개다.
+- 소유자 확인 없이 다른 도메인의 Entity·Repository·공개 Service 메서드·DTO·오류·API 계약을 변경하지 않는다.
+- 리뷰어의 담당 도메인을 제한하지 않지만, 모르는 계약을 추측해 승인하지 않는다.
+- 충돌을 해결한 뒤 적용 가능한 검증을 다시 실행한다.
+- PR 분리는 독립 인수 조건, 도메인 경계, 위험 격리와 rollback 가능성을 기준으로 한다.
+
 CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow나 계획된 검사는 깨끗한 checkout이 통과했거나 저장소 검사가 필수라는 증거가 아니다.
+
+현재 CI와 required check는 `NOT CONFIGURED`다. 존재하지 않는 check를 통과했다고 표시하거나 브랜치 보호의 required check로 등록하지 않는다.
 
 ## 위임과 인계(handoff)
 

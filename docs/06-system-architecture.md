@@ -15,6 +15,8 @@ MiriYum은 `1차 MVP`, `2차 MVP`와 `고도화`까지 **방식 A**를 유지한
 
 React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한다. Spring MVC는 웹 경계, Spring Security는 계정 유형별 인증·인가, Spring Data JPA와 좁은 명시적 SQL은 MySQL 접근, Flyway는 스키마 이력을 담당한다.
 
+`1차 MVP` 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
+
 ```text
 frontend/
   일반 사용자 shell
@@ -23,7 +25,7 @@ frontend/
         │
         ▼
 하나의 Spring Boot
-  auth ─ store ─ booking
+  auth ─ store ─ reservation ─ menuhold ─ pickup
                ├─ store.recommendation(2차 MVP)
                ├─ payment(고도화)
                └─ notification(고도화)
@@ -49,13 +51,13 @@ frontend/
 
 ## `1차 MVP` 기술과 모듈
 
-`1차 MVP`는 `auth`, `store`, `booking`의 실제 기능만 둔다. Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.6.1, Spring MVC, Spring Data JPA, Spring Security, Flyway와 MySQL을 사용한다. 프런트엔드는 Node.js 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10과 React Testing Library 16.3.2를 사용한다.
+`1차 MVP`는 `auth`, `store`, `reservation`, `menuhold`, `pickup`의 실제 기능만 둔다. Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.6.1, Spring MVC, Spring Data JPA, Spring Security, Flyway와 MySQL을 사용한다. 프런트엔드는 Node.js 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10과 React Testing Library 16.3.2를 사용한다.
 
 정확히 확인되지 않은 MySQL·Testcontainers 버전은 적지 않는다. Testcontainers MySQL은 첫 단계부터 Flyway, MySQL 제약, 조건부 SQL, 락·격리와 전체 롤백을 검증하는 통합 테스트 경계다.
 
 일반 조회는 JPA를 사용한다. 예약 인원·팀 수와 메뉴 수량처럼 경합이 큰 쓰기는 repository 안의 DB 유일 제약, 비음수 조건, 고정 잠금 순서, 조건부 SQL과 멱등 키로 보호한다. `예약+메뉴 홀드`는 선택된 모든 자원을 하나의 MySQL 트랜잭션으로 확정하며 부분 성공을 남기지 않는다. 픽업 예약은 메뉴 수량과 픽업 시간대만 사용한다.
 
-계정 유형별 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록 없이 검증한다. 토큰 유형·서명·만료·발급자·대상·계정 namespace를 확인하고 보호 명령은 현재 계정 상태, 매장 운영자-매장 소속과 매장 상태를 MySQL에서 다시 검증한다. `1차 MVP`에는 Valkey·Spring Data Redis를 넣지 않는다.
+계정 유형별 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록 없이 검증한다. 토큰 유형·서명·만료·발급자·대상·계정 namespace를 확인하고 보호 명령은 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 다시 검증한다. `1차 MVP`에는 Valkey·Spring Data Redis를 넣지 않는다.
 
 ## `2차 MVP` 기술 확장
 
@@ -64,7 +66,7 @@ frontend/
 - `RuleInterpreter`: 한국어 입력의 정규화, 명시적 시간대와 `Clock`, 가격, 승인된 지역·분위기·카테고리 사전 및 남은 키워드를 결정적으로 해석한다.
 - QueryDSL: 선택 조건 조합과 projection을 타입 안전하게 구성한다.
 - `store.recommendation`: 유효한 예약·확정 메뉴 이력을 요청 시 MySQL에서 집계하고 Java 점수 계산으로 설명 가능한 후보를 만든다.
-- 동기 추천 API: `booking`의 공개 `BulkAvailabilityPort`를 사용해 최신 자격을 한 번에 검증한다.
+- 동기 추천 가용성 조회: `1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 선구현 금지는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약에만 적용하며, 해당 계약은 `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다.
 - 카카오 좌표 포트: 입점·주소 변경 때만 Kakao Local REST를 호출한다. 지도 SDK는 결과 표시와 매장 운영자의 좌표 확인에만 사용한다.
 
 품절 대안은 같은 매장 후보를 먼저 검증하고, 후보가 없을 때만 원 매장의 검증된 저장 좌표 기준 **3km 이내**의 매장을 허용한다. bounding box로 후보를 줄인 뒤 Java Haversine으로 3km 포함 경계를 확정한다. 추천 요청 중 외부 지도 호출은 하지 않으며 사용자 현재 위치도 요청·저장·사용하지 않는다. AI/LLM, Spring AI, 벡터 DB, 검색엔진, 추천 전용 서비스·DB·캐시는 `2차 MVP`에 없다.

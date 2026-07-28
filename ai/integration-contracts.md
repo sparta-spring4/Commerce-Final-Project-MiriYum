@@ -46,6 +46,27 @@ Frontend scaffold 검증 surface: CONFIGURED
 
 추측한 payload, 만들어 낸 명령 또는 문서화되지 않은 오류 동작을 handoff하지 않는다. delegate의 artifact는 통합 검토의 입력일 뿐, 그 자체로 완료 증거가 아니다.
 
+## contract-first 선행 순서
+
+한 도메인이 다른 도메인의 동작을 소비해야 하면 `spec → OpenAPI → 소유자의 실행 가능한 최소 공개 Service/DTO/오류/테스트 → dev 병합 → 의존 구현` 순서를 지킨다.
+
+1. Issue에 `contract-first`, `blocks`, `blocked by` 관계와 소유자를 기록하고 기능 명세를 확정한다.
+2. 소유 OpenAPI에서 공개 HTTP 계약을 확정한다.
+3. 소유자가 실행 가능한 최소 공개 Service 메서드, 요청·응답 DTO, 확정 오류와 테스트를 제공한다.
+4. 소유 계약 PR을 먼저 검토해 `dev`에 병합한다.
+5. 소비자가 최신 `dev`를 반영하고 공개 계약만 사용한다.
+
+mock과 fake는 테스트 경계에서만 사용할 수 있다. 소비자는 다른 도메인의 Entity·Repository를 직접 접근하거나 동일 API를 중복 구현하지 않는다. 미준비 계약을 production dummy, `return null`, 가짜 성공 응답, 빈 구현, `UnsupportedOperationException` 또는 임시 외부 코드로 대신하지 않는다. 필요한 선행 계약이 없으면 해당 범위를 `BLOCKED`로 기록하며, 조합된 cross-end runtime이 없으면 통합 실행 상태는 계속 `NOT CONFIGURED`다.
+
+## Frontend 소비 불변식
+
+- frontend는 관련 기능 명세와 OpenAPI를 먼저 읽고 OpenAPI에 없는 field, path 또는 status를 만들지 않는다.
+- 일반 사용자와 매장 운영자 화면은 분리하되 같은 backend 계약을 소비한다.
+- 인증 주체와 권한은 token과 backend 결과를 기준으로 하며 client 입력 role로 승격하지 않는다.
+- 성공과 실패는 HTTP status와 공통 응답 `code`를 함께 평가하고, 오류 UI는 확정된 error code를 기준으로 한다.
+- 빈 배열은 정상 empty result이며 `data: null`은 정상적인 응답 데이터 없음이다.
+- 계약이 부족하면 임시 field·DTO·응답을 만들지 않고 contract-first Issue·PR로 보완한다.
+
 ## 통합 증거 경계
 
 엔드포인트 증거는 엔드포인트 명령 또는 CI 실행과 함께 유지한다. Pull Request는 로그를 복제하지 않고 링크를 조합해 공유 인수 조건에 대응시킨다.
