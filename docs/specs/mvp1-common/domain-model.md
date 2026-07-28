@@ -344,9 +344,9 @@ ROLE_STORE_OPERATOR
 
 | 상태 축 | 값 | 의미 |
 |---|---|---|
-| 입점 검증 | `VERIFYING`, `VERIFICATION_PENDING`, `APPROVED`, `REJECTED` | 구조화 사업자 정보·공식 진위확인·중앙 중복 판정의 처리 결과 |
+| 입점 검증 | `VERIFYING`, `VERIFICATION_PENDING`, `APPROVED`, `REJECTED` | 1차 MVP 더미 사업자 기준 데이터·중앙 중복 판정의 처리 결과. 공식 진위확인은 고도화에서 대체 |
 | 매장 운영 | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` | 영업, 휴점, 폐점의 중앙 운영 상태 |
-| 픽업 자격 | `UNVERIFIED`, `ELIGIBLE`, `INELIGIBLE` | 공식 업종 값과 버전된 허용 매핑에 따른 카페·베이커리 픽업 자격 |
+| 픽업 자격 | `UNVERIFIED`, `ELIGIBLE`, `INELIGIBLE` | 1차 MVP의 카페·베이커리 더미 업종 판정. 정확한 코드는 구현 fixture가 소유하며 공식 업종·버전 매핑은 고도화 전용 |
 
 ### 입점 검증 전이
 

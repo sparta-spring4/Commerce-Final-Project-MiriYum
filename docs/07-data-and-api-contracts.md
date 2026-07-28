@@ -25,7 +25,7 @@
 
 ## 단계별 인증 전달 계약
 
-`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. Access JWT 유효기간은 발급 시각부터 1시간, Refresh JWT 유효기간은 발급 시각부터 14일이며 모든 계정 유형과 런타임 프로필에 같은 값을 적용한다.
+`1차 MVP`의 Access JWT와 Refresh JWT는 서버 정상 목록·폐기 목록을 저장하지 않는다. 두 토큰은 종류·서명·만료·발급자·대상·계정 namespace를 검증하고, Refresh JWT는 같은 계정 유형의 토큰만 갱신한다. Access JWT 유효기간은 발급 시각부터 1시간, Refresh JWT 유효기간은 발급 시각부터 14일이며 1차 MVP의 일반 사용자·매장 운영자와 모든 런타임 프로필에 같은 값을 적용한다. 고도화에서 플랫폼 운영자 인증을 추가할 때도 같은 기본 수명을 적용한다.
 
 로그인·재발급 성공 응답은 Access JWT를 응답 본문으로 전달하고 프런트엔드는 shell별 메모리에만 보관한다. 보호 API는 `Authorization: Bearer` 헤더를 사용한다. Refresh JWT는 계정 namespace별로 이름과 경로가 분리된 `HttpOnly`, `Secure`, `SameSite=Lax` 쿠키로만 전달하며 응답 본문이나 Web Storage에 원문을 노출하지 않는다. 토큰 재발급은 동일 Origin의 `POST` JSON 요청과 `Origin`·`Referer` 검증을 요구하고, 로그아웃에는 Spring Security CSRF 보호를 적용한다. 상세 계약과 인수 조건은 [1차 MVP 공통 명세 D-003](specs/mvp1-common/spec.md#d-003-브라우저-토큰-전달저장과-csrf-경계)을 따른다.
 

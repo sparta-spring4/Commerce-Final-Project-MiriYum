@@ -711,6 +711,7 @@ components:
             $ref: "#/components/schemas/TimeRange"
     StoreCreateRequest:
       type: object
+      description: 1차 MVP에서는 입력값을 프로젝트의 더미 사업자 기준 데이터와 비교하며 외부 국세청 API를 호출하지 않는다.
       additionalProperties: false
       required:
         - businessRegistrationNumber
@@ -737,6 +738,7 @@ components:
           maxLength: 100
         businessTypeName:
           type: string
+          description: 더미 사업자 기준 데이터와 비교할 업종 값. 기준 데이터에서 카페 또는 베이커리로 분류되면 픽업 자격 판정 대상이며 정확한 코드값은 구현 fixture가 소유한다.
           minLength: 1
           maxLength: 100
         businessItemName:
