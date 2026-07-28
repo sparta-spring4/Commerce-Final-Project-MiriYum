@@ -9,7 +9,7 @@
 ## 단계별 신뢰성 적용
 
 - **1차 MVP:** 방식 A의 단일 Spring Boot 애플리케이션과 단일 MySQL을 사용한다. 예약 수용량·회차별 팀 수·메뉴 홀드는 MySQL 트랜잭션, 제약, 조건부 갱신, 멱등 키로 보호하고 Testcontainers MySQL로 경합과 복구를 검증한다. Valkey, 메시지 브로커, 검색 클러스터를 두지 않는다.
-- **2차 MVP:** 같은 방식 A와 MySQL을 유지한다. `RuleInterpreter`, QueryDSL, MySQL 검색과 예약 모듈의 동기 `BulkAvailabilityPort`를 사용하며 추천 캐시·AI·검색 엔진·메시지 브로커를 추가하지 않는다.
+- **2차 MVP:** 같은 방식 A와 MySQL을 유지한다. `RuleInterpreter`, QueryDSL과 MySQL 검색을 사용하며, 동기 가용성 조회는 단계 진입 전 별도 contract-first Issue/PR에서 소유자와 하나의 공개 batch 계약을 확정한다. `1차 MVP`는 해당 포트나 batch 메서드를 미리 구현하지 않는다. 추천 캐시·AI·검색 엔진·메시지 브로커는 추가하지 않는다.
 - **고도화:** 단계 진입 시 Valkey 인증 상태와 SSE 전달 보조, S3, PortOne, 알림, 웨이팅을 모두 구현·활성화하고 검증한다. 외부 효과가 있는 후속 처리는 MySQL 기능별 durable task에 임대·fencing·멱등성·제한 재시도·격리·대사 규칙을 적용한다. Valkey와 SSE는 전달 보조이며 예약·결제 원장이 아니다. 공급자 정확 버전·수치·토폴로지는 활성화 전 결정 gate로 남을 수 있지만 기능 생략 근거가 아니다.
 - **향후 고도화:** Kafka, 범용 Outbox, MSA, WebSocket, OpenSearch·Meilisearch 같은 검색 클러스터는 측정된 병목, 실패 모델, 운영 책임, 비용과 마이그레이션 계획을 승인한 뒤에만 검토한다.
 
@@ -233,7 +233,7 @@
 ### 확정 검증 범위·판정
 
 - 1차 MVP는 Testcontainers MySQL로 마지막 예약 수용 인원·회차별 팀 수·메뉴 수량 경합, 중복 멱등 키, 트랜잭션 롤백, 마이그레이션과 인스턴스 재시작을 검증한다.
-- 2차 MVP는 MySQL 검색 지연, `RuleInterpreter` 회귀 데이터셋, QueryDSL 조건 조합, `BulkAvailabilityPort`의 품절·잔여 수량 재검증을 추가한다. 추천 캐시·AI·검색 엔진 장애 시나리오는 대상 기술이 없으므로 만들지 않는다.
+- 2차 MVP는 MySQL 검색 지연, `RuleInterpreter` 회귀 데이터셋, QueryDSL 조건 조합과 단계 진입 전 확정한 공개 batch 조회 계약의 품절·잔여 수량 재검증을 추가한다. 추천 캐시·AI·검색 엔진 장애 시나리오는 대상 기술이 없으므로 만들지 않는다.
 - 고도화에서는 Valkey, S3, PortOne, 알림, SSE와 기능별 durable task의 지연·오류·중복·누락·임대 만료를 모두 검증한다. Kafka, 범용 Outbox, WebSocket, 검색 클러스터는 `향후 고도화` 별도 승인 전 검증 대상이나 테스트 의존성으로 추가하지 않는다.
 - 기존 정상 200 RPS와 1,000 RPS 10분 피크, 응답시간 SLO를 검증 목표로 유지한다. 실제 서버 대수, 캐시 용량, 경보 임계치와 부하 시험 장비 규모는 운영 환경 실측 `TODO`이며 이 정책이 근거 없이 숫자를 확정하지 않는다.
 

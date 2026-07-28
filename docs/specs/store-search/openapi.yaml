@@ -749,6 +749,7 @@ components:
           $ref: "#/components/schemas/StoreModes"
     StoreUpdateRequest:
       type: object
+      description: OTHER 매장에서 modes.pickupEnabled=true를 요청하면 STORE_008로 거절하고 기존 매장 설정을 유지한다.
       additionalProperties: false
       minProperties: 1
       properties:
@@ -1029,14 +1030,20 @@ components:
             code: STORE_003
             message: 대상 매장의 운영 권한이 없습니다.
     StoreStateConflict:
-      description: 현재 매장 상태에서 변경 불가
+      description: 현재 매장 상태 또는 등록 업종의 픽업 자격 때문에 변경 불가
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: STORE_005
-            message: 현재 매장 상태에서 변경할 수 없습니다.
+          examples:
+            invalidStoreState:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 변경할 수 없습니다.
+            pickupIneligible:
+              value:
+                code: STORE_008
+                message: 등록 업종에 픽업 자격이 없습니다.
     ScheduleConflict:
       description: 영업·브레이크·예약 접수 구간 충돌
       content:
