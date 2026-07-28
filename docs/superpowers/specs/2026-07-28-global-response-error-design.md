@@ -264,6 +264,7 @@ git diff --check
 - `backend/src/main/java/com/miriyum/global/exception/**`
 - `backend/src/test/java/com/miriyum/global/response/**`
 - `backend/src/test/java/com/miriyum/global/exception/**`
+- `backend/src/test/java/com/miriyum/global/config/**`
 - `docs/superpowers/specs/2026-07-28-global-response-error-design.md`
 - `docs/superpowers/plans/2026-07-28-global-response-error*.md`
 
