@@ -4,10 +4,10 @@ info:
   version: 1.0.0
   description: 1차 MVP 기능별 OpenAPI가 참조하는 공통 계약이다.
   license:
-    name: Apache-2.0
-    identifier: Apache-2.0
+    name: All Rights Reserved
+    identifier: LicenseRef-All-Rights-Reserved
 servers:
-  - url: https://api.miriyum.com
+  - url: /
 security: []
 paths: {}
 components:
@@ -158,7 +158,7 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 같은 인증 주체와 명령에서 재전송을 식별하는 표준 UUID
+      description: 같은 인증 주체와 HTTP method·route의 전체 요청을 재전송할 때 최초 결과를 식별하는 표준 UUID. path·query·body가 다른 요청에 같은 키를 재사용하면 409로 거절한다.
       schema:
         type: string
         minLength: 36

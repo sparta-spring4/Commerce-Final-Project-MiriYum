@@ -427,15 +427,20 @@ components:
       enum: [NOT_REQUESTED, AVAILABLE, UNAVAILABLE]
     VerificationStatus:
       type: string
-      enum: [VERIFYING, VERIFICATION_PENDING, APPROVED, REJECTED]
+      enum: [APPROVED]
     OperationStatus:
       type: string
       enum: [OPEN, TEMPORARILY_CLOSED, CLOSED]
     PickupEligibility:
       type: string
-      enum: [UNVERIFIED, ELIGIBLE, INELIGIBLE]
+      enum: [ELIGIBLE, INELIGIBLE]
+    BusinessType:
+      type: string
+      description: 매장 등록 신청에서 선택하는 업종 구분. CAFE와 BAKERY만 픽업 자격을 얻는다.
+      enum: [CAFE, BAKERY, OTHER]
     StoreModes:
       type: object
+      description: 등록 업종이 OTHER이면 pickupEnabled는 false여야 한다. true 요청은 일반 등록으로 자동 보정하지 않고 STORE_008로 거절한다.
       additionalProperties: false
       required: [reservationEnabled, menuHoldEnabled, pickupEnabled]
       properties:
@@ -701,14 +706,11 @@ components:
             $ref: "#/components/schemas/TimeRange"
     StoreCreateRequest:
       type: object
-      description: 1차 MVP에서는 입력값을 프로젝트의 더미 사업자 기준 데이터와 비교하며 외부 국세청 API를 호출하지 않는다.
+      description: 1차 MVP는 사업자등록번호 형식과 활성 중복만 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. OTHER도 일반 등록·예약을 사용할 수 있지만 modes.pickupEnabled=true 조합은 STORE_008로 거절하며 매장을 생성하지 않는다.
       additionalProperties: false
       required:
         - businessRegistrationNumber
-        - openingDate
-        - representativeName
-        - businessTypeName
-        - businessItemName
+        - businessType
         - name
         - description
         - region
@@ -720,21 +722,8 @@ components:
         businessRegistrationNumber:
           type: string
           pattern: "^[0-9]{10}$"
-        openingDate:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
-        representativeName:
-          type: string
-          minLength: 1
-          maxLength: 100
-        businessTypeName:
-          type: string
-          description: 더미 사업자 기준 데이터와 비교할 업종 값. 기준 데이터에서 카페 또는 베이커리로 분류되면 픽업 자격 판정 대상이며 정확한 코드값은 구현 fixture가 소유한다.
-          minLength: 1
-          maxLength: 100
-        businessItemName:
-          type: string
-          minLength: 1
-          maxLength: 100
+        businessType:
+          $ref: "#/components/schemas/BusinessType"
         name:
           type: string
           minLength: 1
@@ -1016,14 +1005,20 @@ components:
             code: STORE_001
             message: 매장을 찾을 수 없습니다.
     StoreConflict:
-      description: 사업자등록번호 중복 또는 등록 상태 충돌
+      description: 활성 사업자등록번호 중복 또는 등록 업종의 픽업 자격 충돌
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: STORE_002
-            message: 이미 등록된 사업자등록번호입니다.
+          examples:
+            activeBusinessNumberDuplicate:
+              value:
+                code: STORE_002
+                message: 이미 활성 매장에 등록된 사업자등록번호입니다.
+            pickupIneligible:
+              value:
+                code: STORE_008
+                message: 등록 업종에 픽업 자격이 없습니다.
     StoreAccessDenied:
       description: 대상 매장 운영 권한 없음
       content:

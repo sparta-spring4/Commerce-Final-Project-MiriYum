@@ -78,21 +78,22 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - `POST /api/v1/store-operator/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
 - 요청의 운영자 ID나 역할 값은 받지 않고 JWT subject를 사용한다.
-- 사업자등록번호·개업일자·대표자명·주업태명·주종목명을 구조화 입력한다.
-- 프로젝트가 관리하는 더미 사업자 기준 데이터 비교와 중앙 중복 판정으로 1차 MVP 입점 검증을 처리한다. 국세청 공식 진위조회는 고도화 전용이다.
-- 정상 고유 신청은 플랫폼 운영자 심사 없이 `APPROVED`로 전이할 수 있다.
-- 검증이 진행 중이면 생성 응답의 `verificationStatus`는 `VERIFYING`일 수 있으며 운영 기능과 공개 노출은 `APPROVED` 전까지 허용하지 않는다.
+- 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `OTHER`를 구조화 입력한다.
+- 1차 MVP는 사업자등록번호 형식과 활성 매장 중앙 중복만 검증한다. 더미 기준 데이터 비교, 국세청 공식 진위조회와 플랫폼 운영자 심사는 사용하지 않는다.
+- 형식과 중복 검사를 통과한 신청은 즉시 `APPROVED`로 매장을 생성한다.
 - 사업자등록증 이미지·파일 URL을 받지 않는다.
 
 입점 검증, 운영 상태와 픽업 자격은 각각 다음 축으로 반환한다.
 
 | 축 | 값 |
 | --- | --- |
-| `verificationStatus` | `VERIFYING`, `VERIFICATION_PENDING`, `APPROVED`, `REJECTED` |
+| `verificationStatus` | `APPROVED` |
 | `operationStatus` | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` |
-| `pickupEligibility` | `UNVERIFIED`, `ELIGIBLE`, `INELIGIBLE` |
+| `pickupEligibility` | `ELIGIBLE`, `INELIGIBLE` |
 
-1차 MVP는 더미 사업자 기준 데이터에서 카페 또는 베이커리로 분류된 업종이면 픽업 자격을 부여한다. 정확한 코드값은 매장 도메인의 단일 구현 fixture가 소유한다. 누락·불일치·그 밖의 업종은 픽업 자격만 실패 폐쇄하고 일반 입점·예약 기능은 유지한다. 공식 업종 허용 매핑은 고도화 도입 전에 별도 승인한다.
+등록 업종이 `CAFE` 또는 `BAKERY`이면 픽업 자격 `ELIGIBLE`, `OTHER`이면 `INELIGIBLE`로 확정한다. 검색 카테고리·태그는 이 값을 바꾸지 않는다. `OTHER` 매장의 일반 입점·검색·예약 기능은 유지하며 픽업 기능만 실패 폐쇄한다.
+
+등록 요청이 `businessType=OTHER`와 `modes.pickupEnabled=true`를 함께 보내면 서버는 값을 자동 보정하거나 부분 등록하지 않고 `STORE_008`로 전체 요청을 거절한다. 신청자는 `pickupEnabled=false`로 재요청해 일반 매장·예약 기능을 즉시 등록할 수 있다.
 
 ## 운영 시간과 예약 접수 시간대
 
