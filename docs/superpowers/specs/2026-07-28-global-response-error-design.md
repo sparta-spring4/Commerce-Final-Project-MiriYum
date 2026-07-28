@@ -130,6 +130,8 @@ ValidationErrorDetail
 - 검증·파싱 오류에서 안전한 세부 정보가 있을 때만 `details`를 포함한다.
 - `field`는 공개 JSON 필드 경로이며 요청 전체 오류는 `$`를 사용한다.
 - `reason`에는 거절된 실제 값, 비밀번호, 토큰, 비밀값 또는 내부 예외 정보를 포함하지 않는다.
+- Bean Validation의 사용자 정의 메시지는 `${validatedValue}` 등 입력값을 보간할 수 있으므로 외부 응답에 그대로 사용하지 않는다.
+- 일반 검증 실패는 고정된 `유효하지 않은 값입니다.`, 필수 query·header 누락은 `필수 입력값입니다.`를 사용한다.
 
 ## 예외 처리 흐름
 
@@ -142,10 +144,13 @@ GlobalExceptionHandler
         ├─ ServiceException ───────────────▶ 전달된 ErrorCode
         ├─ MethodArgumentNotValidException ▶ COMMON_001 + 전체 안전한 details
         ├─ HandlerMethodValidationException▶ COMMON_001 + 안전한 details
+        ├─ MethodArgumentTypeMismatchException
+        │                                  ▶ COMMON_001 + 안전한 details
+        ├─ Missing request query·header ───▶ COMMON_001 + 안전한 details
         ├─ HttpMessageNotReadableException ▶ COMMON_002
         ├─ NoResourceFoundException ───────▶ COMMON_005
-        ├─ HttpRequestMethodNotSupported   ▶ COMMON_006
-        ├─ HttpMediaTypeNotSupported       ▶ COMMON_009
+        ├─ HttpRequestMethodNotSupported   ▶ COMMON_006 + Allow 헤더
+        ├─ HttpMediaTypeNotSupported       ▶ COMMON_009 + Accept 헤더
         └─ 그 밖의 Exception ──────────────▶ COMMON_011
         │
         ▼
@@ -156,6 +161,7 @@ ResponseEntity<ErrorResponse>
 
 - 발견한 모든 필드 오류를 수집한다.
 - 요청 본문 DTO 검증과 query·path·header의 Controller 메서드 파라미터 검증을 모두 `COMMON_001`로 변환한다.
+- query·path 타입 불일치와 필수 query·header 누락도 `COMMON_001`로 변환한다.
 - 중복된 필드·사유 쌍은 한 번만 반환한다.
 - 응답 순서는 테스트가 안정적이도록 공개 필드 경로와 사유를 기준으로 결정적으로 정렬한다.
 - 중첩 목록 경로는 `menuSelections[0].quantity`처럼 Spring의 공개 경로를 유지한다.

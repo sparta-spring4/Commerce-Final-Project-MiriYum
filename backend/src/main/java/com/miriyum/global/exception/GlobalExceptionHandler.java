@@ -9,7 +9,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.Errors;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
@@ -18,15 +20,17 @@ import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 
 /**
  * MVC 계층에서 발생한 예외를 일관된 API 오류 응답으로 변환한다.
@@ -35,6 +39,8 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String INVALID_VALUE_REASON = "유효하지 않은 값입니다.";
+    private static final String REQUIRED_VALUE_REASON = "필수 입력값입니다.";
     private static final Comparator<ValidationErrorDetail> DETAIL_ORDER =
             Comparator.comparing(ValidationErrorDetail::field)
                     .thenComparing(ValidationErrorDetail::reason);
@@ -65,12 +71,12 @@ public class GlobalExceptionHandler {
 
             String field = parameterName(result.getMethodParameter());
             for (MessageSourceResolvable error : result.getResolvableErrors()) {
-                details.add(new ValidationErrorDetail(field, defaultMessage(error)));
+                details.add(new ValidationErrorDetail(field, safeValidationReason()));
             }
         }
 
         for (MessageSourceResolvable error : exception.getCrossParameterValidationResults()) {
-            details.add(new ValidationErrorDetail("$", defaultMessage(error)));
+            details.add(new ValidationErrorDetail("$", safeValidationReason()));
         }
 
         return validationResponse(details);
@@ -86,6 +92,33 @@ public class GlobalExceptionHandler {
         return validationResponse(details);
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException exception
+    ) {
+        return validationResponse(List.of(
+                new ValidationErrorDetail(exception.getName(), INVALID_VALUE_REASON)
+        ));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestParameter(
+            MissingServletRequestParameterException exception
+    ) {
+        return validationResponse(List.of(
+                new ValidationErrorDetail(exception.getParameterName(), REQUIRED_VALUE_REASON)
+        ));
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestHeader(
+            MissingRequestHeaderException exception
+    ) {
+        return validationResponse(List.of(
+                new ValidationErrorDetail(exception.getHeaderName(), REQUIRED_VALUE_REASON)
+        ));
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableMessage() {
         return response(CommonErrorCode.MALFORMED_REQUEST);
@@ -97,13 +130,17 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<ErrorResponse> handleMethodNotAllowed() {
-        return response(CommonErrorCode.METHOD_NOT_ALLOWED);
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(
+            HttpRequestMethodNotSupportedException exception
+    ) {
+        return response(CommonErrorCode.METHOD_NOT_ALLOWED, exception.getHeaders());
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
-    public ResponseEntity<ErrorResponse> handleUnsupportedMediaType() {
-        return response(CommonErrorCode.UNSUPPORTED_MEDIA_TYPE);
+    public ResponseEntity<ErrorResponse> handleUnsupportedMediaType(
+            HttpMediaTypeNotSupportedException exception
+    ) {
+        return response(CommonErrorCode.UNSUPPORTED_MEDIA_TYPE, exception.getHeaders());
     }
 
     @ExceptionHandler(Exception.class)
@@ -115,10 +152,10 @@ public class GlobalExceptionHandler {
     private List<ValidationErrorDetail> bindingDetails(Errors bindingResult) {
         List<ValidationErrorDetail> details = new ArrayList<>();
         for (FieldError error : bindingResult.getFieldErrors()) {
-            details.add(new ValidationErrorDetail(error.getField(), defaultMessage(error)));
+            details.add(new ValidationErrorDetail(error.getField(), safeValidationReason()));
         }
         for (ObjectError error : bindingResult.getGlobalErrors()) {
-            details.add(new ValidationErrorDetail("$", defaultMessage(error)));
+            details.add(new ValidationErrorDetail("$", safeValidationReason()));
         }
         return normalize(details);
     }
@@ -127,7 +164,7 @@ public class GlobalExceptionHandler {
         String path = violation.getPropertyPath().toString();
         int separator = path.lastIndexOf('.');
         String field = separator >= 0 ? path.substring(separator + 1) : path;
-        return new ValidationErrorDetail(field.isBlank() ? "$" : field, violation.getMessage());
+        return new ValidationErrorDetail(field.isBlank() ? "$" : field, INVALID_VALUE_REASON);
     }
 
     private String parameterName(MethodParameter parameter) {
@@ -158,9 +195,8 @@ public class GlobalExceptionHandler {
         return "$";
     }
 
-    private String defaultMessage(MessageSourceResolvable error) {
-        String message = error.getDefaultMessage();
-        return message == null || message.isBlank() ? "유효하지 않은 값입니다." : message;
+    private String safeValidationReason() {
+        return INVALID_VALUE_REASON;
     }
 
     private ResponseEntity<ErrorResponse> validationResponse(List<ValidationErrorDetail> details) {
@@ -180,6 +216,12 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> response(ErrorCode errorCode) {
         return ResponseEntity.status(errorCode.getHttpStatus())
+                .body(ErrorResponse.from(errorCode));
+    }
+
+    private ResponseEntity<ErrorResponse> response(ErrorCode errorCode, HttpHeaders headers) {
+        return ResponseEntity.status(errorCode.getHttpStatus())
+                .headers(headers)
                 .body(ErrorResponse.from(errorCode));
     }
 }

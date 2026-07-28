@@ -332,6 +332,9 @@ Use `@RestControllerAdvice` and handlers for:
 - `MethodArgumentNotValidException`;
 - `HandlerMethodValidationException`;
 - `ConstraintViolationException`;
+- `MethodArgumentTypeMismatchException`;
+- `MissingServletRequestParameterException`;
+- `MissingRequestHeaderException`;
 - `HttpMessageNotReadableException`;
 - `NoHandlerFoundException` and servlet `NoResourceFoundException`;
 - `HttpRequestMethodNotSupportedException`;
@@ -355,6 +358,8 @@ private List<ValidationErrorDetail> normalizeDetails(
 ```
 
 Map field errors to their public field path, global and cross-parameter errors to `$`, and method parameters to the explicit `@RequestParam`, `@PathVariable`, or `@RequestHeader` name when available. Never read or serialize `FieldError#getRejectedValue`.
+
+Do not return interpolated Bean Validation messages because `${validatedValue}` can expose rejected secrets. Use the fixed public reason `유효하지 않은 값입니다.` for validation failures and `필수 입력값입니다.` for missing required query or header values. Preserve framework headers returned by `HttpRequestMethodNotSupportedException#getHeaders()` and `HttpMediaTypeNotSupportedException#getHeaders()`.
 
 - [ ] **Step 5: Run the handler test and verify GREEN**
 

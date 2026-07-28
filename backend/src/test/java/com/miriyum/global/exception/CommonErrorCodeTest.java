@@ -26,6 +26,7 @@ class CommonErrorCodeTest {
 
     @Test
     void 공통_오류_코드는_중복되지_않는다() {
+        assertThat(CommonErrorCode.values()).hasSize(12);
         assertThat(CommonErrorCode.values())
                 .extracting(CommonErrorCode::getCode)
                 .doesNotHaveDuplicates();
