@@ -18,9 +18,9 @@
 
 - 방식 A의 단일 Spring Boot·단일 MySQL 경계를 확인한다.
 - 모듈 간 repository/entity 직접 접근, controller→repository 직접 호출과 순환 의존을 구조 테스트로 차단한다.
-- 일반 사용자·매장 운영자·플랫폼 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다.
+- 1차 MVP에서는 일반 사용자·매장 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다. 플랫폼 운영자 계정·JWT 검증 gate는 해당 기능을 구현하는 고도화에서 추가한다.
 - 교차 namespace JWT, 클라이언트 역할 값, 이메일·외부 로그인에 의한 자가 승격을 거부한다.
-- 매장 명령이 현재 계정·소속·매장 상태를 MySQL에서 재검증하는지 확인한다.
+- 매장 명령이 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 재검증하는지 확인한다.
 - 로그·응답·지표에 토큰·비밀·연락처·정밀 위치·증빙·결제수단 원문이 남지 않는지 검사한다.
 
 ## 코드 구현 gate
@@ -111,7 +111,7 @@ Controller class·public endpoint, Service class·public method, cross-domain �
 ### UI·권한
 
 - 단계별 shell·라우트·SDK·환경변수 노출을 검사한다.
-- 매장 운영자와 플랫폼 운영자의 UI·권한·개인정보 조회 경계를 분리한다.
+- 1차 MVP에서는 일반 사용자와 매장 운영자의 UI·권한·개인정보 조회 경계를 분리하고 플랫폼 운영자 shell·라우트·SDK를 만들지 않는다. 플랫폼 운영자 UI 검증은 고도화에서 해당 기능을 구현할 때 추가한다.
 - 파일·SSE·결제의 중간·오류·결과 불명 상태를 확정으로 표시하지 않는지 검증한다.
 
 ## 금지 기술 gate
