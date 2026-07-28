@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: miriyum-backend
+  datasource:
+    url: ${MIRIYUM_DB_URL}
+    username: ${MIRIYUM_DB_USERNAME}
+    password: ${MIRIYUM_DB_PASSWORD}
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
