@@ -60,7 +60,7 @@
 
 QueryDSL은 선택 조합과 projection을 만들고 최종 후보는 MySQL에서 읽는다. 유효한 과거 예약과 확정 메뉴 선택만 이력 신호이며 취소·실패·단순 조회와 노쇼는 선호 신호가 아니다. Java 점수 계산은 같은 스냅샷에 같은 순위·설명을 만들어야 한다.
 
-품절 또는 마지막 수량 경합 실패 뒤에는 `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 확정한 하나의 공개 batch 조회 계약으로 같은 매장 메뉴를 동기 검증한다. `1차 MVP`는 `BulkAvailabilityPort`나 공개 Service batch DTO 메서드 중 어느 방식도 구현하지 않는다. 같은 매장 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
+`1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 품절 또는 마지막 수량 경합 실패 뒤 같은 매장 메뉴를 검증하는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약만 1차에서 선구현하지 않으며, `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다. 같은 매장 후보가 없을 때만 원 매장의 검증된 저장 좌표를 기준으로 bounding box와 Java Haversine을 적용하며, 거리가 **3km 이내**인 후보만 허용하고 3km를 초과하면 거부한다. 사용자 현재 위치는 요청·저장·사용하지 않는다. Kakao Local REST는 입점·주소 변경 시 좌표 변환 포트 뒤에서만 호출하고 추천 요청 중에는 호출하지 않는다.
 
 AI/LLM, Spring AI, 벡터 DB와 검색 클러스터는 `2차 MVP` 계약에 없다. 정확한 사전·가중치·동률 규칙은 고정 평가셋 검증과 승인 전 추측하지 않는다.
 

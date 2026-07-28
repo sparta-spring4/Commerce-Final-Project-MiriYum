@@ -9,7 +9,7 @@
 ## 단계별 신뢰성 적용
 
 - **1차 MVP:** 방식 A의 단일 Spring Boot 애플리케이션과 단일 MySQL을 사용한다. 예약 수용량·회차별 팀 수·메뉴 홀드는 MySQL 트랜잭션, 제약, 조건부 갱신, 멱등 키로 보호하고 Testcontainers MySQL로 경합과 복구를 검증한다. Valkey, 메시지 브로커, 검색 클러스터를 두지 않는다.
-- **2차 MVP:** 같은 방식 A와 MySQL을 유지한다. `RuleInterpreter`, QueryDSL과 MySQL 검색을 사용하며, 동기 가용성 조회는 단계 진입 전 별도 contract-first Issue/PR에서 소유자와 하나의 공개 batch 계약을 확정한다. `1차 MVP`는 해당 포트나 batch 메서드를 미리 구현하지 않는다. 추천 캐시·AI·검색 엔진·메시지 브로커는 추가하지 않는다.
+- **2차 MVP:** 같은 방식 A와 MySQL을 유지한다. `RuleInterpreter`, QueryDSL과 MySQL 검색을 사용한다. 1차 매장 검색용 `ReservationService` 공개 일괄 가용성 조회 계약은 유지하고, `2차 추천 전용` 신규 포트·batch 계약만 1차에서 선구현하지 않는다. 단계 진입 전 별도 contract-first Issue/PR에서 기존 계약의 재사용·확장 여부와 하나의 추천 가용성 조회 계약을 확정한다. 추천 캐시·AI·검색 엔진·메시지 브로커는 추가하지 않는다.
 - **고도화:** 단계 진입 시 Valkey 인증 상태와 SSE 전달 보조, S3, PortOne, 알림, 웨이팅을 모두 구현·활성화하고 검증한다. 외부 효과가 있는 후속 처리는 MySQL 기능별 durable task에 임대·fencing·멱등성·제한 재시도·격리·대사 규칙을 적용한다. Valkey와 SSE는 전달 보조이며 예약·결제 원장이 아니다. 공급자 정확 버전·수치·토폴로지는 활성화 전 결정 gate로 남을 수 있지만 기능 생략 근거가 아니다.
 - **향후 고도화:** Kafka, 범용 Outbox, MSA, WebSocket, OpenSearch·Meilisearch 같은 검색 클러스터는 측정된 병목, 실패 모델, 운영 책임, 비용과 마이그레이션 계획을 승인한 뒤에만 검토한다.
 
