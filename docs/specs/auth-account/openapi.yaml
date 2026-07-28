@@ -619,7 +619,7 @@ components:
           enum: [ACTIVE, SUSPENDED]
     ReservationHistoryStatus:
       type: string
-      enum: [CONFIRMED, CANCELLED, FULFILLED, REJECTED, EXPIRED]
+      enum: [CONFIRMED, CANCELLED, FULFILLED]
     ReservationHistoryItem:
       type: object
       additionalProperties: false

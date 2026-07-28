@@ -38,10 +38,11 @@
 | `keyword` | 매장명·게시 메뉴명·지역 표시명에 대한 1차 MVP 텍스트 포함 검색 |
 | `region` | `SEOUL`, `BUSAN`, `DAEGU`, `DAEJEON`, `GWANGJU` |
 | `storeCategoryCode` | 중앙 catalog에서 받은 매장 주 카테고리 코드 |
-| 예약 조건 | `serviceDate`, `startTime`, `endTime`, `partySize`를 모두 보낸 경우에만 가용성 판정 |
+| 예약 조건 | `serviceDate`, `startTime`, `partySize`를 모두 보낸 경우에만 가용성 판정 |
 | `availableOnly` | 완전한 예약 조건이 있을 때만 `true` 허용 |
 
 예약 조건 일부만 보내거나 `availableOnly=true`인데 완전한 예약 조건이 없으면 `COMMON_001`로 거부한다. 임의 기본 날짜·시간·인원으로 가용성을 추측하지 않는다.
+`endTime`은 클라이언트가 보내지 않으며 서버가 해당 매장의 현재 예약 접수 시간대·서비스 소요·전환 정책으로 계산한다. 이 계산은 실제 예약 생성과 같은 예약 도메인 계약을 사용한다.
 
 검색 결과의 `reservationAvailability`는 다음 값을 사용한다.
 
@@ -49,7 +50,7 @@
 - `AVAILABLE`: 요청한 모든 구간에서 인원 수와 팀 1건을 확보할 수 있음
 - `UNAVAILABLE`: 영업·접수 시간·수용량 가운데 하나 이상이 부족
 
-2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationAvailabilityQueryService`를 사용한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
+2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationService`가 제공하는 예약 가능 일괄 조회 공개 메서드를 사용한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
 
 ### 검색 구현 선택
 
@@ -116,7 +117,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - 공개 매장·메뉴·catalog 조회는 비회원도 가능하다.
 - 등록·수정·운영시간·접수시간대·메뉴 관리는 `store-operator` Access JWT가 필요하다.
-- 모든 매장 관리 요청은 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치, 입점·운영 상태를 `StoreOperatorAccessService`에서 확인한다.
+- 모든 매장 관리 요청은 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치, 입점·운영 상태를 `StoreService`의 운영 권한 검증 공개 메서드에서 확인한다.
 - 대상 매장의 대표 운영자가 아니면 `STORE_003` 403을 반환한다.
 - 공개 매장은 존재하지만 변경 권한이 없는 경우이므로 거짓 404로 숨기지 않는다.
 

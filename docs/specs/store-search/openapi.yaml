@@ -51,11 +51,6 @@ paths:
           required: false
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
-        - name: endTime
-          in: query
-          required: false
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         - name: partySize
           in: query
           required: false
@@ -104,11 +99,6 @@ paths:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         - name: startTime
-          in: query
-          required: false
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
-        - name: endTime
           in: query
           required: false
           schema:

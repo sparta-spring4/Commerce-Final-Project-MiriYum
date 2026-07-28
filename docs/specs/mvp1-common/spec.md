@@ -1142,11 +1142,11 @@ findById(reservationId)
 
 조회 결과가 없으면 실제로 존재하지 않는 경우와 다른 사용자가 소유한 경우 모두 예약 도메인의 같은 `RESERVATION_NOT_FOUND` 계열 오류를 반환한다. 다른 소유자의 ID인지 확인하기 위한 두 번째 조회를 수행하지 않는다.
 
-마이페이지가 이 결과를 사용하더라도 2단계 소유권에 따라 예약 조회 규칙과 404는 예약 도메인이 소유한다. 인증·마이페이지 담당자는 예약 entity나 repository를 직접 조회하지 않고 `ReservationHistoryQueryService` 등 예약 도메인의 공개 조회 계약을 사용한다.
+마이페이지가 이 결과를 사용하더라도 2단계 소유권에 따라 예약 조회 규칙과 404는 예약 도메인이 소유한다. 인증·마이페이지 담당자는 예약 entity나 repository를 직접 조회하지 않고 `ReservationService`의 예약 내역 조회 공개 메서드와 DTO를 사용한다.
 
 ### 매장 운영자 권한 판정
 
-매장 운영자 JWT는 `store-operator` namespace와 계정 subject만 증명한다. 대상 매장의 현재 소속과 운영 가능 상태는 매장 명령마다 매장 도메인의 `StoreOperatorAccessService`로 확인한다.
+매장 운영자 JWT는 `store-operator` namespace와 계정 subject만 증명한다. 대상 매장의 현재 소속과 운영 가능 상태는 매장 명령마다 매장 도메인의 `StoreService` 운영 권한 검증 공개 메서드로 확인한다.
 
 판정 순서는 다음과 같다.
 

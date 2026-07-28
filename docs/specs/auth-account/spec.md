@@ -111,11 +111,11 @@
 ## 마이페이지 예약 내역
 
 - `auth-account`가 `GET /api/v1/consumer-accounts/me/reservations` 경로와 페이지 응답을 관리한다.
-- 인증된 `consumer_account_id`를 예약 도메인의 `ReservationHistoryQueryService`에 전달한다.
+- 인증된 `consumer_account_id`를 예약 도메인의 `ReservationService`가 제공하는 예약 내역 조회 공개 메서드에 전달한다.
 - 예약 도메인은 상태·날짜 필터, 정렬, 예약 스냅샷 DTO와 개인 자원 404 규칙을 소유한다.
 - 다른 사용자의 예약이나 매장 전체 예약을 이 경로로 조회할 수 없다.
 - 결과가 없으면 `200 OK`, `items: []`와 페이지 메타데이터를 반환한다.
-- `status` 필터는 1차 MVP `CONFIRMED`, `CANCELLED`, `FULFILLED`, `REJECTED`, `EXPIRED`만 공개한다.
+- `status` 필터는 1차 MVP의 영속·공개 상태인 `CONFIRMED`, `CANCELLED`, `FULFILLED`만 공개한다.
 - 결제·환불·노쇼·체크인 필드는 포함하지 않는다.
 
 ## 오류 코드
