@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,9 @@ import org.springframework.http.MediaType;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -79,6 +82,17 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void 경로와_헤더_검증_오류는_공개된_파라미터_이름을_사용한다() throws Exception {
+        mockMvc.perform(get("/test/path/0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0].field").value("itemId"));
+
+        mockMvc.perform(get("/test/header").header("X-Retry-Count", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0].field").value("X-Retry-Count"));
+    }
+
+    @Test
     void 읽을_수_없는_요청_본문은_안전한_메시지만_반환한다() throws Exception {
         String malformedBody = """
                 {"name":"노출되면-안되는-값","items":[}
@@ -92,6 +106,23 @@ class GlobalExceptionHandlerTest {
                 .andReturn();
 
         assertThat(result.getResponse().getContentAsString()).doesNotContain("노출되면-안되는-값");
+    }
+
+    @Test
+    void 검증에_실패한_실제_값을_응답에_노출하지_않는다() throws Exception {
+        String rejectedValue = "secret-rejected-value";
+        String body = """
+                {"name":"%s","items":[{"quantity":1}]}
+                """.formatted(rejectedValue);
+
+        MvcResult result = mockMvc.perform(post("/test/validation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(rejectedValue);
     }
 
     @Test
@@ -144,6 +175,20 @@ class GlobalExceptionHandlerTest {
         ) {
         }
 
+        @GetMapping("/path/{itemId}")
+        void validatePath(
+                @Min(value = 1, message = "1 이상이어야 합니다.")
+                @PathVariable("itemId") long itemId
+        ) {
+        }
+
+        @GetMapping("/header")
+        void validateHeader(
+                @Min(value = 1, message = "1 이상이어야 합니다.")
+                @RequestHeader("X-Retry-Count") int retryCount
+        ) {
+        }
+
         @GetMapping("/unexpected")
         void unexpected() {
             throw new IllegalStateException("secret-internal-message");
@@ -152,6 +197,7 @@ class GlobalExceptionHandlerTest {
 
     record TestRequest(
             @NotBlank(message = "이름은 필수입니다.")
+            @Size(max = 10, message = "이름은 10자 이하여야 합니다.")
             String name,
             List<@Valid ItemRequest> items
     ) {

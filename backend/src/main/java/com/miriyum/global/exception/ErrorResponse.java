@@ -13,11 +13,15 @@ public record ErrorResponse(
         List<ValidationErrorDetail> details
 ) {
 
+    public ErrorResponse {
+        details = details == null ? null : List.copyOf(details);
+    }
+
     public static ErrorResponse from(ErrorCode errorCode) {
         return new ErrorResponse(errorCode.getCode(), errorCode.getMessage(), null);
     }
 
     public static ErrorResponse of(ErrorCode errorCode, List<ValidationErrorDetail> details) {
-        return new ErrorResponse(errorCode.getCode(), errorCode.getMessage(), List.copyOf(details));
+        return new ErrorResponse(errorCode.getCode(), errorCode.getMessage(), details);
     }
 }

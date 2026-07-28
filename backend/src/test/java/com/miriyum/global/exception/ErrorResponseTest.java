@@ -36,7 +36,7 @@ class ErrorResponseTest {
         List<ValidationErrorDetail> details =
                 new java.util.ArrayList<>(List.of(new ValidationErrorDetail("name", "필수입니다.")));
 
-        ErrorResponse response = ErrorResponse.of(CommonErrorCode.VALIDATION_FAILED, details);
+        ErrorResponse response = new ErrorResponse("COMMON_001", "입력값이 올바르지 않습니다.", details);
         details.clear();
 
         assertThat(response.details()).hasSize(1);
