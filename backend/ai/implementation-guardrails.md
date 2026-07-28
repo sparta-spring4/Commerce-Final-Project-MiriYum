@@ -51,7 +51,8 @@ API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한
 ## 영속성 및 마이그레이션
 
 - MySQL은 영속성의 정본이며, 마이그레이션이 존재하는 시점부터 Flyway가 스키마 변경을 소유한다.
-- 데이터베이스 연결 값은 환경 입력에서 읽는다. 자격 증명이나 로컬 기본 비밀번호를 절대 커밋하지 않는다.
+- `application.properties`는 8단계의 첫 설정 Issue에서 `application.yml`로 전환하고 두 형식을 중복 유지하지 않는다.
+- DB 연결 URL·사용자명·비밀번호는 각각 `MIRIYUM_DB_URL`, `MIRIYUM_DB_USERNAME`, `MIRIYUM_DB_PASSWORD` 환경 변수로 주입하고 저장소 기본값으로 넣지 않는다.
 - H2를 MySQL의 증거로 사용하지 않는다.
 - DB 의존 통합은 `NOT CONFIGURED` 상태를 유지한다. [ADR-002](../../docs/adr/ADR-002-staged-technology-adoption.md) 및 [ADR-004](../../docs/adr/ADR-004-scaffold-toolchain-and-test-baseline.md)의 활성화 조건에 한해서만 Testcontainers를 검토한다.
 
@@ -91,7 +92,7 @@ JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반
 
 ## 설정·형식·Javadoc
 
-runtime 설정은 실제 구현 Issue에서만 변경한다. `application.properties`와 `application.yml`을 중복 사용하지 않고 YAML을 선택하면 2칸 들여쓰기를 사용한다. DB secret은 환경변수로 주입한다. Java 21, Spring Boot 4.1.0, Gradle 9.6.1을 임의 변경하지 않는다. Lombok은 실제 구현 Issue에서 추가하고 Testcontainers MySQL image는 첫 DB 통합 Issue의 검증된 정확 버전으로 고정한다. QueryDSL, Valkey와 외부 SDK는 필요한 단계와 Issue 전에는 추가하지 않는다.
+runtime 설정은 실제 구현 Issue에서만 변경한다. YAML은 2칸 들여쓰기를 사용한다. Java 21, Spring Boot 4.1.0, Gradle 9.6.1을 임의 변경하지 않는다. Lombok은 실제 구현 Issue에서 추가하고 Testcontainers MySQL image는 첫 DB 통합 Issue의 검증된 정확 버전으로 고정한다. QueryDSL, Valkey와 외부 SDK는 필요한 단계와 Issue 전에는 추가하지 않는다.
 
 Java는 4칸 들여쓰기, UTF-8, final newline, wildcard import 금지를 지킨다. package는 lowercase, constant와 enum은 `UPPER_SNAKE_CASE`다. `process`, `handle`처럼 목적이 모호한 이름을 피한다.
 

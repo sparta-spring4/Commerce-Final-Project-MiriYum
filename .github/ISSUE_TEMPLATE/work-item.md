@@ -12,10 +12,11 @@ assignees: ""
 
 > 제목의 `[Domain]`을 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나로 바꾸세요.
 
-## 소유권
+## 담당과 소유권
 
-- 담당자:
-- 위임 범위와 소유자(해당하는 경우):
+- 구현 담당자:
+- 도메인 소유자:
+- 공동 검토가 필요한 도메인:
 - GitHub Project:
 
 Issue는 범위, 담당자, 인수 조건 및 검증 계획을 소유합니다. Project의 단일 `Status` 필드가 수명 주기를 소유하므로 이 Issue 본문이나 저장소 작업 로그에 이를 복제하지 않습니다.
@@ -31,17 +32,15 @@ Issue는 범위, 담당자, 인수 조건 및 검증 계획을 소유합니다. 
 
 -
 
-### 작은 변경 예외
-
-- 해당 없음 또는 선행 Issue가 실용적이지 않았던 이유:
-
 ## 인수 조건
 
 - [ ]
 
-## 계약 선행 관계
+## 계약과 의존성
 
-- contract-first 필요 여부:
+- 관련 spec:
+- 관련 OpenAPI:
+- contract-first:
 - blocks:
 - blocked by:
 - 선행 공개 Service 메서드·DTO·오류·테스트 계약:

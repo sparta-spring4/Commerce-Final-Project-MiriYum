@@ -4,14 +4,14 @@
 
 ## Issue로 시작하기
 
-질문·조사처럼 저장소를 변경하지 않는 작업과 현재 진행 중인 1~5단계 문서 정비를 제외한 코드·문서·설정·테스트 변경은 구현 전에 GitHub Issue를 생성하거나 선택한다. Issue는 다음을 소유한다.
+단계 5 확정 이후 시작한 저장소 변경은 크기와 관계없이 구현 전에 GitHub Issue를 생성하거나 선택한다. 저장소를 변경하지 않는 질문·조사는 Issue 대상이 아니다. Issue는 다음을 소유한다.
 
 - 의도한 결과와 정확한 포함·제외 경로
 - 현재 담당자와 위임된 작업
 - 인수 조건
 - 검증 계획과 알려진 위험
 
-Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 원칙적으로 예외가 아니며, 선행 Issue가 실용적이지 않았다면 Issue의 `작은 변경 예외`에 이유를 남긴다.
+Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
 
 둘 이상의 도메인 계약이 필요한 작업은 Issue에 `contract-first`, `blocks`, `blocked by` 관계를 기록한다. 소유자는 동작하는 최소 공개 Service 메서드·DTO·오류·테스트 계약을 먼저 제공하고 선행 PR을 `dev`에 병합한다. 소비자는 최신 `dev`를 반영한 뒤 그 계약을 사용한다. 준비되지 않은 계약은 `return null`, 가짜 성공 응답, 빈 구현 또는 `UnsupportedOperationException`으로 대신하지 않고 `BLOCKED`로 보고한다.
 
@@ -39,6 +39,7 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 - `main`은 배포·최종 제출 브랜치이며 일반 작업의 PR 대상이 아니다.
 - 작업 브랜치는 최신 `dev`에서 만들고 `feature/{issue}-{slug}`, `fix/{issue}-{slug}`, `docs/{issue}-{slug}`, `chore/{issue}-{slug}` 형식을 사용한다.
 - 한 브랜치는 하나의 주 Issue를 중심으로 유지한다. 하루가 지났다는 이유만으로 브랜치나 PR을 나누거나 폐기하지 않는다.
+- 작업이 하루를 넘길 가능성이 있으면 Draft PR로 조기에 공유한다.
 - 작업 브랜치에서 `dev`로는 squash merge하고, `dev`에서 `main`으로는 merge commit을 사용한다.
 - 병합 뒤 작업 브랜치는 삭제한다. `dev` 직접 push·force push·삭제는 금지한다.
 

@@ -28,3 +28,9 @@ backend 전용 구현, 명령 실행, 검증, 검토에는 이 문서를 사용�
 - 승인된 Testcontainers 변경이 ADR-002 및 ADR-004를 충족한 후에만 DB 의존 통합 명령을 활성화한다.
 - backend 스캐폴드만으로 CI, Docker, API 스모크, 배포, runner, 스키마, skill, cache 또는 hook 기능을 추론하지 않는다.
 - 다른 도메인의 공개 Service 메서드·DTO·오류가 필요한 작업은 루트 통합 계약의 `contract-first` 순서를 먼저 확인한다. 선행 계약이 최신 `dev`에 없으면 구현 경로를 확장하지 않고 `BLOCKED`로 보고한다.
+
+## 중단과 재라우팅
+
+비소유 도메인의 Entity·Repository·공개 Service 메서드·DTO·API·에러 코드가 필요하거나, 기능 명세와 OpenAPI가 충돌하거나, 새 공개 route·role·state·error code가 필요하면 해당 범위를 중단한다. 승인되지 않은 provider·version·수치·후속 단계 기술이 필요하거나 CI·배포가 구성됐다고 가정해야 하는 경우도 같다.
+
+중단된 의존 범위와 무관한 작업만 계속한다. 필요한 변경은 소유자에게 contract-first Issue·PR로 요청하며 production dummy, 중복 API 또는 다른 도메인의 Repository 직접 접근으로 대신하지 않는다.

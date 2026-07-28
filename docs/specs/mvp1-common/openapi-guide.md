@@ -261,4 +261,6 @@ reservationId:
 - 개인 자원의 실제 부재와 다른 사용자 소유가 같은 도메인 `404`인가?
 - 빈 목록이 `200`과 `items: []`인가?
 - 결제·노쇼·플랫폼 운영자 등 뒤 단계 필드가 섞이지 않았는가?
-- 고정 Redocly CLI `2.35.1` lint와 통합 bundle을 통과했는가?
+- 고정 Redocly CLI `2.22.1` lint와 통합 bundle을 통과했는가?
+
+`mvp1-common/openapi.yaml`은 다른 기능 OpenAPI가 참조하는 재사용 component 라이브러리다. 단독 lint에서는 정의가 파일 내부에서 소비되지 않으므로 `redocly.yaml`의 `mvp1-common` API에만 `no-unused-components: off`를 적용한다. 기능 OpenAPI와 통합 bundle에는 나머지 strict 규칙을 그대로 적용한다.

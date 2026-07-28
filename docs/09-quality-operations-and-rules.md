@@ -25,35 +25,19 @@
 
 ## 코드 구현 gate
 
-### Backend 구조
+### 코드 형식 자동화
 
-- `com.miriyum` 아래 `global`과 `domain.auth`, `domain.store`, `domain.reservation`, `domain.menuhold`, `domain.pickup`의 3계층 구조를 유지한다.
-- `booking`, `account`, `application` wrapper package와 초기 Command/Query/Application Service, Facade, Manager, `ServiceImpl` 분리를 금지한다.
-- 1차 MVP는 `AuthService`, `StoreService`, `ReservationService`, `MenuHoldService`, `PickupService`로 시작하고 실제 복잡도와 별도 Issue 근거가 있을 때만 분리를 검토한다.
-- 다른 도메인의 Entity·Repository를 직접 사용하지 않고 공개 Service 메서드와 DTO만 사용한다.
-- 기술 공통 오류는 `CommonErrorCode`, 도메인 오류는 `AuthErrorCode`, `StoreErrorCode`, `ReservationErrorCode`, `MenuHoldErrorCode`, `PickupErrorCode` 하나씩만 사용한다. 계정 오류는 `AuthErrorCode`에 포함한다.
-- production `return null`, 가짜 성공 응답, 빈 구현, `UnsupportedOperationException`으로 미준비 계약을 숨기지 않는다.
-
-### Java·설정 형식
-
-- UTF-8, final newline, Java 4칸, YAML 2칸, wildcard import 금지, lowercase package와 `UPPER_SNAKE_CASE` constant·enum을 검사한다.
-- Entity의 blanket `@Setter`, `@Data`, `@Builder`, `@RequiredArgsConstructor`를 금지하고 JPA 기본 생성자는 `protected`로 둔다.
-- 생성자 주입, request/response `record`, DTO Bean Validation과 Controller `@Valid`를 사용한다.
-- `application.properties`와 `application.yml`을 중복 사용하지 않고 DB secret은 환경변수로 분리한다.
-- Java 21, Spring Boot 4.1.0, Gradle 9.6.1과 승인되지 않은 의존성 변경을 차단한다.
-- 최소 형식 계약은 루트 `.editorconfig`가 소유한다. Checkstyle, Spotless와 Git hook은 현재 `NOT CONFIGURED`다.
-
-### Javadoc
-
-Controller class·public endpoint, Service class·public method, cross-domain 공개 Service, Entity 생성·상태 전이, 복잡한 Repository와 공통 응답·오류·Security에는 계약 중심 Javadoc을 작성한다. 의미, 사전 조건, 부작용과 실패 조건을 설명하되 getter, 명백한 private method와 spec 전체를 반복하지 않는다. author/date 주석은 금지하고 TODO는 `// TODO(#issue): 이유` 형식만 허용한다.
+- 최소 형식 계약은 루트 `.editorconfig`가 소유한다.
+- Checkstyle, Spotless와 Git hook 같은 빌드 강제 도구는 반복 문제와 도입 효과의 근거가 생긴 뒤 별도 Issue로 검토한다. 현재 상태는 `NOT CONFIGURED`다.
 
 ## 구현 테스트 gate
 
 - 핵심 Service 성공·실패와 상태 전이·인가·정원·재고·날짜·시간은 unit test로 검증한다.
-- validation·HTTP status·응답 envelope·Security·멱등 header는 MockMvc로 검증한다.
+- 공통 응답·인증·검증·멱등성 계약은 Controller 테스트로 검증한다.
 - Flyway·DB constraint·조건부 갱신·동시성·멱등성·rollback·취소 복구·픽업 분리는 Testcontainers MySQL로 검증한다.
 - given/when/then, camelCase test method와 한국어 `@DisplayName`을 사용한다.
 - 시간은 `Clock`, 동시성은 barrier/latch로 제어하고 임의 `sleep`에 의존하지 않는다.
+- H2 통과만으로 MySQL 고유 동작이나 동시성을 증명하지 않는다.
 - DB 검증이 인수 조건인데 Testcontainers가 구성되지 않았으면 `NOT CONFIGURED` 또는 `BLOCKED`이며 완료·병합 가능으로 판정하지 않는다.
 
 ## `1차 MVP` 검증 gate

@@ -1,6 +1,10 @@
 apis:
   mvp1:
     root: docs/specs/mvp1-openapi.yaml
+  mvp1-common:
+    root: docs/specs/mvp1-common/openapi.yaml
+    rules:
+      no-unused-components: off
 extends:
   - recommended-strict
 telemetry: off
