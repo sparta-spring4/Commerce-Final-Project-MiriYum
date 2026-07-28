@@ -17,9 +17,18 @@
 의미를 전달하지 않는다. 사용자 대면 동작이 존재할 때
 `../../docs/08-ui-and-frontend-guidelines.md`의 정본 규칙을 적용한다.
 
+일반 사용자, 매장 운영자와 플랫폼 운영자 화면은 분리한다. 와이어프레임은 정보 구조와 사용자 흐름을 이해하는 참고 자료로만 사용한다. 시안에 보이는 웨이팅·결제·관리자 기능, 수치, 상태와 문구가 현재 단계에 승인됐다고 추론하지 않는다. 정본 기능 명세·OpenAPI와 다르면 구현을 멈추고 차이를 보고한다.
+
 ## Client 경계
 
 서버 endpoint, payload, 인증, 오류 코드, 시간 또는 금액 표현을 추측하지 않는다. 변경 사항은 `../../docs/07-data-and-api-contracts.md` 및 해당 기능 명세에 연결한다. cross-end 변경은 구현 전에 루트 통합 경로를 따라야 한다.
+
+- 같은 backend API 계약을 재사용하고 OpenAPI에 없는 field, path, status 또는 fake response를 만들지 않는다.
+- 인증 주체·권한은 token과 backend 결과를 기준으로 하며 client 입력 role로 승격하지 않는다.
+- 성공은 HTTP status와 공통 response `code`, 실패 UI는 확정 error code로 판정한다.
+- 빈 배열은 정상 empty result, `data: null`은 정상적인 응답 데이터 없음으로 처리한다.
+- 계약이 부족하면 임시 DTO나 응답을 만들지 않고 contract-first Issue·PR을 요청한다.
+- 지도·결제·추천·Valkey 등 후속 기능을 현재 단계에 선도입하지 않는다.
 
 ## 변경 격리
 

@@ -46,6 +46,17 @@ Frontend scaffold 검증 surface: CONFIGURED
 
 추측한 payload, 만들어 낸 명령 또는 문서화되지 않은 오류 동작을 handoff하지 않는다. delegate의 artifact는 통합 검토의 입력일 뿐, 그 자체로 완료 증거가 아니다.
 
+## contract-first 선행 순서
+
+한 도메인이 다른 도메인의 동작을 소비해야 하면 다음 순서를 지킨다.
+
+1. Issue에 `contract-first`, `blocks`, `blocked by` 관계와 소유자를 기록한다.
+2. 소유자가 동작하는 최소 공개 Service 메서드, 요청·응답 DTO, 확정 오류와 테스트 계약을 제공한다.
+3. 소유 계약 PR을 먼저 검토해 `dev`에 병합한다.
+4. 소비자가 최신 `dev`를 반영하고 공개 계약만 사용한다.
+
+소비자는 다른 도메인의 Entity·Repository를 직접 접근하거나 동일 API를 중복 구현하지 않는다. 미준비 계약을 production `return null`, 가짜 성공 응답, 빈 구현, `UnsupportedOperationException` 또는 임시 외부 코드로 대신하지 않는다. 필요한 선행 계약이 없으면 결과를 `BLOCKED`로 기록한다.
+
 ## 통합 증거 경계
 
 엔드포인트 증거는 엔드포인트 명령 또는 CI 실행과 함께 유지한다. Pull Request는 로그를 복제하지 않고 링크를 조합해 공유 인수 조건에 대응시킨다.

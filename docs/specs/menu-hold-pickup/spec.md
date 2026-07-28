@@ -32,11 +32,11 @@
 ## 메뉴 홀드와 일반 예약
 
 - 일반 예약의 `menuSelections`가 비어 있으면 메뉴 홀드 행을 만들지 않는다.
-- 메뉴가 있으면 3번 예약 조정자가 4번의 `MenuHoldAllocationService`를 같은 MySQL 트랜잭션에서 호출한다.
+- 메뉴가 있으면 3번의 `ReservationService`가 4번 `MenuHoldService`의 공개 홀드 생성 메서드를 같은 MySQL 트랜잭션에서 호출한다.
 - 수용량을 먼저 잠그고 메뉴 재고 풀을 나중에 PK 오름차순으로 잠근다.
 - 모든 메뉴 수량을 확보해야 예약 `CONFIRMED`와 메뉴 홀드 `CONFIRMED`가 함께 확정된다.
 - 하나라도 부족하면 가능한 메뉴만 남기거나 메뉴를 자동 제거하지 않고 예약 전체를 실패시킨다.
-- 예약 취소는 `MenuHoldReleaseService`로 홀드를 `RELEASED`하고 실제 사용 풀에 수량을 정확히 한 번 복구한다.
+- 예약 취소는 `MenuHoldService`의 공개 홀드 해제 메서드로 홀드를 `RELEASED`하고 실제 사용 풀에 수량을 정확히 한 번 복구한다.
 - 예약 방문 완료는 홀드를 `FULFILLED`로 종결하고 수량을 복구하지 않는다.
 
 사용자가 메뉴를 건너뛰기 위해 별도의 `/menu-holds/skip` API를 호출하게 하는 대안은 빈 홀드 상태와 프론트 순서 의존성을 만들므로 채택하지 않는다.

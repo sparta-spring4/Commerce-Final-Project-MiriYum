@@ -1,7 +1,7 @@
 ---
 name: 작업 항목
 about: 작업 시작 전에 구현 또는 문서 변경을 정의합니다
-title: ""
+title: "[Domain] "
 labels: ""
 assignees: ""
 ---
@@ -9,6 +9,8 @@ assignees: ""
 # 결과
 
 제안한 활동이 아니라 사용자 또는 저장소의 결과를 설명합니다.
+
+> 제목의 `[Domain]`을 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나로 바꾸세요.
 
 ## 소유권
 
@@ -36,6 +38,15 @@ Issue는 범위, 담당자, 인수 조건 및 검증 계획을 소유합니다. 
 ## 인수 조건
 
 - [ ]
+
+## 계약 선행 관계
+
+- contract-first 필요 여부:
+- blocks:
+- blocked by:
+- 선행 공개 Service 메서드·DTO·오류·테스트 계약:
+
+준비되지 않은 계약은 가짜 구현이나 성공 응답으로 대신하지 않고 `BLOCKED`로 기록합니다.
 
 ## 검증 계획
 

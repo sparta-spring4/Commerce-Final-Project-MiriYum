@@ -281,7 +281,7 @@
 
 ```json
 {
-  "code": "RESERVATION_001",
+  "code": "RESERVATION_003",
   "message": "예약 가능한 수용량을 초과했습니다."
 }
 ```
@@ -327,7 +327,6 @@ global/
 
 domain/
  ├─ auth/exception/AuthErrorCode.java
- ├─ account/exception/AccountErrorCode.java
  ├─ store/exception/StoreErrorCode.java
  ├─ reservation/exception/ReservationErrorCode.java
  ├─ menuhold/exception/MenuHoldErrorCode.java
@@ -349,7 +348,7 @@ public enum ReservationErrorCode implements ErrorCode {
 
     CAPACITY_EXCEEDED(
         HttpStatus.CONFLICT,
-        "RESERVATION_001",
+        "RESERVATION_003",
         "예약 가능한 수용량을 초과했습니다."
     );
 
@@ -510,7 +509,7 @@ Bean Validation 실패는 enum 상수 `VALIDATION_FAILED`, 외부 오류 코드 
 페이지네이션을 지원하는 목록 API는 다음 쿼리 파라미터를 사용한다.
 
 ```http
-GET /api/stores?page=0&size=20&sort=name,asc
+GET /api/v1/stores?page=0&size=20&sort=name,asc
 ```
 
 | 파라미터 | 규칙 |
@@ -663,11 +662,11 @@ idempotency_commands
 
 ### 트랜잭션 소유권
 
-- 쓰기 트랜잭션은 해당 명령을 조정하는 Application Service가 소유한다.
+- 쓰기 트랜잭션은 해당 명령을 조정하는 도메인의 주 Service가 소유한다.
 - Controller와 개별 Repository가 전체 유스케이스의 트랜잭션 경계를 소유하지 않는다.
-- 다른 도메인의 Entity나 Repository를 직접 수정하지 않고 소유 도메인의 공개 Application Service를 같은 트랜잭션 안에서 호출한다.
+- 다른 도메인의 Entity나 Repository를 직접 수정하지 않고 소유 도메인의 공개 Service 메서드를 같은 트랜잭션 안에서 호출한다.
 - 조정 유스케이스의 일부 작업에 실패하면 멱등 기록을 포함한 전체 변경을 롤백한다.
-- 조회 전용 Application Service는 `readOnly = true` 트랜잭션을 사용할 수 있다.
+- 조회 전용 Service 메서드는 `readOnly = true` 트랜잭션을 사용할 수 있다.
 
 ### 유스케이스별 원자적 경계
 
@@ -734,7 +733,7 @@ MiriYum 1차 MVP는 Redis 분산 락을 도입하지 않고 MySQL 행 잠금과 
 
 ### 수용 조건
 
-- 조정 Application Service 한 곳이 각 명령의 전체 트랜잭션을 소유한다.
+- 조정하는 도메인의 주 Service 한 곳이 각 명령의 전체 트랜잭션을 소유한다.
 - 예약과 메뉴 홀드 또는 픽업과 메뉴 재고가 부분 성공으로 나뉘지 않는다.
 - 경합 명령은 명시적인 `READ_COMMITTED`와 5초 제한 시간을 사용한다.
 - 재시도는 승인된 일시적 충돌에만 최초 실행 포함 최대 3회 수행된다.
@@ -797,7 +796,7 @@ MiriYum 1차 MVP는 Redis 분산 락을 도입하지 않고 MySQL 행 잠금과 
 - 하나의 사용자 유스케이스에는 하나의 공개 API만 둔다.
 - 화면 담당자가 다르거나 둘 이상의 도메인 기능을 조정해도 같은 목적의 API를 중복 구현하지 않는다.
 - 2단계에서 정한 조정 유스케이스 소유자가 공개 경로와 OpenAPI 정의를 관리한다.
-- 다른 도메인은 소유자의 공개 Application Service를 사용하며 같은 경로를 별도 Controller로 다시 노출하지 않는다.
+- 다른 도메인은 소유자의 공개 Service 메서드와 DTO를 사용하며 같은 경로를 별도 Controller로 다시 노출하지 않는다.
 - 상태 변경에 사용할 구체적인 리소스·명령 경로는 기능별 상태 전이와 권한을 검증한 뒤 각 기능 spec과 OpenAPI에서 확정한다.
 
 ### 수용 조건
@@ -978,8 +977,8 @@ OpenAPI 경로
 
 ### 소유 경계
 
-- 인증 자격 증명 실패와 권한 부족의 `401 Unauthorized`, `403 Forbidden`은 `AuthErrorCode`가 소유한다.
-- 계정·매장·메뉴·예약·메뉴 홀드·픽업 리소스가 존재하지 않는 오류는 각 도메인의 ErrorCode가 소유한다.
+- 인증 자격 증명 실패, 계정 상태·회원정보 오류와 권한 부족의 `401 Unauthorized`, `403 Forbidden`은 인증 도메인의 단일 `AuthErrorCode`가 소유한다.
+- 매장·메뉴·예약·메뉴 홀드·픽업 리소스가 존재하지 않는 오류는 각 도메인의 단일 ErrorCode가 소유한다.
 - 요청 경로 자체가 존재하지 않는 경우에만 `COMMON_005`를 사용한다.
 - 빈 검색·목록 결과는 C-005에 따라 오류가 아니며 `200 OK`와 빈 배열을 반환한다.
 - 업무상 중복·상태 위반·수용량·재고 부족은 공통 코드로 평탄화하지 않고 해당 도메인 코드를 사용한다.

@@ -27,3 +27,4 @@ backend 전용 구현, 명령 실행, 검증, 검토에는 이 문서를 사용�
 - 마이그레이션이 있을 때만 마이그레이션 전용 자료를 추가한다.
 - 승인된 Testcontainers 변경이 ADR-002 및 ADR-004를 충족한 후에만 DB 의존 통합 명령을 활성화한다.
 - backend 스캐폴드만으로 CI, Docker, API 스모크, 배포, runner, 스키마, skill, cache 또는 hook 기능을 추론하지 않는다.
+- 다른 도메인의 공개 Service 메서드·DTO·오류가 필요한 작업은 루트 통합 계약의 `contract-first` 순서를 먼저 확인한다. 선행 계약이 최신 `dev`에 없으면 구현 경로를 확장하지 않고 `BLOCKED`로 보고한다.

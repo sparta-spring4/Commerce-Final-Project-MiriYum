@@ -47,7 +47,7 @@
 마이페이지 화면·진입 경계 (1번)
             │
             ▼
-예약 조회 Application Service·DTO (3번)
+예약 공개 Service 메서드·DTO (3번)
             │
             ▼
 예약 데이터·상태 규칙 (3번)
@@ -92,7 +92,7 @@
 
 - 매장 운영시간과 예약 접수 요일·시간대 설정을 바꾸려면 2번 팀원의 검토가 필요하다.
 - 예약 인원·팀 수 자원, 잔여 수용량 계산과 최종 가능 판정을 바꾸려면 3번 팀원의 검토가 필요하다.
-- 양쪽 입력이 필요한 변경은 도메인 공개 Application Service와 DTO 계약을 먼저 변경하고 상대 도메인의 내부 entity·repository를 직접 수정하지 않는다.
+- 양쪽 입력이 필요한 변경은 소유 도메인의 공개 Service 메서드와 DTO 계약을 먼저 변경하고 상대 도메인의 내부 entity·repository를 직접 수정하지 않는다.
 
 ### 인수 조건
 
@@ -143,7 +143,7 @@
 
 - 3번 팀원과 예약 도메인은 예약 취소 공개 명령·API, 취소 가능 여부, 예약 상태 전이와 전체 취소 유스케이스의 트랜잭션 조정을 소유한다.
 - 4번 팀원과 메뉴 홀드·픽업 도메인은 예약에 연결된 메뉴 홀드 조회, 홀드 해제, 날짜·시간대별 수량 복구와 중복 해제 방지를 소유한다.
-- 3번 팀원의 예약 취소 application service는 4번 팀원이 제공하는 공개 `MenuHoldReleaseService`를 호출한다.
+- 3번 팀원의 `ReservationService`는 4번 팀원이 제공하는 `MenuHoldService`의 공개 홀드 해제 메서드를 호출한다.
 - 3번 팀원은 메뉴 홀드·수량 entity나 repository를 직접 수정하지 않고, 4번 팀원은 예약 상태를 직접 변경하지 않는다.
 
 ### 트랜잭션과 멱등성
@@ -160,7 +160,7 @@
 예약 취소 공개 명령·트랜잭션 조정 (3번)
                     │
                     ▼
-        MenuHoldReleaseService (4번)
+     MenuHoldService 공개 해제 메서드 (4번)
                     │
                     ▼
        홀드 해제·수량 원장 복구 (4번)
@@ -354,19 +354,19 @@
 
 ### 용어와 코드 의존 규칙
 
-- 이 문서의 `도메인 공개 Application Service`는 네트워크 포트가 아니라 다른 도메인이 사용하도록 소유 도메인이 공개한 Java 인터페이스와 DTO다.
-- 다른 도메인은 소유 도메인의 `application/api` 계약만 사용하고 entity·repository·내부 service·infrastructure 구현을 직접 참조하지 않는다.
-- 필요한 기능이 공개 계약에 없으면 소유 담당자와 인터페이스·메서드·DTO 변경을 합의하고 해당 담당자의 검토를 받는다.
+- 다른 도메인은 소유 도메인의 공개 Service 메서드와 DTO만 사용하고 entity·repository·내부 구현을 직접 참조하지 않는다.
+- 필요한 기능이 공개 계약에 없으면 소유 담당자와 메서드·DTO·오류 변경을 합의하고 해당 담당자의 검토를 받는다.
+- 1차 MVP는 `AuthService`, `StoreService`, `ReservationService`, `MenuHoldService`, `PickupService`로 시작한다. 복잡도가 실제로 확인되고 별도 Issue에 근거가 기록된 경우에만 추가 Service나 Facade를 검토한다.
 - 아직 제품 런타임이 구성되지 않았으므로 아래 패키지 경로는 소유권만 예약한다. 빈 패키지·entity·API·마이그레이션은 실제 승인 기능 구현을 시작할 때 생성한다.
 
 ### 최종 도메인·엔티티·API·파일 소유권
 
 | 팀원 | 소유 도메인·주요 데이터 | 공개 API 최종 관리 | 예약 패키지 경로 | 기능 명세·OpenAPI |
 |---|---|---|---|---|
-| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.auth` | `docs/specs/auth-account/` |
-| 2번 | 매장, 운영자-매장 소속, 사업자 검증·픽업 자격, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.store` | `docs/specs/store-search/` |
-| 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.booking.reservation` | `docs/specs/reservation/` |
-| 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.booking.menuhold`, `com.miriyum.booking.pickup` | `docs/specs/menu-hold-pickup/` |
+| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth` | `docs/specs/auth-account/` |
+| 2번 | 매장, 운영자-매장 소속, 사업자 검증·픽업 자격, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store` | `docs/specs/store-search/` |
+| 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
+| 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.domain.menuhold`, `com.miriyum.domain.pickup` | `docs/specs/menu-hold-pickup/` |
 
 정확한 물리 테이블 이름과 FK는 `3. 상태 전이와 논리 ERD`에서 확정한다. 이미 확정된 `consumer_accounts`, `store_operator_accounts`, `store_operator_store_affiliations`, `stores`와 계정 물리 분리 계약은 그대로 사용한다.
 
@@ -400,6 +400,10 @@
 - 각 공개 HTTP 경로와 OpenAPI operation은 최종 관리 담당자가 한 명으로 식별된다.
 - 동일 사용자 목적의 API와 상태 전이 구현이 서로 다른 담당 패키지에 중복 존재하지 않는다.
 - 공통 계약 변경과 교차 도메인 FK에 필요한 공동 검토자가 누락되지 않는다.
+
+### 2026-07-28 코드 구조 보정
+
+O-009의 데이터·API·파일 소유자와 공동 검토 책임은 변경하지 않는다. 구현 시작 전 코드 규칙을 확정하면서 `application/api`와 `Application Service` 표현을 도메인의 공개 Service 메서드·DTO로 정렬하고, `com.miriyum.booking.*` 예약 경로를 `com.miriyum.domain.*` 아래의 `reservation`, `menuhold`, `pickup`으로 정정했다. 이 보정은 새 계층이나 도메인을 추가하지 않는다.
 
 ## 2단계 마감
 
