@@ -16,8 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 
 /**
- * Owns the transaction snapshot for a general visit reservation and its confirmed terminal state
- * transitions.
+ * 일반 방문 예약의 거래 스냅샷과 승인된 종결 전이를 소유한다.
  */
 @Entity
 @Table(name = "reservations")
@@ -100,9 +99,20 @@ public class Reservation {
     }
 
     /**
-     * Creates a reservation immediately confirmed from an approved transaction snapshot.
+     * 승인된 소유 관계와 거래 스냅샷으로 즉시 확정 예약을 만든다.
      *
-     * @throws IllegalArgumentException when a required value, ID, policy version, or store name is invalid
+     * @param consumerAccountId 예약 대표자 계정 ID
+     * @param storeId 대상 매장 ID
+     * @param storeNameSnapshot 예약 당시 매장 표시명
+     * @param serviceDate 매장 업무 날짜
+     * @param startTime 방문 시작 시각
+     * @param endTime 점유 종료 시각
+     * @param party 예약 당시 인원 구성
+     * @param capacityPolicyVersion 적용 수용량 정책 버전
+     * @param reservationPolicyVersion 적용 예약 정책 버전
+     * @param createdAt 예약 확정 시각
+     * @return 즉시 확정된 예약
+     * @throws IllegalArgumentException 필수 값이 없거나 ID·정책 버전·매장명이 유효하지 않은 경우
      */
     public static Reservation confirm(
             Long consumerAccountId,
@@ -131,10 +141,11 @@ public class Reservation {
     }
 
     /**
-     * Transitions a confirmed reservation to its cancelled terminal state.
+     * 확정 예약을 취소 상태로 종결한다.
      *
-     * @throws IllegalArgumentException when the cancellation time is null
-     * @throws ServiceException when the reservation is not confirmed
+     * @param cancelledAt 취소 확정 시각
+     * @throws IllegalArgumentException 취소 확정 시각이 없는 경우
+     * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void cancel(Instant cancelledAt) {
         requireConfirmed();
@@ -143,10 +154,11 @@ public class Reservation {
     }
 
     /**
-     * Transitions a confirmed reservation to its fulfilled terminal state.
+     * 확정 예약을 방문 완료 상태로 종결한다.
      *
-     * @throws IllegalArgumentException when the fulfillment time is null
-     * @throws ServiceException when the reservation is not confirmed
+     * @param fulfilledAt 방문 완료 확정 시각
+     * @throws IllegalArgumentException 방문 완료 확정 시각이 없는 경우
+     * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void fulfill(Instant fulfilledAt) {
         requireConfirmed();

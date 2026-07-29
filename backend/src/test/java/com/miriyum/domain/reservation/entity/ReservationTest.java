@@ -18,7 +18,7 @@ class ReservationTest {
     private static final Instant TERMINATED_AT = Instant.parse("2026-08-01T02:00:00Z");
 
     @Test
-    @DisplayName("confirms a reservation from an approved transaction snapshot")
+    @DisplayName("승인된 거래 스냅샷으로 예약을 즉시 확정한다")
     void confirmsReservationFromApprovedSnapshot() {
         Reservation reservation = createConfirmedReservation();
 
@@ -38,7 +38,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("cancels a confirmed reservation")
+    @DisplayName("확정 예약을 취소 상태로 종결한다")
     void cancelsConfirmedReservation() {
         Reservation reservation = createConfirmedReservation();
 
@@ -50,7 +50,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("fulfills a confirmed reservation")
+    @DisplayName("확정 예약을 방문 완료 상태로 종결한다")
     void fulfillsConfirmedReservation() {
         Reservation reservation = createConfirmedReservation();
 
@@ -62,7 +62,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("rejects transition from cancelled to fulfilled")
+    @DisplayName("취소된 예약은 방문 완료로 전이할 수 없다")
     void rejectsTransitionFromCancelledToFulfilled() {
         Reservation reservation = createConfirmedReservation();
         reservation.cancel(TERMINATED_AT);
@@ -80,7 +80,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("rejects transition from fulfilled to cancelled")
+    @DisplayName("방문 완료된 예약은 취소로 전이할 수 없다")
     void rejectsTransitionFromFulfilledToCancelled() {
         Reservation reservation = createConfirmedReservation();
         reservation.fulfill(TERMINATED_AT);
@@ -98,7 +98,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("rejects repeated cancellation")
+    @DisplayName("취소된 예약은 취소를 반복할 수 없다")
     void rejectsRepeatedCancellation() {
         Reservation reservation = createConfirmedReservation();
         reservation.cancel(TERMINATED_AT);
@@ -115,7 +115,7 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("rejects repeated fulfillment")
+    @DisplayName("방문 완료된 예약은 방문 완료를 반복할 수 없다")
     void rejectsRepeatedFulfillment() {
         Reservation reservation = createConfirmedReservation();
         reservation.fulfill(TERMINATED_AT);
@@ -132,27 +132,27 @@ class ReservationTest {
     }
 
     @Test
-    @DisplayName("rejects non-positive owner IDs")
+    @DisplayName("양수가 아닌 소유 관계 ID를 거부한다")
     void rejectsNonPositiveOwnerId() {
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(0L, 22L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT));
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 0L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT));
     }
 
     @Test
-    @DisplayName("rejects a blank store name snapshot")
+    @DisplayName("비어 있는 매장명 스냅샷을 거부한다")
     void rejectsBlankStoreNameSnapshot() {
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, " ", 3L, 5L, CREATED_AT));
     }
 
     @Test
-    @DisplayName("rejects non-positive policy versions")
+    @DisplayName("양수가 아닌 정책 버전을 거부한다")
     void rejectsNonPositivePolicyVersion() {
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, "Miri Yum Restaurant", 0L, 5L, CREATED_AT));
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, "Miri Yum Restaurant", 3L, 0L, CREATED_AT));
     }
 
     @Test
-    @DisplayName("rejects a missing required transaction snapshot")
+    @DisplayName("필수 거래 스냅샷이 없으면 생성할 수 없다")
     void rejectsMissingRequiredSnapshot() {
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", null, LocalTime.of(18, 0), LocalTime.of(19, 30),
