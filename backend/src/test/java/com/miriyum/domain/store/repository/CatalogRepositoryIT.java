@@ -98,14 +98,6 @@ class CatalogRepositoryIT {
     }
 
     @Test
-    @DisplayName("catalog_version이 세 종류 모두 1이다")
-    void catalogVersionIsOne() {
-        assertThat(version("store_category")).isEqualTo(1L);
-        assertThat(version("menu_category")).isEqualTo(1L);
-        assertThat(version("store_tag")).isEqualTo(1L);
-    }
-
-    @Test
     @DisplayName("자연키 code 중복 삽입은 무결성 예외가 발생한다")
     void duplicateCodeViolatesPrimaryKey() {
         // 자연키 엔티티는 repository.save가 merge(update)로 동작하므로, DB PK 제약은 raw insert로 검증한다.
@@ -132,10 +124,5 @@ class CatalogRepositoryIT {
                 .extracting(CatalogEntry::getCode)
                 .doesNotContain("TEST_INACTIVE");
         assertThat(storeCategoryRepository.existsByCodeAndActiveTrue("TEST_INACTIVE")).isFalse();
-    }
-
-    private Long version(String catalog) {
-        return jdbcTemplate.queryForObject(
-                "SELECT version FROM catalog_version WHERE catalog = ?", Long.class, catalog);
     }
 }

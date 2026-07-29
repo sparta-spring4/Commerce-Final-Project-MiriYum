@@ -37,8 +37,4 @@ INSERT INTO store_tag (code, display_name, active, sort_order) VALUES
     ('ALLERGY_INFO', '알레르기 안내 제공', TRUE, 7),
     ('PET_FRIENDLY', '반려동물 가능',      TRUE, 8);
 
--- catalog 버전 (세 종류 모두 v1)
-INSERT INTO catalog_version (catalog, version) VALUES
-    ('store_category', 1),
-    ('menu_category', 1),
-    ('store_tag', 1);
+-- 승인된 seed 버전: v1 (세 catalog 공통). 런타임 버전 테이블 없이 이 주석과 승인 문서로만 기록한다.

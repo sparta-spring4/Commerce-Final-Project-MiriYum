@@ -30,9 +30,6 @@ CREATE TABLE store_tag (
     CONSTRAINT ck_store_tag_sort_order CHECK (sort_order > 0)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
-CREATE TABLE catalog_version (
-    catalog VARCHAR(30) NOT NULL,
-    version BIGINT      NOT NULL,
-    PRIMARY KEY (catalog),
-    CONSTRAINT ck_catalog_version_positive CHECK (version > 0)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+-- 런타임 버전 테이블(catalog_version)은 현재 MVP에 소비 코드가 없어 두지 않는다(YAGNI).
+-- 승인된 seed 버전은 v1이며 seed 마이그레이션 주석과 승인 문서에만 기록한다.
+-- 운영자 CRUD·버전 증가·감사·캐시 무효화는 고도화 범위다.

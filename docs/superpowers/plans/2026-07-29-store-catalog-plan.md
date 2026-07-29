@@ -29,8 +29,8 @@ db/migration/V2026_07_29_01__create_catalog_tables.sql, V2026_07_29_02__seed_cat
 1. RED 단위 `CatalogServiceTest` — 종류별 저장소 선택·정렬 매핑, `isActiveCode`(활성/미승인/null), `findUnknownCodes`(미승인만/전부유효/빈입력).
 2. RED slice `CatalogControllerTest` — `standaloneSetup`으로 세 경로 200·봉투·필드·정렬·추가필드 없음(응답 형태 전용, 인증 주장 없음).
 3. GREEN production — entity(@MappedSuperclass+3), repository(base+3), service(switch 매핑), controller, dto.
-4. Migration — 종류별 테이블 3개(code PK, `as_cs` 대소문자 구분, `CHECK(sort_order>0)`) + `catalog_version`(`CHECK(version>0)`), seed 8/10/8 + v1.
-5. RED→GREEN 통합 `CatalogRepositoryIT` — Testcontainers MySQL(`@ServiceConnection`, `@Transactional`): 전체 seed code·표시명·순서, version 3행, code 중복 raw insert 무결성 예외, 대소문자 구분, 비활성 제외.
+4. Migration — 종류별 테이블 3개(code PK, `as_cs` 대소문자 구분, `CHECK(sort_order>0)`), seed 8/10/8. seed 버전 v1은 주석으로만 기록(런타임 버전 테이블 없음, YAGNI).
+5. RED→GREEN 통합 `CatalogRepositoryIT` — Testcontainers MySQL(`@ServiceConnection`, `@Transactional`): 전체 seed code·표시명·순서, code 중복 raw insert 무결성 예외, 대소문자 구분, 비활성 제외.
 6. 의존성 — production `spring-boot-flyway`, test `testcontainers-junit-jupiter`/`testcontainers-mysql`(버전 BOM 관리).
 7. global 컨텍스트 테스트 승격(allowlist 확장, 소유자 승인) — `MiriyumApplicationTests`·`ApplicationJacksonConfigurationTest`를 Testcontainers 기반으로.
 
@@ -47,11 +47,11 @@ git diff --check
 - [x] 세 공개 API가 공통 봉투로 활성 항목만 반환 → `CatalogControllerTest` 3/3 (실제 익명 서빙은 1번 Security 통합 후 별도 검증).
 - [x] code 불투명·자연키 유일·대소문자 구분 → `CatalogRepositoryIT` 중복 raw insert·대소문자 검증.
 - [x] 미승인/비활성 code 중립 검증 결과(STORE_004는 소비 도메인) → `CatalogServiceTest` 8/8.
-- [x] 빈 MySQL Flyway clean-start + 전체 seed·version 재현 → `CatalogRepositoryIT` 7/7 (실제 MySQL, skip 아님).
+- [x] 빈 MySQL Flyway clean-start + 전체 seed 재현 → `CatalogRepositoryIT` 6/6 (실제 MySQL, skip 아님).
 - [x] H2 미사용 → Testcontainers MySQL만.
 - [x] 공통 응답·예외 재사용.
 
-전체: 59 tests, 0 failed, 0 skipped. 3개 Testcontainers 컨텍스트 실제 실행.
+전체: 58 tests, 0 failed, 0 skipped. 3개 Testcontainers 컨텍스트 실제 실행.
 
 ## 범위 밖·주의
 

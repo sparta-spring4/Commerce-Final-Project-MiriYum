@@ -10,9 +10,19 @@
 
 ## 목적
 
-2번 담당 영역의 첫 독립 산출물로, 승인된 매장 카테고리·메뉴 카테고리·매장 태그 catalog를 MySQL 정본으로 관리하고 비회원 공개 조회 API를 제공한다. 후속 매장·메뉴 기능(#33, #35)이 재사용할 **catalog 코드 검증 공개 메서드**를 제공한다.
+이 산출물의 목적은 **운영자 관리 기능 구현이 아니라, 매장·메뉴 기능이 사용할 읽기 전용 카탈로그 기반 구축**이다. 승인된 매장 카테고리·메뉴 카테고리·매장 태그를 MySQL 정본으로 두고, 비회원 공개 조회 API와 후속 매장·메뉴 기능(#33, #35)이 재사용할 **코드 검증 공개 메서드**를 제공한다.
 
-매장·메뉴 Entity, 등록·수정 API, 운영자 인증·인가, 영업시간, 예약·수량 가용성, 검색과 관리자용 catalog 수정 API는 범위가 아니다.
+### 이번 MVP에서 제외 — 고도화 범위 (별도 이슈)
+
+플랫폼 운영자가 카테고리를 직접 추가·수정·비활성화하는 기능은 필요하지만 이번 MVP가 아니라 고도화다. 미래 기능을 미리 완성하지 않는다.
+
+- 플랫폼 운영자용 카테고리 추가·수정·비활성화 API, 운영자 관리 화면
+- 운영자 권한·RBAC
+- 변경 이력·감사 로그
+- 캐시 무효화·변경 감지
+- `catalog_version` 테이블과 런타임 버전 증가 로직
+
+그 밖에 매장·메뉴 Entity, 등록·수정 API, 운영자 인증·인가, 영업시간, 예약·수량 가용성, 검색도 범위가 아니다(각 후속 Issue).
 
 ## 설계 원칙
 
@@ -93,14 +103,9 @@
 - 정렬은 `ORDER BY sort_order ASC, code ASC`로 결정적이다(동순번 시 code로 안정 정렬).
 - 테이블 기본 문자셋 `utf8mb4`/`utf8mb4_0900_ai_ci`(한글 표시명), `code` 컬럼만 `as_cs` 재정의.
 
-### `catalog_version`
+### 버전 처리 (런타임 테이블 없음)
 
-| 컬럼 | 타입 | 제약 | 의미 |
-|---|---|---|---|
-| `catalog` | `VARCHAR(30)` | PK | `store_category`·`menu_category`·`store_tag` |
-| `version` | `BIGINT` | NOT NULL, `CHECK (version > 0)` | 현재 활성 seed 버전 |
-
-- 초기 3행 모두 `version = 1`. OpenAPI 공개 응답(`CatalogListData = {items}`)에는 버전 필드가 없어 노출하지 않는 seed 거버넌스 표식이다. 2차 MVP 검색 캐시 키가 소비할 수 있다.
+승인된 seed 버전은 v1이다. 이를 저장하는 런타임 `catalog_version` 테이블은 **현재 MVP에 소비 코드가 없어 두지 않는다(YAGNI)**. 버전은 seed 마이그레이션 주석과 이 설계·승인 문서에만 기록한다. OpenAPI 공개 응답(`CatalogListData = {items}`)에도 버전 필드가 없다. 2차 MVP 검색 캐시 무효화나 운영자 버전 증가가 실제 요구로 확인되면 고도화 이슈에서 도입한다.
 
 ## 패키지 구조
 
@@ -127,7 +132,7 @@ com.miriyum.domain.store
    └─ CatalogListResponse
 ```
 
-- `CatalogService`는 별도 유지한다. 근거: catalog는 응집된 하위 기능이고 #33/#35가 재사용하므로 `StoreService`(등록·수정·권한, 후속 Issue)와 책임을 분리한다. 정본에 "StoreService 우선" 명문 규칙은 없다.
+- `CatalogService`는 별도 유지한다. ownership.md **O-009**는 "1차 MVP는 `StoreService` 등으로 시작하고, 추가 Service나 Facade는 복잡도가 실제로 확인되고 별도 Issue에 근거가 기록된 경우에만 검토한다"고 규정한다. Issue #31이 그 예외 근거(catalog는 읽기 전용 참조 데이터이며 #33/#35가 공통 재사용 → `StoreService`의 트랜잭션 책임과 분리)를 기록·승인했다.
 - `CatalogKind`·`CatalogItemView`는 서비스 계약의 일부이므로 `service`에 둔다. `CatalogItemView`는 컨트롤러만 소비하는 내부 뷰이며 교차 도메인 공개 DTO가 아니다(소비 도메인은 검증 메서드만 사용).
 
 ## 도메인·엔티티 설계
@@ -173,8 +178,8 @@ com.miriyum.domain.store
 
 ## Flyway migration 설계
 
-- `V2026_07_29_01__create_catalog_tables.sql` — `store_category`·`menu_category`·`store_tag`(각 code PK·`as_cs`·`CHECK(sort_order>0)`)와 `catalog_version`(`CHECK(version>0)`).
-- `V2026_07_29_02__seed_catalog_mvp1.sql` — 승인 seed 8/10/8 + 세 종류 `version = 1`.
+- `V2026_07_29_01__create_catalog_tables.sql` — `store_category`·`menu_category`·`store_tag`(각 code PK·`as_cs`·`CHECK(sort_order>0)`).
+- `V2026_07_29_02__seed_catalog_mvp1.sql` — 승인 seed 8/10/8. seed 버전 v1은 주석으로만 기록(런타임 버전 테이블 없음).
 - 빈 MySQL clean-start로 재현. 적용(병합) 후 파일 불변, 변경은 새 migration.
 
 ## 의존성
@@ -201,7 +206,6 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 - slice `CatalogControllerTest`(`standaloneSetup`): 세 경로 200, 공통 봉투·필드·정렬·추가필드 없음. Security 미포함이므로 응답 형태 검증 전용(인증 주장 없음).
 - 통합 `CatalogRepositoryIT`(Testcontainers MySQL, `@ServiceConnection`, `@Transactional` 롤백, `mysql:8.0.40`):
   - 세 종류 전체 seed의 code·표시명·순서(`containsExactly`)
-  - `catalog_version` 세 행 = 1
   - 자연키 code 중복 raw insert → 무결성 예외
   - 대소문자 구분(`korean` 미매치, `KOREAN` 매치)
   - 비활성 항목 활성 조회 제외
@@ -209,7 +213,7 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 
 ## 파일 허용 목록 (#31, 정정판)
 
-Issue #31 원안 allowlist(`com/miriyum/store/catalog/**`)는 ADR-001·ownership.md와 충돌하여 아래로 정정한다(Issue 본문 동기화 대상).
+Issue #31 원안 allowlist(`com/miriyum/store/catalog/**`)는 ADR-001·ownership.md와 충돌하여 아래로 정정했다(Issue 본문 동기화 완료).
 
 - `backend/build.gradle.kts` — Flyway autoconfig(production) + Testcontainers 테스트 의존성
 - `backend/src/main/resources/db/migration/**`
