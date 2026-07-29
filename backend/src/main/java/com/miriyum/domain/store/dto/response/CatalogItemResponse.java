@@ -1,6 +1,6 @@
-package com.miriyum.store.catalog.web.dto;
+package com.miriyum.domain.store.dto.response;
 
-import com.miriyum.store.catalog.service.CatalogItemView;
+import com.miriyum.domain.store.service.CatalogItemView;
 
 /**
  * 공개 catalog 항목 응답이다.

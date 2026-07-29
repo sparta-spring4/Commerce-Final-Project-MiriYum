@@ -1,19 +1,20 @@
-package com.miriyum.store.catalog.web;
+package com.miriyum.domain.store.controller;
 
+import com.miriyum.domain.store.dto.response.CatalogItemResponse;
+import com.miriyum.domain.store.dto.response.CatalogListResponse;
+import com.miriyum.domain.store.service.CatalogKind;
+import com.miriyum.domain.store.service.CatalogService;
 import com.miriyum.global.response.ApiResponse;
-import com.miriyum.store.catalog.domain.CatalogKind;
-import com.miriyum.store.catalog.service.CatalogService;
-import com.miriyum.store.catalog.web.dto.CatalogItemResponse;
-import com.miriyum.store.catalog.web.dto.CatalogListResponse;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 비회원도 접근하는 공개 catalog 조회 API이다.
+ * 공개 catalog 조회 API이다.
  *
- * <p>활성 항목만 공통 성공 봉투로 반환한다. 인증·인가 필터 구성은 이 컨트롤러가 소유하지 않는다.</p>
+ * <p>활성 항목만 공통 성공 봉투로 반환한다. 인증·인가 필터 구성은 이 컨트롤러가 소유하지 않으며,
+ * 공개 경로의 익명 허용은 인증 도메인의 `SecurityFilterChain`이 소유한다.</p>
  */
 @RestController
 @RequestMapping("/api/v1")

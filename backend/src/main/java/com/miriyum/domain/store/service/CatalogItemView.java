@@ -1,4 +1,4 @@
-package com.miriyum.store.catalog.service;
+package com.miriyum.domain.store.service;
 
 /**
  * 조회 결과의 catalog 항목 표현이다.

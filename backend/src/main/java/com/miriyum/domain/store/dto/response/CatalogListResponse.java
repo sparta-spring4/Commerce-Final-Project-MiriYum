@@ -1,4 +1,4 @@
-package com.miriyum.store.catalog.web.dto;
+package com.miriyum.domain.store.dto.response;
 
 import java.util.List;
 
