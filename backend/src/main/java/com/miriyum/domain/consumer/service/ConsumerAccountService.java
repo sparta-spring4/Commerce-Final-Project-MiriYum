@@ -1,5 +1,6 @@
 package com.miriyum.domain.consumer.service;
 
+import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.consumer.dto.request.ConsumerAccountUpdateRequest;
 import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
@@ -7,6 +8,8 @@ import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ConsumerAccountService {
 
+    private static final long NICKNAME_CHANGE_COOLDOWN_DAYS = 7;
+
     private final ConsumerAccountRepository consumerAccountRepository;
+    private final NicknamePolicy nicknamePolicy;
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public ConsumerAccountResponse getMe(Long accountId) {
@@ -29,8 +36,18 @@ public class ConsumerAccountService {
     @Transactional
     public ConsumerAccountResponse updateName(Long accountId, ConsumerAccountUpdateRequest request) {
         ConsumerAccount account = getActiveAccount(accountId);
-        account.changeName(request.name());
+        LocalDateTime now = LocalDateTime.now(clock);
+        requireNicknameChangeAllowed(account, now);
+        String normalizedNickname = nicknamePolicy.normalize(request.nickname());
+        account.changeName(normalizedNickname, now);
         return ConsumerAccountResponse.from(account);
+    }
+
+    private void requireNicknameChangeAllowed(ConsumerAccount account, LocalDateTime now) {
+        LocalDateTime lastChangedAt = account.getNicknameChangedAt();
+        if (lastChangedAt != null && lastChangedAt.plusDays(NICKNAME_CHANGE_COOLDOWN_DAYS).isAfter(now)) {
+            throw new ServiceException(AccountErrorCode.NICKNAME_CHANGE_TOO_SOON);
+        }
     }
 
     private ConsumerAccount getActiveAccount(Long accountId) {

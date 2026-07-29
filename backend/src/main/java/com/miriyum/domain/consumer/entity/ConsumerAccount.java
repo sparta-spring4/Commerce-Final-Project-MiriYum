@@ -10,6 +10,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -40,12 +41,15 @@ public class ConsumerAccount extends BaseEntity {
     private String passwordHash;
 
     @NonNull
-    @Column(name = "phone", nullable = false, length = 20)
+    @Column(name = "phone", nullable = false, length = 512)
     private String phone;
 
     @NonNull
     @Column(name = "name", nullable = false, length = 20)
     private String name;
+
+    @Column(name = "nickname_changed_at")
+    private LocalDateTime nicknameChangedAt;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -57,7 +61,8 @@ public class ConsumerAccount extends BaseEntity {
         return account;
     }
 
-    public void changeName(String newName) {
+    public void changeName(String newName, LocalDateTime changedAt) {
         this.name = newName;
+        this.nicknameChangedAt = changedAt;
     }
 }
