@@ -56,10 +56,23 @@ public class ConsumerAuthService {
         try {
             saved = consumerAccountRepository.saveAndFlush(account);
         } catch (DataIntegrityViolationException exception) {
-            throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            throw mapDuplicateConstraint(exception);
         }
 
         return ConsumerAccountResponse.from(saved);
+    }
+
+    private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
+        String message = exception.getMostSpecificCause().getMessage();
+        if (message != null) {
+            if (message.contains("uk_consumer_accounts_email")) {
+                return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
+            }
+            if (message.contains("uk_consumer_accounts_phone")) {
+                return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+            }
+        }
+        return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
 
     @Transactional(readOnly = true)
