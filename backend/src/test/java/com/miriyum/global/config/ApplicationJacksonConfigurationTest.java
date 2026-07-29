@@ -12,10 +12,11 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
-            "spring.autoconfigure.exclude="
-                    + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
-                    + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
-                    + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
+            "spring.autoconfigure.exclude=org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
+            "spring.datasource.url=jdbc:h2:mem:miriyum-jackson-test;DB_CLOSE_DELAY=-1",
+            "spring.datasource.driver-class-name=org.h2.Driver",
+            "spring.jpa.hibernate.ddl-auto=create-drop",
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
         })
 class ApplicationJacksonConfigurationTest {
 
