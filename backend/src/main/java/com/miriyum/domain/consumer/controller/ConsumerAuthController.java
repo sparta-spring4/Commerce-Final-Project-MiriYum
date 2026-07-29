@@ -4,7 +4,9 @@ import com.miriyum.domain.auth.cookie.AuthCookieFactory;
 import com.miriyum.domain.auth.cookie.CookieExtractor;
 import com.miriyum.domain.auth.cookie.CsrfTokenGenerator;
 import com.miriyum.domain.auth.cookie.OriginValidator;
+import com.miriyum.domain.auth.dto.request.EmptyJsonRequest;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.CsrfTokenResponse;
 import com.miriyum.domain.auth.dto.response.TokenResponse;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -12,7 +14,6 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
-import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.ApiResponse;
@@ -49,7 +50,7 @@ public class ConsumerAuthController {
 
     @PostMapping("/accounts")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ConsumerAccountResponse> signUp(@Valid @RequestBody ConsumerSignUpRequest request) {
+    public ApiResponse<AccountCreatedResponse> signUp(@Valid @RequestBody ConsumerSignUpRequest request) {
         return ApiResponse.success("가입이 완료됐습니다.", consumerAuthService.signUp(request));
     }
 
@@ -64,7 +65,11 @@ public class ConsumerAuthController {
     }
 
     @PostMapping("/token-refreshes")
-    public ApiResponse<TokenResponse> refresh(HttpServletRequest request, HttpServletResponse response) {
+    public ApiResponse<TokenResponse> refresh(
+            @RequestBody EmptyJsonRequest body,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
         requireSameOrigin(request);
         String refreshToken = CookieExtractor.extract(request, NAMESPACE.refreshCookieName());
         TokenPair tokenPair = consumerAuthService.refresh(refreshToken);
