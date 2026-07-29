@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
+import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
@@ -18,10 +21,11 @@ import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,8 +42,15 @@ class ConsumerAuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
-    @InjectMocks
+    private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
+
     private ConsumerAuthService consumerAuthService;
+
+    @BeforeEach
+    void setUp() {
+        consumerAuthService = new ConsumerAuthService(
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy);
+    }
 
     @Test
     @DisplayName("이미 가입된 이메일로 가입하면 ACCOUNT_001을 던진다")
@@ -47,7 +58,7 @@ class ConsumerAuthServiceTest {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임", "010-1234-5678");
+                "email-ref", "identity-ref", "닉네임");
         given(consumerAccountRepository.existsByEmail("user@example.com")).willReturn(true);
 
         // when & then
@@ -58,12 +69,34 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("가입에 성공하면 닉네임을 정규화해서 저장하고 가입 응답을 반환한다")
+    void signUpSucceedsAndNormalizesNickname() {
+        // given
+        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
+                "user@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "  새 닉네임  ");
+        given(passwordEncoder.encode("password123")).willReturn("hashed");
+        given(consumerAccountRepository.saveAndFlush(any(ConsumerAccount.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        AccountCreatedResponse response = consumerAuthService.signUp(request);
+
+        // then
+        ArgumentCaptor<ConsumerAccount> captor = ArgumentCaptor.forClass(ConsumerAccount.class);
+        verify(consumerAccountRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getName()).isEqualTo("새 닉네임");
+        assertThat(response.accountType()).isEqualTo(AccountType.CONSUMER);
+        assertThat(response.status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
     @DisplayName("비밀번호와 비밀번호 확인이 다르면 검증 오류를 던진다")
     void rejectsSignUpWithMismatchedPasswordConfirm() {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "different456",
-                "email-ref", "identity-ref", "닉네임", "010-1234-5678");
+                "email-ref", "identity-ref", "닉네임");
 
         // when & then
         assertThatThrownBy(() -> consumerAuthService.signUp(request))

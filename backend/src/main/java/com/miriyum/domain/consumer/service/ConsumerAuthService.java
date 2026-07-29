@@ -1,6 +1,8 @@
 package com.miriyum.domain.consumer.service;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
+import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
@@ -8,7 +10,6 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
-import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -35,22 +36,24 @@ public class ConsumerAuthService {
     private final ConsumerAccountRepository consumerAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final NicknamePolicy nicknamePolicy;
 
     @Transactional
-    public ConsumerAccountResponse signUp(ConsumerSignUpRequest request) {
+    public AccountCreatedResponse signUp(ConsumerSignUpRequest request) {
         if (!request.password().equals(request.passwordConfirm())) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
         if (consumerAccountRepository.existsByEmail(request.email())) {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
-        if (consumerAccountRepository.existsByPhone(request.phone())) {
+        if (consumerAccountRepository.existsByPhone(request.identityVerificationReference())) {
             throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
         }
 
+        String normalizedNickname = nicknamePolicy.normalize(request.nickname());
         String passwordHash = passwordEncoder.encode(request.password());
         ConsumerAccount account = ConsumerAccount.create(
-                request.email(), passwordHash, request.phone(), request.name());
+                request.email(), passwordHash, request.identityVerificationReference(), normalizedNickname);
 
         ConsumerAccount saved;
         try {
@@ -59,7 +62,7 @@ public class ConsumerAuthService {
             throw mapDuplicateConstraint(exception);
         }
 
-        return ConsumerAccountResponse.from(saved);
+        return AccountCreatedResponse.of(saved.getId(), AccountType.CONSUMER);
     }
 
     private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
