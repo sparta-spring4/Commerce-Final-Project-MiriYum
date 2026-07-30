@@ -22,18 +22,31 @@ import tools.jackson.databind.ObjectMapper;
  * <p>1번 인증 도메인의 {@code SecurityConfig}("매장 운영자 필터체인은 그 도메인 구현 슬라이스에서
  * 추가한다")가 남긴 확장 지점을 사용해, 1번 파일을 수정하지 않고 이 체인 안에서 완결한다.</p>
  *
- * <p>정확히 세 GET 경로만 익명 허용하고, 같은 경로의 다른 method와 그 밖의 요청은 거부한다.
- * 인증·인가 실패는 1번의 {@link JwtAuthenticationEntryPoint}(401)·{@link JwtAccessDeniedHandler}(403)로
- * 공통 {@code ErrorResponse} envelope를 사용한다. {@code @Order(0)}으로 1번의 default {@code denyAll}
- * 체인보다 먼저 평가되며, securityMatcher가 세 경로에만 한정되어 다른 도메인 체인과 겹치지 않는다.</p>
+ * <p>정확히 세 GET 경로만 익명 허용하고, 같은 경로군(`/**` 포함)의 다른 method·유사 경로와 그 밖의
+ * 요청은 모두 거부한다. securityMatcher가 경로군 전체를 소유하므로 `/store-categories/extra` 같은
+ * 유사 경로도 이 체인 안에서 처리되어, 1번 {@link JwtAuthenticationEntryPoint}(401)·
+ * {@link JwtAccessDeniedHandler}(403)의 공통 {@code ErrorResponse} envelope를 반환한다(global default
+ * {@code denyAll} 체인으로 새지 않는다). {@code @Order(0)}으로 default 체인보다 먼저 평가되며,
+ * securityMatcher가 catalog 경로군에만 한정되어 다른 도메인 체인과 겹치지 않는다.</p>
  */
 @Configuration
 public class CatalogSecurityConfig {
 
+    /** 익명 GET을 허용하는 정확한 세 경로. */
     static final String[] PUBLIC_CATALOG_PATHS = {
             "/api/v1/store-categories",
             "/api/v1/menu-categories",
             "/api/v1/store-tags"
+    };
+
+    /** 이 체인이 소유하는 catalog 경로군(정확한 경로 + 하위 경로). 유사 경로도 공통 envelope로 처리하기 위함. */
+    static final String[] CATALOG_PATH_FAMILIES = {
+            "/api/v1/store-categories",
+            "/api/v1/store-categories/**",
+            "/api/v1/menu-categories",
+            "/api/v1/menu-categories/**",
+            "/api/v1/store-tags",
+            "/api/v1/store-tags/**"
     };
 
     @Bean
@@ -44,7 +57,7 @@ public class CatalogSecurityConfig {
             ObjectMapper objectMapper
     ) throws Exception {
         http
-                .securityMatcher(PUBLIC_CATALOG_PATHS)
+                .securityMatcher(CATALOG_PATH_FAMILIES)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
