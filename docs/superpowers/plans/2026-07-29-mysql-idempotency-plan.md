@@ -46,11 +46,11 @@ db/migration/V4__create_idempotency_commands.sql
 
 ```powershell
 cd backend
-.\gradlew.bat clean build
+.\gradlew.bat clean build --offline
 git diff --check
 ```
 
-2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build`로 **117 tests, 0 failed, 0 errors,
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **122 tests, 0 failed, 0 errors,
 0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
 clean-start를 확인했다.
 
