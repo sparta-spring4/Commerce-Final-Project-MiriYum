@@ -13,6 +13,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("수용량 한도와 현재 점유 및 정책 버전을 보존한다")
     void preservesCapacityPolicyAndOccupancy() {
+        // when
         ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
                 22L,
                 LocalDate.of(2026, 8, 1),
@@ -28,6 +29,7 @@ class ReservationCapacityBucketTest {
                 3L
         );
 
+        // then
         assertThat(bucket.getStoreId()).isEqualTo(22L);
         assertThat(bucket.getMaxPeople()).isEqualTo(20);
         assertThat(bucket.getMaxTeams()).isEqualTo(5);
@@ -42,6 +44,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("기존 점유가 새 최대값보다 커도 이력 보존을 위해 허용한다")
     void allowsOccupancyAboveNewLimits() {
+        // when
         ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
                 22L,
                 LocalDate.of(2026, 8, 1),
@@ -57,6 +60,7 @@ class ReservationCapacityBucketTest {
                 4L
         );
 
+        // then
         assertThat(bucket.getOccupiedPeople()).isGreaterThan(bucket.getMaxPeople());
         assertThat(bucket.getOccupiedTeams()).isGreaterThan(bucket.getMaxTeams());
     }
@@ -64,6 +68,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("음수 수용량이나 점유량을 거부한다")
     void rejectsNegativeCapacityOrOccupancy() {
+        // when & then
         assertThatIllegalArgumentException().isThrownBy(() ->
                 ReservationCapacityBucket.create(
                         22L,
@@ -85,6 +90,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("최대 일행 인원이 최대 수용 인원을 넘으면 거부한다")
     void rejectsPartyMaximumAbovePeopleMaximum() {
+        // when & then
         assertThatIllegalArgumentException().isThrownBy(() ->
                 ReservationCapacityBucket.create(
                         22L,
@@ -106,6 +112,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("최대 일행 인원이 최소 일행 인원보다 작으면 거부한다")
     void rejectsPartyMaximumBelowPartyMinimum() {
+        // when & then
         assertThatIllegalArgumentException().isThrownBy(() ->
                 ReservationCapacityBucket.create(
                         22L,
@@ -127,6 +134,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("양수가 아닌 매장 ID와 정책 버전을 거부한다")
     void rejectsNonPositiveIdentityOrPolicyVersion() {
+        // when & then
         assertThatIllegalArgumentException().isThrownBy(() ->
                 ReservationCapacityBucket.create(
                         0L,
@@ -164,6 +172,7 @@ class ReservationCapacityBucketTest {
     @Test
     @DisplayName("필수 날짜 스냅샷이 없으면 생성할 수 없다")
     void rejectsMissingServiceDate() {
+        // when & then
         assertThatIllegalArgumentException().isThrownBy(() ->
                 ReservationCapacityBucket.create(
                         22L,

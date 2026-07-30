@@ -21,6 +21,7 @@ class ReservationErrorCodeTest {
             String code,
             String message
     ) {
+        // then
         assertThat(errorCode.getHttpStatus()).isEqualTo(httpStatus);
         assertThat(errorCode.getCode()).isEqualTo(code);
         assertThat(errorCode.getMessage()).isEqualTo(message);
@@ -29,6 +30,7 @@ class ReservationErrorCodeTest {
     @Test
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
+        // when & then
         assertThat(ReservationErrorCode.values()).hasSize(9);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
