@@ -67,30 +67,37 @@ class RateLimiterTestcontainersTest {
         // given: LOGIN 한도는 20, 스레드 50개가 동시에 같은 키로 요청
         int threadCount = 50;
         String key = "concurrency-test-ip:POST /api/v1/consumer-auth/sessions";
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch readyLatch = new CountDownLatch(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
         AtomicInteger allowedCount = new AtomicInteger();
+        boolean completedInTime;
 
-        for (int i = 0; i < threadCount; i++) {
-            executor.submit(() -> {
-                readyLatch.countDown();
-                try {
-                    startLatch.await();
-                    if (rateLimiter.tryConsume(RateLimitCategory.LOGIN, key)) {
-                        allowedCount.incrementAndGet();
+        try (ExecutorService executor = Executors.newFixedThreadPool(threadCount)) {
+            for (int i = 0; i < threadCount; i++) {
+                executor.submit(() -> {
+                    readyLatch.countDown();
+                    try {
+                        startLatch.await();
+                        if (rateLimiter.tryConsume(RateLimitCategory.LOGIN, key)) {
+                            allowedCount.incrementAndGet();
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
                     }
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                }
-            });
+                });
+            }
+
+            // when: 모든 스레드가 준비된 뒤 동시에 시작
+            readyLatch.await();
+            startLatch.countDown();
+            executor.shutdown();
+            completedInTime = executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
-        // when: 모든 스레드가 준비된 뒤 동시에 시작
-        readyLatch.await();
-        startLatch.countDown();
-        executor.shutdown();
-        executor.awaitTermination(10, TimeUnit.SECONDS);
+        // then: 제한 시간 안에 스레드 50개가 다 끝나야 아래 카운트 검증이 의미 있다
+        assertThat(completedInTime)
+                .as("스레드 %d개가 10초 안에 끝나지 않았습니다", threadCount)
+                .isTrue();
 
         // then: 한도(20)를 넘는 허용은 없어야 한다
         assertThat(allowedCount.get()).isLessThanOrEqualTo(20);
