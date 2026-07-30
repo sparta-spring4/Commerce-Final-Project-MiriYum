@@ -38,6 +38,7 @@ dependencies {
 
     testImplementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testRuntimeOnly("com.h2database:h2")
     testCompileOnly(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     testCompileOnly("org.projectlombok:lombok")
