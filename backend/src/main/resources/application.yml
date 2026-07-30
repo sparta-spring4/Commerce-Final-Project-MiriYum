@@ -15,3 +15,5 @@ miriyum:
     issuer: ${MIRIYUM_JWT_ISSUER:miriyum}
   security:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
+  identity-verification:
+    dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}

@@ -49,7 +49,7 @@ class ConsumerAuthServiceTest {
     @BeforeEach
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy);
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, true);
     }
 
     @Test
@@ -88,6 +88,23 @@ class ConsumerAuthServiceTest {
         assertThat(captor.getValue().getName()).isEqualTo("새 닉네임");
         assertThat(response.accountType()).isEqualTo(AccountType.CONSUMER);
         assertThat(response.status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    @DisplayName("본인확인 스텁이 꺼져 있으면 가입을 차단한다")
+    void rejectsSignUpWhenIdentityVerificationStubDisabled() {
+        // given
+        ConsumerAuthService serviceWithStubDisabled = new ConsumerAuthService(
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, false);
+        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
+                "user@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "닉네임");
+
+        // when & then
+        assertThatThrownBy(() -> serviceWithStubDisabled.signUp(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
     }
 
     @Test
