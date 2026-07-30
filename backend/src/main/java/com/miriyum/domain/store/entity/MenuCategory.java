@@ -13,7 +13,21 @@ public class MenuCategory extends CatalogEntry {
     protected MenuCategory() {
     }
 
-    public MenuCategory(String code, String displayName, boolean active, int sortOrder) {
+    private MenuCategory(
+            String code,
+            String displayName,
+            boolean active,
+            int sortOrder
+    ) {
         super(code, displayName, active, sortOrder);
+    }
+
+    public static MenuCategory of(
+            String code,
+            String displayName,
+            boolean active,
+            int sortOrder
+    ) {
+        return new MenuCategory(code, displayName, active, sortOrder);
     }
 }

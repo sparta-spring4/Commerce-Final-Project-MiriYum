@@ -55,6 +55,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("Flyway가 매장 카테고리 seed를 code·표시명·순서까지 재현한다")
     void flywayReproducesStoreCategorySeed() {
+        // when & then
         assertThat(storeCategoryRepository.findByActiveTrueOrderBySortOrderAscCodeAsc())
                 .extracting(CatalogEntry::getCode, CatalogEntry::getDisplayName)
                 .containsExactly(
@@ -71,6 +72,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("Flyway가 메뉴 카테고리 seed를 code·표시명·순서까지 재현한다")
     void flywayReproducesMenuCategorySeed() {
+        // when & then
         assertThat(menuCategoryRepository.findByActiveTrueOrderBySortOrderAscCodeAsc())
                 .extracting(CatalogEntry::getCode, CatalogEntry::getDisplayName)
                 .containsExactly(
@@ -89,6 +91,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("Flyway가 매장 태그 seed를 code·표시명·순서까지 재현한다")
     void flywayReproducesStoreTagSeed() {
+        // when & then
         assertThat(storeTagRepository.findByActiveTrueOrderBySortOrderAscCodeAsc())
                 .extracting(CatalogEntry::getCode, CatalogEntry::getDisplayName)
                 .containsExactly(
@@ -105,6 +108,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("자연키 code 중복 삽입은 무결성 예외가 발생한다")
     void duplicateCodeViolatesPrimaryKey() {
+        // when & then
         // 자연키 엔티티는 repository.save가 merge(update)로 동작하므로, DB PK 제약은 raw insert로 검증한다.
         assertThatThrownBy(() -> jdbcTemplate.update(
                 "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
@@ -115,6 +119,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("sort_order가 0 이하이면 CHECK 제약으로 거부된다")
     void nonPositiveSortOrderViolatesCheckConstraint() {
+        // when & then
         // MySQL CHECK 위반은 SQL state HY000이라 Spring이 UncategorizedSQLException으로 변환한다.
         // 상위 DataAccessException과 제약명으로 실제 CHECK 거부를 검증한다.
         assertThatThrownBy(() -> jdbcTemplate.update(
@@ -132,6 +137,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("code 형식 CHECK가 잘못된 코드를 거부한다(소문자·숫자시작·특수문자·한글·빈문자열·50자초과)")
     void invalidCodeFormatViolatesCheckConstraint() {
+        // when & then
         for (String badCode : new String[] {"korean", "1ABC", "AB-C", "한식", "", "A".repeat(51)}) {
             assertThatThrownBy(() -> jdbcTemplate.update(
                     "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
@@ -144,6 +150,7 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("code 비교는 대소문자를 구분한다")
     void codeComparisonIsCaseSensitive() {
+        // when & then
         assertThat(storeCategoryRepository.existsByCodeAndActiveTrue("KOREAN")).isTrue();
         assertThat(storeCategoryRepository.existsByCodeAndActiveTrue("korean")).isFalse();
         assertThat(storeCategoryRepository.findByActiveTrueAndCodeIn(List.of("korean"))).isEmpty();
@@ -152,8 +159,10 @@ class CatalogRepositoryIT {
     @Test
     @DisplayName("비활성 항목은 활성 조회에서 제외된다")
     void inactiveItemIsExcluded() {
-        storeCategoryRepository.saveAndFlush(new StoreCategory("TEST_INACTIVE", "비활성", false, 99));
+        // given
+        storeCategoryRepository.saveAndFlush(StoreCategory.of("TEST_INACTIVE", "비활성", false, 99));
 
+        // when & then
         assertThat(storeCategoryRepository.findByActiveTrueOrderBySortOrderAscCodeAsc())
                 .extracting(CatalogEntry::getCode)
                 .doesNotContain("TEST_INACTIVE");

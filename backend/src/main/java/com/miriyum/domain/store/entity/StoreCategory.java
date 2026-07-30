@@ -13,7 +13,21 @@ public class StoreCategory extends CatalogEntry {
     protected StoreCategory() {
     }
 
-    public StoreCategory(String code, String displayName, boolean active, int sortOrder) {
+    private StoreCategory(
+            String code,
+            String displayName,
+            boolean active,
+            int sortOrder
+    ) {
         super(code, displayName, active, sortOrder);
+    }
+
+    public static StoreCategory of(
+            String code,
+            String displayName,
+            boolean active,
+            int sortOrder
+    ) {
+        return new StoreCategory(code, displayName, active, sortOrder);
     }
 }

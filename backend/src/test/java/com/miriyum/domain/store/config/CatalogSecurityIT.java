@@ -61,6 +61,7 @@ class CatalogSecurityIT {
     @Test
     @DisplayName("정확한 세 익명 GET은 200과 SUCCESS envelope를 반환한다")
     void anonymousGet_exactPublicPaths_return200WithSuccessEnvelope() throws Exception {
+        // when & then
         for (String path : new String[] {
                 "/api/v1/store-categories", "/api/v1/menu-categories", "/api/v1/store-tags"}) {
             mockMvc.perform(get(path))
@@ -73,6 +74,7 @@ class CatalogSecurityIT {
     @Test
     @DisplayName("익명 유사 경로는 401 AUTH_001 공통 envelope(JSON)를 반환한다")
     void anonymousSimilarPath_returns401AuthErrorEnvelope() throws Exception {
+        // when & then
         mockMvc.perform(get("/api/v1/store-categories/extra"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -83,6 +85,7 @@ class CatalogSecurityIT {
     @Test
     @DisplayName("인증된 유사 경로는 403 AUTH_006 공통 envelope(JSON)를 반환한다")
     void authenticatedSimilarPath_returns403AuthErrorEnvelope() throws Exception {
+        // when & then
         mockMvc.perform(get("/api/v1/menu-categories/extra")
                         .header(HttpHeaders.AUTHORIZATION, consumerToken()))
                 .andExpect(status().isForbidden())
@@ -94,6 +97,7 @@ class CatalogSecurityIT {
     @Test
     @DisplayName("정확한 경로의 허용되지 않은 method는 익명 401·인증 403 공통 envelope다")
     void disallowedMethodOnExactPath_anon401_authenticated403() throws Exception {
+        // when & then
         mockMvc.perform(post("/api/v1/store-categories"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -109,6 +113,7 @@ class CatalogSecurityIT {
     @Test
     @DisplayName("잘못된 토큰이나 다른 namespace 토큰이 있어도 정확한 공개 GET은 200이다")
     void publicGet_withInvalidOrForeignToken_stillReturns200() throws Exception {
+        // when & then
         mockMvc.perform(get("/api/v1/store-categories")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-valid-jwt"))
                 .andExpect(status().isOk())

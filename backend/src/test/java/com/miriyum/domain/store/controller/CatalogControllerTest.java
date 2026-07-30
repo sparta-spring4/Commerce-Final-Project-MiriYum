@@ -40,10 +40,12 @@ class CatalogControllerTest {
     @Test
     @DisplayName("매장 카테고리를 공통 봉투로 응답한다")
     void getStoreCategories_returnsEnvelope() throws Exception {
+        // given
         when(catalogService.getItems(CatalogKind.STORE_CATEGORY)).thenReturn(List.of(
                 new CatalogItemView("KOREAN", "한식"),
                 new CatalogItemView("CAFE_BAKERY", "카페·베이커리")));
 
+        // when & then
         mockMvc.perform(get("/api/v1/store-categories"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -57,9 +59,11 @@ class CatalogControllerTest {
     @Test
     @DisplayName("메뉴 카테고리를 공통 봉투로 응답한다")
     void getMenuCategories_returnsEnvelope() throws Exception {
+        // given
         when(catalogService.getItems(CatalogKind.MENU_CATEGORY)).thenReturn(List.of(
                 new CatalogItemView("RICE", "밥요리")));
 
+        // when & then
         mockMvc.perform(get("/api/v1/menu-categories"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -70,9 +74,11 @@ class CatalogControllerTest {
     @Test
     @DisplayName("매장 태그를 공통 봉투로 응답한다")
     void getStoreTags_returnsEnvelope() throws Exception {
+        // given
         when(catalogService.getItems(CatalogKind.STORE_TAG)).thenReturn(List.of(
                 new CatalogItemView("DATE", "데이트")));
 
+        // when & then
         mockMvc.perform(get("/api/v1/store-tags"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
