@@ -1,4 +1,4 @@
-package com.miriyum.domain.consumer.service;
+package com.miriyum.domain.storeoperator.service;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
@@ -10,10 +10,10 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
-import com.miriyum.domain.consumer.entity.ConsumerAccount;
-import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
-import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
+import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
+import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
+import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 일반 사용자 가입·로그인·재발급·로그아웃을 담당한다.
+ * 매장 운영자 가입·로그인·재발급·로그아웃을 담당한다.
  *
  * <p>이메일·본인확인 참조는 제공업체가 아직 선정되지 않아({@code docs/specs/auth-account/spec.md}
  * "공급자 중립 확인 참조" 절) 실제 서버 대 서버 검증을 연결하지 못한다. 정본 명세는 어댑터가 없으면
@@ -33,64 +33,61 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>{@code identityVerificationReference}는 불투명 일회성 참조일 뿐 전화번호가 아니므로,
  * 실제 전화번호로 해석해주는 어댑터가 생기기 전까지 계정의 {@code phone}은 채우지 않고 BLOCKED로
- * 남겨둔다(비어 있음). 참조값을 전화번호 자리에 대신 저장하거나 응답으로 노출하지 않는다.</p>
+ * 남겨둔다(비어 있음).</p>
  */
 @Service
-public class ConsumerAuthService {
+public class StoreOperatorAuthService {
 
-    private final ConsumerAccountRepository consumerAccountRepository;
+    private final StoreOperatorAccountRepository storeOperatorAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
-    private final NicknamePolicy nicknamePolicy;
     private final PasswordPolicy passwordPolicy;
     private final boolean identityVerificationDevStubEnabled;
 
-    public ConsumerAuthService(
-            ConsumerAccountRepository consumerAccountRepository,
+    public StoreOperatorAuthService(
+            StoreOperatorAccountRepository storeOperatorAccountRepository,
             PasswordEncoder passwordEncoder,
             JwtTokenProvider jwtTokenProvider,
-            NicknamePolicy nicknamePolicy,
             PasswordPolicy passwordPolicy,
             @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
     ) {
-        this.consumerAccountRepository = consumerAccountRepository;
+        this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
-        this.nicknamePolicy = nicknamePolicy;
         this.passwordPolicy = passwordPolicy;
         this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
     }
 
     @Transactional
-    public AccountCreatedResponse signUp(ConsumerSignUpRequest request) {
+    public AccountCreatedResponse signUp(StoreOperatorSignUpRequest request) {
         if (!identityVerificationDevStubEnabled) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
         if (!request.password().equals(request.passwordConfirm())) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
-        if (consumerAccountRepository.existsByEmail(request.email())) {
+        if (storeOperatorAccountRepository.existsByEmail(request.email())) {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
-        String normalizedNickname = nicknamePolicy.normalize(request.nickname());
         String normalizedPassword = passwordPolicy.normalize(request.password());
         String passwordHash = passwordEncoder.encode(normalizedPassword);
-        ConsumerAccount account = ConsumerAccount.create(request.email(), passwordHash, normalizedNickname);
+        StoreOperatorAccount account =
+                StoreOperatorAccount.create(request.email(), passwordHash, request.displayName());
 
-        ConsumerAccount saved;
+        StoreOperatorAccount saved;
         try {
-            saved = consumerAccountRepository.saveAndFlush(account);
+            saved = storeOperatorAccountRepository.saveAndFlush(account);
         } catch (DataIntegrityViolationException exception) {
             throw mapDuplicateConstraint(exception);
         }
 
-        return AccountCreatedResponse.of(saved.getId(), AccountType.CONSUMER);
+        return AccountCreatedResponse.of(saved.getId(), AccountType.STORE_OPERATOR);
     }
 
     private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
         String message = exception.getMostSpecificCause().getMessage();
-        if (message != null && message.contains("uk_consumer_accounts_email")) {
+        if (message != null && message.contains("uk_store_operator_accounts_email")) {
             return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
         return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
@@ -98,13 +95,13 @@ public class ConsumerAuthService {
 
     @Transactional(readOnly = true)
     public TokenPair login(LoginRequest request) {
-        ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
+        StoreOperatorAccount account = storeOperatorAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
         if (!passwordEncoder.matches(passwordPolicy.toNfc(request.password()), account.getPasswordHash())) {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
@@ -118,13 +115,13 @@ public class ConsumerAuthService {
         }
 
         ParsedToken parsed = jwtTokenProvider.parseRefreshToken(refreshToken);
-        if (parsed.namespace() != TokenNamespace.CONSUMER) {
+        if (parsed.namespace() != TokenNamespace.STORE_OPERATOR) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
 
-        ConsumerAccount account = consumerAccountRepository.findById(parsed.accountId())
+        StoreOperatorAccount account = storeOperatorAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
@@ -137,15 +134,15 @@ public class ConsumerAuthService {
         }
 
         ParsedToken parsed = jwtTokenProvider.parseRefreshToken(refreshToken);
-        if (parsed.namespace() != TokenNamespace.CONSUMER) {
+        if (parsed.namespace() != TokenNamespace.STORE_OPERATOR) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
         // 1차 MVP는 중앙 토큰 상태가 없으므로 서버 폐기 상태를 별도로 기록하지 않는다.
     }
 
     private TokenPair issueTokenPair(Long accountId) {
-        String accessToken = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
-        String refreshToken = jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId);
+        String accessToken = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId);
         return new TokenPair(accessToken, refreshToken);
     }
 }

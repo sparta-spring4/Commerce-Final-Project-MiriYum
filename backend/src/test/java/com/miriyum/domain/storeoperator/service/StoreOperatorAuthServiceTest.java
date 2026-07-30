@@ -1,4 +1,4 @@
-package com.miriyum.domain.consumer.service;
+package com.miriyum.domain.storeoperator.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,9 +16,9 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
-import com.miriyum.domain.consumer.entity.ConsumerAccount;
-import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
+import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
+import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
@@ -32,10 +32,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
-class ConsumerAuthServiceTest {
+class StoreOperatorAuthServiceTest {
 
     @Mock
-    private ConsumerAccountRepository consumerAccountRepository;
+    private StoreOperatorAccountRepository storeOperatorAccountRepository;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -43,64 +43,56 @@ class ConsumerAuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
-    private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
-    private ConsumerAuthService consumerAuthService;
+    private StoreOperatorAuthService storeOperatorAuthService;
 
     @BeforeEach
     void setUp() {
-        consumerAuthService = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, true);
+        storeOperatorAuthService = new StoreOperatorAuthService(
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, true);
     }
 
     @Test
     @DisplayName("이미 가입된 이메일로 가입하면 ACCOUNT_001을 던진다")
     void rejectsSignUpWithDuplicateEmail() {
         // given
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
-        given(consumerAccountRepository.existsByEmail("user@example.com")).willReturn(true);
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "미리윰식당");
+        given(storeOperatorAccountRepository.existsByEmail("owner@example.com")).willReturn(true);
 
         // when & then
-        assertThatThrownBy(() -> consumerAuthService.signUp(request))
+        assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AccountErrorCode.EMAIL_ALREADY_EXISTS);
     }
 
     @Test
-    @DisplayName("가입에 성공하면 닉네임을 정규화해서 저장하고 가입 응답을 반환한다")
-    void signUpSucceedsAndNormalizesNickname() {
+    @DisplayName("비밀번호와 비밀번호 확인이 다르면 검증 오류를 던진다")
+    void rejectsSignUpWithMismatchedPasswordConfirm() {
         // given
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "Password123!", "Password123!",
-                "email-ref", "identity-ref", "  새 닉네임  ");
-        given(passwordEncoder.encode("Password123!")).willReturn("hashed");
-        given(consumerAccountRepository.saveAndFlush(any(ConsumerAccount.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "password123", "different456",
+                "email-ref", "identity-ref", "미리윰식당");
 
-        // when
-        AccountCreatedResponse response = consumerAuthService.signUp(request);
-
-        // then
-        ArgumentCaptor<ConsumerAccount> captor = ArgumentCaptor.forClass(ConsumerAccount.class);
-        verify(consumerAccountRepository).saveAndFlush(captor.capture());
-        assertThat(captor.getValue().getName()).isEqualTo("새 닉네임");
-        assertThat(response.accountType()).isEqualTo(AccountType.CONSUMER);
-        assertThat(response.status()).isEqualTo("ACTIVE");
+        // when & then
+        assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
     }
 
     @Test
     @DisplayName("본인확인 스텁이 꺼져 있으면 가입을 차단한다")
     void rejectsSignUpWhenIdentityVerificationStubDisabled() {
         // given
-        ConsumerAuthService serviceWithStubDisabled = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, false);
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
+        StoreOperatorAuthService serviceWithStubDisabled = new StoreOperatorAuthService(
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, false);
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "미리윰식당");
 
         // when & then
         assertThatThrownBy(() -> serviceWithStubDisabled.signUp(request))
@@ -110,30 +102,37 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
-    @DisplayName("비밀번호와 비밀번호 확인이 다르면 검증 오류를 던진다")
-    void rejectsSignUpWithMismatchedPasswordConfirm() {
+    @DisplayName("가입에 성공하면 표시 이름을 저장하고 가입 응답을 반환한다")
+    void signUpSucceeds() {
         // given
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "different456",
-                "email-ref", "identity-ref", "닉네임");
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "Password123!", "Password123!",
+                "email-ref", "identity-ref", "미리윰식당");
+        given(passwordEncoder.encode("Password123!")).willReturn("hashed");
+        given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
 
-        // when & then
-        assertThatThrownBy(() -> consumerAuthService.signUp(request))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+        // when
+        AccountCreatedResponse response = storeOperatorAuthService.signUp(request);
+
+        // then
+        ArgumentCaptor<StoreOperatorAccount> captor = ArgumentCaptor.forClass(StoreOperatorAccount.class);
+        verify(storeOperatorAccountRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getDisplayName()).isEqualTo("미리윰식당");
+        assertThat(response.accountType()).isEqualTo(AccountType.STORE_OPERATOR);
+        assertThat(response.status()).isEqualTo("ACTIVE");
     }
 
     @Test
     @DisplayName("영문 소문자와 숫자 2종만 포함한 비밀번호로 가입하면 검증 오류를 던진다")
     void rejectsSignUpWithWeakPassword() {
         // given
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "미리윰식당");
 
         // when & then
-        assertThatThrownBy(() -> consumerAuthService.signUp(request))
+        assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
@@ -144,10 +143,10 @@ class ConsumerAuthServiceTest {
     void rejectsLoginWithUnknownEmail() {
         // given
         LoginRequest request = new LoginRequest("unknown@example.com", "password123");
-        given(consumerAccountRepository.findByEmail("unknown@example.com")).willReturn(Optional.empty());
+        given(storeOperatorAccountRepository.findByEmail("unknown@example.com")).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> consumerAuthService.login(request))
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
@@ -157,13 +156,13 @@ class ConsumerAuthServiceTest {
     @DisplayName("비밀번호가 일치하지 않으면 AUTH_005를 던진다")
     void rejectsLoginWithWrongPassword() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
-        LoginRequest request = new LoginRequest("user@example.com", "wrong-password");
-        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        LoginRequest request = new LoginRequest("owner@example.com", "wrong-password");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("wrong-password", "hashed")).willReturn(false);
 
         // when & then
-        assertThatThrownBy(() -> consumerAuthService.login(request))
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
@@ -173,17 +172,17 @@ class ConsumerAuthServiceTest {
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
-        LoginRequest request = new LoginRequest("user@example.com", "password123");
-        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
+        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
                 .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
+        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
                 .willReturn("refresh-token-value");
 
         // when
-        TokenPair tokenPair = consumerAuthService.login(request);
+        TokenPair tokenPair = storeOperatorAuthService.login(request);
 
         // then
         assertThat(tokenPair.accessToken()).isEqualTo("access-token-value");
@@ -196,17 +195,17 @@ class ConsumerAuthServiceTest {
         // given: 가입 시 NFC로 저장된 비밀번호를, 로그인 시 NFD(자음+모음 분리)로 입력한 상황
         String nfcPassword = "password123가";
         String nfdPassword = java.text.Normalizer.normalize(nfcPassword, java.text.Normalizer.Form.NFD);
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
-        LoginRequest request = new LoginRequest("user@example.com", nfdPassword);
-        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        LoginRequest request = new LoginRequest("owner@example.com", nfdPassword);
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
+        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
                 .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
+        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
                 .willReturn("refresh-token-value");
 
         // when
-        TokenPair tokenPair = consumerAuthService.login(request);
+        TokenPair tokenPair = storeOperatorAuthService.login(request);
 
         // then: NFD 원문이 아니라 NFC로 정규화된 값으로 matches()를 호출했기 때문에 성공한다
         assertThat(tokenPair.accessToken()).isEqualTo("access-token-value");
@@ -216,7 +215,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("빈 Refresh Token으로 재발급하면 AUTH_007을 던진다")
     void rejectsRefreshWithBlankToken() {
         // when & then
-        assertThatThrownBy(() -> consumerAuthService.refresh(" "))
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh(" "))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
