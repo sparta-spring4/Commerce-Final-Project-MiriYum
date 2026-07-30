@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * {@code docs/service-policies/18-scale-reliability.md}의 `SCALE-005`("로그인·인증번호 요청은
  * 10분당 5회")를 따르며, {@code application.yml}의 프로퍼티로 조정할 수 있다.
  *
- * <p><b>알려진 한계(트래킹: 이슈 #61 참고):</b> `SCALE-005`는 1·2차 MVP에서도 속도 제한을
+ * <p><b>알려진 한계(트래킹: 이슈 #63 참고):</b> `SCALE-005`는 1·2차 MVP에서도 속도 제한을
  * 애플리케이션 로컬 메모리만으로 최종 판정하지 않도록 요구하지만, 이 구현은 서버 1대 기준
  * 메모리 카운터다. 서버를 여러 대로 늘리면 인스턴스마다 따로 세어 실제로는 의도한 한도보다
  * 더 많은 요청이 허용될 수 있다. MySQL 기반 저장소로의 전환은 Testcontainers 도입 등 별도
