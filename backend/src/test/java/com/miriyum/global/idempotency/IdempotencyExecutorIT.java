@@ -5,14 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,7 +62,11 @@ class IdempotencyExecutorIT {
 
     @BeforeEach
     void reset() {
+        jdbcTemplate.execute(
+                "CREATE TABLE IF NOT EXISTS idempotency_business_probe "
+                        + "(probe_id BIGINT NOT NULL PRIMARY KEY)");
         jdbcTemplate.execute("TRUNCATE TABLE idempotency_commands");
+        jdbcTemplate.execute("TRUNCATE TABLE idempotency_business_probe");
         runner.resetCallbackCount();
     }
 
@@ -135,6 +138,19 @@ class IdempotencyExecutorIT {
                 .hasMessage("boom");
 
         assertThat(rowCount()).isZero();
+        assertThat(businessRowCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("잘못된 업무 결과는 업무 변경과 멱등 선점을 함께 롤백한다")
+    void invalidBusinessResult_rollsBackEverything() {
+        // when & then
+        assertThatThrownBy(() -> runner.runWithInvalidResult(command(FINGERPRINT)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("httpStatus");
+
+        assertThat(rowCount()).isZero();
+        assertThat(businessRowCount()).isZero();
     }
 
     @Test
@@ -174,32 +190,37 @@ class IdempotencyExecutorIT {
     @DisplayName("동시 같은 키·지문은 콜백 1회, 두 호출 모두 동일 결과를 반환한다")
     void concurrentSameKey_runsCallbackOnce() throws Exception {
         // given
-        int threads = 2;
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        List<IdempotentOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
-        List<Future<?>> futures = new ArrayList<>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch winnerEnteredCallback = new CountDownLatch(1);
+        CountDownLatch releaseWinner = new CountDownLatch(1);
+        CountDownLatch contenderStarted = new CountDownLatch(1);
+        List<IdempotentOutcome> outcomes;
 
         try {
-            for (int i = 0; i < threads; i++) {
-                futures.add(pool.submit(() -> {
-                    ready.countDown();
-                    start.await();
-                    outcomes.add(runner.run(command(FINGERPRINT), result()));
-                    return null;
-                }));
-            }
-            if (!ready.await(30, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("동시성 테스트 작업이 시작 장벽에 도달하지 못했습니다.");
+            Future<IdempotentOutcome> winner = pool.submit(
+                    () -> runner.runHolding(
+                            command(FINGERPRINT), result(), winnerEnteredCallback, releaseWinner));
+            if (!winnerEnteredCallback.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("선점 트랜잭션이 업무 콜백에 진입하지 못했습니다.");
             }
 
-            // when
-            start.countDown();
-            for (Future<?> future : futures) {
-                future.get(30, TimeUnit.SECONDS);
+            Future<IdempotentOutcome> contender = pool.submit(
+                    () -> runner.runSignallingStart(
+                            command(FINGERPRINT), result(), contenderStarted));
+            if (!contenderStarted.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("경합 트랜잭션이 시작되지 못했습니다.");
             }
+
+            // when & then
+            assertThatThrownBy(() -> contender.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            releaseWinner.countDown();
+            outcomes = List.of(
+                    winner.get(30, TimeUnit.SECONDS),
+                    contender.get(30, TimeUnit.SECONDS));
         } finally {
+            releaseWinner.countDown();
             pool.shutdownNow();
         }
 
@@ -239,23 +260,33 @@ class IdempotencyExecutorIT {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM idempotency_commands", Integer.class);
     }
 
+    private int businessRowCount() {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_business_probe", Integer.class);
+    }
+
     record TestData(String value) {
     }
 
     @TestConfiguration
     static class TestConfig {
         @Bean
-        TestCommandRunner testCommandRunner(IdempotencyExecutor executor) {
-            return new TestCommandRunner(executor);
+        TestCommandRunner testCommandRunner(
+                IdempotencyExecutor executor,
+                JdbcTemplate jdbcTemplate
+        ) {
+            return new TestCommandRunner(executor, jdbcTemplate);
         }
     }
 
     static class TestCommandRunner {
         private final IdempotencyExecutor executor;
+        private final JdbcTemplate jdbcTemplate;
         private final AtomicInteger callbackCount = new AtomicInteger();
 
-        TestCommandRunner(IdempotencyExecutor executor) {
+        TestCommandRunner(IdempotencyExecutor executor, JdbcTemplate jdbcTemplate) {
             this.executor = executor;
+            this.jdbcTemplate = jdbcTemplate;
         }
 
         // 프록시 경유 메서드 호출로 target의 카운터에 접근한다(필드 직접 접근은 프록시에서 null).
@@ -279,12 +310,63 @@ class IdempotencyExecutorIT {
         void runThrowing(IdempotencyCommand command) {
             executor.execute(command, () -> {
                 callbackCount.incrementAndGet();
+                jdbcTemplate.update(
+                        "INSERT INTO idempotency_business_probe (probe_id) VALUES (1)");
                 throw new RuntimeException("boom");
+            });
+        }
+
+        @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+        void runWithInvalidResult(IdempotencyCommand command) {
+            executor.execute(command, () -> {
+                callbackCount.incrementAndGet();
+                jdbcTemplate.update(
+                        "INSERT INTO idempotency_business_probe (probe_id) VALUES (2)");
+                return new BusinessResult<>(500, "SUCCESS", "STORE", "store-1", null);
+            });
+        }
+
+        @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+        IdempotentOutcome runHolding(
+                IdempotencyCommand command,
+                BusinessResult<TestData> result,
+                CountDownLatch callbackEntered,
+                CountDownLatch releaseCallback
+        ) {
+            return executor.execute(command, () -> {
+                callbackCount.incrementAndGet();
+                callbackEntered.countDown();
+                await(releaseCallback, "선점 트랜잭션 해제 신호를 받지 못했습니다.");
+                return result;
+            });
+        }
+
+        @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+        IdempotentOutcome runSignallingStart(
+                IdempotencyCommand command,
+                BusinessResult<TestData> result,
+                CountDownLatch started
+        ) {
+            started.countDown();
+            return executor.execute(command, () -> {
+                callbackCount.incrementAndGet();
+                return result;
             });
         }
 
         IdempotentOutcome runWithoutTransaction(IdempotencyCommand command, BusinessResult<TestData> result) {
             return executor.execute(command, () -> result);
+        }
+
+        private static void await(CountDownLatch latch, String timeoutMessage) {
+            try {
+                if (!latch.await(30, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException(timeoutMessage);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("동시성 테스트 대기가 중단되었습니다.", e);
+            }
         }
     }
 }
