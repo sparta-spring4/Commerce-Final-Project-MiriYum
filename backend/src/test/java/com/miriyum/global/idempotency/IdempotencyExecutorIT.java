@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.response.ApiResponse;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -32,6 +33,8 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 실제 MySQL에서 멱등 선점·재생·충돌·롤백·MANDATORY·동시성을 검증한다.
@@ -45,7 +48,7 @@ import org.testcontainers.utility.DockerImageName;
 @Import(IdempotencyExecutorIT.TestConfig.class)
 class IdempotencyExecutorIT {
 
-    private static final String NS = "STORE_OPERATOR";
+    private static final String NS = "store-operator";
     private static final long PRINCIPAL_ID = 42L;
     private static final String COMMAND = "STORE_REGISTER";
     private static final String KEY = "123e4567-e89b-12d3-a456-426614174000";
@@ -60,6 +63,9 @@ class IdempotencyExecutorIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void reset() {
@@ -92,7 +98,7 @@ class IdempotencyExecutorIT {
         assertThat(outcome.replayed()).isFalse();
         assertThat(outcome.httpStatus()).isEqualTo(201);
         assertThat(outcome.responseCode()).isEqualTo("SUCCESS");
-        assertThat(outcome.payloadJson()).isEqualTo("{\"value\":\"hello\"}");
+        assertThat(outcome.data()).isEqualTo(objectMapper.readTree("{\"value\":\"hello\"}"));
         assertThat(runner.callbackCount()).isEqualTo(1);
         assertThat(status()).isEqualTo("SUCCEEDED");
     }
@@ -107,9 +113,27 @@ class IdempotencyExecutorIT {
         // then
         assertThat(first.replayed()).isFalse();
         assertThat(second.replayed()).isTrue();
-        assertThat(second.payloadJson()).isEqualTo(first.payloadJson());
+        assertThat(second.data()).isEqualTo(first.data());
         assertThat(second.httpStatus()).isEqualTo(201);
         assertThat(runner.callbackCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("최초 실행과 재생 응답의 data는 동일한 JSON 객체다")
+    void freshAndReplay_responseDataIsSameJsonObject() {
+        // given
+        IdempotentOutcome first = runner.run(command(FINGERPRINT), result());
+        IdempotentOutcome replay = runner.run(command(FINGERPRINT), result());
+
+        // when
+        JsonNode firstResponse = objectMapper.readTree(objectMapper.writeValueAsString(
+                ApiResponse.success("요청 성공", first.data())));
+        JsonNode replayResponse = objectMapper.readTree(objectMapper.writeValueAsString(
+                ApiResponse.success("요청 성공", replay.data())));
+
+        // then
+        assertThat(firstResponse.get("data").isObject()).isTrue();
+        assertThat(replayResponse.get("data")).isEqualTo(firstResponse.get("data"));
     }
 
     @Test
@@ -239,7 +263,7 @@ class IdempotencyExecutorIT {
         assertThat(outcomes).filteredOn(o -> !o.replayed()).hasSize(1);
         assertThat(outcomes).allSatisfy(o -> {
             assertThat(o.responseCode()).isEqualTo("SUCCESS");
-            assertThat(o.payloadJson()).isEqualTo("{\"value\":\"hello\"}");
+            assertThat(o.data()).isEqualTo(objectMapper.readTree("{\"value\":\"hello\"}"));
         });
     }
 

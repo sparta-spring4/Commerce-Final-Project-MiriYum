@@ -17,9 +17,9 @@ class IdempotencyCommandTest {
         CommandInput[] invalidInputs = {
                 new CommandInput("", 1L, "STORE_REGISTER"),
                 new CommandInput("A".repeat(31), 1L, "STORE_REGISTER"),
-                new CommandInput("STORE_OPERATOR", 0L, "STORE_REGISTER"),
-                new CommandInput("STORE_OPERATOR", 1L, ""),
-                new CommandInput("STORE_OPERATOR", 1L, "A".repeat(61))
+                new CommandInput("store-operator", 0L, "STORE_REGISTER"),
+                new CommandInput("store-operator", 1L, ""),
+                new CommandInput("store-operator", 1L, "A".repeat(61))
         };
 
         // when & then
@@ -35,11 +35,33 @@ class IdempotencyCommandTest {
     }
 
     @Test
+    @DisplayName("표준 namespace와 대문자 상수 형식이 아닌 명령 유형을 거부한다")
+    void constructor_nonCanonicalIdentity_rejected() {
+        // given
+        String[] invalidNamespaces = {"CONSUMER", "STORE_OPERATOR", "store_operator", "unknown"};
+        String[] invalidCommandTypes = {"store_register", "STORE-REGISTER", " STORE_REGISTER"};
+
+        // when & then
+        for (String namespace : invalidNamespaces) {
+            assertThatThrownBy(() -> new IdempotencyCommand(
+                    namespace, 1L, "STORE_REGISTER", VALID_KEY, VALID_FINGERPRINT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("principalNamespace");
+        }
+        for (String commandType : invalidCommandTypes) {
+            assertThatThrownBy(() -> new IdempotencyCommand(
+                    "store-operator", 1L, commandType, VALID_KEY, VALID_FINGERPRINT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("commandType");
+        }
+    }
+
+    @Test
     @DisplayName("소문자 표준 UUID가 아닌 멱등 키를 거부한다")
     void constructor_nonNormalizedKey_rejected() {
         // when & then
         assertThatThrownBy(() -> new IdempotencyCommand(
-                "STORE_OPERATOR",
+                "store-operator",
                 1L,
                 "STORE_REGISTER",
                 "123E4567-E89B-12D3-A456-426614174000",
@@ -52,7 +74,7 @@ class IdempotencyCommandTest {
     void constructor_invalidFingerprint_rejected() {
         // when & then
         assertThatThrownBy(() -> new IdempotencyCommand(
-                "STORE_OPERATOR",
+                "store-operator",
                 1L,
                 "STORE_REGISTER",
                 VALID_KEY,

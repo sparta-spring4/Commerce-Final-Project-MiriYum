@@ -1,5 +1,7 @@
 package com.miriyum.global.idempotency;
 
+import tools.jackson.databind.JsonNode;
+
 /**
  * 멱등 실행 결과다. 신규 실행(fresh)과 재생(replay) 모두 같은 형태를 노출한다.
  *
@@ -11,7 +13,7 @@ package com.miriyum.global.idempotency;
  * @param responseCode 최초 성공 응답 code
  * @param resourceType 결과 리소스 유형
  * @param resourceId 결과 리소스 ID
- * @param payloadJson 최초 성공 응답 {@code data}의 정규화 JSON 문자열
+ * @param data 공통 응답 {@code data}에 넣을 구조화된 JSON 값
  */
 public record IdempotentOutcome(
         boolean replayed,
@@ -19,6 +21,6 @@ public record IdempotentOutcome(
         String responseCode,
         String resourceType,
         String resourceId,
-        String payloadJson
+        JsonNode data
 ) {
 }

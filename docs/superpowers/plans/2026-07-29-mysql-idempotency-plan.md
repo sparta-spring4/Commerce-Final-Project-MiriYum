@@ -39,8 +39,9 @@ db/migration/V4__create_idempotency_commands.sql
    - 다른 지문·같은 키: `COMMON_007`(409), 기존 결과 미변경
    - 콜백 예외: 멱등 행 포함 전체 롤백(행 미존재)
    - `MANDATORY`: 트랜잭션 없이 호출 시 예외
+   - fresh·replay의 `ApiResponse.data`가 이중 직렬화 문자열이 아닌 동일 JSON 객체
    - **동시성:** 두 스레드 같은 키·지문 동시 호출(래치로 동시 시작) → 콜백 `AtomicInteger` **정확히 1**, 두 결과 동일
-6. **리뷰 보강** — `IdempotencyCommand`와 `RequestFingerprint`가 입력 계약을 생성 시 검증하고, DB CHECK가 허용 상태와 `SUCCEEDED` 필수 성공 결과를 강제한다. 동시성 IT는 선점 트랜잭션을 열린 상태로 유지해 실제 유일키 경합을 검증하며, DB 시각은 `CURRENT_TIMESTAMP(6)`을 사용한다.
+6. **리뷰 보강** — `IdempotencyCommand`는 namespace를 `consumer`·`store-operator`, command type을 대문자 상수 형식으로 제한하고 `RequestFingerprint`가 null·blank 입력을 거부한다. DB CHECK가 허용 상태와 `SUCCEEDED` 필수 성공 결과를 강제하며, 저장 JSON은 `JsonNode`로 복원해 응답한다. 동시성 IT는 선점 트랜잭션을 열린 상태로 유지해 실제 유일키 경합을 검증하며, DB 시각은 `CURRENT_TIMESTAMP(6)`을 사용한다.
 
 ## 검증 명령
 
@@ -50,7 +51,7 @@ cd backend
 git diff --check
 ```
 
-2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **124 tests, 0 failed, 0 errors,
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **126 tests, 0 failed, 0 errors,
 0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
 clean-start를 확인했다.
 

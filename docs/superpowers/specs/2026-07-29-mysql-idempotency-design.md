@@ -36,7 +36,7 @@
 | 컬럼 | 타입 | 제약 | 의미 |
 |---|---|---|---|
 | `idempotency_command_id` | `BIGINT` | PK, AUTO_INCREMENT | 테이블별 대리 PK(E-007) |
-| `principal_namespace` | `VARCHAR(30)` `as_cs` | NOT NULL | 계정 namespace(예: `CONSUMER`, `STORE_OPERATOR`) |
+| `principal_namespace` | `VARCHAR(30)` `as_cs` | NOT NULL | 계정 namespace(`consumer`, `store-operator`) |
 | `principal_id` | `BIGINT` | NOT NULL | 인증 주체(행위자) 계정 PK. namespace와 함께 해석(E-007) |
 | `command_type` | `VARCHAR(60)` `as_cs` | NOT NULL | 명령 유형 상수(예: `STORE_REGISTER`) |
 | `idempotency_key` | `CHAR(36)` `as_cs` | NOT NULL | 정규화된 UUID |
@@ -66,7 +66,7 @@ com.miriyum.global.idempotency
 ├─ IdempotencyKey             # UUID 검증·정규화 값 타입 (COMMON_003/004)
 ├─ RequestFingerprint         # 정규화 입력 → SHA-256 hex 헬퍼
 ├─ BusinessResult<T>          # 업무 콜백 반환 (httpStatus, responseCode, resourceType, resourceId, data)
-├─ IdempotentOutcome          # 실행 결과 (fresh/replay 공통: httpStatus, responseCode, resourceType, resourceId, payloadJson)
+├─ IdempotentOutcome          # 실행 결과 (fresh/replay 공통: httpStatus, responseCode, resourceType, resourceId, JsonNode data)
 ├─ IdempotencyRecordRepository# JdbcTemplate upsert·잠금조회·확정
 └─ IdempotencyStatus          # enum PROCESSING, SUCCEEDED
 ```
@@ -81,6 +81,7 @@ com.miriyum.global.idempotency
 - 누락 → `ServiceException(COMMON_003)`. 형식 오류(비-UUID·중괄호·앞뒤 공백·길이≠36) → `ServiceException(COMMON_004)`.
 - 통과 시 소문자 정규화한 값으로 보관. **쓰기 트랜잭션 진입 전**(도메인 컨트롤러/전처리)에서 검증·정규화를 완료하며, executor는 이미 검증·정규화된 키를 받는다. 별도 필터는 없다.
 - `IdempotencyCommand` 생성 시 DB 필수값·길이, 양수 principal ID, 소문자 UUID와 SHA-256 hex 형식을 다시 검증한다. `INSERT IGNORE`에 유일키 충돌 외 잘못된 입력이 도달하지 않게 하는 내부 경계다.
+- namespace는 정본의 `consumer`·`store-operator`만 허용하며, command type은 각 도메인이 소유한 enum의 `name()`과 같은 대문자 상수 형식으로 제한한다. 아직 존재하지 않는 도메인 명령을 global enum으로 선등록하지 않는다.
 
 ### `RequestFingerprint`
 
@@ -111,9 +112,9 @@ com.miriyum.global.idempotency
 
 ### `IdempotentOutcome` 반환과 컨트롤러
 
-- fresh·replay 모두 `{httpStatus, responseCode, resourceType, resourceId, payloadJson}`를 노출한다.
-- 컨트롤러는 이 값으로 `ApiResponse`(code=responseCode, data=payload) 응답을 만든다. 최초 성공 message는 저장하지 않으므로 재생 시 표준 안내 문구를 사용한다(HTTP 원문 미저장 계약과 정합).
-- `payloadJson` 직렬화는 global의 `JsonMapper` 설정을 재사용한다.
+- DB에는 `data`를 JSON 문자열로 저장하되 fresh·replay 모두 `{httpStatus, responseCode, resourceType, resourceId, JsonNode data}`를 노출한다.
+- 컨트롤러는 구조화된 `data`로 `ApiResponse` 응답을 만든다. 최초 성공 message는 저장하지 않으므로 재생 시 표준 안내 문구를 사용한다(HTTP 원문 미저장 계약과 정합).
+- 직렬화·역직렬화는 global의 `ObjectMapper` 설정을 재사용하며, JSON 문자열을 `ApiResponse.data`에 직접 넣지 않는다.
 
 ## 동시성·트랜잭션 (C-007 정합)
 
@@ -149,6 +150,7 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 
 - `IdempotencyKey`: 유효 UUID 통과·소문자 정규화, 누락 `COMMON_003`, 비-UUID·중괄호·공백·길이 오류 `COMMON_004`.
 - `RequestFingerprint`: 같은 입력 → 같은 해시(결정적), 리소스 ID 다르면 다른 해시, null·blank 입력 거부.
+- `IdempotencyCommand`: namespace 표준값과 command type 대문자 상수 형식 검증.
 
 ### 통합 테스트 (Testcontainers MySQL, `mysql:8.0.40`)
 
@@ -159,6 +161,7 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 - fresh: 업무 콜백 1회 실행, 행이 `SUCCEEDED`와 result 저장.
 - replay(같은 키·지문): 콜백 미실행, 저장된 결과 반환.
 - 다른 지문·같은 키: `COMMON_007`(409), 기존 결과 미변경.
+- fresh·replay를 각각 `ApiResponse`로 직렬화했을 때 `data`가 동일 JSON 객체이며 문자열로 이중 직렬화되지 않는다.
 - 업무 콜백 예외: 멱등 행 포함 전체 롤백(행 미존재).
 - `MANDATORY`: 트랜잭션 없이 호출 시 예외.
 - **동시성:** 두 스레드가 같은 키·지문으로 동시 호출 → 업무 콜백 **정확히 1회** 실행, 두 호출 모두 동일 성공 결과 반환.
@@ -171,7 +174,7 @@ cd backend
 git diff --check
 ```
 
-2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **124 tests, 0 failed, 0 errors,
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **126 tests, 0 failed, 0 errors,
 0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
 clean-start를 확인했다.
 

@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -48,7 +49,7 @@ public class IdempotencyExecutor {
             repository.markSucceeded(command, result.httpStatus(), result.responseCode(),
                     result.resourceType(), result.resourceId(), payloadJson);
             return new IdempotentOutcome(false, result.httpStatus(), result.responseCode(),
-                    result.resourceType(), result.resourceId(), payloadJson);
+                    result.resourceType(), result.resourceId(), deserialize(payloadJson));
         }
 
         StoredCommand stored = repository.lockByBusinessKey(command);
@@ -60,7 +61,7 @@ public class IdempotencyExecutor {
                 requireSucceededResult(stored);
                 yield new IdempotentOutcome(true, stored.resultHttpStatus(),
                         stored.resultResponseCode(), stored.resultResourceType(),
-                        stored.resultResourceId(), stored.resultPayload());
+                        stored.resultResourceId(), deserialize(stored.resultPayload()));
             }
             case PROCESSING -> throw new IllegalStateException(
                     "커밋된 PROCESSING 멱등 기록이 발견되었습니다: 불변식 위반");
@@ -72,6 +73,13 @@ public class IdempotencyExecutor {
             return null;
         }
         return objectMapper.writeValueAsString(data);
+    }
+
+    private JsonNode deserialize(String payloadJson) {
+        if (payloadJson == null) {
+            return null;
+        }
+        return objectMapper.readTree(payloadJson);
     }
 
     private static void requireSucceededResult(StoredCommand stored) {
