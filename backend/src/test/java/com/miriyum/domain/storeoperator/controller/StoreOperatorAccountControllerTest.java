@@ -1,5 +1,8 @@
 package com.miriyum.domain.storeoperator.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,18 +21,27 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 매장 운영자 마이페이지 API가 namespace 분리·멱등성 키 요구를 실제 HTTP 응답 수준에서 지키는지 확인한다.
+ * 매장 운영자 마이페이지 API가 namespace 분리와 C-006 멱등 계약을 실제 HTTP 응답 수준에서
+ * 지키는지 확인한다.
+ *
+ * <p>멱등 기반(#32)은 {@code INSERT IGNORE}·{@code SELECT ... FOR UPDATE}로 선점을 판정하는
+ * MySQL 전용 구현이므로 H2가 아니라 Testcontainers MySQL을 사용한다
+ * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014, 이슈 #63).</p>
  */
+@Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
-            "spring.autoconfigure.exclude=org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
-            "spring.datasource.url=jdbc:h2:mem:store-operator-account-controller-test;DB_CLOSE_DELAY=-1",
-            "spring.datasource.driver-class-name=org.h2.Driver",
-            "spring.jpa.hibernate.ddl-auto=create-drop",
+            "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.identity-verification.dev-stub-enabled=false"
         })
@@ -37,6 +49,16 @@ import org.springframework.test.web.servlet.MockMvc;
 class StoreOperatorAccountControllerTest {
 
     private static final String VALID_IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -47,12 +69,19 @@ class StoreOperatorAccountControllerTest {
     @Autowired
     private StoreOperatorAccountRepository storeOperatorAccountRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private Long accountId;
 
     @BeforeEach
     void setUp() {
+        // 컨테이너는 클래스 전체에서 공유되므로 계정·멱등 기록을 매 테스트마다 초기화한다.
+        jdbcTemplate.execute("DELETE FROM idempotency_commands");
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
         StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
-        accountId = storeOperatorAccountRepository.save(account).getId();
+        accountId = storeOperatorAccountRepository.saveAndFlush(account).getId();
     }
 
     @Test
@@ -83,7 +112,11 @@ class StoreOperatorAccountControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.displayName").value("미리윰식당"))
-                .andExpect(jsonPath("$.data.phoneNumber").doesNotExist());
+                // phoneNumber는 필드가 빠진 게 아니라 값이 명시적으로 null이어야 한다. jsonPath의
+                // doesNotExist()는 값이 null이면 통과해 두 경우를 구분하지 못하므로, 키 존재와
+                // null 값을 따로 검증해 OpenAPI의 nullable 계약을 고정한다.
+                .andExpect(jsonPath("$.data").value(hasKey("phoneNumber")))
+                .andExpect(jsonPath("$.data.phoneNumber").value(nullValue()));
     }
 
     @Test
@@ -111,5 +144,56 @@ class StoreOperatorAccountControllerTest {
                         .content("{\"displayName\": \"새상호명\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.displayName").value("새상호명"));
+    }
+
+    @Test
+    @DisplayName("같은 Idempotency-Key로 같은 요청을 다시 보내면 최초 결과를 재생한다")
+    void updateMeReplaysStoredResultForSameKeyAndBody() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                            .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"displayName\": \"첫상호명\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.displayName").value("첫상호명"));
+        }
+
+        // 두 번째 요청은 저장된 결과를 재생만 하므로 멱등 기록은 하나만 남는다.
+        assertSingleSucceededIdempotencyRecord();
+    }
+
+    @Test
+    @DisplayName("같은 Idempotency-Key를 다른 본문으로 재사용하면 409와 COMMON_007을 반환한다")
+    void updateMeRejectsSameKeyWithDifferentBody() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"첫상호명\"}"))
+                .andExpect(status().isOk());
+
+        // when & then: 같은 키에 다른 입력을 실으면 두 번째 요청을 실행하지 않고 거절한다
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"다른상호명\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMMON_007"));
+
+        // then: 최초 결과가 덮어써지지 않았는지 확인한다
+        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.data.displayName").value("첫상호명"));
+    }
+
+    private void assertSingleSucceededIdempotencyRecord() {
+        Integer succeededCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands WHERE processing_status = 'SUCCEEDED'", Integer.class);
+        assertThat(succeededCount).isEqualTo(1);
     }
 }
