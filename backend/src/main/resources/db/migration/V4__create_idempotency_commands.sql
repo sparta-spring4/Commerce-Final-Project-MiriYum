@@ -1,6 +1,7 @@
 -- 공통 MySQL 멱등 명령 기록 (#32, C-006)
 -- 종류: 대리 PK(E-007) + 업무 복합 UNIQUE. 식별 컬럼은 대소문자 구분 collation.
--- Flyway 순서: PR #40(#31)의 _01·_02 이후 _03. 적용 후 이 파일은 수정하지 않는다.
+-- Flyway 순서: V1 consumer accounts → V2 catalog tables → V3 catalog seed 이후 V4.
+-- 적용 후 이 파일은 수정하지 않는다.
 
 CREATE TABLE idempotency_commands (
     idempotency_command_id BIGINT       NOT NULL AUTO_INCREMENT,

@@ -19,6 +19,9 @@ public final class RequestFingerprint {
 
     /**
      * 정규 입력의 SHA-256 hex(소문자 64자)를 반환한다.
+     *
+     * @param canonicalInput 도메인이 구성한 정규 입력
+     * @return 소문자 SHA-256 hex 문자열
      */
     public static String of(String canonicalInput) {
         try {

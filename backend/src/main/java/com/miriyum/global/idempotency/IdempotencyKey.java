@@ -26,6 +26,7 @@ public final class IdempotencyKey {
      * 헤더 값을 검증·정규화한다.
      *
      * @param raw 요청 헤더의 원본 값(없으면 {@code null})
+     * @return 검증 후 소문자로 정규화된 멱등 키
      * @throws ServiceException 누락 시 {@code COMMON_003}, 형식 오류 시 {@code COMMON_004}
      */
     public static IdempotencyKey parse(String raw) {

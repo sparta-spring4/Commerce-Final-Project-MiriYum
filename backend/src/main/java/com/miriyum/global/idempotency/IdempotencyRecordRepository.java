@@ -1,6 +1,5 @@
 package com.miriyum.global.idempotency;
 
-import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -22,24 +21,27 @@ public class IdempotencyRecordRepository {
     /**
      * {@code PROCESSING} 행을 선점한다.
      *
+     * @param command 검증된 명령 식별 정보
      * @return 이 트랜잭션이 새 행을 삽입했으면(신규 선점) {@code true}, 기존 행이 있어 무시됐으면 {@code false}.
      *         {@code INSERT IGNORE}는 UPDATE 매칭 경로가 없어 반환 행 수가 {@code CLIENT_FOUND_ROWS}와
      *         무관하게 1/0으로 일정하다.
      */
     public boolean claim(IdempotencyCommand command) {
-        LocalDateTime now = LocalDateTime.now();
         int inserted = jdbcTemplate.update(
                 "INSERT IGNORE INTO idempotency_commands "
                         + "(principal_namespace, principal_id, command_type, idempotency_key, request_fingerprint, "
                         + "processing_status, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, 'PROCESSING', ?, ?)",
+                        + "VALUES (?, ?, ?, ?, ?, 'PROCESSING', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))",
                 command.principalNamespace(), command.principalId(), command.commandType(),
-                command.idempotencyKey(), command.requestFingerprint(), now, now);
+                command.idempotencyKey(), command.requestFingerprint());
         return inserted == 1;
     }
 
     /**
      * 업무 유일키로 행을 잠그고 읽는다({@code SELECT ... FOR UPDATE}).
+     *
+     * @param command 조회·잠금할 명령 식별 정보
+     * @return 잠긴 기존 명령 기록
      */
     public StoredCommand lockByBusinessKey(IdempotencyCommand command) {
         return jdbcTemplate.queryForObject(
@@ -61,15 +63,22 @@ public class IdempotencyRecordRepository {
 
     /**
      * 선점한 행을 최초 성공 결과와 함께 {@code SUCCEEDED}로 확정한다.
+     *
+     * @param command 확정할 명령 식별 정보
+     * @param httpStatus 최초 성공 HTTP 상태
+     * @param responseCode 최초 성공 응답 코드
+     * @param resourceType 결과 리소스 유형
+     * @param resourceId 결과 리소스 ID
+     * @param payloadJson 최초 성공 응답 데이터의 JSON 문자열
      */
     public void markSucceeded(IdempotencyCommand command, int httpStatus, String responseCode,
             String resourceType, String resourceId, String payloadJson) {
         jdbcTemplate.update(
                 "UPDATE idempotency_commands SET processing_status = 'SUCCEEDED', result_http_status = ?, "
                         + "result_response_code = ?, result_resource_type = ?, result_resource_id = ?, "
-                        + "result_payload = ?, updated_at = ? "
+                        + "result_payload = ?, updated_at = CURRENT_TIMESTAMP(6) "
                         + "WHERE principal_namespace = ? AND principal_id = ? AND command_type = ? AND idempotency_key = ?",
-                httpStatus, responseCode, resourceType, resourceId, payloadJson, LocalDateTime.now(),
+                httpStatus, responseCode, resourceType, resourceId, payloadJson,
                 command.principalNamespace(), command.principalId(), command.commandType(), command.idempotencyKey());
     }
 

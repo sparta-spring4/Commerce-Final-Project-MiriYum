@@ -30,6 +30,16 @@ public class IdempotencyExecutor {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 호출 트랜잭션에 참여해 명령을 최초 실행하거나 저장 결과를 재생한다.
+     *
+     * @param command 검증·정규화된 명령 식별 정보
+     * @param businessWork 신규 선점한 경우에만 실행할 업무 콜백
+     * @param <T> 업무 결과 데이터 타입
+     * @return 신규 실행 또는 재생된 멱등 결과
+     * @throws ServiceException 같은 업무 키를 다른 요청 지문으로 재사용한 경우
+     * @throws IllegalStateException 커밋된 멱등 기록이 상태·결과 불변식을 위반한 경우
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public <T> IdempotentOutcome execute(IdempotencyCommand command, Supplier<BusinessResult<T>> businessWork) {
         if (repository.claim(command)) {
@@ -47,7 +57,8 @@ public class IdempotencyExecutor {
                 if (!stored.requestFingerprint().equals(command.requestFingerprint())) {
                     throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
                 }
-                yield new IdempotentOutcome(true, defaultInt(stored.resultHttpStatus()),
+                requireSucceededResult(stored);
+                yield new IdempotentOutcome(true, stored.resultHttpStatus(),
                         stored.resultResponseCode(), stored.resultResourceType(),
                         stored.resultResourceId(), stored.resultPayload());
             }
@@ -63,7 +74,10 @@ public class IdempotencyExecutor {
         return objectMapper.writeValueAsString(data);
     }
 
-    private static int defaultInt(Integer value) {
-        return value == null ? 0 : value;
+    private static void requireSucceededResult(StoredCommand stored) {
+        if (stored.resultHttpStatus() == null || stored.resultResponseCode() == null) {
+            throw new IllegalStateException(
+                    "결과가 누락된 SUCCEEDED 멱등 기록이 발견되었습니다: 불변식 위반");
+        }
     }
 }

@@ -1,5 +1,7 @@
 package com.miriyum.global.idempotency;
 
+import java.util.regex.Pattern;
+
 /**
  * 멱등 실행 대상 명령의 식별 정보다.
  *
@@ -16,4 +18,33 @@ public record IdempotencyCommand(
         String idempotencyKey,
         String requestFingerprint
 ) {
+
+    private static final Pattern NORMALIZED_UUID_PATTERN = Pattern.compile(
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    private static final Pattern SHA_256_HEX_PATTERN = Pattern.compile("^[0-9a-f]{64}$");
+
+    /**
+     * DB 경계에 전달할 명령 식별값을 검증한다.
+     *
+     * @throws IllegalArgumentException 필수값·DB 길이·정규화 형식 계약을 벗어난 경우
+     */
+    public IdempotencyCommand {
+        requireTextWithin(principalNamespace, 30, "principalNamespace");
+        if (principalId <= 0) {
+            throw new IllegalArgumentException("principalId는 양수여야 합니다.");
+        }
+        requireTextWithin(commandType, 60, "commandType");
+        if (idempotencyKey == null || !NORMALIZED_UUID_PATTERN.matcher(idempotencyKey).matches()) {
+            throw new IllegalArgumentException("idempotencyKey는 소문자 표준 UUID여야 합니다.");
+        }
+        if (requestFingerprint == null || !SHA_256_HEX_PATTERN.matcher(requestFingerprint).matches()) {
+            throw new IllegalArgumentException("requestFingerprint는 소문자 SHA-256 hex여야 합니다.");
+        }
+    }
+
+    private static void requireTextWithin(String value, int maxLength, String fieldName) {
+        if (value == null || value.isBlank() || value.length() > maxLength) {
+            throw new IllegalArgumentException(fieldName + "은 필수이며 최대 " + maxLength + "자여야 합니다.");
+        }
+    }
 }

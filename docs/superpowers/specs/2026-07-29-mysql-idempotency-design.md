@@ -1,7 +1,7 @@
 # MySQL 멱등 명령 기반 설계 (#32)
 
 > 추적 Issue: [#32](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/32)
-> 기준 브랜치: `dev` (기준 SHA `1a2e175`, PR #30 병합 상태)
+> 기준 브랜치: `dev` (기준 SHA `32b3f4e`, PR #40 병합 상태)
 > 기준 계약: `docs/specs/mvp1-common/spec.md` **C-006**(상태 변경 명령 멱등성)·**C-007**(트랜잭션 경계·제한 재시도), 3단계 **E-005**(고정 잠금 순서)
 > 아키텍처: ADR-001, `docs/specs/mvp1-common/ownership.md` (global 공통 기반; O-009 마이그레이션 공통 디렉터리)
 > 소유자: Global 공통 기반 — @116Lv (매장·검색 담당이 공통 기반도 소유, 팀 확인 완료)
@@ -78,6 +78,7 @@ com.miriyum.global.idempotency
 - 헤더 문자열을 받아 표준 UUID(하이픈 포함 36자)인지 검증한다.
 - 누락 → `ServiceException(COMMON_003)`. 형식 오류(비-UUID·중괄호·앞뒤 공백·길이≠36) → `ServiceException(COMMON_004)`.
 - 통과 시 소문자 정규화한 값으로 보관. **쓰기 트랜잭션 진입 전**(도메인 컨트롤러/전처리)에서 검증·정규화를 완료하며, executor는 이미 검증·정규화된 키를 받는다. 별도 필터는 없다.
+- `IdempotencyCommand` 생성 시 DB 필수값·길이, 양수 principal ID, 소문자 UUID와 SHA-256 hex 형식을 다시 검증한다. `INSERT IGNORE`에 유일키 충돌 외 잘못된 입력이 도달하지 않게 하는 내부 경계다.
 
 ### `RequestFingerprint`
 
@@ -97,11 +98,13 @@ com.miriyum.global.idempotency
    - **기존 행(affected=0)**:
      - `SUCCEEDED` + 지문 일치 → **재생**: 콜백 미실행, 저장된 `result_*` 반환.
      - `SUCCEEDED` + 지문 불일치 → `ServiceException(COMMON_007)`(409), 기존 결과 미변경.
+     - `SUCCEEDED`인데 필수 결과(`result_http_status`, `result_response_code`)가 누락됨 → 저장 불변식 위반으로 재생하지 않고 실패.
      - `PROCESSING`(커밋된 상태로 발견) → **불변식 위반**(커밋된 PROCESSING은 존재할 수 없음): 콜백을 실행하지 않고 오류로 처리한다.
 4. 업무 콜백 예외는 전파되어 전체 트랜잭션(멱등 행 포함) 롤백 → 커밋된 `FAILED`·`PROCESSING` 행은 남지 않는다.
 
 - 유일키 경합을 JPA flush 예외로 처리하지 않는다. upsert+`FOR UPDATE`로 잠금 순서를 명시한다(E-005 정렬을 이어 적용).
 - 업무 콜백은 신규 선점(affected=1)에서만 정확히 1회 실행된다(재생·불변식 위반 경로는 콜백 미실행).
+- 생성·갱신 시각은 애플리케이션 시스템 시각을 직접 호출하지 않고 MySQL `CURRENT_TIMESTAMP(6)`으로 기록한다.
 
 ### `IdempotentOutcome` 반환과 컨트롤러
 
@@ -121,7 +124,7 @@ com.miriyum.global.idempotency
 `backend/build.gradle.kts`에 아래를 추가한다. 버전은 Spring Boot 의존성 관리가 소유(ADR-004).
 
 ```kotlin
-implementation("org.springframework.boot:spring-boot-flyway")           // production: 마이그레이션 자동 실행(Boot 4 모듈 분리)
+implementation("org.springframework.boot:spring-boot-starter-flyway")   // production: 마이그레이션 자동 실행
 testImplementation("org.springframework.boot:spring-boot-testcontainers")
 testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 testImplementation("org.testcontainers:testcontainers-mysql")
@@ -131,9 +134,9 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 
 ## Flyway migration
 
-- `backend/src/main/resources/db/migration/V2026_07_29_03__create_idempotency_commands.sql` — 위 스키마·유일 제약.
+- `backend/src/main/resources/db/migration/V4__create_idempotency_commands.sql` — 위 스키마·유일 제약.
 
-> **확정된 규약(2026-07-29):** PR #40(#31)을 먼저 `dev`에 병합한 뒤, #32가 최신 `dev`를 rebase하고 `_03`을 사용한다. #32 개발은 선행할 수 있으나 #40보다 먼저 병합하지 않는다. `spring.flyway.out-of-order`는 활성화하지 않는다. 이로써 마이그레이션 적용 순서는 `_01`→`_02`→`_03`으로 결정적이다.
+> **적용된 규약(2026-07-30):** PR #40(#31)이 `dev`에 병합된 뒤 #32를 merge commit `32b3f4e` 위로 rebase하고 `V4`를 사용한다. `spring.flyway.out-of-order`는 활성화하지 않는다. 마이그레이션 적용 순서는 `V1`→`V2`→`V3`→`V4`다.
 
 ## 테스트 설계
 
@@ -164,7 +167,9 @@ cd backend
 git diff --check
 ```
 
-Docker 환경에서 0 skipped로 수집한다.
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build`로 **117 tests, 0 failed, 0 errors,
+0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
+clean-start를 확인했다.
 
 ## 파일 허용 목록 (#32)
 
@@ -178,8 +183,8 @@ Docker 환경에서 0 skipped로 수집한다.
 
 ## 위험과 롤백
 
-- **Flyway 번호 조율:** 확정됨 — #40 먼저 병합 → #32 rebase 후 `_03`, out-of-order 미사용. #32는 #40 이후에만 병합.
-- **build.gradle 중복:** #31과 동일 의존성 추가 → #40 병합 후 rebase 시 대부분 해소, 잔여는 가산적 충돌(사소).
+- **Flyway 번호 조율:** 적용 완료 — #40 병합 후 #32 rebase, `V4`, out-of-order 미사용.
+- **build.gradle 중복:** #40 병합 후 rebase로 해소. #32 전용 diff에는 의존성 중복 변경이 없다.
 - **동시성 정확성:** MySQL 행 잠금·유일 제약에 의존하므로 H2로 대체 검증하지 않고 Testcontainers로만 증명한다.
 - **MANDATORY 계약:** 호출 도메인이 `@Transactional`을 소유하지 않으면 `execute()`가 실패한다. 이는 의도된 계약이며 문서로 명시한다.
 - **재생 message:** 최초 message는 저장하지 않으므로 재생 응답은 표준 문구를 사용한다(원문 미저장 계약과 정합).

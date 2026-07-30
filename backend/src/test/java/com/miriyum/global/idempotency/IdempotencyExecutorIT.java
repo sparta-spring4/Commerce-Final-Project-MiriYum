@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,7 +36,11 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * 실제 MySQL에서 멱등 선점·재생·충돌·롤백·MANDATORY·동시성을 검증한다.
  */
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.jwt.issuer=miriyum"
+        })
 @Testcontainers(disabledWithoutDocker = true)
 @Import(IdempotencyExecutorIT.TestConfig.class)
 class IdempotencyExecutorIT {
@@ -67,7 +70,10 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("업무 유일키에 유일 제약이 걸려 있다")
     void uniqueConstraintOnBusinessKey() {
+        // given
         insertRaw(FINGERPRINT, IdempotencyStatus.SUCCEEDED);
+
+        // when & then
         assertThatThrownBy(() -> insertRaw("b".repeat(64), IdempotencyStatus.SUCCEEDED))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -75,8 +81,10 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("신규 선점은 콜백을 1회 실행하고 SUCCEEDED로 확정한다")
     void fresh_runsCallbackOnceAndSucceeds() {
+        // when
         IdempotentOutcome outcome = runner.run(command(FINGERPRINT), result());
 
+        // then
         assertThat(outcome.replayed()).isFalse();
         assertThat(outcome.httpStatus()).isEqualTo(201);
         assertThat(outcome.responseCode()).isEqualTo("SUCCESS");
@@ -88,9 +96,11 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("같은 키·지문 재요청은 콜백 없이 저장된 결과를 재생한다")
     void sameKeySameFingerprint_replays() {
+        // when
         IdempotentOutcome first = runner.run(command(FINGERPRINT), result());
         IdempotentOutcome second = runner.run(command(FINGERPRINT), result());
 
+        // then
         assertThat(first.replayed()).isFalse();
         assertThat(second.replayed()).isTrue();
         assertThat(second.payloadJson()).isEqualTo(first.payloadJson());
@@ -101,8 +111,10 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("같은 키·다른 지문은 COMMON_007로 거절하고 기존 결과를 바꾸지 않는다")
     void sameKeyDifferentFingerprint_conflicts() {
+        // given
         runner.run(command(FINGERPRINT), result());
 
+        // when & then
         assertThatThrownBy(() -> runner.run(command("c".repeat(64)), result()))
                 .isInstanceOf(ServiceException.class)
                 .extracting(e -> ((ServiceException) e).getErrorCode())
@@ -117,6 +129,7 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("업무 콜백 예외는 멱등 기록까지 전체 롤백한다")
     void businessFailure_rollsBackEverything() {
+        // when & then
         assertThatThrownBy(() -> runner.runThrowing(command(FINGERPRINT)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("boom");
@@ -127,6 +140,7 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("트랜잭션 없이 호출하면 MANDATORY로 거부한다")
     void withoutTransaction_rejected() {
+        // when & then
         assertThatThrownBy(() -> runner.runWithoutTransaction(command(FINGERPRINT), result()))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThat(rowCount()).isZero();
@@ -135,8 +149,22 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("커밋된 PROCESSING 발견은 불변식 위반으로 콜백 없이 실패한다")
     void committedProcessing_invariantViolation() {
+        // given
         insertRaw(FINGERPRINT, IdempotencyStatus.PROCESSING);
 
+        // when & then
+        assertThatThrownBy(() -> runner.run(command(FINGERPRINT), result()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(runner.callbackCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("결과가 누락된 SUCCEEDED 발견은 불변식 위반으로 실패한다")
+    void succeededWithoutResult_invariantViolation() {
+        // given
+        insertRaw(FINGERPRINT, IdempotencyStatus.SUCCEEDED);
+
+        // when & then
         assertThatThrownBy(() -> runner.run(command(FINGERPRINT), result()))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(runner.callbackCount()).isZero();
@@ -145,25 +173,37 @@ class IdempotencyExecutorIT {
     @Test
     @DisplayName("동시 같은 키·지문은 콜백 1회, 두 호출 모두 동일 결과를 반환한다")
     void concurrentSameKey_runsCallbackOnce() throws Exception {
+        // given
         int threads = 2;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
         CountDownLatch start = new CountDownLatch(1);
         List<IdempotentOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         List<Future<?>> futures = new ArrayList<>();
 
-        for (int i = 0; i < threads; i++) {
-            futures.add(pool.submit(() -> {
-                start.await();
-                outcomes.add(runner.run(command(FINGERPRINT), result()));
-                return null;
-            }));
-        }
-        start.countDown();
-        for (Future<?> future : futures) {
-            future.get(30, TimeUnit.SECONDS);
-        }
-        pool.shutdown();
+        try {
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    outcomes.add(runner.run(command(FINGERPRINT), result()));
+                    return null;
+                }));
+            }
+            if (!ready.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("동시성 테스트 작업이 시작 장벽에 도달하지 못했습니다.");
+            }
 
+            // when
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // then
         assertThat(runner.callbackCount()).isEqualTo(1);
         assertThat(outcomes).hasSize(2);
         assertThat(outcomes).filteredOn(o -> !o.replayed()).hasSize(1);
@@ -182,12 +222,12 @@ class IdempotencyExecutorIT {
     }
 
     private void insertRaw(String fingerprint, IdempotencyStatus statusValue) {
-        LocalDateTime now = LocalDateTime.now();
         jdbcTemplate.update(
                 "INSERT INTO idempotency_commands "
                         + "(principal_namespace, principal_id, command_type, idempotency_key, request_fingerprint, "
-                        + "processing_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                NS, PRINCIPAL_ID, COMMAND, KEY, fingerprint, statusValue.name(), now, now);
+                        + "processing_status, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))",
+                NS, PRINCIPAL_ID, COMMAND, KEY, fingerprint, statusValue.name());
     }
 
     private String status() {
