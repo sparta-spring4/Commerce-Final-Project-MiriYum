@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 등급({@link RateLimitCategory})+키(호출자가 넘긴 값, 보통 IP)별 고정 윈도우 요청 횟수를
@@ -50,10 +51,15 @@ public class RateLimiter {
 
     /**
      * 이번 요청을 허용할 수 있으면 카운트를 올려 허용 결과를 반환하고, 한도를 넘었으면
-     * 거부와 함께 같은 조회 결과에서 계산한 Retry-After를 반환한다. 허용 여부 판정과
-     * 남은 시간 계산을 하나의 저장소 조회에서 함께 처리해, 두 값을 별도로 조회하는 동안
-     * 다른 요청이 윈도우를 갱신해 값이 어긋나는 경합을 없앤다.
+     * 거부와 함께 계산한 Retry-After를 반환한다.
+     *
+     * <p>{@code upsertWindow()}와 {@code findById()}를 별도 트랜잭션으로 호출하면, 자신이
+     * 증가시킨 뒤 읽기 전에 다른 동시 요청이 카운트를 더 올려 자기 순번보다 큰 값을 읽고
+     * 한도 이내 요청까지 잘못 거부할 수 있다. 이 메서드를 하나의 트랜잭션으로 묶어, upsert가
+     * 커밋 전까지 쥐고 있는 InnoDB 행 잠금이 같은 키의 동시 요청을 직렬화하게 하고,
+     * {@code findById()}가 정확히 이 요청이 만든 카운트·만료 시각을 읽도록 보장한다.</p>
      */
+    @Transactional
     public RateLimitResult tryConsume(RateLimitCategory category, String key) {
         Limit limit = limits.get(category);
         LocalDateTime now = LocalDateTime.now(clock);

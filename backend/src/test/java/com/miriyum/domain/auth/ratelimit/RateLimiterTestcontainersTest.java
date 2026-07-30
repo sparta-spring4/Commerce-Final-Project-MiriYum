@@ -6,9 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
@@ -62,19 +66,20 @@ class RateLimiterTestcontainersTest {
     private ConsumerAccountRepository consumerAccountRepository;
 
     @Test
-    @DisplayName("여러 스레드가 동시에 같은 키를 요청해도 허용 횟수가 한도를 넘지 않는다")
-    void concurrentRequestsForSameKeyNeverExceedTheLimit() throws InterruptedException {
+    @DisplayName("여러 스레드가 동시에 같은 키를 요청하면 한도만큼만 정확히 허용한다")
+    void concurrentRequestsForSameKeyAllowExactlyTheLimit() throws InterruptedException, ExecutionException {
         // given: LOGIN 한도는 20, 스레드 50개가 동시에 같은 키로 요청
         int threadCount = 50;
         String key = "concurrency-test-ip";
         CountDownLatch readyLatch = new CountDownLatch(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
         AtomicInteger allowedCount = new AtomicInteger();
+        List<Future<?>> futures = new ArrayList<>();
         boolean completedInTime;
 
         try (ExecutorService executor = Executors.newFixedThreadPool(threadCount)) {
             for (int i = 0; i < threadCount; i++) {
-                executor.submit(() -> {
+                futures.add(executor.submit(() -> {
                     readyLatch.countDown();
                     try {
                         startLatch.await();
@@ -84,7 +89,7 @@ class RateLimiterTestcontainersTest {
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
                     }
-                });
+                }));
             }
 
             // when: 모든 스레드가 준비된 뒤 동시에 시작
@@ -99,8 +104,15 @@ class RateLimiterTestcontainersTest {
                 .as("스레드 %d개가 10초 안에 끝나지 않았습니다", threadCount)
                 .isTrue();
 
-        // then: 한도(20)를 넘는 허용은 없어야 한다
-        assertThat(allowedCount.get()).isLessThanOrEqualTo(20);
+        // then: 작업 스레드에서 던져진 예외(DB 오류 등)가 있으면 여기서 드러난다.
+        // Future를 버리면 예외가 조용히 삼켜져 과도 거부·저장소 오류가 있어도 테스트가 통과할 수 있다.
+        for (Future<?> future : futures) {
+            future.get();
+        }
+
+        // then: 고정 윈도우에 동시 요청 50개, 한도 20이면 정확히 20개만 허용돼야 한다.
+        // 한도보다 적게 허용되면(과도 거부) upsert와 조회가 분리 트랜잭션이라 생기는 경합이다.
+        assertThat(allowedCount.get()).isEqualTo(20);
     }
 
     @Test
