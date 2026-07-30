@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -43,13 +44,14 @@ class ConsumerAuthServiceTest {
     private JwtTokenProvider jwtTokenProvider;
 
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
+    private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
     private ConsumerAuthService consumerAuthService;
 
     @BeforeEach
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, true);
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, true);
     }
 
     @Test
@@ -73,9 +75,9 @@ class ConsumerAuthServiceTest {
     void signUpSucceedsAndNormalizesNickname() {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "password123",
+                "user@example.com", "Password123!", "Password123!",
                 "email-ref", "identity-ref", "  새 닉네임  ");
-        given(passwordEncoder.encode("password123")).willReturn("hashed");
+        given(passwordEncoder.encode("Password123!")).willReturn("hashed");
         given(consumerAccountRepository.saveAndFlush(any(ConsumerAccount.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -95,7 +97,7 @@ class ConsumerAuthServiceTest {
     void rejectsSignUpWhenIdentityVerificationStubDisabled() {
         // given
         ConsumerAuthService serviceWithStubDisabled = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, false);
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, false);
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "password123",
                 "email-ref", "identity-ref", "닉네임");
@@ -113,6 +115,21 @@ class ConsumerAuthServiceTest {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "different456",
+                "email-ref", "identity-ref", "닉네임");
+
+        // when & then
+        assertThatThrownBy(() -> consumerAuthService.signUp(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    @DisplayName("영문 소문자와 숫자 2종만 포함한 비밀번호로 가입하면 검증 오류를 던진다")
+    void rejectsSignUpWithWeakPassword() {
+        // given
+        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
+                "user@example.com", "password123", "password123",
                 "email-ref", "identity-ref", "닉네임");
 
         // when & then

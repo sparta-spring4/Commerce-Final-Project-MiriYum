@@ -9,6 +9,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
@@ -40,17 +41,20 @@ public class StoreOperatorAuthService {
     private final StoreOperatorAccountRepository storeOperatorAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final PasswordPolicy passwordPolicy;
     private final boolean identityVerificationDevStubEnabled;
 
     public StoreOperatorAuthService(
             StoreOperatorAccountRepository storeOperatorAccountRepository,
             PasswordEncoder passwordEncoder,
             JwtTokenProvider jwtTokenProvider,
+            PasswordPolicy passwordPolicy,
             @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.passwordPolicy = passwordPolicy;
         this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
     }
 
@@ -66,7 +70,8 @@ public class StoreOperatorAuthService {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
-        String passwordHash = passwordEncoder.encode(request.password());
+        String normalizedPassword = passwordPolicy.normalize(request.password());
+        String passwordHash = passwordEncoder.encode(normalizedPassword);
         StoreOperatorAccount account =
                 StoreOperatorAccount.create(request.email(), passwordHash, request.displayName());
 

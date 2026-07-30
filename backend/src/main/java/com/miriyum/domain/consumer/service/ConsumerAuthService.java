@@ -9,6 +9,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
@@ -41,6 +42,7 @@ public class ConsumerAuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final NicknamePolicy nicknamePolicy;
+    private final PasswordPolicy passwordPolicy;
     private final boolean identityVerificationDevStubEnabled;
 
     public ConsumerAuthService(
@@ -48,12 +50,14 @@ public class ConsumerAuthService {
             PasswordEncoder passwordEncoder,
             JwtTokenProvider jwtTokenProvider,
             NicknamePolicy nicknamePolicy,
+            PasswordPolicy passwordPolicy,
             @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.nicknamePolicy = nicknamePolicy;
+        this.passwordPolicy = passwordPolicy;
         this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
     }
 
@@ -70,7 +74,8 @@ public class ConsumerAuthService {
         }
 
         String normalizedNickname = nicknamePolicy.normalize(request.nickname());
-        String passwordHash = passwordEncoder.encode(request.password());
+        String normalizedPassword = passwordPolicy.normalize(request.password());
+        String passwordHash = passwordEncoder.encode(normalizedPassword);
         ConsumerAccount account = ConsumerAccount.create(request.email(), passwordHash, normalizedNickname);
 
         ConsumerAccount saved;

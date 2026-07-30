@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -42,12 +43,14 @@ class StoreOperatorAuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    private final PasswordPolicy passwordPolicy = new PasswordPolicy();
+
     private StoreOperatorAuthService storeOperatorAuthService;
 
     @BeforeEach
     void setUp() {
         storeOperatorAuthService = new StoreOperatorAuthService(
-                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, true);
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, true);
     }
 
     @Test
@@ -86,7 +89,7 @@ class StoreOperatorAuthServiceTest {
     void rejectsSignUpWhenIdentityVerificationStubDisabled() {
         // given
         StoreOperatorAuthService serviceWithStubDisabled = new StoreOperatorAuthService(
-                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, false);
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, false);
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "password123", "password123",
                 "email-ref", "identity-ref", "미리윰식당");
@@ -103,9 +106,9 @@ class StoreOperatorAuthServiceTest {
     void signUpSucceeds() {
         // given
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
-                "owner@example.com", "password123", "password123",
+                "owner@example.com", "Password123!", "Password123!",
                 "email-ref", "identity-ref", "미리윰식당");
-        given(passwordEncoder.encode("password123")).willReturn("hashed");
+        given(passwordEncoder.encode("Password123!")).willReturn("hashed");
         given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -118,6 +121,21 @@ class StoreOperatorAuthServiceTest {
         assertThat(captor.getValue().getDisplayName()).isEqualTo("미리윰식당");
         assertThat(response.accountType()).isEqualTo(AccountType.STORE_OPERATOR);
         assertThat(response.status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    @DisplayName("영문 소문자와 숫자 2종만 포함한 비밀번호로 가입하면 검증 오류를 던진다")
+    void rejectsSignUpWithWeakPassword() {
+        // given
+        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
+                "owner@example.com", "password123", "password123",
+                "email-ref", "identity-ref", "미리윰식당");
+
+        // when & then
+        assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
     }
 
     @Test
