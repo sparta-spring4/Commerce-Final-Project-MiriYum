@@ -7,6 +7,8 @@ import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
+import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -56,12 +58,17 @@ public class SecurityConfig {
 
     @Bean
     @Order(2)
-    public SecurityFilterChain publicAuthFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain publicAuthFilterChain(
+            HttpSecurity http,
+            RateLimiter rateLimiter,
+            ObjectMapper objectMapper
+    ) throws Exception {
         http
                 .securityMatcher("/api/v1/consumer-auth/**", "/api/v1/store-operator-auth/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .addFilterBefore(new RateLimitFilter(rateLimiter, objectMapper), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
