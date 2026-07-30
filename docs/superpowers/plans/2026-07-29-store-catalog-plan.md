@@ -2,7 +2,7 @@
 
 > 추적 Issue: [#31](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/31)
 > 설계: `docs/superpowers/specs/2026-07-29-store-catalog-design.md` (승인, 코드 리뷰 반영 개정)
-> 브랜치: `feature/31-store-catalog` (base `1a2e175`)
+> 브랜치: `feature/31-store-catalog` (rebase 기준 `ade5a93`: PR #30 공통 + PR #56 인증(consumer))
 > 방식: TDD, Testcontainers MySQL 검증
 
 ## 전제·선행 확인

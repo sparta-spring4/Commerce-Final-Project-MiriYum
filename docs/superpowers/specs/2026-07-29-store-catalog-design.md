@@ -1,7 +1,7 @@
 # 매장·메뉴 카테고리와 매장 태그 catalog 기반 설계
 
 > 추적 Issue: [#31](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/31)
-> 기준 브랜치: `dev` (기준 SHA `1a2e175`, PR #30 병합 상태)
+> 기준 브랜치: `dev` (rebase 기준 `ade5a93`, PR #30 공통 + PR #56 인증(consumer) 병합 상태)
 > 기준 계약: PR #27 병합 `docs/specs/store-search/{spec.md,openapi.yaml}`, PR #30 병합 공통 `ApiResponse`·`ErrorResponse`·`ServiceException`
 > 정책 원천: `docs/service-policies/03-store-operation.md` (OPER-002~006 초기 고정 후보)
 > 아키텍처 기준: `docs/adr/ADR-001-domain-packages-three-layer.md`, `docs/specs/mvp1-common/ownership.md` (2번 도메인 루트 `com.miriyum.domain.store`)
@@ -31,7 +31,7 @@
 - 아키텍처는 ADR-001 3계층과 ownership.md의 도메인 루트를 따른다: `com.miriyum.domain.store`의 `controller`/`service`/`repository`/`entity`/`dto`.
 - catalog 검증 메서드는 "이 종류에 이 코드가 활성으로 존재하는가"만 판정하는 **중립 결과**를 반환한다. `STORE_004` 매핑, 개수·중복 규칙은 소비 도메인(#33, #35)이 소유한다.
 - 공통 `ApiResponse`·`ErrorResponse`·`ServiceException`을 재사용한다.
-- `SecurityFilterChain`·JWT·인증은 1번 인증 도메인 소유이므로 이 산출물에서 만들지 않는다.
+- 1번 인증 도메인의 중앙 `SecurityConfig`는 수정하지 않는다. 1번이 남긴 도메인별 체인 확장 지점을 사용해 store 도메인 전용 공개 체인만 추가한다.
 - Flyway migration은 적용(병합) 후 수정하지 않는다. 코드 추가·비활성은 새 migration으로 수행한다.
 - DB 동작은 H2가 아니라 Testcontainers MySQL로 검증한다(ADR-002·ADR-004).
 
@@ -170,10 +170,10 @@ com.miriyum.domain.store
 
 ## 교차 도메인 의존성·조율
 
-1. **공개 경로 비회원 접근(1번 인증 소유).** 정책 AUTH-001은 비회원 조회를 허용하지만, 실제 런타임에서 이 경로들을 익명 허용하는 `SecurityFilterChain`은 1번 도메인 소유이며 아직 `dev`에 없다(spring-security는 classpath에만 존재해 기본 설정상 익명 요청은 401). 따라서:
-   - 이 산출물은 **production `SecurityFilterChain`을 만들지 않는다.**
-   - `CatalogControllerTest`는 `standaloneSetup`(Security 미포함)으로 **컨트롤러 매핑·봉투 직렬화만** 검증한다. 이는 "익명 200"의 증명이 아니다.
-   - 실제 익명 서빙은 1번의 `SecurityFilterChain`이 세 경로를 `permitAll` 하고, 실제 FilterChain을 포함한 통합 테스트로 익명 200을 검증한 뒤 성립한다. #40은 그 전까지 완료로 표시하지 않는다.
+1. **공개 경로 비회원 접근(1번 인증 확장 지점 사용, 구현 완료).** dev의 1번 `SecurityConfig`는 다중 필터체인(`@Order(1)` consumer-accounts 인증, `@Order(2)` public-auth permitAll, `@Order(3)` default `denyAll`)이며 "매장 운영자 필터체인은 그 도메인 구현 슬라이스에서 추가한다"는 확장 모델을 명시한다. 이 산출물은:
+   - 1번 `SecurityConfig`를 수정하지 않고 `com.miriyum.domain.store.config.CatalogSecurityConfig`에 **store 도메인 전용 공개 체인**(`@Order(0)`)을 추가한다.
+   - 세 GET 경로만 `permitAll`, 같은 경로의 다른 method·그 밖의 요청은 `denyAll`로 1번 `JwtAuthenticationEntryPoint`(401)·`JwtAccessDeniedHandler`(403) 공통 `ErrorResponse` envelope를 사용한다.
+   - `CatalogSecurityIT`가 실제 SecurityFilterChain으로 익명 GET 200·익명 401·인증 403·유사경로/다른 method 비공개를 검증한다. `CatalogControllerTest`(`standaloneSetup`)는 응답 형태 전용으로 보완한다.
 2. **Flyway 버전 규약.** 공유 `db/migration`은 날짜 기반 `V2026_07_29_01__` 형식으로 도메인 간 충돌을 회피한다.
 
 ## Flyway migration 설계
@@ -232,7 +232,7 @@ Issue #31 원안 allowlist(`com/miriyum/store/catalog/**`)는 ADR-001·ownership
 ## 위험과 롤백
 
 - seed 거버넌스: 승인된 8/10/8 외 값을 임의 추가·변경하지 않는다. 추가·비활성은 새 migration으로만.
-- Security 경계: production `SecurityFilterChain` 미생성으로 1번 인증과 충돌하지 않는다. #40 완료 주장에 "익명 서빙 전체 동작"을 포함하지 않으며 1번 병합 후 통합 검증한다.
+- Security 경계: 1번 중앙 `SecurityConfig`를 수정하지 않고 store 도메인 전용 공개 체인만 추가한다. 실제 필터체인 통합 테스트(`CatalogSecurityIT`)로 익명 200·401·403 공통 envelope를 검증한다.
 - Flyway 번호: 날짜 기반 규약으로 병렬 도메인 충돌 회피.
 - 자연키 merge: `repository.save`가 merge로 동작하므로 런타임 신규 삽입 경로가 없는 seed 전용 catalog에 한해 안전하며, DB PK가 무결성 backstop이다.
 - 롤백: 문제 시 #31 PR 전체를 되돌릴 수 있다. 도메인별 임시 catalog 하드코딩은 롤백 대안이 아니다.
