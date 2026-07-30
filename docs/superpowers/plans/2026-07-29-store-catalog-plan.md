@@ -1,38 +1,42 @@
-# 매장·메뉴 catalog 기반 구현 계획 (#31)
+# 매장·메뉴 catalog 기반 + 공개 경로 Security 구현 계획 (#31)
 
 > 추적 Issue: [#31](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/31)
-> 설계: `docs/superpowers/specs/2026-07-29-store-catalog-design.md` (승인, 코드 리뷰 반영 개정)
+> 설계: `docs/superpowers/specs/2026-07-29-store-catalog-design.md` (승인)
 > 브랜치: `feature/31-store-catalog` (rebase 기준 `ade5a93`: PR #30 공통 + PR #56 인증(consumer))
 > 방식: TDD, Testcontainers MySQL 검증
 
-## 전제·선행 확인
+## 전제·기준
 
-- 선행 병합: PR #27(계약), PR #30(공통 응답·예외).
-- seed·code·version·스키마 승인 완료(2026-07-29): 매장 8 / 메뉴 10 / 태그 8, v1, 종류별 테이블 분리.
-- 아키텍처: ADR-001 3계층 + ownership.md 도메인 루트 `com.miriyum.domain.store`.
-- Security는 만들지 않음(1번 소유). 다른 팀원 코드 의존 없음.
-- **Docker 필요:** IT는 Testcontainers MySQL(`mysql:8.0.40`). Docker 없으면 `disabledWithoutDocker`로 skip → 병합 증거는 Docker 환경 0 skipped로 수집.
+- 최신 `dev`(`ade5a93`) 위로 rebase. dev의 1번 인증(`SecurityConfig` 다중 필터체인·JWT·`V1__create_consumer_accounts`)과 `spring-boot-starter-flyway`를 기준으로 한다.
+- seed·code·version·물리 스키마 Human 승인 완료(2026-07-29): 매장 8 / 메뉴 10 / 태그 8.
+- 아키텍처: ADR-001 3계층 + ownership.md L369 → `com.miriyum.domain.store`.
+- **Docker 필요:** 모든 통합·보안·스모크 테스트가 Testcontainers MySQL(`mysql:8.0.40`). 카탈로그·Flyway DB 증거에는 H2를 사용하지 않는다.
 
 ## 산출물 구조 (com.miriyum.domain.store)
 
 ```
 entity/CatalogEntry(@MappedSuperclass), StoreCategory, MenuCategory, StoreTag
-repository/CatalogEntryRepository(@NoRepositoryBean), StoreCategoryRepository, MenuCategoryRepository, StoreTagRepository
+repository/CatalogEntryRepository(@NoRepositoryBean) + 종류별 3
 service/CatalogService, CatalogKind, CatalogItemView
-controller/CatalogController
+controller/CatalogController (3 GET)
 dto/response/CatalogItemResponse, CatalogListResponse
+config/CatalogSecurityConfig (store 전용 공개 SecurityFilterChain)
 db/migration/V2026_07_29_01__create_catalog_tables.sql, V2026_07_29_02__seed_catalog_mvp1.sql
 ```
 
 ## TDD 단계
 
-1. RED 단위 `CatalogServiceTest` — 종류별 저장소 선택·정렬 매핑, `isActiveCode`(활성/미승인/null), `findUnknownCodes`(미승인만/전부유효/빈입력).
-2. RED slice `CatalogControllerTest` — `standaloneSetup`으로 세 경로 200·봉투·필드·정렬·추가필드 없음(응답 형태 전용, 인증 주장 없음).
-3. GREEN production — entity(@MappedSuperclass+3), repository(base+3), service(switch 매핑), controller, dto.
-4. Migration — 종류별 테이블 3개(code PK, `as_cs` 대소문자 구분, `CHECK(sort_order>0)`), seed 8/10/8. seed 버전 v1은 주석으로만 기록(런타임 버전 테이블 없음, YAGNI).
-5. RED→GREEN 통합 `CatalogRepositoryIT` — Testcontainers MySQL(`@ServiceConnection`, `@Transactional`): 전체 seed code·표시명·순서, code 중복 raw insert 무결성 예외, 대소문자 구분, 비활성 제외.
-6. 의존성 — production `spring-boot-flyway`, test `testcontainers-junit-jupiter`/`testcontainers-mysql`(버전 BOM 관리).
-7. global 컨텍스트 테스트 승격(allowlist 확장, 소유자 승인) — `MiriyumApplicationTests`·`ApplicationJacksonConfigurationTest`를 Testcontainers 기반으로.
+1. 단위 `CatalogServiceTest`(8) — 종류별 조회·정렬, `isActiveCode`, `findUnknownCodes`(중립 결과, STORE_004는 소비 도메인).
+2. slice `CatalogControllerTest`(3, `standaloneSetup`) — 응답 봉투·필드·정렬·추가필드 없음(응답 형태 전용).
+3. GREEN production — entity(@MappedSuperclass+3)·repository(base+3)·service·controller·dto.
+4. Migration — 종류별 테이블 3개(code 자연 PK, `as_cs` 대소문자 구분, `CHECK(sort_order>0)`), seed 8/10/8. 런타임 버전 테이블 없음(YAGNI). Flyway 순서 `V1`(인증) → catalog create → catalog seed.
+5. 통합 `CatalogRepositoryIT`(7, Testcontainers MySQL) — Flyway clean-start·전체 seed·자연키 유일·**`sort_order<=0` CHECK**·대소문자·비활성.
+6. **Security(RED→GREEN)** — `config/CatalogSecurityConfig`에 store 전용 `SecurityFilterChain`(`@Order(0)`) 추가. 1번의 도메인 확장 지점 사용, **중앙 `SecurityConfig` 미수정**.
+   - securityMatcher = catalog 경로군(정확한 3경로 + 각 `/**`) → 유사 경로도 이 체인이 소유.
+   - `permitAll` = 정확한 세 GET 경로만. 그 밖의 method·유사 경로 = `denyAll`.
+   - 1번 `JwtAuthenticationEntryPoint`(401)·`JwtAccessDeniedHandler`(403) 연결 → 공통 `ErrorResponse` envelope.
+   - `CatalogSecurityIT`(5, 실제 SecurityFilterChain): 정확한 익명 GET 200+SUCCESS envelope / 익명 유사경로 401 `AUTH_001` / 인증 유사경로 403 `AUTH_006` / 정확 경로 비허용 method 401·403 / 잘못된·타 namespace 토큰에도 공개 GET 200. 오류 응답 Content-Type JSON.
+7. 의존성 — dev의 `spring-boot-starter-flyway` 유지(마이그레이션 자동 실행) + test `spring-boot-testcontainers`/`testcontainers-junit-jupiter`/`testcontainers-mysql` 추가. 카탈로그·스모크 Testcontainers 테스트에 `miriyum.jwt.*` 설정 제공.
 
 ## 검증 명령
 
@@ -42,19 +46,21 @@ cd backend
 git diff --check
 ```
 
-## 완료 기준 (인수 조건 매핑) — 2026-07-29 `./gradlew clean build` 통과로 검증
+## 완료 기준 (인수 조건 매핑) — 2026-07-30 `./gradlew clean build` 통과로 검증
 
-- [x] 세 공개 API가 공통 봉투로 활성 항목만 반환 → `CatalogControllerTest` 3/3 (실제 익명 서빙은 1번 Security 통합 후 별도 검증).
-- [x] code 불투명·자연키 유일·대소문자 구분 → `CatalogRepositoryIT` 중복 raw insert·대소문자 검증.
-- [x] 미승인/비활성 code 중립 검증 결과(STORE_004는 소비 도메인) → `CatalogServiceTest` 8/8.
-- [x] 빈 MySQL Flyway clean-start + 전체 seed 재현 → `CatalogRepositoryIT` 6/6 (실제 MySQL, skip 아님).
-- [x] H2 미사용 → Testcontainers MySQL만.
+- [x] 세 공개 API가 실제 SecurityFilterChain에서 **익명 GET 200 + SUCCESS envelope** → `CatalogSecurityIT` + `CatalogControllerTest`.
+- [x] 보호/유사 경로 401·403이 공통 `ErrorResponse` envelope(`AUTH_001`/`AUTH_006`, JSON) → `CatalogSecurityIT`.
+- [x] code 불투명·자연키 유일·대소문자 구분·`sort_order` CHECK → `CatalogRepositoryIT`.
+- [x] 미승인/비활성 code 중립 검증 → `CatalogServiceTest`.
+- [x] 빈 MySQL Flyway clean-start(`V1`→catalog) + 전체 seed 재현 → `CatalogRepositoryIT`(실제 MySQL, skip 아님).
+- [x] 카탈로그·Flyway DB 증거에 H2 미사용 → Testcontainers MySQL만.
 - [x] 공통 응답·예외 재사용.
 
-전체: 58 tests, 0 failed, 0 skipped. 3개 Testcontainers 컨텍스트 실제 실행.
+전체: **97 tests, 0 failed, 0 skipped**. Testcontainers MySQL 실제 실행.
 
 ## 범위 밖·주의
 
-- 매장·메뉴 Entity·등록·수정, 인증, 영업시간, 검색 없음. production `SecurityFilterChain` 미생성.
+- 매장·메뉴 Entity·등록·수정, 영업시간, 검색 없음(각 후속 Issue). 운영자 CRUD·감사·캐시·버전은 고도화.
+- 1번 중앙 `SecurityConfig`는 수정하지 않는다(store 전용 체인만 추가).
 - 적용(병합)된 Flyway 파일 수정 금지 — 보정은 새 migration.
-- Issue #31 allowlist는 정본(ADR-001·ownership.md)에 맞춰 `com.miriyum.domain.store`로 정정(설계 문서·Issue 동기화).
+- 병합은 작성자 외 사람 리뷰·브랜치 보호 충족 후에만. 작성자 self-approve·관리자 우회 금지.

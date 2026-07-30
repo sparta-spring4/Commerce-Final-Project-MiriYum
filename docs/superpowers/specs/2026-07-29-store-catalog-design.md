@@ -33,7 +33,7 @@
 - 공통 `ApiResponse`·`ErrorResponse`·`ServiceException`을 재사용한다.
 - 1번 인증 도메인의 중앙 `SecurityConfig`는 수정하지 않는다. 1번이 남긴 도메인별 체인 확장 지점을 사용해 store 도메인 전용 공개 체인만 추가한다.
 - Flyway migration은 적용(병합) 후 수정하지 않는다. 코드 추가·비활성은 새 migration으로 수행한다.
-- DB 동작은 H2가 아니라 Testcontainers MySQL로 검증한다(ADR-002·ADR-004).
+- 카탈로그·Flyway DB 증거에는 H2를 사용하지 않고 Testcontainers MySQL로 검증한다(ADR-002·ADR-004).
 
 ## 승인 기록 (2026-07-29, 매장 도메인 소유자)
 
@@ -186,13 +186,9 @@ com.miriyum.domain.store
 
 버전은 Spring Boot 의존성 관리(spring-boot-dependencies:4.1.0)가 단일 소유(ADR-004).
 
-production — Flyway autoconfig 모듈(Spring Boot 4 autoconfig 모듈 분리로 `flyway-core` 단독으로는 마이그레이션 미실행, 구현 중 확인된 스캐폴드 결함 보정):
+production — dev(PR #56)가 제공하는 `spring-boot-starter-flyway`를 그대로 사용해 마이그레이션을 자동 실행한다. rebase 시 우리 브랜치가 초기에 추가했던 `spring-boot-flyway`·`flyway-core`는 dev의 starter로 대체·제거한다(중복 제거).
 
-```kotlin
-implementation("org.springframework.boot:spring-boot-flyway")
-```
-
-test — Testcontainers MySQL(2.0에서 `testcontainers-` 접두사, Spring Boot BOM이 버전 관리):
+test — Testcontainers MySQL(dev엔 없어 이 산출물이 추가, Spring Boot BOM이 버전 관리):
 
 ```kotlin
 testImplementation("org.springframework.boot:spring-boot-testcontainers")
@@ -204,12 +200,19 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 
 - 단위 `CatalogServiceTest`(Mockito, 3 repository mock): 종류별 저장소 선택, 정렬 매핑, `isActiveCode`(활성/미승인/null), `findUnknownCodes`(미승인만/전부유효/빈입력).
 - slice `CatalogControllerTest`(`standaloneSetup`): 세 경로 200, 공통 봉투·필드·정렬·추가필드 없음. Security 미포함이므로 응답 형태 검증 전용(인증 주장 없음).
-- 통합 `CatalogRepositoryIT`(Testcontainers MySQL, `@ServiceConnection`, `@Transactional` 롤백, `mysql:8.0.40`):
+- 통합 `CatalogRepositoryIT`(Testcontainers MySQL, `@ServiceConnection`, `@Transactional` 롤백, `mysql:8.0.40`, `miriyum.jwt.*` 제공):
   - 세 종류 전체 seed의 code·표시명·순서(`containsExactly`)
   - 자연키 code 중복 raw insert → 무결성 예외
+  - `sort_order<=0`이 CHECK 제약으로 거부(`DataAccessException` + 제약명; MySQL CHECK=HY000→`UncategorizedSQLException`)
   - 대소문자 구분(`korean` 미매치, `KOREAN` 매치)
   - 비활성 항목 활성 조회 제외
-- 회귀: `./gradlew clean build`(Docker 필요). `disabledWithoutDocker`로 Docker 없으면 DB 테스트가 skip되므로, **병합 증거는 Docker 환경에서 0 skipped로 수집**한다.
+- 보안 `CatalogSecurityIT`(실제 SecurityFilterChain, `@AutoConfigureMockMvc`, Testcontainers MySQL, `miriyum.jwt.*` 제공):
+  - 정확한 세 익명 GET 200 + `SUCCESS` envelope
+  - 익명 유사 경로 401 `AUTH_001` 공통 envelope(JSON)
+  - 인증 유사 경로 403 `AUTH_006` 공통 envelope(JSON)
+  - 정확 경로 비허용 method 익명 401·인증 403
+  - 잘못된 Bearer·타 namespace(store-operator) 토큰에도 정확한 공개 GET 200(회귀)
+- 회귀: `./gradlew clean build`(Docker 필요). `disabledWithoutDocker`로 Docker 없으면 DB 테스트가 skip되므로, **병합 증거는 Docker 환경에서 0 skipped로 수집**한다. 최신 검증: **97 tests, 0 failed, 0 skipped**.
 
 ## 파일 허용 목록 (#31, 정정판)
 
