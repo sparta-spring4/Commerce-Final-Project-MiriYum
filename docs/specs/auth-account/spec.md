@@ -63,7 +63,7 @@
 - 만료·일회성 소비·중복 콜백 멱등성
 - 만 14세 이상 여부만 보존하고 생년월일 원본을 저장하지 않는 경계
 
-위 어댑터가 붙기 전까지 `identityVerificationReference`는 형식(공백 아님)만 검증하고 실제 전화번호로 해석하지 않는다. 참조값 원문을 전화번호 자리에 대신 저장하거나 응답으로 노출하지 않으며, 일반 사용자 `phoneNumber`는 BLOCKED(null)로 둔다.
+위 어댑터가 붙기 전까지 `identityVerificationReference`는 형식(공백 아님)만 검증하고 실제 전화번호로 해석하지 않는다. 참조값 원문을 전화번호 자리에 대신 저장하거나 응답으로 노출하지 않으며, 일반 사용자·매장 운영자 모두 `phoneNumber`는 BLOCKED(null)로 둔다.
 
 이 조건을 충족하는 외부 연동 surface가 없으면 가입 runtime은 `NOT CONFIGURED`이며 개발 편의를 이유로 확인을 우회한 운영 계정을 생성하지 않는다.
 
