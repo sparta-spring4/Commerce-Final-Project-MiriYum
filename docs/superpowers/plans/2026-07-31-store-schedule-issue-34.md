@@ -247,6 +247,8 @@ Required constraints:
 UNIQUE (store_id, version_number)
 CHECK (version_number >= 1)
 CHECK (start_time <> end_time)
+CHECK (week_start_minute >= 0)
+CHECK (week_end_minute > week_start_minute)
 CHECK (interval_kind IN ('BUSINESS_HOURS', 'BREAK_TIME'))
 FOREIGN KEY (store_id) REFERENCES stores(store_id) ON DELETE RESTRICT
 FOREIGN KEY (validated_operating_version_id)
@@ -261,9 +263,11 @@ primary key.
 - [ ] **Step 4: Implement JPA aggregates**
 
 Use scalar IDs between aggregates. Version entities own ordered
-`@ElementCollection` entries and expose unmodifiable copies. Factory methods accept
-the allocated version number and normalized intervals. No update method exists on
-version entities.
+`@ElementCollection` entries and expose unmodifiable copies. Each entry persists the
+validated `weekStartMinute` and `weekEndMinute` in addition to the local times and
+overnight placement flag, so early-morning intervals owned by the preceding business
+day are reproducible. Factory methods accept the allocated version number and
+normalized intervals. No update method exists on version entities.
 
 `StoreScheduleState` methods:
 

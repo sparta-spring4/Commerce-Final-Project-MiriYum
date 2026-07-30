@@ -106,7 +106,10 @@ mid-transaction.
 - publication timestamp
 
 Child rows store the start day, range kind (`BUSINESS_HOURS` or `BREAK_TIME`), local
-start time, local end time, and whether the interval ends on the next day.
+start time, local end time, whether the interval is placed after the owning day's
+midnight boundary, and the validated `week_start_minute`/`week_end_minute`. The
+normalized minute offsets distinguish, for example, Monday 01:00 as Monday morning
+from Monday-business-day 01:00 placed on Tuesday morning.
 
 Unique constraints protect `(store_id, version)` and interval identity. Historical
 versions and child rows are never updated or deleted by publication.
@@ -119,8 +122,8 @@ versions and child rows are never updated or deleted by publication.
 - the operating schedule version used for validation
 - publication timestamp
 
-Child rows store start day, local start and end times, and the overnight flag.
-Historical versions remain immutable.
+Child rows store start day, local start and end times, the overnight placement flag,
+and the validated weekly minute offsets. Historical versions remain immutable.
 
 ## Weekly Validation
 
