@@ -1,169 +1,129 @@
 package com.miriyum.domain.auth.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
+/**
+ * {@link RateLimiter}가 등급별 한도를 올바르게 고르고 저장소 결과를 올바르게 해석하는지만
+ * 검증하는 순수 단위 테스트다. 실제 MySQL 원자적 upsert의 만료·경합 동작은
+ * {@code RateLimiterTestcontainersTest}에서 진짜 MySQL로 검증한다.
+ */
+@ExtendWith(MockitoExtension.class)
 class RateLimiterTest {
 
     private static final Instant BASE_TIME = Instant.parse("2026-07-29T00:00:00Z");
-    private static final RateLimitCategory CATEGORY = RateLimitCategory.LOGIN;
+
+    @Mock
+    private RateLimitWindowRepository rateLimitWindowRepository;
+
+    private RateLimiter rateLimiter;
+
+    @BeforeEach
+    void setUp() {
+        rateLimiter = newRateLimiter(Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+    }
 
     @Test
-    @DisplayName("한도 이내의 요청은 전부 허용한다")
-    void allowsRequestsUpToTheLimit() {
-        // given
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(3, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+    @DisplayName("저장소가 반환한 카운트가 한도 이하면 허용한다")
+    void allowsWhenStoredCountWithinLimit() {
+        // given: LOGIN 한도는 3인데 저장소가 2를 반환
+        given(rateLimitWindowRepository.findById(anyString()))
+                .willReturn(Optional.of(windowWithCount(2)));
+
+        // when
+        boolean allowed = rateLimiter.tryConsume(RateLimitCategory.LOGIN, "key");
+
+        // then
+        assertThat(allowed).isTrue();
+        verify(rateLimitWindowRepository).upsertWindow(eq("LOGIN:key"), any(), any());
+    }
+
+    @Test
+    @DisplayName("저장소가 반환한 카운트가 한도를 넘으면 거부한다")
+    void rejectsWhenStoredCountExceedsLimit() {
+        // given: LOGIN 한도는 3인데 저장소가 4를 반환
+        given(rateLimitWindowRepository.findById(anyString()))
+                .willReturn(Optional.of(windowWithCount(4)));
+
+        // when
+        boolean allowed = rateLimiter.tryConsume(RateLimitCategory.LOGIN, "key");
+
+        // then
+        assertThat(allowed).isFalse();
+    }
+
+    @Test
+    @DisplayName("등급마다 다른 한도를 독립적으로 적용한다")
+    void appliesDifferentLimitPerCategory() {
+        // given: TOKEN_REFRESH 한도(30)보다는 작지만 LOGIN 한도(3)보다는 큰 카운트
+        given(rateLimitWindowRepository.findById(anyString()))
+                .willReturn(Optional.of(windowWithCount(10)));
 
         // when & then
-        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
-        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
-        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "key")).isTrue();
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.LOGIN, "key")).isFalse();
     }
 
     @Test
-    @DisplayName("같은 윈도우 안에서 한도를 초과하면 거부한다")
-    void rejectsRequestsOverTheLimitWithinTheSameWindow() {
+    @DisplayName("저장된 윈도우가 없으면 등급의 기본 윈도우 길이를 재시도 시간으로 반환한다")
+    void returnsDefaultWindowLengthWhenNoRecordExists() {
         // given
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(2, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+        given(rateLimitWindowRepository.findById(anyString())).willReturn(Optional.empty());
 
         // when
-        rateLimiter.tryConsume(CATEGORY, "key");
-        rateLimiter.tryConsume(CATEGORY, "key");
-        boolean thirdAttempt = rateLimiter.tryConsume(CATEGORY, "key");
+        long retryAfter = rateLimiter.retryAfterSeconds(RateLimitCategory.LOGIN, "key");
 
-        // then
-        assertThat(thirdAttempt).isFalse();
-    }
-
-    @Test
-    @DisplayName("키가 다르면 서로 독립적으로 카운트한다")
-    void tracksDifferentKeysIndependently() {
-        // given
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
-
-        // when
-        boolean firstKeyAllowed = rateLimiter.tryConsume(CATEGORY, "key-a");
-        boolean secondKeyAllowed = rateLimiter.tryConsume(CATEGORY, "key-b");
-
-        // then
-        assertThat(firstKeyAllowed).isTrue();
-        assertThat(secondKeyAllowed).isTrue();
-    }
-
-    @Test
-    @DisplayName("윈도우가 만료되면 다시 요청을 허용한다")
-    void allowsRequestsAgainAfterTheWindowExpires() {
-        // given
-        TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
-        rateLimiter.tryConsume(CATEGORY, "key");
-
-        // when
-        clock.advanceSeconds(61);
-        boolean afterWindow = rateLimiter.tryConsume(CATEGORY, "key");
-
-        // then
-        assertThat(afterWindow).isTrue();
-    }
-
-    @Test
-    @DisplayName("윈도우 만료 시각과 현재 시각이 정확히 같으면 새 윈도우로 취급한다")
-    void treatsExactExpiryInstantAsExpired() {
-        // given
-        TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
-        rateLimiter.tryConsume(CATEGORY, "key");
-
-        // when: 정확히 60초 경과(만료 시각과 동일한 순간)
-        clock.advance(Duration.ofSeconds(60));
-        boolean allowedAtExactExpiry = rateLimiter.tryConsume(CATEGORY, "key");
-
-        // then
-        assertThat(allowedAtExactExpiry).isTrue();
+        // then: LOGIN 윈도우 길이(600초)
+        assertThat(retryAfter).isEqualTo(600);
     }
 
     @Test
     @DisplayName("남은 시간이 소수 초면 올림해서 Retry-After를 반환한다")
     void roundsUpFractionalRemainingSecondsForRetryAfter() {
-        // given
-        TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
-        rateLimiter.tryConsume(CATEGORY, "key");
+        // given: 0.5초 남은 윈도우
+        LocalDateTime expiresAt = LocalDateTime.ofInstant(BASE_TIME, ZoneOffset.UTC).plus(Duration.ofMillis(500));
+        given(rateLimitWindowRepository.findById(anyString()))
+                .willReturn(Optional.of(windowExpiringAt(expiresAt)));
 
-        // when: 59.5초 경과, 실제로는 0.5초가 남음
-        clock.advance(Duration.ofMillis(59_500));
-        rateLimiter.tryConsume(CATEGORY, "key");
+        // when
+        long retryAfter = rateLimiter.retryAfterSeconds(RateLimitCategory.LOGIN, "key");
 
-        // then: 내림(0초)이 아니라 올림(1초)해야 안내받은 시간만큼 기다린 뒤 재시도가 통과한다
-        assertThat(rateLimiter.retryAfterSeconds(CATEGORY, "key")).isEqualTo(1);
+        // then: 내림(0초)이 아니라 올림(1초)
+        assertThat(retryAfter).isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("등급마다 다른 한도를 독립적으로 적용한다")
-    void appliesDifferentLimitsPerCategory() {
-        // given
-        RateLimiter rateLimiter = new RateLimiter(
-                1, 60,
-                1, 60,
-                3, 60,
-                5, 60,
-                Clock.fixed(BASE_TIME, ZoneOffset.UTC));
-
-        // when & then: TOKEN_REFRESH는 3회까지 허용하고 SIGN_UP은 1회만 허용한다
-        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
-        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
-        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
-        assertThat(rateLimiter.tryConsume(RateLimitCategory.SIGN_UP, "shared-ip")).isTrue();
-    }
-
-    private RateLimiter rateLimiterWithLoginLimit(int maxRequests, long windowSeconds, Clock clock) {
+    private RateLimiter newRateLimiter(Clock clock) {
         return new RateLimiter(
-                1, 60,
-                maxRequests, windowSeconds,
-                1, 60,
-                1, 60,
-                clock);
+                5, 600,
+                3, 600,
+                30, 60,
+                60, 60,
+                clock,
+                rateLimitWindowRepository);
     }
 
-    /**
-     * {@link Clock#fixed}는 시간을 되돌릴 수 없어 윈도우 만료 테스트에 쓸 수 없으므로,
-     * 테스트 안에서만 흐르는 시각을 직접 앞으로 넘기는 용도의 최소 구현이다.
-     */
-    private static final class TestClock extends Clock {
+    private RateLimitWindow windowWithCount(int count) {
+        return new RateLimitWindow("key", LocalDateTime.ofInstant(BASE_TIME, ZoneOffset.UTC).plusMinutes(10), count);
+    }
 
-        private Instant instant;
-
-        private TestClock(Instant instant) {
-            this.instant = instant;
-        }
-
-        void advanceSeconds(long seconds) {
-            advance(Duration.ofSeconds(seconds));
-        }
-
-        void advance(Duration duration) {
-            this.instant = this.instant.plus(duration);
-        }
-
-        @Override
-        public java.time.ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return instant;
-        }
+    private RateLimitWindow windowExpiringAt(LocalDateTime expiresAt) {
+        return new RateLimitWindow("key", expiresAt, 1);
     }
 }

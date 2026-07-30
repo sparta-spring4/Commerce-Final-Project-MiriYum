@@ -2,33 +2,27 @@ package com.miriyum.domain.auth.ratelimit;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * 키(IP+경로)별 고정 윈도우 요청 횟수를 등급({@link RateLimitCategory})마다 다른 한도로 제한한다.
- * 등급별 기본값은 {@code docs/service-policies/18-scale-reliability.md} SCALE-005의
- * 2026-07-30 팀 결정을 따르며, {@code application.yml}의 프로퍼티로 조정할 수 있다.
+ * 등급({@link RateLimitCategory})+키(IP+경로)별 고정 윈도우 요청 횟수를 MySQL(
+ * {@link RateLimitWindowRepository})에서 제한한다. 등급별 기본값은
+ * {@code docs/service-policies/18-scale-reliability.md} SCALE-005의 2026-07-30 팀 결정을
+ * 따르며, {@code application.yml}의 프로퍼티로 조정할 수 있다.
  *
- * <p><b>알려진 한계(트래킹: 이슈 #63 참고):</b> `SCALE-005`는 1·2차 MVP에서도 속도 제한을
- * 애플리케이션 로컬 메모리만으로 최종 판정하지 않도록 요구하지만, 이 구현은 서버 1대 기준
- * 메모리 카운터다. 서버를 여러 대로 늘리면 인스턴스마다 따로 세어 실제로는 의도한 한도보다
- * 더 많은 요청이 허용될 수 있다. MySQL 기반 저장소로의 전환은 Testcontainers 도입 등 별도
- * 인프라 결정이 필요해 별도로 트래킹한다.</p>
- *
- * <p>키가 만료된 뒤에도 항목을 맵에서 지우지 않으므로, 서버를 오래 띄워두면 서로 다른 IP 수만큼
- * 메모리가 계속 늘어난다. 학생 프로젝트 개발 단계에서는 재시작 주기 안에서 무시할 만한 수준이라
- * 별도 정리(eviction) 로직은 넣지 않았다.</p>
+ * <p>SCALE-005는 1·2차 MVP에서도 속도 제한을 애플리케이션 로컬 메모리만으로 최종
+ * 판정하지 않도록 요구한다(이슈 #63). MySQL 원자적 upsert로 갱신하므로 여러 인스턴스가
+ * 같은 카운터를 공유하며, 인스턴스별로 따로 세지 않는다.</p>
  */
 @Component
 public class RateLimiter {
 
     private final Map<RateLimitCategory, Limit> limits;
     private final Clock clock;
-    private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
+    private final RateLimitWindowRepository rateLimitWindowRepository;
 
     public RateLimiter(
             @Value("${miriyum.rate-limit.sign-up.max-requests}") int signUpMaxRequests,
@@ -39,7 +33,8 @@ public class RateLimiter {
             @Value("${miriyum.rate-limit.token-refresh.window-seconds}") long tokenRefreshWindowSeconds,
             @Value("${miriyum.rate-limit.csrf-preparation.max-requests}") int csrfPreparationMaxRequests,
             @Value("${miriyum.rate-limit.csrf-preparation.window-seconds}") long csrfPreparationWindowSeconds,
-            Clock clock
+            Clock clock,
+            RateLimitWindowRepository rateLimitWindowRepository
     ) {
         this.limits = Map.of(
                 RateLimitCategory.SIGN_UP, new Limit(signUpMaxRequests, Duration.ofSeconds(signUpWindowSeconds)),
@@ -50,6 +45,7 @@ public class RateLimiter {
                         new Limit(csrfPreparationMaxRequests, Duration.ofSeconds(csrfPreparationWindowSeconds))
         );
         this.clock = clock;
+        this.rateLimitWindowRepository = rateLimitWindowRepository;
     }
 
     /**
@@ -57,14 +53,13 @@ public class RateLimiter {
      */
     public boolean tryConsume(RateLimitCategory category, String key) {
         Limit limit = limits.get(category);
-        Instant now = clock.instant();
-        Window updated = windows.compute(windowKey(category, key), (ignoredKey, existing) -> {
-            if (existing == null || !existing.expiresAt().isAfter(now)) {
-                return new Window(now.plus(limit.window()), 1);
-            }
-            return new Window(existing.expiresAt(), existing.count() + 1);
-        });
-        return updated.count() <= limit.maxRequests();
+        LocalDateTime now = LocalDateTime.now(clock);
+        String windowKey = windowKey(category, key);
+
+        rateLimitWindowRepository.upsertWindow(windowKey, now, now.plus(limit.window()));
+        RateLimitWindow window = rateLimitWindowRepository.findById(windowKey)
+                .orElseThrow(() -> new IllegalStateException("upsert 직후 윈도우를 찾을 수 없습니다: " + windowKey));
+        return window.getRequestCount() <= limit.maxRequests();
     }
 
     /**
@@ -72,13 +67,13 @@ public class RateLimiter {
      * 내림으로 계산하면 안내받은 초만큼 기다린 클라이언트가 아직 윈도우 안에서 다시 거부될 수 있다.
      */
     public long retryAfterSeconds(RateLimitCategory category, String key) {
-        Window current = windows.get(windowKey(category, key));
-        if (current == null) {
-            return limits.get(category).window().toSeconds();
-        }
-        Duration remaining = Duration.between(clock.instant(), current.expiresAt());
-        long remainingSeconds = (remaining.toMillis() + 999) / 1000;
-        return Math.max(1, remainingSeconds);
+        return rateLimitWindowRepository.findById(windowKey(category, key))
+                .map(window -> {
+                    Duration remaining = Duration.between(LocalDateTime.now(clock), window.getWindowExpiresAt());
+                    long remainingSeconds = (remaining.toMillis() + 999) / 1000;
+                    return Math.max(1, remainingSeconds);
+                })
+                .orElseGet(() -> limits.get(category).window().toSeconds());
     }
 
     /**
@@ -89,8 +84,5 @@ public class RateLimiter {
     }
 
     private record Limit(int maxRequests, Duration window) {
-    }
-
-    private record Window(Instant expiresAt, int count) {
     }
 }

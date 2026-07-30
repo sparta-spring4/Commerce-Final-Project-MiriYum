@@ -13,19 +13,25 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 요청 제한 필터가 실제 HTTP 응답 수준에서 동작하는지 확인한다.
+ * 요청 제한 필터가 실제 HTTP 응답 수준에서, 그리고 실제 MySQL(Testcontainers) 위에서
+ * 동작하는지 확인한다. H2는 {@link RateLimitWindowRepository}의 원자적 upsert 문법
+ * (MySQL 전용 {@code ON DUPLICATE KEY UPDATE})을 지원하지 않아 증거로 쓰지 않는다
+ * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014).
  */
+@Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
-            "spring.autoconfigure.exclude=org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
-            "spring.datasource.url=jdbc:h2:mem:rate-limit-filter-test;DB_CLOSE_DELAY=-1",
-            "spring.datasource.driver-class-name=org.h2.Driver",
-            "spring.jpa.hibernate.ddl-auto=create-drop",
+            "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.rate-limit.sign-up.max-requests=5",
             "miriyum.rate-limit.sign-up.window-seconds=600",
@@ -38,6 +44,16 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
         })
 @AutoConfigureMockMvc
 class RateLimitFilterTest {
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -61,8 +77,9 @@ class RateLimitFilterTest {
     @DisplayName("제한 대상이 아닌 경로(로그아웃)는 요청 제한을 받지 않는다")
     void doesNotLimitUnlistedEndpoints() throws Exception {
         // 로그아웃은 목록에 없으므로 몇 번을 호출해도 429가 아니라(401/403 등) 다른 결과여야 한다.
+        RequestPostProcessor ip = withRemoteAddr("10.0.0.3");
         for (int i = 0; i < 5; i++) {
-            mockMvc.perform(delete("/api/v1/consumer-auth/sessions/current"))
+            mockMvc.perform(delete("/api/v1/consumer-auth/sessions/current").with(ip))
                     .andExpect(result -> {
                         int status = result.getResponse().getStatus();
                         if (status == 429) {

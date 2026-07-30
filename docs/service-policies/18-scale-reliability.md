@@ -364,3 +364,4 @@
 | 2026-07-27 | SCALE-006·SCALE-014 | 2차 MVP 통합 검색·추천을 QueryDSL·MySQL 직접 조회로 확정하고 캐시·AI·검색 엔진·메시지 브로커를 제외 | 확정 | [ADR-007](../adr/ADR-007-unified-search-mysql.md)의 날짜별 개정과 검증 게이트를 반영 |
 | 2026-07-27 | SCALE-004·SCALE-009~SCALE-012 | 대기열·외부 효과·캐시·PG·알림의 세부 규칙을 고도화 활성화 시점에 적용하고 기능별 MySQL durable task를 사용 | 확정 | 조기 분산 인프라 도입 없이 실패 복구 계약을 보존 |
 | 2026-07-30 | SCALE-005 | `auth-account` 인증 전 요청 세부 적용: 회원가입·로그인은 IP당 10분에 5회, 토큰 재발급은 IP당 1분에 30회(신규), CSRF 준비는 IP당 1분에 60회 | 확정 | 팀 논의로 요청 성격별 남용 위험과 정상 자동 호출 빈도를 구분해 적용 |
+| 2026-07-30 | SCALE-005 | `auth-account` 요청 제한 카운터를 JVM 메모리에서 MySQL(`rate_limit_windows`, 원자적 upsert)로 전환, Testcontainers MySQL로 동시 요청 검증(이슈 #63) | 확정 | 1·2차 MVP도 로컬 메모리로 최종 판정하지 않는다는 요구를 충족 |
