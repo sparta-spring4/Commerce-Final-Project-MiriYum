@@ -130,6 +130,18 @@ class CatalogRepositoryIT {
     }
 
     @Test
+    @DisplayName("code 형식 CHECK가 잘못된 코드를 거부한다(소문자·숫자시작·특수문자·한글·빈문자열·50자초과)")
+    void invalidCodeFormatViolatesCheckConstraint() {
+        for (String badCode : new String[] {"korean", "1ABC", "AB-C", "한식", "", "A".repeat(51)}) {
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                    "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
+                    badCode, "형식 위반", true, 50))
+                    .as("bad code=[%s]", badCode)
+                    .isInstanceOf(DataAccessException.class);
+        }
+    }
+
+    @Test
     @DisplayName("code 비교는 대소문자를 구분한다")
     void codeComparisonIsCaseSensitive() {
         assertThat(storeCategoryRepository.existsByCodeAndActiveTrue("KOREAN")).isTrue();

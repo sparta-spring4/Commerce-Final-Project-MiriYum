@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.store.entity.MenuCategory;
@@ -106,5 +107,13 @@ class CatalogServiceTest {
     @DisplayName("findUnknownCodes는 빈 입력에 저장소 조회 없이 빈 목록을 반환한다")
     void findUnknownCodes_emptyInput_returnsEmpty() {
         assertThat(catalogService.findUnknownCodes(CatalogKind.STORE_TAG, List.of())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findUnknownCodes는 null 원소를 잘못된 입력으로 거부한다")
+    void findUnknownCodes_nullElement_throws() {
+        java.util.List<String> withNull = java.util.Arrays.asList("RICE", null);
+        assertThatThrownBy(() -> catalogService.findUnknownCodes(CatalogKind.MENU_CATEGORY, withNull))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

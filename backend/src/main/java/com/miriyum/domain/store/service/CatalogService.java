@@ -7,6 +7,7 @@ import com.miriyum.domain.store.repository.StoreCategoryRepository;
 import com.miriyum.domain.store.repository.StoreTagRepository;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -55,12 +56,22 @@ public class CatalogService {
     /**
      * 입력 코드 중 종류 안의 활성 catalog에 없는 코드를 반환한다.
      *
-     * @return 미승인·비활성 코드 목록. 비어 있으면 전부 유효하다.
+     * <p>계약: {@code codes}가 {@code null}이거나 비어 있으면 빈 목록(전부 유효)을 반환한다. {@code codes}에
+     * {@code null} 원소가 있으면 잘못된 입력으로 보고 {@link IllegalArgumentException}으로 거부한다. 반환
+     * 목록에는 절대 {@code null}이 포함되지 않으므로 소비 도메인의 오류 메시지 생성·직렬화에서 안전하다.
+     * ({@link #isActiveCode} 단건 조회는 {@code null}에 {@code false}를 반환하는 관대한 질의이지만, 다건
+     * 검증은 오류 매핑 입력이므로 {@code null} 원소를 조용히 통과시키지 않는다.)</p>
+     *
+     * @return 미승인·비활성 코드 목록(모두 non-null). 비어 있으면 전부 유효하다.
+     * @throws IllegalArgumentException {@code codes}에 {@code null} 원소가 있는 경우
      */
     @Transactional(readOnly = true)
     public List<String> findUnknownCodes(CatalogKind kind, Collection<String> codes) {
         if (codes == null || codes.isEmpty()) {
             return List.of();
+        }
+        if (codes.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("codes must not contain null");
         }
         Set<String> knownCodes = repositoryFor(kind).findByActiveTrueAndCodeIn(codes).stream()
                 .map(CatalogEntry::getCode)
