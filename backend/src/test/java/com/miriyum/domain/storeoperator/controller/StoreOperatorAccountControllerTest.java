@@ -82,7 +82,8 @@ class StoreOperatorAccountControllerTest {
         mockMvc.perform(get("/api/v1/store-operator-accounts/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.displayName").value("미리윰식당"));
+                .andExpect(jsonPath("$.data.displayName").value("미리윰식당"))
+                .andExpect(jsonPath("$.data.phoneNumber").doesNotExist());
     }
 
     @Test
