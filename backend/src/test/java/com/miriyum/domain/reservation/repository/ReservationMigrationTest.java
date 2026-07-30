@@ -263,6 +263,24 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("예약과 수용량 버킷의 종료 시각은 DB에서도 시작 시각보다 늦어야 한다")
+    void rejectsNonIncreasingServiceTimeInDatabase() {
+        // when & then
+        assertThatThrownBy(() -> insertReservationWithServiceTime(
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 0)
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_service_time");
+        assertThatThrownBy(() -> insertCapacityBucketWithServiceTime(
+                LocalTime.of(18, 0),
+                LocalTime.of(17, 30)
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_capacity_buckets_service_time");
+    }
+
+    @Test
     @DisplayName("예약 인원 합계와 정책 버전은 DB에서도 유효해야 한다")
     void rejectsInvalidPartyAndPolicyVersion() {
         // when & then
@@ -427,6 +445,67 @@ class ReservationMigrationTest {
                 status,
                 cancelledAt,
                 fulfilledAt
+        );
+    }
+
+    private void insertReservationWithServiceTime(
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO reservations (
+                            consumer_account_id,
+                            store_id,
+                            store_name_snapshot,
+                            service_date,
+                            start_time,
+                            end_time,
+                            adult_count,
+                            child_count,
+                            infant_count,
+                            capacity_policy_version,
+                            reservation_policy_version,
+                            status,
+                            created_at
+                        )
+                        VALUES (
+                            ?, ?, '미리윰', '2026-08-01', ?, ?,
+                            2, 1, 1, 1, 1, 'CONFIRMED', '2026-08-01 01:00:00.000000'
+                        )
+                        """,
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                startTime,
+                endTime
+        );
+    }
+
+    private void insertCapacityBucketWithServiceTime(
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO reservation_capacity_buckets (
+                            store_id,
+                            service_date,
+                            start_time,
+                            end_time,
+                            max_people,
+                            max_teams,
+                            occupied_people,
+                            occupied_teams,
+                            min_party_size,
+                            max_party_size,
+                            infants_allowed,
+                            policy_version
+                        )
+                        VALUES (?, '2026-08-01', ?, ?, 20, 5, 0, 0, 1, 8, TRUE, 1)
+                        """,
+                STORE_ID,
+                startTime,
+                endTime
         );
     }
 

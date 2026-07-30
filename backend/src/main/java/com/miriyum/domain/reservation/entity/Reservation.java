@@ -88,6 +88,7 @@ public class Reservation {
         this.serviceDate = requireNonNull(serviceDate, "serviceDate");
         this.startTime = requireNonNull(startTime, "startTime");
         this.endTime = requireNonNull(endTime, "endTime");
+        requireIncreasingServiceTime(this.startTime, this.endTime);
         this.party = requireNonNull(party, "party");
         this.capacityPolicyVersion = requirePositive(capacityPolicyVersion, "capacityPolicyVersion");
         this.reservationPolicyVersion = requirePositive(
@@ -201,6 +202,12 @@ public class Reservation {
             throw new IllegalArgumentException(fieldName + " must not be null");
         }
         return value;
+    }
+
+    private static void requireIncreasingServiceTime(LocalTime startTime, LocalTime endTime) {
+        if (!startTime.isBefore(endTime)) {
+            throw new IllegalArgumentException("endTime must be after startTime");
+        }
     }
 
     private static String requireStoreName(String value) {

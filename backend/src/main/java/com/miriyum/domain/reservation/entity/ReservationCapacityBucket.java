@@ -78,6 +78,7 @@ public class ReservationCapacityBucket {
         this.serviceDate = requireNonNull(serviceDate, "serviceDate");
         this.startTime = requireNonNull(startTime, "startTime");
         this.endTime = requireNonNull(endTime, "endTime");
+        requireIncreasingServiceTime(this.startTime, this.endTime);
         this.maxPeople = requireNonNegative(maxPeople, "maxPeople");
         this.maxTeams = requireNonNegative(maxTeams, "maxTeams");
         this.occupiedPeople = requireNonNegative(occupiedPeople, "occupiedPeople");
@@ -179,6 +180,12 @@ public class ReservationCapacityBucket {
             throw new IllegalArgumentException(fieldName + " must not be null");
         }
         return value;
+    }
+
+    private static void requireIncreasingServiceTime(LocalTime startTime, LocalTime endTime) {
+        if (!startTime.isBefore(endTime)) {
+            throw new IllegalArgumentException("endTime must be after startTime");
+        }
     }
 
     public Long getId() {

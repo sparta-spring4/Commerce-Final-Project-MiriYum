@@ -190,4 +190,36 @@ class ReservationCapacityBucketTest {
                 )
         );
     }
+
+    @Test
+    @DisplayName("종료 시각이 시작 시각보다 늦지 않으면 수용량 버킷 생성을 거부한다")
+    void rejectsNonIncreasingServiceTime() {
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                capacityBucket(LocalTime.of(18, 0), LocalTime.of(18, 0))
+        );
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                capacityBucket(LocalTime.of(18, 0), LocalTime.of(17, 30))
+        );
+    }
+
+    private static ReservationCapacityBucket capacityBucket(
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        return ReservationCapacityBucket.create(
+                22L,
+                LocalDate.of(2026, 8, 1),
+                startTime,
+                endTime,
+                20,
+                5,
+                0,
+                0,
+                1,
+                4,
+                true,
+                3L
+        );
+    }
 }

@@ -216,6 +216,22 @@ class ReservationTest {
         ));
     }
 
+    @Test
+    @DisplayName("종료 시각이 시작 시각보다 늦지 않으면 예약 생성을 거부한다")
+    void rejectsNonIncreasingServiceTime() {
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
+                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
+                LocalTime.of(18, 0), LocalTime.of(18, 0),
+                PartyComposition.of(2, 1, 0), 3L, 5L, CREATED_AT
+        ));
+        assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
+                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
+                LocalTime.of(18, 0), LocalTime.of(17, 30),
+                PartyComposition.of(2, 1, 0), 3L, 5L, CREATED_AT
+        ));
+    }
+
     private static Reservation createConfirmedReservation() {
         return createReservation(11L, 22L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT);
     }
