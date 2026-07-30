@@ -1,6 +1,7 @@
 package com.miriyum.global.idempotency;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,5 +31,19 @@ class RequestFingerprintTest {
     void of_isLowercaseHex64() {
         // when & then
         assertThat(RequestFingerprint.of("anything")).matches("^[0-9a-f]{64}$");
+    }
+
+    @Test
+    @DisplayName("null 또는 빈 정규 입력은 거부한다")
+    void of_nullOrBlankInput_rejected() {
+        // given
+        String[] invalidInputs = {null, "", " ", "\t"};
+
+        // when & then
+        for (String invalidInput : invalidInputs) {
+            assertThatThrownBy(() -> RequestFingerprint.of(invalidInput))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("canonicalInput");
+        }
     }
 }

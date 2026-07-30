@@ -28,19 +28,19 @@ db/migration/V4__create_idempotency_commands.sql
 
 ## TDD 단계
 
-1. **RED 단위** `IdempotencyKeyTest` — 유효 UUID 통과·소문자 정규화, 누락 `COMMON_003`, 비-UUID·중괄호·앞뒤 공백·길이≠36 `COMMON_004`. `RequestFingerprintTest` — 같은 입력 동일 해시, 리소스 ID 다르면 다른 해시.
+1. **RED 단위** `IdempotencyKeyTest` — 유효 UUID 통과·소문자 정규화, 누락 `COMMON_003`, 비-UUID·중괄호·앞뒤 공백·길이≠36 `COMMON_004`. `RequestFingerprintTest` — 같은 입력 동일 해시, 리소스 ID 다르면 다른 해시, null·blank 정규 입력 거부.
 2. **GREEN** — 위 값 타입 + `IdempotencyRecordRepository`(JdbcTemplate upsert/FOR UPDATE/update) + `IdempotencyExecutor`(MANDATORY, affected-rows 기반 신규 선점 판정, 재생·충돌·불변식 위반 분기).
-3. **Migration** `V4__create_idempotency_commands.sql` — E-007 `idempotency_command_id` 대리 PK + 업무 복합 UNIQUE, 식별 컬럼 `as_cs`, result_* nullable, `TEXT` payload.
+3. **Migration** `V4__create_idempotency_commands.sql` — E-007 `idempotency_command_id` 대리 PK + 업무 복합 UNIQUE, `PROCESSING`/`SUCCEEDED` 상태와 성공 결과 CHECK, 식별 컬럼 `as_cs`, result_* nullable, `TEXT` payload.
 4. **의존성** — production `spring-boot-starter-flyway`, test `testcontainers-junit-jupiter`/`testcontainers-mysql`은 #40의 공통 기반을 재사용한다.
 5. **RED→GREEN 통합** `IdempotencyExecutorIT` (Testcontainers MySQL) — 테스트 전용 `@Transactional`(READ_COMMITTED, timeout=5) 래퍼 Service + 합성 명령으로:
-   - Flyway가 `idempotency_commands`·유일 제약 재현
+   - Flyway가 `idempotency_commands`·유일 제약·상태/성공 결과 CHECK 재현
    - fresh: 콜백 1회, 행 `SUCCEEDED`+result 저장
    - replay(같은 키·지문): 콜백 미실행, 저장 결과 반환
    - 다른 지문·같은 키: `COMMON_007`(409), 기존 결과 미변경
    - 콜백 예외: 멱등 행 포함 전체 롤백(행 미존재)
    - `MANDATORY`: 트랜잭션 없이 호출 시 예외
    - **동시성:** 두 스레드 같은 키·지문 동시 호출(래치로 동시 시작) → 콜백 `AtomicInteger` **정확히 1**, 두 결과 동일
-6. **리뷰 보강** — `IdempotencyCommand`가 DB 입력 계약을 생성 시 검증하고, 필수 결과가 누락된 `SUCCEEDED` 재생을 불변식 위반으로 거부한다. 동시성 IT는 모든 작업이 준비 장벽에 도달한 뒤 시작하며, DB 시각은 `CURRENT_TIMESTAMP(6)`을 사용한다.
+6. **리뷰 보강** — `IdempotencyCommand`와 `RequestFingerprint`가 입력 계약을 생성 시 검증하고, DB CHECK가 허용 상태와 `SUCCEEDED` 필수 성공 결과를 강제한다. 동시성 IT는 선점 트랜잭션을 열린 상태로 유지해 실제 유일키 경합을 검증하며, DB 시각은 `CURRENT_TIMESTAMP(6)`을 사용한다.
 
 ## 검증 명령
 
@@ -50,7 +50,7 @@ cd backend
 git diff --check
 ```
 
-2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **122 tests, 0 failed, 0 errors,
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **124 tests, 0 failed, 0 errors,
 0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
 clean-start를 확인했다.
 

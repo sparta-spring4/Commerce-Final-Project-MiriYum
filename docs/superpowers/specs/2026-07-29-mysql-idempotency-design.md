@@ -51,6 +51,8 @@
 | `updated_at` | `DATETIME(6)` | NOT NULL | 갱신 시각 |
 
 - **UNIQUE `uk_idempotency_commands` (principal_namespace, principal_id, command_type, idempotency_key)** — E-007 "명령 멱등 기록" 업무 유일성. 선점과 최종 방어선이며 애플리케이션 사전 조회로 대신하지 않는다(E-007).
+- **CHECK `ck_idempotency_commands_status`** — 상태를 `PROCESSING`, `SUCCEEDED` 두 값으로 제한한다.
+- **CHECK `ck_idempotency_commands_succeeded_result`** — `SUCCEEDED`이면 `result_http_status`와 `result_response_code`가 반드시 존재해야 한다.
 - 식별 컬럼은 대소문자 구분(`utf8mb4_0900_as_cs`)이며 key는 validator에서 소문자 정규화한다(같은 UUID의 이중 표기 방지).
 - `result_*`는 `PROCESSING` 삽입 시 NULL, `SUCCEEDED` 확정 시 채운다. 커밋 후에는 `FAILED` 행이 존재하지 않는다(실패는 롤백).
 - HTTP 원문 바이트·인증 헤더·타임스탬프·원본 JSON 전체는 저장하지 않는다(C-006).
@@ -83,6 +85,7 @@ com.miriyum.global.idempotency
 ### `RequestFingerprint`
 
 - HTTP method + 정규화 route + 실제 path parameter + 정렬·정규화한 승인 query + 승인 body field(예: 예약일·시간대·매장·인원·선택 메뉴·수량)를 **정규 문자열**로 결합.
+- null·blank 정규 입력은 구성 누락으로 간주해 해시 생성 전에 거부한다.
 - 같은 route template이라도 대상 리소스 ID가 다르면 다른 지문.
 - 정규 문자열의 **SHA-256 hex(64자)**를 저장한다. 비밀번호·JWT·Refresh Token·원본 JSON 전체는 포함하지 않는다.
 - 어떤 필드가 지문에 들어가는지는 각 명령의 기능별 계약이 정하며, 도메인이 정규 입력을 구성해 전달한다.
@@ -145,13 +148,14 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 ### 단위 테스트
 
 - `IdempotencyKey`: 유효 UUID 통과·소문자 정규화, 누락 `COMMON_003`, 비-UUID·중괄호·공백·길이 오류 `COMMON_004`.
-- `RequestFingerprint`: 같은 입력 → 같은 해시(결정적), 리소스 ID 다르면 다른 해시.
+- `RequestFingerprint`: 같은 입력 → 같은 해시(결정적), 리소스 ID 다르면 다른 해시, null·blank 입력 거부.
 
 ### 통합 테스트 (Testcontainers MySQL, `mysql:8.0.40`)
 
 테스트 전용 `@Transactional` 래퍼 Service(테스트 소스)에서 `execute()`를 호출한다.
 
-- Flyway가 `idempotency_commands`와 유일 제약을 재현한다.
+- Flyway가 `idempotency_commands`와 유일 제약·상태/성공 결과 CHECK를 재현한다.
+- 알 수 없는 상태와 필수 성공 결과가 누락된 `SUCCEEDED` 행은 DB가 거부한다.
 - fresh: 업무 콜백 1회 실행, 행이 `SUCCEEDED`와 result 저장.
 - replay(같은 키·지문): 콜백 미실행, 저장된 결과 반환.
 - 다른 지문·같은 키: `COMMON_007`(409), 기존 결과 미변경.
@@ -167,7 +171,7 @@ cd backend
 git diff --check
 ```
 
-2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **122 tests, 0 failed, 0 errors,
+2026-07-30 rebase 후 로컬 Docker 환경에서 `clean build --offline`로 **124 tests, 0 failed, 0 errors,
 0 skipped**를 수집했다. Testcontainers MySQL 8.0.40에서 Flyway `V1`→`V2`→`V3`→`V4`
 clean-start를 확인했다.
 

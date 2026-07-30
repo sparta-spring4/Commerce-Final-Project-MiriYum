@@ -22,8 +22,12 @@ public final class RequestFingerprint {
      *
      * @param canonicalInput 도메인이 구성한 정규 입력
      * @return 소문자 SHA-256 hex 문자열
+     * @throws IllegalArgumentException 정규 입력이 {@code null}이거나 blank인 경우
      */
     public static String of(String canonicalInput) {
+        if (canonicalInput == null || canonicalInput.isBlank()) {
+            throw new IllegalArgumentException("canonicalInput must not be null or blank");
+        }
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")
                     .digest(canonicalInput.getBytes(StandardCharsets.UTF_8));

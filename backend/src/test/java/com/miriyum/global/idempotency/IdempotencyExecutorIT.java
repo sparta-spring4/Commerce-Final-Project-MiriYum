@@ -22,6 +22,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
@@ -175,15 +176,23 @@ class IdempotencyExecutorIT {
     }
 
     @Test
-    @DisplayName("결과가 누락된 SUCCEEDED 발견은 불변식 위반으로 실패한다")
-    void succeededWithoutResult_invariantViolation() {
-        // given
-        insertRaw(FINGERPRINT, IdempotencyStatus.SUCCEEDED);
-
+    @DisplayName("허용되지 않은 처리 상태는 DB CHECK 제약으로 거부한다")
+    void invalidProcessingStatus_rejectedByConstraint() {
         // when & then
-        assertThatThrownBy(() -> runner.run(command(FINGERPRINT), result()))
-                .isInstanceOf(IllegalStateException.class);
-        assertThat(runner.callbackCount()).isZero();
+        assertThatThrownBy(
+                        () -> insertRaw(FINGERPRINT, "UNKNOWN", null, null))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_idempotency_commands_status");
+    }
+
+    @Test
+    @DisplayName("필수 결과가 누락된 SUCCEEDED는 DB CHECK 제약으로 거부한다")
+    void succeededWithoutResult_rejectedByConstraint() {
+        // when & then
+        assertThatThrownBy(
+                        () -> insertRaw(FINGERPRINT, "SUCCEEDED", null, null))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_idempotency_commands_succeeded_result");
     }
 
     @Test
@@ -243,12 +252,26 @@ class IdempotencyExecutorIT {
     }
 
     private void insertRaw(String fingerprint, IdempotencyStatus statusValue) {
+        Integer resultHttpStatus =
+                statusValue == IdempotencyStatus.SUCCEEDED ? 201 : null;
+        String resultResponseCode =
+                statusValue == IdempotencyStatus.SUCCEEDED ? "SUCCESS" : null;
+        insertRaw(fingerprint, statusValue.name(), resultHttpStatus, resultResponseCode);
+    }
+
+    private void insertRaw(
+            String fingerprint,
+            String statusValue,
+            Integer resultHttpStatus,
+            String resultResponseCode
+    ) {
         jdbcTemplate.update(
                 "INSERT INTO idempotency_commands "
                         + "(principal_namespace, principal_id, command_type, idempotency_key, request_fingerprint, "
-                        + "processing_status, created_at, updated_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))",
-                NS, PRINCIPAL_ID, COMMAND, KEY, fingerprint, statusValue.name());
+                        + "processing_status, result_http_status, result_response_code, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))",
+                NS, PRINCIPAL_ID, COMMAND, KEY, fingerprint, statusValue,
+                resultHttpStatus, resultResponseCode);
     }
 
     private String status() {

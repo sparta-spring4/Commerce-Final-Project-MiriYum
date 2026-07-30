@@ -20,5 +20,15 @@ CREATE TABLE idempotency_commands (
     updated_at             DATETIME(6)  NOT NULL,
     PRIMARY KEY (idempotency_command_id),
     CONSTRAINT uk_idempotency_commands
-        UNIQUE (principal_namespace, principal_id, command_type, idempotency_key)
+        UNIQUE (principal_namespace, principal_id, command_type, idempotency_key),
+    CONSTRAINT ck_idempotency_commands_status
+        CHECK (processing_status IN ('PROCESSING', 'SUCCEEDED')),
+    CONSTRAINT ck_idempotency_commands_succeeded_result
+        CHECK (
+            processing_status <> 'SUCCEEDED'
+            OR (
+                result_http_status IS NOT NULL
+                AND result_response_code IS NOT NULL
+            )
+        )
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
