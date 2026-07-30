@@ -2,6 +2,7 @@ package com.miriyum.domain.consumer.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
@@ -10,11 +11,17 @@ import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,8 +34,15 @@ class ConsumerAccountServiceTest {
 
     private static final Long ACCOUNT_ID = 1L;
 
+    private static final IdempotencyCommand UPDATE_COMMAND = new IdempotencyCommand(
+            "consumer", ACCOUNT_ID, "CONSUMER_ACCOUNT_UPDATE",
+            "123e4567-e89b-12d3-a456-426614174000", "a".repeat(64));
+
     @Mock
     private ConsumerAccountRepository consumerAccountRepository;
+
+    @Mock
+    private IdempotencyExecutor idempotencyExecutor;
 
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-29T00:00:00Z"), ZoneOffset.UTC);
@@ -37,7 +51,8 @@ class ConsumerAccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        consumerAccountService = new ConsumerAccountService(consumerAccountRepository, nicknamePolicy, clock);
+        consumerAccountService = new ConsumerAccountService(
+                consumerAccountRepository, nicknamePolicy, clock, idempotencyExecutor);
     }
 
     @Test
@@ -46,13 +61,15 @@ class ConsumerAccountServiceTest {
         // given
         ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
 
         // when
-        ConsumerAccountResponse response =
-                consumerAccountService.updateName(ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임"));
+        consumerAccountService.updateName(UPDATE_COMMAND, ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임"));
 
         // then
-        assertThat(response.nickname()).isEqualTo("새닉네임");
+        assertThat(businessResult.get().data())
+                .isInstanceOfSatisfying(ConsumerAccountResponse.class,
+                        response -> assertThat(response.nickname()).isEqualTo("새닉네임"));
         assertThat(account.getNicknameChangedAt()).isEqualTo(LocalDateTime.now(clock));
     }
 
@@ -64,9 +81,11 @@ class ConsumerAccountServiceTest {
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(3));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
+        runBusinessWorkOnExecute();
+
         // when & then
-        assertThatThrownBy(() ->
-                consumerAccountService.updateName(ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임")))
+        assertThatThrownBy(() -> consumerAccountService.updateName(
+                UPDATE_COMMAND, ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임")))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AccountErrorCode.NICKNAME_CHANGE_TOO_SOON);
@@ -80,9 +99,11 @@ class ConsumerAccountServiceTest {
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(3));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
+        runBusinessWorkOnExecute();
+
         // when & then
-        assertThatThrownBy(() ->
-                consumerAccountService.updateName(ACCOUNT_ID, new ConsumerAccountUpdateRequest("!")))
+        assertThatThrownBy(() -> consumerAccountService.updateName(
+                UPDATE_COMMAND, ACCOUNT_ID, new ConsumerAccountUpdateRequest("!")))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AccountErrorCode.NICKNAME_CHANGE_TOO_SOON);
@@ -95,12 +116,30 @@ class ConsumerAccountServiceTest {
         ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(8));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
 
         // when
-        ConsumerAccountResponse response =
-                consumerAccountService.updateName(ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임"));
+        consumerAccountService.updateName(UPDATE_COMMAND, ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임"));
 
         // then
-        assertThat(response.nickname()).isEqualTo("새닉네임");
+        assertThat(businessResult.get().data())
+                .isInstanceOfSatisfying(ConsumerAccountResponse.class,
+                        response -> assertThat(response.nickname()).isEqualTo("새닉네임"));
+    }
+
+    /**
+     * 실제 {@code IdempotencyExecutor}는 DB 선점이 필요하므로, 단위 테스트에서는 업무 콜백만
+     * 그대로 실행하고 그 결과를 꺼내볼 수 있게 대역을 세운다(신규 선점 경로와 같다).
+     */
+    private AtomicReference<BusinessResult<?>> runBusinessWorkOnExecute() {
+        AtomicReference<BusinessResult<?>> captured = new AtomicReference<>();
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> businessWork = invocation.getArgument(1);
+            BusinessResult<?> result = businessWork.get();
+            captured.set(result);
+            return new IdempotentOutcome(false, result.httpStatus(), result.responseCode(),
+                    result.resourceType(), result.resourceId(), null);
+        });
+        return captured;
     }
 }
