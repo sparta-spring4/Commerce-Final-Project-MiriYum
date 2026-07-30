@@ -13,7 +13,7 @@
 - Issue #33만 구현하며 #34 영업시간, #35 메뉴, #36 공개 검색, #37·#38 프론트엔드는 포함하지 않는다.
 - `miriyum.identity-verification.dev-stub-enabled` 기본값과 `MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED` 설정은 변경하지 않는다.
 - 작업은 최신 `dev`와 PR #60 운영자 인증 계약을 결합한 `codex/33-store-core` 전용 worktree에서 수행한다.
-- PR #60의 실제 `V5__create_store_operator_accounts.sql`은 로컬 선행 기준에서 `V6__create_store_operator_accounts.sql`로 정렬하고, #33 migration은 V7을 사용한다.
+- PR #60 병합본의 `V6__create_store_operator_accounts.sql`과 후속 `V7__widen_consumer_password_hash.sql`을 보존하고, #33 migration은 V8을 사용한다.
 - 요청의 운영자 ID·role은 받지 않고 `AuthenticatedPrincipal(TokenNamespace.STORE_OPERATOR, accountId)`만 사용한다.
 - 인증·catalog·멱등 도메인의 Entity나 Repository를 직접 참조하지 않고 공개 Service·DTO만 사용한다.
 - 매장 등록·수정은 `IdempotencyExecutor`와 동일한 `READ_COMMITTED` 트랜잭션에서 결과를 확정한다.
@@ -69,7 +69,7 @@ backend/src/main/java/com/miriyum/domain/store/core/service/StoreCommandFingerpr
 backend/src/main/java/com/miriyum/domain/store/core/service/StoreCommandResult.java
 backend/src/main/java/com/miriyum/domain/store/core/service/StoreManagementView.java
 backend/src/main/java/com/miriyum/domain/store/core/service/StoreService.java
-backend/src/main/resources/db/migration/V7__create_stores.sql
+backend/src/main/resources/db/migration/V8__create_stores.sql
 ```
 
 ### New test files
@@ -241,7 +241,7 @@ git commit -m "feat(store): add store aggregate invariants"
 ### Task 2: MySQL Schema and Repository Constraints
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V7__create_stores.sql`
+- Create: `backend/src/main/resources/db/migration/V8__create_stores.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/store/core/repository/StoreRepository.java`
 - Test: `backend/src/test/java/com/miriyum/domain/store/core/repository/StoreRepositoryIT.java`
 
@@ -328,9 +328,9 @@ class StoreRepositoryIT {
 .\gradlew.bat test --tests "com.miriyum.domain.store.core.repository.StoreRepositoryIT"
 ```
 
-Expected: Flyway/JPA failure because V7 and `StoreRepository` do not exist.
+Expected: Flyway/JPA failure because V8 and `StoreRepository` do not exist.
 
-- [ ] **Step 3: Create V7 migration**
+- [ ] **Step 3: Create V8 migration**
 
 Create `stores` with:
 
@@ -409,7 +409,7 @@ Expected with Docker: all tests pass with zero skipped. Without Docker: Testcont
 - [ ] **Step 6: Commit persistence**
 
 ```powershell
-git add backend/src/main/resources/db/migration/V7__create_stores.sql backend/src/main/java/com/miriyum/domain/store/core/repository backend/src/test/java/com/miriyum/domain/store/core/repository
+git add backend/src/main/resources/db/migration/V8__create_stores.sql backend/src/main/java/com/miriyum/domain/store/core/repository backend/src/test/java/com/miriyum/domain/store/core/repository
 git commit -m "feat(store): persist stores with active business uniqueness"
 ```
 
@@ -1046,7 +1046,7 @@ Expected:
 - no whitespace errors;
 - no frontend, schedule, menu, search, or identity-stub setting changes;
 - after PR #60 is merged and the branch is rebased, no auth dependency commit or V6 file appears in the #33 diff;
-- only #33 implementation, tests, V7 migration, and its design/plan evidence remain.
+- only #33 implementation, tests, V8 migration, and its design/plan evidence remain.
 
 - [ ] **Step 6: Commit verification additions**
 
