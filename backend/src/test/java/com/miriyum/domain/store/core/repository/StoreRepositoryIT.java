@@ -10,17 +10,26 @@ import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
 import jakarta.persistence.EntityManager;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -53,8 +62,18 @@ class StoreRepositoryIT {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private IdempotencyExecutor idempotencyExecutor;
+
     @BeforeEach
     void cleanRows() {
+        jdbcTemplate.execute("DELETE FROM idempotency_commands");
         storeRepository.deleteAll();
         storeOperatorAccountRepository.deleteAll();
     }
@@ -128,6 +147,94 @@ class StoreRepositoryIT {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    @DisplayName("동시에 같은 사업자등록번호를 등록해도 활성 매장은 하나만 생성된다")
+    void concurrentRegistrationCreatesExactlyOneActiveStore() throws Exception {
+        long firstOperator = createOperator("first@example.com");
+        long secondOperator = createOperator("second@example.com");
+        CountDownLatch startGate = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<RegistrationResult> first = executor.submit(
+                    () -> registerAfterGate(startGate, firstOperator));
+            Future<RegistrationResult> second = executor.submit(
+                    () -> registerAfterGate(startGate, secondOperator));
+
+            startGate.countDown();
+            List<RegistrationResult> results = List.of(first.get(), second.get());
+
+            assertThat(results).filteredOn(RegistrationResult::success).hasSize(1);
+            assertThat(results)
+                    .filteredOn(result ->
+                            result.failure() instanceof DataIntegrityViolationException)
+                    .hasSize(1);
+        }
+
+        Integer activeCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM stores
+                        WHERE active_business_registration_number = ?
+                        """,
+                Integer.class,
+                "1234567890");
+        assertThat(activeCount).isOne();
+    }
+
+    @Test
+    @DisplayName("매장 등록 트랜잭션 실패 시 매장과 멱등 기록이 함께 롤백된다")
+    void storeAndIdempotencyRecordRollBackTogether() {
+        long operatorId = createOperator("owner@example.com");
+        IdempotencyCommand command = new IdempotencyCommand(
+                "store-operator",
+                operatorId,
+                "STORE_REGISTER",
+                "550e8400-e29b-41d4-a716-446655440000",
+                "a".repeat(64));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(ignored ->
+                idempotencyExecutor.execute(command, () -> {
+                    storeRepository.saveAndFlush(
+                            store(operatorId, "1234567890", Set.of()));
+                    throw new IllegalStateException("force rollback");
+                })))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("force rollback");
+
+        Integer storeCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM stores
+                        WHERE business_registration_number = ?
+                        """,
+                Integer.class,
+                "1234567890");
+        Integer commandCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM idempotency_commands
+                        WHERE command_type = 'STORE_REGISTER'
+                        """,
+                Integer.class);
+        assertThat(storeCount).isZero();
+        assertThat(commandCount).isZero();
+    }
+
+    private RegistrationResult registerAfterGate(
+            CountDownLatch startGate,
+            long operatorId
+    ) throws InterruptedException {
+        startGate.await();
+        try {
+            transactionTemplate.executeWithoutResult(ignored ->
+                    storeRepository.saveAndFlush(
+                            store(operatorId, "1234567890", Set.of())));
+            return new RegistrationResult(true, null);
+        } catch (RuntimeException exception) {
+            return new RegistrationResult(false, exception);
+        }
+    }
+
     private long createOperator(String email) {
         return storeOperatorAccountRepository.saveAndFlush(
                 StoreOperatorAccount.create(email, "hashed", "운영자")).getId();
@@ -147,5 +254,11 @@ class StoreRepositoryIT {
                 true,
                 true,
                 true);
+    }
+
+    private record RegistrationResult(
+            boolean success,
+            RuntimeException failure
+    ) {
     }
 }
