@@ -1,8 +1,8 @@
 # Store Menu Versioning and Publication Design
 
-**Date:** 2026-07-31  
-**Issue:** #35  
-**Base:** `codex/33-store-core`  
+**Date:** 2026-07-31
+**Issue:** #35
+**Base:** `codex/33-store-core`
 **Scope:** store-operator menu management backend for the first MVP
 
 ## Goal
