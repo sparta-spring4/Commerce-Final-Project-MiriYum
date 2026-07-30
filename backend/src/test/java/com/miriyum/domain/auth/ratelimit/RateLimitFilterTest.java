@@ -3,16 +3,22 @@ package com.miriyum.domain.auth.ratelimit;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpMethod;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -107,6 +113,72 @@ class RateLimitFilterTest {
                         throw new AssertionError("토큰 재발급은 CSRF 준비와 별개 등급이라 429를 받으면 안 됩니다.");
                     }
                 });
+    }
+
+    @ParameterizedTest(name = "{2} {1}은 {0} 등급 한도({3})에서 정확히 허용/거부를 나눈다")
+    @MethodSource("limitedRoutes")
+    @DisplayName("8개 제한 대상 경로 각각이 기대한 등급의 한도로 정확히 매핑된다")
+    void eachLimitedRouteEnforcesItsOwnCategoryLimit(
+            String categoryName, String path, String method, int maxRequests, String uniqueSuffix
+    ) throws Exception {
+        // given: 이 경로만 쓰는 전용 IP로 한도만큼 요청
+        RequestPostProcessor ip = withRemoteAddr("10.1." + uniqueSuffix + ".1");
+        for (int i = 0; i < maxRequests; i++) {
+            int attempt = i + 1;
+            mockMvc.perform(request(HttpMethod.valueOf(method), path).with(ip))
+                    .andExpect(result -> {
+                        int status = result.getResponse().getStatus();
+                        if (status == 429) {
+                            throw new AssertionError(
+                                    method + " " + path + "은 한도(" + maxRequests + ") 이내인 "
+                                            + attempt + "번째 요청에서 429를 받으면 안 됩니다.");
+                        }
+                    });
+        }
+
+        // when & then: 한도를 넘는 다음 요청은 429여야 한다
+        mockMvc.perform(request(HttpMethod.valueOf(method), path).with(ip))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    private static Stream<Arguments> limitedRoutes() {
+        return Stream.of(
+                Arguments.of("SIGN_UP", "/api/v1/consumer-auth/accounts", "POST", 5, "1"),
+                Arguments.of("LOGIN", "/api/v1/consumer-auth/sessions", "POST", 5, "2"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/consumer-auth/token-refreshes", "POST", 30, "3"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/consumer-auth/csrf-tokens/current", "GET", 2, "4"),
+                Arguments.of("SIGN_UP", "/api/v1/store-operator-auth/accounts", "POST", 5, "5"),
+                Arguments.of("LOGIN", "/api/v1/store-operator-auth/sessions", "POST", 5, "6"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operator-auth/token-refreshes", "POST", 30, "7"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operator-auth/csrf-tokens/current", "GET", 2, "8")
+        );
+    }
+
+    @Test
+    @DisplayName("같은 IP의 일반 사용자 가입과 매장 운영자 가입은 같은 등급 한도를 합쳐서 나눠 쓴다")
+    void consumerAndStoreOperatorSignUpShareTheSameSignUpLimit() throws Exception {
+        // given: 회원가입 한도(5회)를 Consumer 3회 + StoreOperator 2회로 나눠 소비
+        RequestPostProcessor ip = withRemoteAddr("10.2.0.1");
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/api/v1/consumer-auth/accounts").with(ip))
+                    .andExpect(result -> {
+                        if (result.getResponse().getStatus() == 429) {
+                            throw new AssertionError("한도(5) 이내인데 Consumer 가입이 429를 받았습니다.");
+                        }
+                    });
+        }
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(post("/api/v1/store-operator-auth/accounts").with(ip))
+                    .andExpect(result -> {
+                        if (result.getResponse().getStatus() == 429) {
+                            throw new AssertionError("한도(5) 이내인데 StoreOperator 가입이 429를 받았습니다.");
+                        }
+                    });
+        }
+
+        // when & then: 두 namespace를 합쳐 6번째 요청이므로 어느 쪽이든 429여야 한다
+        mockMvc.perform(post("/api/v1/consumer-auth/accounts").with(ip))
+                .andExpect(status().isTooManyRequests());
     }
 
     private static RequestPostProcessor withRemoteAddr(String remoteAddr) {

@@ -8,8 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * 등급({@link RateLimitCategory})+키(IP+경로)별 고정 윈도우 요청 횟수를 MySQL(
- * {@link RateLimitWindowRepository})에서 제한한다. 등급별 기본값은
+ * 등급({@link RateLimitCategory})+키(호출자가 넘긴 값, 보통 IP)별 고정 윈도우 요청 횟수를
+ * MySQL({@link RateLimitWindowRepository})에서 제한한다. 등급별 기본값은
  * {@code docs/service-policies/18-scale-reliability.md} SCALE-005의 2026-07-30 팀 결정을
  * 따르며, {@code application.yml}의 프로퍼티로 조정할 수 있다.
  *
@@ -49,9 +49,12 @@ public class RateLimiter {
     }
 
     /**
-     * 이번 요청을 허용할 수 있으면 카운트를 올리고 {@code true}를 반환한다.
+     * 이번 요청을 허용할 수 있으면 카운트를 올려 허용 결과를 반환하고, 한도를 넘었으면
+     * 거부와 함께 같은 조회 결과에서 계산한 Retry-After를 반환한다. 허용 여부 판정과
+     * 남은 시간 계산을 하나의 저장소 조회에서 함께 처리해, 두 값을 별도로 조회하는 동안
+     * 다른 요청이 윈도우를 갱신해 값이 어긋나는 경합을 없앤다.
      */
-    public boolean tryConsume(RateLimitCategory category, String key) {
+    public RateLimitResult tryConsume(RateLimitCategory category, String key) {
         Limit limit = limits.get(category);
         LocalDateTime now = LocalDateTime.now(clock);
         String windowKey = windowKey(category, key);
@@ -59,21 +62,22 @@ public class RateLimiter {
         rateLimitWindowRepository.upsertWindow(windowKey, now, now.plus(limit.window()));
         RateLimitWindow window = rateLimitWindowRepository.findById(windowKey)
                 .orElseThrow(() -> new IllegalStateException("upsert 직후 윈도우를 찾을 수 없습니다: " + windowKey));
-        return window.getRequestCount() <= limit.maxRequests();
+
+        if (window.getRequestCount() <= limit.maxRequests()) {
+            return RateLimitResult.allow();
+        }
+        return RateLimitResult.reject(retryAfterSeconds(now, window.getWindowExpiresAt()));
     }
 
     /**
      * 현재 윈도우가 끝나 다시 요청할 수 있게 되기까지 남은 초(최소 1초, 올림)를 반환한다.
-     * 내림으로 계산하면 안내받은 초만큼 기다린 클라이언트가 아직 윈도우 안에서 다시 거부될 수 있다.
+     * {@code Duration.toMillis()}로 먼저 밀리초로 내림하면 그보다 더 작은 나머지(나노초)가
+     * 반올림 전에 사라져 진짜 올림이 되지 않으므로, 초·나노초 성분을 직접 써서 올림한다.
      */
-    public long retryAfterSeconds(RateLimitCategory category, String key) {
-        return rateLimitWindowRepository.findById(windowKey(category, key))
-                .map(window -> {
-                    Duration remaining = Duration.between(LocalDateTime.now(clock), window.getWindowExpiresAt());
-                    long remainingSeconds = (remaining.toMillis() + 999) / 1000;
-                    return Math.max(1, remainingSeconds);
-                })
-                .orElseGet(() -> limits.get(category).window().toSeconds());
+    private long retryAfterSeconds(LocalDateTime now, LocalDateTime windowExpiresAt) {
+        Duration remaining = Duration.between(now, windowExpiresAt);
+        long remainingSeconds = remaining.getSeconds() + (remaining.getNano() > 0 ? 1 : 0);
+        return Math.max(1, remainingSeconds);
     }
 
     /**
@@ -84,5 +88,16 @@ public class RateLimiter {
     }
 
     private record Limit(int maxRequests, Duration window) {
+    }
+
+    public record RateLimitResult(boolean allowed, long retryAfterSeconds) {
+
+        public static RateLimitResult allow() {
+            return new RateLimitResult(true, 0);
+        }
+
+        private static RateLimitResult reject(long retryAfterSeconds) {
+            return new RateLimitResult(false, retryAfterSeconds);
+        }
     }
 }

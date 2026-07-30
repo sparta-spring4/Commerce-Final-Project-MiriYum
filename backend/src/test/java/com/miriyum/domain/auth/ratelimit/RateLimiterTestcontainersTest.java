@@ -66,7 +66,7 @@ class RateLimiterTestcontainersTest {
     void concurrentRequestsForSameKeyNeverExceedTheLimit() throws InterruptedException {
         // given: LOGIN 한도는 20, 스레드 50개가 동시에 같은 키로 요청
         int threadCount = 50;
-        String key = "concurrency-test-ip:POST /api/v1/consumer-auth/sessions";
+        String key = "concurrency-test-ip";
         CountDownLatch readyLatch = new CountDownLatch(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
         AtomicInteger allowedCount = new AtomicInteger();
@@ -78,7 +78,7 @@ class RateLimiterTestcontainersTest {
                     readyLatch.countDown();
                     try {
                         startLatch.await();
-                        if (rateLimiter.tryConsume(RateLimitCategory.LOGIN, key)) {
+                        if (rateLimiter.tryConsume(RateLimitCategory.LOGIN, key).allowed()) {
                             allowedCount.incrementAndGet();
                         }
                     } catch (InterruptedException exception) {
