@@ -18,5 +18,5 @@ miriyum:
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   rate-limit:
-    max-requests: ${MIRIYUM_RATE_LIMIT_MAX_REQUESTS:10}
-    window-seconds: ${MIRIYUM_RATE_LIMIT_WINDOW_SECONDS:60}
+    max-requests: ${MIRIYUM_RATE_LIMIT_MAX_REQUESTS:5}
+    window-seconds: ${MIRIYUM_RATE_LIMIT_WINDOW_SECONDS:600}
