@@ -21,7 +21,7 @@ service/CatalogService, CatalogKind, CatalogItemView
 controller/CatalogController (3 GET)
 dto/response/CatalogItemResponse, CatalogListResponse
 config/CatalogSecurityConfig (store 전용 공개 SecurityFilterChain)
-db/migration/V2026_07_29_01__create_catalog_tables.sql, V2026_07_29_02__seed_catalog_mvp1.sql
+db/migration/V2__create_catalog_tables.sql, V3__seed_catalog_mvp1.sql
 ```
 
 ## TDD 단계

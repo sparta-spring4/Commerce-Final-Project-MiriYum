@@ -174,12 +174,12 @@ com.miriyum.domain.store
    - 1번 `SecurityConfig`를 수정하지 않고 `com.miriyum.domain.store.config.CatalogSecurityConfig`에 **store 도메인 전용 공개 체인**(`@Order(0)`)을 추가한다.
    - 세 GET 경로만 `permitAll`, 같은 경로의 다른 method·그 밖의 요청은 `denyAll`로 1번 `JwtAuthenticationEntryPoint`(401)·`JwtAccessDeniedHandler`(403) 공통 `ErrorResponse` envelope를 사용한다.
    - `CatalogSecurityIT`가 실제 SecurityFilterChain으로 익명 GET 200·익명 401·인증 403·유사경로/다른 method 비공개를 검증한다. `CatalogControllerTest`(`standaloneSetup`)는 응답 형태 전용으로 보완한다.
-2. **Flyway 버전 규약.** 공유 `db/migration`은 날짜 기반 `V2026_07_29_01__` 형식으로 도메인 간 충돌을 회피한다.
+2. **Flyway 버전 규약(팀 확정 2026-07-30).** 공유 `db/migration`은 dev의 `V1__` 형식과 통일해 **순차 번호**(`V1` 인증 → `V2` catalog create → `V3` catalog seed → `V4` 멱등 #57)를 사용한다. 날짜형은 채택하지 않는다. 병렬 PR은 다음 번호를 수동 조율하며, 미병합 상태에서만 번호를 재정렬한다.
 
 ## Flyway migration 설계
 
-- `V2026_07_29_01__create_catalog_tables.sql` — `store_category`·`menu_category`·`store_tag`(각 code PK·`as_cs`·`CHECK(sort_order>0)`).
-- `V2026_07_29_02__seed_catalog_mvp1.sql` — 승인 seed 8/10/8. seed 버전 v1은 주석으로만 기록(런타임 버전 테이블 없음).
+- `V2__create_catalog_tables.sql` — `store_category`·`menu_category`·`store_tag`(각 code PK·`as_cs`·`CHECK(sort_order>0)`·`CHECK(REGEXP_LIKE(code,'^[A-Z][A-Z0-9_]{1,49}$','c'))`).
+- `V3__seed_catalog_mvp1.sql` — 승인 seed 8/10/8. seed 버전 v1은 주석으로만 기록(런타임 버전 테이블 없음).
 - 빈 MySQL clean-start로 재현. 적용(병합) 후 파일 불변, 변경은 새 migration.
 
 ## 의존성
@@ -198,12 +198,13 @@ testImplementation("org.testcontainers:testcontainers-mysql")
 
 ## 테스트 설계
 
-- 단위 `CatalogServiceTest`(Mockito, 3 repository mock): 종류별 저장소 선택, 정렬 매핑, `isActiveCode`(활성/미승인/null), `findUnknownCodes`(미승인만/전부유효/빈입력).
+- 단위 `CatalogServiceTest`(Mockito, 3 repository mock): 종류별 저장소 선택, 정렬 매핑, `isActiveCode`(활성/미승인/null), `findUnknownCodes`(미승인만/전부유효/빈입력/**null 원소 거부 `IllegalArgumentException`**).
 - slice `CatalogControllerTest`(`standaloneSetup`): 세 경로 200, 공통 봉투·필드·정렬·추가필드 없음. Security 미포함이므로 응답 형태 검증 전용(인증 주장 없음).
 - 통합 `CatalogRepositoryIT`(Testcontainers MySQL, `@ServiceConnection`, `@Transactional` 롤백, `mysql:8.0.40`, `miriyum.jwt.*` 제공):
   - 세 종류 전체 seed의 code·표시명·순서(`containsExactly`)
   - 자연키 code 중복 raw insert → 무결성 예외
   - `sort_order<=0`이 CHECK 제약으로 거부(`DataAccessException` + 제약명; MySQL CHECK=HY000→`UncategorizedSQLException`)
+  - **code 형식 CHECK** 거부: 소문자·숫자시작·특수문자·한글·빈문자열·50자초과(`REGEXP_LIKE ^[A-Z][A-Z0-9_]{1,49}$`)
   - 대소문자 구분(`korean` 미매치, `KOREAN` 매치)
   - 비활성 항목 활성 조회 제외
 - 보안 `CatalogSecurityIT`(실제 SecurityFilterChain, `@AutoConfigureMockMvc`, Testcontainers MySQL, `miriyum.jwt.*` 제공):
@@ -236,6 +237,6 @@ Issue #31 원안 allowlist(`com/miriyum/store/catalog/**`)는 ADR-001·ownership
 
 - seed 거버넌스: 승인된 8/10/8 외 값을 임의 추가·변경하지 않는다. 추가·비활성은 새 migration으로만.
 - Security 경계: 1번 중앙 `SecurityConfig`를 수정하지 않고 store 도메인 전용 공개 체인만 추가한다. 실제 필터체인 통합 테스트(`CatalogSecurityIT`)로 익명 200·401·403 공통 envelope를 검증한다.
-- Flyway 번호: 날짜 기반 규약으로 병렬 도메인 충돌 회피.
+- Flyway 번호: 순차 규약(`V1`/`V2`/`V3`, dev `V1__`과 통일, 팀 확정 2026-07-30). 병렬 PR은 다음 번호를 수동 조율하고 미병합 시에만 재정렬.
 - 자연키 merge: `repository.save`가 merge로 동작하므로 런타임 신규 삽입 경로가 없는 seed 전용 catalog에 한해 안전하며, DB PK가 무결성 backstop이다.
 - 롤백: 문제 시 #31 PR 전체를 되돌릴 수 있다. 도메인별 임시 catalog 하드코딩은 롤백 대안이 아니다.
