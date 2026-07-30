@@ -11,23 +11,40 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * 회원가입 API가 실제 HTTP 응답 수준에서 본인확인 스텁 경계를 지키는지 확인한다.
+ *
+ * <p>가입 요청은 {@code RateLimitFilter}를 거치며 MySQL 전용 원자적 upsert 문법을 쓰므로
+ * H2가 아니라 Testcontainers MySQL을 사용한다({@code docs/service-policies/18-scale-reliability.md}
+ * SCALE-014, 이슈 #63).</p>
  */
+@Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
-            "spring.autoconfigure.exclude=org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
-            "spring.datasource.url=jdbc:h2:mem:store-operator-auth-controller-test;DB_CLOSE_DELAY=-1",
-            "spring.datasource.driver-class-name=org.h2.Driver",
-            "spring.jpa.hibernate.ddl-auto=create-drop",
+            "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.identity-verification.dev-stub-enabled=false"
         })
 @AutoConfigureMockMvc
 class StoreOperatorAuthControllerTest {
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
 
     @Autowired
     private MockMvc mockMvc;
