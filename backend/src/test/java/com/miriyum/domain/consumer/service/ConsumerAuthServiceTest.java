@@ -123,7 +123,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("비밀번호가 일치하지 않으면 AUTH_005를 던진다")
     void rejectsLoginWithWrongPassword() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
         LoginRequest request = new LoginRequest("user@example.com", "wrong-password");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("wrong-password", "hashed")).willReturn(false);
@@ -139,7 +139,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
         LoginRequest request = new LoginRequest("user@example.com", "password123");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);

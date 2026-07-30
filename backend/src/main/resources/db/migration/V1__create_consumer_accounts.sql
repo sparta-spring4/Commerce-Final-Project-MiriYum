@@ -2,7 +2,7 @@ CREATE TABLE consumer_accounts (
     consumer_account_id BIGINT NOT NULL AUTO_INCREMENT,
     email VARCHAR(254) NOT NULL,
     password_hash VARCHAR(72) NOT NULL,
-    phone VARCHAR(512) NOT NULL,
+    phone VARCHAR(512) NULL,
     name VARCHAR(20) NOT NULL,
     nickname_changed_at DATETIME(6) NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',

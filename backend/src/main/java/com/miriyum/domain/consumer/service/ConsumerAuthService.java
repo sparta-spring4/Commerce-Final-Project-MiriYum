@@ -26,8 +26,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>이메일·본인확인 참조는 제공업체가 아직 선정되지 않아({@code docs/specs/auth-account/spec.md}
  * "공급자 중립 확인 참조" 절) 실제 서버 대 서버 검증을 연결하지 못한다. 이번 구현은 개발용으로
- * Bean Validation의 공백 검사만 통과하면 유효한 것으로 간주하는 임시 처리이며, 실제 제공업체가
- * 선정되면 참조를 해석·검증하는 어댑터로 교체해야 한다.</p>
+ * Bean Validation의 공백 검사만 통과하면 유효한 것으로 간주하는 임시 처리다.</p>
+ *
+ * <p>{@code identityVerificationReference}는 불투명 일회성 참조일 뿐 전화번호가 아니므로,
+ * 실제 전화번호로 해석해주는 어댑터가 생기기 전까지 계정의 {@code phone}은 채우지 않고 BLOCKED로
+ * 남겨둔다(비어 있음). 참조값을 전화번호 자리에 대신 저장하거나 응답으로 노출하지 않는다.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -46,14 +49,10 @@ public class ConsumerAuthService {
         if (consumerAccountRepository.existsByEmail(request.email())) {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
-        if (consumerAccountRepository.existsByPhone(request.identityVerificationReference())) {
-            throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
-        }
 
         String normalizedNickname = nicknamePolicy.normalize(request.nickname());
         String passwordHash = passwordEncoder.encode(request.password());
-        ConsumerAccount account = ConsumerAccount.create(
-                request.email(), passwordHash, request.identityVerificationReference(), normalizedNickname);
+        ConsumerAccount account = ConsumerAccount.create(request.email(), passwordHash, normalizedNickname);
 
         ConsumerAccount saved;
         try {
@@ -67,13 +66,8 @@ public class ConsumerAuthService {
 
     private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
         String message = exception.getMostSpecificCause().getMessage();
-        if (message != null) {
-            if (message.contains("uk_consumer_accounts_email")) {
-                return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
-            }
-            if (message.contains("uk_consumer_accounts_phone")) {
-                return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
-            }
+        if (message != null && message.contains("uk_consumer_accounts_email")) {
+            return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
         return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }

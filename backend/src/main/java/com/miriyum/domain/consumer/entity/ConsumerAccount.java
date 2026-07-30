@@ -40,8 +40,7 @@ public class ConsumerAccount extends BaseEntity {
     @Column(name = "password_hash", nullable = false, length = 72)
     private String passwordHash;
 
-    @NonNull
-    @Column(name = "phone", nullable = false, length = 512)
+    @Column(name = "phone", length = 512)
     private String phone;
 
     @NonNull
@@ -55,8 +54,8 @@ public class ConsumerAccount extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     private ConsumerAccountStatus status;
 
-    public static ConsumerAccount create(String email, String passwordHash, String phone, String name) {
-        ConsumerAccount account = new ConsumerAccount(email, passwordHash, phone, name);
+    public static ConsumerAccount create(String email, String passwordHash, String name) {
+        ConsumerAccount account = new ConsumerAccount(email, passwordHash, name);
         account.status = ConsumerAccountStatus.ACTIVE;
         return account;
     }

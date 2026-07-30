@@ -10,9 +10,9 @@ import jakarta.validation.constraints.Size;
  * {@code ConsumerSignUpRequest}와 대응한다.
  *
  * <p>승인된 스키마에는 전화번호 필드가 없다. 본인확인 제공업체가 아직 선정되지 않아, 서버가
- * {@code identityVerificationReference}를 해석해 실제 전화번호를 얻어오는 대신 이번 구현은
- * 그 참조값 자체를 전화번호 자리에 임시로 저장한다. 실제 제공업체가 선정되면 참조를 해석·검증하는
- * 어댑터로 교체해야 한다.</p>
+ * {@code identityVerificationReference}를 해석해 실제 전화번호를 얻어오는 어댑터가 없으므로
+ * 이번 구현은 형식(공백 아님)만 검증하고 계정의 전화번호는 채우지 않는다(BLOCKED). 실제
+ * 제공업체가 선정되면 참조를 해석·검증하는 어댑터로 교체해야 한다.</p>
  */
 public record ConsumerSignUpRequest(
 

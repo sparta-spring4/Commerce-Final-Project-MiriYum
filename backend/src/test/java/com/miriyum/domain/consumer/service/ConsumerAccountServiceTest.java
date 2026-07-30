@@ -44,7 +44,7 @@ class ConsumerAccountServiceTest {
     @DisplayName("닉네임을 한 번도 바꾼 적 없으면 바로 변경할 수 있다")
     void allowsFirstNicknameChange() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "이전닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
         // when
@@ -60,7 +60,7 @@ class ConsumerAccountServiceTest {
     @DisplayName("7일 이내에 다시 바꾸려 하면 ACCOUNT_005를 던진다")
     void rejectsNicknameChangeWithinCooldown() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "이전닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(3));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
@@ -76,7 +76,7 @@ class ConsumerAccountServiceTest {
     @DisplayName("7일 이내면 닉네임 형식이 잘못됐어도 형식 오류가 아니라 ACCOUNT_005를 던진다")
     void cooldownCheckTakesPriorityOverFormatValidation() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "이전닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(3));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
@@ -92,7 +92,7 @@ class ConsumerAccountServiceTest {
     @DisplayName("7일이 지나면 다시 바꿀 수 있다")
     void allowsNicknameChangeAfterCooldown() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "010-1234-5678", "이전닉네임");
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "이전닉네임");
         account.changeName("이전닉네임", LocalDateTime.now(clock).minusDays(8));
         given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
 
