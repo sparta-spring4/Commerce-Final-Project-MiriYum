@@ -62,14 +62,42 @@ class ReservationTest {
     }
 
     @Test
+    @DisplayName("예약 생성 이전 시각으로 취소할 수 없다")
+    void rejectsCancellationBeforeCreation() {
+        Reservation reservation = createConfirmedReservation();
+
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                reservation.cancel(Instant.parse("2026-08-01T00:59:59Z"))
+        );
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getFulfilledAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("예약 생성 이전 시각으로 방문 완료할 수 없다")
+    void rejectsFulfillmentBeforeCreation() {
+        Reservation reservation = createConfirmedReservation();
+
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                reservation.fulfill(Instant.parse("2026-08-01T00:59:59Z"))
+        );
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getFulfilledAt()).isNull();
+    }
+
+    @Test
     @DisplayName("취소된 예약은 방문 완료로 전이할 수 없다")
     void rejectsTransitionFromCancelledToFulfilled() {
         Reservation reservation = createConfirmedReservation();
         reservation.cancel(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -86,8 +114,8 @@ class ReservationTest {
         reservation.fulfill(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -104,8 +132,8 @@ class ReservationTest {
         reservation.cancel(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -121,8 +149,8 @@ class ReservationTest {
         reservation.fulfill(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())

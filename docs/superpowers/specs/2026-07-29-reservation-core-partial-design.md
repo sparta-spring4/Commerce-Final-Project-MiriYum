@@ -114,7 +114,7 @@
 - `cancel(Instant cancelledAt)`
 - `fulfill(Instant fulfilledAt)`
 
-두 메서드는 `CONFIRMED`에서만 성공한다. 이미 `CANCELLED` 또는 `FULFILLED`이면 `ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION)`을 던지고 상태와 종결 시각을 변경하지 않는다. 범용 `changeStatus`와 public setter는 제공하지 않는다.
+두 메서드는 `CONFIRMED`에서만 성공한다. 이미 `CANCELLED` 또는 `FULFILLED`이면 `ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION)`을 던지고 상태와 종결 시각을 변경하지 않는다. 유효한 종결 시각은 `createdAt`과 같거나 그 이후여야 하며, 값이 없거나 `createdAt`보다 이르면 `IllegalArgumentException`으로 거부한다. 상태 검증의 기존 우선순위를 유지하고 종결 시각의 유효성을 필드나 상태 변경 전에 검증하므로, 시각 순서가 유효하지 않으면 상태는 `CONFIRMED`, `cancelledAt`과 `fulfilledAt`은 `null`로 유지된다. 범용 `changeStatus`와 public setter는 제공하지 않는다.
 
 연락처 원문, 알림 대상 참조와 연락 가능 상태 필드는 이번 증분에 추가하지 않는다. 인증 도메인이 참조 형식·상태 의미·최대 길이를 공개하고 `dev`에 병합한 뒤 예약 스냅샷에 추가한다.
 
@@ -224,6 +224,7 @@ Repository는 `JpaRepository<Entity, Long>` 기본 경계만 제공한다. 조�
 - `PartyComposition`의 범위와 합계 불변식 검증
 - 예약 생성이 `CONFIRMED`이고 스냅샷을 보존하는지 검증
 - `CONFIRMED → CANCELLED`, `CONFIRMED → FULFILLED` 전이 검증
+- 예약 생성 이전 시각의 취소·방문 완료를 각각 거부하고 상태와 두 종결 시각을 변경하지 않는지 검증
 - 두 종결 상태의 재활성화와 상호 전환 거부 검증
 - 버킷 한도·점유·정책 버전 불변식 검증
 - 배정의 점유 인원과 팀 수 1 불변식 검증

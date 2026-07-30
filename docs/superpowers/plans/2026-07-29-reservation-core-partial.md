@@ -33,7 +33,7 @@
 | `backend/src/main/java/com/miriyum/domain/reservation/exception/ReservationErrorCode.java` | `RESERVATION_001~009` 외부 오류 계약 |
 | `backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationStatus.java` | 승인된 세 예약 상태 |
 | `backend/src/main/java/com/miriyum/domain/reservation/entity/PartyComposition.java` | 성인·아동·영유아 인원 스냅샷과 합계 불변식 |
-| `backend/src/main/java/com/miriyum/domain/reservation/entity/Reservation.java` | 예약 거래 스냅샷과 취소·방문 완료 상태 전이 |
+| `backend/src/main/java/com/miriyum/domain/reservation/entity/Reservation.java` | 예약 거래 스냅샷과 취소·방문 완료 상태 전이 및 종결 시각 순서 불변식 |
 | `backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucket.java` | 구간별 수용량 정책과 현재 점유 스냅샷 |
 | `backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationCapacityAllocation.java` | 예약별 버킷 점유 이력 |
 | `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java` | 예약 기본 JPA 영속성 경계 |
@@ -42,7 +42,7 @@
 | `backend/src/test/java/com/miriyum/domain/reservation/exception/ReservationErrorCodeTest.java` | 오류 HTTP·코드·메시지·중복 검증 |
 | `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationStatusTest.java` | 상태 목록 검증 |
 | `backend/src/test/java/com/miriyum/domain/reservation/entity/PartyCompositionTest.java` | 인원 범위·합계 검증 |
-| `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationTest.java` | 예약 생성·스냅샷·종결 전이 검증 |
+| `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationTest.java` | 예약 생성·스냅샷·종결 전이 및 취소·방문 완료 시각 순서 검증 |
 | `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucketTest.java` | 버킷 한도·점유·정책 버전 검증 |
 | `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCapacityAllocationTest.java` | 점유 인원·팀 1건·정책 버전 검증 |
 
@@ -443,6 +443,8 @@ git commit -m "feat(reservation): 예약 상태와 인원 구성 모델 구현"
 - Consumes: `ReservationStatus`, `PartyComposition`, `ReservationErrorCode.INVALID_STATE_TRANSITION`, `ServiceException`
 - Produces: `Reservation.confirm(...)`, `cancel(Instant)`, `fulfill(Instant)`과 거래 스냅샷 getter
 
+최종 리뷰 보완에서는 취소·방문 완료 시각이 `createdAt`과 같거나 그 이후여야 한다. 취소와 방문 완료 각각에 대해 생성 이전의 리터럴 시각을 전달하는 회귀 테스트를 먼저 추가하고 focused `ReservationTest`가 시각 순서 검증 부재로 실패하는 RED를 확인한 뒤 구현을 수정한다. `requireConfirmed()`를 먼저 호출해 종결 상태의 `ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION)` 우선순위를 유지하고, 종결 시각은 필드와 상태를 변경하기 전에 검증한다. 시각이 없거나 `createdAt`보다 이르면 `IllegalArgumentException`을 던지며 상태는 `CONFIRMED`, 두 종결 시각은 `null`로 유지한다. 상태 전이 오류 테스트는 지원되는 `catchThrowableOfType(ServiceException.class, callable)` 형식을 사용하고 실제 `ServiceException.getErrorCode()`를 계속 검증한다.
+
 - [ ] **Step 1: Write the failing aggregate tests**
 
 ```java
@@ -510,14 +512,42 @@ class ReservationTest {
     }
 
     @Test
+    @DisplayName("예약 생성 이전 시각으로 취소할 수 없다")
+    void rejectsCancellationBeforeCreation() {
+        Reservation reservation = createConfirmedReservation();
+
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                reservation.cancel(Instant.parse("2026-08-01T00:59:59Z"))
+        );
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getFulfilledAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("예약 생성 이전 시각으로 방문 완료할 수 없다")
+    void rejectsFulfillmentBeforeCreation() {
+        Reservation reservation = createConfirmedReservation();
+
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                reservation.fulfill(Instant.parse("2026-08-01T00:59:59Z"))
+        );
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(reservation.getCancelledAt()).isNull();
+        assertThat(reservation.getFulfilledAt()).isNull();
+    }
+
+    @Test
     @DisplayName("취소된 예약은 방문 완료로 전이할 수 없다")
     void rejectsTransitionFromCancelledToFulfilled() {
         Reservation reservation = createConfirmedReservation();
         reservation.cancel(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -534,8 +564,8 @@ class ReservationTest {
         reservation.fulfill(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -552,8 +582,8 @@ class ReservationTest {
         reservation.cancel(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.cancel(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -569,8 +599,8 @@ class ReservationTest {
         reservation.fulfill(TERMINATED_AT);
 
         ServiceException exception = catchThrowableOfType(
-                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60)),
-                ServiceException.class
+                ServiceException.class,
+                () -> reservation.fulfill(TERMINATED_AT.plusSeconds(60))
         );
 
         assertThat(exception.getErrorCode())
@@ -852,12 +882,13 @@ public class Reservation {
      * 확정 예약을 취소 상태로 종결한다.
      *
      * @param cancelledAt 취소 확정 시각
-     * @throws IllegalArgumentException 취소 확정 시각이 없는 경우
+     * @throws IllegalArgumentException 취소 확정 시각이 없거나 예약 생성 시각보다 이른 경우
      * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void cancel(Instant cancelledAt) {
         requireConfirmed();
-        this.cancelledAt = requireNonNull(cancelledAt, "cancelledAt");
+        Instant validatedCancelledAt = requireTerminalTimestamp(cancelledAt, "cancelledAt");
+        this.cancelledAt = validatedCancelledAt;
         this.status = ReservationStatus.CANCELLED;
     }
 
@@ -865,12 +896,13 @@ public class Reservation {
      * 확정 예약을 방문 완료 상태로 종결한다.
      *
      * @param fulfilledAt 방문 완료 확정 시각
-     * @throws IllegalArgumentException 방문 완료 확정 시각이 없는 경우
+     * @throws IllegalArgumentException 방문 완료 확정 시각이 없거나 예약 생성 시각보다 이른 경우
      * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void fulfill(Instant fulfilledAt) {
         requireConfirmed();
-        this.fulfilledAt = requireNonNull(fulfilledAt, "fulfilledAt");
+        Instant validatedFulfilledAt = requireTerminalTimestamp(fulfilledAt, "fulfilledAt");
+        this.fulfilledAt = validatedFulfilledAt;
         this.status = ReservationStatus.FULFILLED;
     }
 
@@ -878,6 +910,14 @@ public class Reservation {
         if (status != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
+    }
+
+    private Instant requireTerminalTimestamp(Instant value, String fieldName) {
+        Instant timestamp = requireNonNull(value, fieldName);
+        if (timestamp.isBefore(createdAt)) {
+            throw new IllegalArgumentException(fieldName + " must not be before createdAt");
+        }
+        return timestamp;
     }
 
     private static Long requirePositive(Long value, String fieldName) {

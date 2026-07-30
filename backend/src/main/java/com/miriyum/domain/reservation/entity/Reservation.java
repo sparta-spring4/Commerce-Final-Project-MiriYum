@@ -144,12 +144,13 @@ public class Reservation {
      * 확정 예약을 취소 상태로 종결한다.
      *
      * @param cancelledAt 취소 확정 시각
-     * @throws IllegalArgumentException 취소 확정 시각이 없는 경우
+     * @throws IllegalArgumentException 취소 확정 시각이 없거나 예약 생성 시각보다 이른 경우
      * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void cancel(Instant cancelledAt) {
         requireConfirmed();
-        this.cancelledAt = requireNonNull(cancelledAt, "cancelledAt");
+        Instant validatedCancelledAt = requireTerminalTimestamp(cancelledAt, "cancelledAt");
+        this.cancelledAt = validatedCancelledAt;
         this.status = ReservationStatus.CANCELLED;
     }
 
@@ -157,12 +158,13 @@ public class Reservation {
      * 확정 예약을 방문 완료 상태로 종결한다.
      *
      * @param fulfilledAt 방문 완료 확정 시각
-     * @throws IllegalArgumentException 방문 완료 확정 시각이 없는 경우
+     * @throws IllegalArgumentException 방문 완료 확정 시각이 없거나 예약 생성 시각보다 이른 경우
      * @throws ServiceException 현재 상태가 확정이 아닌 경우
      */
     public void fulfill(Instant fulfilledAt) {
         requireConfirmed();
-        this.fulfilledAt = requireNonNull(fulfilledAt, "fulfilledAt");
+        Instant validatedFulfilledAt = requireTerminalTimestamp(fulfilledAt, "fulfilledAt");
+        this.fulfilledAt = validatedFulfilledAt;
         this.status = ReservationStatus.FULFILLED;
     }
 
@@ -170,6 +172,14 @@ public class Reservation {
         if (status != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
+    }
+
+    private Instant requireTerminalTimestamp(Instant value, String fieldName) {
+        Instant timestamp = requireNonNull(value, fieldName);
+        if (timestamp.isBefore(createdAt)) {
+            throw new IllegalArgumentException(fieldName + " must not be before createdAt");
+        }
+        return timestamp;
     }
 
     private static Long requirePositive(Long value, String fieldName) {
