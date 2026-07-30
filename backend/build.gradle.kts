@@ -22,12 +22,28 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.flywaydb:flyway-core")
+    implementation("org.springframework.boot:spring-boot-starter-flyway")
     runtimeOnly("org.flywaydb:flyway-mysql")
     runtimeOnly("com.mysql:mysql-connector-j")
 
+    implementation("io.jsonwebtoken:jjwt-api:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
+    runtimeOnly("com.fasterxml.jackson.core:jackson-databind")
+
+    compileOnly(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
+    annotationProcessor("org.projectlombok:lombok")
+
     testImplementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testRuntimeOnly("com.h2database:h2")
+    testCompileOnly(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
+    testCompileOnly("org.projectlombok:lombok")
+    testAnnotationProcessor(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
+    testAnnotationProcessor("org.projectlombok:lombok")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

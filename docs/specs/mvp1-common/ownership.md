@@ -365,7 +365,7 @@
 
 | 팀원 | 소유 도메인·주요 데이터 | 공개 API 최종 관리 | 예약 패키지 경로 | 기능 명세·OpenAPI |
 |---|---|---|---|---|
-| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth` | `docs/specs/auth-account/` |
+| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth`(JWT·쿠키·CSRF·공통 에러코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) | `docs/specs/auth-account/` |
 | 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 자격, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store` | `docs/specs/store-search/` |
 | 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
 | 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.domain.menuhold`, `com.miriyum.domain.pickup` | `docs/specs/menu-hold-pickup/` |
@@ -406,6 +406,10 @@
 ### 2026-07-28 코드 구조 보정
 
 O-009의 데이터·API·파일 소유자와 공동 검토 책임은 변경하지 않는다. 구현 시작 전 코드 규칙을 확정하면서 `application/api`와 `Application Service` 표현을 도메인의 공개 Service 메서드·DTO로 정렬하고, `com.miriyum.booking.*` 예약 경로를 `com.miriyum.domain.*` 아래의 `reservation`, `menuhold`, `pickup`으로 정정했다. 이 보정은 새 계층이나 도메인을 추가하지 않는다.
+
+### 2026-07-29 코드 구조 보정
+
+O-009의 1번 팀원 담당 범위와 소유권은 변경하지 않는다. 1번 팀원의 예약 패키지 경로를 `com.miriyum.domain.auth` 하나에서 `com.miriyum.domain.auth`(JWT 발급·검증, 쿠키·CSRF 처리, 공통 에러 코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) 세 개의 최상위 패키지로 정정했다. 계정 물리 분리 원칙(`docs/02-users-and-permissions.md`)이 폴더 구조에서도 바로 드러나도록 팀 협의로 정했으며, 4번 팀원이 이미 `menuhold`·`pickup` 두 최상위 패키지를 갖는 것과 같은 전례를 따른다. 이 보정은 3계층 구조(ADR-001)와 O-009의 담당자·소유권 배정을 바꾸지 않으며, 새 도메인이나 담당자 재배정을 의미하지 않는다.
 
 ## 2단계 마감
 
