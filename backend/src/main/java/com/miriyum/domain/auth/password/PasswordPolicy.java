@@ -2,7 +2,6 @@ package com.miriyum.domain.auth.password;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import org.springframework.stereotype.Component;
 
@@ -16,14 +15,6 @@ public class PasswordPolicy {
     private static final int MIN_LENGTH = 8;
     private static final int MAX_LENGTH = 64;
     private static final int MIN_CHARACTER_CLASSES = 3;
-
-    /**
-     * BCrypt(<a href="https://github.com/spring-projects/spring-security">spring-security-crypto</a>
-     * {@code BCryptPasswordEncoder})가 처리할 수 있는 최대 UTF-8 byte 길이다. 정책의 64 Unicode
-     * code point 상한과 별개로, 다중 byte 문자가 많으면 이 한도를 넘어 인코딩 시 예외가 날 수 있어
-     * 정책 검증 단계에서 먼저 걸러낸다.
-     */
-    private static final int MAX_ENCODER_BYTE_LENGTH = 72;
 
     /**
      * NFC 정규화 뒤 길이·문자 종류 조합을 검증한다.
@@ -44,12 +35,15 @@ public class PasswordPolicy {
         return Normalizer.normalize(rawPassword, Normalizer.Form.NFC);
     }
 
+    /**
+     * 길이는 UTF-16 code unit이 아니라 유니코드 code point로 센다. AUTH-006이 "코드 포인트 하나를
+     * 한 글자로 계산"하도록 정하므로, 이모지처럼 surrogate pair로 저장되는 문자도 한 글자로 센다.
+     * 인코더의 byte 한도는 {@link Sha256BCryptPasswordEncoder}가 전처리로 흡수하므로 여기서
+     * byte 길이를 따로 제한하지 않는다.
+     */
     private void validate(String password) {
         int length = password.codePointCount(0, password.length());
         if (length < MIN_LENGTH || length > MAX_LENGTH) {
-            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
-        }
-        if (password.getBytes(StandardCharsets.UTF_8).length > MAX_ENCODER_BYTE_LENGTH) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
         if (countCharacterClasses(password) < MIN_CHARACTER_CLASSES) {

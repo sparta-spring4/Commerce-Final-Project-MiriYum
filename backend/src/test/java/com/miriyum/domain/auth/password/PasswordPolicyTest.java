@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -89,12 +90,27 @@ class PasswordPolicyTest {
     }
 
     @Test
-    @DisplayName("64 code point 이내여도 UTF-8로 72바이트를 넘으면 거부한다")
-    void rejectsPasswordExceedingBcryptByteLimitEvenWithinCodePointLimit() {
+    @DisplayName("UTF-8로 72바이트를 넘어도 64 code point 이내면 통과한다")
+    void acceptsMultiBytePasswordWithinCodePointLimitEvenBeyondBcryptByteLimit() {
         // given: 한글 25자(코드포인트 25개, UTF-8 3바이트씩 75바이트) + 영문 대소문자·숫자로 3종 충족
         String password = "가".repeat(25) + "Aa1";
 
-        // when & then: 28 code point로 정책의 8~64자 범위 안이지만 BCrypt의 72바이트 한도를 넘는다
+        // when
+        String normalized = passwordPolicy.normalize(password);
+
+        // then: 28 code point로 AUTH-006의 8~64자 범위 안이므로 BCrypt의 72바이트 한도와 무관하게
+        // 통과해야 한다(byte 한도는 Sha256BCryptPasswordEncoder의 전처리가 흡수한다).
+        assertThat(password.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(72);
+        assertThat(normalized).isEqualTo(password);
+    }
+
+    @Test
+    @DisplayName("64 code point를 넘으면 거부한다")
+    void rejectsPasswordOverSixtyFourCodePoints() {
+        // given: 한글 65자(코드포인트 65개) + 3종 충족
+        String password = "가".repeat(65) + "Aa1";
+
+        // when & then
         assertThatThrownBy(() -> passwordPolicy.normalize(password))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())

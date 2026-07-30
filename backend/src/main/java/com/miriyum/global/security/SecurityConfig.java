@@ -7,8 +7,10 @@ import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.password.Sha256BCryptPasswordEncoder;
 import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -16,6 +18,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -29,9 +32,29 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * 비밀번호 해시 방식을 저장 값 접두사로 구분하는 {@link DelegatingPasswordEncoder}를 쓴다.
+     *
+     * <p>기본 방식은 {@code sha256-bcrypt}다. BCrypt는 72 UTF-8 byte를 넘는 입력을 처리하지 못하는데
+     * AUTH-006은 최대 64 유니코드 코드 포인트를 허용하므로, 한글처럼 코드 포인트당 byte 수가 큰
+     * 비밀번호를 그대로 BCrypt에 넘기면 정책상 유효한 값을 거부하게 된다. 자세한 이유는
+     * {@link Sha256BCryptPasswordEncoder} 참고.</p>
+     *
+     * <p>접두사가 없는 해시는 이 방식을 도입하기 전 개발 DB에 남은 순수 BCrypt 값이므로
+     * {@code setDefaultPasswordEncoderForMatches}로 계속 검증만 되게 둔다. 운영 데이터가 생기기
+     * 전에 정리하고 이 fallback은 제거해야 한다.</p>
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        BCryptPasswordEncoder bcryptPasswordEncoder = new BCryptPasswordEncoder();
+        DelegatingPasswordEncoder passwordEncoder = new DelegatingPasswordEncoder(
+                Sha256BCryptPasswordEncoder.ENCODING_ID,
+                Map.of(
+                        Sha256BCryptPasswordEncoder.ENCODING_ID,
+                        new Sha256BCryptPasswordEncoder(bcryptPasswordEncoder),
+                        "bcrypt", bcryptPasswordEncoder));
+        passwordEncoder.setDefaultPasswordEncoderForMatches(bcryptPasswordEncoder);
+        return passwordEncoder;
     }
 
     @Bean

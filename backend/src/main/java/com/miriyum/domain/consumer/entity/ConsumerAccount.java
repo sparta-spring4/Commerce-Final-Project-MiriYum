@@ -37,7 +37,7 @@ public class ConsumerAccount extends BaseEntity {
     private String email;
 
     @NonNull
-    @Column(name = "password_hash", nullable = false, length = 72)
+    @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
     @Column(name = "phone", length = 512)
