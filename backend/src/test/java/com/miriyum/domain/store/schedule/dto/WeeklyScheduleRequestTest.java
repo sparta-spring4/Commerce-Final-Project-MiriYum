@@ -63,6 +63,22 @@ class WeeklyScheduleRequestTest {
                 .contains("days[0].slots[0].startTime");
     }
 
+    @Test
+    void rejectsTimeWithSecondPrecision() {
+        List<DailyReservationSlotsRequest> days = Arrays.stream(DayOfWeek.values())
+                .map(day -> new DailyReservationSlotsRequest(day, List.of()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        days.set(0, new DailyReservationSlotsRequest(
+                DayOfWeek.MONDAY,
+                List.of(new TimeRangeRequest(
+                        LocalTime.of(9, 0, 30),
+                        LocalTime.of(10, 0)))));
+
+        assertThat(validator.validate(new WeeklyReservationTimeSlotsRequest(days)))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("days[0].slots[0].minutePrecision");
+    }
+
     private List<DailyOperatingScheduleRequest> allOperatingDays() {
         return Arrays.stream(DayOfWeek.values())
                 .map(day -> new DailyOperatingScheduleRequest(

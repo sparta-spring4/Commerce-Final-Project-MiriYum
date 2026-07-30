@@ -1,0 +1,105 @@
+package com.miriyum.domain.store.schedule.service;
+
+import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
+import com.miriyum.domain.store.schedule.dto.DailyReservationSlotsRequest;
+import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
+import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
+import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
+import com.miriyum.global.idempotency.RequestFingerprint;
+import java.time.LocalTime;
+import java.util.Comparator;
+import java.util.List;
+
+public final class StoreScheduleFingerprint {
+
+    private static final Comparator<TimeRangeRequest> RANGE_ORDER =
+            Comparator.comparing(TimeRangeRequest::startTime)
+                    .thenComparing(TimeRangeRequest::endTime);
+
+    private StoreScheduleFingerprint() {
+    }
+
+    public static String forOperating(
+            long storeId,
+            WeeklyOperatingHoursRequest request
+    ) {
+        StringBuilder canonical = new StringBuilder(
+                "PUT|/api/v1/store-operator/stores/{storeId}/operating-hours|");
+        append(canonical, "storeId", Long.toString(storeId));
+        request.days().stream()
+                .sorted(Comparator.comparingInt(day ->
+                        day.dayOfWeek().getValue()))
+                .forEach(day -> appendOperatingDay(canonical, day));
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    public static String forReservation(
+            long storeId,
+            WeeklyReservationTimeSlotsRequest request
+    ) {
+        StringBuilder canonical = new StringBuilder(
+                "PUT|/api/v1/store-operator/stores/{storeId}/reservation-time-slots|");
+        append(canonical, "storeId", Long.toString(storeId));
+        request.days().stream()
+                .sorted(Comparator.comparingInt(day ->
+                        day.dayOfWeek().getValue()))
+                .forEach(day -> appendReservationDay(canonical, day));
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    private static void appendOperatingDay(
+            StringBuilder canonical,
+            DailyOperatingScheduleRequest day
+    ) {
+        String prefix = day.dayOfWeek().name();
+        append(canonical, "day", prefix);
+        appendRanges(canonical, prefix + ".businessHours", day.businessHours());
+        appendRanges(canonical, prefix + ".breakTimes", day.breakTimes());
+    }
+
+    private static void appendReservationDay(
+            StringBuilder canonical,
+            DailyReservationSlotsRequest day
+    ) {
+        String prefix = day.dayOfWeek().name();
+        append(canonical, "day", prefix);
+        appendRanges(canonical, prefix + ".slots", day.slots());
+    }
+
+    private static void appendRanges(
+            StringBuilder canonical,
+            String fieldName,
+            List<TimeRangeRequest> ranges
+    ) {
+        List<TimeRangeRequest> sorted = ranges.stream().sorted(RANGE_ORDER).toList();
+        append(canonical, fieldName + ".size", Integer.toString(sorted.size()));
+        for (int index = 0; index < sorted.size(); index++) {
+            TimeRangeRequest range = sorted.get(index);
+            append(canonical, fieldName + "[" + index + "].start",
+                    canonicalTime(range.startTime()));
+            append(canonical, fieldName + "[" + index + "].end",
+                    canonicalTime(range.endTime()));
+        }
+    }
+
+    private static String canonicalTime(LocalTime time) {
+        return String.format(
+                java.util.Locale.ROOT,
+                "%02d:%02d",
+                time.getHour(),
+                time.getMinute());
+    }
+
+    private static void append(
+            StringBuilder canonical,
+            String fieldName,
+            String value
+    ) {
+        canonical.append(fieldName)
+                .append('=')
+                .append(value.length())
+                .append(':')
+                .append(value)
+                .append('|');
+    }
+}
