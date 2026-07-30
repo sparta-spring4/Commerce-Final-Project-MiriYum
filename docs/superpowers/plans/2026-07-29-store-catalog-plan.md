@@ -26,11 +26,11 @@ db/migration/V2__create_catalog_tables.sql, V3__seed_catalog_mvp1.sql
 
 ## TDD 단계
 
-1. 단위 `CatalogServiceTest`(8) — 종류별 조회·정렬, `isActiveCode`, `findUnknownCodes`(중립 결과, STORE_004는 소비 도메인).
+1. 단위 `CatalogServiceTest`(9) — 종류별 조회·정렬, `isActiveCode`, `findUnknownCodes`(중립 결과 · **null 원소 거부 계약(`IllegalArgumentException`)**, STORE_004는 소비 도메인).
 2. slice `CatalogControllerTest`(3, `standaloneSetup`) — 응답 봉투·필드·정렬·추가필드 없음(응답 형태 전용).
 3. GREEN production — entity(@MappedSuperclass+3)·repository(base+3)·service·controller·dto.
 4. Migration — 종류별 테이블 3개(code 자연 PK, `as_cs` 대소문자 구분, `CHECK(sort_order>0)`), seed 8/10/8. 런타임 버전 테이블 없음(YAGNI). Flyway 순서 `V1`(인증) → catalog create → catalog seed.
-5. 통합 `CatalogRepositoryIT`(7, Testcontainers MySQL) — Flyway clean-start·전체 seed·자연키 유일·**`sort_order<=0` CHECK**·대소문자·비활성.
+5. 통합 `CatalogRepositoryIT`(8, Testcontainers MySQL) — Flyway clean-start·전체 seed·자연키 유일·**`sort_order<=0` CHECK**·**code 형식 CHECK(소문자·숫자시작·특수문자·한글·빈문자열·50자초과 6종 거부)**·대소문자·비활성.
 6. **Security(RED→GREEN)** — `config/CatalogSecurityConfig`에 store 전용 `SecurityFilterChain`(`@Order(0)`) 추가. 1번의 도메인 확장 지점 사용, **중앙 `SecurityConfig` 미수정**.
    - securityMatcher = catalog 경로군(정확한 3경로 + 각 `/**`) → 유사 경로도 이 체인이 소유.
    - `permitAll` = 정확한 세 GET 경로만. 그 밖의 method·유사 경로 = `denyAll`.
@@ -56,7 +56,7 @@ git diff --check
 - [x] 카탈로그·Flyway DB 증거에 H2 미사용 → Testcontainers MySQL만.
 - [x] 공통 응답·예외 재사용.
 
-전체: **97 tests, 0 failed, 0 skipped**. Testcontainers MySQL 실제 실행.
+전체: **99 tests, 0 failed, 0 skipped**. Testcontainers MySQL 실제 실행.
 
 ## 범위 밖·주의
 

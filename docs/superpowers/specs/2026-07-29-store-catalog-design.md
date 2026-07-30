@@ -213,7 +213,7 @@ testImplementation("org.testcontainers:testcontainers-mysql")
   - 인증 유사 경로 403 `AUTH_006` 공통 envelope(JSON)
   - 정확 경로 비허용 method 익명 401·인증 403
   - 잘못된 Bearer·타 namespace(store-operator) 토큰에도 정확한 공개 GET 200(회귀)
-- 회귀: `./gradlew clean build`(Docker 필요). `disabledWithoutDocker`로 Docker 없으면 DB 테스트가 skip되므로, **병합 증거는 Docker 환경에서 0 skipped로 수집**한다. 최신 검증: **97 tests, 0 failed, 0 skipped**.
+- 회귀: `./gradlew clean build`(Docker 필요). `disabledWithoutDocker`로 Docker 없으면 DB 테스트가 skip되므로, **병합 증거는 Docker 환경에서 0 skipped로 수집**한다. 최신 검증: **99 tests, 0 failed, 0 skipped**.
 
 ## 파일 허용 목록 (#31, 정정판)
 
