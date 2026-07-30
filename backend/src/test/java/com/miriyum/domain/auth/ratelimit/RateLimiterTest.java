@@ -12,29 +12,30 @@ import org.junit.jupiter.api.Test;
 class RateLimiterTest {
 
     private static final Instant BASE_TIME = Instant.parse("2026-07-29T00:00:00Z");
+    private static final RateLimitCategory CATEGORY = RateLimitCategory.LOGIN;
 
     @Test
     @DisplayName("한도 이내의 요청은 전부 허용한다")
     void allowsRequestsUpToTheLimit() {
         // given
-        RateLimiter rateLimiter = new RateLimiter(3, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(3, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
 
         // when & then
-        assertThat(rateLimiter.tryConsume("key")).isTrue();
-        assertThat(rateLimiter.tryConsume("key")).isTrue();
-        assertThat(rateLimiter.tryConsume("key")).isTrue();
+        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
+        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
+        assertThat(rateLimiter.tryConsume(CATEGORY, "key")).isTrue();
     }
 
     @Test
     @DisplayName("같은 윈도우 안에서 한도를 초과하면 거부한다")
     void rejectsRequestsOverTheLimitWithinTheSameWindow() {
         // given
-        RateLimiter rateLimiter = new RateLimiter(2, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(2, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
 
         // when
-        rateLimiter.tryConsume("key");
-        rateLimiter.tryConsume("key");
-        boolean thirdAttempt = rateLimiter.tryConsume("key");
+        rateLimiter.tryConsume(CATEGORY, "key");
+        rateLimiter.tryConsume(CATEGORY, "key");
+        boolean thirdAttempt = rateLimiter.tryConsume(CATEGORY, "key");
 
         // then
         assertThat(thirdAttempt).isFalse();
@@ -44,11 +45,11 @@ class RateLimiterTest {
     @DisplayName("키가 다르면 서로 독립적으로 카운트한다")
     void tracksDifferentKeysIndependently() {
         // given
-        RateLimiter rateLimiter = new RateLimiter(1, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, Clock.fixed(BASE_TIME, ZoneOffset.UTC));
 
         // when
-        boolean firstKeyAllowed = rateLimiter.tryConsume("key-a");
-        boolean secondKeyAllowed = rateLimiter.tryConsume("key-b");
+        boolean firstKeyAllowed = rateLimiter.tryConsume(CATEGORY, "key-a");
+        boolean secondKeyAllowed = rateLimiter.tryConsume(CATEGORY, "key-b");
 
         // then
         assertThat(firstKeyAllowed).isTrue();
@@ -60,12 +61,12 @@ class RateLimiterTest {
     void allowsRequestsAgainAfterTheWindowExpires() {
         // given
         TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = new RateLimiter(1, 60, clock);
-        rateLimiter.tryConsume("key");
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
+        rateLimiter.tryConsume(CATEGORY, "key");
 
         // when
         clock.advanceSeconds(61);
-        boolean afterWindow = rateLimiter.tryConsume("key");
+        boolean afterWindow = rateLimiter.tryConsume(CATEGORY, "key");
 
         // then
         assertThat(afterWindow).isTrue();
@@ -76,12 +77,12 @@ class RateLimiterTest {
     void treatsExactExpiryInstantAsExpired() {
         // given
         TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = new RateLimiter(1, 60, clock);
-        rateLimiter.tryConsume("key");
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
+        rateLimiter.tryConsume(CATEGORY, "key");
 
         // when: 정확히 60초 경과(만료 시각과 동일한 순간)
         clock.advance(Duration.ofSeconds(60));
-        boolean allowedAtExactExpiry = rateLimiter.tryConsume("key");
+        boolean allowedAtExactExpiry = rateLimiter.tryConsume(CATEGORY, "key");
 
         // then
         assertThat(allowedAtExactExpiry).isTrue();
@@ -92,15 +93,42 @@ class RateLimiterTest {
     void roundsUpFractionalRemainingSecondsForRetryAfter() {
         // given
         TestClock clock = new TestClock(BASE_TIME);
-        RateLimiter rateLimiter = new RateLimiter(1, 60, clock);
-        rateLimiter.tryConsume("key");
+        RateLimiter rateLimiter = rateLimiterWithLoginLimit(1, 60, clock);
+        rateLimiter.tryConsume(CATEGORY, "key");
 
         // when: 59.5초 경과, 실제로는 0.5초가 남음
         clock.advance(Duration.ofMillis(59_500));
-        rateLimiter.tryConsume("key");
+        rateLimiter.tryConsume(CATEGORY, "key");
 
         // then: 내림(0초)이 아니라 올림(1초)해야 안내받은 시간만큼 기다린 뒤 재시도가 통과한다
-        assertThat(rateLimiter.retryAfterSeconds("key")).isEqualTo(1);
+        assertThat(rateLimiter.retryAfterSeconds(CATEGORY, "key")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("등급마다 다른 한도를 독립적으로 적용한다")
+    void appliesDifferentLimitsPerCategory() {
+        // given
+        RateLimiter rateLimiter = new RateLimiter(
+                1, 60,
+                1, 60,
+                3, 60,
+                5, 60,
+                Clock.fixed(BASE_TIME, ZoneOffset.UTC));
+
+        // when & then: TOKEN_REFRESH는 3회까지 허용하고 SIGN_UP은 1회만 허용한다
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.TOKEN_REFRESH, "shared-ip")).isTrue();
+        assertThat(rateLimiter.tryConsume(RateLimitCategory.SIGN_UP, "shared-ip")).isTrue();
+    }
+
+    private RateLimiter rateLimiterWithLoginLimit(int maxRequests, long windowSeconds, Clock clock) {
+        return new RateLimiter(
+                1, 60,
+                maxRequests, windowSeconds,
+                1, 60,
+                1, 60,
+                clock);
     }
 
     /**

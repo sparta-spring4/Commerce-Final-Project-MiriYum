@@ -7,7 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Set;
+import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -24,15 +24,15 @@ import tools.jackson.databind.ObjectMapper;
  */
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private static final Set<String> LIMITED_REQUESTS = Set.of(
-            "POST /api/v1/consumer-auth/accounts",
-            "POST /api/v1/consumer-auth/sessions",
-            "POST /api/v1/consumer-auth/token-refreshes",
-            "GET /api/v1/consumer-auth/csrf-tokens/current",
-            "POST /api/v1/store-operator-auth/accounts",
-            "POST /api/v1/store-operator-auth/sessions",
-            "POST /api/v1/store-operator-auth/token-refreshes",
-            "GET /api/v1/store-operator-auth/csrf-tokens/current"
+    private static final Map<String, RateLimitCategory> LIMITED_REQUESTS = Map.ofEntries(
+            Map.entry("POST /api/v1/consumer-auth/accounts", RateLimitCategory.SIGN_UP),
+            Map.entry("POST /api/v1/consumer-auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumer-auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
+            Map.entry("GET /api/v1/consumer-auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
+            Map.entry("POST /api/v1/store-operator-auth/accounts", RateLimitCategory.SIGN_UP),
+            Map.entry("POST /api/v1/store-operator-auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operator-auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
+            Map.entry("GET /api/v1/store-operator-auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
     );
 
     private final RateLimiter rateLimiter;
@@ -45,8 +45,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String requestKey = request.getMethod() + " " + request.getRequestURI();
-        return !LIMITED_REQUESTS.contains(requestKey);
+        return !LIMITED_REQUESTS.containsKey(requestKey(request));
     }
 
     @Override
@@ -55,10 +54,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        String key = clientIp(request) + ":" + request.getMethod() + ":" + request.getRequestURI();
+        RateLimitCategory category = LIMITED_REQUESTS.get(requestKey(request));
+        String key = clientIp(request) + ":" + requestKey(request);
 
-        if (!rateLimiter.tryConsume(key)) {
-            long retryAfterSeconds = rateLimiter.retryAfterSeconds(key);
+        if (!rateLimiter.tryConsume(category, key)) {
+            long retryAfterSeconds = rateLimiter.retryAfterSeconds(category, key);
             response.setStatus(CommonErrorCode.TOO_MANY_REQUESTS.getHttpStatus().value());
             response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -68,6 +68,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private String requestKey(HttpServletRequest request) {
+        return request.getMethod() + " " + request.getRequestURI();
     }
 
     private String clientIp(HttpServletRequest request) {
