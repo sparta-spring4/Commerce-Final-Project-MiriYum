@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,7 +27,11 @@ import org.testcontainers.utility.DockerImageName;
  * <p>Docker가 없으면 {@code disabledWithoutDocker}로 자동 비활성화된다(병합 증거는 Docker 환경에서
  * 0 skipped로 수집한다). H2 성공을 MySQL 증거로 대체하지 않는다.</p>
  */
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.jwt.issuer=miriyum"
+        })
 @Testcontainers(disabledWithoutDocker = true)
 @Transactional
 class CatalogRepositoryIT {
@@ -105,6 +110,23 @@ class CatalogRepositoryIT {
                 "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
                 "KOREAN", "한식 중복", true, 99))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("sort_order가 0 이하이면 CHECK 제약으로 거부된다")
+    void nonPositiveSortOrderViolatesCheckConstraint() {
+        // MySQL CHECK 위반은 SQL state HY000이라 Spring이 UncategorizedSQLException으로 변환한다.
+        // 상위 DataAccessException과 제약명으로 실제 CHECK 거부를 검증한다.
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
+                "ZERO_ORDER", "잘못된 순서", true, 0))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_store_category_sort_order");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO store_category (code, display_name, active, sort_order) VALUES (?, ?, ?, ?)",
+                "NEG_ORDER", "잘못된 순서", true, -1))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_store_category_sort_order");
     }
 
     @Test
