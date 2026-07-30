@@ -21,8 +21,11 @@ public record ConsumerSignUpRequest(
         @Size(max = 254)
         String email,
 
+        // 최대 128: @Size는 UTF-16 code unit 기준이라 supplementary 문자가 섞이면 64
+        // code point가 128 code unit까지 늘어날 수 있다. 정확한 64 code point 상한은
+        // PasswordPolicy가 codePointCount로 검증한다.
         @NotBlank
-        @Size(min = 8, max = 64)
+        @Size(min = 8, max = 128)
         String password,
 
         @NotBlank

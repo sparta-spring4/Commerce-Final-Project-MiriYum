@@ -191,6 +191,28 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("NFD로 입력한 비밀번호도 NFC로 정규화한 뒤 비교한다")
+    void loginNormalizesPasswordToNfcBeforeMatching() {
+        // given: 가입 시 NFC로 저장된 비밀번호를, 로그인 시 NFD(자음+모음 분리)로 입력한 상황
+        String nfcPassword = "password123가";
+        String nfdPassword = java.text.Normalizer.normalize(nfcPassword, java.text.Normalizer.Form.NFD);
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        LoginRequest request = new LoginRequest("user@example.com", nfdPassword);
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
+        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
+                .willReturn("access-token-value");
+        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
+                .willReturn("refresh-token-value");
+
+        // when
+        TokenPair tokenPair = consumerAuthService.login(request);
+
+        // then: NFD 원문이 아니라 NFC로 정규화된 값으로 matches()를 호출했기 때문에 성공한다
+        assertThat(tokenPair.accessToken()).isEqualTo("access-token-value");
+    }
+
+    @Test
     @DisplayName("빈 Refresh Token으로 재발급하면 AUTH_007을 던진다")
     void rejectsRefreshWithBlankToken() {
         // when & then

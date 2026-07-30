@@ -101,7 +101,7 @@ public class ConsumerAuthService {
         ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
-        if (!passwordEncoder.matches(request.password(), account.getPasswordHash())) {
+        if (!passwordEncoder.matches(passwordPolicy.toNfc(request.password()), account.getPasswordHash())) {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {

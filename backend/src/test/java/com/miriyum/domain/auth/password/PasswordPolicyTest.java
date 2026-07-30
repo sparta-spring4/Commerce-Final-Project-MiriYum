@@ -87,4 +87,30 @@ class PasswordPolicyTest {
         // then
         assertThat(normalized).isEqualTo(Normalizer.normalize(nfdPassword, Normalizer.Form.NFC));
     }
+
+    @Test
+    @DisplayName("64 code point 이내여도 UTF-8로 72바이트를 넘으면 거부한다")
+    void rejectsPasswordExceedingBcryptByteLimitEvenWithinCodePointLimit() {
+        // given: 한글 25자(코드포인트 25개, UTF-8 3바이트씩 75바이트) + 영문 대소문자·숫자로 3종 충족
+        String password = "가".repeat(25) + "Aa1";
+
+        // when & then: 28 code point로 정책의 8~64자 범위 안이지만 BCrypt의 72바이트 한도를 넘는다
+        assertThatThrownBy(() -> passwordPolicy.normalize(password))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    @DisplayName("toNfc는 검증 없이 NFC 정규화만 한다")
+    void toNfcNormalizesWithoutValidating() {
+        // given: 형식 검증을 통과 못 할 짧은 NFD 문자열(로그인 시 잘못된 비밀번호로 들어올 수 있는 입력)
+        String shortNfd = Normalizer.normalize("가", Normalizer.Form.NFD);
+
+        // when
+        String result = passwordPolicy.toNfc(shortNfd);
+
+        // then: 예외 없이 NFC로만 변환된다
+        assertThat(result).isEqualTo(Normalizer.normalize(shortNfd, Normalizer.Form.NFC));
+    }
 }
