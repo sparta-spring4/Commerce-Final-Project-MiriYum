@@ -52,4 +52,5 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    systemProperty("miriyum.menu.schedule.enabled", "false")
 }
