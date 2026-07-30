@@ -12,6 +12,7 @@ import com.miriyum.domain.reservation.entity.ReservationStatus;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,9 @@ class ReservationMigrationTest {
 
     @Autowired
     private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private Flyway flyway;
 
     @BeforeEach
     void resetRowsAndSeedParents() {
@@ -140,6 +144,15 @@ class ReservationMigrationTest {
                 STORE_ID,
                 STORE_OPERATOR_ACCOUNT_ID
         );
+    }
+
+    @Test
+    @DisplayName("예약 코어 스키마는 Flyway V10으로 적용된다")
+    void appliesReservationCoreAsFlywayV10() {
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "10".equals(String.valueOf(migration.getVersion()))
+                                && "V10__create_reservation_core.sql".equals(migration.getScript()));
     }
 
     @Test
