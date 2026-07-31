@@ -3,10 +3,12 @@ package com.miriyum.domain.store.core.dto;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.ZoneId;
 import java.util.List;
 
 public record StoreCreateRequest(
@@ -33,6 +35,10 @@ public record StoreCreateRequest(
         String address,
 
         @NotBlank
+        @Size(max = 64)
+        String timeZoneId,
+
+        @NotBlank
         @Pattern(regexp = "^[A-Z][A-Z0-9_]{1,49}$")
         String storeCategoryCode,
 
@@ -45,6 +51,21 @@ public record StoreCreateRequest(
 
         @NotNull
         @Valid
-        StoreModesRequest modes
+        StoreModesRequest modes,
+
+        @NotNull
+        @AssertTrue
+        Boolean applicantSelfAttested,
+
+        @NotNull
+        @AssertTrue
+        Boolean requiredTermsAgreed
 ) {
+    @AssertTrue(message = "유효한 IANA 시간대여야 합니다.")
+    public boolean isTimeZoneIdValid() {
+        if (timeZoneId == null || timeZoneId.isBlank()) {
+            return true;
+        }
+        return ZoneId.getAvailableZoneIds().contains(timeZoneId);
+    }
 }

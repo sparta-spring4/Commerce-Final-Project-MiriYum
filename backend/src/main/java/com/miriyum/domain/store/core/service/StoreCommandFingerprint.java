@@ -19,9 +19,18 @@ public final class StoreCommandFingerprint {
         append(canonical, "description", request.description());
         append(canonical, "region", request.region().name());
         append(canonical, "address", request.address());
+        append(canonical, "timeZoneId", request.timeZoneId());
         append(canonical, "storeCategoryCode", request.storeCategoryCode());
         appendSorted(canonical, "tagCodes", request.tagCodes());
         appendModes(canonical, request.modes());
+        append(
+                canonical,
+                "applicantSelfAttested",
+                Boolean.toString(request.applicantSelfAttested()));
+        append(
+                canonical,
+                "requiredTermsAgreed",
+                Boolean.toString(request.requiredTermsAgreed()));
         return RequestFingerprint.of(canonical.toString());
     }
 

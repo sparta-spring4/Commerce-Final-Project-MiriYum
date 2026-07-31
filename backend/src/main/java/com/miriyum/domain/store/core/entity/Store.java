@@ -20,6 +20,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import lombok.AccessLevel;
@@ -65,6 +67,9 @@ public class Store extends BaseEntity {
     @Column(name = "address", nullable = false, length = 300)
     private String address;
 
+    @Column(name = "time_zone_id", nullable = false, length = 64)
+    private String timeZoneId;
+
     @Column(name = "store_category_code", nullable = false, length = 50)
     private String storeCategoryCode;
 
@@ -96,6 +101,15 @@ public class Store extends BaseEntity {
     @Column(name = "pickup_enabled", nullable = false)
     private boolean pickupEnabled;
 
+    @Column(name = "applicant_self_attested_at", nullable = false)
+    private LocalDateTime applicantSelfAttestedAt;
+
+    @Column(name = "required_terms_agreed_at", nullable = false)
+    private LocalDateTime requiredTermsAgreedAt;
+
+    @Column(name = "required_terms_version", nullable = false, length = 50)
+    private String requiredTermsVersion;
+
     private Store(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
@@ -108,7 +122,10 @@ public class Store extends BaseEntity {
             Set<String> tagCodes,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
-            boolean pickupEnabled
+            boolean pickupEnabled,
+            String timeZoneId,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
     ) {
         this.storeOperatorAccountId = storeOperatorAccountId;
         this.businessRegistrationNumber = businessRegistrationNumber;
@@ -122,6 +139,10 @@ public class Store extends BaseEntity {
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;
+        this.timeZoneId = timeZoneId;
+        this.applicantSelfAttestedAt = onboardingAcceptedAt;
+        this.requiredTermsAgreedAt = onboardingAcceptedAt;
+        this.requiredTermsVersion = requiredTermsVersion;
     }
 
     public static Store create(
@@ -136,10 +157,15 @@ public class Store extends BaseEntity {
             Set<String> tagCodes,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
-            boolean pickupEnabled
+            boolean pickupEnabled,
+            String timeZoneId,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
     ) {
         PickupEligibility eligibility = pickupEligibilityFor(businessType);
         requirePickupAllowed(eligibility, pickupEnabled);
+        requireOnboardingEvidence(onboardingAcceptedAt, requiredTermsVersion);
+        String canonicalTimeZoneId = requireTimeZone(timeZoneId);
 
         Store store = new Store(
                 storeOperatorAccountId,
@@ -153,7 +179,10 @@ public class Store extends BaseEntity {
                 tagCodes,
                 reservationEnabled,
                 menuHoldEnabled,
-                pickupEnabled);
+                pickupEnabled,
+                canonicalTimeZoneId,
+                onboardingAcceptedAt,
+                requiredTermsVersion);
         store.verificationStatus = VerificationStatus.APPROVED;
         store.operationStatus = OperationStatus.OPEN;
         store.pickupEligibility = eligibility;
@@ -172,7 +201,7 @@ public class Store extends BaseEntity {
             Boolean pickupEnabled,
             OperationStatus operationStatus
     ) {
-        requireOperationTransition(operationStatus);
+        requireGeneralUpdateStatus(operationStatus);
         boolean nextPickupEnabled = pickupEnabled == null ? this.pickupEnabled : pickupEnabled;
         requirePickupAllowed(pickupEligibility, nextPickupEnabled);
 
@@ -186,6 +215,13 @@ public class Store extends BaseEntity {
         this.menuHoldEnabled = menuHoldEnabled == null ? this.menuHoldEnabled : menuHoldEnabled;
         this.pickupEnabled = nextPickupEnabled;
         this.operationStatus = operationStatus == null ? this.operationStatus : operationStatus;
+    }
+
+    /**
+     * 폐점 전용 유스케이스가 모든 선행 조건을 검증한 뒤 호출하는 비가역 전이다.
+     */
+    public void close() {
+        this.operationStatus = OperationStatus.CLOSED;
     }
 
     public void requireManagedBy(long operatorAccountId) {
@@ -206,11 +242,33 @@ public class Store extends BaseEntity {
         }
     }
 
-    private void requireOperationTransition(OperationStatus requestedStatus) {
-        if (requestedStatus != null
-                && operationStatus == OperationStatus.CLOSED
-                && requestedStatus != OperationStatus.CLOSED) {
+    private void requireGeneralUpdateStatus(OperationStatus requestedStatus) {
+        if (requestedStatus == OperationStatus.CLOSED
+                || (requestedStatus != null
+                && operationStatus == OperationStatus.CLOSED)) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
+    }
+
+    private static void requireOnboardingEvidence(
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
+    ) {
+        if (onboardingAcceptedAt == null
+                || requiredTermsVersion == null
+                || requiredTermsVersion.isBlank()) {
+            throw new IllegalArgumentException("onboarding evidence is required");
+        }
+    }
+
+    private static String requireTimeZone(String timeZoneId) {
+        if (timeZoneId == null || timeZoneId.isBlank()) {
+            throw new IllegalArgumentException("store time zone is required");
+        }
+        if (!ZoneId.getAvailableZoneIds().contains(timeZoneId)) {
+            throw new IllegalArgumentException(
+                    "store time zone must be a valid IANA identifier");
+        }
+        return timeZoneId;
     }
 }

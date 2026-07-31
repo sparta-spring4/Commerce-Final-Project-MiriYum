@@ -3,6 +3,7 @@ package com.miriyum.domain.store.core.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -29,6 +30,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -89,6 +91,88 @@ class StoreControllerTest {
     }
 
     @Test
+    void createRejectsUnknownIanaTimeZone() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateJson().replace(
+                                "Asia/Seoul",
+                                "Mars/Olympus")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void createRejectsMissingOnboardingDeclarations() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJsonWithModesAndDeclarations(
+                                """
+                                        {
+                                          "reservationEnabled": true,
+                                          "menuHoldEnabled": true,
+                                          "pickupEnabled": true
+                                        }
+                                        """,
+                                "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void createRejectsFalseRequiredTermsAgreement() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJsonWithModesAndDeclarations(
+                                """
+                                        {
+                                          "reservationEnabled": true,
+                                          "menuHoldEnabled": true,
+                                          "pickupEnabled": true
+                                        }
+                                        """,
+                                """
+                                        ,
+                                          "applicantSelfAttested": true,
+                                          "requiredTermsAgreed": false
+                                        """)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsGetBeforeService(long storeId)
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(get("/api/v1/store-operator/stores/{storeId}", storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void getReturnsManagedStoreEnvelope() throws Exception {
         authenticateStoreOperator(11L);
         given(storeService.getManagedStore(11L, 7L)).willReturn(managedStore(7L));
@@ -99,6 +183,28 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsPatchBeforeService(long storeId)
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/{storeId}", storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "새 이름"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeService).shouldHaveNoInteractions();
     }
 
     @Test
@@ -120,6 +226,26 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"));
+    }
+
+    @Test
+    void closedStatusInGeneralPatchReturnsCommon001WithoutServiceCall()
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operationStatus": "CLOSED"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
     }
 
     @ParameterizedTest
@@ -207,6 +333,19 @@ class StoreControllerTest {
     }
 
     private String createJsonWithModes(String modesJson) {
+        return createJsonWithModesAndDeclarations(
+                modesJson,
+                """
+                        ,
+                          "applicantSelfAttested": true,
+                          "requiredTermsAgreed": true
+                        """);
+    }
+
+    private String createJsonWithModesAndDeclarations(
+            String modesJson,
+            String declarationsJson
+    ) {
         return """
                 {
                   "businessRegistrationNumber": "1234567890",
@@ -215,11 +354,12 @@ class StoreControllerTest {
                   "description": "",
                   "region": "SEOUL",
                   "address": "서울시 중구",
+                  "timeZoneId": "Asia/Seoul",
                   "storeCategoryCode": "CAFE_BAKERY",
                   "tagCodes": ["DATE"],
-                  "modes": %s
+                  "modes": %s%s
                 }
-                """.formatted(modesJson);
+                """.formatted(modesJson, declarationsJson);
     }
 
     private static Stream<String> modeObjectsMissingOneRequiredField() {
@@ -250,6 +390,7 @@ class StoreControllerTest {
                 "미리윰",
                 Region.SEOUL,
                 "서울시 중구",
+                "Asia/Seoul",
                 "CAFE_BAKERY",
                 VerificationStatus.APPROVED,
                 OperationStatus.OPEN,

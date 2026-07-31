@@ -47,4 +47,9 @@ public record StoreUpdateRequest(
                 || modes != null
                 || operationStatus != null;
     }
+
+    @AssertTrue(message = "일반 수정에서는 폐점할 수 없습니다.")
+    public boolean isNonTerminalOperationStatus() {
+        return operationStatus != OperationStatus.CLOSED;
+    }
 }
