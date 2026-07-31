@@ -260,6 +260,228 @@ class ReservationQueryRepositoryTest {
         assertThat(result.getTotalPages()).isZero();
     }
 
+    @Test
+    @DisplayName("매장 예약 목록은 다른 매장을 제외하고 서비스 날짜와 예약 ID 순서를 지킨다")
+    void listsReservationsOnlyInsideStoreScopeDeterministically() {
+        // given
+        Reservation first = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        Reservation second = saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT.plusSeconds(1)
+        );
+        Reservation third = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                CREATED_AT.plusSeconds(2)
+        );
+        saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT.plusSeconds(3)
+        );
+        saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                CREATED_AT.plusSeconds(4)
+        );
+        Sort sort = Sort.by(
+                Sort.Order.asc("serviceDate"),
+                Sort.Order.asc("id")
+        );
+
+        // when
+        Page<Reservation> result = reservationRepository.findAllByStoreId(
+                STORE_ID,
+                PageRequest.of(0, 20, sort)
+        );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Reservation::getId)
+                .containsExactly(first.getId(), second.getId(), third.getId());
+        assertThat(result.getContent())
+                .extracting(Reservation::getStoreId)
+                .containsOnly(STORE_ID);
+        assertThat(result.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("매장 예약 목록은 대상 매장의 선택한 서비스 날짜만 반환한다")
+    void filtersStoreReservationsByServiceDate() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        Reservation expected = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                CREATED_AT
+        );
+        saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate.plusDays(1),
+                CREATED_AT.plusSeconds(1)
+        );
+        saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                serviceDate,
+                CREATED_AT.plusSeconds(2)
+        );
+
+        // when
+        Page<Reservation> result =
+                reservationRepository.findAllByStoreIdAndServiceDate(
+                        STORE_ID,
+                        serviceDate,
+                        PageRequest.of(0, 20, Sort.by("id"))
+                );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Reservation::getId)
+                .containsExactly(expected.getId());
+        assertThat(result.getContent())
+                .extracting(Reservation::getStoreId)
+                .containsOnly(STORE_ID);
+    }
+
+    @Test
+    @DisplayName("매장 예약 목록은 대상 매장의 선택한 예약 상태만 반환한다")
+    void filtersStoreReservationsByStatus() {
+        // given
+        saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        Reservation expected = saveCancelledReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                CREATED_AT.plusSeconds(1)
+        );
+        saveCancelledReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                CREATED_AT.plusSeconds(3)
+        );
+
+        // when
+        Page<Reservation> result =
+                reservationRepository.findAllByStoreIdAndStatus(
+                        STORE_ID,
+                        ReservationStatus.CANCELLED,
+                        PageRequest.of(0, 20, Sort.by("id"))
+                );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Reservation::getId)
+                .containsExactly(expected.getId());
+        assertThat(result.getContent())
+                .extracting(Reservation::getStoreId)
+                .containsOnly(STORE_ID);
+        assertThat(result.getContent())
+                .extracting(Reservation::getStatus)
+                .containsOnly(ReservationStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("매장 예약 목록은 대상 매장의 서비스 날짜와 예약 상태를 함께 적용한다")
+    void filtersStoreReservationsByServiceDateAndStatus() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        Reservation expected = saveCancelledReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                CREATED_AT
+        );
+        saveCancelledReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate.plusDays(1),
+                CREATED_AT.plusSeconds(2)
+        );
+        saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                CREATED_AT.plusSeconds(4)
+        );
+        saveCancelledReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                serviceDate,
+                CREATED_AT.plusSeconds(5)
+        );
+
+        // when
+        Page<Reservation> result =
+                reservationRepository.findAllByStoreIdAndServiceDateAndStatus(
+                        STORE_ID,
+                        serviceDate,
+                        ReservationStatus.CANCELLED,
+                        PageRequest.of(0, 20, Sort.by("id"))
+                );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Reservation::getId)
+                .containsExactly(expected.getId());
+        assertThat(result.getContent())
+                .extracting(Reservation::getStoreId)
+                .containsOnly(STORE_ID);
+        assertThat(result.getContent())
+                .extracting(Reservation::getServiceDate, Reservation::getStatus)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        serviceDate,
+                        ReservationStatus.CANCELLED
+                ));
+    }
+
+    @Test
+    @DisplayName("예약이 없는 매장 페이지는 다른 매장 예약을 노출하지 않고 빈 결과를 반환한다")
+    void returnsEmptyPageInsideStoreScope() {
+        // given
+        saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        Pageable pageable = PageRequest.of(
+                0,
+                20,
+                Sort.by(
+                        Sort.Order.asc("serviceDate"),
+                        Sort.Order.asc("id")
+                )
+        );
+
+        // when
+        Page<Reservation> result =
+                reservationRepository.findAllByStoreId(STORE_ID, pageable);
+
+        // then
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+        assertThat(result.getTotalPages()).isZero();
+    }
+
     private Reservation saveReservation(
             long consumerAccountId,
             long storeId,
@@ -269,6 +491,22 @@ class ReservationQueryRepositoryTest {
         return reservationRepository.saveAndFlush(
                 reservation(consumerAccountId, storeId, serviceDate, createdAt)
         );
+    }
+
+    private Reservation saveCancelledReservation(
+            long consumerAccountId,
+            long storeId,
+            LocalDate serviceDate,
+            Instant createdAt
+    ) {
+        Reservation reservation = reservation(
+                consumerAccountId,
+                storeId,
+                serviceDate,
+                createdAt
+        );
+        reservation.cancel(createdAt.plusSeconds(1));
+        return reservationRepository.saveAndFlush(reservation);
     }
 
     private Reservation reservation(
