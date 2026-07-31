@@ -61,14 +61,15 @@ public class LoginFailureDelayRepository {
                 token, expiresAt, now, accountNamespace, accountId, now, now) == 1;
     }
 
-    public LoginFailureDelay lockExisting(String accountNamespace, long accountId) {
-        return jdbcTemplate.queryForObject(
+    public Optional<LoginFailureDelay> lockExisting(String accountNamespace, long accountId) {
+        List<LoginFailureDelay> found = jdbcTemplate.query(
                 "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at, "
                         + "active_attempt_token, active_attempt_expires_at "
                         + "FROM login_failure_delays "
                         + "WHERE account_namespace = ? AND account_id = ? FOR UPDATE",
                 LoginFailureDelayRepository::mapRow,
                 accountNamespace, accountId);
+        return found.stream().findFirst();
     }
 
     public void save(String accountNamespace, long accountId, LoginFailureDelay delay, LocalDateTime now) {

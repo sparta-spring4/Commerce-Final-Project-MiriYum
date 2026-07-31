@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -43,11 +44,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * AUTH-006의 계정 단위 로그인 지연을 실제 MySQL에서 검증한다.
+ * Verifies account-level login delay and attempt ownership with real MySQL.
  *
- * <p>실패 기록은 {@code INSERT ... ON DUPLICATE KEY UPDATE}로 배타 잠금을 잡는 MySQL 전용
- * 경로이고, 정책은 여러 인증 인스턴스가 동시에 실패를 기록해도 5회 기준이 우회되지 않도록
- * 요구하므로 H2가 아니라 Testcontainers MySQL을 쓴다.</p>
+ * <p>Only one request may hold an account's short-lived password-comparison lease. Contending
+ * requests must not reach BCrypt and are exposed as the same AUTH_005 response as all other
+ * credential failures.</p>
  */
 @Testcontainers
 @SpringBootTest(
@@ -77,6 +78,9 @@ class LoginDelayIntegrationTest {
 
     @Autowired
     private ConsumerAuthService consumerAuthService;
+
+    @Autowired
+    private LoginDelayGuard loginDelayGuard;
 
     @Autowired
     private ConsumerAccountRepository consumerAccountRepository;
@@ -161,9 +165,9 @@ class LoginDelayIntegrationTest {
     }
 
     @Test
-    @DisplayName("같은 계정의 올바른 비밀번호 동시 요청은 실패로 누적되지 않고 모두 성공한다")
+    @DisplayName("같은 계정의 동시 성공 요청은 하나만 비교하고 나머지는 AUTH_005로 숨긴다")
     void concurrentSuccessfulLoginsDoNotCountAsFailures() throws Exception {
-        // given: 같은 계정으로 충분히 많은 동시 성공 요청을 보내, 기존 구현의 false delay를 드러낸다
+        // given: Hold BCrypt long enough for concurrent requests to observe the active lease.
         int threadCount = 6;
         CountDownLatch readyLatch = new CountDownLatch(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
@@ -190,7 +194,7 @@ class LoginDelayIntegrationTest {
             completedInTime = executor.awaitTermination(30, TimeUnit.SECONDS);
         }
 
-        // then: 모두 토큰 발급까지 성공해야 하고, 성공 요청이 실패 횟수를 남겨선 안 된다.
+        // then: One owner succeeds; contending requests are indistinguishable from credential failures.
         assertThat(completedInTime).as("동시 로그인 %d건이 30초 안에 끝나지 않았습니다", threadCount).isTrue();
         int successCount = 0;
         int busyCount = 0;
@@ -233,6 +237,15 @@ class LoginDelayIntegrationTest {
         assertThat(failureRowCount()).isZero();
         assertThat(catchLoginFailure(EMAIL).getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
         assertThat(consecutiveFailures()).isEqualTo(1);
+    }
+
+    @Test
+    void returnsFalseWhenLeaseRowIsDeletedBeforeAttemptCompletion() {
+        LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.CONSUMER, accountId);
+        jdbcTemplate.update("DELETE FROM login_failure_delays WHERE account_id = ?", accountId);
+
+        assertThat(loginDelayGuard.completeAttempt(
+                TokenNamespace.CONSUMER, accountId, attempt, true)).isFalse();
     }
 
     @Test
@@ -334,14 +347,11 @@ class LoginDelayIntegrationTest {
             future.get();
         }
 
-        // then: 결과는 정확히 5회·1단계여야 한다. 앞의 5건이 5회 기준을 채워 1분 지연을 만들고,
-        // 나머지 요청은 잠금 안에서 "지연 중"으로 판정돼 상태를 바꾸지 않는다. 단계가 2·3으로
-        // 올라가면 지연이 살아있는 동안의 실패로 단계가 뛴 것이므로 정책 위반이다.
+        // then: Only the lease owner reaches BCrypt and records one confirmed mismatch.
         assertThat(consecutiveFailures()).isEqualTo(1);
         assertThat(delayStage()).isZero();
 
-        // then: 지연이 걸린 뒤의 요청은 비밀번호 비교에 도달하지 않아야 한다. 지연은 추측 속도를
-        // 늦추는 장치이므로, 동시 요청이 지연을 우회해 해시 비교를 계속 수행하면 목적이 무너진다.
+        // Contending requests must not consume additional password guesses.
         verify(passwordEncoder, times(1)).matches(any(), any());
     }
 

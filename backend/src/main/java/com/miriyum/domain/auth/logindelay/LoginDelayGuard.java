@@ -57,7 +57,11 @@ public class LoginDelayGuard {
             boolean passwordMatches
     ) {
         LocalDateTime now = LocalDateTime.now(clock);
-        LoginFailureDelay current = loginFailureDelayRepository.lockExisting(namespace.value(), accountId);
+        LoginFailureDelay current = loginFailureDelayRepository.lockExisting(namespace.value(), accountId)
+                .orElse(null);
+        if (current == null) {
+            return false;
+        }
         if (!current.isOwnedBy(attempt.token())) {
             return false;
         }
