@@ -1,13 +1,14 @@
 package com.miriyum.domain.store.schedule.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalTime;
 
 public record TimeRangeRequest(
-        @NotNull LocalTime startTime,
-        @NotNull LocalTime endTime
+        @NotNull @JsonFormat(pattern = "HH:mm") LocalTime startTime,
+        @NotNull @JsonFormat(pattern = "HH:mm") LocalTime endTime
 ) {
 
     @JsonIgnore

@@ -689,10 +689,12 @@ components:
           enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]
         businessHours:
           type: array
+          maxItems: 48
           items:
             $ref: "#/components/schemas/TimeRange"
         breakTimes:
           type: array
+          maxItems: 48
           items:
             $ref: "#/components/schemas/TimeRange"
     DailyTimeSlots:
@@ -705,6 +707,7 @@ components:
           enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]
         slots:
           type: array
+          maxItems: 48
           items:
             $ref: "#/components/schemas/TimeRange"
     StoreCreateRequest:

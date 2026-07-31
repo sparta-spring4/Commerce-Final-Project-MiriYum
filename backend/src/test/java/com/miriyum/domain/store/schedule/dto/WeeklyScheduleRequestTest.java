@@ -79,6 +79,51 @@ class WeeklyScheduleRequestTest {
                 .contains("days[0].slots[0].minutePrecision");
     }
 
+    @Test
+    void rejectsNullDayAndRangeElements() {
+        List<DailyOperatingScheduleRequest> days =
+                new ArrayList<>(allOperatingDays());
+        days.set(0, null);
+        days.set(1, new DailyOperatingScheduleRequest(
+                DayOfWeek.TUESDAY,
+                Arrays.asList((TimeRangeRequest) null),
+                List.of()));
+
+        assertThat(validator.validate(new WeeklyOperatingHoursRequest(days)))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains(
+                        "days[0].<list element>",
+                        "days[1].businessHours[0].<list element>");
+    }
+
+    @Test
+    void rejectsMoreThanFortyEightIntervalsPerDay() {
+        TimeRangeRequest range = new TimeRangeRequest(
+                LocalTime.of(9, 0),
+                LocalTime.of(10, 0));
+        List<TimeRangeRequest> tooMany = new ArrayList<>();
+        for (int index = 0; index < 49; index++) {
+            tooMany.add(range);
+        }
+
+        DailyOperatingScheduleRequest operating =
+                new DailyOperatingScheduleRequest(
+                        DayOfWeek.MONDAY,
+                        tooMany,
+                        tooMany);
+        DailyReservationSlotsRequest reservation =
+                new DailyReservationSlotsRequest(
+                        DayOfWeek.MONDAY,
+                        tooMany);
+
+        assertThat(validator.validate(operating))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("businessHours", "breakTimes");
+        assertThat(validator.validate(reservation))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("slots");
+    }
+
     private List<DailyOperatingScheduleRequest> allOperatingDays() {
         return Arrays.stream(DayOfWeek.values())
                 .map(day -> new DailyOperatingScheduleRequest(

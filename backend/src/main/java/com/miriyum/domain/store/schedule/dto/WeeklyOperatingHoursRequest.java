@@ -13,12 +13,15 @@ import java.util.stream.Collectors;
 public record WeeklyOperatingHoursRequest(
         @NotNull
         @Size(min = 7, max = 7)
-        List<@Valid DailyOperatingScheduleRequest> days
+        List<@NotNull @Valid DailyOperatingScheduleRequest> days
 ) {
 
     @AssertTrue(message = "일주일의 모든 요일을 중복 없이 포함해야 합니다.")
     public boolean isEachDayExactlyOnce() {
         if (days == null || days.size() != DayOfWeek.values().length) {
+            return true;
+        }
+        if (days.stream().anyMatch(java.util.Objects::isNull)) {
             return true;
         }
         Set<DayOfWeek> actual = days.stream()

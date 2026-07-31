@@ -130,6 +130,92 @@ class StoreScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
+    @Test
+    void nullOperatingDayReturnsCommon001() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(BASE_URL + "/operating-hours")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(operatingJsonWithNullDay()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void nullOperatingRangeReturnsCommon001() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(BASE_URL + "/operating-hours")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validOperatingJson().replace(
+                                "\"businessHours\": [{",
+                                "\"businessHours\": [null, {")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void nullReservationDayReturnsCommon001() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(BASE_URL + "/reservation-time-slots")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reservationJsonWithNullDay()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void nullReservationRangeReturnsCommon001() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(BASE_URL + "/reservation-time-slots")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson().replace(
+                                "\"slots\": [{",
+                                "\"slots\": [null, {")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void secondPrecisionInputReturnsCommon002() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(BASE_URL + "/reservation-time-slots")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson().replace(
+                                "\"19:00\"",
+                                "\"19:00:00\"")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {0L, -1L})
     void nonPositiveStoreIdRejectsOperatingPublicationBeforeService(
@@ -173,10 +259,10 @@ class StoreScheduleControllerTest {
                         .value("MONDAY"))
                 .andExpect(jsonPath(
                         "$.data.days[0].businessHours[0].startTime")
-                        .value("18:00:00"))
+                        .value("18:00"))
                 .andExpect(jsonPath(
                         "$.data.days[0].businessHours[0].endTime")
-                        .value("02:00:00"));
+                        .value("02:00"));
     }
 
     @ParameterizedTest
@@ -221,7 +307,7 @@ class StoreScheduleControllerTest {
                 .andExpect(jsonPath("$.data.version").value(1))
                 .andExpect(jsonPath(
                         "$.data.days[0].slots[0].startTime")
-                        .value("19:00:00"));
+                        .value("19:00"));
     }
 
     @Test
@@ -324,6 +410,38 @@ class StoreScheduleControllerTest {
                       "startTime": "19:00",
                       "endTime": "20:00"
                     }]},
+                    {"dayOfWeek": "TUESDAY", "slots": []},
+                    {"dayOfWeek": "WEDNESDAY", "slots": []},
+                    {"dayOfWeek": "THURSDAY", "slots": []},
+                    {"dayOfWeek": "FRIDAY", "slots": []},
+                    {"dayOfWeek": "SATURDAY", "slots": []},
+                    {"dayOfWeek": "SUNDAY", "slots": []}
+                  ]
+                }
+                """;
+    }
+
+    private String operatingJsonWithNullDay() {
+        return """
+                {
+                  "days": [
+                    null,
+                    {"dayOfWeek": "TUESDAY", "businessHours": [], "breakTimes": []},
+                    {"dayOfWeek": "WEDNESDAY", "businessHours": [], "breakTimes": []},
+                    {"dayOfWeek": "THURSDAY", "businessHours": [], "breakTimes": []},
+                    {"dayOfWeek": "FRIDAY", "businessHours": [], "breakTimes": []},
+                    {"dayOfWeek": "SATURDAY", "businessHours": [], "breakTimes": []},
+                    {"dayOfWeek": "SUNDAY", "businessHours": [], "breakTimes": []}
+                  ]
+                }
+                """;
+    }
+
+    private String reservationJsonWithNullDay() {
+        return """
+                {
+                  "days": [
+                    null,
                     {"dayOfWeek": "TUESDAY", "slots": []},
                     {"dayOfWeek": "WEDNESDAY", "slots": []},
                     {"dayOfWeek": "THURSDAY", "slots": []},
