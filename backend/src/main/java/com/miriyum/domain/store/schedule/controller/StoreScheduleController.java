@@ -6,7 +6,7 @@ import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
+import com.miriyum.domain.store.schedule.service.StoreScheduleCommandFacade;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class StoreScheduleController {
 
-    private final StoreScheduleService storeScheduleService;
+    private final StoreScheduleCommandFacade storeScheduleService;
 
     @PutMapping("/operating-hours")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>>

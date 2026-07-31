@@ -19,7 +19,7 @@ import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
+import com.miriyum.domain.store.schedule.service.StoreScheduleCommandFacade;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -51,7 +51,7 @@ class StoreScheduleControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private StoreScheduleService storeScheduleService;
+    private StoreScheduleCommandFacade storeScheduleService;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;

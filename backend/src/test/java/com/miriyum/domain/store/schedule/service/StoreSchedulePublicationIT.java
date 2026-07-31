@@ -10,6 +10,7 @@ import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
@@ -21,6 +22,7 @@ import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepo
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -64,10 +66,16 @@ class StoreSchedulePublicationIT {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add(
+                "spring.datasource.hikari.connection-init-sql",
+                () -> "SET SESSION innodb_lock_wait_timeout = 1");
     }
 
     @Autowired
     private StoreScheduleService scheduleService;
+
+    @Autowired
+    private StoreScheduleCommandFacade commandFacade;
 
     @Autowired
     private StoreService storeService;
@@ -232,6 +240,54 @@ class StoreSchedulePublicationIT {
 
         assertThat(storeRepository.findById(ownerStore.storeId()).orElseThrow()
                 .getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+    }
+
+    @Test
+    void actualStoreLockTimeoutReturnsStore006AndRollsBackCommand()
+            throws Exception {
+        OwnerStore ownerStore = createStore();
+        CountDownLatch storeLocked = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<?> lockHolder = executor.submit(() ->
+                    transactionTemplate.executeWithoutResult(ignored -> {
+                        storeRepository.findByIdForUpdate(ownerStore.storeId())
+                                .orElseThrow();
+                        storeLocked.countDown();
+                        await(releaseLock);
+                    }));
+            assertThat(storeLocked.await(5, TimeUnit.SECONDS)).isTrue();
+
+            try {
+                assertThatThrownBy(() -> commandFacade.replaceOperatingHours(
+                        ownerStore.operatorId(),
+                        ownerStore.storeId(),
+                        IdempotencyKey.parse(
+                                "550e8400-e29b-41d4-a716-446655440004"),
+                        operatingRequest(9)))
+                        .isInstanceOf(ServiceException.class)
+                        .extracting(exception ->
+                                ((ServiceException) exception).getErrorCode())
+                        .isEqualTo(StoreErrorCode.SCHEDULE_CONFLICT);
+            } finally {
+                releaseLock.countDown();
+            }
+            lockHolder.get(5, TimeUnit.SECONDS);
+        }
+
+        assertThat(operatingRepository
+                .findAllByStoreIdOrderByVersionNumber(ownerStore.storeId()))
+                .isEmpty();
+        Integer commandCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM idempotency_commands
+                        WHERE idempotency_key =
+                            '550e8400-e29b-41d4-a716-446655440004'
+                        """,
+                Integer.class);
+        assertThat(commandCount).isZero();
     }
 
     private OwnerStore createStore() {
