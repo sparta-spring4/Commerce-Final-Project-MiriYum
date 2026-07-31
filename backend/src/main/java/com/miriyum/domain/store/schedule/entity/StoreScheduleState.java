@@ -31,6 +31,20 @@ public class StoreScheduleState extends BaseEntity {
     @Column(name = "next_reservation_version", nullable = false)
     private long nextReservationVersion;
 
+    private StoreScheduleState(
+            long storeId,
+            long nextOperatingVersion,
+            long nextReservationVersion
+    ) {
+        this.storeId = storeId;
+        this.nextOperatingVersion = nextOperatingVersion;
+        this.nextReservationVersion = nextReservationVersion;
+    }
+
+    public static StoreScheduleState initialize(long storeId) {
+        return new StoreScheduleState(storeId, 1L, 1L);
+    }
+
     public long allocateOperatingVersion() {
         return nextOperatingVersion++;
     }

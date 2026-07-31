@@ -53,21 +53,35 @@ public class ReservationScheduleVersion extends BaseEntity {
     @OrderColumn(name = "entry_order")
     private List<ReservationScheduleEntry> entries = new ArrayList<>();
 
+    private ReservationScheduleVersion(
+            long storeId,
+            long versionNumber,
+            long validatedOperatingVersionId,
+            LocalDateTime publishedAt,
+            List<ReservationScheduleEntry> entries
+    ) {
+        this.storeId = storeId;
+        this.versionNumber = versionNumber;
+        this.validatedOperatingVersionId = validatedOperatingVersionId;
+        this.publishedAt = publishedAt;
+        this.entries = new ArrayList<>(entries);
+    }
+
     public static ReservationScheduleVersion create(
             long storeId,
             long versionNumber,
             long validatedOperatingVersionId,
             List<WeeklyInterval> intervals
     ) {
-        ReservationScheduleVersion version = new ReservationScheduleVersion();
-        version.storeId = storeId;
-        version.versionNumber = versionNumber;
-        version.validatedOperatingVersionId = validatedOperatingVersionId;
-        version.publishedAt = LocalDateTime.now(BUSINESS_ZONE);
-        version.entries = intervals.stream()
+        List<ReservationScheduleEntry> entries = intervals.stream()
                 .map(ReservationScheduleEntry::from)
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-        return version;
+        return new ReservationScheduleVersion(
+                storeId,
+                versionNumber,
+                validatedOperatingVersionId,
+                LocalDateTime.now(BUSINESS_ZONE),
+                entries);
     }
 
     public List<ReservationScheduleEntry> getEntries() {

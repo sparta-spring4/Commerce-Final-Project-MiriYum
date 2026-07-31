@@ -32,7 +32,6 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
-import java.lang.reflect.Constructor;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.util.Arrays;
@@ -308,18 +307,7 @@ class StoreScheduleServiceTest {
     }
 
     private StoreScheduleState state() {
-        try {
-            Constructor<StoreScheduleState> constructor =
-                    StoreScheduleState.class.getDeclaredConstructor();
-            constructor.setAccessible(true);
-            StoreScheduleState state = constructor.newInstance();
-            ReflectionTestUtils.setField(state, "storeId", STORE_ID);
-            ReflectionTestUtils.setField(state, "nextOperatingVersion", 1L);
-            ReflectionTestUtils.setField(state, "nextReservationVersion", 1L);
-            return state;
-        } catch (ReflectiveOperationException exception) {
-            throw new AssertionError(exception);
-        }
+        return StoreScheduleState.initialize(STORE_ID);
     }
 
     private WeeklyOperatingHoursRequest operatingRequest() {

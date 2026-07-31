@@ -40,6 +40,9 @@ class StoreScheduleResponseTest {
 
         OperatingHoursResponse response = OperatingHoursResponse.from(version);
 
+        assertThat(version.getStoreId()).isEqualTo(7L);
+        assertThat(version.getVersionNumber()).isEqualTo(3L);
+        assertThat(version.getEntries()).hasSize(2);
         assertThat(response.version()).isEqualTo(3);
         assertThat(response.days()).extracting(DailyOperatingScheduleRequest::dayOfWeek)
                 .containsExactly(DayOfWeek.values());
@@ -69,6 +72,10 @@ class StoreScheduleResponseTest {
         ReservationTimeSlotsResponse response =
                 ReservationTimeSlotsResponse.from(version);
 
+        assertThat(version.getStoreId()).isEqualTo(7L);
+        assertThat(version.getVersionNumber()).isEqualTo(2L);
+        assertThat(version.getValidatedOperatingVersionId()).isEqualTo(20L);
+        assertThat(version.getEntries()).hasSize(1);
         assertThat(response.version()).isEqualTo(2);
         assertThat(response.days()).extracting(DailyReservationSlotsRequest::dayOfWeek)
                 .containsExactly(DayOfWeek.values());

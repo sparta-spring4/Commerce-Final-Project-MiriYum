@@ -50,19 +50,31 @@ public class OperatingScheduleVersion extends BaseEntity {
     @OrderColumn(name = "entry_order")
     private List<OperatingScheduleEntry> entries = new ArrayList<>();
 
+    private OperatingScheduleVersion(
+            long storeId,
+            long versionNumber,
+            LocalDateTime publishedAt,
+            List<OperatingScheduleEntry> entries
+    ) {
+        this.storeId = storeId;
+        this.versionNumber = versionNumber;
+        this.publishedAt = publishedAt;
+        this.entries = new ArrayList<>(entries);
+    }
+
     public static OperatingScheduleVersion create(
             long storeId,
             long versionNumber,
             List<WeeklyInterval> intervals
     ) {
-        OperatingScheduleVersion version = new OperatingScheduleVersion();
-        version.storeId = storeId;
-        version.versionNumber = versionNumber;
-        version.publishedAt = LocalDateTime.now(BUSINESS_ZONE);
-        version.entries = intervals.stream()
+        List<OperatingScheduleEntry> entries = intervals.stream()
                 .map(OperatingScheduleEntry::from)
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-        return version;
+        return new OperatingScheduleVersion(
+                storeId,
+                versionNumber,
+                LocalDateTime.now(BUSINESS_ZONE),
+                entries);
     }
 
     public List<OperatingScheduleEntry> getEntries() {
