@@ -87,6 +87,38 @@ class LoginDelayPolicyTest {
     }
 
     @Test
+    @DisplayName("지연이 아직 유효한 동안의 실패는 단계를 올리지 않는다")
+    void doesNotEscalateWhileDelayIsStillActive() {
+        // given: 5회 실패로 1분 지연이 걸린 상태
+        LoginFailureDelay delayed = applyFailures(LoginFailureDelay.none(), 5);
+        LocalDateTime whileDelayed = delayed.nextAttemptAllowedAt().minusSeconds(1);
+
+        // when: 지연이 끝나기 전에 실패가 한 번 더 들어와도
+        LoginFailureDelay afterFailure = loginDelayPolicy.applyFailure(delayed, whileDelayed);
+
+        // then: 단계도 다음 시도 가능 시각도 그대로다. 정책은 "지연 종료 후" 실패에만 단계를 올린다.
+        assertThat(afterFailure).isEqualTo(delayed);
+    }
+
+    @Test
+    @DisplayName("지연 중 실패가 여러 번 들어와도 단계는 1에 머문다")
+    void keepsFirstStageWhenSeveralFailuresArriveDuringTheDelay() {
+        // given: 동시 요청이 지연 확인을 함께 통과한 뒤 순서대로 기록되는 상황을 재현한다
+        LoginFailureDelay delayed = applyFailures(LoginFailureDelay.none(), 5);
+        LocalDateTime whileDelayed = delayed.nextAttemptAllowedAt().minusSeconds(1);
+
+        // when: 지연 중에 다섯 번 더 실패해도
+        LoginFailureDelay afterFailures = delayed;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            afterFailures = loginDelayPolicy.applyFailure(afterFailures, whileDelayed);
+        }
+
+        // then: 5분·15분으로 건너뛰지 않는다
+        assertThat(afterFailures.delayStage()).isEqualTo(1);
+        assertThat(afterFailures.nextAttemptAllowedAt()).isEqualTo(delayed.nextAttemptAllowedAt());
+    }
+
+    @Test
     @DisplayName("다음 시도 가능 시각과 정확히 같은 순간은 지연이 끝난 것으로 본다")
     void treatsExactBoundaryAsDelayEnded() {
         // given: 1분 지연이 걸린 상태

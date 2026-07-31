@@ -34,10 +34,18 @@ public class LoginDelayPolicy {
      * 실패 한 번을 반영한 다음 상태를 계산한다.
      *
      * <p>아직 지연 단계에 오르지 않았으면 실패 횟수만 올리고, 5회에 도달하는 순간 1단계로 올린다.
-     * 이미 한 번이라도 지연됐던 계정(단계 1 이상)은 지연이 끝난 뒤의 실패이므로 곧바로 다음
-     * 단계로 올린다. 마지막 단계에서는 단계를 유지한 채 지연 시각만 다시 민다.</p>
+     * 이미 지연을 겪고 그 지연이 끝난 뒤 다시 실패했으면 다음 단계로 올린다. 마지막 단계에서는
+     * 단계를 유지한 채 지연 시각만 다시 민다.</p>
+     *
+     * <p>아직 지연이 유효한 동안 들어온 실패는 상태를 그대로 둔다. 정책은 "지연 종료 후 다시
+     * 실패하면" 다음 단계로 올리도록 정하므로, 지연 중의 실패로 단계가 오르면 안 된다. 이 검사가
+     * 없으면 동시 요청이 문제가 된다. 여러 요청이 지연 여부 확인을 함께 통과한 뒤 잠금에서
+     * 직렬화되면, 5번째 실패가 1단계를 만든 직후 6·7번째가 곧바로 5분·15분 단계로 뛴다.</p>
      */
     public LoginFailureDelay applyFailure(LoginFailureDelay current, LocalDateTime now) {
+        if (current.isDelayedAt(now)) {
+            return current;
+        }
         if (current.delayStage() == 0) {
             int failures = current.consecutiveFailures() + 1;
             if (failures < FAILURES_BEFORE_FIRST_DELAY) {

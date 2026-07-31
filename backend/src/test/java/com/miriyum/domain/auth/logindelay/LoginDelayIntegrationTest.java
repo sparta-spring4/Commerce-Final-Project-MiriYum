@@ -174,10 +174,12 @@ class LoginDelayIntegrationTest {
             future.get();
         }
 
-        // then: 지연으로 일부가 비밀번호 검사 전에 거절될 수 있으므로 기록된 실패 수는 10 이하지만,
-        // 최소한 5회 기준을 넘겨 지연 단계가 올라가 있어야 하고 카운트 유실로 0이 되면 안 된다.
-        assertThat(consecutiveFailures()).isBetween(5, threadCount);
-        assertThat(delayStage()).isGreaterThanOrEqualTo(1);
+        // then: 결과는 정확히 5회·1단계여야 한다.
+        // 앞의 5건이 5회 기준을 채워 1분 지연을 만들고, 지연 확인을 이미 통과한 나머지 요청은
+        // 잠금 뒤 "지연 중"으로 판정돼 상태를 바꾸지 않는다. 여기서 단계가 2·3으로 올라가면
+        // 지연이 살아있는 동안의 실패로 단계가 뛴 것이므로 정책 위반이다.
+        assertThat(consecutiveFailures()).isEqualTo(5);
+        assertThat(delayStage()).isEqualTo(1);
     }
 
     /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */
