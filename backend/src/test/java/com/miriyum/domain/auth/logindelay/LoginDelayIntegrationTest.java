@@ -204,7 +204,7 @@ class LoginDelayIntegrationTest {
                 assertThat(exception.getCause())
                         .isInstanceOf(ServiceException.class)
                         .extracting(cause -> ((ServiceException) cause).getErrorCode())
-                        .isEqualTo(com.miriyum.global.exception.CommonErrorCode.TOO_MANY_REQUESTS);
+                        .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
                 busyCount++;
             }
         }

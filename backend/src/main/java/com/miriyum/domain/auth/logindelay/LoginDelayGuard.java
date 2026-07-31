@@ -50,7 +50,7 @@ public class LoginDelayGuard {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void completeAttempt(
+    public boolean completeAttempt(
             TokenNamespace namespace,
             long accountId,
             LoginAttempt attempt,
@@ -59,14 +59,15 @@ public class LoginDelayGuard {
         LocalDateTime now = LocalDateTime.now(clock);
         LoginFailureDelay current = loginFailureDelayRepository.lockExisting(namespace.value(), accountId);
         if (!current.isOwnedBy(attempt.token())) {
-            return;
+            return false;
         }
         if (passwordMatches) {
             loginFailureDelayRepository.resetOwnedAttempt(namespace.value(), accountId, attempt.token());
-            return;
+            return true;
         }
         LoginFailureDelay updated = loginDelayPolicy.applyFailure(current, now);
         loginFailureDelayRepository.save(namespace.value(), accountId, updated, now);
+        return true;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

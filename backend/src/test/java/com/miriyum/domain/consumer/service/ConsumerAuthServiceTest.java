@@ -3,6 +3,7 @@ package com.miriyum.domain.consumer.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -193,9 +194,27 @@ class ConsumerAuthServiceTest {
         assertThatThrownBy(() -> consumerAuthService.login(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(CommonErrorCode.TOO_MANY_REQUESTS);
+                .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
 
         verifyNoInteractions(passwordEncoder);
+    }
+
+    @Test
+    void rejectsLoginWhenAttemptOwnershipIsLost() {
+        ConsumerAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        given(loginDelayGuard.tryAcquireAttempt(TokenNamespace.CONSUMER, ACCOUNT_ID))
+                .willReturn(LoginAttempt.acquired("attempt-token"));
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(loginDelayGuard.completeAttempt(any(), anyLong(), any(), anyBoolean())).willReturn(false);
+
+        assertThatThrownBy(() -> consumerAuthService.login(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+
+        verifyNoInteractions(jwtTokenProvider);
     }
 
     @Test
@@ -262,6 +281,7 @@ class ConsumerAuthServiceTest {
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
+        given(loginDelayGuard.completeAttempt(any(), anyLong(), any(), anyBoolean())).willReturn(true);
     }
 
     /**

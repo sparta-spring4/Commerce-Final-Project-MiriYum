@@ -17,7 +17,6 @@ import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
-import com.miriyum.global.exception.RetryableServiceException;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -96,16 +95,17 @@ public class ConsumerAuthService {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
         if (attempt.status() == LoginAttempt.Status.BUSY) {
-            throw new RetryableServiceException(CommonErrorCode.TOO_MANY_REQUESTS, 1);
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
 
         boolean completed = false;
         try {
             boolean passwordMatches = passwordEncoder.matches(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
-            loginDelayGuard.completeAttempt(TokenNamespace.CONSUMER, account.getId(), attempt, passwordMatches);
+            boolean attemptCompleted = loginDelayGuard.completeAttempt(
+                    TokenNamespace.CONSUMER, account.getId(), attempt, passwordMatches);
             completed = true;
-            if (!passwordMatches) {
+            if (!attemptCompleted || !passwordMatches) {
                 throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
             }
 

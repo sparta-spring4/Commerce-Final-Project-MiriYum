@@ -45,13 +45,6 @@ public class GlobalExceptionHandler {
             Comparator.comparing(ValidationErrorDetail::field)
                     .thenComparing(ValidationErrorDetail::reason);
 
-    @ExceptionHandler(RetryableServiceException.class)
-    public ResponseEntity<ErrorResponse> handleRetryableServiceException(RetryableServiceException exception) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.RETRY_AFTER, String.valueOf(exception.getRetryAfterSeconds()));
-        return response(exception.getErrorCode(), headers);
-    }
-
     @ExceptionHandler(ServiceException.class)
     public ResponseEntity<ErrorResponse> handleServiceException(ServiceException exception) {
         return response(exception.getErrorCode());
