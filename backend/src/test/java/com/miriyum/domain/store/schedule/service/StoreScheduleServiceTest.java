@@ -92,6 +92,7 @@ class StoreScheduleServiceTest {
     @Test
     void operatingPublicationUsesCentralAuthorityAndReturnsVersionOne() {
         StoreScheduleState state = state();
+        state.activateReservation(31L);
         WeeklyOperatingHoursRequest request = operatingRequest();
         List<WeeklyInterval> intervals = operatingIntervals();
         given(stateRepository.findForUpdateByStoreId(STORE_ID))
@@ -114,6 +115,7 @@ class StoreScheduleServiceTest {
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().version()).isEqualTo(1);
         assertThat(state.getActiveOperatingScheduleVersionId()).isEqualTo(21L);
+        assertThat(state.getActiveReservationScheduleVersionId()).isNull();
         then(storeService).should()
                 .requireManagementOwnership(OPERATOR_ID, STORE_ID);
         then(storeService).should()

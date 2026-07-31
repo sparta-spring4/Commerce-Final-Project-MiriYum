@@ -190,6 +190,42 @@ class StoreScheduleRepositoryIT {
 
     @Test
     @Transactional
+    void newOperatingVersionDeactivatesReservationValidatedAgainstPreviousVersion() {
+        long storeId = createStore();
+        StoreScheduleState state = initializeAndLock(storeId);
+        OperatingScheduleVersion first = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(
+                        storeId,
+                        state.allocateOperatingVersion(),
+                        List.of(business(9, 0, 18, 0, 540, 1080))));
+        state.activateOperating(first.getId());
+        ReservationScheduleVersion reservation =
+                reservationRepository.saveAndFlush(
+                        ReservationScheduleVersion.create(
+                                storeId,
+                                state.allocateReservationVersion(),
+                                first.getId(),
+                                List.of(reservation(10, 0, 11, 0, 600, 660))));
+        state.activateReservation(reservation.getId());
+
+        OperatingScheduleVersion second = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(
+                        storeId,
+                        state.allocateOperatingVersion(),
+                        List.of(business(12, 0, 20, 0, 720, 1200))));
+        state.activateOperating(second.getId());
+        entityManager.flush();
+        entityManager.clear();
+
+        StoreScheduleState found = stateRepository.findById(storeId).orElseThrow();
+        assertThat(found.getActiveOperatingScheduleVersionId())
+                .isEqualTo(second.getId());
+        assertThat(found.getActiveReservationScheduleVersionId()).isNull();
+        assertThat(reservationRepository.findById(reservation.getId())).isPresent();
+    }
+
+    @Test
+    @Transactional
     void deletingStoreReferencedByScheduleStateIsRestricted() {
         long storeId = createStore();
         initializeAndLock(storeId);

@@ -55,6 +55,7 @@ public class StoreScheduleState extends BaseEntity {
 
     public void activateOperating(long versionId) {
         activeOperatingScheduleVersionId = versionId;
+        activeReservationScheduleVersionId = null;
     }
 
     public void activateReservation(long versionId) {
