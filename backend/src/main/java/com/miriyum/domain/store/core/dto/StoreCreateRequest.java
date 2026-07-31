@@ -3,6 +3,7 @@ package com.miriyum.domain.store.core.dto;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -45,6 +46,14 @@ public record StoreCreateRequest(
 
         @NotNull
         @Valid
-        StoreModesRequest modes
+        StoreModesRequest modes,
+
+        @NotNull
+        @AssertTrue
+        Boolean applicantSelfAttested,
+
+        @NotNull
+        @AssertTrue
+        Boolean requiredTermsAgreed
 ) {
 }

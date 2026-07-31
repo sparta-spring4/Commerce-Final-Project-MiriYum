@@ -24,6 +24,10 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -44,6 +48,9 @@ class StoreServiceTest {
     private static final long OPERATOR_ID = 11L;
     private static final long STORE_ID = 7L;
     private static final String IDEMPOTENCY_KEY = "123e4567-e89b-12d3-a456-426614174000";
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-07-31T03:00:00Z"),
+            ZoneOffset.UTC);
 
     @Mock
     private StoreOperatorAccountService operatorAccountService;
@@ -68,16 +75,19 @@ class StoreServiceTest {
                 storeRepository,
                 catalogPolicy,
                 idempotencyExecutor,
-                objectMapper);
+                objectMapper,
+                FIXED_CLOCK);
     }
 
     @Test
     void createsStoreThroughIdempotentCommand() {
         StoreCreateRequest request = validCreateRequest();
         AtomicReference<BusinessResult<?>> result = runBusinessWorkOnExecute();
+        AtomicReference<Store> savedStore = new AtomicReference<>();
         given(storeRepository.saveAndFlush(any(Store.class))).willAnswer(invocation -> {
             Store store = invocation.getArgument(0);
             ReflectionTestUtils.setField(store, "id", STORE_ID);
+            savedStore.set(store);
             return store;
         });
 
@@ -87,6 +97,12 @@ class StoreServiceTest {
         assertThat(commandResult.httpStatus()).isEqualTo(201);
         assertThat(commandResult.data().storeId()).isEqualTo(Long.toString(STORE_ID));
         assertThat(result.get().resourceType()).isEqualTo("STORE");
+        assertThat(savedStore.get().getApplicantSelfAttestedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(savedStore.get().getRequiredTermsAgreedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(savedStore.get().getRequiredTermsVersion())
+                .isEqualTo("STORE_ONBOARDING_REQUIRED_TERMS_V1");
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(catalogPolicy).should().validate("CAFE_BAKERY", List.of("DATE"));
         then(storeRepository).should().saveAndFlush(any(Store.class));
@@ -310,7 +326,9 @@ class StoreServiceTest {
                 "서울시 중구",
                 "CAFE_BAKERY",
                 List.of("DATE"),
-                new StoreModesRequest(true, true, true));
+                new StoreModesRequest(true, true, true),
+                true,
+                true);
     }
 
     private Store storeOwnedBy(long operatorId) {
@@ -326,6 +344,8 @@ class StoreServiceTest {
                 Set.of("DATE"),
                 true,
                 true,
-                true);
+                true,
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }
 }

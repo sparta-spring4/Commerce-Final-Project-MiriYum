@@ -23,6 +23,7 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.DayOfWeek;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.List;
@@ -206,7 +207,9 @@ class StoreSchedulePublicationIT {
                 Set.of(),
                 true,
                 true,
-                true)).getId();
+                true,
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         return new OwnerStore(operatorId, storeId);
     }
 

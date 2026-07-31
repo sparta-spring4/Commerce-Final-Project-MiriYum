@@ -20,6 +20,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import lombok.AccessLevel;
@@ -96,6 +97,15 @@ public class Store extends BaseEntity {
     @Column(name = "pickup_enabled", nullable = false)
     private boolean pickupEnabled;
 
+    @Column(name = "applicant_self_attested_at", nullable = false)
+    private LocalDateTime applicantSelfAttestedAt;
+
+    @Column(name = "required_terms_agreed_at", nullable = false)
+    private LocalDateTime requiredTermsAgreedAt;
+
+    @Column(name = "required_terms_version", nullable = false, length = 50)
+    private String requiredTermsVersion;
+
     private Store(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
@@ -108,7 +118,9 @@ public class Store extends BaseEntity {
             Set<String> tagCodes,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
-            boolean pickupEnabled
+            boolean pickupEnabled,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
     ) {
         this.storeOperatorAccountId = storeOperatorAccountId;
         this.businessRegistrationNumber = businessRegistrationNumber;
@@ -122,6 +134,9 @@ public class Store extends BaseEntity {
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;
+        this.applicantSelfAttestedAt = onboardingAcceptedAt;
+        this.requiredTermsAgreedAt = onboardingAcceptedAt;
+        this.requiredTermsVersion = requiredTermsVersion;
     }
 
     public static Store create(
@@ -136,10 +151,13 @@ public class Store extends BaseEntity {
             Set<String> tagCodes,
             boolean reservationEnabled,
             boolean menuHoldEnabled,
-            boolean pickupEnabled
+            boolean pickupEnabled,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
     ) {
         PickupEligibility eligibility = pickupEligibilityFor(businessType);
         requirePickupAllowed(eligibility, pickupEnabled);
+        requireOnboardingEvidence(onboardingAcceptedAt, requiredTermsVersion);
 
         Store store = new Store(
                 storeOperatorAccountId,
@@ -153,7 +171,9 @@ public class Store extends BaseEntity {
                 tagCodes,
                 reservationEnabled,
                 menuHoldEnabled,
-                pickupEnabled);
+                pickupEnabled,
+                onboardingAcceptedAt,
+                requiredTermsVersion);
         store.verificationStatus = VerificationStatus.APPROVED;
         store.operationStatus = OperationStatus.OPEN;
         store.pickupEligibility = eligibility;
@@ -218,6 +238,17 @@ public class Store extends BaseEntity {
                 || (requestedStatus != null
                 && operationStatus == OperationStatus.CLOSED)) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
+        }
+    }
+
+    private static void requireOnboardingEvidence(
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion
+    ) {
+        if (onboardingAcceptedAt == null
+                || requiredTermsVersion == null
+                || requiredTermsVersion.isBlank()) {
+            throw new IllegalArgumentException("onboarding evidence is required");
         }
     }
 }

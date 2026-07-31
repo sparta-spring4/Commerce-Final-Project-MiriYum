@@ -7,6 +7,7 @@ import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
+import java.time.LocalDateTime;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -30,7 +31,9 @@ class ManagedStoreResponseTest {
                 Set.of("DATE"),
                 true,
                 false,
-                true);
+                true,
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1");
         ReflectionTestUtils.setField(store, "id", 9_007_199_254_740_993L);
 
         ManagedStoreResponse response = ManagedStoreResponse.from(store);

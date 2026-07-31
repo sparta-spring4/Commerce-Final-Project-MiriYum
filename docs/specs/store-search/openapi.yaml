@@ -721,6 +721,8 @@ components:
         - storeCategoryCode
         - tagCodes
         - modes
+        - applicantSelfAttested
+        - requiredTermsAgreed
       properties:
         businessRegistrationNumber:
           type: string
@@ -750,6 +752,14 @@ components:
             $ref: "#/components/schemas/CatalogCode"
         modes:
           $ref: "#/components/schemas/StoreModes"
+        applicantSelfAttested:
+          type: boolean
+          const: true
+          description: 신청자가 입력한 사업자 정보에 대한 책임을 자기확약한다.
+        requiredTermsAgreed:
+          type: boolean
+          const: true
+          description: 필수 입점 약관에 동의한다. 서버가 동의 시각과 STORE_ONBOARDING_REQUIRED_TERMS_V1 버전을 기록한다.
     StoreUpdateRequest:
       type: object
       description: OTHER 매장에서 modes.pickupEnabled=true를 요청하면 STORE_008로 거절하고 기존 매장 설정을 유지한다.

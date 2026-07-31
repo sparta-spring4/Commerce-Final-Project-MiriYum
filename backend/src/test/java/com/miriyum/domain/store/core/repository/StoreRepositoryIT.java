@@ -19,6 +19,7 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -104,6 +105,12 @@ class StoreRepositoryIT {
 
         Store found = storeRepository.findById(saved.getId()).orElseThrow();
         assertThat(found.getTagCodes()).containsExactlyInAnyOrder("DATE", "QUIET");
+        assertThat(found.getApplicantSelfAttestedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(found.getRequiredTermsAgreedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(found.getRequiredTermsVersion())
+                .isEqualTo("STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }
 
     @Test
@@ -314,7 +321,9 @@ class StoreRepositoryIT {
                 tags,
                 true,
                 true,
-                true);
+                true,
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }
 
     private record RegistrationResult(

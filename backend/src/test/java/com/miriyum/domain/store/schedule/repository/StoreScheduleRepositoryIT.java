@@ -16,6 +16,7 @@ import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.util.List;
@@ -223,7 +224,9 @@ class StoreScheduleRepositoryIT {
                 Set.of(),
                 true,
                 true,
-                true)).getId();
+                true,
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
     }
 
     private WeeklyInterval business(

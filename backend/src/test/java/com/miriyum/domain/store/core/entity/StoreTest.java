@@ -10,11 +10,17 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.time.LocalDateTime;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class StoreTest {
+
+    private static final LocalDateTime ONBOARDING_ACCEPTED_AT =
+            LocalDateTime.of(2026, 7, 31, 12, 0);
+    private static final String REQUIRED_TERMS_VERSION =
+            "STORE_ONBOARDING_REQUIRED_TERMS_V1";
 
     @Test
     @DisplayName("카페 매장은 승인·영업 중·픽업 가능 상태로 생성된다")
@@ -31,7 +37,9 @@ class StoreTest {
                 Set.of("DATE"),
                 true,
                 true,
-                true);
+                true,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION);
 
         assertThat(store.getVerificationStatus()).isEqualTo(VerificationStatus.APPROVED);
         assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
@@ -53,7 +61,9 @@ class StoreTest {
                 Set.of(),
                 true,
                 false,
-                true))
+                true,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
@@ -74,7 +84,9 @@ class StoreTest {
                 Set.of(),
                 true,
                 false,
-                false);
+                false,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION);
 
         assertThatThrownBy(() -> store.requireManagedBy(12L))
                 .isInstanceOf(ServiceException.class)
@@ -97,7 +109,9 @@ class StoreTest {
                 Set.of("DATE"),
                 true,
                 true,
-                true);
+                true,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION);
 
         store.update(
                 "새 이름",
@@ -134,7 +148,9 @@ class StoreTest {
                 Set.of(),
                 true,
                 false,
-                false);
+                false,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION);
 
         assertThatThrownBy(() -> store.update(
                 null,
@@ -248,6 +264,8 @@ class StoreTest {
                 Set.of("DATE"),
                 true,
                 true,
-                true);
+                true,
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION);
     }
 }

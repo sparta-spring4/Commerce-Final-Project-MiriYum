@@ -90,6 +90,56 @@ class StoreControllerTest {
     }
 
     @Test
+    void createRejectsMissingOnboardingDeclarations() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJsonWithModesAndDeclarations(
+                                """
+                                        {
+                                          "reservationEnabled": true,
+                                          "menuHoldEnabled": true,
+                                          "pickupEnabled": true
+                                        }
+                                        """,
+                                "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void createRejectsFalseRequiredTermsAgreement() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJsonWithModesAndDeclarations(
+                                """
+                                        {
+                                          "reservationEnabled": true,
+                                          "menuHoldEnabled": true,
+                                          "pickupEnabled": true
+                                        }
+                                        """,
+                                """
+                                        ,
+                                          "applicantSelfAttested": true,
+                                          "requiredTermsAgreed": false
+                                        """)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void getReturnsManagedStoreEnvelope() throws Exception {
         authenticateStoreOperator(11L);
         given(storeService.getManagedStore(11L, 7L)).willReturn(managedStore(7L));
@@ -228,6 +278,19 @@ class StoreControllerTest {
     }
 
     private String createJsonWithModes(String modesJson) {
+        return createJsonWithModesAndDeclarations(
+                modesJson,
+                """
+                        ,
+                          "applicantSelfAttested": true,
+                          "requiredTermsAgreed": true
+                        """);
+    }
+
+    private String createJsonWithModesAndDeclarations(
+            String modesJson,
+            String declarationsJson
+    ) {
         return """
                 {
                   "businessRegistrationNumber": "1234567890",
@@ -238,9 +301,9 @@ class StoreControllerTest {
                   "address": "서울시 중구",
                   "storeCategoryCode": "CAFE_BAKERY",
                   "tagCodes": ["DATE"],
-                  "modes": %s
+                  "modes": %s%s
                 }
-                """.formatted(modesJson);
+                """.formatted(modesJson, declarationsJson);
     }
 
     private static Stream<String> modeObjectsMissingOneRequiredField() {
