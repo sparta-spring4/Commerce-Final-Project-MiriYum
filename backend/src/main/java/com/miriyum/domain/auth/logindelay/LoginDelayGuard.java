@@ -2,7 +2,9 @@ package com.miriyum.domain.auth.logindelay;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Component
 public class LoginDelayGuard {
+
+    private static final Duration ATTEMPT_LEASE = Duration.ofSeconds(30);
 
     private final LoginFailureDelayRepository loginFailureDelayRepository;
     private final LoginDelayPolicy loginDelayPolicy;
@@ -27,33 +31,47 @@ public class LoginDelayGuard {
         this.clock = clock;
     }
 
-    /**
-     * Reads an already-confirmed delay without creating or updating a failure row.
-     */
-    @Transactional(readOnly = true)
-    public boolean isDelayed(TokenNamespace namespace, long accountId) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public LoginAttempt tryAcquireAttempt(TokenNamespace namespace, long accountId) {
         LocalDateTime now = LocalDateTime.now(clock);
+        String token = UUID.randomUUID().toString();
+        LocalDateTime expiresAt = now.plus(ATTEMPT_LEASE);
+
+        if (loginFailureDelayRepository.insertAttempt(namespace.value(), accountId, token, expiresAt, now)
+                || loginFailureDelayRepository.acquireExistingAttempt(
+                namespace.value(), accountId, token, expiresAt, now)) {
+            return LoginAttempt.acquired(token);
+        }
+
         return loginFailureDelayRepository.find(namespace.value(), accountId)
-                .map(delay -> delay.isDelayedAt(now))
-                .orElse(false);
+                .filter(delay -> delay.isDelayedAt(now))
+                .map(delay -> LoginAttempt.delayed())
+                .orElseGet(LoginAttempt::busy);
     }
 
-    /**
-     * Updates the policy only after PasswordEncoder has confirmed a mismatch.
-     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordFailure(TokenNamespace namespace, long accountId) {
+    public void completeAttempt(
+            TokenNamespace namespace,
+            long accountId,
+            LoginAttempt attempt,
+            boolean passwordMatches
+    ) {
         LocalDateTime now = LocalDateTime.now(clock);
-        LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
+        LoginFailureDelay current = loginFailureDelayRepository.lockExisting(namespace.value(), accountId);
+        if (!current.isOwnedBy(attempt.token())) {
+            return;
+        }
+        if (passwordMatches) {
+            loginFailureDelayRepository.resetOwnedAttempt(namespace.value(), accountId, attempt.token());
+            return;
+        }
         LoginFailureDelay updated = loginDelayPolicy.applyFailure(current, now);
         loginFailureDelayRepository.save(namespace.value(), accountId, updated, now);
     }
 
-    /**
-     * A successful password comparison clears previously confirmed failures.
-     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void reset(TokenNamespace namespace, long accountId) {
-        loginFailureDelayRepository.reset(namespace.value(), accountId);
+    public void releaseAttempt(TokenNamespace namespace, long accountId, LoginAttempt attempt) {
+        loginFailureDelayRepository.releaseAttempt(
+                namespace.value(), accountId, attempt.token(), LocalDateTime.now(clock));
     }
 }

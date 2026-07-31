@@ -28,7 +28,8 @@ public class LoginFailureDelayRepository {
      */
     public Optional<LoginFailureDelay> find(String accountNamespace, long accountId) {
         List<LoginFailureDelay> found = jdbcTemplate.query(
-                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at "
+                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at, "
+                        + "active_attempt_token, active_attempt_expires_at "
                         + "FROM login_failure_delays "
                         + "WHERE account_namespace = ? AND account_id = ?",
                 LoginFailureDelayRepository::mapRow,
@@ -55,19 +56,44 @@ public class LoginFailureDelayRepository {
      *     {@code next_attempt_allowed_at}과 기준이 어긋나기 때문이다(C-004는 절대 시각을 UTC로
      *     저장하도록 정한다).
      */
-    public LoginFailureDelay lock(String accountNamespace, long accountId, LocalDateTime now) {
-        jdbcTemplate.update(
-                "INSERT INTO login_failure_delays "
+    public boolean insertAttempt(
+            String accountNamespace,
+            long accountId,
+            String token,
+            LocalDateTime expiresAt,
+            LocalDateTime now
+    ) {
+        return jdbcTemplate.update(
+                "INSERT IGNORE INTO login_failure_delays "
                         + "(account_namespace, account_id, consecutive_failures, delay_stage, "
-                        + "next_attempt_allowed_at, created_at, updated_at) "
-                        + "VALUES (?, ?, 0, 0, NULL, ?, ?) "
-                        + "ON DUPLICATE KEY UPDATE updated_at = ?",
-                accountNamespace, accountId, now, now, now);
+                        + "next_attempt_allowed_at, active_attempt_token, active_attempt_expires_at, "
+                        + "created_at, updated_at) "
+                        + "VALUES (?, ?, 0, 0, NULL, ?, ?, ?, ?)",
+                accountNamespace, accountId, token, expiresAt, now, now) == 1;
+    }
 
+    public boolean acquireExistingAttempt(
+            String accountNamespace,
+            long accountId,
+            String token,
+            LocalDateTime expiresAt,
+            LocalDateTime now
+    ) {
+        return jdbcTemplate.update(
+                "UPDATE login_failure_delays "
+                        + "SET active_attempt_token = ?, active_attempt_expires_at = ?, updated_at = ? "
+                        + "WHERE account_namespace = ? AND account_id = ? "
+                        + "AND (next_attempt_allowed_at IS NULL OR next_attempt_allowed_at <= ?) "
+                        + "AND (active_attempt_token IS NULL OR active_attempt_expires_at <= ?)",
+                token, expiresAt, now, accountNamespace, accountId, now, now) == 1;
+    }
+
+    public LoginFailureDelay lockExisting(String accountNamespace, long accountId) {
         return jdbcTemplate.queryForObject(
-                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at "
+                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at, "
+                        + "active_attempt_token, active_attempt_expires_at "
                         + "FROM login_failure_delays "
-                        + "WHERE account_namespace = ? AND account_id = ?",
+                        + "WHERE account_namespace = ? AND account_id = ? FOR UPDATE",
                 LoginFailureDelayRepository::mapRow,
                 accountNamespace, accountId);
     }
@@ -81,7 +107,8 @@ public class LoginFailureDelayRepository {
     public void save(String accountNamespace, long accountId, LoginFailureDelay delay, LocalDateTime now) {
         jdbcTemplate.update(
                 "UPDATE login_failure_delays "
-                        + "SET consecutive_failures = ?, delay_stage = ?, next_attempt_allowed_at = ?, updated_at = ? "
+                        + "SET consecutive_failures = ?, delay_stage = ?, next_attempt_allowed_at = ?, "
+                        + "active_attempt_token = NULL, active_attempt_expires_at = NULL, updated_at = ? "
                         + "WHERE account_namespace = ? AND account_id = ?",
                 delay.consecutiveFailures(), delay.delayStage(), delay.nextAttemptAllowedAt(), now,
                 accountNamespace, accountId);
@@ -91,10 +118,24 @@ public class LoginFailureDelayRepository {
      * 로그인 성공 시 실패 상태를 초기화한다. 행을 지우는 것으로 초기화를 갈음해 표가 무한히
      * 늘어나지 않게 한다.
      */
-    public void reset(String accountNamespace, long accountId) {
+    public void resetOwnedAttempt(String accountNamespace, long accountId, String token) {
         jdbcTemplate.update(
-                "DELETE FROM login_failure_delays WHERE account_namespace = ? AND account_id = ?",
-                accountNamespace, accountId);
+                "DELETE FROM login_failure_delays "
+                        + "WHERE account_namespace = ? AND account_id = ? AND active_attempt_token = ?",
+                accountNamespace, accountId, token);
+    }
+
+    public void releaseAttempt(String accountNamespace, long accountId, String token, LocalDateTime now) {
+        jdbcTemplate.update(
+                "DELETE FROM login_failure_delays "
+                        + "WHERE account_namespace = ? AND account_id = ? AND active_attempt_token = ? "
+                        + "AND consecutive_failures = 0 AND delay_stage = 0 AND next_attempt_allowed_at IS NULL",
+                accountNamespace, accountId, token);
+        jdbcTemplate.update(
+                "UPDATE login_failure_delays "
+                        + "SET active_attempt_token = NULL, active_attempt_expires_at = NULL, updated_at = ? "
+                        + "WHERE account_namespace = ? AND account_id = ? AND active_attempt_token = ?",
+                now, accountNamespace, accountId, token);
     }
 
     private static LoginFailureDelay mapRow(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
@@ -102,6 +143,12 @@ public class LoginFailureDelayRepository {
         return new LoginFailureDelay(
                 rs.getInt("consecutive_failures"),
                 rs.getInt("delay_stage"),
-                nextAttemptAllowedAt == null ? null : nextAttemptAllowedAt.toLocalDateTime());
+                nextAttemptAllowedAt == null ? null : nextAttemptAllowedAt.toLocalDateTime(),
+                rs.getString("active_attempt_token"),
+                toLocalDateTime(rs.getTimestamp("active_attempt_expires_at")));
+    }
+
+    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toLocalDateTime();
     }
 }

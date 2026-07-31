@@ -267,6 +267,14 @@ class GlobalExceptionHandlerTest {
         assertThat(result.getResponse().getContentAsString()).doesNotContain("secret-internal-message");
     }
 
+    @Test
+    void retryableServiceExceptionReturnsRetryAfterHeader() throws Exception {
+        mockMvc.perform(get("/test/retryable-error"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("COMMON_010"))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "1"));
+    }
+
     @RestController
     @RequestMapping("/test")
     static class TestController {
@@ -274,6 +282,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/service-error")
         void serviceError() {
             throw new ServiceException(TestErrorCode.NOT_FOUND);
+        }
+
+        @GetMapping("/retryable-error")
+        void retryableError() {
+            throw new RetryableServiceException(CommonErrorCode.TOO_MANY_REQUESTS, 1);
         }
 
         @PostMapping(value = "/validation", consumes = MediaType.APPLICATION_JSON_VALUE)

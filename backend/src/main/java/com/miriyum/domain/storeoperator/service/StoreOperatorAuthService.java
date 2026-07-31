@@ -10,12 +10,14 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.RetryableServiceException;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -85,22 +87,33 @@ public class StoreOperatorAuthService {
         StoreOperatorAccount account = storeOperatorAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
-        if (loginDelayGuard.isDelayed(TokenNamespace.STORE_OPERATOR, account.getId())) {
+        LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.STORE_OPERATOR, account.getId());
+        if (attempt.status() == LoginAttempt.Status.DELAYED) {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
-
-        boolean passwordMatches = passwordEncoder.matches(
-                passwordPolicy.toNfc(request.password()), account.getPasswordHash());
-        if (!passwordMatches) {
-            loginDelayGuard.recordFailure(TokenNamespace.STORE_OPERATOR, account.getId());
-            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        if (attempt.status() == LoginAttempt.Status.BUSY) {
+            throw new RetryableServiceException(CommonErrorCode.TOO_MANY_REQUESTS, 1);
         }
-        loginDelayGuard.reset(TokenNamespace.STORE_OPERATOR, account.getId());
 
-        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
-            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+        boolean completed = false;
+        try {
+            boolean passwordMatches = passwordEncoder.matches(
+                    passwordPolicy.toNfc(request.password()), account.getPasswordHash());
+            loginDelayGuard.completeAttempt(TokenNamespace.STORE_OPERATOR, account.getId(), attempt, passwordMatches);
+            completed = true;
+            if (!passwordMatches) {
+                throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+            }
+
+            if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+                throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+            }
+            return issueTokenPair(account.getId());
+        } finally {
+            if (!completed) {
+                loginDelayGuard.releaseAttempt(TokenNamespace.STORE_OPERATOR, account.getId(), attempt);
+            }
         }
-        return issueTokenPair(account.getId());
     }
 
     @Transactional(readOnly = true)

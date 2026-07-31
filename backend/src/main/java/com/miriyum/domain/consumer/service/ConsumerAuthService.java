@@ -10,12 +10,14 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.RetryableServiceException;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -89,22 +91,33 @@ public class ConsumerAuthService {
         ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
-        if (loginDelayGuard.isDelayed(TokenNamespace.CONSUMER, account.getId())) {
+        LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.CONSUMER, account.getId());
+        if (attempt.status() == LoginAttempt.Status.DELAYED) {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
-
-        boolean passwordMatches = passwordEncoder.matches(
-                passwordPolicy.toNfc(request.password()), account.getPasswordHash());
-        if (!passwordMatches) {
-            loginDelayGuard.recordFailure(TokenNamespace.CONSUMER, account.getId());
-            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        if (attempt.status() == LoginAttempt.Status.BUSY) {
+            throw new RetryableServiceException(CommonErrorCode.TOO_MANY_REQUESTS, 1);
         }
-        loginDelayGuard.reset(TokenNamespace.CONSUMER, account.getId());
 
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
-            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+        boolean completed = false;
+        try {
+            boolean passwordMatches = passwordEncoder.matches(
+                    passwordPolicy.toNfc(request.password()), account.getPasswordHash());
+            loginDelayGuard.completeAttempt(TokenNamespace.CONSUMER, account.getId(), attempt, passwordMatches);
+            completed = true;
+            if (!passwordMatches) {
+                throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+            }
+
+            if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+                throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+            }
+            return issueTokenPair(account.getId());
+        } finally {
+            if (!completed) {
+                loginDelayGuard.releaseAttempt(TokenNamespace.CONSUMER, account.getId(), attempt);
+            }
         }
-        return issueTokenPair(account.getId());
     }
 
     @Transactional(readOnly = true)

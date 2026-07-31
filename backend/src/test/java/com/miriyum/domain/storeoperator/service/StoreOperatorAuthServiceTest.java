@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
@@ -17,6 +18,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -180,6 +182,22 @@ class StoreOperatorAuthServiceTest {
     }
 
     @Test
+    void rejectsBusyLoginWithoutPasswordComparison() {
+        StoreOperatorAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
+        given(loginDelayGuard.tryAcquireAttempt(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID))
+                .willReturn(LoginAttempt.busy());
+
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.TOO_MANY_REQUESTS);
+
+        verifyNoInteractions(passwordEncoder);
+    }
+
+    @Test
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
@@ -199,7 +217,7 @@ class StoreOperatorAuthServiceTest {
         // then
         assertThat(tokenPair.accessToken()).isEqualTo("access-token-value");
         assertThat(tokenPair.refreshToken()).isEqualTo("refresh-token-value");
-        verify(loginDelayGuard).isDelayed(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+        verify(loginDelayGuard).tryAcquireAttempt(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
     }
 
     @Test
@@ -241,7 +259,8 @@ class StoreOperatorAuthServiceTest {
      * 않은 상태를 재현한다.
      */
     private void delegatePasswordCheckToEncoder() {
-        given(loginDelayGuard.isDelayed(any(), anyLong())).willReturn(false);
+        given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
+                .willReturn(LoginAttempt.acquired("attempt-token"));
     }
 
     /**

@@ -192,11 +192,24 @@ class LoginDelayIntegrationTest {
 
         // then: 모두 토큰 발급까지 성공해야 하고, 성공 요청이 실패 횟수를 남겨선 안 된다.
         assertThat(completedInTime).as("동시 로그인 %d건이 30초 안에 끝나지 않았습니다", threadCount).isTrue();
+        int successCount = 0;
+        int busyCount = 0;
         for (Future<TokenPair> future : futures) {
-            TokenPair tokenPair = future.get();
-            assertThat(tokenPair.accessToken()).isNotBlank();
-            assertThat(tokenPair.refreshToken()).isNotBlank();
+            try {
+                TokenPair tokenPair = future.get();
+                assertThat(tokenPair.accessToken()).isNotBlank();
+                assertThat(tokenPair.refreshToken()).isNotBlank();
+                successCount++;
+            } catch (ExecutionException exception) {
+                assertThat(exception.getCause())
+                        .isInstanceOf(ServiceException.class)
+                        .extracting(cause -> ((ServiceException) cause).getErrorCode())
+                        .isEqualTo(com.miriyum.global.exception.CommonErrorCode.TOO_MANY_REQUESTS);
+                busyCount++;
+            }
         }
+        assertThat(successCount).isEqualTo(1);
+        assertThat(busyCount).isEqualTo(threadCount - 1);
         assertThat(failureRowCount()).isZero();
     }
 
@@ -324,12 +337,12 @@ class LoginDelayIntegrationTest {
         // then: 결과는 정확히 5회·1단계여야 한다. 앞의 5건이 5회 기준을 채워 1분 지연을 만들고,
         // 나머지 요청은 잠금 안에서 "지연 중"으로 판정돼 상태를 바꾸지 않는다. 단계가 2·3으로
         // 올라가면 지연이 살아있는 동안의 실패로 단계가 뛴 것이므로 정책 위반이다.
-        assertThat(consecutiveFailures()).isEqualTo(5);
-        assertThat(delayStage()).isEqualTo(1);
+        assertThat(consecutiveFailures()).isEqualTo(1);
+        assertThat(delayStage()).isZero();
 
         // then: 지연이 걸린 뒤의 요청은 비밀번호 비교에 도달하지 않아야 한다. 지연은 추측 속도를
         // 늦추는 장치이므로, 동시 요청이 지연을 우회해 해시 비교를 계속 수행하면 목적이 무너진다.
-        verify(passwordEncoder, times(threadCount)).matches(any(), any());
+        verify(passwordEncoder, times(1)).matches(any(), any());
     }
 
     /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */
