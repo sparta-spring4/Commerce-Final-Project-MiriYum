@@ -1,8 +1,5 @@
 package com.miriyum.domain.store.schedule.service;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.VerificationStatus;
-import com.miriyum.domain.store.core.service.StoreManagementView;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
@@ -54,7 +51,7 @@ public class StoreScheduleService {
             IdempotencyKey key,
             WeeklyOperatingHoursRequest request
     ) {
-        requirePublicationAuthority(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
                 operatorId,
@@ -63,6 +60,7 @@ public class StoreScheduleService {
                 StoreScheduleFingerprint.forOperating(storeId, request));
 
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            storeService.requireSchedulePublicationAuthority(operatorId, storeId);
             StoreScheduleState state = initializeAndLock(storeId);
             List<WeeklyInterval> intervals =
                     schedulePolicy.validateOperating(request);
@@ -88,7 +86,7 @@ public class StoreScheduleService {
                     IdempotencyKey key,
                     WeeklyReservationTimeSlotsRequest request
             ) {
-        requirePublicationAuthority(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
                 operatorId,
@@ -97,6 +95,7 @@ public class StoreScheduleService {
                 StoreScheduleFingerprint.forReservation(storeId, request));
 
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            storeService.requireSchedulePublicationAuthority(operatorId, storeId);
             StoreScheduleState state = initializeAndLock(storeId);
             Long operatingVersionId =
                     state.getActiveOperatingScheduleVersionId();
@@ -127,18 +126,6 @@ public class StoreScheduleService {
                     response);
         });
         return commandResult(outcome, ReservationTimeSlotsResponse.class);
-    }
-
-    private void requirePublicationAuthority(long operatorId, long storeId) {
-        StoreManagementView authority =
-                storeService.requireManagementAuthority(operatorId, storeId);
-        if (authority.verificationStatus() != VerificationStatus.APPROVED) {
-            throw new ServiceException(
-                    StoreErrorCode.VERIFICATION_STATE_CONFLICT);
-        }
-        if (authority.operationStatus() == OperationStatus.CLOSED) {
-            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
-        }
     }
 
     private StoreScheduleState initializeAndLock(long storeId) {

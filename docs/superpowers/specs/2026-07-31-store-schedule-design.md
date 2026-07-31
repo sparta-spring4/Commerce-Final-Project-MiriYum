@@ -66,8 +66,8 @@ An overnight interval belongs to the day on which it starts. For example, Monday
 ## Architecture
 
 The schedule domain lives under `com.miriyum.domain.store.schedule`. It consumes
-Issue #33's public `StoreService.requireManagementAuthority` method and does not access
-the Store repository directly.
+the purpose-specific authority guards exposed by Issue #33's `StoreService` and does
+not access the Store repository directly.
 
 The main units are:
 
@@ -155,8 +155,12 @@ Semantic interval failures use `STORE_006`.
 
 ## Authority and Store State
 
-Before each operation, the service calls
-`StoreService.requireManagementAuthority(operatorAccountId, storeId)`.
+Before idempotency lookup, the service calls
+`StoreService.requireManagementOwnership(operatorAccountId, storeId)` to check the
+stable store existence and ownership contract. For a new execution only, the
+idempotent callback calls
+`StoreService.requireSchedulePublicationAuthority(operatorAccountId, storeId)` to
+check the mutable publication state.
 
 - missing store: `STORE_001`
 - different owner: `STORE_003`
@@ -179,12 +183,16 @@ The request fingerprint includes the route identity, store ID, all seven days, a
 normalized sorted intervals. Equivalent weekly content produces the same fingerprint
 even if request arrays arrive in a different order.
 
-The authority check, idempotency execution, state-row lock, validation, immutable
-version insertion, active-pointer update, and stored success response participate in
-one `READ_COMMITTED` transaction with a bounded timeout.
+The stable ownership check, idempotency execution, mutable publication-state check,
+state-row lock, validation, immutable version insertion, active-pointer update, and
+stored success response participate in one `READ_COMMITTED` transaction with a
+bounded timeout.
 
 The same key and fingerprint replays the stored version without creating another
-version. Reusing the key for different content returns `COMMON_007`.
+version. A replay still requires the same current owner, but does not re-evaluate
+mutable verification or operation status. Thus a previously successful publication
+can be replayed after the store closes, while a new key is rejected with `STORE_005`.
+Reusing the key for different content returns `COMMON_007`.
 
 Different keys racing for the same stream serialize on `store_schedule_state`. One
 request publishes first; the next request validates and publishes from the resulting
@@ -237,7 +245,7 @@ Unit tests:
 
 Service tests:
 
-- central Issue #33 authority invocation
+- purpose-specific ownership and publication-authority invocation
 - closed and temporarily closed behavior
 - independent version increments and operating-version reference
 - whole-week replacement rather than partial merge

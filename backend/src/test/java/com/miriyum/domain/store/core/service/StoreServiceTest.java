@@ -155,18 +155,31 @@ class StoreServiceTest {
     }
 
     @Test
-    void exposesOnlyManagementAuthorityState() {
+    void managementOwnershipChecksOnlyExistenceAndOwner() {
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+
+        storeService.requireManagementOwnership(OPERATOR_ID, STORE_ID);
+
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should().findOperatorAccountIdById(STORE_ID);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void schedulePublicationAuthorityRejectsClosedStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
-        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        store.close();
         given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
 
-        StoreManagementView view =
-                storeService.requireManagementAuthority(OPERATOR_ID, STORE_ID);
-
-        assertThat(view.storeId()).isEqualTo(STORE_ID);
-        assertThat(view.operationStatus()).isEqualTo(OperationStatus.OPEN);
-        assertThat(view.verificationStatus()).isEqualTo(store.getVerificationStatus());
-        assertThat(view.pickupEligibility()).isEqualTo(store.getPickupEligibility());
+        assertThatThrownBy(() ->
+                storeService.requireSchedulePublicationAuthority(
+                        OPERATOR_ID,
+                        STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception ->
+                        ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
     }
 
     @Test

@@ -5,6 +5,8 @@ import com.miriyum.domain.store.core.dto.StoreCreateRequest;
 import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
+import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
@@ -139,17 +141,28 @@ public class StoreService {
     }
 
     @Transactional(readOnly = true)
-    public StoreManagementView requireManagementAuthority(
+    public void requireManagementOwnership(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        requireStoreOwnership(operatorAccountId, storeId);
+    }
+
+    @Transactional(readOnly = true)
+    public void requireSchedulePublicationAuthority(
             long operatorAccountId,
             long storeId
     ) {
         operatorAccountService.getMe(operatorAccountId);
         Store store = loadManagedStore(operatorAccountId, storeId);
-        return new StoreManagementView(
-                store.getId(),
-                store.getOperationStatus(),
-                store.getVerificationStatus(),
-                store.getPickupEligibility());
+        if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
+            throw new ServiceException(
+                    StoreErrorCode.VERIFICATION_STATE_CONFLICT);
+        }
+        if (store.getOperationStatus() == OperationStatus.CLOSED) {
+            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
+        }
     }
 
     private Store loadManagedStore(long operatorAccountId, long storeId) {
