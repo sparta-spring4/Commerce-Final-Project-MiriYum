@@ -5,6 +5,8 @@ import com.miriyum.domain.store.core.dto.StoreCreateRequest;
 import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
+import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
@@ -14,6 +16,9 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -33,12 +38,16 @@ public class StoreService {
     private static final String SUCCESS_RESPONSE_CODE = "SUCCESS";
     private static final String ACTIVE_BUSINESS_NUMBER_CONSTRAINT =
             "uk_stores_active_business_number";
+    private static final String REQUIRED_TERMS_VERSION =
+            "STORE_ONBOARDING_REQUIRED_TERMS_V1";
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
 
     private final StoreOperatorAccountService operatorAccountService;
     private final StoreRepository storeRepository;
     private final StoreCatalogPolicy catalogPolicy;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreCommandResult create(
@@ -58,6 +67,8 @@ public class StoreService {
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
             catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
             StoreModesRequest modes = request.modes();
+            LocalDateTime onboardingAcceptedAt =
+                    LocalDateTime.ofInstant(clock.instant(), BUSINESS_ZONE);
             Store store = Store.create(
                     operatorAccountId,
                     request.businessRegistrationNumber(),
@@ -70,7 +81,10 @@ public class StoreService {
                     Set.copyOf(request.tagCodes()),
                     modes.reservationEnabled(),
                     modes.menuHoldEnabled(),
-                    modes.pickupEnabled());
+                    modes.pickupEnabled(),
+                    request.timeZoneId(),
+                    onboardingAcceptedAt,
+                    REQUIRED_TERMS_VERSION);
             Store saved = saveStore(store);
             return success(HttpStatus.CREATED, saved);
         });
@@ -128,17 +142,52 @@ public class StoreService {
     }
 
     @Transactional(readOnly = true)
-    public StoreManagementView requireManagementAuthority(
+    public void requireManagementOwnership(
             long operatorAccountId,
             long storeId
     ) {
         operatorAccountService.getMe(operatorAccountId);
-        Store store = loadManagedStore(operatorAccountId, storeId);
-        return new StoreManagementView(
+        requireStoreOwnership(operatorAccountId, storeId);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreScheduleAuthority requireSchedulePublicationAuthority(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+        requireScheduleState(store);
+        return scheduleAuthority(store);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreScheduledActivationDecision inspectScheduledActivation(
+            long storeId
+    ) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        boolean activationAllowed =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() != OperationStatus.CLOSED;
+        return new StoreScheduledActivationDecision(
                 store.getId(),
-                store.getOperationStatus(),
-                store.getVerificationStatus(),
-                store.getPickupEligibility());
+                store.getTimeZoneId(),
+                activationAllowed);
+    }
+
+    private void requireScheduleState(Store store) {
+        if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
+            throw new ServiceException(
+                    StoreErrorCode.VERIFICATION_STATE_CONFLICT);
+        }
+        if (store.getOperationStatus() == OperationStatus.CLOSED) {
+            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
+        }
+    }
+
+    private StoreScheduleAuthority scheduleAuthority(Store store) {
+        return new StoreScheduleAuthority(store.getId(), store.getTimeZoneId());
     }
 
     private Store loadManagedStore(long operatorAccountId, long storeId) {
