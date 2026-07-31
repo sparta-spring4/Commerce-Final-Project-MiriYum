@@ -1,4 +1,4 @@
--- Flyway 순서: V8 store core → V9 store schedule 이후 V10 reservation core.
+-- Flyway 순서: #67 V9~V13 이후 V14 reservation core.
 CREATE TABLE reservations (
     reservation_id BIGINT NOT NULL AUTO_INCREMENT,
     consumer_account_id BIGINT NOT NULL,
