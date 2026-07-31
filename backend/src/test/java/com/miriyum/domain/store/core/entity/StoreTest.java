@@ -72,6 +72,28 @@ class StoreTest {
     }
 
     @Test
+    @DisplayName("고정 UTC 오프셋은 IANA 시간대 식별자가 아니므로 거부한다")
+    void fixedOffsetTimeZoneIsRejected() {
+        assertThatThrownBy(() -> Store.create(
+                11L,
+                "1234567890",
+                BusinessType.CAFE,
+                "미리윰",
+                "",
+                Region.SEOUL,
+                "서울시 중구",
+                "CAFE_BAKERY",
+                Set.of(),
+                true,
+                false,
+                false,
+                "+09:00",
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("OTHER 업종은 픽업 기능을 활성화할 수 없다")
     void otherCannotEnablePickup() {
         assertThatThrownBy(() -> Store.create(

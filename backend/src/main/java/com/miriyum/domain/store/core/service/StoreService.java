@@ -162,11 +162,18 @@ public class StoreService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
-    public StoreScheduleAuthority requireScheduledActivationAuthority(long storeId) {
+    public StoreScheduledActivationDecision inspectScheduledActivation(
+            long storeId
+    ) {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
-        requireScheduleState(store);
-        return scheduleAuthority(store);
+        boolean activationAllowed =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() != OperationStatus.CLOSED;
+        return new StoreScheduledActivationDecision(
+                store.getId(),
+                store.getTimeZoneId(),
+                activationAllowed);
     }
 
     private void requireScheduleState(Store store) {

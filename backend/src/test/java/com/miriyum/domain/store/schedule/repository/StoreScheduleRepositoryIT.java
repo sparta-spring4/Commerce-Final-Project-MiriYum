@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -237,20 +238,74 @@ class StoreScheduleRepositoryIT {
         }).isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    @Transactional
+    void activeOperatingPointerCannotReferenceAnotherStoreVersion() {
+        long firstStoreId = createStore(
+                "first-schedule-owner@example.com", "1234567890");
+        long secondStoreId = createStore(
+                "second-schedule-owner@example.com", "1234567891");
+        initializeAndLock(firstStoreId);
+        StoreScheduleState secondState = initializeAndLock(secondStoreId);
+        OperatingScheduleVersion secondVersion =
+                operatingRepository.saveAndFlush(
+                        OperatingScheduleVersion.create(
+                                secondStoreId,
+                                secondState.allocateOperatingVersion(),
+                                List.of(business(9, 0, 18, 0, 540, 1080))));
+        entityManager.flush();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                UPDATE store_schedule_state
+                SET active_operating_schedule_version_id = ?
+                WHERE store_id = ?
+                """,
+                secondVersion.getId(),
+                firstStoreId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional
+    void notEvaluatedConflictStatusCannotClaimZeroConflicts() {
+        long storeId = createStore();
+        StoreScheduleState state = initializeAndLock(storeId);
+        OperatingScheduleVersion version = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(
+                        storeId,
+                        state.allocateOperatingVersion(),
+                        List.of(business(9, 0, 18, 0, 540, 1080))));
+        entityManager.flush();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                UPDATE store_operating_schedule_versions
+                SET conflict_count = 0
+                WHERE operating_schedule_version_id = ?
+                """,
+                version.getId()))
+                .isInstanceOf(DataAccessException.class);
+    }
+
     private StoreScheduleState initializeAndLock(long storeId) {
         stateRepository.initialize(storeId);
         return stateRepository.findForUpdateByStoreId(storeId).orElseThrow();
     }
 
     private long createStore() {
+        return createStore("schedule-owner@example.com", "1234567890");
+    }
+
+    private long createStore(String email, String businessRegistrationNumber) {
         long operatorId = operatorRepository.saveAndFlush(
                 StoreOperatorAccount.create(
-                        "schedule-owner@example.com",
+                        email,
                         "hashed",
                         "운영자")).getId();
         return storeRepository.saveAndFlush(Store.create(
                 operatorId,
-                "1234567890",
+                businessRegistrationNumber,
                 BusinessType.CAFE,
                 "야간 매장",
                 "",

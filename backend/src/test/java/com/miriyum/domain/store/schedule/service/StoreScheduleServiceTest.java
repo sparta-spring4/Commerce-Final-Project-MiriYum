@@ -10,6 +10,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
@@ -321,6 +322,96 @@ class StoreScheduleServiceTest {
         assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.DRAFT);
         assertThat(result.data().effectiveAt()).isNull();
         assertThat(result.data().changeReason()).isNull();
+    }
+
+    @Test
+    void operatingPublicationCannotBeCancelledAtOrAfterItsEffectiveTime() {
+        StoreScheduleState state = state();
+        OperatingScheduleVersion scheduled = OperatingScheduleVersion.createDraft(
+                STORE_ID, 2L, "Asia/Seoul", operatingIntervals());
+        scheduled.schedule(FIXED_CLOCK.instant(), "여름 영업시간");
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
+                .willReturn(Optional.of(scheduled));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> scheduleService.cancelOperatingPublication(
+                OPERATOR_ID,
+                STORE_ID,
+                2L,
+                IdempotencyKey.parse(KEY),
+                new SchedulePublicationCancellationRequest("효력 시각 경과")))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+        assertThat(scheduled.getStatus()).isEqualTo(ScheduleVersionStatus.SCHEDULED);
+    }
+
+    @Test
+    void reservationPublicationCannotBeCancelledAtOrAfterItsEffectiveTime() {
+        StoreScheduleState state = state();
+        ReservationScheduleVersion scheduled =
+                ReservationScheduleVersion.createDraft(
+                        STORE_ID,
+                        2L,
+                        21L,
+                        "Asia/Seoul",
+                        reservationIntervals());
+        scheduled.schedule(FIXED_CLOCK.instant(), "여름 예약시간");
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(reservationRepository.findByStoreIdAndVersionNumber(
+                STORE_ID, 2L))
+                .willReturn(Optional.of(scheduled));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> scheduleService.cancelReservationPublication(
+                OPERATOR_ID,
+                STORE_ID,
+                2L,
+                IdempotencyKey.parse(KEY),
+                new SchedulePublicationCancellationRequest("효력 시각 경과")))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+        assertThat(scheduled.getStatus()).isEqualTo(ScheduleVersionStatus.SCHEDULED);
+    }
+
+    @Test
+    void permanentlyInvalidStoreMarksDueOperatingActivationFailed() {
+        StoreScheduleState state = state();
+        OperatingScheduleVersion scheduled = OperatingScheduleVersion.createDraft(
+                STORE_ID, 2L, "Asia/Seoul", operatingIntervals());
+        ReflectionTestUtils.setField(scheduled, "id", 22L);
+        scheduled.schedule(FIXED_CLOCK.instant(), "여름 영업시간");
+        given(operatingRepository.findStoreIdById(22L))
+                .willReturn(Optional.of(STORE_ID));
+        given(storeService.inspectScheduledActivation(STORE_ID))
+                .willReturn(new StoreScheduledActivationDecision(
+                        STORE_ID, "Asia/Seoul", false));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findForUpdateById(22L))
+                .willReturn(Optional.of(scheduled));
+        given(operatingRepository
+                .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        STORE_ID,
+                        ScheduleVersionStatus.SCHEDULED,
+                        FIXED_CLOCK.instant()))
+                .willReturn(Optional.of(scheduled));
+
+        scheduleService.activateDueOperating(22L);
+
+        assertThat(scheduled.getStatus())
+                .isEqualTo(ScheduleVersionStatus.ACTIVATION_FAILED);
+        then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
     }
 
     @Test

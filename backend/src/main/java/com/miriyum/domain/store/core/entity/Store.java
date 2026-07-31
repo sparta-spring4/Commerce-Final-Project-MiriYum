@@ -20,7 +20,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
-import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.LinkedHashSet;
@@ -266,12 +265,10 @@ public class Store extends BaseEntity {
         if (timeZoneId == null || timeZoneId.isBlank()) {
             throw new IllegalArgumentException("store time zone is required");
         }
-        try {
-            return ZoneId.of(timeZoneId).getId();
-        } catch (DateTimeException exception) {
+        if (!ZoneId.getAvailableZoneIds().contains(timeZoneId)) {
             throw new IllegalArgumentException(
-                    "store time zone must be a valid IANA identifier",
-                    exception);
+                    "store time zone must be a valid IANA identifier");
         }
+        return timeZoneId;
     }
 }

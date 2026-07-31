@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.schedule.service;
 
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
@@ -255,8 +256,9 @@ public class StoreScheduleService {
                     .orElseThrow(() -> new ServiceException(
                             StoreErrorCode.SCHEDULE_CONFLICT));
             Instant scheduledAt = target.getEffectiveAt();
-            target.cancelPublication();
             Instant now = clock.instant();
+            requireCancellationBeforeEffectiveTime(scheduledAt, now);
+            target.cancelPublication();
             auditRepository.save(StoreScheduleAuditEvent.recordOperator(
                     storeId,
                     operatorId,
@@ -473,8 +475,9 @@ public class StoreScheduleService {
                     .orElseThrow(() -> new ServiceException(
                             StoreErrorCode.SCHEDULE_CONFLICT));
             Instant scheduledAt = target.getEffectiveAt();
-            target.cancelPublication();
             Instant now = clock.instant();
+            requireCancellationBeforeEffectiveTime(scheduledAt, now);
+            target.cancelPublication();
             Long activeVersion = activeReservationVersionNumber(state);
             savePublicationAudit(
                     storeId, operatorId, key, authority,
@@ -500,8 +503,8 @@ public class StoreScheduleService {
         if (storeId == null) {
             return;
         }
-        StoreScheduleAuthority authority =
-                storeService.requireScheduledActivationAuthority(storeId);
+        StoreScheduledActivationDecision decision =
+                storeService.inspectScheduledActivation(storeId);
         StoreScheduleState state = initializeAndLock(storeId);
         OperatingScheduleVersion target =
                 operatingRepository.findForUpdateById(versionId).orElse(null);
@@ -518,6 +521,28 @@ public class StoreScheduleService {
                         now)
                 .orElse(null);
         if (earliest == null || !earliest.getId().equals(versionId)) {
+            return;
+        }
+        if (!decision.activationAllowed()) {
+            Instant effectiveAt = target.getEffectiveAt();
+            target.failActivation();
+            auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                    storeId,
+                    new ScheduleAuditRecord(
+                            ScheduleStream.OPERATING,
+                            target.getVersionNumber(),
+                            activeVersionNumber(state),
+                            activeVersionNumber(state),
+                            ScheduleAuditAction.SCHEDULE_ACTIVATION_FAILED,
+                            ScheduleVersionStatus.SCHEDULED,
+                            ScheduleVersionStatus.ACTIVATION_FAILED,
+                            decision.timeZoneId(),
+                            effectiveAt,
+                            effectiveAt,
+                            now,
+                            target.getChangeReason(),
+                            "scheduled-operating-" + versionId,
+                            ScheduleAuditOutcome.FAILED)));
             return;
         }
         Long previousVersion = null;
@@ -544,13 +569,22 @@ public class StoreScheduleService {
                         ScheduleAuditAction.SCHEDULE_ACTIVATED,
                         ScheduleVersionStatus.SCHEDULED,
                         ScheduleVersionStatus.ACTIVE,
-                        authority.timeZoneId(),
+                        decision.timeZoneId(),
                         effectiveAt,
                         effectiveAt,
                         now,
                         target.getChangeReason(),
                         "scheduled-operating-" + versionId,
                         ScheduleAuditOutcome.SUCCEEDED)));
+    }
+
+    private static void requireCancellationBeforeEffectiveTime(
+            Instant effectiveAt,
+            Instant now
+    ) {
+        if (effectiveAt == null || !effectiveAt.isAfter(now)) {
+            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
+        }
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -560,8 +594,8 @@ public class StoreScheduleService {
         if (storeId == null) {
             return;
         }
-        StoreScheduleAuthority authority =
-                storeService.requireScheduledActivationAuthority(storeId);
+        StoreScheduledActivationDecision decision =
+                storeService.inspectScheduledActivation(storeId);
         StoreScheduleState state = initializeAndLock(storeId);
         ReservationScheduleVersion target =
                 reservationRepository.findForUpdateById(versionId).orElse(null);
@@ -581,6 +615,27 @@ public class StoreScheduleService {
             return;
         }
         Instant effectiveAt = target.getEffectiveAt();
+        if (!decision.activationAllowed()) {
+            target.failActivation();
+            auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                    storeId,
+                    new ScheduleAuditRecord(
+                            ScheduleStream.RESERVATION,
+                            target.getVersionNumber(),
+                            activeReservationVersionNumber(state),
+                            activeReservationVersionNumber(state),
+                            ScheduleAuditAction.SCHEDULE_ACTIVATION_FAILED,
+                            ScheduleVersionStatus.SCHEDULED,
+                            ScheduleVersionStatus.ACTIVATION_FAILED,
+                            decision.timeZoneId(),
+                            effectiveAt,
+                            effectiveAt,
+                            now,
+                            target.getChangeReason(),
+                            "scheduled-reservation-" + versionId,
+                            ScheduleAuditOutcome.FAILED)));
+            return;
+        }
         if (!target.getValidatedOperatingVersionId().equals(
                 state.getActiveOperatingScheduleVersionId())) {
             target.failActivation();
@@ -594,7 +649,7 @@ public class StoreScheduleService {
                             ScheduleAuditAction.SCHEDULE_ACTIVATION_FAILED,
                             ScheduleVersionStatus.SCHEDULED,
                             ScheduleVersionStatus.ACTIVATION_FAILED,
-                            authority.timeZoneId(),
+                            decision.timeZoneId(),
                             effectiveAt,
                             effectiveAt,
                             now,
@@ -625,7 +680,7 @@ public class StoreScheduleService {
                         ScheduleAuditAction.SCHEDULE_ACTIVATED,
                         ScheduleVersionStatus.SCHEDULED,
                         ScheduleVersionStatus.ACTIVE,
-                        authority.timeZoneId(),
+                        decision.timeZoneId(),
                         effectiveAt,
                         effectiveAt,
                         now,

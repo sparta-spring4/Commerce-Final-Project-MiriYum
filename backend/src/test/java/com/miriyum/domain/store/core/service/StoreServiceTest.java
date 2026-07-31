@@ -201,17 +201,33 @@ class StoreServiceTest {
     }
 
     @Test
-    void scheduledActivationAuthorityDoesNotRequireAnOperatorIdentity() {
+    void scheduledActivationDecisionAllowsApprovedStoreWithoutOperatorIdentity() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
         given(storeRepository.findByIdForUpdate(STORE_ID))
                 .willReturn(Optional.of(store));
 
-        StoreScheduleAuthority authority =
-                storeService.requireScheduledActivationAuthority(STORE_ID);
+        StoreScheduledActivationDecision decision =
+                storeService.inspectScheduledActivation(STORE_ID);
 
-        assertThat(authority.timeZoneId()).isEqualTo("Asia/Seoul");
+        assertThat(decision.timeZoneId()).isEqualTo("Asia/Seoul");
+        assertThat(decision.activationAllowed()).isTrue();
         then(operatorAccountService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void scheduledActivationDecisionRejectsClosedStoreWithoutThrowing() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        store.close();
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+
+        StoreScheduledActivationDecision decision =
+                storeService.inspectScheduledActivation(STORE_ID);
+
+        assertThat(decision.activationAllowed()).isFalse();
+        assertThat(decision.timeZoneId()).isEqualTo("Asia/Seoul");
     }
 
     @Test

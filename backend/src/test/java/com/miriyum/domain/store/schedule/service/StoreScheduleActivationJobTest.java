@@ -2,6 +2,7 @@ package com.miriyum.domain.store.schedule.service;
 
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
@@ -66,5 +67,41 @@ class StoreScheduleActivationJobTest {
         order.verify(scheduleService).activateDueOperating(12L);
         order.verify(scheduleService).activateDueReservation(21L);
         then(scheduleService).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void oneCandidateFailureDoesNotBlockRemainingCandidates() {
+        Instant now = Instant.parse("2026-07-31T03:00:00Z");
+        OperatingScheduleVersion first = Mockito.mock(
+                OperatingScheduleVersion.class);
+        OperatingScheduleVersion second = Mockito.mock(
+                OperatingScheduleVersion.class);
+        ReservationScheduleVersion reservation = Mockito.mock(
+                ReservationScheduleVersion.class);
+        given(first.getId()).willReturn(11L);
+        given(second.getId()).willReturn(12L);
+        given(reservation.getId()).willReturn(21L);
+        given(operatingRepository
+                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        ScheduleVersionStatus.SCHEDULED,
+                        now))
+                .willReturn(List.of(first, second));
+        given(reservationRepository
+                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        ScheduleVersionStatus.SCHEDULED,
+                        now))
+                .willReturn(List.of(reservation));
+        willThrow(new IllegalStateException("temporary failure"))
+                .given(scheduleService).activateDueOperating(11L);
+        StoreScheduleActivationJob job = new StoreScheduleActivationJob(
+                operatingRepository,
+                reservationRepository,
+                scheduleService,
+                Clock.fixed(now, ZoneOffset.UTC));
+
+        job.activateDueSchedules();
+
+        then(scheduleService).should().activateDueOperating(12L);
+        then(scheduleService).should().activateDueReservation(21L);
     }
 }

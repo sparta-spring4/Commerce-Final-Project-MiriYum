@@ -8,9 +8,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import java.util.List;
-import java.time.DateTimeException;
 import java.time.ZoneId;
+import java.util.List;
 
 public record StoreCreateRequest(
         @NotBlank
@@ -67,11 +66,6 @@ public record StoreCreateRequest(
         if (timeZoneId == null || timeZoneId.isBlank()) {
             return true;
         }
-        try {
-            ZoneId.of(timeZoneId);
-            return true;
-        } catch (DateTimeException exception) {
-            return false;
-        }
+        return ZoneId.getAvailableZoneIds().contains(timeZoneId);
     }
 }
