@@ -73,10 +73,9 @@ class LoginDelayPolicyTest {
     @DisplayName("15분 단계 이후의 추가 실패는 영구 잠금 없이 15분을 반복한다")
     void repeatsFifteenMinutesWithoutPermanentLock() {
         // given: 최대 단계에 도달한 상태
-        LoginFailureDelay atMaxStage = new LoginFailureDelay(7, 3, NOW);
+        LoginFailureDelay delay = new LoginFailureDelay(7, 3, NOW);
 
         // when: 세 번 더 실패해도
-        LoginFailureDelay delay = atMaxStage;
         LocalDateTime attemptedAt = NOW;
         for (int attempt = 0; attempt < 3; attempt++) {
             delay = loginDelayPolicy.applyFailure(delay, attemptedAt);

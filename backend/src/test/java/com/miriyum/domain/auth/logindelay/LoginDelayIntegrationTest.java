@@ -115,12 +115,12 @@ class LoginDelayIntegrationTest {
     @DisplayName("지연 중 실패는 응답으로 지연 상태를 구분할 수 없게 AUTH_005로 동일하게 응답한다")
     void delayedResponseIsIndistinguishableFromNormalFailure() {
         // given: 지연 전 실패와 지연 후 실패의 오류 코드를 비교한다
-        ServiceException beforeDelay = catchLoginFailure(WRONG_PASSWORD);
+        ServiceException beforeDelay = catchLoginFailure(EMAIL);
         failLogin(5);
-        ServiceException whileDelayed = catchLoginFailure(WRONG_PASSWORD);
+        ServiceException whileDelayed = catchLoginFailure(EMAIL);
 
         // then: 존재하지 않는 계정의 실패까지 셋 다 같은 코드여야 한다
-        ServiceException unknownAccount = catchLoginFailureFor("no-such-user@example.com", WRONG_PASSWORD);
+        ServiceException unknownAccount = catchLoginFailure("no-such-user@example.com");
         assertThat(beforeDelay.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
         assertThat(whileDelayed.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
         assertThat(unknownAccount.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
@@ -156,7 +156,7 @@ class LoginDelayIntegrationTest {
                     readyLatch.countDown();
                     try {
                         startLatch.await();
-                        catchLoginFailure(WRONG_PASSWORD);
+                        failLogin(1);
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
                     }
@@ -180,19 +180,17 @@ class LoginDelayIntegrationTest {
         assertThat(delayStage()).isGreaterThanOrEqualTo(1);
     }
 
+    /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */
     private void failLogin(int times) {
         for (int attempt = 0; attempt < times; attempt++) {
-            catchLoginFailure(WRONG_PASSWORD);
+            catchLoginFailure(EMAIL);
         }
     }
 
-    private ServiceException catchLoginFailure(String password) {
-        return catchLoginFailureFor(EMAIL, password);
-    }
-
-    private ServiceException catchLoginFailureFor(String email, String password) {
+    /** 틀린 비밀번호로 로그인해 던져진 오류를 돌려준다. 오류 코드를 비교해야 할 때 쓴다. */
+    private ServiceException catchLoginFailure(String email) {
         try {
-            consumerAuthService.login(new LoginRequest(email, password));
+            consumerAuthService.login(new LoginRequest(email, WRONG_PASSWORD));
             throw new AssertionError("로그인이 실패해야 하는데 성공했습니다: " + email);
         } catch (ServiceException exception) {
             return exception;

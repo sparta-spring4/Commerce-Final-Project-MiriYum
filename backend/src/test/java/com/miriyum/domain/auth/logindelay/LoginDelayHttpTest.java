@@ -19,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,6 +48,7 @@ class LoginDelayHttpTest {
 
     private static final String EMAIL = "http-delay@example.com";
     private static final String RAW_PASSWORD = "Password123!";
+    private static final String WRONG_PASSWORD = "WrongPassword123!";
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
@@ -85,13 +87,13 @@ class LoginDelayHttpTest {
     void sixthRequestIsRejectedWithSameErrorEvenWithCorrectPassword() throws Exception {
         // given: 실패 5회를 실제 HTTP 요청으로 쌓는다
         for (int attempt = 0; attempt < 5; attempt++) {
-            login(EMAIL, "WrongPassword123!")
+            login(WRONG_PASSWORD)
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("AUTH_005"));
         }
 
         // when & then: 지연 중이라 비밀번호가 맞아도 같은 응답으로 거절된다
-        login(EMAIL, RAW_PASSWORD)
+        login(RAW_PASSWORD)
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_005"));
     }
@@ -101,11 +103,11 @@ class LoginDelayHttpTest {
     void loginStillSucceedsBeforeThreshold() throws Exception {
         // given: 지연 직전까지만 실패
         for (int attempt = 0; attempt < 4; attempt++) {
-            login(EMAIL, "WrongPassword123!").andExpect(status().isUnauthorized());
+            login(WRONG_PASSWORD).andExpect(status().isUnauthorized());
         }
 
         // when & then
-        login(EMAIL, RAW_PASSWORD)
+        login(RAW_PASSWORD)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accessToken").isNotEmpty());
     }
@@ -115,26 +117,27 @@ class LoginDelayHttpTest {
     void successResetsFailureCountOverHttp() throws Exception {
         // given: 4회 실패 후 성공으로 초기화
         for (int attempt = 0; attempt < 4; attempt++) {
-            login(EMAIL, "WrongPassword123!").andExpect(status().isUnauthorized());
+            login(WRONG_PASSWORD).andExpect(status().isUnauthorized());
         }
-        login(EMAIL, RAW_PASSWORD).andExpect(status().isOk());
+        login(RAW_PASSWORD).andExpect(status().isOk());
 
         // when: 다시 4회 실패해도
         for (int attempt = 0; attempt < 4; attempt++) {
-            login(EMAIL, "WrongPassword123!").andExpect(status().isUnauthorized());
+            login(WRONG_PASSWORD).andExpect(status().isUnauthorized());
         }
 
         // then: 초기화됐으므로 아직 지연 전이라 로그인에 성공한다
-        login(EMAIL, RAW_PASSWORD).andExpect(status().isOk());
+        login(RAW_PASSWORD).andExpect(status().isOk());
     }
 
-    private org.springframework.test.web.servlet.ResultActions login(String email, String password) throws Exception {
+    /** 테스트 계정으로 로그인을 시도한다. 지연은 계정 단위라 대상 계정은 항상 같다. */
+    private ResultActions login(String password) throws Exception {
         String requestBody = """
                 {
                   "email": "%s",
                   "password": "%s"
                 }
-                """.formatted(email, password);
+                """.formatted(EMAIL, password);
         return mockMvc.perform(post("/api/v1/consumer-auth/sessions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(requestBody));
