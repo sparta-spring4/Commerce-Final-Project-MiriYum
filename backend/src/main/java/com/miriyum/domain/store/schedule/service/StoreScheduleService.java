@@ -5,6 +5,8 @@ import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleEntry;
@@ -17,6 +19,7 @@ import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;
 import com.miriyum.domain.store.schedule.model.ScheduleAuditRecord;
 import com.miriyum.domain.store.schedule.model.ScheduleStream;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
+import com.miriyum.domain.store.schedule.model.PublicationMode;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepository;
 import com.miriyum.domain.store.schedule.repository.ReservationScheduleVersionRepository;
@@ -123,6 +126,164 @@ public class StoreScheduleService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ScheduleCommandResult<OperatingHoursResponse> publishOperating(
+            long operatorId,
+            long storeId,
+            long versionNumber,
+            IdempotencyKey key,
+            SchedulePublicationRequest request
+    ) {
+        storeService.requireManagementOwnership(operatorId, storeId);
+        IdempotencyCommand command = new IdempotencyCommand(
+                PRINCIPAL_NAMESPACE,
+                operatorId,
+                "STORE_OPERATING_HOURS_PUBLISH",
+                key.value(),
+                StoreScheduleFingerprint.forOperatingPublication(
+                        storeId,
+                        versionNumber,
+                        request));
+
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            StoreScheduleAuthority authority =
+                    storeService.requireSchedulePublicationAuthority(
+                            operatorId,
+                            storeId);
+            StoreScheduleState state = initializeAndLock(storeId);
+            OperatingScheduleVersion target = operatingRepository
+                    .findByStoreIdAndVersionNumber(storeId, versionNumber)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            Instant now = clock.instant();
+            validatePublicationRequest(request, now);
+            if (request.publicationMode() == PublicationMode.SCHEDULED) {
+                Instant effectiveAt = request.effectiveAt().toInstant();
+                target.schedule(effectiveAt, request.changeReason());
+                auditRepository.save(StoreScheduleAuditEvent.recordOperator(
+                        storeId,
+                        operatorId,
+                        new ScheduleAuditRecord(
+                                ScheduleStream.OPERATING,
+                                target.getVersionNumber(),
+                                activeVersionNumber(state),
+                                activeVersionNumber(state),
+                                ScheduleAuditAction.PUBLICATION_SCHEDULED,
+                                ScheduleVersionStatus.DRAFT,
+                                ScheduleVersionStatus.SCHEDULED,
+                                authority.timeZoneId(),
+                                now,
+                                effectiveAt,
+                                now,
+                                request.changeReason(),
+                                key.value(),
+                                ScheduleAuditOutcome.SUCCEEDED)));
+                OperatingHoursResponse response =
+                        OperatingHoursResponse.from(target);
+                return success(
+                        resourceId(storeId, "OPERATING", response.version()),
+                        response);
+            }
+
+            Long previousActiveVersion = null;
+            Long activeVersionId = state.getActiveOperatingScheduleVersionId();
+            if (activeVersionId != null) {
+                OperatingScheduleVersion previous = operatingRepository
+                        .findById(activeVersionId)
+                        .orElseThrow(() -> new ServiceException(
+                                StoreErrorCode.SCHEDULE_CONFLICT));
+                previousActiveVersion = previous.getVersionNumber();
+                previous.retire();
+            }
+
+            target.activate(now, request.changeReason());
+            retireActiveReservation(state);
+            state.activateOperating(target.getId());
+            auditRepository.save(StoreScheduleAuditEvent.recordOperator(
+                    storeId,
+                    operatorId,
+                    new ScheduleAuditRecord(
+                            ScheduleStream.OPERATING,
+                            target.getVersionNumber(),
+                            previousActiveVersion,
+                            target.getVersionNumber(),
+                            ScheduleAuditAction.IMMEDIATE_PUBLISHED,
+                            ScheduleVersionStatus.DRAFT,
+                            ScheduleVersionStatus.ACTIVE,
+                            authority.timeZoneId(),
+                            now,
+                            now,
+                            now,
+                            request.changeReason(),
+                            key.value(),
+                            ScheduleAuditOutcome.SUCCEEDED)));
+            OperatingHoursResponse response = OperatingHoursResponse.from(target);
+            return success(
+                    resourceId(storeId, "OPERATING", response.version()),
+                    response);
+        });
+        return commandResult(outcome, OperatingHoursResponse.class);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ScheduleCommandResult<OperatingHoursResponse>
+            cancelOperatingPublication(
+                    long operatorId,
+                    long storeId,
+                    long versionNumber,
+                    IdempotencyKey key,
+                    SchedulePublicationCancellationRequest request
+            ) {
+        storeService.requireManagementOwnership(operatorId, storeId);
+        IdempotencyCommand command = new IdempotencyCommand(
+                PRINCIPAL_NAMESPACE,
+                operatorId,
+                "STORE_OPERATING_HOURS_PUBLICATION_CANCEL",
+                key.value(),
+                StoreScheduleFingerprint.forCancellation(
+                        "operating-hours",
+                        storeId,
+                        versionNumber,
+                        request));
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            StoreScheduleAuthority authority =
+                    storeService.requireSchedulePublicationAuthority(
+                            operatorId,
+                            storeId);
+            StoreScheduleState state = initializeAndLock(storeId);
+            OperatingScheduleVersion target = operatingRepository
+                    .findByStoreIdAndVersionNumber(storeId, versionNumber)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            Instant scheduledAt = target.getEffectiveAt();
+            target.cancelPublication();
+            Instant now = clock.instant();
+            auditRepository.save(StoreScheduleAuditEvent.recordOperator(
+                    storeId,
+                    operatorId,
+                    new ScheduleAuditRecord(
+                            ScheduleStream.OPERATING,
+                            target.getVersionNumber(),
+                            activeVersionNumber(state),
+                            activeVersionNumber(state),
+                            ScheduleAuditAction.SCHEDULED_PUBLICATION_CANCELLED,
+                            ScheduleVersionStatus.SCHEDULED,
+                            ScheduleVersionStatus.DRAFT,
+                            authority.timeZoneId(),
+                            now,
+                            scheduledAt,
+                            now,
+                            request.changeReason(),
+                            key.value(),
+                            ScheduleAuditOutcome.SUCCEEDED)));
+            OperatingHoursResponse response = OperatingHoursResponse.from(target);
+            return success(
+                    resourceId(storeId, "OPERATING", response.version()),
+                    response);
+        });
+        return commandResult(outcome, OperatingHoursResponse.class);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public ScheduleCommandResult<ReservationTimeSlotsResponse>
             createReservationDraft(
                     long operatorId,
@@ -203,6 +364,357 @@ public class StoreScheduleService {
                     WeeklyReservationTimeSlotsRequest request
             ) {
         return createReservationDraft(operatorId, storeId, key, request);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ScheduleCommandResult<ReservationTimeSlotsResponse>
+            publishReservation(
+                    long operatorId,
+                    long storeId,
+                    long versionNumber,
+                    IdempotencyKey key,
+                    SchedulePublicationRequest request
+            ) {
+        storeService.requireManagementOwnership(operatorId, storeId);
+        IdempotencyCommand command = new IdempotencyCommand(
+                PRINCIPAL_NAMESPACE,
+                operatorId,
+                "STORE_RESERVATION_TIME_SLOTS_PUBLISH",
+                key.value(),
+                StoreScheduleFingerprint.forReservationPublication(
+                        storeId,
+                        versionNumber,
+                        request));
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            StoreScheduleAuthority authority =
+                    storeService.requireSchedulePublicationAuthority(
+                            operatorId,
+                            storeId);
+            StoreScheduleState state = initializeAndLock(storeId);
+            ReservationScheduleVersion target = reservationRepository
+                    .findByStoreIdAndVersionNumber(storeId, versionNumber)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            if (!target.getValidatedOperatingVersionId().equals(
+                    state.getActiveOperatingScheduleVersionId())) {
+                throw new ServiceException(StoreErrorCode.SCHEDULE_CONFLICT);
+            }
+            Instant now = clock.instant();
+            validatePublicationRequest(request, now);
+            Long previousVersion = activeReservationVersionNumber(state);
+            if (request.publicationMode() == PublicationMode.SCHEDULED) {
+                Instant effectiveAt = request.effectiveAt().toInstant();
+                target.schedule(effectiveAt, request.changeReason());
+                savePublicationAudit(
+                        storeId, operatorId, key, authority,
+                        target.getVersionNumber(), previousVersion, previousVersion,
+                        ScheduleStream.RESERVATION,
+                        ScheduleAuditAction.PUBLICATION_SCHEDULED,
+                        ScheduleVersionStatus.DRAFT,
+                        ScheduleVersionStatus.SCHEDULED,
+                        now, effectiveAt, request.changeReason());
+            } else {
+                Long activeId = state.getActiveReservationScheduleVersionId();
+                if (activeId != null) {
+                    reservationRepository.findById(activeId)
+                            .orElseThrow(() -> new ServiceException(
+                                    StoreErrorCode.SCHEDULE_CONFLICT))
+                            .retire();
+                }
+                target.activate(now, request.changeReason());
+                state.activateReservation(target.getId());
+                savePublicationAudit(
+                        storeId, operatorId, key, authority,
+                        target.getVersionNumber(), previousVersion,
+                        target.getVersionNumber(),
+                        ScheduleStream.RESERVATION,
+                        ScheduleAuditAction.IMMEDIATE_PUBLISHED,
+                        ScheduleVersionStatus.DRAFT,
+                        ScheduleVersionStatus.ACTIVE,
+                        now, now, request.changeReason());
+            }
+            ReservationTimeSlotsResponse response =
+                    ReservationTimeSlotsResponse.from(target);
+            return success(
+                    resourceId(storeId, "RESERVATION", response.version()),
+                    response);
+        });
+        return commandResult(outcome, ReservationTimeSlotsResponse.class);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ScheduleCommandResult<ReservationTimeSlotsResponse>
+            cancelReservationPublication(
+                    long operatorId,
+                    long storeId,
+                    long versionNumber,
+                    IdempotencyKey key,
+                    SchedulePublicationCancellationRequest request
+            ) {
+        storeService.requireManagementOwnership(operatorId, storeId);
+        IdempotencyCommand command = new IdempotencyCommand(
+                PRINCIPAL_NAMESPACE,
+                operatorId,
+                "STORE_RESERVATION_TIME_SLOTS_PUBLICATION_CANCEL",
+                key.value(),
+                StoreScheduleFingerprint.forCancellation(
+                        "reservation-time-slots",
+                        storeId,
+                        versionNumber,
+                        request));
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            StoreScheduleAuthority authority =
+                    storeService.requireSchedulePublicationAuthority(
+                            operatorId,
+                            storeId);
+            StoreScheduleState state = initializeAndLock(storeId);
+            ReservationScheduleVersion target = reservationRepository
+                    .findByStoreIdAndVersionNumber(storeId, versionNumber)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            Instant scheduledAt = target.getEffectiveAt();
+            target.cancelPublication();
+            Instant now = clock.instant();
+            Long activeVersion = activeReservationVersionNumber(state);
+            savePublicationAudit(
+                    storeId, operatorId, key, authority,
+                    target.getVersionNumber(), activeVersion, activeVersion,
+                    ScheduleStream.RESERVATION,
+                    ScheduleAuditAction.SCHEDULED_PUBLICATION_CANCELLED,
+                    ScheduleVersionStatus.SCHEDULED,
+                    ScheduleVersionStatus.DRAFT,
+                    now, scheduledAt, request.changeReason());
+            ReservationTimeSlotsResponse response =
+                    ReservationTimeSlotsResponse.from(target);
+            return success(
+                    resourceId(storeId, "RESERVATION", response.version()),
+                    response);
+        });
+        return commandResult(outcome, ReservationTimeSlotsResponse.class);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public void activateDueOperating(long versionId) {
+        Long storeId = operatingRepository.findStoreIdById(versionId)
+                .orElse(null);
+        if (storeId == null) {
+            return;
+        }
+        StoreScheduleAuthority authority =
+                storeService.requireScheduledActivationAuthority(storeId);
+        StoreScheduleState state = initializeAndLock(storeId);
+        OperatingScheduleVersion target =
+                operatingRepository.findForUpdateById(versionId).orElse(null);
+        Instant now = clock.instant();
+        if (target == null
+                || target.getStatus() != ScheduleVersionStatus.SCHEDULED
+                || target.getEffectiveAt().isAfter(now)) {
+            return;
+        }
+        OperatingScheduleVersion earliest = operatingRepository
+                .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        storeId,
+                        ScheduleVersionStatus.SCHEDULED,
+                        now)
+                .orElse(null);
+        if (earliest == null || !earliest.getId().equals(versionId)) {
+            return;
+        }
+        Long previousVersion = null;
+        Long activeId = state.getActiveOperatingScheduleVersionId();
+        if (activeId != null) {
+            OperatingScheduleVersion previous = operatingRepository
+                    .findById(activeId)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            previousVersion = previous.getVersionNumber();
+            previous.retire();
+        }
+        Instant effectiveAt = target.getEffectiveAt();
+        target.activate(now, target.getChangeReason());
+        retireActiveReservation(state);
+        state.activateOperating(target.getId());
+        auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                storeId,
+                new ScheduleAuditRecord(
+                        ScheduleStream.OPERATING,
+                        target.getVersionNumber(),
+                        previousVersion,
+                        target.getVersionNumber(),
+                        ScheduleAuditAction.SCHEDULE_ACTIVATED,
+                        ScheduleVersionStatus.SCHEDULED,
+                        ScheduleVersionStatus.ACTIVE,
+                        authority.timeZoneId(),
+                        effectiveAt,
+                        effectiveAt,
+                        now,
+                        target.getChangeReason(),
+                        "scheduled-operating-" + versionId,
+                        ScheduleAuditOutcome.SUCCEEDED)));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public void activateDueReservation(long versionId) {
+        Long storeId = reservationRepository.findStoreIdById(versionId)
+                .orElse(null);
+        if (storeId == null) {
+            return;
+        }
+        StoreScheduleAuthority authority =
+                storeService.requireScheduledActivationAuthority(storeId);
+        StoreScheduleState state = initializeAndLock(storeId);
+        ReservationScheduleVersion target =
+                reservationRepository.findForUpdateById(versionId).orElse(null);
+        Instant now = clock.instant();
+        if (target == null
+                || target.getStatus() != ScheduleVersionStatus.SCHEDULED
+                || target.getEffectiveAt().isAfter(now)) {
+            return;
+        }
+        ReservationScheduleVersion earliest = reservationRepository
+                .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        storeId,
+                        ScheduleVersionStatus.SCHEDULED,
+                        now)
+                .orElse(null);
+        if (earliest == null || !earliest.getId().equals(versionId)) {
+            return;
+        }
+        Instant effectiveAt = target.getEffectiveAt();
+        if (!target.getValidatedOperatingVersionId().equals(
+                state.getActiveOperatingScheduleVersionId())) {
+            target.failActivation();
+            auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                    storeId,
+                    new ScheduleAuditRecord(
+                            ScheduleStream.RESERVATION,
+                            target.getVersionNumber(),
+                            activeReservationVersionNumber(state),
+                            activeReservationVersionNumber(state),
+                            ScheduleAuditAction.SCHEDULE_ACTIVATION_FAILED,
+                            ScheduleVersionStatus.SCHEDULED,
+                            ScheduleVersionStatus.ACTIVATION_FAILED,
+                            authority.timeZoneId(),
+                            effectiveAt,
+                            effectiveAt,
+                            now,
+                            target.getChangeReason(),
+                            "scheduled-reservation-" + versionId,
+                            ScheduleAuditOutcome.FAILED)));
+            return;
+        }
+        Long previousVersion = null;
+        Long activeId = state.getActiveReservationScheduleVersionId();
+        if (activeId != null) {
+            ReservationScheduleVersion previous = reservationRepository
+                    .findById(activeId)
+                    .orElseThrow(() -> new ServiceException(
+                            StoreErrorCode.SCHEDULE_CONFLICT));
+            previousVersion = previous.getVersionNumber();
+            previous.retire();
+        }
+        target.activate(now, target.getChangeReason());
+        state.activateReservation(target.getId());
+        auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                storeId,
+                new ScheduleAuditRecord(
+                        ScheduleStream.RESERVATION,
+                        target.getVersionNumber(),
+                        previousVersion,
+                        target.getVersionNumber(),
+                        ScheduleAuditAction.SCHEDULE_ACTIVATED,
+                        ScheduleVersionStatus.SCHEDULED,
+                        ScheduleVersionStatus.ACTIVE,
+                        authority.timeZoneId(),
+                        effectiveAt,
+                        effectiveAt,
+                        now,
+                        target.getChangeReason(),
+                        "scheduled-reservation-" + versionId,
+                        ScheduleAuditOutcome.SUCCEEDED)));
+    }
+
+    private void validatePublicationRequest(
+            SchedulePublicationRequest request,
+            Instant now
+    ) {
+        boolean invalidImmediate = request.publicationMode() == PublicationMode.IMMEDIATE
+                && request.effectiveAt() != null;
+        boolean invalidScheduled = request.publicationMode() == PublicationMode.SCHEDULED
+                && (request.effectiveAt() == null
+                    || !request.effectiveAt().toInstant().isAfter(now));
+        if (request.publicationMode() == null
+                || invalidImmediate
+                || invalidScheduled) {
+            throw new ServiceException(StoreErrorCode.SCHEDULE_CONFLICT);
+        }
+    }
+
+    private Long activeVersionNumber(StoreScheduleState state) {
+        Long id = state.getActiveOperatingScheduleVersionId();
+        return id == null
+                ? null
+                : operatingRepository.findById(id)
+                        .map(OperatingScheduleVersion::getVersionNumber)
+                        .orElseThrow(() -> new ServiceException(
+                                StoreErrorCode.SCHEDULE_CONFLICT));
+    }
+
+    private Long activeReservationVersionNumber(StoreScheduleState state) {
+        Long id = state.getActiveReservationScheduleVersionId();
+        return id == null
+                ? null
+                : reservationRepository.findById(id)
+                        .map(ReservationScheduleVersion::getVersionNumber)
+                        .orElseThrow(() -> new ServiceException(
+                                StoreErrorCode.SCHEDULE_CONFLICT));
+    }
+
+    private void retireActiveReservation(StoreScheduleState state) {
+        Long reservationId = state.getActiveReservationScheduleVersionId();
+        if (reservationId == null) {
+            return;
+        }
+        reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new ServiceException(
+                        StoreErrorCode.SCHEDULE_CONFLICT))
+                .retire();
+    }
+
+    private void savePublicationAudit(
+            long storeId,
+            long operatorId,
+            IdempotencyKey key,
+            StoreScheduleAuthority authority,
+            long targetVersion,
+            Long previousActiveVersion,
+            Long newActiveVersion,
+            ScheduleStream stream,
+            ScheduleAuditAction action,
+            ScheduleVersionStatus previousStatus,
+            ScheduleVersionStatus newStatus,
+            Instant requestedAt,
+            Instant effectiveAt,
+            String changeReason
+    ) {
+        auditRepository.save(StoreScheduleAuditEvent.recordOperator(
+                storeId,
+                operatorId,
+                new ScheduleAuditRecord(
+                        stream,
+                        targetVersion,
+                        previousActiveVersion,
+                        newActiveVersion,
+                        action,
+                        previousStatus,
+                        newStatus,
+                        authority.timeZoneId(),
+                        requestedAt,
+                        effectiveAt,
+                        requestedAt,
+                        changeReason,
+                        key.value(),
+                        ScheduleAuditOutcome.SUCCEEDED)));
     }
 
     private StoreScheduleState initializeAndLock(long storeId) {

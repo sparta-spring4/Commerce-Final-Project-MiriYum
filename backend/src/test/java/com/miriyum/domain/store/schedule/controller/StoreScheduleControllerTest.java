@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -241,7 +242,7 @@ class StoreScheduleControllerTest {
     @Test
     void operatingHoursReturnsPublishedVersion() throws Exception {
         authenticateStoreOperator(11L);
-        given(storeScheduleService.replaceOperatingHours(
+        given(storeScheduleService.createOperatingDraft(
                 eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                 .willReturn(new ScheduleCommandResult<>(
                         200, operatingResponse()));
@@ -291,7 +292,7 @@ class StoreScheduleControllerTest {
     void reservationTimeSlotsReturnsReferencedOperatingVersion()
             throws Exception {
         authenticateStoreOperator(11L);
-        given(storeScheduleService.replaceReservationTimeSlots(
+        given(storeScheduleService.createReservationDraft(
                 eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                 .willReturn(new ScheduleCommandResult<>(
                         200, reservationResponse()));
@@ -313,7 +314,7 @@ class StoreScheduleControllerTest {
     @Test
     void reservationConflictReturnsStore006() throws Exception {
         authenticateStoreOperator(11L);
-        given(storeScheduleService.replaceReservationTimeSlots(
+        given(storeScheduleService.createReservationDraft(
                 eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                 .willThrow(new ServiceException(
                         StoreErrorCode.SCHEDULE_CONFLICT));
@@ -326,6 +327,103 @@ class StoreScheduleControllerTest {
                         .content(validReservationJson()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STORE_006"));
+    }
+
+    @Test
+    void immediateOperatingPublicationCallsPublicationCommand()
+            throws Exception {
+        authenticateStoreOperator(11L);
+        given(storeScheduleService.publishOperating(
+                eq(11L), eq(7L), eq(1L),
+                any(IdempotencyKey.class), any()))
+                .willReturn(new ScheduleCommandResult<>(
+                        200, operatingResponse()));
+
+        mockMvc.perform(post(
+                        BASE_URL + "/operating-hours/1/publication")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "publicationMode": "IMMEDIATE",
+                                  "changeReason": "여름 영업시간"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.version").value(1));
+    }
+
+    @Test
+    void immediatePublicationRejectsEffectiveAtBeforeService()
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post(
+                        BASE_URL + "/operating-hours/1/publication")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "publicationMode": "IMMEDIATE",
+                                  "effectiveAt": "2026-08-01T12:00:00+09:00",
+                                  "changeReason": "여름 영업시간"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void scheduledPublicationRequiresEffectiveAtBeforeService()
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post(
+                        BASE_URL + "/operating-hours/1/publication")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "publicationMode": "SCHEDULED",
+                                  "changeReason": "여름 영업시간"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void nonPositivePublicationVersionIsRejectedBeforeService()
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post(
+                        BASE_URL + "/operating-hours/0/publication")
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "publicationMode": "IMMEDIATE",
+                                  "changeReason": "여름 영업시간"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
     }
 
     @ParameterizedTest
@@ -365,7 +463,7 @@ class StoreScheduleControllerTest {
     @Test
     void otherOperatorReturnsStore003() throws Exception {
         authenticateStoreOperator(12L);
-        given(storeScheduleService.replaceOperatingHours(
+        given(storeScheduleService.createOperatingDraft(
                 eq(12L), eq(7L), any(IdempotencyKey.class), any()))
                 .willThrow(new ServiceException(
                         StoreErrorCode.ACCESS_DENIED));
@@ -463,11 +561,11 @@ class StoreScheduleControllerTest {
     ) throws Exception {
         authenticateStoreOperator(11L);
         if (endpoint.equals("operating-hours")) {
-            given(storeScheduleService.replaceOperatingHours(
+            given(storeScheduleService.createOperatingDraft(
                     eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                     .willThrow(new ServiceException(errorCode));
         } else {
-            given(storeScheduleService.replaceReservationTimeSlots(
+            given(storeScheduleService.createReservationDraft(
                     eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                     .willThrow(new ServiceException(errorCode));
         }

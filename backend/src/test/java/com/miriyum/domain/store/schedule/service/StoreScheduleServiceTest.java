@@ -16,6 +16,8 @@ import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.DailyReservationSlotsRequest;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
@@ -24,6 +26,7 @@ import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleAuditEvent;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
+import com.miriyum.domain.store.schedule.model.PublicationMode;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepository;
@@ -40,6 +43,7 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
@@ -191,6 +195,171 @@ class StoreScheduleServiceTest {
         assertThat(state.getActiveReservationScheduleVersionId()).isEqualTo(30L);
         assertThat(savedVersion.get().getValidatedOperatingVersionId()).isEqualTo(21L);
         then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
+    }
+
+    @Test
+    void immediateOperatingPublicationActivatesDraftAndRetiresPreviousVersion() {
+        StoreScheduleState state = state();
+        state.activateOperating(21L);
+        state.activateReservation(31L);
+        OperatingScheduleVersion previous = OperatingScheduleVersion.create(
+                STORE_ID,
+                1L,
+                operatingIntervals());
+        ReflectionTestUtils.setField(previous, "id", 21L);
+        OperatingScheduleVersion draft = OperatingScheduleVersion.createDraft(
+                STORE_ID,
+                2L,
+                "Asia/Seoul",
+                operatingIntervals());
+        ReflectionTestUtils.setField(draft, "id", 22L);
+        ReservationScheduleVersion previousReservation =
+                ReservationScheduleVersion.create(
+                        STORE_ID,
+                        1L,
+                        21L,
+                        reservationIntervals());
+        ReflectionTestUtils.setField(previousReservation, "id", 31L);
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID,
+                STORE_ID))
+                .willReturn(new StoreScheduleAuthority(
+                        STORE_ID,
+                        "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findByStoreIdAndVersionNumber(
+                STORE_ID,
+                2L))
+                .willReturn(Optional.of(draft));
+        given(operatingRepository.findById(21L))
+                .willReturn(Optional.of(previous));
+        given(reservationRepository.findById(31L))
+                .willReturn(Optional.of(previousReservation));
+        runBusinessWorkOnExecute();
+
+        ScheduleCommandResult<OperatingHoursResponse> result =
+                scheduleService.publishOperating(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        2L,
+                        IdempotencyKey.parse(KEY),
+                        new SchedulePublicationRequest(
+                                PublicationMode.IMMEDIATE,
+                                null,
+                                "여름 영업시간"));
+
+        assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.ACTIVE);
+        assertThat(previous.getStatus()).isEqualTo(ScheduleVersionStatus.RETIRED);
+        assertThat(state.getActiveOperatingScheduleVersionId()).isEqualTo(22L);
+        assertThat(state.getActiveReservationScheduleVersionId()).isNull();
+        assertThat(previousReservation.getStatus())
+                .isEqualTo(ScheduleVersionStatus.RETIRED);
+        then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
+    }
+
+    @Test
+    void scheduledOperatingPublicationKeepsCurrentPointer() {
+        StoreScheduleState state = state();
+        OperatingScheduleVersion draft = OperatingScheduleVersion.createDraft(
+                STORE_ID, 2L, "Asia/Seoul", operatingIntervals());
+        ReflectionTestUtils.setField(draft, "id", 22L);
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
+                .willReturn(Optional.of(draft));
+        runBusinessWorkOnExecute();
+
+        ScheduleCommandResult<OperatingHoursResponse> result =
+                scheduleService.publishOperating(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        2L,
+                        IdempotencyKey.parse(KEY),
+                        new SchedulePublicationRequest(
+                                PublicationMode.SCHEDULED,
+                                OffsetDateTime.parse("2026-08-01T12:00:00+09:00"),
+                                "여름 영업시간"));
+
+        assertThat(result.data().status())
+                .isEqualTo(ScheduleVersionStatus.SCHEDULED);
+        assertThat(result.data().effectiveAt())
+                .isEqualTo(Instant.parse("2026-08-01T03:00:00Z"));
+        assertThat(state.getActiveOperatingScheduleVersionId()).isNull();
+    }
+
+    @Test
+    void cancellationReturnsScheduledOperatingVersionToDraft() {
+        StoreScheduleState state = state();
+        OperatingScheduleVersion scheduled = OperatingScheduleVersion.createDraft(
+                STORE_ID, 2L, "Asia/Seoul", operatingIntervals());
+        ReflectionTestUtils.setField(scheduled, "id", 22L);
+        scheduled.schedule(
+                Instant.parse("2026-08-01T03:00:00Z"),
+                "여름 영업시간");
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
+                .willReturn(Optional.of(scheduled));
+        runBusinessWorkOnExecute();
+
+        ScheduleCommandResult<OperatingHoursResponse> result =
+                scheduleService.cancelOperatingPublication(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        2L,
+                        IdempotencyKey.parse(KEY),
+                        new SchedulePublicationCancellationRequest(
+                                "오픈 일정 변경"));
+
+        assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.DRAFT);
+        assertThat(result.data().effectiveAt()).isNull();
+        assertThat(result.data().changeReason()).isNull();
+    }
+
+    @Test
+    void immediateReservationPublicationRequiresItsValidatedOperatingVersion() {
+        StoreScheduleState state = state();
+        state.activateOperating(21L);
+        ReservationScheduleVersion draft =
+                ReservationScheduleVersion.createDraft(
+                        STORE_ID,
+                        2L,
+                        21L,
+                        "Asia/Seoul",
+                        reservationIntervals());
+        ReflectionTestUtils.setField(draft, "id", 32L);
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(reservationRepository.findByStoreIdAndVersionNumber(
+                STORE_ID, 2L))
+                .willReturn(Optional.of(draft));
+        runBusinessWorkOnExecute();
+
+        ScheduleCommandResult<ReservationTimeSlotsResponse> result =
+                scheduleService.publishReservation(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        2L,
+                        IdempotencyKey.parse(KEY),
+                        new SchedulePublicationRequest(
+                                PublicationMode.IMMEDIATE,
+                                null,
+                                "예약 접수 시간 확대"));
+
+        assertThat(result.data().status())
+                .isEqualTo(ScheduleVersionStatus.ACTIVE);
+        assertThat(state.getActiveReservationScheduleVersionId())
+                .isEqualTo(32L);
     }
 
     @Test

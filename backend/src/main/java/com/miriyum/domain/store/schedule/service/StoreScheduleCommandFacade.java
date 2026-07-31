@@ -3,6 +3,8 @@ package com.miriyum.domain.store.schedule.service;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.global.exception.ServiceException;
@@ -72,6 +74,55 @@ public class StoreScheduleCommandFacade {
                     WeeklyReservationTimeSlotsRequest request
             ) {
         return createReservationDraft(operatorId, storeId, key, request);
+    }
+
+    public ScheduleCommandResult<OperatingHoursResponse> publishOperating(
+            long operatorId,
+            long storeId,
+            long version,
+            IdempotencyKey key,
+            SchedulePublicationRequest request
+    ) {
+        return translateConflict(() -> scheduleService.publishOperating(
+                operatorId, storeId, version, key, request));
+    }
+
+    public ScheduleCommandResult<ReservationTimeSlotsResponse>
+            publishReservation(
+                    long operatorId,
+                    long storeId,
+                    long version,
+                    IdempotencyKey key,
+                    SchedulePublicationRequest request
+            ) {
+        return translateConflict(() -> scheduleService.publishReservation(
+                operatorId, storeId, version, key, request));
+    }
+
+    public ScheduleCommandResult<OperatingHoursResponse>
+            cancelOperatingPublication(
+                    long operatorId,
+                    long storeId,
+                    long version,
+                    IdempotencyKey key,
+                    SchedulePublicationCancellationRequest request
+            ) {
+        return translateConflict(() ->
+                scheduleService.cancelOperatingPublication(
+                        operatorId, storeId, version, key, request));
+    }
+
+    public ScheduleCommandResult<ReservationTimeSlotsResponse>
+            cancelReservationPublication(
+                    long operatorId,
+                    long storeId,
+                    long version,
+                    IdempotencyKey key,
+                    SchedulePublicationCancellationRequest request
+            ) {
+        return translateConflict(() ->
+                scheduleService.cancelReservationPublication(
+                        operatorId, storeId, version, key, request));
     }
 
     private <T> T translateConflict(Supplier<T> command) {

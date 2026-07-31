@@ -9,6 +9,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.time.DateTimeException;
+import java.time.ZoneId;
 
 public record StoreCreateRequest(
         @NotBlank
@@ -60,4 +62,16 @@ public record StoreCreateRequest(
         @AssertTrue
         Boolean requiredTermsAgreed
 ) {
+    @AssertTrue(message = "유효한 IANA 시간대여야 합니다.")
+    public boolean isTimeZoneIdValid() {
+        if (timeZoneId == null || timeZoneId.isBlank()) {
+            return true;
+        }
+        try {
+            ZoneId.of(timeZoneId);
+            return true;
+        } catch (DateTimeException exception) {
+            return false;
+        }
+    }
 }

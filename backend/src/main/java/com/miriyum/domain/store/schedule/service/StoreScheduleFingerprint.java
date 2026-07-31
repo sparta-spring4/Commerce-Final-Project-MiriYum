@@ -5,6 +5,8 @@ import com.miriyum.domain.store.schedule.dto.DailyReservationSlotsRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.LocalTime;
 import java.util.Comparator;
@@ -44,6 +46,66 @@ public final class StoreScheduleFingerprint {
                 .sorted(Comparator.comparingInt(day ->
                         day.dayOfWeek().getValue()))
                 .forEach(day -> appendReservationDay(canonical, day));
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    public static String forOperatingPublication(
+            long storeId,
+            long version,
+            SchedulePublicationRequest request
+    ) {
+        StringBuilder canonical = new StringBuilder(
+                "POST|/api/v1/store-operator/stores/{storeId}"
+                        + "/operating-hours/{version}/publication|");
+        append(canonical, "storeId", Long.toString(storeId));
+        append(canonical, "version", Long.toString(version));
+        append(canonical, "publicationMode", request.publicationMode().name());
+        append(canonical, "effectiveAt", request.effectiveAt() == null
+                ? ""
+                : request.effectiveAt().toInstant().toString());
+        append(canonical, "changeReason", request.changeReason());
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    public static String forReservationPublication(
+            long storeId,
+            long version,
+            SchedulePublicationRequest request
+    ) {
+        return forPublication("reservation-time-slots", storeId, version, request);
+    }
+
+    public static String forCancellation(
+            String streamPath,
+            long storeId,
+            long version,
+            SchedulePublicationCancellationRequest request
+    ) {
+        StringBuilder canonical = new StringBuilder(
+                "POST|/api/v1/store-operator/stores/{storeId}/"
+                        + streamPath + "/{version}/publication-cancellation|");
+        append(canonical, "storeId", Long.toString(storeId));
+        append(canonical, "version", Long.toString(version));
+        append(canonical, "changeReason", request.changeReason());
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    private static String forPublication(
+            String streamPath,
+            long storeId,
+            long version,
+            SchedulePublicationRequest request
+    ) {
+        StringBuilder canonical = new StringBuilder(
+                "POST|/api/v1/store-operator/stores/{storeId}/"
+                        + streamPath + "/{version}/publication|");
+        append(canonical, "storeId", Long.toString(storeId));
+        append(canonical, "version", Long.toString(version));
+        append(canonical, "publicationMode", request.publicationMode().name());
+        append(canonical, "effectiveAt", request.effectiveAt() == null
+                ? ""
+                : request.effectiveAt().toInstant().toString());
+        append(canonical, "changeReason", request.changeReason());
         return RequestFingerprint.of(canonical.toString());
     }
 

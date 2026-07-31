@@ -138,8 +138,10 @@ public class ReservationScheduleVersion extends BaseEntity {
                 && status != ScheduleVersionStatus.SCHEDULED) {
             throw scheduleConflict();
         }
+        if (status == ScheduleVersionStatus.DRAFT) {
+            effectiveAt = activationTime;
+        }
         status = ScheduleVersionStatus.ACTIVE;
-        effectiveAt = activationTime;
         activatedAt = activationTime;
         changeReason = reason;
     }

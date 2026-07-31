@@ -14,9 +14,11 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
+import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
+import com.miriyum.domain.store.schedule.model.PublicationMode;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepository;
@@ -30,6 +32,9 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -55,7 +60,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.store.schedule.activation-enabled=false"
         })
 class StoreSchedulePublicationIT {
 
@@ -172,6 +178,60 @@ class StoreSchedulePublicationIT {
                 Integer.class,
                 ownerStore.storeId());
         assertThat(auditCount).isEqualTo(2);
+    }
+
+    @Test
+    void dueOperatingPublicationActivatesExactlyOnce() {
+        OwnerStore ownerStore = createStore();
+        IdempotencyKey draftKey = IdempotencyKey.parse(
+                "550e8400-e29b-41d4-a716-446655440010");
+        scheduleService.createOperatingDraft(
+                ownerStore.operatorId(),
+                ownerStore.storeId(),
+                draftKey,
+                operatingRequest(9));
+        Instant future = Instant.now().plusSeconds(60);
+        scheduleService.publishOperating(
+                ownerStore.operatorId(),
+                ownerStore.storeId(),
+                1L,
+                IdempotencyKey.parse(
+                        "550e8400-e29b-41d4-a716-446655440011"),
+                new SchedulePublicationRequest(
+                        PublicationMode.SCHEDULED,
+                        OffsetDateTime.ofInstant(future, ZoneOffset.UTC),
+                        "자동 게시 검증"));
+        OperatingScheduleVersion scheduled = operatingRepository
+                .findByStoreIdAndVersionNumber(ownerStore.storeId(), 1L)
+                .orElseThrow();
+        jdbcTemplate.update(
+                """
+                        UPDATE store_operating_schedule_versions
+                        SET effective_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND
+                        WHERE operating_schedule_version_id = ?
+                        """,
+                scheduled.getId());
+
+        scheduleService.activateDueOperating(scheduled.getId());
+        scheduleService.activateDueOperating(scheduled.getId());
+
+        OperatingScheduleVersion activated =
+                operatingRepository.findById(scheduled.getId()).orElseThrow();
+        StoreScheduleState state =
+                stateRepository.findById(ownerStore.storeId()).orElseThrow();
+        assertThat(activated.getStatus()).isEqualTo(ScheduleVersionStatus.ACTIVE);
+        assertThat(state.getActiveOperatingScheduleVersionId())
+                .isEqualTo(scheduled.getId());
+        Integer auditCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM store_schedule_audit_events
+                        WHERE store_id = ?
+                          AND action = 'SCHEDULE_ACTIVATED'
+                        """,
+                Integer.class,
+                ownerStore.storeId());
+        assertThat(auditCount).isEqualTo(1);
     }
 
     @Test

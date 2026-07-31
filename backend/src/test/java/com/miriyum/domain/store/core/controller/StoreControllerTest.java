@@ -91,6 +91,23 @@ class StoreControllerTest {
     }
 
     @Test
+    void createRejectsUnknownIanaTimeZone() throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateJson().replace(
+                                "Asia/Seoul",
+                                "Mars/Olympus")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void createRejectsMissingOnboardingDeclarations() throws Exception {
         authenticateStoreOperator(11L);
 
