@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MiriYum MVP1 Store and Search API
-  version: 1.0.0
+  version: 1.1.0
   description: 공개 매장 탐색과 매장 운영자 기본 관리 계약
   license:
     name: All rights reserved
@@ -274,8 +274,8 @@ paths:
   /api/v1/store-operator/stores/{storeId}/operating-hours:
     put:
       tags: [Store Management]
-      summary: 주간 영업시간 전체 게시
-      operationId: replaceOperatingHours
+      summary: 주간 영업시간 전체 초안 저장
+      operationId: createOperatingHoursDraft
       security:
         - bearerAuth: []
       parameters:
@@ -289,7 +289,75 @@ paths:
               $ref: "#/components/schemas/WeeklyOperatingHoursRequest"
       responses:
         "200":
-          description: 게시된 영업시간
+          description: 저장된 영업시간 초안
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatingHoursSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/SchedulePublicationConflict"
+  /api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication:
+    post:
+      tags: [Store Management]
+      summary: 영업시간 초안 즉시 또는 예약 게시
+      operationId: publishOperatingHoursDraft
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulePublicationRequest"
+      responses:
+        "200":
+          description: 즉시 게시되거나 예약된 영업시간 버전
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatingHoursSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/SchedulePublicationConflict"
+  /api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication-cancellation:
+    post:
+      tags: [Store Management]
+      summary: 영업시간 예약 게시 취소
+      operationId: cancelOperatingHoursPublication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulePublicationCancellationRequest"
+      responses:
+        "200":
+          description: 예약이 취소되어 초안으로 돌아간 영업시간 버전
           content:
             application/json:
               schema:
@@ -307,8 +375,8 @@ paths:
   /api/v1/store-operator/stores/{storeId}/reservation-time-slots:
     put:
       tags: [Store Management]
-      summary: 주간 예약 접수 시간대 전체 게시
-      operationId: replaceReservationTimeSlots
+      summary: 주간 예약 접수 시간대 전체 초안 저장
+      operationId: createReservationTimeSlotsDraft
       security:
         - bearerAuth: []
       parameters:
@@ -322,7 +390,75 @@ paths:
               $ref: "#/components/schemas/WeeklyReservationTimeSlotsRequest"
       responses:
         "200":
-          description: 게시된 예약 접수 시간대
+          description: 저장된 예약 접수 시간대 초안
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationTimeSlotsSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/SchedulePublicationConflict"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication:
+    post:
+      tags: [Store Management]
+      summary: 예약 접수 시간대 초안 즉시 또는 예약 게시
+      operationId: publishReservationTimeSlotsDraft
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulePublicationRequest"
+      responses:
+        "200":
+          description: 즉시 게시되거나 예약된 예약 접수 시간대 버전
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationTimeSlotsSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/SchedulePublicationConflict"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation:
+    post:
+      tags: [Store Management]
+      summary: 예약 접수 시간대 예약 게시 취소
+      operationId: cancelReservationTimeSlotsPublication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulePublicationCancellationRequest"
+      responses:
+        "200":
+          description: 예약이 취소되어 초안으로 돌아간 예약 접수 시간대 버전
           content:
             application/json:
               schema:
@@ -413,6 +549,14 @@ components:
       required: true
       schema:
         $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    ScheduleVersion:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
     MenuId:
       name: menuId
       in: path
@@ -499,6 +643,7 @@ components:
         - description
         - region
         - address
+        - timeZoneId
         - storeCategoryCode
         - tags
         - operationStatus
@@ -524,6 +669,8 @@ components:
           type: string
           minLength: 1
           maxLength: 300
+        timeZoneId:
+          $ref: "#/components/schemas/TimeZoneId"
         storeCategoryCode:
           $ref: "#/components/schemas/CatalogCode"
         tags:
@@ -559,6 +706,7 @@ components:
         - name
         - region
         - address
+        - timeZoneId
         - storeCategoryCode
         - verificationStatus
         - operationStatus
@@ -577,6 +725,8 @@ components:
           type: string
           minLength: 1
           maxLength: 300
+        timeZoneId:
+          $ref: "#/components/schemas/TimeZoneId"
         storeCategoryCode:
           $ref: "#/components/schemas/CatalogCode"
         verificationStatus:
@@ -725,6 +875,7 @@ components:
         - description
         - region
         - address
+        - timeZoneId
         - storeCategoryCode
         - tagCodes
         - modes
@@ -749,6 +900,8 @@ components:
           type: string
           minLength: 1
           maxLength: 300
+        timeZoneId:
+          $ref: "#/components/schemas/TimeZoneId"
         storeCategoryCode:
           $ref: "#/components/schemas/CatalogCode"
         tagCodes:
@@ -820,6 +973,57 @@ components:
           maxItems: 7
           items:
             $ref: "#/components/schemas/DailyTimeSlots"
+    TimeZoneId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: IANA Time Zone Database 식별자. 주소나 서버 기본 시간대로 추측하지 않는다.
+      examples: [Asia/Seoul]
+    ScheduleVersionStatus:
+      type: string
+      enum: [DRAFT, SCHEDULED, ACTIVE, RETIRED, ACTIVATION_FAILED]
+    ConflictCheckStatus:
+      type: string
+      enum: [NOT_EVALUATED, EVALUATED]
+    SchedulePublicationRequest:
+      type: object
+      additionalProperties: false
+      required: [publicationMode, changeReason]
+      properties:
+        publicationMode:
+          type: string
+          enum: [IMMEDIATE, SCHEDULED]
+        effectiveAt:
+          type: string
+          format: date-time
+          description: SCHEDULED에서만 허용하는 미래 RFC 3339 date-time. 오프셋을 반드시 포함한다.
+        changeReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      allOf:
+        - if:
+            properties:
+              publicationMode:
+                const: SCHEDULED
+          then:
+            required: [effectiveAt]
+        - if:
+            properties:
+              publicationMode:
+                const: IMMEDIATE
+          then:
+            not:
+              required: [effectiveAt]
+    SchedulePublicationCancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [changeReason]
+      properties:
+        changeReason:
+          type: string
+          minLength: 1
+          maxLength: 500
     MenuWriteRequest:
       type: object
       additionalProperties: false
@@ -902,12 +1106,27 @@ components:
     OperatingHoursData:
       type: object
       additionalProperties: false
-      required: [version, days]
+      required: [version, status, timeZoneId, conflictCheckStatus, days]
       properties:
         version:
           type: integer
           format: int64
           minimum: 1
+        status:
+          $ref: "#/components/schemas/ScheduleVersionStatus"
+        timeZoneId:
+          $ref: "#/components/schemas/TimeZoneId"
+        effectiveAt:
+          type: [string, "null"]
+          format: date-time
+        changeReason:
+          type: [string, "null"]
+          maxLength: 500
+        conflictCheckStatus:
+          $ref: "#/components/schemas/ConflictCheckStatus"
+        conflictCount:
+          type: [integer, "null"]
+          minimum: 0
         days:
           type: array
           items:
@@ -915,12 +1134,27 @@ components:
     ReservationTimeSlotsData:
       type: object
       additionalProperties: false
-      required: [version, days]
+      required: [version, status, timeZoneId, conflictCheckStatus, days]
       properties:
         version:
           type: integer
           format: int64
           minimum: 1
+        status:
+          $ref: "#/components/schemas/ScheduleVersionStatus"
+        timeZoneId:
+          $ref: "#/components/schemas/TimeZoneId"
+        effectiveAt:
+          type: [string, "null"]
+          format: date-time
+        changeReason:
+          type: [string, "null"]
+          maxLength: 500
+        conflictCheckStatus:
+          $ref: "#/components/schemas/ConflictCheckStatus"
+        conflictCount:
+          type: [integer, "null"]
+          minimum: 0
         days:
           type: array
           items:

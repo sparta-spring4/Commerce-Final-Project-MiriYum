@@ -1,6 +1,7 @@
 # Store Schedule Issue #34 Design
 
-> 구현 과정 기록이며 활성 정본이 아니다. 현재 제품·API 계약은
+> 상태: `SUPERSEDED`. 아래 즉시 게시 전용 설계는 현재 구현 기준으로 사용하지 않는다.
+> 활성 제품·API 계약과 2026-07-31 승인 수명주기는
 > `docs/service-policies/03-store-operation.md`,
 > `docs/specs/store-search/spec.md`,
 > `docs/specs/store-search/openapi.yaml`을 따른다.
