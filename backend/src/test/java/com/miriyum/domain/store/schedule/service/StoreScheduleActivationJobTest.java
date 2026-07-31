@@ -19,6 +19,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 
 @ExtendWith(MockitoExtension.class)
 class StoreScheduleActivationJobTest {
@@ -45,14 +46,16 @@ class StoreScheduleActivationJobTest {
         given(second.getId()).willReturn(12L);
         given(reservation.getId()).willReturn(21L);
         given(operatingRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now))
+                        now,
+                        PageRequest.of(0, 100)))
                 .willReturn(List.of(first, second));
         given(reservationRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now))
+                        now,
+                        PageRequest.of(0, 100)))
                 .willReturn(List.of(reservation));
         StoreScheduleActivationJob job = new StoreScheduleActivationJob(
                 operatingRepository,
@@ -82,14 +85,16 @@ class StoreScheduleActivationJobTest {
         given(second.getId()).willReturn(12L);
         given(reservation.getId()).willReturn(21L);
         given(operatingRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now))
+                        now,
+                        PageRequest.of(0, 100)))
                 .willReturn(List.of(first, second));
         given(reservationRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now))
+                        now,
+                        PageRequest.of(0, 100)))
                 .willReturn(List.of(reservation));
         willThrow(new IllegalStateException("temporary failure"))
                 .given(scheduleService).activateDueOperating(11L);

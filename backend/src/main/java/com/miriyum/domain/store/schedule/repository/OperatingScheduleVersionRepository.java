@@ -6,6 +6,7 @@ import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -20,10 +21,31 @@ public interface OperatingScheduleVersionRepository
             long storeId,
             long versionNumber);
 
-    List<OperatingScheduleVersion>
-            findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
-                    ScheduleVersionStatus status,
-                    Instant effectiveAt);
+    @Query("""
+            select candidate
+            from OperatingScheduleVersion candidate
+            where candidate.status = :status
+              and candidate.effectiveAt <= :effectiveAt
+              and not exists (
+                  select older.id
+                  from OperatingScheduleVersion older
+                  where older.storeId = candidate.storeId
+                    and older.status = :status
+                    and older.effectiveAt <= :effectiveAt
+                    and (
+                        older.effectiveAt < candidate.effectiveAt
+                        or (
+                            older.effectiveAt = candidate.effectiveAt
+                            and older.versionNumber < candidate.versionNumber
+                        )
+                    )
+              )
+            order by candidate.effectiveAt asc, candidate.versionNumber asc
+            """)
+    List<OperatingScheduleVersion> findEarliestDuePerStore(
+            @Param("status") ScheduleVersionStatus status,
+            @Param("effectiveAt") Instant effectiveAt,
+            Pageable pageable);
 
     Optional<OperatingScheduleVersion>
             findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(

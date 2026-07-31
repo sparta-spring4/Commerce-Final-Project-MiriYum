@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +17,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 @Slf4j
 public class StoreScheduleActivationJob {
+
+    private static final PageRequest ACTIVATION_BATCH = PageRequest.of(0, 100);
 
     private final OperatingScheduleVersionRepository operatingRepository;
     private final ReservationScheduleVersionRepository reservationRepository;
@@ -27,16 +30,18 @@ public class StoreScheduleActivationJob {
     public void activateDueSchedules() {
         Instant now = clock.instant();
         operatingRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now)
+                        now,
+                        ACTIVATION_BATCH)
                 .stream()
                 .map(OperatingScheduleVersion::getId)
                 .forEach(versionId -> activateOperatingSafely(versionId));
         reservationRepository
-                .findTop100ByStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                .findEarliestDuePerStore(
                         ScheduleVersionStatus.SCHEDULED,
-                        now)
+                        now,
+                        ACTIVATION_BATCH)
                 .stream()
                 .map(ReservationScheduleVersion::getId)
                 .forEach(versionId -> activateReservationSafely(versionId));

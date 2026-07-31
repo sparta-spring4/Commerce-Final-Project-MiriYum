@@ -12,13 +12,16 @@ import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
+import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import jakarta.persistence.EntityManager;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -286,6 +290,97 @@ class StoreScheduleRepositoryIT {
                 """,
                 version.getId()))
                 .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @Transactional
+    void dueQueriesReturnOnlyEachStoresEarliestCandidate() {
+        Instant now = Instant.parse("2026-07-31T03:00:00Z");
+        long saturatedStoreId = createStore(
+                "saturated-schedule-owner@example.com", "1234567890");
+        long otherStoreId = createStore(
+                "other-schedule-owner@example.com", "1234567891");
+        StoreScheduleState saturatedState =
+                initializeAndLock(saturatedStoreId);
+        StoreScheduleState otherState = initializeAndLock(otherStoreId);
+        OperatingScheduleVersion saturatedBaseline =
+                operatingRepository.saveAndFlush(
+                        OperatingScheduleVersion.create(
+                                saturatedStoreId,
+                                saturatedState.allocateOperatingVersion(),
+                                List.of(business(9, 0, 18, 0, 540, 1080))));
+        OperatingScheduleVersion otherBaseline = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(
+                        otherStoreId,
+                        otherState.allocateOperatingVersion(),
+                        List.of(business(9, 0, 18, 0, 540, 1080))));
+        saturatedState.activateOperating(saturatedBaseline.getId());
+        otherState.activateOperating(otherBaseline.getId());
+
+        List<OperatingScheduleVersion> saturatedOperating = new ArrayList<>();
+        List<ReservationScheduleVersion> saturatedReservation = new ArrayList<>();
+        for (int index = 0; index < 101; index++) {
+            Instant effectiveAt = now.minusSeconds(200L - index);
+            OperatingScheduleVersion operating =
+                    OperatingScheduleVersion.createDraft(
+                            saturatedStoreId,
+                            saturatedState.allocateOperatingVersion(),
+                            "Asia/Seoul",
+                            List.of(business(9, 0, 18, 0, 540, 1080)));
+            operating.schedule(effectiveAt, "포화 매장 영업시간");
+            saturatedOperating.add(operating);
+            ReservationScheduleVersion reservation =
+                    ReservationScheduleVersion.createDraft(
+                            saturatedStoreId,
+                            saturatedState.allocateReservationVersion(),
+                            saturatedBaseline.getId(),
+                            "Asia/Seoul",
+                            List.of(reservation(10, 0, 11, 0, 600, 660)));
+            reservation.schedule(effectiveAt, "포화 매장 예약시간");
+            saturatedReservation.add(reservation);
+        }
+        operatingRepository.saveAllAndFlush(saturatedOperating);
+        reservationRepository.saveAllAndFlush(saturatedReservation);
+
+        OperatingScheduleVersion otherOperating =
+                OperatingScheduleVersion.createDraft(
+                        otherStoreId,
+                        otherState.allocateOperatingVersion(),
+                        "Asia/Seoul",
+                        List.of(business(9, 0, 18, 0, 540, 1080)));
+        otherOperating.schedule(now.minusSeconds(50), "다른 매장 영업시간");
+        operatingRepository.saveAndFlush(otherOperating);
+        ReservationScheduleVersion otherReservation =
+                ReservationScheduleVersion.createDraft(
+                        otherStoreId,
+                        otherState.allocateReservationVersion(),
+                        otherBaseline.getId(),
+                        "Asia/Seoul",
+                        List.of(reservation(10, 0, 11, 0, 600, 660)));
+        otherReservation.schedule(now.minusSeconds(50), "다른 매장 예약시간");
+        reservationRepository.saveAndFlush(otherReservation);
+
+        List<OperatingScheduleVersion> operatingCandidates =
+                operatingRepository.findEarliestDuePerStore(
+                        ScheduleVersionStatus.SCHEDULED,
+                        now,
+                        PageRequest.of(0, 100));
+        List<ReservationScheduleVersion> reservationCandidates =
+                reservationRepository.findEarliestDuePerStore(
+                        ScheduleVersionStatus.SCHEDULED,
+                        now,
+                        PageRequest.of(0, 100));
+
+        assertThat(operatingCandidates)
+                .extracting(OperatingScheduleVersion::getId)
+                .containsExactly(
+                        saturatedOperating.getFirst().getId(),
+                        otherOperating.getId());
+        assertThat(reservationCandidates)
+                .extracting(ReservationScheduleVersion::getId)
+                .containsExactly(
+                        saturatedReservation.getFirst().getId(),
+                        otherReservation.getId());
     }
 
     private StoreScheduleState initializeAndLock(long storeId) {
