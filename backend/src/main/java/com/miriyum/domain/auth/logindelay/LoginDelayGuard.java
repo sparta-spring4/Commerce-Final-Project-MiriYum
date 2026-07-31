@@ -3,6 +3,7 @@ package com.miriyum.domain.auth.logindelay;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.function.BooleanSupplier;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,30 +32,43 @@ public class LoginDelayGuard {
     }
 
     /**
-     * 지금 이 계정이 지연 중인지 확인한다. 호출부는 지연 중이면 비밀번호를 검사하지 말고
-     * 평소와 같은 자격 증명 오류로 응답해야 한다(실패 횟수·지연 상태·계정 존재 여부 비노출).
-     */
-    @Transactional(readOnly = true)
-    public boolean isDelayed(TokenNamespace namespace, long accountId) {
-        return loginFailureDelayRepository.find(namespace.value(), accountId)
-                .orElseGet(LoginFailureDelay::none)
-                .isDelayedAt(LocalDateTime.now(clock));
-    }
-
-    /**
-     * 실패 한 번을 기록하고 필요하면 지연 단계를 올린다.
+     * 계정별 지연 판정 → 비밀번호 비교 → 실패 반영을 하나의 트랜잭션과 하나의 행 잠금 안에서
+     * 수행한다. 비밀번호가 맞으면 {@code true}, 지연 중이거나 비밀번호가 틀리면 {@code false}다.
      *
-     * <p>호출부는 이 직후 자격 증명 오류를 던지는데, 같은 트랜잭션이면 그 예외에 기록까지 함께
-     * 롤백되어 실패가 영원히 누적되지 않는다. 그래서 {@code REQUIRES_NEW}로 별도 트랜잭션에서
-     * 기록하고 즉시 커밋한다. 행을 잠그는 구간도 이 짧은 트랜잭션 안에서만 유지된다.</p>
+     * <p>지연 판정을 잠금 밖에서 따로 읽으면, 동시 요청이 모두 "지연 아님"을 보고 통과한 뒤
+     * 비밀번호 비교까지 마친다. 그러면 5번째 실패가 지연을 만든 뒤에도 이미 통과한 요청들이
+     * 추측을 계속 수행해, 한 계정을 여러 IP에서 노리는 공격을 늦추려는 목적이 무력해진다.
+     * 그래서 잠금을 먼저 잡고 그 안에서 판정하며, 지연 중이면 {@code passwordMatches}를 아예
+     * 호출하지 않는다.</p>
+     *
+     * <p>실패 기록은 호출부가 자격 증명 오류를 던지기 전에 커밋돼야 한다. 이 메서드는 예외를
+     * 던지지 않고 결과만 반환하므로 기록이 롤백되지 않으며, 별도 트랜잭션({@code REQUIRES_NEW})이라
+     * 호출부가 나중에 예외를 던져도 영향을 받지 않는다.</p>
+     *
+     * <p>비용: 비밀번호 해시 비교가 행 잠금을 쥔 채 실행되므로 <b>같은 계정</b>의 동시 로그인
+     * 시도는 차례로 처리된다. 다른 계정은 서로 다른 행이라 영향이 없고, 한 사용자가 동시에 여러 번
+     * 로그인하는 경우는 드물다. 오히려 이 직렬화가 계정 단위 추측 속도 제한의 핵심이다.</p>
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordFailure(TokenNamespace namespace, long accountId) {
-        // 한 번 읽은 시각을 단계 계산과 감사 컬럼에 함께 넘겨, 같은 기록 안에서 시간 기준이 갈리지 않게 한다.
+    public boolean isPasswordAcceptedWithinDelay(
+            TokenNamespace namespace,
+            long accountId,
+            BooleanSupplier passwordMatches
+    ) {
+        // 한 번 읽은 시각을 지연 판정·단계 계산·감사 컬럼에 함께 써, 같은 판정 안에서 기준이 갈리지 않게 한다.
         LocalDateTime now = LocalDateTime.now(clock);
         LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
+
+        if (current.isDelayedAt(now)) {
+            return false;
+        }
+        if (passwordMatches.getAsBoolean()) {
+            return true;
+        }
+
         LoginFailureDelay updated = loginDelayPolicy.applyFailure(current, now);
         loginFailureDelayRepository.save(namespace.value(), accountId, updated, now);
+        return false;
     }
 
     /**

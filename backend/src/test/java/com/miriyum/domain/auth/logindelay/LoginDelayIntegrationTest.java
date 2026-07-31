@@ -2,6 +2,10 @@ package com.miriyum.domain.auth.logindelay;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
@@ -25,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -67,7 +72,11 @@ class LoginDelayIntegrationTest {
     @Autowired
     private ConsumerAccountRepository consumerAccountRepository;
 
-    @Autowired
+    /**
+     * 지연이 걸린 뒤의 동시 요청이 해시 비교까지 도달하는지 세려면 실제 호출 횟수를 관찰해야 하므로
+     * 실 구현을 감싼 spy를 쓴다.
+     */
+    @MockitoSpyBean
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -83,6 +92,8 @@ class LoginDelayIntegrationTest {
         ConsumerAccount account = ConsumerAccount.create(
                 EMAIL, passwordEncoder.encode(RAW_PASSWORD), "지연테스트");
         accountId = consumerAccountRepository.saveAndFlush(account).getId();
+        // 준비 과정의 encode() 호출이 뒤의 matches() 검증에 섞이지 않게 비운다.
+        clearInvocations(passwordEncoder);
     }
 
     @Test
@@ -174,12 +185,15 @@ class LoginDelayIntegrationTest {
             future.get();
         }
 
-        // then: 결과는 정확히 5회·1단계여야 한다.
-        // 앞의 5건이 5회 기준을 채워 1분 지연을 만들고, 지연 확인을 이미 통과한 나머지 요청은
-        // 잠금 뒤 "지연 중"으로 판정돼 상태를 바꾸지 않는다. 여기서 단계가 2·3으로 올라가면
-        // 지연이 살아있는 동안의 실패로 단계가 뛴 것이므로 정책 위반이다.
+        // then: 결과는 정확히 5회·1단계여야 한다. 앞의 5건이 5회 기준을 채워 1분 지연을 만들고,
+        // 나머지 요청은 잠금 안에서 "지연 중"으로 판정돼 상태를 바꾸지 않는다. 단계가 2·3으로
+        // 올라가면 지연이 살아있는 동안의 실패로 단계가 뛴 것이므로 정책 위반이다.
         assertThat(consecutiveFailures()).isEqualTo(5);
         assertThat(delayStage()).isEqualTo(1);
+
+        // then: 지연이 걸린 뒤의 요청은 비밀번호 비교에 도달하지 않아야 한다. 지연은 추측 속도를
+        // 늦추는 장치이므로, 동시 요청이 지연을 우회해 해시 비교를 계속 수행하면 목적이 무너진다.
+        verify(passwordEncoder, times(5)).matches(any(), any());
     }
 
     /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */

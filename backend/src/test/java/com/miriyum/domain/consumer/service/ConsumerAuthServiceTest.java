@@ -3,6 +3,7 @@ package com.miriyum.domain.consumer.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -169,6 +171,7 @@ class ConsumerAuthServiceTest {
         ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", "wrong-password");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("wrong-password", "hashed")).willReturn(false);
 
         // when & then
@@ -185,6 +188,7 @@ class ConsumerAuthServiceTest {
         ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", "password123");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
         given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
                 .willReturn("access-token-value");
@@ -208,6 +212,7 @@ class ConsumerAuthServiceTest {
         ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", nfdPassword);
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
         given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
                 .willReturn("access-token-value");
@@ -229,6 +234,16 @@ class ConsumerAuthServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+    }
+
+    /**
+     * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 비밀번호 비교를 직접 호출한다. 이 단위
+     * 테스트는 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 넘겨받은 비교를 그대로 실행하고
+     * 그 결과를 반환하게 한다(지연이 걸리지 않은 상태와 같다).
+     */
+    private void delegatePasswordCheckToEncoder() {
+        given(loginDelayGuard.isPasswordAcceptedWithinDelay(any(), anyLong(), any()))
+                .willAnswer(invocation -> invocation.getArgument(2, BooleanSupplier.class).getAsBoolean());
     }
 
     /**
