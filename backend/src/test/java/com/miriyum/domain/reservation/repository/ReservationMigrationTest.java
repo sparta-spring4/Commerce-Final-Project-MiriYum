@@ -152,12 +152,12 @@ class ReservationMigrationTest {
     }
 
     @Test
-    @DisplayName("예약 코어 스키마는 Flyway V14로 적용된다")
-    void appliesReservationCoreAsFlywayV14() {
+    @DisplayName("예약 코어 스키마는 Flyway V15로 적용된다")
+    void appliesReservationCoreAsFlywayV15() {
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "14".equals(String.valueOf(migration.getVersion()))
-                                && "V14__create_reservation_core.sql".equals(migration.getScript()));
+                        "15".equals(String.valueOf(migration.getVersion()))
+                                && "V15__create_reservation_core.sql".equals(migration.getScript()));
     }
 
     @Test
