@@ -37,6 +37,18 @@ class StoreCommandFingerprintTest {
     }
 
     @Test
+    @DisplayName("매장 시간대가 다르면 등록 fingerprint가 달라진다")
+    void timeZoneChangesCreateFingerprint() {
+        StoreCreateRequest seoul = request(
+                List.of("DATE"), true, true, "Asia/Seoul");
+        StoreCreateRequest tokyo = request(
+                List.of("DATE"), true, true, "Asia/Tokyo");
+
+        assertThat(StoreCommandFingerprint.forCreate(seoul))
+                .isNotEqualTo(StoreCommandFingerprint.forCreate(tokyo));
+    }
+
+    @Test
     @DisplayName("대상 매장 ID가 다르면 수정 fingerprint가 달라진다")
     void targetStoreIdChangesUpdateFingerprint() {
         StoreUpdateRequest request = updateName("새 이름");
@@ -61,6 +73,19 @@ class StoreCommandFingerprintTest {
             boolean applicantSelfAttested,
             boolean requiredTermsAgreed
     ) {
+        return request(
+                tags,
+                applicantSelfAttested,
+                requiredTermsAgreed,
+                "Asia/Seoul");
+    }
+
+    private StoreCreateRequest request(
+            List<String> tags,
+            boolean applicantSelfAttested,
+            boolean requiredTermsAgreed,
+            String timeZoneId
+    ) {
         return new StoreCreateRequest(
                 "1234567890",
                 BusinessType.CAFE,
@@ -68,6 +93,7 @@ class StoreCommandFingerprintTest {
                 "",
                 Region.SEOUL,
                 "서울시 중구",
+                timeZoneId,
                 "CAFE_BAKERY",
                 tags,
                 new StoreModesRequest(true, true, true),

@@ -337,6 +337,7 @@ class StoreControllerTest {
                   "description": "",
                   "region": "SEOUL",
                   "address": "서울시 중구",
+                  "timeZoneId": "Asia/Seoul",
                   "storeCategoryCode": "CAFE_BAKERY",
                   "tagCodes": ["DATE"],
                   "modes": %s%s
@@ -372,6 +373,7 @@ class StoreControllerTest {
                 "미리윰",
                 Region.SEOUL,
                 "서울시 중구",
+                "Asia/Seoul",
                 "CAFE_BAKERY",
                 VerificationStatus.APPROVED,
                 OperationStatus.OPEN,

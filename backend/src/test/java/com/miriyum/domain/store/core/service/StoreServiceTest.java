@@ -185,6 +185,36 @@ class StoreServiceTest {
     }
 
     @Test
+    void schedulePublicationAuthorityReturnsLockedStoreTimeZone() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+
+        StoreScheduleAuthority authority =
+                storeService.requireSchedulePublicationAuthority(
+                        OPERATOR_ID,
+                        STORE_ID);
+
+        assertThat(authority)
+                .isEqualTo(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+    }
+
+    @Test
+    void scheduledActivationAuthorityDoesNotRequireAnOperatorIdentity() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+
+        StoreScheduleAuthority authority =
+                storeService.requireScheduledActivationAuthority(STORE_ID);
+
+        assertThat(authority.timeZoneId()).isEqualTo("Asia/Seoul");
+        then(operatorAccountService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void updateValidatesEffectiveCatalogCombinationAndChangesStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
@@ -339,6 +369,7 @@ class StoreServiceTest {
                 "",
                 Region.SEOUL,
                 "서울시 중구",
+                "Asia/Seoul",
                 "CAFE_BAKERY",
                 List.of("DATE"),
                 new StoreModesRequest(true, true, true),
@@ -360,6 +391,7 @@ class StoreServiceTest {
                 true,
                 true,
                 true,
+                "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 12, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }

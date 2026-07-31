@@ -32,6 +32,7 @@ class ManagedStoreResponseTest {
                 true,
                 false,
                 true,
+                "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 12, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1");
         ReflectionTestUtils.setField(store, "id", 9_007_199_254_740_993L);
@@ -41,6 +42,7 @@ class ManagedStoreResponseTest {
         assertThat(response.storeId()).isEqualTo("9007199254740993");
         assertThat(response.name()).isEqualTo("미리윰");
         assertThat(response.region()).isEqualTo(Region.SEOUL);
+        assertThat(response.timeZoneId()).isEqualTo("Asia/Seoul");
         assertThat(response.verificationStatus()).isEqualTo(VerificationStatus.APPROVED);
         assertThat(response.operationStatus()).isEqualTo(OperationStatus.OPEN);
         assertThat(response.pickupEligibility()).isEqualTo(PickupEligibility.ELIGIBLE);

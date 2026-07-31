@@ -309,6 +309,7 @@ class StoreSchedulePublicationIT {
                 true,
                 true,
                 true,
+                "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 12, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
         return new OwnerStore(operatorId, storeId);

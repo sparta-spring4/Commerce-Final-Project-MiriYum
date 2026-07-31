@@ -34,6 +34,10 @@ public record StoreCreateRequest(
         String address,
 
         @NotBlank
+        @Size(max = 64)
+        String timeZoneId,
+
+        @NotBlank
         @Pattern(regexp = "^[A-Z][A-Z0-9_]{1,49}$")
         String storeCategoryCode,
 

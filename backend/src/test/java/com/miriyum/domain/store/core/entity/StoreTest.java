@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 class StoreTest {
 
+    private static final String TIME_ZONE_ID = "Asia/Seoul";
     private static final LocalDateTime ONBOARDING_ACCEPTED_AT =
             LocalDateTime.of(2026, 7, 31, 12, 0);
     private static final String REQUIRED_TERMS_VERSION =
@@ -38,12 +39,36 @@ class StoreTest {
                 true,
                 true,
                 true,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
 
         assertThat(store.getVerificationStatus()).isEqualTo(VerificationStatus.APPROVED);
         assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
         assertThat(store.getPickupEligibility()).isEqualTo(PickupEligibility.ELIGIBLE);
+        assertThat(store.getTimeZoneId()).isEqualTo(TIME_ZONE_ID);
+    }
+
+    @Test
+    @DisplayName("IANA 데이터베이스에 없는 매장 시간대는 생성할 수 없다")
+    void unknownIanaTimeZoneIsRejected() {
+        assertThatThrownBy(() -> Store.create(
+                11L,
+                "1234567890",
+                BusinessType.CAFE,
+                "미리윰",
+                "",
+                Region.SEOUL,
+                "서울시 중구",
+                "CAFE_BAKERY",
+                Set.of(),
+                true,
+                false,
+                false,
+                "Mars/Olympus",
+                ONBOARDING_ACCEPTED_AT,
+                REQUIRED_TERMS_VERSION))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -62,6 +87,7 @@ class StoreTest {
                 true,
                 false,
                 true,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION))
                 .isInstanceOf(ServiceException.class)
@@ -85,6 +111,7 @@ class StoreTest {
                 true,
                 false,
                 false,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
 
@@ -110,6 +137,7 @@ class StoreTest {
                 true,
                 true,
                 true,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
 
@@ -149,6 +177,7 @@ class StoreTest {
                 true,
                 false,
                 false,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
 
@@ -265,6 +294,7 @@ class StoreTest {
                 true,
                 true,
                 true,
+                TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
     }

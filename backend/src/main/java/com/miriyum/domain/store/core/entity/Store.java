@@ -20,7 +20,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import java.time.DateTimeException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import lombok.AccessLevel;
@@ -65,6 +67,9 @@ public class Store extends BaseEntity {
 
     @Column(name = "address", nullable = false, length = 300)
     private String address;
+
+    @Column(name = "time_zone_id", nullable = false, length = 64)
+    private String timeZoneId;
 
     @Column(name = "store_category_code", nullable = false, length = 50)
     private String storeCategoryCode;
@@ -119,6 +124,7 @@ public class Store extends BaseEntity {
             boolean reservationEnabled,
             boolean menuHoldEnabled,
             boolean pickupEnabled,
+            String timeZoneId,
             LocalDateTime onboardingAcceptedAt,
             String requiredTermsVersion
     ) {
@@ -134,6 +140,7 @@ public class Store extends BaseEntity {
         this.reservationEnabled = reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;
+        this.timeZoneId = timeZoneId;
         this.applicantSelfAttestedAt = onboardingAcceptedAt;
         this.requiredTermsAgreedAt = onboardingAcceptedAt;
         this.requiredTermsVersion = requiredTermsVersion;
@@ -152,12 +159,14 @@ public class Store extends BaseEntity {
             boolean reservationEnabled,
             boolean menuHoldEnabled,
             boolean pickupEnabled,
+            String timeZoneId,
             LocalDateTime onboardingAcceptedAt,
             String requiredTermsVersion
     ) {
         PickupEligibility eligibility = pickupEligibilityFor(businessType);
         requirePickupAllowed(eligibility, pickupEnabled);
         requireOnboardingEvidence(onboardingAcceptedAt, requiredTermsVersion);
+        String canonicalTimeZoneId = requireTimeZone(timeZoneId);
 
         Store store = new Store(
                 storeOperatorAccountId,
@@ -172,6 +181,7 @@ public class Store extends BaseEntity {
                 reservationEnabled,
                 menuHoldEnabled,
                 pickupEnabled,
+                canonicalTimeZoneId,
                 onboardingAcceptedAt,
                 requiredTermsVersion);
         store.verificationStatus = VerificationStatus.APPROVED;
@@ -249,6 +259,19 @@ public class Store extends BaseEntity {
                 || requiredTermsVersion == null
                 || requiredTermsVersion.isBlank()) {
             throw new IllegalArgumentException("onboarding evidence is required");
+        }
+    }
+
+    private static String requireTimeZone(String timeZoneId) {
+        if (timeZoneId == null || timeZoneId.isBlank()) {
+            throw new IllegalArgumentException("store time zone is required");
+        }
+        try {
+            return ZoneId.of(timeZoneId).getId();
+        } catch (DateTimeException exception) {
+            throw new IllegalArgumentException(
+                    "store time zone must be a valid IANA identifier",
+                    exception);
         }
     }
 }

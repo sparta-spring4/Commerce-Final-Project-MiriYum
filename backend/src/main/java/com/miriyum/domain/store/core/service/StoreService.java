@@ -82,6 +82,7 @@ public class StoreService {
                     modes.reservationEnabled(),
                     modes.menuHoldEnabled(),
                     modes.pickupEnabled(),
+                    request.timeZoneId(),
                     onboardingAcceptedAt,
                     REQUIRED_TERMS_VERSION);
             Store saved = saveStore(store);
@@ -150,12 +151,25 @@ public class StoreService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
-    public void requireSchedulePublicationAuthority(
+    public StoreScheduleAuthority requireSchedulePublicationAuthority(
             long operatorAccountId,
             long storeId
     ) {
         operatorAccountService.getMe(operatorAccountId);
         Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+        requireScheduleState(store);
+        return scheduleAuthority(store);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreScheduleAuthority requireScheduledActivationAuthority(long storeId) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        requireScheduleState(store);
+        return scheduleAuthority(store);
+    }
+
+    private void requireScheduleState(Store store) {
         if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
             throw new ServiceException(
                     StoreErrorCode.VERIFICATION_STATE_CONFLICT);
@@ -163,6 +177,10 @@ public class StoreService {
         if (store.getOperationStatus() == OperationStatus.CLOSED) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
+    }
+
+    private StoreScheduleAuthority scheduleAuthority(Store store) {
+        return new StoreScheduleAuthority(store.getId(), store.getTimeZoneId());
     }
 
     private Store loadManagedStore(long operatorAccountId, long storeId) {
