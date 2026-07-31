@@ -6,8 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
+import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
+import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
@@ -66,6 +68,9 @@ class StoreSchedulePublicationIT {
 
     @Autowired
     private StoreScheduleService scheduleService;
+
+    @Autowired
+    private StoreService storeService;
 
     @Autowired
     private StoreScheduleStateRepository stateRepository;
@@ -189,6 +194,46 @@ class StoreSchedulePublicationIT {
         assertThat(commandCount).isZero();
     }
 
+    @Test
+    void publicationAuthorityLockSerializesWithTerminalStateChange()
+            throws Exception {
+        OwnerStore ownerStore = createStore();
+        CountDownLatch authorityLocked = new CountDownLatch(1);
+        CountDownLatch releasePublication = new CountDownLatch(1);
+        CountDownLatch stateChangeLocked = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> publication = executor.submit(() ->
+                    transactionTemplate.executeWithoutResult(ignored -> {
+                        storeService.requireSchedulePublicationAuthority(
+                                ownerStore.operatorId(),
+                                ownerStore.storeId());
+                        authorityLocked.countDown();
+                        await(releasePublication);
+                    }));
+            Future<?> stateChange = executor.submit(() -> {
+                await(authorityLocked);
+                transactionTemplate.executeWithoutResult(ignored -> {
+                    Store store = storeRepository
+                            .findByIdForUpdate(ownerStore.storeId())
+                            .orElseThrow();
+                    stateChangeLocked.countDown();
+                    store.close();
+                });
+            });
+
+            assertThat(authorityLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(stateChangeLocked.await(300, TimeUnit.MILLISECONDS))
+                    .isFalse();
+            releasePublication.countDown();
+            publication.get(5, TimeUnit.SECONDS);
+            stateChange.get(5, TimeUnit.SECONDS);
+        }
+
+        assertThat(storeRepository.findById(ownerStore.storeId()).orElseThrow()
+                .getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+    }
+
     private OwnerStore createStore() {
         long operatorId = operatorRepository.saveAndFlush(
                 StoreOperatorAccount.create(
@@ -236,6 +281,17 @@ class StoreSchedulePublicationIT {
                 ScheduleIntervalKind.BUSINESS_HOURS,
                 1080,
                 1560);
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("timed out waiting for test latch");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(exception);
+        }
     }
 
     private record OwnerStore(long operatorId, long storeId) {

@@ -170,7 +170,8 @@ class StoreServiceTest {
     void schedulePublicationAuthorityRejectsClosedStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
         store.close();
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
 
         assertThatThrownBy(() ->
                 storeService.requireSchedulePublicationAuthority(
@@ -180,6 +181,7 @@ class StoreServiceTest {
                 .extracting(exception ->
                         ((ServiceException) exception).getErrorCode())
                 .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
     }
 
     @Test

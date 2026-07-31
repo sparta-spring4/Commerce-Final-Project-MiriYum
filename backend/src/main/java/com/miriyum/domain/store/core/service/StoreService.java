@@ -149,13 +149,13 @@ public class StoreService {
         requireStoreOwnership(operatorAccountId, storeId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public void requireSchedulePublicationAuthority(
             long operatorAccountId,
             long storeId
     ) {
         operatorAccountService.getMe(operatorAccountId);
-        Store store = loadManagedStore(operatorAccountId, storeId);
+        Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
         if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
             throw new ServiceException(
                     StoreErrorCode.VERIFICATION_STATE_CONFLICT);
