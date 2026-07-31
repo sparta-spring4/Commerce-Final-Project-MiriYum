@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -30,9 +31,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class StoreOperatorAuthServiceTest {
+
+    private static final Long ACCOUNT_ID = 1L;
 
     @Mock
     private StoreOperatorAccountRepository storeOperatorAccountRepository;
@@ -43,6 +47,9 @@ class StoreOperatorAuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private LoginDelayGuard loginDelayGuard;
+
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
     private StoreOperatorAuthService storeOperatorAuthService;
@@ -50,7 +57,8 @@ class StoreOperatorAuthServiceTest {
     @BeforeEach
     void setUp() {
         storeOperatorAuthService = new StoreOperatorAuthService(
-                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, true);
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
+                loginDelayGuard, true);
     }
 
     @Test
@@ -89,7 +97,8 @@ class StoreOperatorAuthServiceTest {
     void rejectsSignUpWhenIdentityVerificationStubDisabled() {
         // given
         StoreOperatorAuthService serviceWithStubDisabled = new StoreOperatorAuthService(
-                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy, false);
+                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
+                loginDelayGuard, false);
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "password123", "password123",
                 "email-ref", "identity-ref", "미리윰식당");
@@ -156,7 +165,7 @@ class StoreOperatorAuthServiceTest {
     @DisplayName("비밀번호가 일치하지 않으면 AUTH_005를 던진다")
     void rejectsLoginWithWrongPassword() {
         // given
-        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        StoreOperatorAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("owner@example.com", "wrong-password");
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("wrong-password", "hashed")).willReturn(false);
@@ -172,7 +181,7 @@ class StoreOperatorAuthServiceTest {
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
-        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        StoreOperatorAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("owner@example.com", "password123");
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
@@ -195,7 +204,7 @@ class StoreOperatorAuthServiceTest {
         // given: 가입 시 NFC로 저장된 비밀번호를, 로그인 시 NFD(자음+모음 분리)로 입력한 상황
         String nfcPassword = "password123가";
         String nfdPassword = java.text.Normalizer.normalize(nfcPassword, java.text.Normalizer.Form.NFD);
-        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        StoreOperatorAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("owner@example.com", nfdPassword);
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
@@ -219,5 +228,15 @@ class StoreOperatorAuthServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+    }
+
+    /**
+     * 로그인은 조회한 계정의 PK로 지연 상태를 확인하므로, 실제 경로처럼 ID가 채워진 계정을 쓴다.
+     * {@code create()}만 호출한 엔티티는 아직 영속되지 않아 ID가 {@code null}이다.
+     */
+    private StoreOperatorAccount persistedAccount() {
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        return account;
     }
 }

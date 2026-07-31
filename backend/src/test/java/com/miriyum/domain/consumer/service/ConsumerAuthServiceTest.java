@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
@@ -30,9 +31,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class ConsumerAuthServiceTest {
+
+    private static final Long ACCOUNT_ID = 1L;
 
     @Mock
     private ConsumerAccountRepository consumerAccountRepository;
@@ -43,6 +47,9 @@ class ConsumerAuthServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private LoginDelayGuard loginDelayGuard;
+
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
@@ -51,7 +58,8 @@ class ConsumerAuthServiceTest {
     @BeforeEach
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, true);
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
+                loginDelayGuard, true);
     }
 
     @Test
@@ -97,7 +105,8 @@ class ConsumerAuthServiceTest {
     void rejectsSignUpWhenIdentityVerificationStubDisabled() {
         // given
         ConsumerAuthService serviceWithStubDisabled = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy, false);
+                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
+                loginDelayGuard, false);
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "password123",
                 "email-ref", "identity-ref", "닉네임");
@@ -157,7 +166,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("비밀번호가 일치하지 않으면 AUTH_005를 던진다")
     void rejectsLoginWithWrongPassword() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", "wrong-password");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("wrong-password", "hashed")).willReturn(false);
@@ -173,7 +182,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", "password123");
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
@@ -196,7 +205,7 @@ class ConsumerAuthServiceTest {
         // given: 가입 시 NFC로 저장된 비밀번호를, 로그인 시 NFD(자음+모음 분리)로 입력한 상황
         String nfcPassword = "password123가";
         String nfdPassword = java.text.Normalizer.normalize(nfcPassword, java.text.Normalizer.Form.NFD);
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", nfdPassword);
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
@@ -220,5 +229,15 @@ class ConsumerAuthServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+    }
+
+    /**
+     * 로그인은 조회한 계정의 PK로 지연 상태를 확인하므로, 실제 경로처럼 ID가 채워진 계정을 쓴다.
+     * {@code create()}만 호출한 엔티티는 아직 영속되지 않아 ID가 {@code null}이다.
+     */
+    private ConsumerAccount persistedAccount() {
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        return account;
     }
 }

@@ -9,6 +9,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -42,6 +43,7 @@ public class StoreOperatorAuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordPolicy passwordPolicy;
+    private final LoginDelayGuard loginDelayGuard;
     private final boolean identityVerificationDevStubEnabled;
 
     public StoreOperatorAuthService(
@@ -49,12 +51,14 @@ public class StoreOperatorAuthService {
             PasswordEncoder passwordEncoder,
             JwtTokenProvider jwtTokenProvider,
             PasswordPolicy passwordPolicy,
+            LoginDelayGuard loginDelayGuard,
             @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordPolicy = passwordPolicy;
+        this.loginDelayGuard = loginDelayGuard;
         this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
     }
 
@@ -93,18 +97,34 @@ public class StoreOperatorAuthService {
         return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * 이메일·비밀번호 로그인이다. AUTH-006의 계정 단위 지연을 적용한다.
+     *
+     * <p>지연 중이면 비밀번호를 검사하지 않고 곧바로 거절하되, 응답은 평소 실패와 같은
+     * {@code AUTH_005}다. 실패 횟수·지연 상태·계정 존재 여부를 응답으로 구분할 수 없어야 한다.</p>
+     *
+     * <p>이 메서드에는 일부러 트랜잭션 경계를 두지 않는다. 조회 → 판정 → 짧은 기록 순서라 전체를
+     * 하나로 묶어야 하는 불변식이 없고, 원자성이 필요한 실패 카운터 증가는 {@link LoginDelayGuard}가
+     * 자체 트랜잭션과 행 잠금으로 이미 보장한다. 반대로 여기에 트랜잭션을 걸면 실패 기록용
+     * {@code REQUIRES_NEW} 트랜잭션이 커넥션을 하나 더 잡아 요청당 두 개를 쓰게 되고, 동시 로그인
+     * 실패가 몰릴 때 커넥션 풀이 고갈된다.</p>
+     */
     public TokenPair login(LoginRequest request) {
         StoreOperatorAccount account = storeOperatorAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
+        if (loginDelayGuard.isDelayed(TokenNamespace.STORE_OPERATOR, account.getId())) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
         if (!passwordEncoder.matches(passwordPolicy.toNfc(request.password()), account.getPasswordHash())) {
+            loginDelayGuard.recordFailure(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
+        loginDelayGuard.reset(TokenNamespace.STORE_OPERATOR, account.getId());
         return issueTokenPair(account.getId());
     }
 
