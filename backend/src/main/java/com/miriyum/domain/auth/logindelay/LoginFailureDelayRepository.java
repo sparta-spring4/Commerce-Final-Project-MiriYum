@@ -11,8 +11,8 @@ import org.springframework.stereotype.Repository;
  *
  * <p>AUTH-006은 실패 횟수·지연 단계를 중앙 저장소에서 원자적으로 갱신하고, 여러 인증 인스턴스가
  * 동시에 실패를 기록해도 5회 기준과 단계가 우회되지 않도록 요구한다. 그래서 갱신 경로는 JPA
- * 변경 감지가 아니라 {@code INSERT IGNORE}(행 확보) 뒤 {@code SELECT ... FOR UPDATE}(행 잠금)로
- * 처리한다. 잠금은 호출 도메인이 소유한 트랜잭션이 커밋될 때까지 유지된다.</p>
+ * 변경 감지가 아니라 {@code INSERT ... ON DUPLICATE KEY UPDATE}로 행 확보와 배타 잠금을 한 번에
+ * 처리한다({@link #lock} 참고). 잠금은 호출 도메인이 소유한 트랜잭션이 커밋될 때까지 유지된다.</p>
  */
 @Repository
 public class LoginFailureDelayRepository {

@@ -24,7 +24,6 @@ import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepositor
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
-import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -236,13 +235,12 @@ class StoreOperatorAuthServiceTest {
     }
 
     /**
-     * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 비밀번호 비교를 직접 호출한다. 이 단위
-     * 테스트는 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 넘겨받은 비교를 그대로 실행하고
-     * 그 결과를 반환하게 한다(지연이 걸리지 않은 상태와 같다).
+     * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 지연 여부를 판정한다. 이 단위 테스트는
+     * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지
+     * 않은 상태를 재현한다.
      */
     private void delegatePasswordCheckToEncoder() {
-        given(loginDelayGuard.isPasswordAcceptedWithinDelay(any(), anyLong(), any()))
-                .willAnswer(invocation -> invocation.getArgument(2, BooleanSupplier.class).getAsBoolean());
+        given(loginDelayGuard.tryReserveAttempt(any(), anyLong())).willReturn(true);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.miriyum.domain.auth.logindelay;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -39,7 +42,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * AUTH-006의 계정 단위 로그인 지연을 실제 MySQL에서 검증한다.
  *
- * <p>실패 기록은 {@code INSERT IGNORE} + {@code SELECT ... FOR UPDATE}로 갱신되는 MySQL 전용
+ * <p>실패 기록은 {@code INSERT ... ON DUPLICATE KEY UPDATE}로 배타 잠금을 잡는 MySQL 전용
  * 경로이고, 정책은 여러 인증 인스턴스가 동시에 실패를 기록해도 5회 기준이 우회되지 않도록
  * 요구하므로 H2가 아니라 Testcontainers MySQL을 쓴다.</p>
  */
@@ -48,7 +51,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            // 커넥션을 오래 쥐면 곧바로 드러나도록 풀을 작게 잡는다. 해시 비교가 트랜잭션 안에 있었다면
+            // 서로 다른 계정 8건이 동시에 계산에 들어가 이 풀을 모두 점유했을 것이다.
+            "spring.datasource.hikari.maximum-pool-size=2"
         })
 class LoginDelayIntegrationTest {
 
@@ -149,6 +155,71 @@ class LoginDelayIntegrationTest {
 
         // then: 기록이 사라져 다음 실패는 처음부터 다시 센다
         assertThat(failureRowCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("비밀번호 해시 비교는 트랜잭션·DB 커넥션 밖에서 수행한다")
+    void passwordComparisonRunsOutsideTransaction() {
+        // given: 해시 비교가 실행되는 순간의 트랜잭션 활성 여부를 기록한다
+        AtomicBoolean transactionActiveDuringComparison = new AtomicBoolean(true);
+        willAnswer(invocation -> {
+            transactionActiveDuringComparison.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return invocation.callRealMethod();
+        }).given(passwordEncoder).matches(any(), any());
+
+        // when
+        catchLoginFailure(EMAIL);
+
+        // then: 해시 계산 동안 트랜잭션을 쥐고 있으면 DB 커넥션과 행 잠금도 함께 점유한다.
+        // 서로 다른 계정을 동시에 시도하면 각 요청이 커넥션을 물고 나란히 계산에 들어가 풀이 고갈되고,
+        // 인증과 무관한 DB 요청까지 지연된다. 그래서 비교는 반드시 트랜잭션 밖이어야 한다.
+        assertThat(transactionActiveDuringComparison).isFalse();
+    }
+
+    @Test
+    @DisplayName("서로 다른 계정으로 풀 크기 이상 동시 로그인해도 다른 DB 요청이 막히지 않는다")
+    void concurrentLoginsOnDistinctAccountsDoNotStarveOtherQueries() throws Exception {
+        // given: 커넥션 풀(테스트 설정 2개)보다 많은 계정으로 동시에 로그인 실패를 만든다
+        int accountCount = 8;
+        for (int index = 0; index < accountCount; index++) {
+            consumerAccountRepository.saveAndFlush(ConsumerAccount.create(
+                    "starve-" + index + "@example.com", passwordEncoder.encode(RAW_PASSWORD), "동시" + index));
+        }
+        CountDownLatch readyLatch = new CountDownLatch(accountCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        List<Future<?>> logins = new ArrayList<>();
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(accountCount)) {
+            for (int index = 0; index < accountCount; index++) {
+                String email = "starve-" + index + "@example.com";
+                logins.add(executor.submit(() -> {
+                    readyLatch.countDown();
+                    try {
+                        startLatch.await();
+                        catchLoginFailure(email);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                }));
+            }
+            readyLatch.await();
+            startLatch.countDown();
+
+            // when: 로그인들이 진행되는 동안 인증과 무관한 조회를 수행한다
+            for (int probe = 0; probe < 20; probe++) {
+                assertThat(jdbcTemplate.queryForObject("SELECT 1", Integer.class)).isEqualTo(1);
+            }
+
+            executor.shutdown();
+            assertThat(executor.awaitTermination(30, TimeUnit.SECONDS))
+                    .as("동시 로그인 %d건이 30초 안에 끝나지 않았습니다", accountCount)
+                    .isTrue();
+        }
+
+        // then: 모든 로그인이 예외 없이 끝나야 한다(커넥션 획득 실패는 여기서 드러난다)
+        for (Future<?> login : logins) {
+            login.get();
+        }
     }
 
     @Test

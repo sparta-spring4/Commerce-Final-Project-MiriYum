@@ -103,9 +103,10 @@ public class ConsumerAuthService {
     /**
      * 이메일·비밀번호 로그인이다. AUTH-006의 계정 단위 지연을 적용한다.
      *
-     * <p>지연 판정·비밀번호 비교·실패 반영은 {@link LoginDelayGuard}가 계정 행 잠금 안에서 함께
-     * 처리한다. 지연 중이면 비밀번호 비교 자체를 수행하지 않으며, 응답은 평소 실패와 같은
-     * {@code AUTH_005}다. 실패 횟수·지연 상태·계정 존재 여부를 응답으로 구분할 수 없어야 한다.</p>
+     * <p>{@link LoginDelayGuard#tryReserveAttempt}가 계정 행을 잠근 채 지연 여부를 판정하고 실패를
+     * 미리 기록한다. 지연 중이면 비밀번호 비교 자체를 수행하지 않으며, 응답은 평소 실패와 같은
+     * {@code AUTH_005}다. 실패 횟수·지연 상태·계정 존재 여부를 응답으로 구분할 수 없어야 한다.
+     * 비밀번호가 맞으면 예약한 실패를 {@link LoginDelayGuard#reset}으로 되돌린다.</p>
      *
      * <p>이 메서드에는 일부러 트랜잭션 경계를 두지 않는다. 조회 → 판정 → 짧은 기록 순서라 전체를
      * 하나로 묶어야 하는 불변식이 없고, 원자성이 필요한 실패 카운터 증가는 {@link LoginDelayGuard}가
@@ -117,17 +118,18 @@ public class ConsumerAuthService {
         ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
 
-        boolean passwordAccepted = loginDelayGuard.isPasswordAcceptedWithinDelay(
-                TokenNamespace.CONSUMER, account.getId(),
-                () -> passwordEncoder.matches(passwordPolicy.toNfc(request.password()), account.getPasswordHash()));
-        if (!passwordAccepted) {
+        if (!loginDelayGuard.tryReserveAttempt(TokenNamespace.CONSUMER, account.getId())) {
             throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
         }
+        // 해시 비교는 트랜잭션 밖에서 한다. 위 예약이 이미 커밋됐으므로 실패는 기록된 상태다.
+        if (!passwordEncoder.matches(passwordPolicy.toNfc(request.password()), account.getPasswordHash())) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+        loginDelayGuard.reset(TokenNamespace.CONSUMER, account.getId());
+
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
-
-        loginDelayGuard.reset(TokenNamespace.CONSUMER, account.getId());
         return issueTokenPair(account.getId());
     }
 

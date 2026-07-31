@@ -1,7 +1,7 @@
 -- 계정별 연속 로그인 실패 횟수와 지연 단계를 담는 중앙 저장소다(AUTH-006).
 -- 일반 사용자·매장 운영자가 계정 테이블을 공유하지 않으므로 namespace를 키에 포함해 한 테이블로 관리한다.
 -- 여러 인증 인스턴스가 동시에 갱신해도 5회 기준과 1분·5분·15분 단계가 우회되지 않아야 하므로,
--- 애플리케이션은 이 행을 SELECT ... FOR UPDATE로 잠근 뒤 갱신한다.
+-- 애플리케이션은 INSERT ... ON DUPLICATE KEY UPDATE로 이 행에 배타 잠금을 잡은 뒤 갱신한다.
 -- 번호는 dev에 이미 병합된 앞 번호(매장 도메인이 V8~V13 사용)와 겹치지 않게 V14로 배정했다.
 CREATE TABLE login_failure_delays (
     account_namespace VARCHAR(30) NOT NULL,
