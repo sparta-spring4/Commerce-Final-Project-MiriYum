@@ -47,7 +47,6 @@ public class StoreService {
             StoreCreateRequest request
     ) {
         operatorAccountService.getMe(operatorAccountId);
-        catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
 
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
@@ -57,6 +56,7 @@ public class StoreService {
                 StoreCommandFingerprint.forCreate(request));
 
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
             StoreModesRequest modes = request.modes();
             Store store = Store.create(
                     operatorAccountId,
@@ -91,15 +91,7 @@ public class StoreService {
             StoreUpdateRequest request
     ) {
         operatorAccountService.getMe(operatorAccountId);
-        Store store = loadManagedStore(operatorAccountId, storeId);
-
-        String categoryCode = request.storeCategoryCode() == null
-                ? store.getStoreCategoryCode()
-                : request.storeCategoryCode();
-        List<String> tagCodes = request.tagCodes() == null
-                ? List.copyOf(store.getTagCodes())
-                : request.tagCodes();
-        catalogPolicy.validate(categoryCode, tagCodes);
+        requireStoreOwnership(operatorAccountId, storeId);
 
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
@@ -109,6 +101,14 @@ public class StoreService {
                 StoreCommandFingerprint.forUpdate(storeId, request));
 
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+            String categoryCode = request.storeCategoryCode() == null
+                    ? store.getStoreCategoryCode()
+                    : request.storeCategoryCode();
+            List<String> tagCodes = request.tagCodes() == null
+                    ? List.copyOf(store.getTagCodes())
+                    : request.tagCodes();
+            catalogPolicy.validate(categoryCode, tagCodes);
             StoreModesRequest modes = request.modes();
             store.update(
                     request.name(),
@@ -143,6 +143,21 @@ public class StoreService {
 
     private Store loadManagedStore(long operatorAccountId, long storeId) {
         Store store = storeRepository.findById(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        store.requireManagedBy(operatorAccountId);
+        return store;
+    }
+
+    private void requireStoreOwnership(long operatorAccountId, long storeId) {
+        long ownerAccountId = storeRepository.findOperatorAccountIdById(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        if (ownerAccountId != operatorAccountId) {
+            throw new ServiceException(StoreErrorCode.ACCESS_DENIED);
+        }
+    }
+
+    private Store loadManagedStoreForUpdate(long operatorAccountId, long storeId) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
         return store;

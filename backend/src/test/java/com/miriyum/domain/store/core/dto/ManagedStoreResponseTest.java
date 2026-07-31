@@ -11,6 +11,7 @@ import com.miriyum.domain.store.core.enums.VerificationStatus;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class ManagedStoreResponseTest {
 
@@ -30,9 +31,11 @@ class ManagedStoreResponseTest {
                 true,
                 false,
                 true);
+        ReflectionTestUtils.setField(store, "id", 9_007_199_254_740_993L);
 
         ManagedStoreResponse response = ManagedStoreResponse.from(store);
 
+        assertThat(response.storeId()).isEqualTo("9007199254740993");
         assertThat(response.name()).isEqualTo("미리윰");
         assertThat(response.region()).isEqualTo(Region.SEOUL);
         assertThat(response.verificationStatus()).isEqualTo(VerificationStatus.APPROVED);

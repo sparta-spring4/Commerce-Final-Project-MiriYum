@@ -155,4 +155,84 @@ class StoreTest {
         assertThat(store.isMenuHoldEnabled()).isFalse();
         assertThat(store.isPickupEnabled()).isFalse();
     }
+
+    @Test
+    @DisplayName("폐점된 매장은 영업으로 되돌릴 수 없고 다른 수정도 반영하지 않는다")
+    void closedStoreCannotReopenAndKeepsOtherFields() {
+        Store store = cafeStore("기존 이름");
+        store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.CLOSED);
+
+        assertThatThrownBy(() -> store.update(
+                "변경되면 안 됨",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                OperationStatus.OPEN))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+
+        assertThat(store.getName()).isEqualTo("기존 이름");
+        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("폐점된 매장은 휴점으로 되돌릴 수 없다")
+    void closedStoreCannotBecomeTemporarilyClosed() {
+        Store store = cafeStore("미리윰");
+        store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.CLOSED);
+
+        assertThatThrownBy(() -> store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.TEMPORARILY_CLOSED))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+    }
+
+    @Test
+    @DisplayName("영업과 휴점은 서로 전환할 수 있고 두 상태 모두 폐점할 수 있다")
+    void nonTerminalOperationTransitionsRemainAllowed() {
+        Store store = cafeStore("미리윰");
+
+        store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.TEMPORARILY_CLOSED);
+        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
+
+        store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.OPEN);
+        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
+
+        store.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.CLOSED);
+        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+    }
+
+    private Store cafeStore(String name) {
+        return Store.create(
+                11L,
+                "1234567890",
+                BusinessType.CAFE,
+                name,
+                "",
+                Region.SEOUL,
+                "서울시 중구",
+                "CAFE_BAKERY",
+                Set.of("DATE"),
+                true,
+                true,
+                true);
+    }
 }

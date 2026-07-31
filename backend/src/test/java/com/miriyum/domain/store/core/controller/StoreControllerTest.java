@@ -25,7 +25,10 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -80,7 +83,8 @@ class StoreControllerTest {
                         .content(validCreateJson()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.storeId").value(7))
+                .andExpect(jsonPath("$.data.storeId").isString())
+                .andExpect(jsonPath("$.data.storeId").value("7"))
                 .andExpect(jsonPath("$.data.operationStatus").value("OPEN"));
     }
 
@@ -93,7 +97,8 @@ class StoreControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.storeId").value(7));
+                .andExpect(jsonPath("$.data.storeId").isString())
+                .andExpect(jsonPath("$.data.storeId").value("7"));
     }
 
     @Test
@@ -113,7 +118,40 @@ class StoreControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.storeId").value(7));
+                .andExpect(jsonPath("$.data.storeId").isString())
+                .andExpect(jsonPath("$.data.storeId").value("7"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("modeObjectsMissingOneRequiredField")
+    void createRejectsMissingModeField(String modesJson) throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJsonWithModes(modesJson)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("modeObjectsMissingOneRequiredField")
+    void patchRejectsMissingModeField(String modesJson) throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "modes": %s
+                                }
+                                """.formatted(modesJson)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
     @Test
@@ -159,6 +197,16 @@ class StoreControllerTest {
     }
 
     private String validCreateJson() {
+        return createJsonWithModes("""
+                {
+                  "reservationEnabled": true,
+                  "menuHoldEnabled": true,
+                  "pickupEnabled": true
+                }
+                """);
+    }
+
+    private String createJsonWithModes(String modesJson) {
         return """
                 {
                   "businessRegistrationNumber": "1234567890",
@@ -169,18 +217,36 @@ class StoreControllerTest {
                   "address": "서울시 중구",
                   "storeCategoryCode": "CAFE_BAKERY",
                   "tagCodes": ["DATE"],
-                  "modes": {
-                    "reservationEnabled": true,
-                    "menuHoldEnabled": true,
-                    "pickupEnabled": true
-                  }
+                  "modes": %s
                 }
-                """;
+                """.formatted(modesJson);
+    }
+
+    private static Stream<String> modeObjectsMissingOneRequiredField() {
+        return Stream.of(
+                """
+                        {
+                          "menuHoldEnabled": true,
+                          "pickupEnabled": true
+                        }
+                        """,
+                """
+                        {
+                          "reservationEnabled": true,
+                          "pickupEnabled": true
+                        }
+                        """,
+                """
+                        {
+                          "reservationEnabled": true,
+                          "menuHoldEnabled": true
+                        }
+                        """);
     }
 
     private ManagedStoreResponse managedStore(long storeId) {
         return new ManagedStoreResponse(
-                storeId,
+                Long.toString(storeId),
                 "미리윰",
                 Region.SEOUL,
                 "서울시 중구",

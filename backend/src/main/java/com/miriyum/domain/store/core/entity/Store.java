@@ -96,6 +96,34 @@ public class Store extends BaseEntity {
     @Column(name = "pickup_enabled", nullable = false)
     private boolean pickupEnabled;
 
+    private Store(
+            long storeOperatorAccountId,
+            String businessRegistrationNumber,
+            BusinessType businessType,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            Set<String> tagCodes,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled
+    ) {
+        this.storeOperatorAccountId = storeOperatorAccountId;
+        this.businessRegistrationNumber = businessRegistrationNumber;
+        this.businessType = businessType;
+        this.name = name;
+        this.description = description;
+        this.region = region;
+        this.address = address;
+        this.storeCategoryCode = storeCategoryCode;
+        this.tagCodes = new LinkedHashSet<>(tagCodes);
+        this.reservationEnabled = reservationEnabled;
+        this.menuHoldEnabled = menuHoldEnabled;
+        this.pickupEnabled = pickupEnabled;
+    }
+
     public static Store create(
             long storeOperatorAccountId,
             String businessRegistrationNumber,
@@ -113,22 +141,22 @@ public class Store extends BaseEntity {
         PickupEligibility eligibility = pickupEligibilityFor(businessType);
         requirePickupAllowed(eligibility, pickupEnabled);
 
-        Store store = new Store();
-        store.storeOperatorAccountId = storeOperatorAccountId;
-        store.businessRegistrationNumber = businessRegistrationNumber;
-        store.businessType = businessType;
-        store.name = name;
-        store.description = description;
-        store.region = region;
-        store.address = address;
-        store.storeCategoryCode = storeCategoryCode;
-        store.tagCodes = new LinkedHashSet<>(tagCodes);
+        Store store = new Store(
+                storeOperatorAccountId,
+                businessRegistrationNumber,
+                businessType,
+                name,
+                description,
+                region,
+                address,
+                storeCategoryCode,
+                tagCodes,
+                reservationEnabled,
+                menuHoldEnabled,
+                pickupEnabled);
         store.verificationStatus = VerificationStatus.APPROVED;
         store.operationStatus = OperationStatus.OPEN;
         store.pickupEligibility = eligibility;
-        store.reservationEnabled = reservationEnabled;
-        store.menuHoldEnabled = menuHoldEnabled;
-        store.pickupEnabled = pickupEnabled;
         return store;
     }
 
@@ -144,6 +172,7 @@ public class Store extends BaseEntity {
             Boolean pickupEnabled,
             OperationStatus operationStatus
     ) {
+        requireOperationTransition(operationStatus);
         boolean nextPickupEnabled = pickupEnabled == null ? this.pickupEnabled : pickupEnabled;
         requirePickupAllowed(pickupEligibility, nextPickupEnabled);
 
@@ -174,6 +203,14 @@ public class Store extends BaseEntity {
     private static void requirePickupAllowed(PickupEligibility eligibility, boolean pickupEnabled) {
         if (eligibility == PickupEligibility.INELIGIBLE && pickupEnabled) {
             throw new ServiceException(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
+        }
+    }
+
+    private void requireOperationTransition(OperationStatus requestedStatus) {
+        if (requestedStatus != null
+                && operationStatus == OperationStatus.CLOSED
+                && requestedStatus != OperationStatus.CLOSED) {
+            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
     }
 }

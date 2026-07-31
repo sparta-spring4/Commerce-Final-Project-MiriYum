@@ -17,6 +17,7 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -84,7 +85,7 @@ class StoreServiceTest {
                 storeService.create(OPERATOR_ID, IdempotencyKey.parse(IDEMPOTENCY_KEY), request);
 
         assertThat(commandResult.httpStatus()).isEqualTo(201);
-        assertThat(commandResult.data().storeId()).isEqualTo(STORE_ID);
+        assertThat(commandResult.data().storeId()).isEqualTo(Long.toString(STORE_ID));
         assertThat(result.get().resourceType()).isEqualTo("STORE");
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(catalogPolicy).should().validate("CAFE_BAKERY", List.of("DATE"));
@@ -159,7 +160,9 @@ class StoreServiceTest {
         StoreUpdateRequest request = new StoreUpdateRequest(
                 "새 이름", null, null, null, null, List.of("QUIET"),
                 new StoreModesRequest(false, true, false), null);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(storeRepository.saveAndFlush(store)).willReturn(store);
         runBusinessWorkOnExecute();
 
@@ -171,6 +174,64 @@ class StoreServiceTest {
         assertThat(store.getTagCodes()).containsExactly("QUIET");
         assertThat(store.isReservationEnabled()).isFalse();
         then(catalogPolicy).should().validate("CAFE_BAKERY", List.of("QUIET"));
+    }
+
+    @Test
+    void replayedCreateSkipsMutableCatalogValidationAndSave() {
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(storedOutcome(201));
+
+        StoreCommandResult result = storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest());
+
+        assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(catalogPolicy).shouldHaveNoInteractions();
+        then(storeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void replayedUpdateRechecksOwnershipButSkipsMutableCatalogValidationAndSave() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(storedOutcome(200));
+
+        StoreCommandResult result = storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                new StoreUpdateRequest(
+                        "재생에서는 적용하지 않음",
+                        null, null, null, null, null, null, null));
+
+        assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(storeRepository).should().findOperatorAccountIdById(STORE_ID);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+        then(catalogPolicy).shouldHaveNoInteractions();
+        assertThat(store.getName()).isEqualTo("미리윰");
+    }
+
+    @Test
+    void reusedCreateKeyRejectsBeforeMutableCatalogValidation() {
+        ServiceException conflict =
+                new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        given(idempotencyExecutor.execute(any(), any())).willThrow(conflict);
+
+        assertThatThrownBy(() -> storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest()))
+                .isSameAs(conflict);
+
+        then(operatorAccountService).should().getMe(OPERATOR_ID);
+        then(catalogPolicy).shouldHaveNoInteractions();
+        then(storeRepository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -225,6 +286,18 @@ class StoreServiceTest {
                 result.resourceType(),
                 result.resourceId(),
                 objectMapper.valueToTree(response));
+    }
+
+    private IdempotentOutcome storedOutcome(int httpStatus) {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        return new IdempotentOutcome(
+                true,
+                httpStatus,
+                "SUCCESS",
+                "STORE",
+                Long.toString(STORE_ID),
+                objectMapper.valueToTree(ManagedStoreResponse.from(store)));
     }
 
     private StoreCreateRequest validCreateRequest() {

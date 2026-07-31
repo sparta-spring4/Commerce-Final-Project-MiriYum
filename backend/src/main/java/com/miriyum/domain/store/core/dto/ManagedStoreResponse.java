@@ -7,7 +7,7 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 
 public record ManagedStoreResponse(
-        Long storeId,
+        String storeId,
         String name,
         Region region,
         String address,
@@ -20,7 +20,7 @@ public record ManagedStoreResponse(
 
     public static ManagedStoreResponse from(Store store) {
         return new ManagedStoreResponse(
-                store.getId(),
+                String.valueOf(store.getId()),
                 store.getName(),
                 store.getRegion(),
                 store.getAddress(),
