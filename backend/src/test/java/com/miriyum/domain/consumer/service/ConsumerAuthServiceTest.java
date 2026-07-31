@@ -241,7 +241,8 @@ class ConsumerAuthServiceTest {
      * 않은 상태를 재현한다.
      */
     private void delegatePasswordCheckToEncoder() {
-        given(loginDelayGuard.tryReserveAttempt(any(), anyLong())).willReturn(true);
+        given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
+                .willReturn(LoginDelayGuard.AttemptPermit.acquired("attempt-token"));
     }
 
     /**

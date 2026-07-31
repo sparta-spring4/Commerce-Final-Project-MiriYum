@@ -3,6 +3,7 @@ package com.miriyum.domain.auth.logindelay;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Component
 public class LoginDelayGuard {
+
+    private static final long ACTIVE_ATTEMPT_LEASE_SECONDS = 30;
 
     private final LoginFailureDelayRepository loginFailureDelayRepository;
     private final LoginDelayPolicy loginDelayPolicy;
@@ -31,17 +34,17 @@ public class LoginDelayGuard {
     }
 
     /**
-     * 이번 시도를 진행해도 되는지 판정하고, 진행을 허용하면 <b>실패를 미리 기록해 슬롯을 예약</b>한다.
-     * 허용되면 {@code true}, 지연 중이면 {@code false}다.
+     * 이번 시도를 진행해도 되는지 판정하고, 진행을 허용하면 비밀번호 비교 슬롯을 잠시 점유한다.
      *
-     * <p>호출부는 {@code true}일 때만 비밀번호를 비교하고, 비교가 성공하면 {@link #reset}으로
-     * 예약한 실패를 되돌려야 한다. 비교가 실패하면 이미 기록돼 있으므로 추가 작업이 없다.</p>
+     * <p>같은 계정의 비밀번호 비교는 하나씩만 수행한다. 이전 구현처럼 "허용 요청을 먼저 실패로 적립"
+     * 하면 올바른 비밀번호의 동시 요청도 실패 5회를 채워 지연을 만들어 버릴 수 있다. 그래서
+     * <b>진행 중 시도</b>와 <b>확정 실패</b>를 분리해, 비교가 끝나기 전에는 실패 횟수에 반영하지 않는다.</p>
      *
-     * <p><b>왜 미리 기록하는가.</b> 지연 판정과 실패 기록을 비밀번호 비교 앞뒤로 나누면, 동시 요청이
-     * 모두 "지연 아님"을 보고 통과한 뒤 비교까지 마친다. 5번째 실패가 지연을 만든 뒤에도 이미 통과한
-     * 요청들이 추측을 계속 수행하므로, 한 계정을 여러 IP에서 노리는 공격을 늦추려는 목적이
-     * 무력해진다. 판정과 기록을 이 짧은 트랜잭션 하나로 합쳐 행 잠금 안에서 처리하면, 뒤에 온 요청은
-     * 앞선 요청이 만든 지연을 반드시 보게 되어 비교 단계로 들어가지 못한다.</p>
+     * <p>반환값이 {@link AttemptDecision#ACQUIRED}면 호출부가 비밀번호를 비교하고, 성공·실패·예외
+     * 어느 쪽으로 끝났는지에 따라 {@link #reset}, {@link #recordFailure}, {@link #release} 중
+     * 하나를 반드시 호출해야 한다. {@link AttemptDecision#BUSY}는 같은 계정의 비교가 이미 진행
+     * 중이므로 잠시 뒤 다시 시도하라는 뜻이고, {@link AttemptDecision#DELAYED}는 정책상 지연
+     * 중이라 비교 자체를 거절해야 한다는 뜻이다.</p>
      *
      * <p><b>왜 비교를 여기서 하지 않는가.</b> 비밀번호 해시 비교(BCrypt)를 이 트랜잭션 안에서
      * 실행하면 해시 계산이 끝날 때까지 DB 커넥션과 행 잠금을 함께 쥔다. 서로 다른 계정을 동시에
@@ -49,33 +52,92 @@ public class LoginDelayGuard {
      * 인증과 무관한 DB 요청까지 지연시킨다. 그래서 이 트랜잭션은 짧은 DB 연산만 하고 즉시 커밋하며,
      * 해시 비교는 호출부가 트랜잭션 밖에서 수행한다.</p>
      *
-     * <p>이 메서드는 예외를 던지지 않고 결과만 반환하므로 예약한 기록이 롤백되지 않는다. 별도
-     * 트랜잭션({@code REQUIRES_NEW})이라 호출부가 나중에 자격 증명 오류를 던져도 영향이 없다.</p>
+     * <p>진행 중 시도 표시에는 만료 시각을 둔다. 호출부가 죽어 {@link #release}가 오지 않아도
+     * 영구 점유 상태에 빠지지 않게 하기 위해서다.</p>
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean tryReserveAttempt(TokenNamespace namespace, long accountId) {
-        // 한 번 읽은 시각을 지연 판정·단계 계산·감사 컬럼에 함께 써, 같은 판정 안에서 기준이 갈리지 않게 한다.
+    public AttemptPermit tryAcquireAttempt(TokenNamespace namespace, long accountId) {
         LocalDateTime now = LocalDateTime.now(clock);
         LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
 
         if (current.isDelayedAt(now)) {
-            return false;
+            return AttemptPermit.delayed();
+        }
+        if (current.hasActiveAttemptAt(now)) {
+            return AttemptPermit.busy();
         }
 
-        LoginFailureDelay reserved = loginDelayPolicy.applyFailure(current, now);
+        String attemptToken = UUID.randomUUID().toString();
+        LoginFailureDelay reserved = current.reserveAttempt(
+                attemptToken, now.plusSeconds(ACTIVE_ATTEMPT_LEASE_SECONDS));
         loginFailureDelayRepository.save(namespace.value(), accountId, reserved, now);
-        return true;
+        return AttemptPermit.acquired(attemptToken);
+    }
+
+    /**
+     * 비밀번호가 틀렸을 때 확정 실패 한 건을 반영한다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordFailure(TokenNamespace namespace, long accountId, String attemptToken) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
+        if (!current.isOwnedBy(attemptToken)) {
+            return;
+        }
+
+        LoginFailureDelay updated = loginDelayPolicy.applyFailure(current.clearActiveAttempt(), now);
+        loginFailureDelayRepository.save(namespace.value(), accountId, updated, now);
     }
 
     /**
      * 비밀번호가 맞았을 때 실패 횟수와 지연 단계를 초기화한다.
-     * {@link #tryReserveAttempt}가 미리 기록해 둔 실패도 이 시점에 함께 사라진다.
-     *
-     * <p>호출부가 이 뒤에 계정 상태 등으로 예외를 던져도 초기화가 유지되도록 별도 트랜잭션에서
-     * 커밋한다. 비밀번호가 맞았다면 무차별 대입 신호가 아니므로 실패를 남기지 않는다.</p>
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void reset(TokenNamespace namespace, long accountId) {
+    public void reset(TokenNamespace namespace, long accountId, String attemptToken) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
+        if (!current.isOwnedBy(attemptToken)) {
+            return;
+        }
         loginFailureDelayRepository.reset(namespace.value(), accountId);
+    }
+
+    /**
+     * 비밀번호 비교가 예외로 끝났을 때 진행 중 표시만 제거한다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void release(TokenNamespace namespace, long accountId, String attemptToken) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        LoginFailureDelay current = loginFailureDelayRepository.lock(namespace.value(), accountId, now);
+        if (!current.isOwnedBy(attemptToken)) {
+            return;
+        }
+        LoginFailureDelay cleared = current.clearActiveAttempt();
+        if (cleared.isEmpty()) {
+            loginFailureDelayRepository.reset(namespace.value(), accountId);
+            return;
+        }
+        loginFailureDelayRepository.save(namespace.value(), accountId, cleared, now);
+    }
+
+    public enum AttemptDecision {
+        ACQUIRED,
+        BUSY,
+        DELAYED
+    }
+
+    public record AttemptPermit(AttemptDecision decision, String attemptToken) {
+
+        public static AttemptPermit acquired(String attemptToken) {
+            return new AttemptPermit(AttemptDecision.ACQUIRED, attemptToken);
+        }
+
+        public static AttemptPermit busy() {
+            return new AttemptPermit(AttemptDecision.BUSY, null);
+        }
+
+        public static AttemptPermit delayed() {
+            return new AttemptPermit(AttemptDecision.DELAYED, null);
+        }
     }
 }

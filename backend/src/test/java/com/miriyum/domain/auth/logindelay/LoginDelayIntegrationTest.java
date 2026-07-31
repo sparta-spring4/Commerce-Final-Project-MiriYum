@@ -3,6 +3,8 @@ package com.miriyum.domain.auth.logindelay;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
@@ -155,6 +158,68 @@ class LoginDelayIntegrationTest {
 
         // then: 기록이 사라져 다음 실패는 처음부터 다시 센다
         assertThat(failureRowCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 계정의 올바른 비밀번호 동시 요청은 실패로 누적되지 않고 모두 성공한다")
+    void concurrentSuccessfulLoginsDoNotCountAsFailures() throws Exception {
+        // given: 같은 계정으로 충분히 많은 동시 성공 요청을 보내, 기존 구현의 false delay를 드러낸다
+        int threadCount = 6;
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        List<Future<TokenPair>> futures = new ArrayList<>();
+        boolean completedInTime;
+
+        willAnswer(invocation -> {
+            Thread.sleep(80);
+            return invocation.callRealMethod();
+        }).given(passwordEncoder).matches(eq(RAW_PASSWORD), anyString());
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(threadCount)) {
+            for (int attempt = 0; attempt < threadCount; attempt++) {
+                futures.add(executor.submit(() -> {
+                    readyLatch.countDown();
+                    startLatch.await();
+                    return consumerAuthService.login(new LoginRequest(EMAIL, RAW_PASSWORD));
+                }));
+            }
+
+            readyLatch.await();
+            startLatch.countDown();
+            executor.shutdown();
+            completedInTime = executor.awaitTermination(30, TimeUnit.SECONDS);
+        }
+
+        // then: 모두 토큰 발급까지 성공해야 하고, 성공 요청이 실패 횟수를 남겨선 안 된다.
+        assertThat(completedInTime).as("동시 로그인 %d건이 30초 안에 끝나지 않았습니다", threadCount).isTrue();
+        for (Future<TokenPair> future : futures) {
+            TokenPair tokenPair = future.get();
+            assertThat(tokenPair.accessToken()).isNotBlank();
+            assertThat(tokenPair.refreshToken()).isNotBlank();
+        }
+        assertThat(failureRowCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("비밀번호 비교가 예외로 중단되면 예약 시도는 실패로 남지 않는다")
+    void passwordComparisonExceptionDoesNotLeaveReservedFailure() {
+        // given: 비교 중 예외가 터져도 확정 실패가 아니므로 카운트가 남으면 안 된다
+        AtomicBoolean firstFailure = new AtomicBoolean(true);
+        willAnswer(invocation -> {
+            if (firstFailure.getAndSet(false)) {
+                throw new IllegalStateException("encoder failed");
+            }
+            return invocation.callRealMethod();
+        }).given(passwordEncoder).matches(eq(WRONG_PASSWORD), anyString());
+
+        // when & then
+        assertThatThrownBy(() -> consumerAuthService.login(new LoginRequest(EMAIL, WRONG_PASSWORD)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("encoder failed");
+
+        assertThat(failureRowCount()).isZero();
+        assertThat(catchLoginFailure(EMAIL).getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+        assertThat(consecutiveFailures()).isEqualTo(1);
     }
 
     @Test
