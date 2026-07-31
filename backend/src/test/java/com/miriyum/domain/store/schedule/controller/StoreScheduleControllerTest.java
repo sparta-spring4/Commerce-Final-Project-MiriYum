@@ -3,6 +3,7 @@ package com.miriyum.domain.store.schedule.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -27,6 +28,8 @@ import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -127,6 +130,28 @@ class StoreScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsOperatingPublicationBeforeService(
+            long storeId
+    ) throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(
+                        "/api/v1/store-operator/stores/{storeId}/operating-hours",
+                        storeId)
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validOperatingJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
+    }
+
     @Test
     void operatingHoursReturnsPublishedVersion() throws Exception {
         authenticateStoreOperator(11L);
@@ -152,6 +177,28 @@ class StoreScheduleControllerTest {
                 .andExpect(jsonPath(
                         "$.data.days[0].businessHours[0].endTime")
                         .value("02:00:00"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsReservationPublicationBeforeService(
+            long storeId
+    ) throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(put(
+                        "/api/v1/store-operator/stores/{storeId}/reservation-time-slots",
+                        storeId)
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeScheduleService).shouldHaveNoInteractions();
     }
 
     @Test

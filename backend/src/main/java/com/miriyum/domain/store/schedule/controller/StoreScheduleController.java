@@ -10,6 +10,7 @@ import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,7 +32,7 @@ public class StoreScheduleController {
     public ResponseEntity<ApiResponse<OperatingHoursResponse>>
             replaceOperatingHours(
                     @AuthenticationPrincipal AuthenticatedPrincipal principal,
-                    @PathVariable long storeId,
+                    @PathVariable @Positive long storeId,
                     @RequestHeader(
                             value = "Idempotency-Key",
                             required = false
@@ -54,7 +55,7 @@ public class StoreScheduleController {
     public ResponseEntity<ApiResponse<ReservationTimeSlotsResponse>>
             replaceReservationTimeSlots(
                     @AuthenticationPrincipal AuthenticatedPrincipal principal,
-                    @PathVariable long storeId,
+                    @PathVariable @Positive long storeId,
                     @RequestHeader(
                             value = "Idempotency-Key",
                             required = false

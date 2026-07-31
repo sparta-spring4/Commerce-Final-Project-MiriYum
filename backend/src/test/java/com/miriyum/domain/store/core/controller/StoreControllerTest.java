@@ -30,6 +30,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -139,6 +140,21 @@ class StoreControllerTest {
         then(storeService).shouldHaveNoInteractions();
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsGetBeforeService(long storeId)
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(get("/api/v1/store-operator/stores/{storeId}", storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeService).shouldHaveNoInteractions();
+    }
+
     @Test
     void getReturnsManagedStoreEnvelope() throws Exception {
         authenticateStoreOperator(11L);
@@ -150,6 +166,28 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    void nonPositiveStoreIdRejectsPatchBeforeService(long storeId)
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/{storeId}", storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "새 이름"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(storeService).shouldHaveNoInteractions();
     }
 
     @Test
