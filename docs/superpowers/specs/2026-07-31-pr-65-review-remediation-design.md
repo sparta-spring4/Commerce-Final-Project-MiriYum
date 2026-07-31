@@ -40,7 +40,7 @@ C-008과 `PublicId` OpenAPI 계약에 따라 내부 `Long` ID는 응답 경계�
 - `TEMPORARILY_CLOSED -> CLOSED`
 - 같은 상태로의 멱등 갱신
 
-`CLOSED -> OPEN`과 `CLOSED -> TEMPORARILY_CLOSED`는 `STORE_005`로 거절한다. 실패한 전이는 다른 요청 필드도 변경하지 않는다.
+`CLOSED -> OPEN`과 `CLOSED -> TEMPORARILY_CLOSED`는 `StoreErrorCode.STORE_STATE_CONFLICT`(`STORE_005`)로 거절한다. 실패한 전이는 다른 요청 필드도 변경하지 않는다.
 
 OPER-009는 동일 사업자등록 단위의 재개를 플랫폼 운영자 복구로 한정한다. 해당 고도화 경로가 없는 1차 MVP에서는 `business_registration_number` 자체에 유일 제약을 유지해 폐점 후 일반 `POST /stores` 재등록을 차단한다. 기존 제약 이름 `uk_stores_active_business_number`는 서비스 오류 매핑 호환을 위해 유지한다.
 
