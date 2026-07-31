@@ -431,6 +431,9 @@ components:
     OperationStatus:
       type: string
       enum: [OPEN, TEMPORARILY_CLOSED, CLOSED]
+    EditableOperationStatus:
+      type: string
+      enum: [OPEN, TEMPORARILY_CLOSED]
     PickupEligibility:
       type: string
       enum: [ELIGIBLE, INELIGIBLE]
@@ -777,7 +780,7 @@ components:
         modes:
           $ref: "#/components/schemas/StoreModes"
         operationStatus:
-          $ref: "#/components/schemas/OperationStatus"
+          $ref: "#/components/schemas/EditableOperationStatus"
     WeeklyOperatingHoursRequest:
       type: object
       additionalProperties: false

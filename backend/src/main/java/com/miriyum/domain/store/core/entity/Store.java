@@ -172,7 +172,7 @@ public class Store extends BaseEntity {
             Boolean pickupEnabled,
             OperationStatus operationStatus
     ) {
-        requireOperationTransition(operationStatus);
+        requireGeneralUpdateStatus(operationStatus);
         boolean nextPickupEnabled = pickupEnabled == null ? this.pickupEnabled : pickupEnabled;
         requirePickupAllowed(pickupEligibility, nextPickupEnabled);
 
@@ -186,6 +186,13 @@ public class Store extends BaseEntity {
         this.menuHoldEnabled = menuHoldEnabled == null ? this.menuHoldEnabled : menuHoldEnabled;
         this.pickupEnabled = nextPickupEnabled;
         this.operationStatus = operationStatus == null ? this.operationStatus : operationStatus;
+    }
+
+    /**
+     * 폐점 전용 유스케이스가 모든 선행 조건을 검증한 뒤 호출하는 비가역 전이다.
+     */
+    public void close() {
+        this.operationStatus = OperationStatus.CLOSED;
     }
 
     public void requireManagedBy(long operatorAccountId) {
@@ -206,10 +213,10 @@ public class Store extends BaseEntity {
         }
     }
 
-    private void requireOperationTransition(OperationStatus requestedStatus) {
-        if (requestedStatus != null
-                && operationStatus == OperationStatus.CLOSED
-                && requestedStatus != OperationStatus.CLOSED) {
+    private void requireGeneralUpdateStatus(OperationStatus requestedStatus) {
+        if (requestedStatus == OperationStatus.CLOSED
+                || (requestedStatus != null
+                && operationStatus == OperationStatus.CLOSED)) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
     }

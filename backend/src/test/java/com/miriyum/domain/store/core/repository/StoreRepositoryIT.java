@@ -126,9 +126,7 @@ class StoreRepositoryIT {
         long secondOperator = createOperator("second@example.com");
         Store closed = storeRepository.saveAndFlush(
                 store(firstOperator, "1234567890", Set.of()));
-        closed.update(
-                null, null, null, null, null, null,
-                null, null, null, OperationStatus.CLOSED);
+        closed.close();
         storeRepository.saveAndFlush(closed);
 
         assertThatThrownBy(() ->

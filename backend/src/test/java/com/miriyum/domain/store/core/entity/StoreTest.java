@@ -160,9 +160,7 @@ class StoreTest {
     @DisplayName("폐점된 매장은 영업으로 되돌릴 수 없고 다른 수정도 반영하지 않는다")
     void closedStoreCannotReopenAndKeepsOtherFields() {
         Store store = cafeStore("기존 이름");
-        store.update(
-                null, null, null, null, null, null,
-                null, null, null, OperationStatus.CLOSED);
+        store.close();
 
         assertThatThrownBy(() -> store.update(
                 "변경되면 안 됨",
@@ -187,9 +185,7 @@ class StoreTest {
     @DisplayName("폐점된 매장은 휴점으로 되돌릴 수 없다")
     void closedStoreCannotBecomeTemporarilyClosed() {
         Store store = cafeStore("미리윰");
-        store.update(
-                null, null, null, null, null, null,
-                null, null, null, OperationStatus.CLOSED);
+        store.close();
 
         assertThatThrownBy(() -> store.update(
                 null, null, null, null, null, null,
@@ -200,7 +196,7 @@ class StoreTest {
     }
 
     @Test
-    @DisplayName("영업과 휴점은 서로 전환할 수 있고 두 상태 모두 폐점할 수 있다")
+    @DisplayName("일반 수정에서는 영업과 휴점만 서로 전환할 수 있다")
     void nonTerminalOperationTransitionsRemainAllowed() {
         Store store = cafeStore("미리윰");
 
@@ -213,11 +209,30 @@ class StoreTest {
                 null, null, null, null, null, null,
                 null, null, null, OperationStatus.OPEN);
         assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
+    }
 
-        store.update(
-                null, null, null, null, null, null,
-                null, null, null, OperationStatus.CLOSED);
-        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.CLOSED);
+    @Test
+    @DisplayName("일반 수정으로 폐점을 요청하면 다른 필드도 변경하지 않는다")
+    void generalUpdateCannotCloseOrPartiallyMutateStore() {
+        Store store = cafeStore("기존 이름");
+
+        assertThatThrownBy(() -> store.update(
+                "변경되면 안 됨",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                OperationStatus.CLOSED))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+
+        assertThat(store.getName()).isEqualTo("기존 이름");
+        assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
     }
 
     private Store cafeStore(String name) {

@@ -2,6 +2,7 @@ package com.miriyum.domain.store.core.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.miriyum.domain.store.core.enums.OperationStatus;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.DisplayName;
@@ -30,5 +31,17 @@ class StoreUpdateRequestTest {
                 null, "", null, null, null, null, null, null);
 
         assertThat(validator.validate(request)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("일반 매장 수정 요청은 CLOSED를 허용하지 않는다")
+    void rejectsClosedOperationStatus() {
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, null, null, null, null, null,
+                OperationStatus.CLOSED);
+
+        assertThat(validator.validate(request))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .contains("nonTerminalOperationStatus");
     }
 }

@@ -3,6 +3,7 @@ package com.miriyum.domain.store.core.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -120,6 +121,26 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"));
+    }
+
+    @Test
+    void closedStatusInGeneralPatchReturnsCommon001WithoutServiceCall()
+            throws Exception {
+        authenticateStoreOperator(11L);
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "operationStatus": "CLOSED"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(storeService).shouldHaveNoInteractions();
     }
 
     @ParameterizedTest
