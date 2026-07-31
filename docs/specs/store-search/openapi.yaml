@@ -709,7 +709,7 @@ components:
             $ref: "#/components/schemas/TimeRange"
     StoreCreateRequest:
       type: object
-      description: 1차 MVP는 사업자등록번호 형식과 활성 중복만 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. OTHER도 일반 등록·예약을 사용할 수 있지만 modes.pickupEnabled=true 조합은 STORE_008로 거절하며 매장을 생성하지 않는다.
+      description: 1차 MVP는 사업자등록번호 형식과 전체 매장 이력에 대한 영구 유일성을 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. 폐점한 매장의 번호도 재사용할 수 없다. OTHER도 일반 등록·예약을 사용할 수 있지만 modes.pickupEnabled=true 조합은 STORE_008로 거절하며 매장을 생성하지 않는다.
       additionalProperties: false
       required:
         - businessRegistrationNumber
@@ -1019,16 +1019,16 @@ components:
             code: STORE_001
             message: 매장을 찾을 수 없습니다.
     StoreConflict:
-      description: 활성 사업자등록번호 중복 또는 등록 업종의 픽업 자격 충돌
+      description: 현재 또는 폐점 매장 이력에 이미 귀속된 사업자등록번호 또는 등록 업종의 픽업 자격 충돌
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
           examples:
-            activeBusinessNumberDuplicate:
+            businessNumberDuplicate:
               value:
                 code: STORE_002
-                message: 이미 활성 매장에 등록된 사업자등록번호입니다.
+                message: 이미 등록된 사업자등록번호입니다.
             pickupIneligible:
               value:
                 code: STORE_008
