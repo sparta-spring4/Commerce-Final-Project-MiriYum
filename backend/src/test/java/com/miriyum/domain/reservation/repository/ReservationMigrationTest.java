@@ -125,6 +125,10 @@ class ReservationMigrationTest {
                             description,
                             region,
                             address,
+                            time_zone_id,
+                            applicant_self_attested_at,
+                            required_terms_agreed_at,
+                            required_terms_version,
                             store_category_code,
                             verification_status,
                             operation_status,
@@ -137,6 +141,7 @@ class ReservationMigrationTest {
                         )
                         VALUES (
                             ?, ?, '1234567890', 'CAFE', '미리윰', '', 'SEOUL', '서울시 중구',
+                            'Asia/Seoul', NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1',
                             'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
                             TRUE, TRUE, TRUE, NOW(6), NOW(6)
                         )
@@ -147,12 +152,12 @@ class ReservationMigrationTest {
     }
 
     @Test
-    @DisplayName("예약 코어 스키마는 Flyway V10으로 적용된다")
-    void appliesReservationCoreAsFlywayV10() {
+    @DisplayName("예약 코어 스키마는 Flyway V14로 적용된다")
+    void appliesReservationCoreAsFlywayV14() {
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "10".equals(String.valueOf(migration.getVersion()))
-                                && "V10__create_reservation_core.sql".equals(migration.getScript()));
+                        "14".equals(String.valueOf(migration.getVersion()))
+                                && "V14__create_reservation_core.sql".equals(migration.getScript()));
     }
 
     @Test
