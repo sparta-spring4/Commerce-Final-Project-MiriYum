@@ -27,17 +27,41 @@ public class StoreScheduleCommandFacade {
 
     private final StoreScheduleService scheduleService;
 
+    public ScheduleCommandResult<OperatingHoursResponse> createOperatingDraft(
+            long operatorId,
+            long storeId,
+            IdempotencyKey key,
+            WeeklyOperatingHoursRequest request
+    ) {
+        return translateConflict(() -> scheduleService.createOperatingDraft(
+                operatorId,
+                storeId,
+                key,
+                request));
+    }
+
     public ScheduleCommandResult<OperatingHoursResponse> replaceOperatingHours(
             long operatorId,
             long storeId,
             IdempotencyKey key,
             WeeklyOperatingHoursRequest request
     ) {
-        return translateConflict(() -> scheduleService.replaceOperatingHours(
-                operatorId,
-                storeId,
-                key,
-                request));
+        return createOperatingDraft(operatorId, storeId, key, request);
+    }
+
+    public ScheduleCommandResult<ReservationTimeSlotsResponse>
+            createReservationDraft(
+                    long operatorId,
+                    long storeId,
+                    IdempotencyKey key,
+                    WeeklyReservationTimeSlotsRequest request
+            ) {
+        return translateConflict(() ->
+                scheduleService.createReservationDraft(
+                        operatorId,
+                        storeId,
+                        key,
+                        request));
     }
 
     public ScheduleCommandResult<ReservationTimeSlotsResponse>
@@ -47,12 +71,7 @@ public class StoreScheduleCommandFacade {
                     IdempotencyKey key,
                     WeeklyReservationTimeSlotsRequest request
             ) {
-        return translateConflict(() ->
-                scheduleService.replaceReservationTimeSlots(
-                        operatorId,
-                        storeId,
-                        key,
-                        request));
+        return createReservationDraft(operatorId, storeId, key, request);
     }
 
     private <T> T translateConflict(Supplier<T> command) {

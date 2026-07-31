@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
@@ -20,11 +21,14 @@ import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
+import com.miriyum.domain.store.schedule.entity.StoreScheduleAuditEvent;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
+import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepository;
 import com.miriyum.domain.store.schedule.repository.ReservationScheduleVersionRepository;
+import com.miriyum.domain.store.schedule.repository.StoreScheduleAuditEventRepository;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -32,8 +36,11 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import java.time.Clock;
 import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -68,6 +75,9 @@ class StoreScheduleServiceTest {
     private ReservationScheduleVersionRepository reservationRepository;
 
     @Mock
+    private StoreScheduleAuditEventRepository auditRepository;
+
+    @Mock
     private WeeklySchedulePolicy schedulePolicy;
 
     @Mock
@@ -75,6 +85,9 @@ class StoreScheduleServiceTest {
 
     private ObjectMapper objectMapper;
     private StoreScheduleService scheduleService;
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-07-31T03:00:00Z"),
+            ZoneOffset.UTC);
 
     @BeforeEach
     void setUp() {
@@ -84,19 +97,31 @@ class StoreScheduleServiceTest {
                 stateRepository,
                 operatingRepository,
                 reservationRepository,
+                auditRepository,
                 schedulePolicy,
                 idempotencyExecutor,
-                objectMapper);
+                objectMapper,
+                FIXED_CLOCK);
     }
 
     @Test
-    void operatingPublicationUsesCentralAuthorityAndReturnsVersionOne() {
+    void operatingPutCreatesDraftWithoutChangingActivePointers() {
         StoreScheduleState state = state();
+        ReflectionTestUtils.setField(
+                state,
+                "activeOperatingScheduleVersionId",
+                20L);
         state.activateReservation(31L);
         WeeklyOperatingHoursRequest request = operatingRequest();
         List<WeeklyInterval> intervals = operatingIntervals();
         given(stateRepository.findForUpdateByStoreId(STORE_ID))
                 .willReturn(Optional.of(state));
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID,
+                STORE_ID))
+                .willReturn(new StoreScheduleAuthority(
+                        STORE_ID,
+                        "Asia/Seoul"));
         given(schedulePolicy.validateOperating(request)).willReturn(intervals);
         given(operatingRepository.saveAndFlush(any())).willAnswer(invocation -> {
             OperatingScheduleVersion version = invocation.getArgument(0);
@@ -106,7 +131,7 @@ class StoreScheduleServiceTest {
         runBusinessWorkOnExecute();
 
         ScheduleCommandResult<OperatingHoursResponse> result =
-                scheduleService.replaceOperatingHours(
+                scheduleService.createOperatingDraft(
                         OPERATOR_ID,
                         STORE_ID,
                         IdempotencyKey.parse(KEY),
@@ -114,18 +139,18 @@ class StoreScheduleServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().version()).isEqualTo(1);
-        assertThat(state.getActiveOperatingScheduleVersionId()).isEqualTo(21L);
-        assertThat(state.getActiveReservationScheduleVersionId()).isNull();
-        then(storeService).should()
-                .requireManagementOwnership(OPERATOR_ID, STORE_ID);
-        then(storeService).should()
-                .requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID);
+        assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.DRAFT);
+        assertThat(result.data().timeZoneId()).isEqualTo("Asia/Seoul");
+        assertThat(state.getActiveOperatingScheduleVersionId()).isEqualTo(20L);
+        assertThat(state.getActiveReservationScheduleVersionId()).isEqualTo(31L);
+        then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
     }
 
     @Test
-    void reservationPublicationReferencesCurrentOperatingVersion() {
+    void reservationPutCreatesDraftWithoutChangingActivePointer() {
         StoreScheduleState state = state();
         ReflectionTestUtils.setField(state, "activeOperatingScheduleVersionId", 21L);
+        ReflectionTestUtils.setField(state, "activeReservationScheduleVersionId", 30L);
         OperatingScheduleVersion operating = OperatingScheduleVersion.create(
                 STORE_ID,
                 4L,
@@ -135,6 +160,12 @@ class StoreScheduleServiceTest {
         List<WeeklyInterval> reservationIntervals = reservationIntervals();
         given(stateRepository.findForUpdateByStoreId(STORE_ID))
                 .willReturn(Optional.of(state));
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID,
+                STORE_ID))
+                .willReturn(new StoreScheduleAuthority(
+                        STORE_ID,
+                        "Asia/Seoul"));
         given(operatingRepository.findById(21L)).willReturn(Optional.of(operating));
         given(schedulePolicy.validateReservation(request, operatingIntervals()))
                 .willReturn(reservationIntervals);
@@ -149,15 +180,17 @@ class StoreScheduleServiceTest {
         runBusinessWorkOnExecute();
 
         ScheduleCommandResult<ReservationTimeSlotsResponse> result =
-                scheduleService.replaceReservationTimeSlots(
+                scheduleService.createReservationDraft(
                         OPERATOR_ID,
                         STORE_ID,
                         IdempotencyKey.parse(KEY),
                         request);
 
         assertThat(result.data().version()).isEqualTo(1);
-        assertThat(state.getActiveReservationScheduleVersionId()).isEqualTo(31L);
+        assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.DRAFT);
+        assertThat(state.getActiveReservationScheduleVersionId()).isEqualTo(30L);
         assertThat(savedVersion.get().getValidatedOperatingVersionId()).isEqualTo(21L);
+        then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
     }
 
     @Test
@@ -222,11 +255,17 @@ class StoreScheduleServiceTest {
     }
 
     @Test
-    void temporarilyClosedStoreCanPublishSchedule() {
+    void temporarilyClosedStoreCanSaveScheduleDraft() {
         StoreScheduleState state = state();
         WeeklyOperatingHoursRequest request = operatingRequest();
         given(stateRepository.findForUpdateByStoreId(STORE_ID))
                 .willReturn(Optional.of(state));
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID,
+                STORE_ID))
+                .willReturn(new StoreScheduleAuthority(
+                        STORE_ID,
+                        "Asia/Seoul"));
         given(schedulePolicy.validateOperating(request))
                 .willReturn(operatingIntervals());
         given(operatingRepository.saveAndFlush(any())).willAnswer(invocation -> {
@@ -247,7 +286,7 @@ class StoreScheduleServiceTest {
     }
 
     @Test
-    void publicationsUseDistinctCommandTypesAndCanonicalFingerprints() {
+    void draftsUseDistinctCommandTypesAndCanonicalFingerprints() {
         AtomicReference<IdempotencyCommand> command = new AtomicReference<>();
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
             command.set(invocation.getArgument(0));
@@ -268,7 +307,7 @@ class StoreScheduleServiceTest {
                 request);
 
         assertThat(command.get().commandType())
-                .isEqualTo("STORE_OPERATING_HOURS_REPLACE");
+                .isEqualTo("STORE_OPERATING_HOURS_DRAFT_CREATE");
         assertThat(command.get().requestFingerprint())
                 .isEqualTo(StoreScheduleFingerprint.forOperating(STORE_ID, request));
     }
@@ -281,6 +320,12 @@ class StoreScheduleServiceTest {
         WeeklyOperatingHoursRequest request = operatingRequest();
         given(stateRepository.findForUpdateByStoreId(STORE_ID))
                 .willReturn(Optional.of(state));
+        given(storeService.requireSchedulePublicationAuthority(
+                OPERATOR_ID,
+                STORE_ID))
+                .willReturn(new StoreScheduleAuthority(
+                        STORE_ID,
+                        "Asia/Seoul"));
         given(schedulePolicy.validateOperating(request))
                 .willReturn(operatingIntervals());
         given(operatingRepository.saveAndFlush(any())).willThrow(failure);

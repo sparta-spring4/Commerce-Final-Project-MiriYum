@@ -16,6 +16,7 @@ import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
+import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.store.schedule.repository.OperatingScheduleVersionRepository;
@@ -103,6 +104,7 @@ class StoreSchedulePublicationIT {
 
     @BeforeEach
     void cleanRows() {
+        jdbcTemplate.execute("DELETE FROM store_schedule_audit_events");
         jdbcTemplate.execute("DELETE FROM store_schedule_state");
         jdbcTemplate.execute("DELETE FROM store_reservation_schedule_entries");
         jdbcTemplate.execute("DELETE FROM store_reservation_schedule_versions");
@@ -114,7 +116,7 @@ class StoreSchedulePublicationIT {
     }
 
     @Test
-    void concurrentOperatingPublicationsReceiveDistinctSequentialVersions()
+    void concurrentOperatingDraftsReceiveDistinctSequentialVersions()
             throws Exception {
         OwnerStore ownerStore = createStore();
         CountDownLatch startGate = new CountDownLatch(1);
@@ -156,8 +158,20 @@ class StoreSchedulePublicationIT {
         assertThat(versions)
                 .extracting(OperatingScheduleVersion::getVersionNumber)
                 .containsExactly(1L, 2L);
-        assertThat(state.getActiveOperatingScheduleVersionId())
-                .isEqualTo(versions.get(1).getId());
+        assertThat(versions)
+                .extracting(OperatingScheduleVersion::getStatus)
+                .containsOnly(ScheduleVersionStatus.DRAFT);
+        assertThat(state.getActiveOperatingScheduleVersionId()).isNull();
+        Integer auditCount = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM store_schedule_audit_events
+                        WHERE store_id = ?
+                          AND action = 'DRAFT_CREATED'
+                        """,
+                Integer.class,
+                ownerStore.storeId());
+        assertThat(auditCount).isEqualTo(2);
     }
 
     @Test

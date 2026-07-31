@@ -40,11 +40,11 @@ class StoreScheduleCommandFacadeTest {
     void lockFailureBecomesStore006() {
         WeeklyOperatingHoursRequest request =
                 new WeeklyOperatingHoursRequest(List.of());
-        given(scheduleService.replaceOperatingHours(
+        given(scheduleService.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request))
                 .willThrow(new CannotAcquireLockException("lock timeout"));
 
-        assertStore006(() -> facade.replaceOperatingHours(
+        assertStore006(() -> facade.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request));
     }
 
@@ -52,11 +52,11 @@ class StoreScheduleCommandFacadeTest {
     void transactionTimeoutBecomesStore006() {
         WeeklyReservationTimeSlotsRequest request =
                 new WeeklyReservationTimeSlotsRequest(List.of());
-        given(scheduleService.replaceReservationTimeSlots(
+        given(scheduleService.createReservationDraft(
                 OPERATOR_ID, STORE_ID, KEY, request))
                 .willThrow(new TransactionTimedOutException("timed out"));
 
-        assertStore006(() -> facade.replaceReservationTimeSlots(
+        assertStore006(() -> facade.createReservationDraft(
                 OPERATOR_ID, STORE_ID, KEY, request));
     }
 
@@ -69,11 +69,11 @@ class StoreScheduleCommandFacadeTest {
                         "constraint failed",
                         new IllegalStateException(
                                 "uk_operating_schedule_store_version"));
-        given(scheduleService.replaceOperatingHours(
+        given(scheduleService.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request))
                 .willThrow(failure);
 
-        assertStore006(() -> facade.replaceOperatingHours(
+        assertStore006(() -> facade.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request));
     }
 
@@ -83,11 +83,11 @@ class StoreScheduleCommandFacadeTest {
                 new WeeklyOperatingHoursRequest(List.of());
         DataIntegrityViolationException failure =
                 new DataIntegrityViolationException("unrelated");
-        given(scheduleService.replaceOperatingHours(
+        given(scheduleService.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request))
                 .willThrow(failure);
 
-        assertThatThrownBy(() -> facade.replaceOperatingHours(
+        assertThatThrownBy(() -> facade.createOperatingDraft(
                 OPERATOR_ID, STORE_ID, KEY, request))
                 .isSameAs(failure);
     }
