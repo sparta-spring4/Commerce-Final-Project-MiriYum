@@ -49,14 +49,14 @@ public class LoginDelayPolicy {
         if (current.delayStage() == 0) {
             int failures = current.consecutiveFailures() + 1;
             if (failures < FAILURES_BEFORE_FIRST_DELAY) {
-                return new LoginFailureDelay(failures, 0, null, null, null);
+                return new LoginFailureDelay(failures, 0, null);
             }
-            return new LoginFailureDelay(failures, 1, now.plus(durationOfStage(1)), null, null);
+            return new LoginFailureDelay(failures, 1, now.plus(durationOfStage(1)));
         }
 
         int nextStage = Math.min(current.delayStage() + 1, MAX_STAGE);
         return new LoginFailureDelay(
-                current.consecutiveFailures() + 1, nextStage, now.plus(durationOfStage(nextStage)), null, null);
+                current.consecutiveFailures() + 1, nextStage, now.plus(durationOfStage(nextStage)));
     }
 
     private Duration durationOfStage(int stage) {

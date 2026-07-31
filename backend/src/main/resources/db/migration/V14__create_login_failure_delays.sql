@@ -12,8 +12,6 @@ CREATE TABLE login_failure_delays (
     delay_stage INT NOT NULL,
     -- 이 시각 전까지는 비밀번호를 검사하지 않고 거절한다. 지연이 없으면 NULL이다.
     next_attempt_allowed_at DATETIME(6) NULL,
-    active_attempt_token VARCHAR(36) NULL,
-    active_attempt_expires_at DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (account_namespace, account_id),

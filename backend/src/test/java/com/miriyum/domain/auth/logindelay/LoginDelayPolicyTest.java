@@ -59,7 +59,7 @@ class LoginDelayPolicyTest {
     @DisplayName("그다음 실패는 15분으로 늘린다")
     void escalatesToFifteenMinutesOnThirdStage() {
         // given: 이미 5분 단계까지 올라간 상태
-        LoginFailureDelay atSecondStage = new LoginFailureDelay(6, 2, NOW, null, null);
+        LoginFailureDelay atSecondStage = new LoginFailureDelay(6, 2, NOW);
 
         // when
         LoginFailureDelay delay = loginDelayPolicy.applyFailure(atSecondStage, NOW);
@@ -73,7 +73,7 @@ class LoginDelayPolicyTest {
     @DisplayName("15분 단계 이후의 추가 실패는 영구 잠금 없이 15분을 반복한다")
     void repeatsFifteenMinutesWithoutPermanentLock() {
         // given: 최대 단계에 도달한 상태
-        LoginFailureDelay delay = new LoginFailureDelay(7, 3, NOW, null, null);
+        LoginFailureDelay delay = new LoginFailureDelay(7, 3, NOW);
 
         // when: 세 번 더 실패해도
         LocalDateTime attemptedAt = NOW;

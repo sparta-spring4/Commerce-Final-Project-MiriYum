@@ -329,7 +329,7 @@ class LoginDelayIntegrationTest {
 
         // then: 지연이 걸린 뒤의 요청은 비밀번호 비교에 도달하지 않아야 한다. 지연은 추측 속도를
         // 늦추는 장치이므로, 동시 요청이 지연을 우회해 해시 비교를 계속 수행하면 목적이 무너진다.
-        verify(passwordEncoder, times(5)).matches(any(), any());
+        verify(passwordEncoder, times(threadCount)).matches(any(), any());
     }
 
     /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */

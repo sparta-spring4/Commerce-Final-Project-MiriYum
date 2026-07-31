@@ -200,6 +200,7 @@ class ConsumerAuthServiceTest {
         // then
         assertThat(tokenPair.accessToken()).isEqualTo("access-token-value");
         assertThat(tokenPair.refreshToken()).isEqualTo("refresh-token-value");
+        verify(loginDelayGuard).isDelayed(TokenNamespace.CONSUMER, ACCOUNT_ID);
     }
 
     @Test
@@ -241,8 +242,7 @@ class ConsumerAuthServiceTest {
      * 않은 상태를 재현한다.
      */
     private void delegatePasswordCheckToEncoder() {
-        given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
-                .willReturn(LoginDelayGuard.AttemptPermit.acquired("attempt-token"));
+        given(loginDelayGuard.isDelayed(any(), anyLong())).willReturn(false);
     }
 
     /**

@@ -28,8 +28,7 @@ public class LoginFailureDelayRepository {
      */
     public Optional<LoginFailureDelay> find(String accountNamespace, long accountId) {
         List<LoginFailureDelay> found = jdbcTemplate.query(
-                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at, "
-                        + "active_attempt_token, active_attempt_expires_at "
+                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at "
                         + "FROM login_failure_delays "
                         + "WHERE account_namespace = ? AND account_id = ?",
                 LoginFailureDelayRepository::mapRow,
@@ -66,8 +65,7 @@ public class LoginFailureDelayRepository {
                 accountNamespace, accountId, now, now, now);
 
         return jdbcTemplate.queryForObject(
-                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at, "
-                        + "active_attempt_token, active_attempt_expires_at "
+                "SELECT consecutive_failures, delay_stage, next_attempt_allowed_at "
                         + "FROM login_failure_delays "
                         + "WHERE account_namespace = ? AND account_id = ?",
                 LoginFailureDelayRepository::mapRow,
@@ -83,12 +81,9 @@ public class LoginFailureDelayRepository {
     public void save(String accountNamespace, long accountId, LoginFailureDelay delay, LocalDateTime now) {
         jdbcTemplate.update(
                 "UPDATE login_failure_delays "
-                        + "SET consecutive_failures = ?, delay_stage = ?, next_attempt_allowed_at = ?, "
-                        + "active_attempt_token = ?, active_attempt_expires_at = ?, "
-                        + "updated_at = ? "
+                        + "SET consecutive_failures = ?, delay_stage = ?, next_attempt_allowed_at = ?, updated_at = ? "
                         + "WHERE account_namespace = ? AND account_id = ?",
-                delay.consecutiveFailures(), delay.delayStage(), delay.nextAttemptAllowedAt(),
-                delay.activeAttemptToken(), delay.activeAttemptExpiresAt(), now,
+                delay.consecutiveFailures(), delay.delayStage(), delay.nextAttemptAllowedAt(), now,
                 accountNamespace, accountId);
     }
 
@@ -104,12 +99,9 @@ public class LoginFailureDelayRepository {
 
     private static LoginFailureDelay mapRow(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         java.sql.Timestamp nextAttemptAllowedAt = rs.getTimestamp("next_attempt_allowed_at");
-        java.sql.Timestamp activeAttemptExpiresAt = rs.getTimestamp("active_attempt_expires_at");
         return new LoginFailureDelay(
                 rs.getInt("consecutive_failures"),
                 rs.getInt("delay_stage"),
-                nextAttemptAllowedAt == null ? null : nextAttemptAllowedAt.toLocalDateTime(),
-                rs.getString("active_attempt_token"),
-                activeAttemptExpiresAt == null ? null : activeAttemptExpiresAt.toLocalDateTime());
+                nextAttemptAllowedAt == null ? null : nextAttemptAllowedAt.toLocalDateTime());
     }
 }
