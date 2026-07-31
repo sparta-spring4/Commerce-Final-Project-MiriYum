@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.dto.request;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -14,6 +15,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.data.domain.Sort;
 
 class StoreReservationSearchRequestTest {
 
@@ -72,6 +74,27 @@ class StoreReservationSearchRequestTest {
         assertThat(request.order()).isEqualTo(expected);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("approvedSortOrders")
+    @DisplayName("모든 운영자 목록 정렬은 같은 방향의 예약 ID 보조 정렬을 제공한다")
+    void providesSameDirectionReservationIdTieBreaker(
+            String rawSort,
+            String primaryProperty,
+            Sort.Direction direction
+    ) {
+        // given & when
+        StoreReservationSearchRequest request =
+                StoreReservationSearchRequest.from(null, null, 0, 20, rawSort);
+
+        // then
+        assertThat(request.order().sortOrders())
+                .extracting(Sort.Order::getProperty, Sort.Order::getDirection)
+                .containsExactly(
+                        tuple(primaryProperty, direction),
+                        tuple("id", direction)
+                );
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"REQUESTED", "NO_SHOW", ""})
     @DisplayName("허용하지 않은 예약 상태는 COMMON_001로 거절한다")
@@ -110,6 +133,15 @@ class StoreReservationSearchRequestTest {
                 Arguments.of(-1, 20),
                 Arguments.of(0, 0),
                 Arguments.of(0, 101)
+        );
+    }
+
+    private static Stream<Arguments> approvedSortOrders() {
+        return Stream.of(
+                Arguments.of("serviceDate,asc", "serviceDate", Sort.Direction.ASC),
+                Arguments.of("serviceDate,desc", "serviceDate", Sort.Direction.DESC),
+                Arguments.of("createdAt,asc", "createdAt", Sort.Direction.ASC),
+                Arguments.of("createdAt,desc", "createdAt", Sort.Direction.DESC)
         );
     }
 

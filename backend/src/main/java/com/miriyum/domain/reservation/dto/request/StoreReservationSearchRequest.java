@@ -4,6 +4,8 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.List;
+import org.springframework.data.domain.Sort;
 
 /**
  * 매장 운영자가 관리 권한이 있는 매장의 예약 목록을 조회하는 조건이다.
@@ -85,15 +87,35 @@ public record StoreReservationSearchRequest(
      * 운영자 예약 목록 OpenAPI가 허용한 단일 정렬이다.
      */
     public enum Order {
-        SERVICE_DATE_ASC("serviceDate,asc"),
-        SERVICE_DATE_DESC("serviceDate,desc"),
-        CREATED_AT_ASC("createdAt,asc"),
-        CREATED_AT_DESC("createdAt,desc");
+        SERVICE_DATE_ASC("serviceDate,asc", "serviceDate", Sort.Direction.ASC),
+        SERVICE_DATE_DESC("serviceDate,desc", "serviceDate", Sort.Direction.DESC),
+        CREATED_AT_ASC("createdAt,asc", "createdAt", Sort.Direction.ASC),
+        CREATED_AT_DESC("createdAt,desc", "createdAt", Sort.Direction.DESC);
 
         private final String externalValue;
+        private final String primaryProperty;
+        private final Sort.Direction direction;
 
-        Order(String externalValue) {
+        Order(
+                String externalValue,
+                String primaryProperty,
+                Sort.Direction direction
+        ) {
             this.externalValue = externalValue;
+            this.primaryProperty = primaryProperty;
+            this.direction = direction;
+        }
+
+        /**
+         * 페이지 경계를 결정적으로 유지하는 주 정렬과 예약 ID 보조 정렬을 제공한다.
+         *
+         * @return 주 속성과 같은 방향의 예약 ID 보조 정렬
+         */
+        public List<Sort.Order> sortOrders() {
+            return List.of(
+                    new Sort.Order(direction, primaryProperty),
+                    new Sort.Order(direction, "id")
+            );
         }
 
         private static Order fromNullable(String value) {
