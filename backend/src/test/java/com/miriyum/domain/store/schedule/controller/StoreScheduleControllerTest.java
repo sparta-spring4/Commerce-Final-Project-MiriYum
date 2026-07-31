@@ -328,6 +328,40 @@ class StoreScheduleControllerTest {
                 .andExpect(jsonPath("$.code").value("STORE_006"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"operating-hours", "reservation-time-slots"})
+    void missingStoreReturnsStore001ForBothScheduleCommands(String endpoint)
+            throws Exception {
+        assertScheduleError(
+                endpoint,
+                StoreErrorCode.STORE_NOT_FOUND,
+                404,
+                "STORE_001");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"operating-hours", "reservation-time-slots"})
+    void closedStoreReturnsStore005ForBothScheduleCommands(String endpoint)
+            throws Exception {
+        assertScheduleError(
+                endpoint,
+                StoreErrorCode.STORE_STATE_CONFLICT,
+                409,
+                "STORE_005");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"operating-hours", "reservation-time-slots"})
+    void invalidVerificationReturnsStore007ForBothScheduleCommands(
+            String endpoint
+    ) throws Exception {
+        assertScheduleError(
+                endpoint,
+                StoreErrorCode.VERIFICATION_STATE_CONFLICT,
+                409,
+                "STORE_007");
+    }
+
     @Test
     void otherOperatorReturnsStore003() throws Exception {
         authenticateStoreOperator(12L);
@@ -419,6 +453,35 @@ class StoreScheduleControllerTest {
                   ]
                 }
                 """;
+    }
+
+    private void assertScheduleError(
+            String endpoint,
+            StoreErrorCode errorCode,
+            int status,
+            String code
+    ) throws Exception {
+        authenticateStoreOperator(11L);
+        if (endpoint.equals("operating-hours")) {
+            given(storeScheduleService.replaceOperatingHours(
+                    eq(11L), eq(7L), any(IdempotencyKey.class), any()))
+                    .willThrow(new ServiceException(errorCode));
+        } else {
+            given(storeScheduleService.replaceReservationTimeSlots(
+                    eq(11L), eq(7L), any(IdempotencyKey.class), any()))
+                    .willThrow(new ServiceException(errorCode));
+        }
+
+        mockMvc.perform(put(BASE_URL + "/" + endpoint)
+                        .header(HttpHeaders.AUTHORIZATION,
+                                "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(endpoint.equals("operating-hours")
+                                ? validOperatingJson()
+                                : validReservationJson()))
+                .andExpect(status().is(status))
+                .andExpect(jsonPath("$.code").value(code));
     }
 
     private String operatingJsonWithNullDay() {

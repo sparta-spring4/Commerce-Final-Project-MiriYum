@@ -300,8 +300,10 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
         "409":
-          $ref: "#/components/responses/ScheduleConflict"
+          $ref: "#/components/responses/SchedulePublicationConflict"
   /api/v1/store-operator/stores/{storeId}/reservation-time-slots:
     put:
       tags: [Store Management]
@@ -331,8 +333,10 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
         "409":
-          $ref: "#/components/responses/ScheduleConflict"
+          $ref: "#/components/responses/SchedulePublicationConflict"
   /api/v1/store-operator/stores/{storeId}/menus:
     post:
       tags: [Store Management]
@@ -1060,15 +1064,25 @@ components:
               value:
                 code: STORE_008
                 message: 등록 업종에 픽업 자격이 없습니다.
-    ScheduleConflict:
-      description: 영업·브레이크·예약 접수 구간 충돌
+    SchedulePublicationConflict:
+      description: 매장 운영·입점 검증 상태 또는 일정 구간·잠금 충돌
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: STORE_006
-            message: 영업시간과 예약 접수 시간대를 확인해 주세요.
+          examples:
+            invalidStoreState:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            scheduleConflict:
+              value:
+                code: STORE_006
+                message: 영업 또는 예약 접수 시간대가 충돌합니다.
+            invalidVerificationState:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
     MenuNotFound:
       description: 메뉴를 찾을 수 없음
       content:

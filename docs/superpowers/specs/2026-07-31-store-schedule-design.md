@@ -1,5 +1,10 @@
 # Store Schedule Issue #34 Design
 
+> 구현 과정 기록이며 활성 정본이 아니다. 현재 제품·API 계약은
+> `docs/service-policies/03-store-operation.md`,
+> `docs/specs/store-search/spec.md`,
+> `docs/specs/store-search/openapi.yaml`을 따른다.
+
 ## Goal
 
 Implement Issue #34 so an authenticated store operator can publish complete weekly
