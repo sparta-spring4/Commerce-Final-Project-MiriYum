@@ -197,8 +197,22 @@ public class StoreScheduleService {
             }
 
             target.activate(now, request.changeReason());
-            retireActiveReservation(state);
+            ReservationScheduleVersion retiredReservation =
+                    retireActiveReservation(state);
             state.activateOperating(target.getId());
+            if (retiredReservation != null) {
+                auditRepository.save(StoreScheduleAuditEvent.recordOperator(
+                        storeId,
+                        operatorId,
+                        reservationRetirementRecord(
+                                retiredReservation,
+                                authority.timeZoneId(),
+                                now,
+                                now,
+                                now,
+                                request.changeReason(),
+                                key.value())));
+            }
             auditRepository.save(StoreScheduleAuditEvent.recordOperator(
                     storeId,
                     operatorId,
@@ -557,8 +571,21 @@ public class StoreScheduleService {
         }
         Instant effectiveAt = target.getEffectiveAt();
         target.activate(now, target.getChangeReason());
-        retireActiveReservation(state);
+        ReservationScheduleVersion retiredReservation =
+                retireActiveReservation(state);
         state.activateOperating(target.getId());
+        if (retiredReservation != null) {
+            auditRepository.save(StoreScheduleAuditEvent.recordSystem(
+                    storeId,
+                    reservationRetirementRecord(
+                            retiredReservation,
+                            decision.timeZoneId(),
+                            effectiveAt,
+                            effectiveAt,
+                            now,
+                            target.getChangeReason(),
+                            "scheduled-operating-" + versionId)));
+        }
         auditRepository.save(StoreScheduleAuditEvent.recordSystem(
                 storeId,
                 new ScheduleAuditRecord(
@@ -725,15 +752,46 @@ public class StoreScheduleService {
                                 StoreErrorCode.SCHEDULE_CONFLICT));
     }
 
-    private void retireActiveReservation(StoreScheduleState state) {
+    private ReservationScheduleVersion retireActiveReservation(
+            StoreScheduleState state
+    ) {
         Long reservationId = state.getActiveReservationScheduleVersionId();
         if (reservationId == null) {
-            return;
+            return null;
         }
-        reservationRepository.findById(reservationId)
+        ReservationScheduleVersion reservation = reservationRepository
+                .findById(reservationId)
                 .orElseThrow(() -> new ServiceException(
-                        StoreErrorCode.SCHEDULE_CONFLICT))
-                .retire();
+                        StoreErrorCode.SCHEDULE_CONFLICT));
+        reservation.retire();
+        return reservation;
+    }
+
+    private ScheduleAuditRecord reservationRetirementRecord(
+            ReservationScheduleVersion reservation,
+            String timeZoneId,
+            Instant requestedAt,
+            Instant effectiveAt,
+            Instant occurredAt,
+            String changeReason,
+            String requestId
+    ) {
+        return new ScheduleAuditRecord(
+                ScheduleStream.RESERVATION,
+                reservation.getVersionNumber(),
+                reservation.getVersionNumber(),
+                null,
+                ScheduleAuditAction
+                        .RESERVATION_RETIRED_BY_OPERATING_CHANGE,
+                ScheduleVersionStatus.ACTIVE,
+                ScheduleVersionStatus.RETIRED,
+                timeZoneId,
+                requestedAt,
+                effectiveAt,
+                occurredAt,
+                changeReason,
+                requestId,
+                ScheduleAuditOutcome.SUCCEEDED);
     }
 
     private void savePublicationAudit(

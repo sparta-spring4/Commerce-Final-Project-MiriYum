@@ -573,4 +573,3 @@ Expected: backend build success, no diff whitespace errors, and only Issue #34 a
 git add backend docs/superpowers/plans/2026-07-31-store-schedule-issue-34.md
 git commit -m "test(store): verify schedule publication lifecycle"
 ```
-

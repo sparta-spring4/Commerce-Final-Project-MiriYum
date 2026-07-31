@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
@@ -26,6 +27,7 @@ import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleAuditEvent;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
+import com.miriyum.domain.store.schedule.model.ScheduleAuditAction;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.model.PublicationMode;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
@@ -54,6 +56,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -256,7 +259,26 @@ class StoreScheduleServiceTest {
         assertThat(state.getActiveReservationScheduleVersionId()).isNull();
         assertThat(previousReservation.getStatus())
                 .isEqualTo(ScheduleVersionStatus.RETIRED);
-        then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
+        ArgumentCaptor<StoreScheduleAuditEvent> auditCaptor =
+                ArgumentCaptor.forClass(StoreScheduleAuditEvent.class);
+        then(auditRepository).should(times(2)).save(auditCaptor.capture());
+        assertThat(auditCaptor.getAllValues())
+                .filteredOn(event -> event.getAction()
+                        == ScheduleAuditAction
+                        .RESERVATION_RETIRED_BY_OPERATING_CHANGE)
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.getTargetVersion()).isEqualTo(1L);
+                    assertThat(event.getPreviousActiveVersion()).isEqualTo(1L);
+                    assertThat(event.getNewActiveVersion()).isNull();
+                    assertThat(event.getPreviousStatus())
+                            .isEqualTo(ScheduleVersionStatus.ACTIVE);
+                    assertThat(event.getNewStatus())
+                            .isEqualTo(ScheduleVersionStatus.RETIRED);
+                    assertThat(event.getChangeReason())
+                            .isEqualTo("여름 영업시간");
+                    assertThat(event.getRequestId()).isEqualTo(KEY);
+                });
     }
 
     @Test
@@ -412,6 +434,72 @@ class StoreScheduleServiceTest {
         assertThat(scheduled.getStatus())
                 .isEqualTo(ScheduleVersionStatus.ACTIVATION_FAILED);
         then(auditRepository).should().save(any(StoreScheduleAuditEvent.class));
+    }
+
+    @Test
+    void scheduledOperatingActivationAuditsRetiredReservationVersion() {
+        StoreScheduleState state = state();
+        state.activateOperating(21L);
+        state.activateReservation(31L);
+        OperatingScheduleVersion previous = OperatingScheduleVersion.create(
+                STORE_ID,
+                1L,
+                operatingIntervals());
+        ReflectionTestUtils.setField(previous, "id", 21L);
+        OperatingScheduleVersion scheduled = OperatingScheduleVersion.createDraft(
+                STORE_ID, 2L, "Asia/Seoul", operatingIntervals());
+        ReflectionTestUtils.setField(scheduled, "id", 22L);
+        scheduled.schedule(FIXED_CLOCK.instant(), "여름 영업시간");
+        ReservationScheduleVersion previousReservation =
+                ReservationScheduleVersion.create(
+                        STORE_ID,
+                        1L,
+                        21L,
+                        reservationIntervals());
+        ReflectionTestUtils.setField(previousReservation, "id", 31L);
+        given(operatingRepository.findStoreIdById(22L))
+                .willReturn(Optional.of(STORE_ID));
+        given(storeService.inspectScheduledActivation(STORE_ID))
+                .willReturn(new StoreScheduledActivationDecision(
+                        STORE_ID, "Asia/Seoul", true));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID))
+                .willReturn(Optional.of(state));
+        given(operatingRepository.findForUpdateById(22L))
+                .willReturn(Optional.of(scheduled));
+        given(operatingRepository
+                .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        STORE_ID,
+                        ScheduleVersionStatus.SCHEDULED,
+                        FIXED_CLOCK.instant()))
+                .willReturn(Optional.of(scheduled));
+        given(operatingRepository.findById(21L))
+                .willReturn(Optional.of(previous));
+        given(reservationRepository.findById(31L))
+                .willReturn(Optional.of(previousReservation));
+
+        scheduleService.activateDueOperating(22L);
+
+        ArgumentCaptor<StoreScheduleAuditEvent> auditCaptor =
+                ArgumentCaptor.forClass(StoreScheduleAuditEvent.class);
+        then(auditRepository).should(times(2)).save(auditCaptor.capture());
+        assertThat(auditCaptor.getAllValues())
+                .filteredOn(event -> event.getAction()
+                        == ScheduleAuditAction
+                        .RESERVATION_RETIRED_BY_OPERATING_CHANGE)
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.getTargetVersion()).isEqualTo(1L);
+                    assertThat(event.getPreviousActiveVersion()).isEqualTo(1L);
+                    assertThat(event.getNewActiveVersion()).isNull();
+                    assertThat(event.getPreviousStatus())
+                            .isEqualTo(ScheduleVersionStatus.ACTIVE);
+                    assertThat(event.getNewStatus())
+                            .isEqualTo(ScheduleVersionStatus.RETIRED);
+                    assertThat(event.getChangeReason())
+                            .isEqualTo("여름 영업시간");
+                    assertThat(event.getRequestId())
+                            .isEqualTo("scheduled-operating-22");
+                });
     }
 
     @Test

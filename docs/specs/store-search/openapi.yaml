@@ -830,9 +830,14 @@ components:
       required: [startTime, endTime]
       properties:
         startTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+          $ref: "#/components/schemas/StoreScheduleLocalTime"
         endTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+          $ref: "#/components/schemas/StoreScheduleLocalTime"
+    StoreScheduleLocalTime:
+      type: string
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+      description: 영업·예약 일정의 매장 timeZoneId를 기준으로 해석하는 분 단위 현지 시각
+      examples: ["09:00"]
     DailySchedule:
       type: object
       additionalProperties: false
