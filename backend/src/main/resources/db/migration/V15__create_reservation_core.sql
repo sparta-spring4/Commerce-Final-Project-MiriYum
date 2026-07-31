@@ -10,6 +10,8 @@ CREATE TABLE reservations (
     adult_count INT NOT NULL,
     child_count INT NOT NULL,
     infant_count INT NOT NULL,
+    notification_target_reference VARCHAR(512) NOT NULL,
+    contact_available_at_confirmation BOOLEAN NOT NULL,
     capacity_policy_version BIGINT NOT NULL,
     reservation_policy_version BIGINT NOT NULL,
     status VARCHAR(20) NOT NULL,
@@ -36,6 +38,12 @@ CREATE TABLE reservations (
             AND infant_count BETWEEN 0 AND 100
             AND adult_count + child_count + infant_count >= 1
         ),
+    CONSTRAINT ck_reservations_notification_target_reference
+        CHECK (
+            CHAR_LENGTH(TRIM(notification_target_reference)) BETWEEN 1 AND 512
+        ),
+    CONSTRAINT ck_reservations_contact_available_at_confirmation
+        CHECK (contact_available_at_confirmation = TRUE),
     CONSTRAINT ck_reservations_policy_versions
         CHECK (
             capacity_policy_version > 0

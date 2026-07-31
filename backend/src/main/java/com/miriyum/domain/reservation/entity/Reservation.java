@@ -48,6 +48,9 @@ public class Reservation {
     @Embedded
     private PartyComposition party;
 
+    @Embedded
+    private ReservationContactSnapshot contactSnapshot;
+
     @Column(name = "capacity_policy_version", nullable = false)
     private long capacityPolicyVersion;
 
@@ -78,6 +81,7 @@ public class Reservation {
             LocalTime startTime,
             LocalTime endTime,
             PartyComposition party,
+            ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
             long reservationPolicyVersion,
             Instant createdAt
@@ -90,6 +94,7 @@ public class Reservation {
         this.endTime = requireNonNull(endTime, "endTime");
         requireIncreasingServiceTime(this.startTime, this.endTime);
         this.party = requireNonNull(party, "party");
+        this.contactSnapshot = requireNonNull(contactSnapshot, "contactSnapshot");
         this.capacityPolicyVersion = requirePositive(capacityPolicyVersion, "capacityPolicyVersion");
         this.reservationPolicyVersion = requirePositive(
                 reservationPolicyVersion,
@@ -109,6 +114,7 @@ public class Reservation {
      * @param startTime 방문 시작 시각
      * @param endTime 점유 종료 시각
      * @param party 예약 당시 인원 구성
+     * @param contactSnapshot 예약 당시 불투명 알림 대상과 연락 가능 상태
      * @param capacityPolicyVersion 적용 수용량 정책 버전
      * @param reservationPolicyVersion 적용 예약 정책 버전
      * @param createdAt 예약 확정 시각
@@ -123,6 +129,7 @@ public class Reservation {
             LocalTime startTime,
             LocalTime endTime,
             PartyComposition party,
+            ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
             long reservationPolicyVersion,
             Instant createdAt
@@ -135,6 +142,7 @@ public class Reservation {
                 startTime,
                 endTime,
                 party,
+                contactSnapshot,
                 capacityPolicyVersion,
                 reservationPolicyVersion,
                 createdAt
@@ -249,6 +257,10 @@ public class Reservation {
 
     public PartyComposition getParty() {
         return party;
+    }
+
+    public ReservationContactSnapshot getContactSnapshot() {
+        return contactSnapshot;
     }
 
     public long getCapacityPolicyVersion() {
