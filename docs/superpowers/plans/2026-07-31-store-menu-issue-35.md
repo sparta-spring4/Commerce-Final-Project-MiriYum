@@ -23,7 +23,7 @@
 - Price is a non-negative integer in KRW.
 - Pickup selection requires store `PickupEligibility.ELIGIBLE`; hold selection is content configuration and downstream execution must also check the store mode.
 - Writes require a store-operator token and a valid `Idempotency-Key`; each command type has a distinct fingerprint namespace.
-- Use migration `V10__create_store_menus.sql`. Issue #34 owns V9, so rebase #35 after #34 merges before production integration.
+- Use migration `V11__create_store_menus.sql`. Issue #34 owns V10, so rebase #35 after #34 merges before production integration.
 
 ---
 
@@ -35,13 +35,13 @@
 - `domain/store/menu/repository`: locked aggregate lookup, version/event persistence, due-schedule claim query.
 - `domain/store/menu/service`: content policy/fingerprint, command orchestration, read assembly, scheduled activation.
 - `domain/store/menu/controller`: store-operator HTTP contract.
-- `resources/db/migration/V10__create_store_menus.sql`: relational constraints, indexes, and restrictive foreign keys.
+- `resources/db/migration/V11__create_store_menus.sql`: relational constraints, indexes, and restrictive foreign keys.
 - Matching `src/test` packages: domain rules, DTO/policy/fingerprint tests, controller slice tests, service tests, and MySQL integration tests.
 
 ### Task 1: Persistence Contract and Aggregate Lifecycle
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V10__create_store_menus.sql`
+- Create: `backend/src/main/resources/db/migration/V11__create_store_menus.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/store/menu/enums/MenuVersionStatus.java`
 - Create: `backend/src/main/java/com/miriyum/domain/store/menu/enums/MenuVisibility.java`
 - Create: `backend/src/main/java/com/miriyum/domain/store/menu/enums/MenuSellingStatus.java`
@@ -74,7 +74,7 @@ Implement pointer changes only through aggregate methods. Published and schedule
 
 Assert all five tables exist, `(menu_id, version_number)` is unique, a menu references one store, content collections reference versions, and store/menu/version deletion is restrictive rather than cascading away audit history.
 
-- [ ] **Step 5: Implement V10 migration**
+- [ ] **Step 5: Implement V11 migration**
 
 Create `menus`, `menu_versions`, `menu_version_secondary_categories`, `menu_version_local_tags`, and `menu_publication_events`, with check constraints for enums, price, version numbers, pointer distinctness, and indexed scheduled-effective lookup.
 
@@ -377,7 +377,7 @@ Run: `git diff codex/33-store-core...HEAD --check`
 
 Run: `git status --short`
 
-Confirm no quantity/SOLD_OUT, image, option, public endpoint, or unrelated #34 implementation entered the diff; confirm V10 and the #34-rebase note are present.
+Confirm no quantity/SOLD_OUT, image, option, public endpoint, or unrelated #34 implementation entered the diff; confirm V11 and the #34-rebase note are present.
 
 - [ ] **Step 4: Final commit if verification required corrections**
 
@@ -385,7 +385,7 @@ Commit: `fix: harden store menu lifecycle`
 
 - [ ] **Step 5: Push and open Draft PR**
 
-Push `codex/35-store-menu`, then open a Draft PR targeting `codex/33-store-core`. The PR body must map the API roles in plain language, list lifecycle/control behavior, include exact test evidence, say that V10 assumes #34's V9 and therefore requires rebase after #34 merges, and close issue #35.
+Push `codex/35-store-menu`, then open a Draft PR targeting `codex/33-store-core`. The PR body must map the API roles in plain language, list lifecycle/control behavior, include exact test evidence, say that V11 assumes #34's V10 and therefore requires rebase after #34 merges, and close issue #35.
 
 ## Self-Review
 

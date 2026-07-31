@@ -261,9 +261,9 @@ the same due row later.
 ## Persistence and Migration Ordering
 
 Issue #35 is developed from `codex/33-store-core`, while Issue #34 independently
-uses Flyway V9. Issue #35 therefore reserves V10 and must be rebased after Issue
-#34 is merged before production integration. V10 must not be deployed ahead of
-V9. The PR records this temporary stacked migration-order dependency.
+uses Flyway V10. Issue #35 therefore reserves V11 and must be rebased after Issue
+#34 is merged before production integration. V11 must not be deployed ahead of
+V10. The PR records this temporary stacked migration-order dependency.
 
 Tables cover:
 
@@ -295,7 +295,7 @@ responses for every management action.
 
 MySQL Testcontainers tests cover:
 
-- Flyway V10 and JPA mappings
+- Flyway V11 and JPA mappings
 - immutable historical versions
 - one draft/scheduled/published version per menu
 - two concurrent updates receiving distinct version numbers
