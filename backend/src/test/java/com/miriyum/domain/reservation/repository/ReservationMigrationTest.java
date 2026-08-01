@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.entity.PartyComposition;
@@ -13,6 +14,7 @@ import com.miriyum.domain.reservation.entity.ReservationStatus;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,6 +47,7 @@ class ReservationMigrationTest {
     private static final long CONSUMER_ACCOUNT_ID = 10_001L;
     private static final long STORE_OPERATOR_ACCOUNT_ID = 20_001L;
     private static final long STORE_ID = 30_001L;
+    private static final long SECOND_STORE_ID = 30_002L;
     private static final Instant CREATED_AT = Instant.parse("2026-08-01T01:00:00Z");
     private static final String NOTIFICATION_TARGET_REFERENCE =
             "consumer:10001:channel:primary";
@@ -478,6 +481,92 @@ class ReservationMigrationTest {
         assertThat(capacityAllocationRepository.count()).isZero();
     }
 
+    @Test
+    @DisplayName("가용성 조회는 각 매장·날짜의 최신 정책 버킷만 구간 순서로 반환한다")
+    void findsEachStoresLatestPolicyBucketsInServiceTimeOrder() {
+        // given
+        insertStore(SECOND_STORE_ID, "1234567891", "두번째 매장");
+        capacityBucketRepository.saveAllAndFlush(List.of(
+                capacityBucket(
+                        1L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                ),
+                capacityBucket(
+                        2L,
+                        LocalTime.of(18, 30),
+                        LocalTime.of(19, 0)
+                ),
+                capacityBucket(
+                        2L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                ),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        4L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                ),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        5L,
+                        LocalTime.of(18, 30),
+                        LocalTime.of(19, 0)
+                ),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        5L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                )
+        ));
+
+        // when
+        List<ReservationCapacityBucket> buckets =
+                capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                        List.of(STORE_ID, SECOND_STORE_ID),
+                        LocalDate.of(2026, 8, 1),
+                        LocalTime.of(18, 0),
+                        LocalTime.of(19, 0)
+                );
+
+        // then
+        assertThat(buckets)
+                .extracting(
+                        ReservationCapacityBucket::getStoreId,
+                        ReservationCapacityBucket::getStartTime,
+                        ReservationCapacityBucket::getEndTime,
+                        ReservationCapacityBucket::getPolicyVersion
+                )
+                .containsExactly(
+                        tuple(
+                                STORE_ID,
+                                LocalTime.of(18, 0),
+                                LocalTime.of(18, 30),
+                                2L
+                        ),
+                        tuple(
+                                STORE_ID,
+                                LocalTime.of(18, 30),
+                                LocalTime.of(19, 0),
+                                2L
+                        ),
+                        tuple(
+                                SECOND_STORE_ID,
+                                LocalTime.of(18, 0),
+                                LocalTime.of(18, 30),
+                                5L
+                        ),
+                        tuple(
+                                SECOND_STORE_ID,
+                                LocalTime.of(18, 30),
+                                LocalTime.of(19, 0),
+                                5L
+                        )
+                );
+    }
+
     private Reservation reservation() {
         return Reservation.confirm(
                 CONSUMER_ACCOUNT_ID,
@@ -495,11 +584,32 @@ class ReservationMigrationTest {
     }
 
     private ReservationCapacityBucket capacityBucket(long policyVersion) {
-        return ReservationCapacityBucket.create(
-                STORE_ID,
-                LocalDate.of(2026, 8, 1),
+        return capacityBucket(
+                policyVersion,
                 LocalTime.of(18, 0),
-                LocalTime.of(18, 30),
+                LocalTime.of(18, 30)
+        );
+    }
+
+    private ReservationCapacityBucket capacityBucket(
+            long policyVersion,
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        return capacityBucket(STORE_ID, policyVersion, startTime, endTime);
+    }
+
+    private ReservationCapacityBucket capacityBucket(
+            long storeId,
+            long policyVersion,
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        return ReservationCapacityBucket.create(
+                storeId,
+                LocalDate.of(2026, 8, 1),
+                startTime,
+                endTime,
                 20,
                 5,
                 0,
@@ -508,6 +618,51 @@ class ReservationMigrationTest {
                 8,
                 true,
                 policyVersion
+        );
+    }
+
+    private void insertStore(
+            long storeId,
+            String businessRegistrationNumber,
+            String name
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO stores (
+                            store_id,
+                            store_operator_account_id,
+                            business_registration_number,
+                            business_type,
+                            name,
+                            description,
+                            region,
+                            address,
+                            time_zone_id,
+                            applicant_self_attested_at,
+                            required_terms_agreed_at,
+                            required_terms_version,
+                            store_category_code,
+                            verification_status,
+                            operation_status,
+                            pickup_eligibility,
+                            reservation_enabled,
+                            menu_hold_enabled,
+                            pickup_enabled,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (
+                            ?, ?, ?, 'CAFE', ?, '', 'SEOUL', '서울시 중구',
+                            'Asia/Seoul', NOW(6), NOW(6),
+                            'STORE_ONBOARDING_REQUIRED_TERMS_V1',
+                            'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
+                            TRUE, TRUE, TRUE, NOW(6), NOW(6)
+                        )
+                        """,
+                storeId,
+                STORE_OPERATOR_ACCOUNT_ID,
+                businessRegistrationNumber,
+                name
         );
     }
 

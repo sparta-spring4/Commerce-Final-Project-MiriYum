@@ -66,6 +66,109 @@ class ReservationCapacityBucketTest {
     }
 
     @Test
+    @DisplayName("남은 인원과 팀 수가 정확히 맞으면 예약 가능하다")
+    void acceptsPartyAtRemainingPeopleAndTeamBoundary() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                6,
+                3,
+                2,
+                2,
+                1,
+                4,
+                true
+        );
+
+        // when
+        boolean available = bucket.canAccept(4, false);
+
+        // then
+        assertThat(available).isTrue();
+    }
+
+    @Test
+    @DisplayName("인원 한도가 부족하면 팀 수가 남아도 예약할 수 없다")
+    void rejectsPartyWhenPeopleCapacityIsInsufficient() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                6,
+                5,
+                3,
+                1,
+                1,
+                6,
+                true
+        );
+
+        // when
+        boolean available = bucket.canAccept(4, false);
+
+        // then
+        assertThat(available).isFalse();
+    }
+
+    @Test
+    @DisplayName("팀 한도가 찼으면 인원 한도가 남아도 예약할 수 없다")
+    void rejectsPartyWhenTeamCapacityIsInsufficient() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                2,
+                2,
+                2,
+                1,
+                6,
+                true
+        );
+
+        // when
+        boolean available = bucket.canAccept(2, false);
+
+        // then
+        assertThat(available).isFalse();
+    }
+
+    @Test
+    @DisplayName("영유아를 허용하지 않는 버킷은 영유아 동반 요청을 거부한다")
+    void rejectsInfantPartyWhenInfantsAreNotAllowed() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                4,
+                0,
+                0,
+                1,
+                6,
+                false
+        );
+
+        // when
+        boolean available = bucket.canAccept(3, true);
+
+        // then
+        assertThat(available).isFalse();
+    }
+
+    @Test
+    @DisplayName("일행 인원이 버킷의 최소·최대 범위를 벗어나면 예약할 수 없다")
+    void rejectsPartyOutsideBucketPartyRange() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                4,
+                0,
+                0,
+                2,
+                4,
+                true
+        );
+
+        // when & then
+        assertThat(bucket.canAccept(1, false)).isFalse();
+        assertThat(bucket.canAccept(5, false)).isFalse();
+    }
+
+    @Test
     @DisplayName("음수 수용량이나 점유량을 거부한다")
     void rejectsNegativeCapacityOrOccupancy() {
         // when & then
@@ -219,6 +322,31 @@ class ReservationCapacityBucketTest {
                 1,
                 4,
                 true,
+                3L
+        );
+    }
+
+    private static ReservationCapacityBucket capacityBucket(
+            int maxPeople,
+            int maxTeams,
+            int occupiedPeople,
+            int occupiedTeams,
+            int minPartySize,
+            int maxPartySize,
+            boolean infantsAllowed
+    ) {
+        return ReservationCapacityBucket.create(
+                22L,
+                LocalDate.of(2026, 8, 1),
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30),
+                maxPeople,
+                maxTeams,
+                occupiedPeople,
+                occupiedTeams,
+                minPartySize,
+                maxPartySize,
+                infantsAllowed,
                 3L
         );
     }
