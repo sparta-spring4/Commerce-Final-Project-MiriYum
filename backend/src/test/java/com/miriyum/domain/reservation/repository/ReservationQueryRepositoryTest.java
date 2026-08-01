@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -523,6 +524,9 @@ class ReservationQueryRepositoryTest {
                 LocalTime.of(18, 0),
                 LocalTime.of(19, 0),
                 PartyComposition.of(2, 0, 0),
+                ReservationContactSnapshot.contactable(
+                        "consumer:" + consumerAccountId + ":channel:primary"
+                ),
                 1L,
                 1L,
                 createdAt
@@ -586,6 +590,10 @@ class ReservationQueryRepositoryTest {
                             description,
                             region,
                             address,
+                            time_zone_id,
+                            applicant_self_attested_at,
+                            required_terms_agreed_at,
+                            required_terms_version,
                             store_category_code,
                             verification_status,
                             operation_status,
@@ -598,6 +606,7 @@ class ReservationQueryRepositoryTest {
                         )
                         VALUES (
                             ?, ?, ?, 'CAFE', ?, '', 'SEOUL', '서울시 중구',
+                            'Asia/Seoul', NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1',
                             'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
                             TRUE, TRUE, TRUE, NOW(6), NOW(6)
                         )

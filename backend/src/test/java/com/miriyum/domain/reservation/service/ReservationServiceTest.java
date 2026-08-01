@@ -8,14 +8,22 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
+import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
+import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
+import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.time.LocalDate;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,11 +48,21 @@ class ReservationServiceTest {
     @Mock
     private ReservationRepository reservationRepository;
 
+    @Mock
+    private ConsumerAccountService consumerAccountService;
+
+    @Mock
+    private StoreService storeService;
+
     private ReservationService reservationService;
 
     @BeforeEach
     void setUp() {
-        reservationService = new ReservationService(reservationRepository);
+        reservationService = new ReservationService(
+                reservationRepository,
+                consumerAccountService,
+                storeService
+        );
     }
 
     @Test
@@ -72,6 +90,7 @@ class ReservationServiceTest {
                         any(ReservationStatus.class),
                         any(Pageable.class)
                 );
+        then(consumerAccountService).should().getMe(11L);
         assertThat(pageable.getValue().getPageNumber()).isZero();
         assertThat(pageable.getValue().getPageSize()).isEqualTo(20);
         assertThat(response.items()).isEmpty();
@@ -107,6 +126,7 @@ class ReservationServiceTest {
                 );
         then(reservationRepository).should(never())
                 .findAllByConsumerAccountId(anyLong(), any(Pageable.class));
+        then(consumerAccountService).should().getMe(11L);
         assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
         assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
     }
@@ -166,6 +186,127 @@ class ReservationServiceTest {
         // when & then
         assertValidationFailure(() ->
                 reservationService.getConsumerReservationHistory(11L, null));
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("정지된 소비자 계정은 예약 내역을 조회하지 않는다")
+    void rejectsRestrictedConsumerBeforeQuery() {
+        // given
+        ReservationHistorySearchRequest request =
+                ReservationHistorySearchRequest.from(null, null, null, null);
+        given(consumerAccountService.getMe(11L))
+                .willThrow(new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED));
+
+        // when & then
+        assertThatThrownBy(() ->
+                reservationService.getConsumerReservationHistory(11L, request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("운영자 목록은 매장 관리 권한을 확인한 뒤 대상 매장만 조회한다")
+    void findsStoreReservationsAfterManagementAuthorization() {
+        // given
+        StoreReservationSearchRequest request =
+                StoreReservationSearchRequest.from(null, null, 0, 20, null);
+        given(reservationRepository.findAllByStoreId(
+                eq(22L),
+                any(Pageable.class)
+        )).willReturn(Page.empty(PageRequest.of(0, 20)));
+
+        // when
+        StoreReservationPageResponse response =
+                reservationService.getStoreReservations(33L, 22L, request);
+
+        // then
+        then(storeService).should().requireManagementOwnership(33L, 22L);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        then(reservationRepository).should()
+                .findAllByStoreId(eq(22L), pageable.capture());
+        assertThat(pageable.getValue().getSort().stream())
+                .extracting(Sort.Order::getProperty, Sort.Order::getDirection)
+                .containsExactly(
+                        tuple("serviceDate", Sort.Direction.ASC),
+                        tuple("id", Sort.Direction.ASC)
+                );
+        assertThat(response.items()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("운영자 목록은 서비스 날짜와 상태를 함께 제한한다")
+    void filtersStoreReservationsByServiceDateAndStatus() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        StoreReservationSearchRequest request =
+                StoreReservationSearchRequest.from(
+                        serviceDate,
+                        "CONFIRMED",
+                        1,
+                        10,
+                        "createdAt,desc"
+                );
+        given(reservationRepository.findAllByStoreIdAndServiceDateAndStatus(
+                eq(22L),
+                eq(serviceDate),
+                eq(ReservationStatus.CONFIRMED),
+                any(Pageable.class)
+        )).willReturn(Page.empty(PageRequest.of(1, 10)));
+
+        // when
+        reservationService.getStoreReservations(33L, 22L, request);
+
+        // then
+        then(storeService).should().requireManagementOwnership(33L, 22L);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        then(reservationRepository).should()
+                .findAllByStoreIdAndServiceDateAndStatus(
+                        eq(22L),
+                        eq(serviceDate),
+                        eq(ReservationStatus.CONFIRMED),
+                        pageable.capture()
+                );
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("매장 관리 권한이 없으면 예약 목록을 조회하지 않는다")
+    void rejectsStoreAccessBeforeQuery() {
+        // given
+        StoreReservationSearchRequest request =
+                StoreReservationSearchRequest.from(null, null, null, null, null);
+        willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED))
+                .given(storeService)
+                .requireManagementOwnership(33L, 22L);
+
+        // when & then
+        assertThatThrownBy(() ->
+                reservationService.getStoreReservations(33L, 22L, request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.ACCESS_DENIED));
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("운영자·매장 ID 또는 조회 조건이 유효하지 않으면 조회하지 않는다")
+    void rejectsInvalidStoreQueryScope() {
+        // given
+        StoreReservationSearchRequest request =
+                StoreReservationSearchRequest.from(null, null, null, null, null);
+
+        // when & then
+        assertValidationFailure(() ->
+                reservationService.getStoreReservations(0L, 22L, request));
+        assertValidationFailure(() ->
+                reservationService.getStoreReservations(33L, 0L, request));
+        assertValidationFailure(() ->
+                reservationService.getStoreReservations(33L, 22L, null));
+        then(storeService).shouldHaveNoInteractions();
         then(reservationRepository).shouldHaveNoInteractions();
     }
 

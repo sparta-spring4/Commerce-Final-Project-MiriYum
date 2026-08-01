@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -89,6 +90,7 @@ class StoreReservationResponseTest {
                 LocalTime.of(18, 0),
                 LocalTime.of(19, 0),
                 PartyComposition.of(2, 1, 0),
+                ReservationContactSnapshot.contactable("consumer:11:channel:primary"),
                 3L,
                 4L,
                 Instant.parse("2026-07-31T09:00:00Z")
