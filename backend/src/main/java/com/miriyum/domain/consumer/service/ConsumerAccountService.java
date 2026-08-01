@@ -50,6 +50,11 @@ public class ConsumerAccountService {
      * <p>이 메서드가 트랜잭션을 소유하고 {@link IdempotencyExecutor}는 {@code MANDATORY}로 참여한다.
      * 같은 키·같은 지문 재요청은 업무 로직을 다시 실행하지 않으므로 7일 변경 제한도 다시 걸리지 않고
      * 최초 결과를 재생한다. 같은 키를 다른 지문으로 재사용하면 {@code COMMON_007}로 거절한다.</p>
+     *
+     * <p>현재 계정의 존재·활성 확인은 요청마다 성립해야 하는 인증 경계이므로 멱등 실행기 <b>앞</b>에서
+     * 수행한다. 콜백 안에 두면 재생 경로에서 콜백이 실행되지 않아, 최초 수정 이후 계정이 사라져도
+     * 같은 키·같은 지문 재요청이 저장된 200을 그대로 돌려준다. 반대로 닉네임 변경 주기처럼 재생 시
+     * 다시 적용하면 안 되는 가변 업무 검증은 콜백 안에 남긴다.</p>
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public IdempotentOutcome updateName(
@@ -57,8 +62,8 @@ public class ConsumerAccountService {
             Long accountId,
             ConsumerAccountUpdateRequest request
     ) {
+        ConsumerAccount account = getActiveAccount(accountId);
         return idempotencyExecutor.execute(command, () -> {
-            ConsumerAccount account = getActiveAccount(accountId);
             LocalDateTime now = LocalDateTime.now(clock);
             requireNicknameChangeAllowed(account, now);
             String normalizedNickname = nicknamePolicy.normalize(request.nickname());

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -92,6 +94,24 @@ class ConsumerAccountServiceTest {
     void separatesMissingAccountFromSuspendedAccount() {
         assertThat(AuthErrorCode.ACCESS_TOKEN_INVALID.getHttpStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(AuthErrorCode.ACCOUNT_RESTRICTED.getHttpStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("계정이 없으면 멱등 실행기를 호출하기 전에 401 AUTH_003으로 거절한다")
+    void rejectsUpdateBeforeIdempotentExecutionWhenAccountMissing() {
+        // given
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.updateName(
+                UPDATE_COMMAND, ACCOUNT_ID, new ConsumerAccountUpdateRequest("새닉네임")))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+
+        // 재생 경로는 업무 콜백을 실행하지 않으므로, 계정 확인이 콜백 안에 있으면 저장된 200이
+        // 그대로 나간다. 실행기에 들어가기 전에 막혔는지를 호출 자체로 고정한다.
+        then(idempotencyExecutor).should(never()).execute(any(), any());
     }
 
     @Test

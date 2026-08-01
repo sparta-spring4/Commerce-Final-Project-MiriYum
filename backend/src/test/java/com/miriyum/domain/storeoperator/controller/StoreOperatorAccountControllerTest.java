@@ -238,6 +238,35 @@ class StoreOperatorAccountControllerTest {
                 .andExpect(jsonPath("$.data.displayName").value("첫상호명"));
     }
 
+    /**
+     * 멱등 재생은 저장된 결과를 그대로 돌려주므로, 계정 확인이 업무 콜백 안에 있으면 계정이 사라진
+     * 뒤에도 최초 200이 재생돼 C-013 판정을 우회한다. 인증 경계를 멱등 실행기 앞으로 옮긴 뒤의
+     * 회귀를 HTTP 수준에서 고정한다(PR #78 리뷰 지적).
+     */
+    @Test
+    @DisplayName("수정 성공 후 계정이 사라지면 같은 Idempotency-Key 재요청도 401 AUTH_003을 반환한다")
+    void updateMeDoesNotReplayStoredResultAfterAccountDisappears() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"첫상호명\"}"))
+                .andExpect(status().isOk());
+
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
+
+        // 같은 키·같은 본문이라 멱등 기록은 그대로 남아 있지만, 인증 경계가 먼저 걸린다.
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"첫상호명\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"));
+    }
+
     private void assertSingleSucceededIdempotencyRecord() {
         Integer succeededCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM idempotency_commands WHERE processing_status = 'SUCCEEDED'", Integer.class);
