@@ -13,6 +13,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -117,6 +118,52 @@ class StoreOperatorAccountControllerTest {
                 // null 값을 따로 검증해 OpenAPI의 nullable 계약을 고정한다.
                 .andExpect(jsonPath("$.data").value(hasKey("phoneNumber")))
                 .andExpect(jsonPath("$.data.phoneNumber").value(nullValue()));
+    }
+
+    /**
+     * C-013은 "subject에 해당하는 현재 계정을 확인할 수 없음"을 401로 정한다. 계정이 사라진 뒤에도
+     * Access Token은 최대 1시간 살아 있으므로 이 경로가 실제로 열린다(이슈 #72).
+     *
+     * <p>응답이 잘못된 토큰의 401과 완전히 같아야 계정 삭제 여부가 드러나지 않는다. ErrorResponse는
+     * {@code code}·{@code message}만 담고 시각·경로 같은 변동 필드가 없어 본문을 그대로 비교한다.</p>
+     */
+    @Test
+    @DisplayName("계정이 사라진 뒤 유효한 토큰으로 조회하면 잘못된 토큰과 똑같은 401 AUTH_003을 반환한다")
+    void getMeWithDeletedAccountIsIndistinguishableFromInvalidToken() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
+
+        String deletedAccountBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        String invalidTokenBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(deletedAccountBody).isEqualTo(invalidTokenBody);
+    }
+
+    @Test
+    @DisplayName("계정이 비활성이면 계정 부재와 달리 403과 AUTH_011을 반환한다")
+    void getMeWithSuspendedAccountReturnsForbidden() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        jdbcTemplate.update(
+                "UPDATE store_operator_accounts SET status = 'SUSPENDED' WHERE store_operator_account_id = ?",
+                accountId);
+
+        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_011"));
     }
 
     @Test

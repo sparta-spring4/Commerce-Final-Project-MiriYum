@@ -6,9 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.consumer.dto.request.ConsumerAccountUpdateRequest;
 import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -28,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class ConsumerAccountServiceTest {
@@ -53,6 +57,41 @@ class ConsumerAccountServiceTest {
     void setUp() {
         consumerAccountService = new ConsumerAccountService(
                 consumerAccountRepository, nicknamePolicy, clock, idempotencyExecutor);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 계정을 조회하면 C-013에 따라 401 AUTH_003을 던진다")
+    void rejectsUnknownAccount() {
+        // given
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.getMe(ACCOUNT_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("비활성 계정을 조회하면 계정 부재와 달리 403 AUTH_011을 던진다")
+    void rejectsSuspendedAccount() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.getMe(ACCOUNT_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+    }
+
+    @Test
+    @DisplayName("계정 부재와 비활성 계정은 서로 다른 상태 코드로 갈린다")
+    void separatesMissingAccountFromSuspendedAccount() {
+        assertThat(AuthErrorCode.ACCESS_TOKEN_INVALID.getHttpStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(AuthErrorCode.ACCOUNT_RESTRICTED.getHttpStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test

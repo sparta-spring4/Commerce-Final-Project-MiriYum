@@ -76,9 +76,18 @@ public class ConsumerAccountService {
         }
     }
 
+    /**
+     * JWT subject에 해당하는 현재 계정을 확인한다.
+     *
+     * <p>{@code docs/specs/mvp1-common/spec.md}의 {@code C-013}은 "subject에 해당하는 현재 계정을
+     * 확인할 수 없음"을 {@code 401}로, "유효한 principal이지만 현재 계정 상태가 이용을 허용하지 않음"을
+     * {@code 403}으로 구분한다. 계정이 없으면 그 토큰으로는 더 이상 주체를 특정할 수 없으므로 일반
+     * Access Token 오류와 같은 {@code AUTH_003}(401)으로 응답한다. 오류 코드와 메시지가 같아
+     * 응답만으로는 계정 삭제 여부를 알 수 없다(이슈 #72).</p>
+     */
     private ConsumerAccount getActiveAccount(Long accountId) {
         ConsumerAccount account = consumerAccountRepository.findById(accountId)
-                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED));
+                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
