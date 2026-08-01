@@ -1,5 +1,7 @@
 package com.miriyum.domain.store.menu.dto;
 
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -19,11 +21,22 @@ public record MenuContentRequest(
                 secondaryCategoryCodes,
         @NotNull @Size(max = 10) List<@NotBlank @Size(max = 30) String> localTags,
         boolean holdSelectionAllowed,
-        boolean pickupSelectionAllowed
+        boolean pickupSelectionAllowed,
+        @NotNull DisclosureRegistrationStatus allergenInformationStatus,
+        @NotNull @Size(max = 20) List<@NotNull @Valid AllergenDisclosureRequest>
+                allergenDisclosures,
+        @NotNull DisclosureRegistrationStatus originInformationStatus,
+        @NotNull @Size(max = 20) List<@NotNull @Valid OriginDisclosureRequest>
+                originDisclosures,
+        @NotNull Boolean alcoholic
 ) {
     public MenuContentRequest {
         secondaryCategoryCodes = secondaryCategoryCodes == null
                 ? null : List.copyOf(secondaryCategoryCodes);
         localTags = localTags == null ? null : List.copyOf(localTags);
+        allergenDisclosures = allergenDisclosures == null
+                ? null : List.copyOf(allergenDisclosures);
+        originDisclosures = originDisclosures == null
+                ? null : List.copyOf(originDisclosures);
     }
 }

@@ -1,12 +1,11 @@
 package com.miriyum.domain.store.menu.service;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.VerificationStatus;
-import com.miriyum.domain.store.core.service.StoreManagementView;
+import com.miriyum.domain.store.core.service.StoreMenuAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
+import com.miriyum.domain.store.menu.dto.MenuChangeReasonRequest;
 import com.miriyum.domain.store.menu.dto.MenuPublicationRequest;
 import com.miriyum.domain.store.menu.dto.MenuSellingStatusRequest;
 import com.miriyum.domain.store.menu.dto.MenuVisibilityRequest;
@@ -15,6 +14,13 @@ import com.miriyum.domain.store.menu.entity.MenuPublicationEvent;
 import com.miriyum.domain.store.menu.entity.MenuVersion;
 import com.miriyum.domain.store.menu.enums.MenuPublicationEventType;
 import com.miriyum.domain.store.menu.enums.MenuPublicationMode;
+import com.miriyum.domain.store.menu.enums.MenuAuditActorType;
+import com.miriyum.domain.store.menu.enums.MenuAuditOutcome;
+import com.miriyum.domain.store.menu.enums.MenuImpactCheckStatus;
+import com.miriyum.domain.store.menu.enums.MenuRecoveryResult;
+import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.store.menu.enums.MenuVisibility;
+import com.miriyum.domain.store.menu.model.MenuAuditRecord;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.repository.MenuPublicationEventRepository;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
@@ -26,6 +32,9 @@ import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -41,6 +50,11 @@ public class MenuCommandService {
     private static final String PRINCIPAL_NAMESPACE = "store-operator";
     private static final String RESOURCE_TYPE = "MENU";
     private static final String SUCCESS_RESPONSE_CODE = "SUCCESS";
+    private static final String ALL_CONTENT_FIELDS = String.join(",",
+            "NAME", "DESCRIPTION", "PRICE", "REPRESENTATIVE",
+            "PRIMARY_CATEGORY", "SECONDARY_CATEGORIES", "LOCAL_TAGS",
+            "HOLD_SELECTION_ALLOWED", "PICKUP_SELECTION_ALLOWED",
+            "ALLERGEN_INFORMATION", "ORIGIN_INFORMATION", "ALCOHOLIC");
 
     private final StoreService storeService;
     private final MenuRepository menuRepository;
@@ -57,12 +71,23 @@ public class MenuCommandService {
             IdempotencyKey key,
             MenuContentRequest request
     ) {
-        StoreManagementView store = requireMutableStore(operatorId, storeId);
-        MenuContent content = contentPolicy.validateAndNormalize(request, store);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_CREATE", key,
                 MenuCommandFingerprint.of("CREATE", storeId, 0, request), () -> {
+                    StoreMenuAuthority store =
+                            storeService.requireMenuMutationAuthority(operatorId, storeId);
+                    MenuContent content = contentPolicy.validateAndNormalize(request, store);
+                    Instant now = databaseClock.now();
                     Menu menu = menuRepository.saveAndFlush(
-                            Menu.create(storeId, content, operatorId, databaseClock.now()));
+                            Menu.create(storeId, content, operatorId, now));
+                    recordOperator(menu, menu.getDraftVersionNumber(),
+                            MenuPublicationEventType.DRAFT_CREATED, operatorId,
+                            now, null, now, key.value(), null,
+                            null, menu.getDraftVersionNumber(), ALL_CONTENT_FIELDS,
+                            MenuVisibility.HIDDEN, MenuVisibility.HIDDEN,
+                            MenuSellingStatus.PAUSED, MenuSellingStatus.PAUSED,
+                            MenuImpactCheckStatus.NOT_APPLICABLE,
+                            MenuRecoveryResult.NOT_APPLICABLE);
                     return success(HttpStatus.CREATED, menu);
                 });
     }
@@ -75,13 +100,27 @@ public class MenuCommandService {
             IdempotencyKey key,
             MenuContentRequest request
     ) {
-        StoreManagementView store = requireMutableStore(operatorId, storeId);
-        MenuContent content = contentPolicy.validateAndNormalize(request, store);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_UPDATE", key,
                 MenuCommandFingerprint.of("UPDATE", storeId, menuId, request), () -> {
+                    StoreMenuAuthority store =
+                            storeService.requireMenuMutationAuthority(operatorId, storeId);
+                    MenuContent content = contentPolicy.validateAndNormalize(request, store);
                     Menu menu = lockedMenu(storeId, menuId);
-                    menu.appendDraft(content, operatorId, databaseClock.now());
-                    return success(HttpStatus.OK, menuRepository.saveAndFlush(menu));
+                    MenuVersion previous = editableBaseline(menu);
+                    Instant now = databaseClock.now();
+                    MenuVersion draft = menu.appendDraft(content, operatorId, now);
+                    Menu saved = menuRepository.saveAndFlush(menu);
+                    recordOperator(saved, draft.getVersionNumber(),
+                            MenuPublicationEventType.DRAFT_UPDATED, operatorId,
+                            now, null, now, key.value(), null,
+                            previous == null ? null : previous.getVersionNumber(),
+                            draft.getVersionNumber(), changedFields(previous, draft),
+                            saved.getVisibility(), saved.getVisibility(),
+                            saved.getSellingStatus(), saved.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_APPLICABLE,
+                            MenuRecoveryResult.NOT_APPLICABLE);
+                    return success(HttpStatus.OK, saved);
                 });
     }
 
@@ -93,12 +132,16 @@ public class MenuCommandService {
             IdempotencyKey key,
             MenuPublicationRequest request
     ) {
-        requireMutableStore(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         requirePublicationRequest(request);
         return execute(operatorId, "MENU_PUBLICATION", key,
                 MenuCommandFingerprint.of("PUBLICATION", storeId, menuId, request), () -> {
+                    storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
+                    Integer previousVersionNumber = menu.getPublishedVersionNumber();
+                    MenuVisibility previousVisibility = menu.getVisibility();
+                    MenuSellingStatus previousSellingStatus = menu.getSellingStatus();
                     MenuVersion version;
                     MenuPublicationEventType type;
                     Instant effectiveAt;
@@ -115,8 +158,13 @@ public class MenuCommandService {
                         confirmedAt = null;
                     }
                     menuRepository.saveAndFlush(menu);
-                    record(menu, version.getVersionNumber(), type, operatorId,
-                            now, effectiveAt, confirmedAt);
+                    recordOperator(menu, version.getVersionNumber(), type, operatorId,
+                            now, effectiveAt, confirmedAt, key.value(), request.changeReason(),
+                            previousVersionNumber, version.getVersionNumber(), "VERSION_STATUS",
+                            previousVisibility, menu.getVisibility(),
+                            previousSellingStatus, menu.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_EVALUATED,
+                            MenuRecoveryResult.NOT_EVALUATED);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -126,18 +174,26 @@ public class MenuCommandService {
             long operatorId,
             long storeId,
             long menuId,
-            IdempotencyKey key
+            IdempotencyKey key,
+            MenuChangeReasonRequest request
     ) {
-        requireMutableStore(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_PUBLICATION_CANCEL", key,
-                MenuCommandFingerprint.of("PUBLICATION_CANCEL", storeId, menuId, null), () -> {
+                MenuCommandFingerprint.of("PUBLICATION_CANCEL", storeId, menuId, request), () -> {
+                    storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
                     MenuVersion cancelled = menu.cancelSchedule(now);
                     menuRepository.saveAndFlush(menu);
-                    record(menu, cancelled.getVersionNumber(),
-                            MenuPublicationEventType.SCHEDULE_CANCELLED,
-                            operatorId, now, cancelled.getEffectiveAt(), now);
+                    recordOperator(menu, cancelled.getVersionNumber(),
+                            MenuPublicationEventType.SCHEDULE_CANCELLED, operatorId,
+                            now, cancelled.getEffectiveAt(), now, key.value(),
+                            request.changeReason(), cancelled.getVersionNumber(), null,
+                            "VERSION_STATUS,EFFECTIVE_AT",
+                            menu.getVisibility(), menu.getVisibility(),
+                            menu.getSellingStatus(), menu.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_APPLICABLE,
+                            MenuRecoveryResult.NOT_APPLICABLE);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -150,16 +206,23 @@ public class MenuCommandService {
             IdempotencyKey key,
             MenuVisibilityRequest request
     ) {
-        requireMutableStore(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_VISIBILITY", key,
                 MenuCommandFingerprint.of("VISIBILITY", storeId, menuId, request), () -> {
+                    storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
+                    MenuVisibility previousVisibility = menu.getVisibility();
                     menu.changeVisibility(request.visibility());
                     menuRepository.saveAndFlush(menu);
-                    record(menu, menu.getPublishedVersionNumber(),
-                            MenuPublicationEventType.VISIBILITY_CHANGED,
-                            operatorId, now, null, now);
+                    recordOperator(menu, menu.getPublishedVersionNumber(),
+                            MenuPublicationEventType.VISIBILITY_CHANGED, operatorId,
+                            now, now, now, key.value(), request.changeReason(),
+                            menu.getPublishedVersionNumber(), menu.getPublishedVersionNumber(),
+                            "VISIBILITY", previousVisibility, menu.getVisibility(),
+                            menu.getSellingStatus(), menu.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_EVALUATED,
+                            MenuRecoveryResult.NOT_EVALUATED);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -172,16 +235,23 @@ public class MenuCommandService {
             IdempotencyKey key,
             MenuSellingStatusRequest request
     ) {
-        requireMutableStore(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_SELLING_STATUS", key,
                 MenuCommandFingerprint.of("SELLING_STATUS", storeId, menuId, request), () -> {
+                    storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
+                    MenuSellingStatus previousSellingStatus = menu.getSellingStatus();
                     menu.changeSellingStatus(request.sellingStatus());
                     menuRepository.saveAndFlush(menu);
-                    record(menu, menu.getPublishedVersionNumber(),
-                            MenuPublicationEventType.SELLING_STATUS_CHANGED,
-                            operatorId, now, null, now);
+                    recordOperator(menu, menu.getPublishedVersionNumber(),
+                            MenuPublicationEventType.SELLING_STATUS_CHANGED, operatorId,
+                            now, now, now, key.value(), request.changeReason(),
+                            menu.getPublishedVersionNumber(), menu.getPublishedVersionNumber(),
+                            "SELLING_STATUS", menu.getVisibility(), menu.getVisibility(),
+                            previousSellingStatus, menu.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_EVALUATED,
+                            MenuRecoveryResult.NOT_EVALUATED);
                     return success(HttpStatus.OK, menu);
                 });
     }
@@ -191,31 +261,30 @@ public class MenuCommandService {
             long operatorId,
             long storeId,
             long menuId,
-            IdempotencyKey key
+            IdempotencyKey key,
+            MenuChangeReasonRequest request
     ) {
-        requireMutableStore(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return execute(operatorId, "MENU_RETIREMENT", key,
-                MenuCommandFingerprint.of("RETIREMENT", storeId, menuId, null), () -> {
+                MenuCommandFingerprint.of("RETIREMENT", storeId, menuId, request), () -> {
+                    storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
+                    Integer previousVersion = menu.getPublishedVersionNumber();
+                    MenuVisibility previousVisibility = menu.getVisibility();
+                    MenuSellingStatus previousSellingStatus = menu.getSellingStatus();
                     menu.retire(now);
                     menuRepository.saveAndFlush(menu);
-                    record(menu, null, MenuPublicationEventType.RETIRED,
-                            operatorId, now, null, now);
+                    recordOperator(menu, null, MenuPublicationEventType.RETIRED,
+                            operatorId, now, now, now, key.value(), request.changeReason(),
+                            previousVersion, null,
+                            "VERSION_STATUS,VISIBILITY,SELLING_STATUS",
+                            previousVisibility, menu.getVisibility(),
+                            previousSellingStatus, menu.getSellingStatus(),
+                            MenuImpactCheckStatus.NOT_EVALUATED,
+                            MenuRecoveryResult.NOT_EVALUATED);
                     return success(HttpStatus.OK, menu);
                 });
-    }
-
-    private StoreManagementView requireMutableStore(long operatorId, long storeId) {
-        StoreManagementView store =
-                storeService.requireManagementAuthority(operatorId, storeId);
-        if (store.verificationStatus() != VerificationStatus.APPROVED) {
-            throw new ServiceException(StoreErrorCode.VERIFICATION_STATE_CONFLICT);
-        }
-        if (store.operationStatus() == OperationStatus.CLOSED) {
-            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
-        }
-        return store;
     }
 
     private Menu lockedMenu(long storeId, long menuId) {
@@ -253,18 +322,87 @@ public class MenuCommandService {
                 ManagedMenuResponse.from(menu));
     }
 
-    private void record(
+    private void recordOperator(
             Menu menu,
             Integer versionNumber,
             MenuPublicationEventType type,
-            Long operatorId,
+            long operatorId,
             Instant commandedAt,
             Instant effectiveAt,
-            Instant confirmedAt
+            Instant confirmedAt,
+            String requestId,
+            String changeReason,
+            Integer previousVersionNumber,
+            Integer newVersionNumber,
+            String changedFields,
+            MenuVisibility previousVisibility,
+            MenuVisibility newVisibility,
+            MenuSellingStatus previousSellingStatus,
+            MenuSellingStatus newSellingStatus,
+            MenuImpactCheckStatus impactCheckStatus,
+            MenuRecoveryResult recoveryResult
     ) {
-        eventRepository.save(MenuPublicationEvent.record(
-                menu.getId(), versionNumber, type, operatorId,
-                commandedAt, effectiveAt, confirmedAt));
+        eventRepository.save(MenuPublicationEvent.record(new MenuAuditRecord(
+                menu.getId(), versionNumber, type, MenuAuditActorType.OPERATOR,
+                operatorId, commandedAt, effectiveAt, confirmedAt, requestId,
+                MenuAuditOutcome.SUCCEEDED, previousVersionNumber, newVersionNumber,
+                changedFields, changeReason, previousVisibility, newVisibility,
+                previousSellingStatus, newSellingStatus, impactCheckStatus, null,
+                recoveryResult)));
+    }
+
+    private static MenuVersion editableBaseline(Menu menu) {
+        Integer versionNumber = menu.getDraftVersionNumber() != null
+                ? menu.getDraftVersionNumber() : menu.getPublishedVersionNumber();
+        if (versionNumber == null) {
+            return null;
+        }
+        return menu.getVersions().stream()
+                .filter(version -> version.getVersionNumber() == versionNumber)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String changedFields(MenuVersion previous, MenuVersion current) {
+        if (previous == null) {
+            return ALL_CONTENT_FIELDS;
+        }
+        List<String> changed = new ArrayList<>();
+        addChanged(changed, "NAME", previous.getName(), current.getName());
+        addChanged(changed, "DESCRIPTION", previous.getDescription(), current.getDescription());
+        addChanged(changed, "PRICE", previous.getPrice(), current.getPrice());
+        addChanged(changed, "REPRESENTATIVE",
+                previous.isRepresentative(), current.isRepresentative());
+        addChanged(changed, "PRIMARY_CATEGORY",
+                previous.getPrimaryCategoryCode(), current.getPrimaryCategoryCode());
+        addChanged(changed, "SECONDARY_CATEGORIES",
+                previous.getSecondaryCategoryCodes(), current.getSecondaryCategoryCodes());
+        addChanged(changed, "LOCAL_TAGS", previous.getLocalTags(), current.getLocalTags());
+        addChanged(changed, "HOLD_SELECTION_ALLOWED",
+                previous.isHoldSelectionAllowed(), current.isHoldSelectionAllowed());
+        addChanged(changed, "PICKUP_SELECTION_ALLOWED",
+                previous.isPickupSelectionAllowed(), current.isPickupSelectionAllowed());
+        addChanged(changed, "ALLERGEN_INFORMATION",
+                List.of(previous.getAllergenInformationStatus(),
+                        previous.getAllergenDisclosures()),
+                List.of(current.getAllergenInformationStatus(),
+                        current.getAllergenDisclosures()));
+        addChanged(changed, "ORIGIN_INFORMATION",
+                List.of(previous.getOriginInformationStatus(), previous.getOriginDisclosures()),
+                List.of(current.getOriginInformationStatus(), current.getOriginDisclosures()));
+        addChanged(changed, "ALCOHOLIC", previous.isAlcoholic(), current.isAlcoholic());
+        return String.join(",", changed);
+    }
+
+    private static void addChanged(
+            List<String> changed,
+            String field,
+            Object previous,
+            Object current
+    ) {
+        if (!Objects.equals(previous, current)) {
+            changed.add(field);
+        }
     }
 
     private static void requirePublicationRequest(MenuPublicationRequest request) {

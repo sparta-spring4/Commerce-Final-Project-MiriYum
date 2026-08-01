@@ -14,18 +14,11 @@ CREATE TABLE stores (
     reservation_enabled BOOLEAN NOT NULL,
     menu_hold_enabled BOOLEAN NOT NULL,
     pickup_enabled BOOLEAN NOT NULL,
-    active_business_registration_number VARCHAR(10)
-        GENERATED ALWAYS AS (
-            CASE
-                WHEN operation_status <> 'CLOSED' THEN business_registration_number
-                ELSE NULL
-            END
-        ) STORED,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (store_id),
     CONSTRAINT uk_stores_active_business_number
-        UNIQUE (active_business_registration_number),
+        UNIQUE (business_registration_number),
     CONSTRAINT fk_stores_operator
         FOREIGN KEY (store_operator_account_id)
         REFERENCES store_operator_accounts (store_operator_account_id)

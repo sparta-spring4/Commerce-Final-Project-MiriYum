@@ -1,6 +1,8 @@
 package com.miriyum.domain.store.menu.enums;
 
 public enum MenuPublicationEventType {
+    DRAFT_CREATED,
+    DRAFT_UPDATED,
     PUBLISHED_IMMEDIATELY,
     PUBLICATION_SCHEDULED,
     SCHEDULE_CANCELLED,

@@ -11,10 +11,17 @@ public record MenuContent(
         List<String> secondaryCategoryCodes,
         List<String> localTags,
         boolean holdSelectionAllowed,
-        boolean pickupSelectionAllowed
+        boolean pickupSelectionAllowed,
+        DisclosureRegistrationStatus allergenInformationStatus,
+        List<AllergenDisclosure> allergenDisclosures,
+        DisclosureRegistrationStatus originInformationStatus,
+        List<OriginDisclosure> originDisclosures,
+        boolean alcoholic
 ) {
     public MenuContent {
         secondaryCategoryCodes = List.copyOf(secondaryCategoryCodes);
         localTags = List.copyOf(localTags);
+        allergenDisclosures = List.copyOf(allergenDisclosures);
+        originDisclosures = List.copyOf(originDisclosures);
     }
 }

@@ -10,10 +10,15 @@ import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.menu.entity.Menu;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -67,13 +72,21 @@ class MenuRepositoryIT {
         Store store = storeRepository.saveAndFlush(Store.create(
                 operatorId, "9876543210", BusinessType.CAFE, "store", "",
                 Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
-                true, true, true));
+                true, true, true, "Asia/Seoul",
+                LocalDateTime.of(2026, 7, 31, 9, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1"));
         Menu saved = menuRepository.saveAndFlush(Menu.create(
                 store.getId(),
                 new MenuContent(
                         "Americano", "", 5_000, true, "BEVERAGE",
                         List.of("DESSERT"), List.of("signature"),
-                        true, true),
+                        true, true,
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new AllergenDisclosure(
+                                "우유", AllergenDisclosureStatus.CONTAINS)),
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new OriginDisclosure("원두", "콜롬비아")),
+                        false),
                 operatorId,
                 Instant.parse("2026-07-31T00:00:00Z")));
         entityManager.clear();

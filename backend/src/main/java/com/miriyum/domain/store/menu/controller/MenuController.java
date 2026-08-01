@@ -3,6 +3,7 @@ package com.miriyum.domain.store.menu.controller;
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
+import com.miriyum.domain.store.menu.dto.MenuChangeReasonRequest;
 import com.miriyum.domain.store.menu.dto.MenuPublicationRequest;
 import com.miriyum.domain.store.menu.dto.MenuSellingStatusRequest;
 import com.miriyum.domain.store.menu.dto.MenuVisibilityRequest;
@@ -16,7 +17,6 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -92,16 +92,17 @@ public class MenuController {
                         IdempotencyKey.parse(rawKey), request));
     }
 
-    @DeleteMapping("/{menuId}/publication")
+    @PostMapping("/{menuId}/publication-cancellation")
     public ResponseEntity<ApiResponse<ManagedMenuResponse>> cancelPublication(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long storeId,
             @PathVariable long menuId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody MenuChangeReasonRequest request
     ) {
         return response("예약 게시를 취소했습니다.",
                 commandService.cancelPublication(principal.accountId(), storeId, menuId,
-                        IdempotencyKey.parse(rawKey)));
+                        IdempotencyKey.parse(rawKey), request));
     }
 
     @PatchMapping("/{menuId}/visibility")
@@ -135,11 +136,12 @@ public class MenuController {
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long storeId,
             @PathVariable long menuId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody MenuChangeReasonRequest request
     ) {
         return response("메뉴를 운영 종료했습니다.",
                 commandService.retire(principal.accountId(), storeId, menuId,
-                        IdempotencyKey.parse(rawKey)));
+                        IdempotencyKey.parse(rawKey), request));
     }
 
     private ResponseEntity<ApiResponse<ManagedMenuResponse>> response(

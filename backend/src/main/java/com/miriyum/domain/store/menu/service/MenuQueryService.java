@@ -20,7 +20,7 @@ public class MenuQueryService {
 
     @Transactional(readOnly = true)
     public List<ManagedMenuResponse> list(long operatorId, long storeId) {
-        storeService.requireManagementAuthority(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return menuRepository.findAllManagedByStoreId(storeId).stream()
                 .map(ManagedMenuResponse::from)
                 .toList();
@@ -28,7 +28,7 @@ public class MenuQueryService {
 
     @Transactional(readOnly = true)
     public ManagedMenuResponse get(long operatorId, long storeId, long menuId) {
-        storeService.requireManagementAuthority(operatorId, storeId);
+        storeService.requireManagementOwnership(operatorId, storeId);
         return ManagedMenuResponse.from(loadForStore(menuRepository.findManagedById(menuId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND)), storeId));
     }

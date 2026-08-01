@@ -73,17 +73,20 @@ public class Menu extends BaseEntity {
     @OrderBy("versionNumber ASC")
     private List<MenuVersion> versions = new ArrayList<>();
 
+    private Menu(long storeId) {
+        this.storeId = storeId;
+        this.nextVersionNumber = 1;
+        this.visibility = MenuVisibility.HIDDEN;
+        this.sellingStatus = MenuSellingStatus.PAUSED;
+    }
+
     public static Menu create(
             long storeId,
             MenuContent content,
             long operatorId,
             Instant now
     ) {
-        Menu menu = new Menu();
-        menu.storeId = storeId;
-        menu.nextVersionNumber = 1;
-        menu.visibility = MenuVisibility.HIDDEN;
-        menu.sellingStatus = MenuSellingStatus.PAUSED;
+        Menu menu = new Menu(storeId);
         menu.appendDraft(content, operatorId, now);
         return menu;
     }
@@ -105,6 +108,7 @@ public class Menu extends BaseEntity {
     public MenuVersion publish(Instant now) {
         requireActive();
         MenuVersion draft = requireDraft();
+        draft.requirePublishableDisclosures();
         findVersion(publishedVersionNumber).ifPresent(MenuVersion::retire);
         findVersion(scheduledVersionNumber).ifPresent(MenuVersion::retire);
         boolean firstPublication = publishedVersionNumber == null;
@@ -125,6 +129,7 @@ public class Menu extends BaseEntity {
             throw stateConflict();
         }
         MenuVersion draft = requireDraft();
+        draft.requirePublishableDisclosures();
         findVersion(scheduledVersionNumber).ifPresent(MenuVersion::retire);
         draft.schedule(effectiveAt);
         scheduledVersionNumber = draft.getVersionNumber();

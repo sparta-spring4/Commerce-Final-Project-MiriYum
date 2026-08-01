@@ -2,23 +2,31 @@ package com.miriyum.domain.store.core.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.core.service.StoreCommandResult;
+import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +36,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
@@ -68,14 +78,19 @@ class StoreRepositoryIT {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
-    @Autowired
+    @MockitoSpyBean
     private IdempotencyExecutor idempotencyExecutor;
+
+    @Autowired
+    private StoreService storeService;
 
     @BeforeEach
     void cleanRows() {
         jdbcTemplate.execute("DELETE FROM idempotency_commands");
-        storeRepository.deleteAll();
-        storeOperatorAccountRepository.deleteAll();
+        jdbcTemplate.execute("DELETE FROM store_tag_assignment");
+        jdbcTemplate.execute("DELETE FROM stores");
+        jdbcTemplate.execute("DELETE FROM store_operator_accounts");
+        entityManager.clear();
     }
 
     @Test
@@ -90,6 +105,12 @@ class StoreRepositoryIT {
 
         Store found = storeRepository.findById(saved.getId()).orElseThrow();
         assertThat(found.getTagCodes()).containsExactlyInAnyOrder("DATE", "QUIET");
+        assertThat(found.getApplicantSelfAttestedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(found.getRequiredTermsAgreedAt())
+                .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
+        assertThat(found.getRequiredTermsVersion())
+                .isEqualTo("STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }
 
     @Test
@@ -106,21 +127,20 @@ class StoreRepositoryIT {
     }
 
     @Test
-    @DisplayName("종료된 매장의 사업자등록번호는 새 활성 매장이 다시 귀속할 수 있다")
-    void closedStoreReleasesActiveBusinessNumber() {
+    @DisplayName("폐점된 매장의 사업자등록번호도 일반 등록 경로에서 재귀속할 수 없다")
+    void closedStoreKeepsBusinessNumberOwnership() {
         long firstOperator = createOperator("first@example.com");
         long secondOperator = createOperator("second@example.com");
         Store closed = storeRepository.saveAndFlush(
                 store(firstOperator, "1234567890", Set.of()));
-        closed.update(
-                null, null, null, null, null, null,
-                null, null, null, OperationStatus.CLOSED);
+        closed.close();
         storeRepository.saveAndFlush(closed);
 
-        Store replacement = storeRepository.saveAndFlush(
-                store(secondOperator, "1234567890", Set.of()));
-
-        assertThat(replacement.getId()).isNotNull();
+        assertThatThrownBy(() ->
+                storeRepository.saveAndFlush(
+                        store(secondOperator, "1234567890", Set.of())))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uk_stores_active_business_number");
     }
 
     @Test
@@ -174,7 +194,7 @@ class StoreRepositoryIT {
                 """
                         SELECT COUNT(*)
                         FROM stores
-                        WHERE active_business_registration_number = ?
+                        WHERE business_registration_number = ?
                         """,
                 Integer.class,
                 "1234567890");
@@ -220,6 +240,54 @@ class StoreRepositoryIT {
         assertThat(commandCount).isZero();
     }
 
+    @Test
+    @DisplayName("서로 다른 필드의 동시 PATCH는 두 변경을 모두 보존한다")
+    void concurrentDifferentFieldUpdatesPreserveBothChanges() throws Exception {
+        long operatorId = createOperator("owner@example.com");
+        Store saved = storeRepository.saveAndFlush(
+                store(operatorId, "1234567890", Set.of()));
+        long storeId = saved.getId();
+        CountDownLatch bothAtIdempotencyBoundary = new CountDownLatch(2);
+        IdempotencyExecutor target =
+                AopTestUtils.getUltimateTargetObject(idempotencyExecutor);
+
+        doAnswer(invocation -> {
+            bothAtIdempotencyBoundary.countDown();
+            if (!bothAtIdempotencyBoundary.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("두 PATCH가 멱등 실행 경계에 도달하지 못했습니다.");
+            }
+            return invocation.callRealMethod();
+        }).when(target).execute(any(), any());
+
+        StoreUpdateRequest rename = new StoreUpdateRequest(
+                "새 이름", null, null, null, null, null, null, null);
+        StoreUpdateRequest relocate = new StoreUpdateRequest(
+                null, null, null, "새 주소", null, null, null, null);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<StoreCommandResult> first = executor.submit(() ->
+                    storeService.update(
+                            operatorId,
+                            storeId,
+                            IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440001"),
+                            rename));
+            Future<StoreCommandResult> second = executor.submit(() ->
+                    storeService.update(
+                            operatorId,
+                            storeId,
+                            IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440002"),
+                            relocate));
+
+            assertThat(first.get(10, TimeUnit.SECONDS).httpStatus()).isEqualTo(200);
+            assertThat(second.get(10, TimeUnit.SECONDS).httpStatus()).isEqualTo(200);
+        }
+
+        entityManager.clear();
+        Store updated = storeRepository.findById(storeId).orElseThrow();
+        assertThat(updated.getName()).isEqualTo("새 이름");
+        assertThat(updated.getAddress()).isEqualTo("새 주소");
+    }
+
     private RegistrationResult registerAfterGate(
             CountDownLatch startGate,
             long operatorId
@@ -253,7 +321,10 @@ class StoreRepositoryIT {
                 tags,
                 true,
                 true,
-                true);
+                true,
+                "Asia/Seoul",
+                LocalDateTime.of(2026, 7, 31, 12, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1");
     }
 
     private record RegistrationResult(

@@ -7,7 +7,11 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
+import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
@@ -145,6 +149,16 @@ class MenuTest {
                 .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
     }
 
+    @Test
+    void publishingWithoutRequiredDisclosuresIsRejected() {
+        Menu menu = Menu.create(7L, unregisteredContent("Americano"), 11L, NOW);
+
+        assertThatThrownBy(() -> menu.publish(NOW.plusSeconds(1)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
+    }
+
     private MenuContent content(String name) {
         return new MenuContent(
                 name,
@@ -155,6 +169,30 @@ class MenuTest {
                 List.of("BEVERAGE"),
                 List.of("signature"),
                 true,
-                true);
+                true,
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new AllergenDisclosure(
+                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new OriginDisclosure("원두", "콜롬비아")),
+                false);
+    }
+
+    private MenuContent unregisteredContent(String name) {
+        return new MenuContent(
+                name,
+                "description",
+                5_000,
+                false,
+                "COFFEE",
+                List.of("BEVERAGE"),
+                List.of("signature"),
+                true,
+                true,
+                DisclosureRegistrationStatus.NOT_REGISTERED,
+                List.of(),
+                DisclosureRegistrationStatus.NOT_REGISTERED,
+                List.of(),
+                false);
     }
 }

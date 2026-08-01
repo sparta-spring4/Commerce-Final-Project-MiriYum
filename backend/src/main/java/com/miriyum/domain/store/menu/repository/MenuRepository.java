@@ -14,19 +14,25 @@ import org.springframework.data.repository.query.Param;
 
 public interface MenuRepository extends JpaRepository<Menu, Long> {
 
+    @Query("select m.storeId from Menu m where m.id = :menuId")
+    Optional<Long> findStoreIdById(@Param("menuId") long menuId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = {"versions", "versions.secondaryCategoryCodes",
-            "versions.localTags"})
+            "versions.localTags", "versions.allergenDisclosures",
+            "versions.originDisclosures"})
     @Query("select distinct m from Menu m where m.id = :menuId")
     Optional<Menu> findByIdForUpdate(@Param("menuId") long menuId);
 
     @EntityGraph(attributePaths = {"versions", "versions.secondaryCategoryCodes",
-            "versions.localTags"})
+            "versions.localTags", "versions.allergenDisclosures",
+            "versions.originDisclosures"})
     @Query("select distinct m from Menu m where m.id = :menuId")
     Optional<Menu> findManagedById(@Param("menuId") long menuId);
 
     @EntityGraph(attributePaths = {"versions", "versions.secondaryCategoryCodes",
-            "versions.localTags"})
+            "versions.localTags", "versions.allergenDisclosures",
+            "versions.originDisclosures"})
     @Query("select distinct m from Menu m where m.storeId = :storeId order by m.id")
     List<Menu> findAllManagedByStoreId(@Param("storeId") long storeId);
 

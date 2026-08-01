@@ -16,11 +16,36 @@ class StoreCommandFingerprintTest {
     @Test
     @DisplayName("태그 입력 순서는 매장 등록 fingerprint를 바꾸지 않는다")
     void tagOrderDoesNotChangeCreateFingerprint() {
-        StoreCreateRequest first = requestWithTags(List.of("DATE", "QUIET"));
-        StoreCreateRequest second = requestWithTags(List.of("QUIET", "DATE"));
+        StoreCreateRequest first = request(
+                List.of("DATE", "QUIET"), true, true);
+        StoreCreateRequest second = request(
+                List.of("QUIET", "DATE"), true, true);
 
         assertThat(StoreCommandFingerprint.forCreate(first))
                 .isEqualTo(StoreCommandFingerprint.forCreate(second));
+    }
+
+    @Test
+    @DisplayName("자기확약과 필수 약관 동의는 등록 fingerprint에 포함된다")
+    void onboardingDeclarationsAffectCreateFingerprint() {
+        StoreCreateRequest attested = request(List.of("DATE"), true, true);
+        StoreCreateRequest missingAgreement =
+                request(List.of("DATE"), true, false);
+
+        assertThat(StoreCommandFingerprint.forCreate(attested))
+                .isNotEqualTo(StoreCommandFingerprint.forCreate(missingAgreement));
+    }
+
+    @Test
+    @DisplayName("매장 시간대가 다르면 등록 fingerprint가 달라진다")
+    void timeZoneChangesCreateFingerprint() {
+        StoreCreateRequest seoul = request(
+                List.of("DATE"), true, true, "Asia/Seoul");
+        StoreCreateRequest tokyo = request(
+                List.of("DATE"), true, true, "Asia/Tokyo");
+
+        assertThat(StoreCommandFingerprint.forCreate(seoul))
+                .isNotEqualTo(StoreCommandFingerprint.forCreate(tokyo));
     }
 
     @Test
@@ -43,7 +68,24 @@ class StoreCommandFingerprintTest {
                 .isNotEqualTo(StoreCommandFingerprint.forUpdate(1L, empty));
     }
 
-    private StoreCreateRequest requestWithTags(List<String> tags) {
+    private StoreCreateRequest request(
+            List<String> tags,
+            boolean applicantSelfAttested,
+            boolean requiredTermsAgreed
+    ) {
+        return request(
+                tags,
+                applicantSelfAttested,
+                requiredTermsAgreed,
+                "Asia/Seoul");
+    }
+
+    private StoreCreateRequest request(
+            List<String> tags,
+            boolean applicantSelfAttested,
+            boolean requiredTermsAgreed,
+            String timeZoneId
+    ) {
         return new StoreCreateRequest(
                 "1234567890",
                 BusinessType.CAFE,
@@ -51,9 +93,12 @@ class StoreCommandFingerprintTest {
                 "",
                 Region.SEOUL,
                 "서울시 중구",
+                timeZoneId,
                 "CAFE_BAKERY",
                 tags,
-                new StoreModesRequest(true, true, true));
+                new StoreModesRequest(true, true, true),
+                applicantSelfAttested,
+                requiredTermsAgreed);
     }
 
     private StoreUpdateRequest updateName(String name) {

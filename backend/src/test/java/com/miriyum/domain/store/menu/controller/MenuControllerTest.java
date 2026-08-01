@@ -3,7 +3,6 @@ package com.miriyum.domain.store.menu.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,6 +19,10 @@ import com.miriyum.domain.store.menu.dto.MenuVersionResponse;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.menu.service.MenuCommandResult;
 import com.miriyum.domain.store.menu.service.MenuCommandService;
 import com.miriyum.domain.store.menu.service.MenuQueryService;
@@ -94,25 +97,38 @@ class MenuControllerTest {
     void publicationAndControlsHaveSeparateRoutes() throws Exception {
         given(commandService.publish(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
-        given(commandService.cancelPublication(eq(11L), eq(7L), eq(21L), any()))
+        given(commandService.cancelPublication(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
         given(commandService.changeVisibility(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
         given(commandService.changeSellingStatus(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
-        given(commandService.retire(eq(11L), eq(7L), eq(21L), any()))
+        given(commandService.retire(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
 
         perform(post("/api/v1/store-operator/stores/7/menus/21/publication"),
-                "{\"mode\":\"IMMEDIATE\"}").andExpect(status().isOk());
-        perform(delete("/api/v1/store-operator/stores/7/menus/21/publication"), null)
+                "{\"mode\":\"IMMEDIATE\",\"changeReason\":\"가격 확정\"}")
+                .andExpect(status().isOk());
+        perform(post("/api/v1/store-operator/stores/7/menus/21/publication-cancellation"),
+                "{\"changeReason\":\"게시 일정 변경\"}")
                 .andExpect(status().isOk());
         perform(patch("/api/v1/store-operator/stores/7/menus/21/visibility"),
-                "{\"visibility\":\"VISIBLE\"}").andExpect(status().isOk());
-        perform(patch("/api/v1/store-operator/stores/7/menus/21/selling-status"),
-                "{\"sellingStatus\":\"SELLING\"}").andExpect(status().isOk());
-        perform(post("/api/v1/store-operator/stores/7/menus/21/retirement"), null)
+                "{\"visibility\":\"VISIBLE\",\"changeReason\":\"메뉴 공개\"}")
                 .andExpect(status().isOk());
+        perform(patch("/api/v1/store-operator/stores/7/menus/21/selling-status"),
+                "{\"sellingStatus\":\"SELLING\",\"changeReason\":\"판매 재개\"}")
+                .andExpect(status().isOk());
+        perform(post("/api/v1/store-operator/stores/7/menus/21/retirement"),
+                "{\"changeReason\":\"메뉴 종료\"}")
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void publicationWithoutChangeReasonReturnsBadRequest() throws Exception {
+        perform(post("/api/v1/store-operator/stores/7/menus/21/publication"),
+                "{\"mode\":\"IMMEDIATE\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
     @Test
@@ -163,7 +179,16 @@ class MenuControllerTest {
                   "secondaryCategoryCodes": [],
                   "localTags": ["signature"],
                   "holdSelectionAllowed": true,
-                  "pickupSelectionAllowed": true
+                  "pickupSelectionAllowed": true,
+                  "allergenInformationStatus": "REGISTERED",
+                  "allergenDisclosures": [
+                    {"ingredient": "우유", "status": "CONTAINS"}
+                  ],
+                  "originInformationStatus": "REGISTERED",
+                  "originDisclosures": [
+                    {"ingredient": "원두", "origin": "콜롬비아"}
+                  ],
+                  "alcoholic": false
                 }
                 """;
     }
@@ -174,7 +199,14 @@ class MenuControllerTest {
                 new MenuVersionResponse(
                         1, MenuVersionStatus.DRAFT, "Americano", "", 5_000,
                         true, "COFFEE", List.of(), List.of("signature"),
-                        true, true, null),
+                        true, true,
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new AllergenDisclosure(
+                                "우유", AllergenDisclosureStatus.CONTAINS)),
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new OriginDisclosure("원두", "콜롬비아")),
+                        false,
+                        null),
                 null, null);
     }
 }

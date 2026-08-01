@@ -2,6 +2,9 @@ package com.miriyum.domain.store.menu.entity;
 
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -82,6 +85,31 @@ public class MenuVersion {
     @Column(name = "pickup_selection_allowed", nullable = false)
     private boolean pickupSelectionAllowed;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "allergen_information_status", nullable = false, length = 20)
+    private DisclosureRegistrationStatus allergenInformationStatus;
+
+    @ElementCollection
+    @CollectionTable(
+            name = "menu_version_allergen_disclosures",
+            joinColumns = @JoinColumn(name = "menu_version_id"))
+    @OrderColumn(name = "sort_order")
+    private List<AllergenDisclosure> allergenDisclosures = new ArrayList<>();
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origin_information_status", nullable = false, length = 20)
+    private DisclosureRegistrationStatus originInformationStatus;
+
+    @ElementCollection
+    @CollectionTable(
+            name = "menu_version_origin_disclosures",
+            joinColumns = @JoinColumn(name = "menu_version_id"))
+    @OrderColumn(name = "sort_order")
+    private List<OriginDisclosure> originDisclosures = new ArrayList<>();
+
+    @Column(name = "alcoholic", nullable = false)
+    private boolean alcoholic;
+
     @Column(name = "created_by_operator_id", nullable = false)
     private long createdByOperatorId;
 
@@ -91,6 +119,34 @@ public class MenuVersion {
     @Column(name = "effective_at")
     private Instant effectiveAt;
 
+    private MenuVersion(
+            Menu menu,
+            int versionNumber,
+            MenuContent content,
+            long operatorId,
+            Instant now
+    ) {
+        this.menu = menu;
+        this.versionNumber = versionNumber;
+        this.status = MenuVersionStatus.DRAFT;
+        this.name = content.name();
+        this.description = content.description();
+        this.price = content.price();
+        this.representative = content.representative();
+        this.primaryCategoryCode = content.primaryCategoryCode();
+        this.secondaryCategoryCodes = new ArrayList<>(content.secondaryCategoryCodes());
+        this.localTags = new ArrayList<>(content.localTags());
+        this.holdSelectionAllowed = content.holdSelectionAllowed();
+        this.pickupSelectionAllowed = content.pickupSelectionAllowed();
+        this.allergenInformationStatus = content.allergenInformationStatus();
+        this.allergenDisclosures = new ArrayList<>(content.allergenDisclosures());
+        this.originInformationStatus = content.originInformationStatus();
+        this.originDisclosures = new ArrayList<>(content.originDisclosures());
+        this.alcoholic = content.alcoholic();
+        this.createdByOperatorId = operatorId;
+        this.createdAt = now;
+    }
+
     static MenuVersion draft(
             Menu menu,
             int versionNumber,
@@ -98,22 +154,7 @@ public class MenuVersion {
             long operatorId,
             Instant now
     ) {
-        MenuVersion version = new MenuVersion();
-        version.menu = menu;
-        version.versionNumber = versionNumber;
-        version.status = MenuVersionStatus.DRAFT;
-        version.name = content.name();
-        version.description = content.description();
-        version.price = content.price();
-        version.representative = content.representative();
-        version.primaryCategoryCode = content.primaryCategoryCode();
-        version.secondaryCategoryCodes = new ArrayList<>(content.secondaryCategoryCodes());
-        version.localTags = new ArrayList<>(content.localTags());
-        version.holdSelectionAllowed = content.holdSelectionAllowed();
-        version.pickupSelectionAllowed = content.pickupSelectionAllowed();
-        version.createdByOperatorId = operatorId;
-        version.createdAt = now;
-        return version;
+        return new MenuVersion(menu, versionNumber, content, operatorId, now);
     }
 
     void schedule(Instant effectiveAt) {
@@ -124,6 +165,19 @@ public class MenuVersion {
     void publish(Instant effectiveAt) {
         status = MenuVersionStatus.PUBLISHED;
         this.effectiveAt = effectiveAt;
+    }
+
+    void requirePublishableDisclosures() {
+        boolean allergenReady = allergenInformationStatus
+                == DisclosureRegistrationStatus.REGISTERED;
+        boolean originReady = originInformationStatus
+                == DisclosureRegistrationStatus.NOT_APPLICABLE
+                || (originInformationStatus == DisclosureRegistrationStatus.REGISTERED
+                && !originDisclosures.isEmpty());
+        if (!allergenReady || !originReady) {
+            throw new com.miriyum.global.exception.ServiceException(
+                    com.miriyum.domain.store.error.StoreErrorCode.MENU_STATE_CONFLICT);
+        }
     }
 
     void retire() {

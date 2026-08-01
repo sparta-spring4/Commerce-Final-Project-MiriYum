@@ -1,5 +1,7 @@
 # Store Core Issue #33 Implementation Plan
 
+> **2026-07-31 review correction:** 폐점 시 사업자등록번호를 해제하는 이 문서의 초기 generated-column 예시는 OPER-009와 일치하지 않아 폐기됐다. 현재 구현과 검증은 `2026-07-31-pr-65-review-remediation.md`의 영구 유일 제약 및 플랫폼 운영자 복구 경계를 따른다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 인증된 매장 운영자가 자신의 매장을 멱등하게 등록·조회·수정하고 다른 도메인이 같은 중앙 권한 검증 계약을 사용하게 한다.

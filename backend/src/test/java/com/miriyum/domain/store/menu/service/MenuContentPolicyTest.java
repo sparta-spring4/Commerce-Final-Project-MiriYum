@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.PickupEligibility;
-import com.miriyum.domain.store.core.enums.VerificationStatus;
-import com.miriyum.domain.store.core.service.StoreManagementView;
+import com.miriyum.domain.store.core.service.StoreMenuAuthority;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
+import com.miriyum.domain.store.menu.dto.AllergenDisclosureRequest;
+import com.miriyum.domain.store.menu.dto.OriginDisclosureRequest;
+import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.service.CatalogKind;
 import com.miriyum.domain.store.service.CatalogService;
@@ -52,7 +54,9 @@ class MenuContentPolicyTest {
     void rejectsPrimaryCategoryRepeatedAsSecondary() {
         assertValidationFailure(new MenuContentRequest(
                 "Americano", "", 5_000, false, "COFFEE",
-                List.of("COFFEE"), List.of(), true, false));
+                List.of("COFFEE"), List.of(), true, false,
+                DisclosureRegistrationStatus.REGISTERED, List.of(),
+                DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
     }
 
     @Test
@@ -64,7 +68,9 @@ class MenuContentPolicyTest {
         assertThatThrownBy(() -> policy.validateAndNormalize(
                 new MenuContentRequest(
                         "Americano", "", 5_000, false, "COFFEE",
-                        List.of("UNKNOWN"), List.of(), true, false),
+                        List.of("UNKNOWN"), List.of(), true, false,
+                        DisclosureRegistrationStatus.REGISTERED, List.of(),
+                        DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false),
                 store(PickupEligibility.ELIGIBLE)))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
@@ -101,11 +107,16 @@ class MenuContentPolicyTest {
     private MenuContentRequest request(List<String> tags) {
         return new MenuContentRequest(
                 "Americano", "description", 5_000, false, "COFFEE",
-                List.of("BEVERAGE"), tags, true, true);
+                List.of("BEVERAGE"), tags, true, true,
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new AllergenDisclosureRequest(
+                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new OriginDisclosureRequest("원두", "콜롬비아")),
+                false);
     }
 
-    private StoreManagementView store(PickupEligibility eligibility) {
-        return new StoreManagementView(
-                7L, OperationStatus.OPEN, VerificationStatus.APPROVED, eligibility);
+    private StoreMenuAuthority store(PickupEligibility eligibility) {
+        return new StoreMenuAuthority(7L, eligibility);
     }
 }

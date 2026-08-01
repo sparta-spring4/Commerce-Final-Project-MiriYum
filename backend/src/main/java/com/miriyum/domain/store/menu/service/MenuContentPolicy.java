@@ -1,10 +1,13 @@
 package com.miriyum.domain.store.menu.service;
 
 import com.miriyum.domain.store.core.enums.PickupEligibility;
-import com.miriyum.domain.store.core.service.StoreManagementView;
+import com.miriyum.domain.store.core.service.StoreMenuAuthority;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
 import com.miriyum.domain.store.menu.model.MenuContent;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.service.CatalogKind;
 import com.miriyum.domain.store.service.CatalogService;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -34,7 +37,7 @@ public class MenuContentPolicy {
 
     public MenuContent validateAndNormalize(
             MenuContentRequest request,
-            StoreManagementView store
+            StoreMenuAuthority store
     ) {
         requireStructure(request);
         List<String> categories = new ArrayList<>();
@@ -57,7 +60,18 @@ public class MenuContentPolicy {
                 request.secondaryCategoryCodes(),
                 normalizedTags,
                 request.holdSelectionAllowed(),
-                request.pickupSelectionAllowed());
+                request.pickupSelectionAllowed(),
+                request.allergenInformationStatus(),
+                request.allergenDisclosures().stream()
+                        .map(item -> new AllergenDisclosure(
+                                item.ingredient().trim(), item.status()))
+                        .toList(),
+                request.originInformationStatus(),
+                request.originDisclosures().stream()
+                        .map(item -> new OriginDisclosure(
+                                item.ingredient().trim(), item.origin().trim()))
+                        .toList(),
+                request.alcoholic());
     }
 
     private static void requireStructure(MenuContentRequest request) {
@@ -73,7 +87,24 @@ public class MenuContentPolicy {
                 || request.secondaryCategoryCodes() == null
                 || request.secondaryCategoryCodes().size() > 5
                 || request.localTags() == null
-                || request.localTags().size() > 10) {
+                || request.localTags().size() > 10
+                || request.allergenInformationStatus() == null
+                || request.allergenInformationStatus()
+                        == DisclosureRegistrationStatus.NOT_APPLICABLE
+                || request.allergenDisclosures() == null
+                || request.allergenDisclosures().size() > 20
+                || request.originInformationStatus() == null
+                || request.originDisclosures() == null
+                || request.originDisclosures().size() > 20
+                || request.alcoholic() == null) {
+            throw validation();
+        }
+        if ((request.allergenInformationStatus()
+                == DisclosureRegistrationStatus.NOT_REGISTERED
+                && !request.allergenDisclosures().isEmpty())
+                || (request.originInformationStatus()
+                != DisclosureRegistrationStatus.REGISTERED
+                && !request.originDisclosures().isEmpty())) {
             throw validation();
         }
         Set<String> categories = new HashSet<>();

@@ -50,6 +50,9 @@ CREATE TABLE menu_versions (
     primary_category_code VARCHAR(50) COLLATE utf8mb4_0900_as_cs NOT NULL,
     hold_selection_allowed BOOLEAN NOT NULL,
     pickup_selection_allowed BOOLEAN NOT NULL,
+    allergen_information_status VARCHAR(20) NOT NULL,
+    origin_information_status VARCHAR(20) NOT NULL,
+    alcoholic BOOLEAN NOT NULL,
     created_by_operator_id BIGINT NOT NULL,
     created_at DATETIME(6) NOT NULL,
     effective_at DATETIME(6) NULL,
@@ -68,6 +71,12 @@ CREATE TABLE menu_versions (
     CONSTRAINT ck_menu_versions_status
         CHECK (status IN ('DRAFT', 'SCHEDULED', 'PUBLISHED', 'RETIRED')),
     CONSTRAINT ck_menu_versions_price CHECK (price >= 0),
+    CONSTRAINT ck_menu_versions_allergen_status CHECK (
+        allergen_information_status IN ('REGISTERED', 'NOT_REGISTERED')
+    ),
+    CONSTRAINT ck_menu_versions_origin_status CHECK (
+        origin_information_status IN ('REGISTERED', 'NOT_REGISTERED', 'NOT_APPLICABLE')
+    ),
     CONSTRAINT ck_menu_versions_effective_time CHECK (
         (status = 'DRAFT' AND effective_at IS NULL)
         OR (status IN ('SCHEDULED', 'PUBLISHED') AND effective_at IS NOT NULL)
@@ -104,15 +113,55 @@ CREATE TABLE menu_version_local_tags (
     CONSTRAINT ck_menu_version_local_tag_order CHECK (sort_order BETWEEN 0 AND 9)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
+CREATE TABLE menu_version_allergen_disclosures (
+    menu_version_id BIGINT NOT NULL,
+    sort_order INT NOT NULL,
+    ingredient_name VARCHAR(100) NOT NULL,
+    disclosure_status VARCHAR(20) NOT NULL,
+    PRIMARY KEY (menu_version_id, sort_order),
+    CONSTRAINT fk_menu_version_allergen_version
+        FOREIGN KEY (menu_version_id)
+        REFERENCES menu_versions (menu_version_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_menu_version_allergen_order CHECK (sort_order BETWEEN 0 AND 19),
+    CONSTRAINT ck_menu_version_allergen_status
+        CHECK (disclosure_status IN ('CONTAINS', 'MAY_CONTAIN'))
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE menu_version_origin_disclosures (
+    menu_version_id BIGINT NOT NULL,
+    sort_order INT NOT NULL,
+    ingredient_name VARCHAR(100) NOT NULL,
+    origin_label VARCHAR(200) NOT NULL,
+    PRIMARY KEY (menu_version_id, sort_order),
+    CONSTRAINT fk_menu_version_origin_version
+        FOREIGN KEY (menu_version_id)
+        REFERENCES menu_versions (menu_version_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_menu_version_origin_order CHECK (sort_order BETWEEN 0 AND 19)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
 CREATE TABLE menu_publication_events (
     menu_publication_event_id BIGINT NOT NULL AUTO_INCREMENT,
     menu_id BIGINT NOT NULL,
     version_number INT NULL,
     event_type VARCHAR(40) NOT NULL,
+    actor_type VARCHAR(20) NOT NULL,
     actor_operator_id BIGINT NULL,
     commanded_at DATETIME(6) NOT NULL,
     effective_at DATETIME(6) NULL,
     confirmed_at DATETIME(6) NULL,
+    request_id VARCHAR(100) NOT NULL,
+    outcome VARCHAR(20) NOT NULL,
+    previous_version_number INT NULL,
+    new_version_number INT NULL,
+    changed_fields VARCHAR(1000) NOT NULL,
+    change_reason VARCHAR(500) NULL,
+    previous_visibility VARCHAR(20) NULL,
+    new_visibility VARCHAR(20) NULL,
+    previous_selling_status VARCHAR(20) NULL,
+    new_selling_status VARCHAR(20) NULL,
+    impact_check_status VARCHAR(20) NOT NULL,
+    impact_count INT NULL,
+    recovery_result VARCHAR(20) NOT NULL,
     PRIMARY KEY (menu_publication_event_id),
     CONSTRAINT fk_menu_publication_event_menu
         FOREIGN KEY (menu_id) REFERENCES menus (menu_id) ON DELETE RESTRICT,
@@ -125,6 +174,8 @@ CREATE TABLE menu_publication_events (
         ON DELETE RESTRICT,
     CONSTRAINT ck_menu_publication_event_type CHECK (
         event_type IN (
+            'DRAFT_CREATED',
+            'DRAFT_UPDATED',
             'PUBLISHED_IMMEDIATELY',
             'PUBLICATION_SCHEDULED',
             'SCHEDULE_CANCELLED',
@@ -134,5 +185,13 @@ CREATE TABLE menu_publication_events (
             'RETIRED'
         )
     ),
+    CONSTRAINT ck_menu_audit_actor CHECK (actor_type IN ('OPERATOR', 'SYSTEM')),
+    CONSTRAINT ck_menu_audit_outcome CHECK (outcome = 'SUCCEEDED'),
+    CONSTRAINT ck_menu_audit_impact CHECK (
+        (impact_check_status = 'NOT_APPLICABLE' AND impact_count IS NULL)
+        OR (impact_check_status = 'NOT_EVALUATED' AND impact_count IS NULL)
+    ),
+    CONSTRAINT ck_menu_audit_recovery
+        CHECK (recovery_result IN ('NOT_APPLICABLE', 'NOT_EVALUATED')),
     INDEX idx_menu_publication_events_menu (menu_id, menu_publication_event_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
