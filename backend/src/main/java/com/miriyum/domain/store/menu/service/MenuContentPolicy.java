@@ -100,6 +100,9 @@ public class MenuContentPolicy {
             throw validation();
         }
         if ((request.allergenInformationStatus()
+                == DisclosureRegistrationStatus.REGISTERED
+                && request.allergenDisclosures().isEmpty())
+                || (request.allergenInformationStatus()
                 == DisclosureRegistrationStatus.NOT_REGISTERED
                 && !request.allergenDisclosures().isEmpty())
                 || (request.originInformationStatus()

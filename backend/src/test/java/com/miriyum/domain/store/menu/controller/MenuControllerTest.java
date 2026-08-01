@@ -132,6 +132,16 @@ class MenuControllerTest {
     }
 
     @Test
+    void soldOutIsAcceptedAsIndependentSellingStatus() throws Exception {
+        given(commandService.changeSellingStatus(eq(11L), eq(7L), eq(21L), any(), any()))
+                .willReturn(new MenuCommandResult(200, menu()));
+
+        perform(patch("/api/v1/store-operator/stores/7/menus/21/selling-status"),
+                "{\"sellingStatus\":\"SOLD_OUT\",\"changeReason\":\"당일 소진\"}")
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void managementReadsDoNotRequireIdempotencyKey() throws Exception {
         given(queryService.list(11L, 7L)).willReturn(List.of(menu()));
         given(queryService.get(11L, 7L, 21L)).willReturn(menu());

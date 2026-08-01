@@ -16,7 +16,8 @@ CREATE TABLE menus (
         FOREIGN KEY (store_id) REFERENCES stores (store_id) ON DELETE RESTRICT,
     CONSTRAINT ck_menus_next_version CHECK (next_version_number >= 2),
     CONSTRAINT ck_menus_visibility CHECK (visibility IN ('VISIBLE', 'HIDDEN')),
-    CONSTRAINT ck_menus_selling_status CHECK (selling_status IN ('SELLING', 'PAUSED')),
+    CONSTRAINT ck_menus_selling_status
+        CHECK (selling_status IN ('SELLING', 'SOLD_OUT', 'PAUSED')),
     CONSTRAINT ck_menus_distinct_pointers CHECK (
         (draft_version_number IS NULL OR scheduled_version_number IS NULL
             OR draft_version_number <> scheduled_version_number)

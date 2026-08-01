@@ -636,7 +636,7 @@ paths:
               $ref: "#/components/schemas/MenuChangeReasonRequest"
       responses:
         "200":
-          description: 예약 게시가 취소된 메뉴
+          description: 예약 버전이 같은 버전 번호의 초안으로 복귀한 메뉴
           content:
             application/json:
               schema:
@@ -688,8 +688,8 @@ paths:
   /api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status:
     patch:
       tags: [Store Management]
-      summary: 메뉴 운영자 판매 제어 상태 변경
-      description: SELLING과 PAUSED만 관리한다. 수량 가용성 SOLD_OUT은 메뉴 홀드 도메인의 시간대별 결과이며 이 상태에 저장하지 않는다.
+      summary: 메뉴 판매 상태 변경
+      description: 일반 메뉴의 SOLD_OUT은 운영자가 수동 변경한다. 홀드 메뉴의 자동 품절·복구는 중앙 수량 도메인의 확정 결과만 사용한다.
       operationId: changeMenuSellingStatus
       security:
         - bearerAuth: []
@@ -705,7 +705,7 @@ paths:
               $ref: "#/components/schemas/MenuSellingStatusRequest"
       responses:
         "200":
-          description: 판매 제어 상태가 변경된 메뉴
+          description: 판매 상태가 변경된 메뉴
           content:
             application/json:
               schema:
@@ -1006,7 +1006,7 @@ components:
           type: boolean
         saleStatus:
           type: string
-          enum: [SELLING, PAUSED]
+          enum: [SELLING, SOLD_OUT, PAUSED]
     ManagedMenu:
       type: object
       additionalProperties: false
@@ -1021,8 +1021,8 @@ components:
           enum: [VISIBLE, HIDDEN]
         sellingStatus:
           type: string
-          enum: [SELLING, PAUSED]
-          description: 운영자의 판매 제어 상태. 수량 기반 SOLD_OUT은 메뉴 홀드 도메인 결과다.
+          enum: [SELLING, SOLD_OUT, PAUSED]
+          description: 판매 중, 일시 품절, 운영자 판매 중지를 구분한다.
         retired:
           type: boolean
         draft:
@@ -1119,7 +1119,7 @@ components:
     DisclosureRegistrationStatus:
       type: string
       enum: [REGISTERED, NOT_REGISTERED, NOT_APPLICABLE]
-      description: 알레르기는 REGISTERED 또는 초안의 NOT_REGISTERED만 허용하며, NOT_APPLICABLE은 원산지에만 사용한다.
+      description: 알레르기는 REGISTERED와 초안의 NOT_REGISTERED만 허용하며 REGISTERED 게시에는 최소 1개 항목이 필요하다. NOT_APPLICABLE은 원산지에만 사용한다.
     AllergenDisclosure:
       type: object
       additionalProperties: false
@@ -1438,6 +1438,15 @@ components:
             $ref: "#/components/schemas/OriginDisclosure"
         alcoholic:
           type: boolean
+      allOf:
+        - if:
+            properties:
+              allergenInformationStatus:
+                const: REGISTERED
+          then:
+            properties:
+              allergenDisclosures:
+                minItems: 1
     MenuPublicationRequest:
       type: object
       additionalProperties: false
@@ -1496,7 +1505,7 @@ components:
       properties:
         sellingStatus:
           type: string
-          enum: [SELLING, PAUSED]
+          enum: [SELLING, SOLD_OUT, PAUSED]
         changeReason:
           type: string
           minLength: 1

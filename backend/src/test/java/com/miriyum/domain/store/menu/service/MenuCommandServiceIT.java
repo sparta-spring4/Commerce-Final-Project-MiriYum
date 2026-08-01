@@ -18,6 +18,7 @@ import com.miriyum.domain.store.menu.entity.MenuPublicationEvent;
 import com.miriyum.domain.store.menu.enums.MenuPublicationEventType;
 import com.miriyum.domain.store.menu.enums.MenuPublicationMode;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
@@ -196,15 +197,21 @@ class MenuCommandServiceIT {
                         MenuPublicationMode.SCHEDULED,
                         Instant.now().plusSeconds(3_600),
                         "저녁 메뉴 예약"));
-        service.cancelPublication(operatorId, storeId, menuId, key(32),
+        MenuCommandResult cancelled = service.cancelPublication(
+                operatorId, storeId, menuId, key(32),
                 new MenuChangeReasonRequest("예약 계획 변경"));
+        assertThat(cancelled.data().scheduled()).isNull();
+        assertThat(cancelled.data().draft().versionNumber()).isEqualTo(1);
+        assertThat(cancelled.data().draft().status()).isEqualTo(MenuVersionStatus.DRAFT);
+        assertThat(cancelled.data().draft().effectiveAt()).isNull();
         service.update(operatorId, storeId, menuId, key(33), content("Latte"));
         service.publish(operatorId, storeId, menuId, key(34),
                 new MenuPublicationRequest(MenuPublicationMode.IMMEDIATE, null, "신규 게시"));
         service.changeVisibility(operatorId, storeId, menuId, key(35),
                 new MenuVisibilityRequest(MenuVisibility.HIDDEN, "일시 숨김"));
         service.changeSellingStatus(operatorId, storeId, menuId, key(36),
-                new MenuSellingStatusRequest(MenuSellingStatus.PAUSED, "재료 준비"));
+                new MenuSellingStatusRequest(
+                        MenuSellingStatus.valueOf("SOLD_OUT"), "당일 소진"));
         service.retire(operatorId, storeId, menuId, key(37),
                 new MenuChangeReasonRequest("판매 종료"));
 
@@ -223,14 +230,18 @@ class MenuCommandServiceIT {
                 .extracting(MenuPublicationEvent::getChangeReason)
                 .containsExactly(
                         "저녁 메뉴 예약", "예약 계획 변경", null, "신규 게시",
-                        "일시 숨김", "재료 준비", "판매 종료");
+                        "일시 숨김", "당일 소진", "판매 종료");
         assertThat(events).extracting(MenuPublicationEvent::getRequestId)
                 .doesNotContainNull();
         assertThat(events.get(3).getChangedFields()).contains("NAME");
+        assertThat(events.get(2).getPreviousVersionNumber()).isEqualTo(1);
+        assertThat(events.get(2).getNewVersionNumber()).isEqualTo(1);
+        assertThat(events.get(2).getEffectiveAt()).isNotNull();
         assertThat(events.get(5).getPreviousVisibility()).isEqualTo(MenuVisibility.VISIBLE);
         assertThat(events.get(5).getNewVisibility()).isEqualTo(MenuVisibility.HIDDEN);
         assertThat(events.get(6).getPreviousSellingStatus()).isEqualTo(MenuSellingStatus.SELLING);
-        assertThat(events.get(6).getNewSellingStatus()).isEqualTo(MenuSellingStatus.PAUSED);
+        assertThat(events.get(6).getNewSellingStatus())
+                .isEqualTo(MenuSellingStatus.valueOf("SOLD_OUT"));
         assertThat(events.get(7).getNewVersionNumber()).isNull();
     }
 

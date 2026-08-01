@@ -163,7 +163,8 @@ public class Menu extends BaseEntity {
         if (scheduled.getEffectiveAt() == null || !now.isBefore(scheduled.getEffectiveAt())) {
             throw stateConflict();
         }
-        scheduled.retire();
+        scheduled.cancelSchedule();
+        draftVersionNumber = scheduled.getVersionNumber();
         scheduledVersionNumber = null;
         return scheduled;
     }

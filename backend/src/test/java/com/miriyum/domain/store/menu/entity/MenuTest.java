@@ -86,7 +86,9 @@ class MenuTest {
         assertThat(scheduled.getStatus()).isEqualTo(MenuVersionStatus.SCHEDULED);
 
         menu.cancelSchedule(NOW.plusSeconds(4));
-        assertThat(scheduled.getStatus()).isEqualTo(MenuVersionStatus.RETIRED);
+        assertThat(scheduled.getStatus()).isEqualTo(MenuVersionStatus.DRAFT);
+        assertThat(scheduled.getEffectiveAt()).isNull();
+        assertThat(menu.getDraftVersionNumber()).isEqualTo(2);
         assertThat(menu.getScheduledVersionNumber()).isNull();
         assertThat(menu.getPublishedVersionNumber()).isEqualTo(1);
     }
@@ -159,6 +161,16 @@ class MenuTest {
                 .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
     }
 
+    @Test
+    void publishingRegisteredAllergenStatusWithoutAnyDisclosureIsRejected() {
+        Menu menu = Menu.create(7L, emptyRegisteredAllergenContent(), 11L, NOW);
+
+        assertThatThrownBy(() -> menu.publish(NOW.plusSeconds(1)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
+    }
+
     private MenuContent content(String name) {
         return new MenuContent(
                 name,
@@ -194,5 +206,13 @@ class MenuTest {
                 DisclosureRegistrationStatus.NOT_REGISTERED,
                 List.of(),
                 false);
+    }
+
+    private MenuContent emptyRegisteredAllergenContent() {
+        return new MenuContent(
+                "Americano", "description", 5_000, false, "COFFEE",
+                List.of(), List.of(), true, true,
+                DisclosureRegistrationStatus.REGISTERED, List.of(),
+                DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false);
     }
 }

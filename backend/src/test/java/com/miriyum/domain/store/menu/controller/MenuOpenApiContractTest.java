@@ -49,6 +49,9 @@ class MenuOpenApiContractTest {
         assertThat(map(managedMenu.get("properties")))
                 .containsKeys("menuId", "storeId", "visibility", "sellingStatus",
                         "retired", "draft", "scheduled", "published");
+        assertThat(list(map(map(managedMenu.get("properties"))
+                .get("sellingStatus")).get("enum")))
+                .containsExactly("SELLING", "SOLD_OUT", "PAUSED");
     }
 
     @SuppressWarnings("unchecked")

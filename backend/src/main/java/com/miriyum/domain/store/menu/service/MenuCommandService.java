@@ -183,12 +183,23 @@ public class MenuCommandService {
                     storeService.requireMenuMutationAuthority(operatorId, storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
+                    Integer scheduledVersionNumber = menu.getScheduledVersionNumber();
+                    Instant scheduledEffectiveAt = scheduledVersionNumber == null
+                            ? null
+                            : menu.getVersions().stream()
+                                    .filter(version -> Objects.equals(
+                                            version.getVersionNumber(),
+                                            scheduledVersionNumber))
+                                    .map(MenuVersion::getEffectiveAt)
+                                    .findFirst()
+                                    .orElse(null);
                     MenuVersion cancelled = menu.cancelSchedule(now);
                     menuRepository.saveAndFlush(menu);
                     recordOperator(menu, cancelled.getVersionNumber(),
                             MenuPublicationEventType.SCHEDULE_CANCELLED, operatorId,
-                            now, cancelled.getEffectiveAt(), now, key.value(),
-                            request.changeReason(), cancelled.getVersionNumber(), null,
+                            now, scheduledEffectiveAt, now, key.value(),
+                            request.changeReason(), cancelled.getVersionNumber(),
+                            cancelled.getVersionNumber(),
                             "VERSION_STATUS,EFFECTIVE_AT",
                             menu.getVisibility(), menu.getVisibility(),
                             menu.getSellingStatus(), menu.getSellingStatus(),

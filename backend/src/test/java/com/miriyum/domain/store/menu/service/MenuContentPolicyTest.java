@@ -55,7 +55,9 @@ class MenuContentPolicyTest {
         assertValidationFailure(new MenuContentRequest(
                 "Americano", "", 5_000, false, "COFFEE",
                 List.of("COFFEE"), List.of(), true, false,
-                DisclosureRegistrationStatus.REGISTERED, List.of(),
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new AllergenDisclosureRequest(
+                        "우유", AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
     }
 
@@ -69,7 +71,9 @@ class MenuContentPolicyTest {
                 new MenuContentRequest(
                         "Americano", "", 5_000, false, "COFFEE",
                         List.of("UNKNOWN"), List.of(), true, false,
-                        DisclosureRegistrationStatus.REGISTERED, List.of(),
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new AllergenDisclosureRequest(
+                                "우유", AllergenDisclosureStatus.CONTAINS)),
                         DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false),
                 store(PickupEligibility.ELIGIBLE)))
                 .isInstanceOf(ServiceException.class)
@@ -94,6 +98,15 @@ class MenuContentPolicyTest {
     void rejectsUrlAndOfficialImpersonationTags() {
         assertValidationFailure(request(List.of("https://example.com")));
         assertValidationFailure(request(List.of("MiriYum official")));
+    }
+
+    @Test
+    void rejectsRegisteredAllergenStatusWithoutAnyDisclosure() {
+        assertValidationFailure(new MenuContentRequest(
+                "Americano", "", 5_000, false, "COFFEE",
+                List.of(), List.of(), true, false,
+                DisclosureRegistrationStatus.REGISTERED, List.of(),
+                DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
     }
 
     private void assertValidationFailure(MenuContentRequest request) {

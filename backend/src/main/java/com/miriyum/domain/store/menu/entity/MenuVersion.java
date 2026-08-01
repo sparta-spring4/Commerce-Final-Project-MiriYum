@@ -167,9 +167,15 @@ public class MenuVersion {
         this.effectiveAt = effectiveAt;
     }
 
+    void cancelSchedule() {
+        status = MenuVersionStatus.DRAFT;
+        effectiveAt = null;
+    }
+
     void requirePublishableDisclosures() {
         boolean allergenReady = allergenInformationStatus
-                == DisclosureRegistrationStatus.REGISTERED;
+                == DisclosureRegistrationStatus.REGISTERED
+                && !allergenDisclosures.isEmpty();
         boolean originReady = originInformationStatus
                 == DisclosureRegistrationStatus.NOT_APPLICABLE
                 || (originInformationStatus == DisclosureRegistrationStatus.REGISTERED
