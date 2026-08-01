@@ -21,6 +21,7 @@ import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.repository.MenuPublicationEventRepository;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
@@ -115,7 +116,7 @@ class MenuCommandServiceIT {
         MenuCommandResult published = service.publish(
                 operatorId,
                 storeId,
-                created.data().menuId(),
+                Long.parseLong(created.data().menuId()),
                 IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440002"),
                 new MenuPublicationRequest(
                         MenuPublicationMode.IMMEDIATE, null, "첫 게시"));
@@ -128,7 +129,8 @@ class MenuCommandServiceIT {
         assertThat(published.data().visibility()).isEqualTo(MenuVisibility.VISIBLE);
         assertThat(published.data().sellingStatus()).isEqualTo(MenuSellingStatus.SELLING);
         List<MenuPublicationEvent> events =
-                eventRepository.findByMenuIdOrderById(created.data().menuId());
+                eventRepository.findByMenuIdOrderById(
+                        Long.parseLong(created.data().menuId()));
         assertThat(events).extracting(MenuPublicationEvent::getEventType)
                 .containsExactly(
                         MenuPublicationEventType.DRAFT_CREATED,
@@ -174,7 +176,8 @@ class MenuCommandServiceIT {
 
         assertThat(replay.data()).isEqualTo(first.data());
         assertThat(menuRepository.count()).isOne();
-        assertThat(eventRepository.findByMenuIdOrderById(first.data().menuId()))
+        assertThat(eventRepository.findByMenuIdOrderById(
+                Long.parseLong(first.data().menuId())))
                 .extracting(MenuPublicationEvent::getEventType)
                 .containsExactly(MenuPublicationEventType.DRAFT_CREATED);
     }
@@ -190,8 +193,9 @@ class MenuCommandServiceIT {
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
-        long menuId = service.create(operatorId, storeId, key(30), content("Americano"))
-                .data().menuId();
+        long menuId = Long.parseLong(service.create(
+                operatorId, storeId, key(30), content("Americano"))
+                .data().menuId());
         service.publish(operatorId, storeId, menuId, key(31),
                 new MenuPublicationRequest(
                         MenuPublicationMode.SCHEDULED,
@@ -257,7 +261,8 @@ class MenuCommandServiceIT {
                 true, true,
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosureRequest(
-                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                        AllergenIngredientCode.MILK,
+                        AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new OriginDisclosureRequest("원두", "콜롬비아")),
                 false);

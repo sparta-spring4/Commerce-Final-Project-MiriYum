@@ -18,6 +18,7 @@ import com.miriyum.domain.store.menu.enums.MenuPublicationEventType;
 import com.miriyum.domain.store.menu.enums.MenuPublicationMode;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.repository.MenuPublicationEventRepository;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -171,6 +173,22 @@ class MenuScheduleActivatorIT {
                         == MenuPublicationEventType.SCHEDULE_ACTIVATED);
     }
 
+    @Test
+    void dueQuerySkipsClosedStoreBeforeApplyingBatchLimit() {
+        Fixture closed = scheduledMenu("closed-owner@example.com", "1111111111", 20);
+        Store closedStore = storeRepository.findById(closed.storeId()).orElseThrow();
+        closedStore.close();
+        storeRepository.saveAndFlush(closedStore);
+        makeDue(closed.menuId());
+
+        Fixture eligible = scheduledMenu("eligible-owner@example.com", "2222222222", 30);
+        makeDue(eligible.menuId());
+
+        assertThat(menuRepository.findDueScheduledIds(
+                databaseClock.now(), PageRequest.of(0, 1)))
+                .containsExactly(eligible.menuId());
+    }
+
     private boolean activateTogether(
             long menuId,
             CountDownLatch ready,
@@ -190,8 +208,8 @@ class MenuScheduleActivatorIT {
                 true, true, true, "Asia/Seoul",
                 LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
-        long menuId = commandService.create(
-                operatorId, storeId, key(keySuffix), content()).data().menuId();
+        long menuId = Long.parseLong(commandService.create(
+                operatorId, storeId, key(keySuffix), content()).data().menuId());
         commandService.publish(
                 operatorId,
                 storeId,
@@ -224,7 +242,8 @@ class MenuScheduleActivatorIT {
                 List.of(), List.of("signature"), true, true,
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosureRequest(
-                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                        AllergenIngredientCode.MILK,
+                        AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new OriginDisclosureRequest("원두", "콜롬비아")),
                 false);

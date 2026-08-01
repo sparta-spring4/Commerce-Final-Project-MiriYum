@@ -9,6 +9,7 @@ import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.AllergenDisclosure;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
@@ -184,7 +185,8 @@ class MenuTest {
                 true,
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosure(
-                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                        AllergenIngredientCode.MILK,
+                        AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new OriginDisclosure("원두", "콜롬비아")),
                 false);

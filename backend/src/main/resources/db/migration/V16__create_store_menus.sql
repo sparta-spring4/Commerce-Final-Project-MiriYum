@@ -117,15 +117,25 @@ CREATE TABLE menu_version_local_tags (
 CREATE TABLE menu_version_allergen_disclosures (
     menu_version_id BIGINT NOT NULL,
     sort_order INT NOT NULL,
-    ingredient_name VARCHAR(100) NOT NULL,
+    allergen_code VARCHAR(30) NOT NULL,
     disclosure_status VARCHAR(20) NOT NULL,
     PRIMARY KEY (menu_version_id, sort_order),
     CONSTRAINT fk_menu_version_allergen_version
         FOREIGN KEY (menu_version_id)
         REFERENCES menu_versions (menu_version_id) ON DELETE RESTRICT,
+    CONSTRAINT uk_menu_version_allergen_code
+        UNIQUE (menu_version_id, allergen_code),
     CONSTRAINT ck_menu_version_allergen_order CHECK (sort_order BETWEEN 0 AND 19),
     CONSTRAINT ck_menu_version_allergen_status
-        CHECK (disclosure_status IN ('CONTAINS', 'MAY_CONTAIN'))
+        CHECK (disclosure_status IN ('CONTAINS', 'MAY_CONTAIN')),
+    CONSTRAINT ck_menu_version_allergen_code CHECK (
+        allergen_code IN (
+            'EGG', 'MILK', 'BUCKWHEAT', 'PEANUT', 'SOYBEAN', 'WHEAT',
+            'MACKEREL', 'CRAB', 'SHRIMP', 'PORK', 'PEACH', 'TOMATO',
+            'SULFITES', 'WALNUT', 'CHICKEN', 'BEEF', 'SQUID',
+            'SHELLFISH', 'PINE_NUT'
+        )
+    )
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
 CREATE TABLE menu_version_origin_disclosures (

@@ -6,8 +6,8 @@ import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 
 public record ManagedMenuResponse(
-        long menuId,
-        long storeId,
+        String menuId,
+        String storeId,
         MenuVisibility visibility,
         MenuSellingStatus sellingStatus,
         boolean retired,
@@ -17,8 +17,8 @@ public record ManagedMenuResponse(
 ) {
     public static ManagedMenuResponse from(Menu menu) {
         return new ManagedMenuResponse(
-                menu.getId(),
-                menu.getStoreId(),
+                String.valueOf(menu.getId()),
+                String.valueOf(menu.getStoreId()),
                 menu.getVisibility(),
                 menu.getSellingStatus(),
                 menu.isRetired(),

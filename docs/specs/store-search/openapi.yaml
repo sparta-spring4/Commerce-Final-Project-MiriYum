@@ -1123,12 +1123,30 @@ components:
     AllergenDisclosure:
       type: object
       additionalProperties: false
-      required: [ingredient, status]
+      required: [ingredientCode, status]
       properties:
-        ingredient:
+        ingredientCode:
           type: string
-          minLength: 1
-          maxLength: 100
+          enum:
+            - EGG
+            - MILK
+            - BUCKWHEAT
+            - PEANUT
+            - SOYBEAN
+            - WHEAT
+            - MACKEREL
+            - CRAB
+            - SHRIMP
+            - PORK
+            - PEACH
+            - TOMATO
+            - SULFITES
+            - WALNUT
+            - CHICKEN
+            - BEEF
+            - SQUID
+            - SHELLFISH
+            - PINE_NUT
         status:
           type: string
           enum: [CONTAINS, MAY_CONTAIN]

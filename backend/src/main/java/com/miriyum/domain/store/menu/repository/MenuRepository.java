@@ -42,6 +42,12 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
             where m.retired = false
               and m.scheduledVersionNumber = v.versionNumber
               and v.effectiveAt <= :now
+              and exists (
+                  select s.id from Store s
+                  where s.id = m.storeId
+                    and s.verificationStatus = com.miriyum.domain.store.core.enums.VerificationStatus.APPROVED
+                    and s.operationStatus <> com.miriyum.domain.store.core.enums.OperationStatus.CLOSED
+              )
             order by v.effectiveAt, m.id
             """)
     List<Long> findDueScheduledIds(@Param("now") Instant now, Pageable pageable);

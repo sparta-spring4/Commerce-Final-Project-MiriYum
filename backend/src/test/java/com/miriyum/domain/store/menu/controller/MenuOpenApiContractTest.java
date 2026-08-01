@@ -52,6 +52,18 @@ class MenuOpenApiContractTest {
         assertThat(list(map(map(managedMenu.get("properties"))
                 .get("sellingStatus")).get("enum")))
                 .containsExactly("SELLING", "SOLD_OUT", "PAUSED");
+        assertThat(map(map(managedMenu.get("properties")).get("menuId")))
+                .containsEntry("$ref",
+                        "../mvp1-common/openapi.yaml#/components/schemas/PublicId");
+        assertThat(map(map(managedMenu.get("properties")).get("storeId")))
+                .containsEntry("$ref",
+                        "../mvp1-common/openapi.yaml#/components/schemas/PublicId");
+
+        Map<String, Object> allergen = map(schemas.get("AllergenDisclosure"));
+        assertThat(list(map(map(allergen.get("properties"))
+                .get("ingredientCode")).get("enum")))
+                .hasSize(19)
+                .contains("EGG", "MILK", "SHELLFISH", "PINE_NUT");
     }
 
     @SuppressWarnings("unchecked")

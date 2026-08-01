@@ -3,6 +3,7 @@ package com.miriyum.domain.store.menu.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,6 +21,7 @@ import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
@@ -74,7 +76,8 @@ class MenuControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(contentJson()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.menuId").value(21))
+                .andExpect(jsonPath("$.data.menuId").value(instanceOf(String.class)))
+                .andExpect(jsonPath("$.data.storeId").value(instanceOf(String.class)))
                 .andExpect(jsonPath("$.data.draft.versionNumber").value(1))
                 .andExpect(jsonPath("$.data.visibility").value("HIDDEN"))
                 .andExpect(jsonPath("$.data.sellingStatus").value("PAUSED"));
@@ -142,6 +145,18 @@ class MenuControllerTest {
     }
 
     @Test
+    void arbitraryAllergenIngredientIsRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/store-operator/stores/7/menus")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(contentJson().replace(
+                                "\"ingredientCode\": \"MILK\"",
+                                "\"ingredientCode\": \"ARBITRARY\"")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void managementReadsDoNotRequireIdempotencyKey() throws Exception {
         given(queryService.list(11L, 7L)).willReturn(List.of(menu()));
         given(queryService.get(11L, 7L, 21L)).willReturn(menu());
@@ -192,7 +207,7 @@ class MenuControllerTest {
                   "pickupSelectionAllowed": true,
                   "allergenInformationStatus": "REGISTERED",
                   "allergenDisclosures": [
-                    {"ingredient": "우유", "status": "CONTAINS"}
+                    {"ingredientCode": "MILK", "status": "CONTAINS"}
                   ],
                   "originInformationStatus": "REGISTERED",
                   "originDisclosures": [
@@ -205,14 +220,15 @@ class MenuControllerTest {
 
     private ManagedMenuResponse menu() {
         return new ManagedMenuResponse(
-                21L, 7L, MenuVisibility.HIDDEN, MenuSellingStatus.PAUSED, false,
+                "21", "7", MenuVisibility.HIDDEN, MenuSellingStatus.PAUSED, false,
                 new MenuVersionResponse(
                         1, MenuVersionStatus.DRAFT, "Americano", "", 5_000,
                         true, "COFFEE", List.of(), List.of("signature"),
                         true, true,
                         DisclosureRegistrationStatus.REGISTERED,
                         List.of(new AllergenDisclosure(
-                                "우유", AllergenDisclosureStatus.CONTAINS)),
+                                AllergenIngredientCode.MILK,
+                                AllergenDisclosureStatus.CONTAINS)),
                         DisclosureRegistrationStatus.REGISTERED,
                         List.of(new OriginDisclosure("원두", "콜롬비아")),
                         false,

@@ -6,6 +6,7 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.service.CatalogKind;
@@ -64,7 +65,7 @@ public class MenuContentPolicy {
                 request.allergenInformationStatus(),
                 request.allergenDisclosures().stream()
                         .map(item -> new AllergenDisclosure(
-                                item.ingredient().trim(), item.status()))
+                                item.ingredientCode(), item.status()))
                         .toList(),
                 request.originInformationStatus(),
                 request.originDisclosures().stream()
@@ -108,6 +109,14 @@ public class MenuContentPolicy {
                 || (request.originInformationStatus()
                 != DisclosureRegistrationStatus.REGISTERED
                 && !request.originDisclosures().isEmpty())) {
+            throw validation();
+        }
+        Set<AllergenIngredientCode> allergenCodes = new HashSet<>();
+        if (request.allergenDisclosures().stream()
+                .anyMatch(item -> item == null
+                        || item.ingredientCode() == null
+                        || item.status() == null
+                        || !allergenCodes.add(item.ingredientCode()))) {
             throw validation();
         }
         Set<String> categories = new HashSet<>();

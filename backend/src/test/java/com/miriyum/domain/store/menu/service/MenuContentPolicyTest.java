@@ -11,6 +11,7 @@ import com.miriyum.domain.store.menu.dto.MenuContentRequest;
 import com.miriyum.domain.store.menu.dto.AllergenDisclosureRequest;
 import com.miriyum.domain.store.menu.dto.OriginDisclosureRequest;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.service.CatalogKind;
@@ -57,7 +58,7 @@ class MenuContentPolicyTest {
                 List.of("COFFEE"), List.of(), true, false,
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosureRequest(
-                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                        AllergenIngredientCode.MILK, AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
     }
 
@@ -73,7 +74,8 @@ class MenuContentPolicyTest {
                         List.of("UNKNOWN"), List.of(), true, false,
                         DisclosureRegistrationStatus.REGISTERED,
                         List.of(new AllergenDisclosureRequest(
-                                "우유", AllergenDisclosureStatus.CONTAINS)),
+                                AllergenIngredientCode.MILK,
+                                AllergenDisclosureStatus.CONTAINS)),
                         DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false),
                 store(PickupEligibility.ELIGIBLE)))
                 .isInstanceOf(ServiceException.class)
@@ -109,6 +111,22 @@ class MenuContentPolicyTest {
                 DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
     }
 
+    @Test
+    void rejectsDuplicateAllergenIngredientWithDifferentStatuses() {
+        assertValidationFailure(new MenuContentRequest(
+                "Americano", "", 5_000, false, "COFFEE",
+                List.of(), List.of(), true, false,
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(
+                        new AllergenDisclosureRequest(
+                                AllergenIngredientCode.MILK,
+                                AllergenDisclosureStatus.CONTAINS),
+                        new AllergenDisclosureRequest(
+                                AllergenIngredientCode.MILK,
+                                AllergenDisclosureStatus.MAY_CONTAIN)),
+                DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false));
+    }
+
     private void assertValidationFailure(MenuContentRequest request) {
         assertThatThrownBy(() -> policy.validateAndNormalize(
                 request, store(PickupEligibility.ELIGIBLE)))
@@ -123,7 +141,7 @@ class MenuContentPolicyTest {
                 List.of("BEVERAGE"), tags, true, true,
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosureRequest(
-                        "우유", AllergenDisclosureStatus.CONTAINS)),
+                        AllergenIngredientCode.MILK, AllergenDisclosureStatus.CONTAINS)),
                 DisclosureRegistrationStatus.REGISTERED,
                 List.of(new OriginDisclosureRequest("원두", "콜롬비아")),
                 false);
