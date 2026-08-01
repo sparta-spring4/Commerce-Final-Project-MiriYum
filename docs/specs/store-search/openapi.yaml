@@ -621,6 +621,7 @@ paths:
     post:
       tags: [Store Management]
       summary: 메뉴 예약 게시 취소
+      description: 예약 이후 생성한 활성 초안이 이미 있으면 최신 초안을 보존하기 위해 STORE_010 충돌로 거부한다.
       operationId: cancelMenuPublication
       security:
         - bearerAuth: []

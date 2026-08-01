@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
@@ -92,6 +93,32 @@ class MenuTest {
         assertThat(menu.getDraftVersionNumber()).isEqualTo(2);
         assertThat(menu.getScheduledVersionNumber()).isNull();
         assertThat(menu.getPublishedVersionNumber()).isEqualTo(1);
+    }
+
+    @Test
+    void cancellingScheduleWithNewerDraftIsRejectedAndPreservesLatestDraft() {
+        Menu menu = Menu.create(7L, content("Americano"), 11L, NOW);
+        MenuVersion scheduled = menu.schedule(
+                NOW.plusSeconds(60), NOW.plusSeconds(1));
+        MenuVersion latestDraft = menu.appendDraft(
+                content("Latte"), 11L, NOW.plusSeconds(2));
+
+        assertThatThrownBy(() -> menu.cancelSchedule(NOW.plusSeconds(3)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
+        assertThat(menu.getVersions())
+                .filteredOn(version -> version.getStatus() == MenuVersionStatus.DRAFT)
+                .containsExactly(latestDraft);
+        assertThat(menu.getDraftVersionNumber()).isEqualTo(2);
+        assertThat(menu.getScheduledVersionNumber()).isEqualTo(1);
+        assertThat(scheduled.getStatus()).isEqualTo(MenuVersionStatus.SCHEDULED);
+        assertThat(ManagedMenuResponse.from(menu).draft().name()).isEqualTo("Latte");
+
+        MenuVersion published = menu.publish(NOW.plusSeconds(4));
+        assertThat(published).isSameAs(latestDraft);
+        assertThat(published.getName()).isEqualTo("Latte");
+        assertThat(scheduled.getStatus()).isEqualTo(MenuVersionStatus.RETIRED);
     }
 
     @Test

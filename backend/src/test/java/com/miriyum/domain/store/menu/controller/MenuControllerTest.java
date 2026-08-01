@@ -164,11 +164,11 @@ class MenuControllerTest {
         mockMvc.perform(get("/api/v1/store-operator/stores/7/menus")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].menuId").value(21));
+                .andExpect(jsonPath("$.data[0].menuId").value("21"));
         mockMvc.perform(get("/api/v1/store-operator/stores/7/menus/21")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.menuId").value(21));
+                .andExpect(jsonPath("$.data.menuId").value("21"));
     }
 
     @Test
