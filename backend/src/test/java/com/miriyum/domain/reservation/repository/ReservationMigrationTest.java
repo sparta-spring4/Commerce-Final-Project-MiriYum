@@ -8,6 +8,7 @@ import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -45,6 +46,8 @@ class ReservationMigrationTest {
     private static final long STORE_OPERATOR_ACCOUNT_ID = 20_001L;
     private static final long STORE_ID = 30_001L;
     private static final Instant CREATED_AT = Instant.parse("2026-08-01T01:00:00Z");
+    private static final String NOTIFICATION_TARGET_REFERENCE =
+            "consumer:10001:channel:primary";
 
     @Container
     static final MySQLContainer MYSQL =
@@ -152,12 +155,12 @@ class ReservationMigrationTest {
     }
 
     @Test
-    @DisplayName("예약 코어 스키마는 Flyway V14로 적용된다")
-    void appliesReservationCoreAsFlywayV14() {
+    @DisplayName("예약 코어 스키마는 Flyway V15로 적용된다")
+    void appliesReservationCoreAsFlywayV15() {
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "14".equals(String.valueOf(migration.getVersion()))
-                                && "V14__create_reservation_core.sql".equals(migration.getScript()));
+                        "15".equals(String.valueOf(migration.getVersion()))
+                                && "V15__create_reservation_core.sql".equals(migration.getScript()));
     }
 
     @Test
@@ -190,10 +193,51 @@ class ReservationMigrationTest {
 
         assertThat(foundReservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         assertThat(foundReservation.getParty().totalCount()).isEqualTo(4);
+        assertThat(foundReservation.getContactSnapshot().getNotificationTargetReference())
+                .isEqualTo(NOTIFICATION_TARGET_REFERENCE);
+        assertThat(foundReservation.getContactSnapshot().isContactAvailableAtConfirmation())
+                .isTrue();
         assertThat(foundBucket.getPolicyVersion()).isEqualTo(1L);
         assertThat(foundAllocation.getReservationId()).isEqualTo(savedReservation.getId());
         assertThat(foundAllocation.getCapacityBucketId()).isEqualTo(savedBucket.getId());
         assertThat(foundAllocation.getOccupiedTeams()).isOne();
+    }
+
+    @Test
+    @DisplayName("계정 연락처가 바뀌어도 예약 당시 알림 대상과 연락 가능 상태를 보존한다")
+    void preservesContactSnapshotAfterAccountContactChanges() {
+        // given
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+
+        // when
+        jdbcTemplate.update(
+                "UPDATE consumer_accounts SET phone = ? WHERE consumer_account_id = ?",
+                "010-9999-9999",
+                CONSUMER_ACCOUNT_ID
+        );
+
+        // then
+        String targetReference = jdbcTemplate.queryForObject(
+                """
+                        SELECT notification_target_reference
+                        FROM reservations
+                        WHERE reservation_id = ?
+                        """,
+                String.class,
+                savedReservation.getId()
+        );
+        Boolean contactAvailable = jdbcTemplate.queryForObject(
+                """
+                        SELECT contact_available_at_confirmation
+                        FROM reservations
+                        WHERE reservation_id = ?
+                        """,
+                Boolean.class,
+                savedReservation.getId()
+        );
+
+        assertThat(targetReference).isEqualTo(NOTIFICATION_TARGET_REFERENCE);
+        assertThat(contactAvailable).isTrue();
     }
 
     @Test
@@ -306,6 +350,7 @@ class ReservationMigrationTest {
                 reservationInsertSql(0, 0, 0, 1L, 1L),
                 CONSUMER_ACCOUNT_ID,
                 STORE_ID,
+                NOTIFICATION_TARGET_REFERENCE,
                 "CONFIRMED",
                 null,
                 null
@@ -316,12 +361,28 @@ class ReservationMigrationTest {
                 reservationInsertSql(1, 0, 0, 0L, 1L),
                 CONSUMER_ACCOUNT_ID,
                 STORE_ID,
+                NOTIFICATION_TARGET_REFERENCE,
                 "CONFIRMED",
                 null,
                 null
         ))
                 .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("ck_reservations_policy_versions");
+    }
+
+    @Test
+    @DisplayName("예약 당시 알림 대상 참조와 연락 가능 상태가 유효해야 한다")
+    void rejectsInvalidContactSnapshot() {
+        // when & then
+        assertThatThrownBy(() -> insertReservationWithContactSnapshot(" ", true))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_notification_target_reference");
+        assertThatThrownBy(() -> insertReservationWithContactSnapshot(
+                NOTIFICATION_TARGET_REFERENCE,
+                false
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_contact_available_at_confirmation");
     }
 
     @Test
@@ -426,6 +487,7 @@ class ReservationMigrationTest {
                 LocalTime.of(18, 0),
                 LocalTime.of(19, 0),
                 PartyComposition.of(2, 1, 1),
+                ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE),
                 1L,
                 1L,
                 CREATED_AT
@@ -460,6 +522,7 @@ class ReservationMigrationTest {
                 reservationInsertSql(2, 1, 1, 1L, 1L),
                 consumerAccountId,
                 storeId,
+                NOTIFICATION_TARGET_REFERENCE,
                 status,
                 cancelledAt,
                 fulfilledAt
@@ -482,6 +545,8 @@ class ReservationMigrationTest {
                             adult_count,
                             child_count,
                             infant_count,
+                            notification_target_reference,
+                            contact_available_at_confirmation,
                             capacity_policy_version,
                             reservation_policy_version,
                             status,
@@ -489,13 +554,52 @@ class ReservationMigrationTest {
                         )
                         VALUES (
                             ?, ?, '미리윰', '2026-08-01', ?, ?,
-                            2, 1, 1, 1, 1, 'CONFIRMED', '2026-08-01 01:00:00.000000'
+                            2, 1, 1, ?, TRUE, 1, 1, 'CONFIRMED',
+                            '2026-08-01 01:00:00.000000'
                         )
                         """,
                 CONSUMER_ACCOUNT_ID,
                 STORE_ID,
                 startTime,
-                endTime
+                endTime,
+                NOTIFICATION_TARGET_REFERENCE
+        );
+    }
+
+    private void insertReservationWithContactSnapshot(
+            String notificationTargetReference,
+            boolean contactAvailableAtConfirmation
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO reservations (
+                            consumer_account_id,
+                            store_id,
+                            store_name_snapshot,
+                            service_date,
+                            start_time,
+                            end_time,
+                            adult_count,
+                            child_count,
+                            infant_count,
+                            notification_target_reference,
+                            contact_available_at_confirmation,
+                            capacity_policy_version,
+                            reservation_policy_version,
+                            status,
+                            created_at
+                        )
+                        VALUES (
+                            ?, ?, '미리윰', '2026-08-01',
+                            '18:00:00.000000', '19:00:00.000000',
+                            2, 1, 1, ?, ?, 1, 1, 'CONFIRMED',
+                            '2026-08-01 01:00:00.000000'
+                        )
+                        """,
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                notificationTargetReference,
+                contactAvailableAtConfirmation
         );
     }
 
@@ -545,6 +649,8 @@ class ReservationMigrationTest {
                     adult_count,
                     child_count,
                     infant_count,
+                    notification_target_reference,
+                    contact_available_at_confirmation,
                     capacity_policy_version,
                     reservation_policy_version,
                     status,
@@ -554,7 +660,8 @@ class ReservationMigrationTest {
                 )
                 VALUES (
                     ?, ?, '미리윰', '2026-08-01', '18:00:00.000000', '19:00:00.000000',
-                    %d, %d, %d, %d, %d, ?, '2026-08-01 01:00:00.000000', ?, ?
+                    %d, %d, %d, ?, TRUE,
+                    %d, %d, ?, '2026-08-01 01:00:00.000000', ?, ?
                 )
                 """.formatted(
                 adultCount,

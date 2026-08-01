@@ -16,6 +16,8 @@ class ReservationTest {
 
     private static final Instant CREATED_AT = Instant.parse("2026-08-01T01:00:00Z");
     private static final Instant TERMINATED_AT = Instant.parse("2026-08-01T02:00:00Z");
+    private static final String NOTIFICATION_TARGET_REFERENCE =
+            "consumer:11:channel:primary";
 
     @Test
     @DisplayName("승인된 거래 스냅샷으로 예약을 즉시 확정한다")
@@ -31,6 +33,9 @@ class ReservationTest {
         assertThat(reservation.getStartTime()).isEqualTo(LocalTime.of(18, 0));
         assertThat(reservation.getEndTime()).isEqualTo(LocalTime.of(19, 30));
         assertThat(reservation.getParty().totalCount()).isEqualTo(3);
+        assertThat(reservation.getContactSnapshot().getNotificationTargetReference())
+                .isEqualTo(NOTIFICATION_TARGET_REFERENCE);
+        assertThat(reservation.getContactSnapshot().isContactAvailableAtConfirmation()).isTrue();
         assertThat(reservation.getCapacityPolicyVersion()).isEqualTo(3L);
         assertThat(reservation.getReservationPolicyVersion()).isEqualTo(5L);
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
@@ -212,7 +217,18 @@ class ReservationTest {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", null, LocalTime.of(18, 0), LocalTime.of(19, 30),
-                PartyComposition.of(2, 1, 0), 3L, 5L, CREATED_AT
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
+        ));
+    }
+
+    @Test
+    @DisplayName("연락 스냅샷이 없으면 예약을 확정할 수 없다")
+    void rejectsMissingContactSnapshot() {
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
+                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
+                LocalTime.of(18, 0), LocalTime.of(19, 30),
+                PartyComposition.of(2, 1, 0), null, 3L, 5L, CREATED_AT
         ));
     }
 
@@ -223,12 +239,12 @@ class ReservationTest {
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
                 LocalTime.of(18, 0), LocalTime.of(18, 0),
-                PartyComposition.of(2, 1, 0), 3L, 5L, CREATED_AT
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
         ));
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
                 LocalTime.of(18, 0), LocalTime.of(17, 30),
-                PartyComposition.of(2, 1, 0), 3L, 5L, CREATED_AT
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
         ));
     }
 
@@ -247,7 +263,11 @@ class ReservationTest {
         return Reservation.confirm(
                 consumerAccountId, storeId, storeNameSnapshot, LocalDate.of(2026, 8, 1),
                 LocalTime.of(18, 0), LocalTime.of(19, 30), PartyComposition.of(2, 1, 0),
-                capacityPolicyVersion, reservationPolicyVersion, createdAt
+                contactSnapshot(), capacityPolicyVersion, reservationPolicyVersion, createdAt
         );
+    }
+
+    private static ReservationContactSnapshot contactSnapshot() {
+        return ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE);
     }
 }
