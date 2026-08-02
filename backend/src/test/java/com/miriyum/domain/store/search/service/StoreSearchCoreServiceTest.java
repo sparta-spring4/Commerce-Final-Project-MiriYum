@@ -3,6 +3,7 @@ package com.miriyum.domain.store.search.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
@@ -104,6 +105,8 @@ class StoreSearchCoreServiceTest {
                 null,
                 0,
                 20);
+        lenient().when(repository.search(query))
+                .thenThrow(new AssertionError("예약 조건은 저장소 조회 전에 거절해야 한다"));
 
         // when & then
         assertThatThrownBy(() -> service.searchWithoutAvailability(query))
@@ -117,6 +120,8 @@ class StoreSearchCoreServiceTest {
         StoreSearchQuery query = queryWithoutReservation("UNKNOWN");
         given(catalogService.isActiveCode(CatalogKind.STORE_CATEGORY, "UNKNOWN"))
                 .willReturn(false);
+        lenient().when(repository.search(query))
+                .thenThrow(new AssertionError("비활성 카테고리는 저장소 조회 전에 거절해야 한다"));
 
         // when & then
         assertThatThrownBy(() -> service.searchWithoutAvailability(query))

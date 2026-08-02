@@ -1,11 +1,13 @@
 package com.miriyum.domain.store.search.service;
 
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;
 import com.miriyum.domain.store.search.dto.PublicStoreSummary;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import com.miriyum.domain.store.search.repository.StoreSearchCandidate;
 import com.miriyum.domain.store.search.repository.StoreSearchRepository;
+import com.miriyum.global.exception.ServiceException;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +48,8 @@ public class StoreSearchCoreService {
      * @param query 검증과 정규화를 마친 공개 매장 검색 조건
      * @return 예약 가용성을 요청하지 않은 공개 매장 요약 페이지
      * @throws IllegalStateException 예약 조건이 포함되어 2단계 가용성 계약이 필요한 경우
+     * @throws ServiceException 카테고리 코드가 미승인 또는 비활성이어서
+     *                          {@link StoreErrorCode#CATALOG_CODE_INVALID}인 경우
      */
     @Transactional(readOnly = true)
     public Page<PublicStoreSummary> searchWithoutAvailability(StoreSearchQuery query) {
