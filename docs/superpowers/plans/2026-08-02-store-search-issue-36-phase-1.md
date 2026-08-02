@@ -552,7 +552,7 @@ git commit -m "feat(search): project stores with not-requested availability"
 - Consumes: Task 4 SQL predicate
 - Produces: Store 공개 상태·이름 정렬 인덱스와 Menu 현재 게시 버전 lookup 인덱스
 
-- [ ] **Step 1: 인덱스 부재 실패 테스트를 작성한다**
+- [x] **Step 1: 인덱스 부재 실패 테스트를 작성한다**
 
 Use `JdbcTemplate` against `information_schema.statistics`:
 
@@ -570,11 +570,11 @@ void installsPublicSearchIndexesInColumnOrder() {
 
 Add an `EXPLAIN FORMAT=JSON` test for the menu-name predicate and assert the returned JSON contains `idx_menus_public_search`. Seed at least 100 non-matching menus in one batch so the optimizer has a meaningful choice.
 
-- [ ] **Step 2: repository IT를 실행해 RED를 확인한다**
+- [x] **Step 2: repository IT를 실행해 RED를 확인한다**
 
 Expected: index assertion fails because V17 does not exist.
 
-- [ ] **Step 3: V17 migration을 작성한다**
+- [x] **Step 3: V17 migration을 작성한다**
 
 ```sql
 CREATE INDEX idx_stores_public_search
@@ -586,7 +586,7 @@ CREATE INDEX idx_menus_public_search
 
 Do not edit V8 or V16.
 
-- [ ] **Step 4: Flyway clean-start와 repository IT GREEN을 확인한다**
+- [x] **Step 4: Flyway clean-start와 repository IT GREEN을 확인한다**
 
 Run:
 
@@ -596,7 +596,7 @@ Run:
 
 Expected: PASS; Flyway applies V1 through V17 on MySQL 8.0.40.
 
-- [ ] **Step 5: Task 6을 커밋한다**
+- [x] **Step 5: Task 6을 커밋한다**
 
 ```powershell
 git add -- backend/src/main/resources/db/migration/V17__add_store_search_indexes.sql backend/src/test/java/com/miriyum/domain/store/search/repository/StoreSearchRepositoryIT.java
