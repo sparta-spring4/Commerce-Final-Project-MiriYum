@@ -91,12 +91,16 @@ class StoreSearchRepositoryIT {
         publishMenu(seoul, "파스타 두번째", MenuSellingStatus.PAUSED, MenuVisibility.VISIBLE,
                 false);
         createStore("폐점 파스타", Region.SEOUL, "KOREAN", true);
+        Store wildcardDecoy = createStore("와일드카드 유사 매장", Region.BUSAN, "KOREAN", false);
+        publishMenu(wildcardDecoy, "100ABC특선", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
         createStore("부산 식당", Region.BUSAN, "KOREAN", false);
         flushAndClear();
 
         // when
         PageSnapshot byName = snapshot(query("성수", null, null, "name,asc", 0, 20));
         PageSnapshot byMenu = snapshot(query("100%_특선", null, null, "name,asc", 0, 20));
+        PageSnapshot byCommonMenu = snapshot(query("파스타", null, null, "name,asc", 0, 20));
         PageSnapshot byRegion = snapshot(query("서울", null, null, "name,asc", 0, 20));
         StoreSearchCandidate candidate = repository.search(
                 query("성수", null, null, "name,asc", 0, 20)).getContent().getFirst();
@@ -104,6 +108,8 @@ class StoreSearchRepositoryIT {
         // then
         assertThat(byName.storeIds()).containsExactly(seoul.getId());
         assertThat(byMenu.storeIds()).containsExactly(seoul.getId());
+        assertThat(byCommonMenu.storeIds()).containsExactly(seoul.getId());
+        assertThat(byCommonMenu.totalElements()).isEqualTo(1);
         assertThat(byRegion.storeIds()).containsExactly(seoul.getId());
         assertThat(byRegion.totalElements()).isEqualTo(1);
         assertThat(candidate).satisfies(found -> {
@@ -121,6 +127,50 @@ class StoreSearchRepositoryIT {
 
     @Test
     @Transactional
+    @DisplayName("승인되지 않은 매장은 공개 검색에서 제외한다")
+    void excludesUnapprovedStores() {
+        // given
+        jdbcTemplate.execute("""
+                CREATE TEMPORARY TABLE stores (
+                    store_id BIGINT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    region VARCHAR(20) NOT NULL,
+                    address VARCHAR(300) NOT NULL,
+                    store_category_code VARCHAR(50) NOT NULL,
+                    operation_status VARCHAR(30) NOT NULL,
+                    verification_status VARCHAR(20) NOT NULL,
+                    reservation_enabled BOOLEAN NOT NULL,
+                    menu_hold_enabled BOOLEAN NOT NULL,
+                    pickup_enabled BOOLEAN NOT NULL,
+                    created_at DATETIME NOT NULL
+                )
+                """);
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO stores (
+                        store_id, name, region, address, store_category_code,
+                        operation_status, verification_status,
+                        reservation_enabled, menu_hold_enabled, pickup_enabled, created_at
+                    ) VALUES
+                        (9001, '승인 매장', 'SEOUL', '주소', 'KOREAN',
+                         'OPEN', 'APPROVED', TRUE, TRUE, TRUE, '2026-08-02 09:00:00'),
+                        (9002, '비승인 매장', 'SEOUL', '주소', 'KOREAN',
+                         'OPEN', 'PENDING', TRUE, TRUE, TRUE, '2026-08-02 09:00:00')
+                    """);
+
+            // when
+            PageSnapshot result = snapshot(query(null, null, null, "name,asc", 0, 20));
+
+            // then
+            assertThat(result.storeIds()).containsExactly(9001L);
+            assertThat(result.totalElements()).isEqualTo(1);
+        } finally {
+            jdbcTemplate.execute("DROP TEMPORARY TABLE IF EXISTS stores");
+        }
+    }
+
+    @Test
+    @Transactional
     @DisplayName("현재 공개 게시 메뉴만 검색하며 판매중지와 품절 메뉴도 포함한다")
     void searchesOnlyCurrentVisiblePublishedMenusRegardlessOfSellingStatus() {
         // given
@@ -134,6 +184,7 @@ class StoreSearchRepositoryIT {
         publishMenu(store, "폐기제외키워드", MenuSellingStatus.SELLING, MenuVisibility.VISIBLE,
                 true);
         createDraftMenu(store, "초안제외키워드");
+        replacePublishedMenu(store, "과거게시제외키워드", "현재게시포함키워드");
         flushAndClear();
 
         // when
@@ -142,6 +193,10 @@ class StoreSearchRepositoryIT {
         PageSnapshot hidden = snapshot(query("숨김제외키워드", null, null, null, 0, 20));
         PageSnapshot retired = snapshot(query("폐기제외키워드", null, null, null, 0, 20));
         PageSnapshot draft = snapshot(query("초안제외키워드", null, null, null, 0, 20));
+        PageSnapshot previousPublished = snapshot(query(
+                "과거게시제외키워드", null, null, null, 0, 20));
+        PageSnapshot currentPublished = snapshot(query(
+                "현재게시포함키워드", null, null, null, 0, 20));
 
         // then
         assertThat(soldOut.storeIds()).containsExactly(store.getId());
@@ -149,6 +204,8 @@ class StoreSearchRepositoryIT {
         assertThat(hidden.storeIds()).isEmpty();
         assertThat(retired.storeIds()).isEmpty();
         assertThat(draft.storeIds()).isEmpty();
+        assertThat(previousPublished.storeIds()).isEmpty();
+        assertThat(currentPublished.storeIds()).containsExactly(store.getId());
     }
 
     @Test
@@ -243,6 +300,16 @@ class StoreSearchRepositoryIT {
     private void createDraftMenu(Store store, String name) {
         menuRepository.saveAndFlush(Menu.create(
                 store.getId(), content(name), store.getStoreOperatorAccountId(), NOW));
+    }
+
+    private void replacePublishedMenu(Store store, String previousName, String currentName) {
+        Menu menu = Menu.create(
+                store.getId(), content(previousName), store.getStoreOperatorAccountId(), NOW);
+        menu.publish(NOW.plusSeconds(1));
+        menu.appendDraft(
+                content(currentName), store.getStoreOperatorAccountId(), NOW.plusSeconds(2));
+        menu.publish(NOW.plusSeconds(3));
+        menuRepository.saveAndFlush(menu);
     }
 
     private MenuContent content(String name) {
