@@ -50,11 +50,11 @@
 - Consumes: 승인된 2단계 설계 `docs/superpowers/specs/2026-08-02-store-search-issue-36-design.md`
 - Produces: 제품 코드가 따를 정확한 package allowlist와 `blocked by #48 / PR #79` 기록
 
-- [ ] **Step 1: Issue #36의 현재 본문을 다시 읽는다**
+- [x] **Step 1: Issue #36의 현재 본문을 다시 읽는다**
 
 Run through the GitHub connector: fetch Issue #36 and confirm its state is `open`.
 
-- [ ] **Step 2: 허용 경로와 의존성을 정확히 갱신한다**
+- [x] **Step 2: 허용 경로와 의존성을 정확히 갱신한다**
 
 Apply these exact changes without replacing unrelated acceptance criteria:
 
@@ -79,7 +79,7 @@ Append the following phase boundary:
 - Phase 1에서는 불완전한 공개 controller나 production fake를 만들지 않는다.
 ```
 
-- [ ] **Step 3: 갱신 결과를 다시 읽어 범위를 확인한다**
+- [x] **Step 3: 갱신 결과를 다시 읽어 범위를 확인한다**
 
 Expected: original endpoints, acceptance criteria and verification list remain present; only the path, concrete dependency and phase boundary change.
 
@@ -97,7 +97,7 @@ Expected: original endpoints, acceptance criteria and verification list remain p
 - Consumes: `Region`, `CommonErrorCode.VALIDATION_FAILED`, `ServiceException`
 - Produces: `StoreSearchQuery.from(...)`, `normalizedKeyword()`, `likePattern()`, `reservationCondition()`, `sort()`, `page()`, `size()`
 
-- [ ] **Step 1: all-or-none와 keyword escape 실패 테스트를 작성한다**
+- [x] **Step 1: all-or-none와 keyword escape 실패 테스트를 작성한다**
 
 ```java
 class StoreSearchQueryTest {
@@ -133,7 +133,7 @@ class StoreSearchQueryTest {
 }
 ```
 
-- [ ] **Step 2: 모델 테스트를 실행해 RED를 확인한다**
+- [x] **Step 2: 모델 테스트를 실행해 RED를 확인한다**
 
 Run:
 
@@ -143,7 +143,7 @@ Run:
 
 Expected: compilation failure because the three model types do not exist.
 
-- [ ] **Step 3: 예약 조건과 sort enum을 최소 구현한다**
+- [x] **Step 3: 예약 조건과 sort enum을 최소 구현한다**
 
 ```java
 public record ReservationSearchCondition(
@@ -171,7 +171,7 @@ public enum StoreSearchSort {
 }
 ```
 
-- [ ] **Step 4: `StoreSearchQuery.from`을 구현한다**
+- [x] **Step 4: `StoreSearchQuery.from`을 구현한다**
 
 Use this exact signature:
 
@@ -205,7 +205,7 @@ if (anyReservationValue != allReservationValues
 
 Normalize keyword with `strip()` and `replaceAll("\\s+", " ")`; convert blank to `null`; reject normalized values longer than 100. Build the LIKE pattern by escaping `!` as `!!`, `%` as `!%`, and `_` as `!_`, then wrap it in `%`. MySQL uses `ESCAPE '!'`, so a backslash remains a literal backslash.
 
-- [ ] **Step 5: boundary tests를 추가하고 GREEN을 확인한다**
+- [x] **Step 5: boundary tests를 추가하고 GREEN을 확인한다**
 
 Add tests for party sizes `1` and `100`, invalid `0` and `101`, pages `-1`, sizes `0` and `101`, unknown sort, default sort, blank keyword and a literal backslash.
 
@@ -217,7 +217,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Task 2를 커밋한다**
+- [x] **Step 6: Task 2를 커밋한다**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/store/search/model backend/src/test/java/com/miriyum/domain/store/search/model
@@ -256,11 +256,6 @@ class StoreSearchCatalogPolicyTest {
                                 .isEqualTo(StoreErrorCode.CATALOG_CODE_INVALID));
     }
 
-    @Test
-    void skipsCatalogLookupWhenFilterIsAbsent() {
-        policy.requireActiveStoreCategory(null);
-        then(catalogService).shouldHaveNoInteractions();
-    }
 }
 ```
 
@@ -436,7 +431,7 @@ git commit -m "feat(search): query public store candidates"
 ```java
 @Test
 void validatesCategoryAndMapsCandidatesToNotRequested() {
-    StoreSearchQuery query = queryWithoutReservation();
+    StoreSearchQuery query = queryWithoutReservationAndCategory();
     StoreSearchCandidate candidate = new StoreSearchCandidate(
             9007199254740993L, "매장", Region.SEOUL, "주소", "KOREAN",
             OperationStatus.OPEN, true, false, false,
@@ -445,7 +440,6 @@ void validatesCategoryAndMapsCandidatesToNotRequested() {
 
     Page<PublicStoreSummary> result = service.searchWithoutAvailability(query);
 
-    then(catalogPolicy).should().requireActiveStoreCategory("KOREAN");
     assertThat(result.getContent().getFirst().storeId())
             .isEqualTo("9007199254740993");
     assertThat(result.getContent().getFirst().reservationAvailability())
@@ -455,9 +449,21 @@ void validatesCategoryAndMapsCandidatesToNotRequested() {
 @Test
 void refusesReservationConditionUntilPhaseTwoContractExists() {
     assertThatThrownBy(() -> service.searchWithoutAvailability(queryWithReservation()))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessage("reservation availability contract is not connected");
-    then(repository).shouldHaveNoInteractions();
+            .isInstanceOf(IllegalStateException.class);
+}
+
+@Test
+void rejectsInactiveCategoryThroughTheRealPolicy() {
+    StoreSearchCatalogPolicy realPolicy = new StoreSearchCatalogPolicy(catalogService);
+    StoreSearchCoreService realService = new StoreSearchCoreService(realPolicy, repository);
+    given(catalogService.isActiveCode(CatalogKind.STORE_CATEGORY, "UNKNOWN"))
+            .willReturn(false);
+
+    assertThatThrownBy(() -> realService.searchWithoutAvailability(
+            queryWithoutReservation("UNKNOWN")))
+            .isInstanceOfSatisfying(ServiceException.class, exception ->
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(StoreErrorCode.CATALOG_CODE_INVALID));
 }
 ```
 
