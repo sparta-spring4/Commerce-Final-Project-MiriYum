@@ -74,16 +74,33 @@ public record StoreSearchQuery(
         if (keyword == null) {
             return null;
         }
-        String normalized = keyword.strip()
-                .replaceAll("\\p{javaWhitespace}+", " ")
-                .toLowerCase(Locale.ROOT);
+        String normalized = collapseWhitespace(keyword).toLowerCase(Locale.ROOT);
         if (normalized.isBlank()) {
             return null;
         }
-        if (normalized.length() > MAX_KEYWORD_LENGTH) {
+        if (normalized.codePointCount(0, normalized.length()) > MAX_KEYWORD_LENGTH) {
             throw validationFailed();
         }
         return normalized;
+    }
+
+    private static String collapseWhitespace(String value) {
+        StringBuilder normalized = new StringBuilder(value.length());
+        boolean pendingSpace = false;
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+                pendingSpace = normalized.length() > 0;
+                continue;
+            }
+            if (pendingSpace) {
+                normalized.append(' ');
+                pendingSpace = false;
+            }
+            normalized.appendCodePoint(codePoint);
+        }
+        return normalized.toString();
     }
 
     private static String toLikePattern(String keyword) {

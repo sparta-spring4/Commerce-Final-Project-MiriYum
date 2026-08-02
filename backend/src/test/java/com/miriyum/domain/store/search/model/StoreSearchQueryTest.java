@@ -8,6 +8,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 class StoreSearchQueryTest {
@@ -25,6 +26,21 @@ class StoreSearchQueryTest {
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.VALIDATION_FAILED));
+    }
+
+    @Test
+    void rejectsEveryPartialReservationConditionCombination() {
+        // given
+        LocalDate date = LocalDate.of(2026, 8, 3);
+        LocalTime time = LocalTime.of(18, 30);
+
+        // when & then
+        assertValidationFailed(() -> reservationQuery(date, null, null));
+        assertValidationFailed(() -> reservationQuery(null, time, null));
+        assertValidationFailed(() -> reservationQuery(null, null, 2));
+        assertValidationFailed(() -> reservationQuery(date, time, null));
+        assertValidationFailed(() -> reservationQuery(date, null, 2));
+        assertValidationFailed(() -> reservationQuery(null, time, 2));
     }
 
     @Test
@@ -103,6 +119,21 @@ class StoreSearchQueryTest {
     }
 
     @Test
+    void acceptsPageSizeBoundaries() {
+        // when
+        StoreSearchQuery minimum = StoreSearchQuery.from(
+                null, null, null, null, null, null,
+                false, "name,asc", 0, 1);
+        StoreSearchQuery maximum = StoreSearchQuery.from(
+                null, null, null, null, null, null,
+                false, "name,asc", 0, 100);
+
+        // then
+        assertThat(minimum.size()).isEqualTo(1);
+        assertThat(maximum.size()).isEqualTo(100);
+    }
+
+    @Test
     void acceptsOnlyDocumentedSortValuesAndDefaultsToNameAscending() {
         // when
         StoreSearchQuery defaultSort = queryWithSort(null);
@@ -116,6 +147,21 @@ class StoreSearchQueryTest {
         assertThat(createdDescending.sort()).isEqualTo(StoreSearchSort.CREATED_AT_DESC);
         assertThat(createdAscending.sort()).isEqualTo(StoreSearchSort.CREATED_AT_ASC);
         assertValidationFailed(() -> queryWithSort("storeId,desc"));
+        assertValidationFailed(() -> queryWithSort(""));
+        assertValidationFailed(() -> queryWithSort("   "));
+    }
+
+    @Test
+    void exposesOnlyFixedOrderClausesWithStoreIdTieBreaker() {
+        // when & then
+        assertThat(StoreSearchSort.NAME_ASC.orderByClause())
+                .isEqualTo("s.name ASC, s.store_id ASC");
+        assertThat(StoreSearchSort.NAME_DESC.orderByClause())
+                .isEqualTo("s.name DESC, s.store_id ASC");
+        assertThat(StoreSearchSort.CREATED_AT_DESC.orderByClause())
+                .isEqualTo("s.created_at DESC, s.store_id ASC");
+        assertThat(StoreSearchSort.CREATED_AT_ASC.orderByClause())
+                .isEqualTo("s.created_at ASC, s.store_id ASC");
     }
 
     @Test
@@ -132,12 +178,54 @@ class StoreSearchQueryTest {
     }
 
     @Test
+    void collapsesUnicodeSpaceCharactersIntoOneAsciiSpace() {
+        // given
+        String keyword = "\u00A0서울\u2007\u202F카페\u00A0";
+
+        // when
+        StoreSearchQuery query = queryWithKeyword(keyword);
+
+        // then
+        assertThat(query.normalizedKeyword()).isEqualTo("서울 카페");
+    }
+
+    @Test
     void rejectsNormalizedKeywordLongerThanOneHundredCharacters() {
         // given
         String keyword = "가".repeat(101);
 
         // when & then
         assertValidationFailed(() -> queryWithKeyword(keyword));
+    }
+
+    @Test
+    void measuresKeywordLengthByUnicodeCodePoint() {
+        // given
+        String oneHundredEmoji = "😀".repeat(100);
+        String oneHundredOneEmoji = "😀".repeat(101);
+
+        // when
+        StoreSearchQuery accepted = queryWithKeyword(oneHundredEmoji);
+
+        // then
+        assertThat(accepted.normalizedKeyword()).isEqualTo(oneHundredEmoji);
+        assertValidationFailed(() -> queryWithKeyword(oneHundredOneEmoji));
+    }
+
+    @Test
+    void lowercasesKeywordIndependentlyFromDefaultLocale() {
+        // given
+        Locale previous = Locale.getDefault();
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+        try {
+            // when
+            StoreSearchQuery query = queryWithKeyword("I CAFE");
+
+            // then
+            assertThat(query.normalizedKeyword()).isEqualTo("i cafe");
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 
     private static StoreSearchQuery queryWithSort(String sort) {
@@ -149,6 +237,16 @@ class StoreSearchQueryTest {
     private static StoreSearchQuery queryWithKeyword(String keyword) {
         return StoreSearchQuery.from(
                 keyword, null, null, null, null, null,
+                false, "name,asc", 0, 20);
+    }
+
+    private static StoreSearchQuery reservationQuery(
+            LocalDate date,
+            LocalTime time,
+            Integer partySize
+    ) {
+        return StoreSearchQuery.from(
+                null, null, null, date, time, partySize,
                 false, "name,asc", 0, 20);
     }
 

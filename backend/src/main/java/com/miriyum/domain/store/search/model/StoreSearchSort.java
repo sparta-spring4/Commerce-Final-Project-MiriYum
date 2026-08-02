@@ -22,7 +22,7 @@ public enum StoreSearchSort {
     }
 
     public static StoreSearchSort parse(String value) {
-        String resolved = value == null || value.isBlank() ? "name,asc" : value;
+        String resolved = value == null ? "name,asc" : value;
         return Arrays.stream(values())
                 .filter(candidate -> candidate.externalValue.equals(resolved))
                 .findFirst()
