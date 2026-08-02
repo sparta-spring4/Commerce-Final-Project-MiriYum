@@ -180,7 +180,7 @@ class StoreSearchQueryTest {
     @Test
     void collapsesUnicodeSpaceCharactersIntoOneAsciiSpace() {
         // given
-        String keyword = "\u00A0서울\u2007\u202F카페\u00A0";
+        String keyword = "\u00A0서울\u0085\u2007\u202F카페\u00A0";
 
         // when
         StoreSearchQuery query = queryWithKeyword(keyword);

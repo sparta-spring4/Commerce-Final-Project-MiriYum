@@ -90,7 +90,7 @@ public record StoreSearchQuery(
         for (int offset = 0; offset < value.length();) {
             int codePoint = value.codePointAt(offset);
             offset += Character.charCount(codePoint);
-            if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+            if (isUnicodeWhitespace(codePoint)) {
                 pendingSpace = normalized.length() > 0;
                 continue;
             }
@@ -101,6 +101,12 @@ public record StoreSearchQuery(
             normalized.appendCodePoint(codePoint);
         }
         return normalized.toString();
+    }
+
+    private static boolean isUnicodeWhitespace(int codePoint) {
+        return codePoint == 0x0085
+                || Character.isWhitespace(codePoint)
+                || Character.isSpaceChar(codePoint);
     }
 
     private static String toLikePattern(String keyword) {
