@@ -474,9 +474,30 @@ paths:
         "409":
           $ref: "#/components/responses/SchedulePublicationConflict"
   /api/v1/store-operator/stores/{storeId}/menus:
+    get:
+      tags: [Store Management]
+      summary: 관리용 메뉴 목록 조회
+      operationId: listManagedMenus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 관리용 메뉴 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuListSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
     post:
       tags: [Store Management]
-      summary: 메뉴 기본정보 등록
+      summary: 메뉴 초안 등록
       operationId: createMenu
       security:
         - bearerAuth: []
@@ -502,12 +523,36 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/MenuStateConflict"
   /api/v1/store-operator/stores/{storeId}/menus/{menuId}:
+    get:
+      tags: [Store Management]
+      summary: 관리용 메뉴 상세 조회
+      operationId: getManagedMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+      responses:
+        "200":
+          description: 관리용 메뉴 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
     put:
       tags: [Store Management]
-      summary: 메뉴 기본정보와 상태의 새 버전 등록
+      summary: 메뉴 내용을 수정해 새 초안 등록
       operationId: updateMenu
       security:
         - bearerAuth: []
@@ -524,6 +569,178 @@ paths:
       responses:
         "200":
           description: 수정된 메뉴 버전
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication:
+    post:
+      tags: [Store Management]
+      summary: 메뉴 초안 즉시 게시 또는 예약 게시
+      operationId: publishMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuPublicationRequest"
+      responses:
+        "200":
+          description: 게시 상태가 변경된 메뉴
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication-cancellation:
+    post:
+      tags: [Store Management]
+      summary: 메뉴 예약 게시 취소
+      description: 예약 이후 생성한 활성 초안이 이미 있으면 최신 초안을 보존하기 위해 STORE_010 충돌로 거부한다.
+      operationId: cancelMenuPublication
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuChangeReasonRequest"
+      responses:
+        "200":
+          description: 예약 버전이 같은 버전 번호의 초안으로 복귀한 메뉴
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}/visibility:
+    patch:
+      tags: [Store Management]
+      summary: 메뉴 공개 노출 상태 변경
+      operationId: changeMenuVisibility
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuVisibilityRequest"
+      responses:
+        "200":
+          description: 노출 상태가 변경된 메뉴
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status:
+    patch:
+      tags: [Store Management]
+      summary: 메뉴 판매 상태 변경
+      description: 일반 메뉴의 SOLD_OUT은 운영자가 수동 변경한다. 홀드 메뉴의 자동 품절·복구는 중앙 수량 도메인의 확정 결과만 사용한다.
+      operationId: changeMenuSellingStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuSellingStatusRequest"
+      responses:
+        "200":
+          description: 판매 상태가 변경된 메뉴
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedMenuSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operator/stores/{storeId}/menus/{menuId}/retirement:
+    post:
+      tags: [Store Management]
+      summary: 메뉴 운영 종료
+      operationId: retireMenu
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuChangeReasonRequest"
+      responses:
+        "200":
+          description: 운영 종료된 메뉴
           content:
             application/json:
               schema:
@@ -790,20 +1007,163 @@ components:
           type: boolean
         saleStatus:
           type: string
-          enum: [SELLING, PAUSED]
+          enum: [SELLING, SOLD_OUT, PAUSED]
     ManagedMenu:
       type: object
       additionalProperties: false
-      required: [menu, versionStatus, visibility]
+      required: [menuId, storeId, visibility, sellingStatus, retired]
       properties:
-        menu:
-          $ref: "#/components/schemas/PublicMenu"
-        versionStatus:
-          type: string
-          enum: [DRAFT, SCHEDULED, PUBLISHED, RETIRED]
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         visibility:
           type: string
           enum: [VISIBLE, HIDDEN]
+        sellingStatus:
+          type: string
+          enum: [SELLING, SOLD_OUT, PAUSED]
+          description: 판매 중, 일시 품절, 운영자 판매 중지를 구분한다.
+        retired:
+          type: boolean
+        draft:
+          oneOf:
+            - $ref: "#/components/schemas/MenuVersion"
+            - type: "null"
+        scheduled:
+          oneOf:
+            - $ref: "#/components/schemas/MenuVersion"
+            - type: "null"
+        published:
+          oneOf:
+            - $ref: "#/components/schemas/MenuVersion"
+            - type: "null"
+    MenuVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - versionNumber
+        - status
+        - name
+        - description
+        - price
+        - representative
+        - primaryCategoryCode
+        - secondaryCategoryCodes
+        - localTags
+        - holdSelectionAllowed
+        - pickupSelectionAllowed
+        - allergenInformationStatus
+        - allergenDisclosures
+        - originInformationStatus
+        - originDisclosures
+        - alcoholic
+      properties:
+        versionNumber:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [DRAFT, SCHEDULED, PUBLISHED, RETIRED]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          type: integer
+          minimum: 0
+          maximum: 2000000000
+        representative:
+          type: boolean
+        primaryCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        secondaryCategoryCodes:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/CatalogCode"
+        localTags:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+        holdSelectionAllowed:
+          type: boolean
+        pickupSelectionAllowed:
+          type: boolean
+        allergenInformationStatus:
+          $ref: "#/components/schemas/DisclosureRegistrationStatus"
+        allergenDisclosures:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/AllergenDisclosure"
+        originInformationStatus:
+          $ref: "#/components/schemas/DisclosureRegistrationStatus"
+        originDisclosures:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/OriginDisclosure"
+        alcoholic:
+          type: boolean
+        effectiveAt:
+          type: [string, "null"]
+          format: date-time
+    DisclosureRegistrationStatus:
+      type: string
+      enum: [REGISTERED, NOT_REGISTERED, NOT_APPLICABLE]
+      description: 알레르기는 REGISTERED와 초안의 NOT_REGISTERED만 허용하며 REGISTERED 게시에는 최소 1개 항목이 필요하다. NOT_APPLICABLE은 원산지에만 사용한다.
+    AllergenDisclosure:
+      type: object
+      additionalProperties: false
+      required: [ingredientCode, status]
+      properties:
+        ingredientCode:
+          type: string
+          enum:
+            - EGG
+            - MILK
+            - BUCKWHEAT
+            - PEANUT
+            - SOYBEAN
+            - WHEAT
+            - MACKEREL
+            - CRAB
+            - SHRIMP
+            - PORK
+            - PEACH
+            - TOMATO
+            - SULFITES
+            - WALNUT
+            - CHICKEN
+            - BEEF
+            - SQUID
+            - SHELLFISH
+            - PINE_NUT
+        status:
+          type: string
+          enum: [CONTAINS, MAY_CONTAIN]
+    OriginDisclosure:
+      type: object
+      additionalProperties: false
+      required: [ingredient, origin]
+      properties:
+        ingredient:
+          type: string
+          minLength: 1
+          maxLength: 100
+        origin:
+          type: string
+          minLength: 1
+          maxLength: 200
     CatalogItem:
       type: object
       additionalProperties: false
@@ -1040,11 +1400,13 @@ components:
         - primaryCategoryCode
         - secondaryCategoryCodes
         - localTags
-        - holdEnabled
-        - pickupEnabled
-        - versionStatus
-        - visibility
-        - saleStatus
+        - holdSelectionAllowed
+        - pickupSelectionAllowed
+        - allergenInformationStatus
+        - allergenDisclosures
+        - originInformationStatus
+        - originDisclosures
+        - alcoholic
       properties:
         name:
           type: string
@@ -1055,8 +1417,8 @@ components:
           maxLength: 1000
         price:
           type: integer
-          format: int64
           minimum: 0
+          maximum: 2000000000
         representative:
           type: boolean
         primaryCategoryCode:
@@ -1075,19 +1437,98 @@ components:
             type: string
             minLength: 1
             maxLength: 30
-        holdEnabled:
+        holdSelectionAllowed:
           type: boolean
-        pickupEnabled:
+        pickupSelectionAllowed:
           type: boolean
-        versionStatus:
+        allergenInformationStatus:
+          $ref: "#/components/schemas/DisclosureRegistrationStatus"
+        allergenDisclosures:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/AllergenDisclosure"
+        originInformationStatus:
+          $ref: "#/components/schemas/DisclosureRegistrationStatus"
+        originDisclosures:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/OriginDisclosure"
+        alcoholic:
+          type: boolean
+      allOf:
+        - if:
+            properties:
+              allergenInformationStatus:
+                const: REGISTERED
+          then:
+            properties:
+              allergenDisclosures:
+                minItems: 1
+    MenuPublicationRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, changeReason]
+      properties:
+        mode:
           type: string
-          enum: [DRAFT, SCHEDULED, PUBLISHED, RETIRED]
+          enum: [IMMEDIATE, SCHEDULED]
+        effectiveAt:
+          type: [string, "null"]
+          format: date-time
+          description: SCHEDULED일 때 필수이며 미래 시각이어야 한다. IMMEDIATE일 때는 보내지 않는다.
+        changeReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      allOf:
+        - if:
+            properties:
+              mode:
+                const: SCHEDULED
+          then:
+            required: [effectiveAt]
+        - if:
+            properties:
+              mode:
+                const: IMMEDIATE
+          then:
+            not:
+              required: [effectiveAt]
+    MenuChangeReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [changeReason]
+      properties:
+        changeReason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    MenuVisibilityRequest:
+      type: object
+      additionalProperties: false
+      required: [visibility, changeReason]
+      properties:
         visibility:
           type: string
           enum: [VISIBLE, HIDDEN]
-        saleStatus:
+        changeReason:
           type: string
-          enum: [SELLING, PAUSED]
+          minLength: 1
+          maxLength: 500
+    MenuSellingStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [sellingStatus, changeReason]
+      properties:
+        sellingStatus:
+          type: string
+          enum: [SELLING, SOLD_OUT, PAUSED]
+        changeReason:
+          type: string
+          minLength: 1
+          maxLength: 500
     StorePageData:
       type: object
       additionalProperties: false
@@ -1254,6 +1695,19 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/ManagedMenu"
+    ManagedMenuListSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManagedMenu"
   responses:
     StoreNotFound:
       description: 매장을 찾을 수 없음

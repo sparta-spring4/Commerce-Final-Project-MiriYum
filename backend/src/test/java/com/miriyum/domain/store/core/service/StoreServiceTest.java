@@ -201,6 +201,22 @@ class StoreServiceTest {
     }
 
     @Test
+    void menuMutationAuthorityReturnsLockedStorePickupEligibility() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+
+        StoreMenuAuthority authority =
+                storeService.requireMenuMutationAuthority(OPERATOR_ID, STORE_ID);
+
+        assertThat(authority)
+                .isEqualTo(new StoreMenuAuthority(
+                        STORE_ID,
+                        com.miriyum.domain.store.core.enums.PickupEligibility.ELIGIBLE));
+    }
+
+    @Test
     void scheduledActivationDecisionAllowsApprovedStoreWithoutOperatorIdentity() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);

@@ -34,3 +34,9 @@ miriyum:
     csrf-preparation:
       max-requests: ${MIRIYUM_RATE_LIMIT_CSRF_PREPARATION_MAX_REQUESTS:60}
       window-seconds: ${MIRIYUM_RATE_LIMIT_CSRF_PREPARATION_WINDOW_SECONDS:60}
+  menu:
+    schedule:
+      enabled: ${MIRIYUM_MENU_SCHEDULE_ENABLED:true}
+      batch-size: ${MIRIYUM_MENU_SCHEDULE_BATCH_SIZE:50}
+      fixed-delay-ms: ${MIRIYUM_MENU_SCHEDULE_FIXED_DELAY_MS:5000}
+      initial-delay-ms: ${MIRIYUM_MENU_SCHEDULE_INITIAL_DELAY_MS:5000}

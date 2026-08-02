@@ -161,6 +161,25 @@ public class StoreService {
         return scheduleAuthority(store);
     }
 
+    /**
+     * 메뉴 신규 명령을 위해 Store 행을 잠그고 현재 운영 가능 상태를 검증한다.
+     *
+     * @param operatorAccountId 인증된 매장 운영자 계정 식별자
+     * @param storeId 대상 매장 식별자
+     * @return 메뉴 콘텐츠 검증에 필요한 중앙 매장 판정
+     * @throws ServiceException 소유권이 없거나 현재 매장 상태에서 메뉴를 변경할 수 없는 경우
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreMenuAuthority requireMenuMutationAuthority(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+        requireScheduleState(store);
+        return new StoreMenuAuthority(store.getId(), store.getPickupEligibility());
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreScheduledActivationDecision inspectScheduledActivation(
             long storeId
