@@ -426,7 +426,7 @@ git commit -m "feat(search): query public store candidates"
 - Consumes: `StoreSearchCatalogPolicy.requireActiveStoreCategory`, `StoreSearchRepository.search`
 - Produces: `Page<PublicStoreSummary> searchWithoutAvailability(StoreSearchQuery query)`
 
-- [ ] **Step 1: service 조정 실패 테스트를 작성한다**
+- [x] **Step 1: service 조정 실패 테스트를 작성한다**
 
 ```java
 @Test
@@ -467,11 +467,11 @@ void rejectsInactiveCategoryThroughTheRealPolicy() {
 }
 ```
 
-- [ ] **Step 2: service 테스트 RED를 확인한다**
+- [x] **Step 2: service 테스트 RED를 확인한다**
 
 Run the Task 5 test class. Expected: compilation failure because DTOs and service do not exist.
 
-- [ ] **Step 3: DTO를 구현한다**
+- [x] **Step 3: DTO를 구현한다**
 
 ```java
 public enum ReservationAvailability {
@@ -504,7 +504,7 @@ public record PublicStoreSummary(
 }
 ```
 
-- [ ] **Step 4: 읽기 service를 구현한다**
+- [x] **Step 4: 읽기 service를 구현한다**
 
 ```java
 @Service
@@ -523,7 +523,7 @@ public class StoreSearchCoreService {
 
 `toSummary` must use `Long.toString(candidate.storeId())`, preserve the candidate fields, create `PublicStoreModes`, and set `ReservationAvailability.NOT_REQUESTED` unconditionally.
 
-- [ ] **Step 5: service와 Phase 1 unit 회귀를 실행한다**
+- [x] **Step 5: service와 Phase 1 unit 회귀를 실행한다**
 
 Run:
 
@@ -533,7 +533,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Task 5를 커밋한다**
+- [x] **Step 6: Task 5를 커밋한다**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/store/search/dto backend/src/main/java/com/miriyum/domain/store/search/service/StoreSearchCoreService.java backend/src/test/java/com/miriyum/domain/store/search/service/StoreSearchCoreServiceTest.java
