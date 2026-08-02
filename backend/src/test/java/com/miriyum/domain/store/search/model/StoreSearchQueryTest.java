@@ -9,6 +9,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Locale;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class StoreSearchQueryTest {
@@ -226,6 +227,41 @@ class StoreSearchQueryTest {
         } finally {
             Locale.setDefault(previous);
         }
+    }
+
+    @Test
+    @DisplayName("직접 생성해도 검색 조건 불변식을 우회할 수 없다")
+    void rejectsDirectConstructionThatBypassesValidatedQueryInvariants() {
+        // when & then
+        assertValidationFailed(() -> new StoreSearchQuery(
+                null, null, null, null, null,
+                true, StoreSearchSort.NAME_ASC, 0, 20));
+        assertValidationFailed(() -> new StoreSearchQuery(
+                null, null, null, null, null,
+                false, StoreSearchSort.NAME_ASC, -1, 20));
+        assertValidationFailed(() -> new StoreSearchQuery(
+                null, null, null, null, null,
+                false, null, 0, 20));
+        assertValidationFailed(() -> new StoreSearchQuery(
+                "cafe", "%ca_e%", null, null, null,
+                false, StoreSearchSort.NAME_ASC, 0, 20));
+        assertValidationFailed(() -> new StoreSearchQuery(
+                " CAFE ", "% CAFE %", null, null, null,
+                false, StoreSearchSort.NAME_ASC, 0, 20));
+    }
+
+    @Test
+    @DisplayName("예약 조건을 직접 생성해도 필수값과 인원 범위를 검증한다")
+    void rejectsInvalidDirectReservationConditionConstruction() {
+        // given
+        LocalDate date = LocalDate.of(2026, 8, 3);
+        LocalTime time = LocalTime.of(18, 30);
+
+        // when & then
+        assertValidationFailed(() -> new ReservationSearchCondition(null, time, 2));
+        assertValidationFailed(() -> new ReservationSearchCondition(date, null, 2));
+        assertValidationFailed(() -> new ReservationSearchCondition(date, time, 0));
+        assertValidationFailed(() -> new ReservationSearchCondition(date, time, 101));
     }
 
     private static StoreSearchQuery queryWithSort(String sort) {
