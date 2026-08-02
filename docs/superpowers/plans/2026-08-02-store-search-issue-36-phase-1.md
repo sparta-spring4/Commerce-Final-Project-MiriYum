@@ -236,7 +236,7 @@ git commit -m "feat(search): validate public store search criteria"
 - Consumes: `CatalogService.isActiveCode(CatalogKind.STORE_CATEGORY, code)`
 - Produces: `void requireActiveStoreCategory(String code)`; `null` means no filter, inactive value throws `STORE_004`
 
-- [ ] **Step 1: catalog mapping 실패 테스트를 작성한다**
+- [x] **Step 1: catalog mapping 실패 테스트를 작성한다**
 
 ```java
 @ExtendWith(MockitoExtension.class)
@@ -259,7 +259,7 @@ class StoreSearchCatalogPolicyTest {
 }
 ```
 
-- [ ] **Step 2: 테스트를 실행해 RED를 확인한다**
+- [x] **Step 2: 테스트를 실행해 RED를 확인한다**
 
 Run:
 
@@ -269,7 +269,7 @@ Run:
 
 Expected: compilation failure because `StoreSearchCatalogPolicy` does not exist.
 
-- [ ] **Step 3: 정책 service를 구현한다**
+- [x] **Step 3: 정책 service를 구현한다**
 
 ```java
 @Component
@@ -287,11 +287,11 @@ public class StoreSearchCatalogPolicy {
 }
 ```
 
-- [ ] **Step 4: 정책 테스트 GREEN을 확인한다**
+- [x] **Step 4: 정책 테스트 GREEN을 확인한다**
 
 Run the Task 3 test class. Expected: PASS.
 
-- [ ] **Step 5: Task 3을 커밋한다**
+- [x] **Step 5: Task 3을 커밋한다**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/store/search/service/StoreSearchCatalogPolicy.java backend/src/test/java/com/miriyum/domain/store/search/service/StoreSearchCatalogPolicyTest.java
