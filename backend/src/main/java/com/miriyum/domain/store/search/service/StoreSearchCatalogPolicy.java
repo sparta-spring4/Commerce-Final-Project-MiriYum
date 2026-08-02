@@ -18,6 +18,15 @@ public class StoreSearchCatalogPolicy {
         this.catalogService = catalogService;
     }
 
+    /**
+     * 선택된 매장 주 카테고리 코드가 현재 활성 카탈로그 코드인지 확인한다.
+     *
+     * <p>{@code null}은 카테고리 필터가 없는 검색으로 간주해 검증을 생략한다.</p>
+     *
+     * @param code 검증할 불투명 매장 카테고리 코드 또는 필터가 없으면 {@code null}
+     * @throws ServiceException 코드가 미승인 또는 비활성이면
+     *                          {@link StoreErrorCode#CATALOG_CODE_INVALID}
+     */
     public void requireActiveStoreCategory(String code) {
         if (code == null) {
             return;
