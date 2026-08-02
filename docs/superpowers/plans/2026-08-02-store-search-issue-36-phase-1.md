@@ -615,7 +615,7 @@ git commit -m "perf(search): index public store candidate queries"
 - Consumes: Tasks 1–6 committed outputs
 - Produces: reviewable Phase 1 branch with no incomplete HTTP API
 
-- [ ] **Step 1: Phase 1 집중 테스트를 실행한다**
+- [x] **Step 1: Phase 1 집중 테스트를 실행한다**
 
 ```powershell
 .\gradlew.bat test --tests "com.miriyum.domain.store.search.*"
@@ -623,7 +623,7 @@ git commit -m "perf(search): index public store candidate queries"
 
 Expected: PASS, failures 0, errors 0, skipped 0.
 
-- [ ] **Step 2: Store/Menu 기존 회귀 테스트를 실행한다**
+- [x] **Step 2: Store/Menu 기존 회귀 테스트를 실행한다**
 
 ```powershell
 .\gradlew.bat test --tests "com.miriyum.domain.store.core.*" --tests "com.miriyum.domain.store.menu.*"
@@ -631,7 +631,7 @@ Expected: PASS, failures 0, errors 0, skipped 0.
 
 Expected: PASS, failures 0, errors 0, skipped 0.
 
-- [ ] **Step 3: 전체 backend 검증을 실행한다**
+- [x] **Step 3: 전체 backend 검증을 실행한다**
 
 ```powershell
 .\gradlew.bat clean build
@@ -639,7 +639,7 @@ Expected: PASS, failures 0, errors 0, skipped 0.
 
 Run with process monitoring rather than a short command timeout. Expected: `BUILD SUCCESSFUL`; record exact test, failure, error and skipped totals from `build/test-results/test/TEST-*.xml`.
 
-- [ ] **Step 4: 범위와 whitespace를 검증한다**
+- [x] **Step 4: 범위와 whitespace를 검증한다**
 
 ```powershell
 git diff --check origin/dev...HEAD
@@ -656,7 +656,7 @@ docs/superpowers/specs/2026-08-02-store-search-issue-36-design.md
 docs/superpowers/plans/2026-08-02-store-search-issue-36-phase-1.md
 ```
 
-- [ ] **Step 5: forbidden dependency scan을 실행한다**
+- [x] **Step 5: forbidden dependency scan을 실행한다**
 
 ```powershell
 rg -n "domain\.reservation\.(entity|repository)|domain\.menuhold\.(entity|repository)|QueryDSL|OpenSearch|Meilisearch" backend/src/main/java/com/miriyum/domain/store/search
@@ -664,7 +664,7 @@ rg -n "domain\.reservation\.(entity|repository)|domain\.menuhold\.(entity|reposi
 
 Expected: no matches.
 
-- [ ] **Step 6: 계획 체크박스와 검증 증거를 커밋한다**
+- [x] **Step 6: 계획 체크박스와 검증 증거를 커밋한다**
 
 ```powershell
 git add -- docs/superpowers/plans/2026-08-02-store-search-issue-36-phase-1.md
