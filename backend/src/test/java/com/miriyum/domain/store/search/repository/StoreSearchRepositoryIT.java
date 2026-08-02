@@ -27,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -248,6 +249,64 @@ class StoreSearchRepositoryIT {
         assertThat(secondPage.totalElements()).isEqualTo(3);
     }
 
+    @Test
+    @DisplayName("공개 매장 검색 인덱스를 계획된 열 순서로 설치한다")
+    void installsPublicSearchIndexesInColumnOrder() {
+        // when
+        List<String> storeIndexColumns = indexColumns("idx_stores_public_search");
+        List<String> menuIndexColumns = indexColumns("idx_menus_public_search");
+
+        // then
+        assertThat(storeIndexColumns)
+                .containsExactly("verification_status", "name", "store_id");
+        assertThat(menuIndexColumns)
+                .containsExactly(
+                        "store_id", "retired", "visibility", "published_version_number");
+    }
+
+    @Test
+    @DisplayName("현재 공개 메뉴 조회 실행계획에서 복합 인덱스를 사용한다")
+    void usesPublicMenuSearchIndexForCurrentPublishedLookup() {
+        // given
+        Store targetStore = createStore("실행계획 대상", Region.SEOUL, "KOREAN", false);
+        try {
+            String insertSql = """
+                    INSERT INTO menus (
+                        store_id, next_version_number, draft_version_number,
+                        scheduled_version_number, published_version_number,
+                        visibility, selling_status, retired, lock_version, created_at, updated_at
+                    ) VALUES (?, 2, NULL, NULL, 1, ?, 'SELLING', FALSE, 0, NOW(6), NOW(6))
+                    """;
+            List<Object[]> nonMatchingMenus = IntStream.range(0, 100)
+                    .mapToObj(index -> new Object[]{targetStore.getId(), "HIDDEN"})
+                    .toList();
+            jdbcTemplate.batchUpdate(insertSql, nonMatchingMenus);
+            jdbcTemplate.update(insertSql, targetStore.getId(), "VISIBLE");
+            jdbcTemplate.execute("ANALYZE TABLE menus");
+
+            // when
+            String executionPlan = jdbcTemplate.queryForObject("""
+                    EXPLAIN FORMAT=JSON
+                    SELECT m.published_version_number
+                    FROM menus m
+                    WHERE m.store_id = ?
+                      AND m.retired = FALSE
+                      AND m.visibility = 'VISIBLE'
+                      AND m.published_version_number IS NOT NULL
+                    """, String.class, targetStore.getId());
+
+            // then
+            assertThat(executionPlan)
+                    .contains("\"key\": \"idx_menus_public_search\"");
+        } finally {
+            jdbcTemplate.update("DELETE FROM menus WHERE store_id = ?", targetStore.getId());
+            jdbcTemplate.update("DELETE FROM stores WHERE store_id = ?", targetStore.getId());
+            jdbcTemplate.update(
+                    "DELETE FROM store_operator_accounts WHERE store_operator_account_id = ?",
+                    targetStore.getStoreOperatorAccountId());
+        }
+    }
+
     private Store createStore(
             String name,
             Region region,
@@ -354,6 +413,17 @@ class StoreSearchRepositoryIT {
     private void setCreatedAt(Store store, String createdAt) {
         jdbcTemplate.update(
                 "UPDATE stores SET created_at = ? WHERE store_id = ?", createdAt, store.getId());
+    }
+
+    private List<String> indexColumns(String indexName) {
+        return jdbcTemplate.query("""
+                SELECT column_name
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name IN ('stores', 'menus')
+                  AND index_name = ?
+                ORDER BY seq_in_index
+                """, (resultSet, rowNumber) -> resultSet.getString("column_name"), indexName);
     }
 
     private void flushAndClear() {
