@@ -311,7 +311,7 @@ git commit -m "feat(search): validate store category filters"
 - Consumes: `StoreSearchQuery`, its fixed `StoreSearchSort.orderByClause()` and bindable values
 - Produces: `Page<StoreSearchCandidate> search(StoreSearchQuery query)`
 
-- [ ] **Step 1: 공개 상태와 keyword 의미의 MySQL 실패 테스트를 작성한다**
+- [x] **Step 1: 공개 상태와 keyword 의미의 MySQL 실패 테스트를 작성한다**
 
 Create fixtures through `StoreRepository`, `MenuRepository` and their public aggregate methods:
 
@@ -335,7 +335,7 @@ void searchesStoreNamePublishedMenuNameAndRegionLabelWithoutDuplicates() {
 
 Also add separate tests proving `HIDDEN`, retired and non-published menu versions do not match, while `SOLD_OUT` and `PAUSED` published menus do match.
 
-- [ ] **Step 2: repository IT를 실행해 RED를 확인한다**
+- [x] **Step 2: repository IT를 실행해 RED를 확인한다**
 
 Run:
 
@@ -345,7 +345,7 @@ Run:
 
 Expected: compilation failure because repository and candidate projection do not exist.
 
-- [ ] **Step 3: 후보 projection을 구현한다**
+- [x] **Step 3: 후보 projection을 구현한다**
 
 ```java
 public record StoreSearchCandidate(
@@ -363,7 +363,7 @@ public record StoreSearchCandidate(
 }
 ```
 
-- [ ] **Step 4: 고정 SQL repository를 구현한다**
+- [x] **Step 4: 고정 SQL repository를 구현한다**
 
 Use `NamedParameterJdbcTemplate`. The data and count statements must share this exact predicate:
 
@@ -400,11 +400,11 @@ WHERE s.verification_status = 'APPROVED'
 
 The data statement selects the candidate record columns, appends only `query.sort().orderByClause()`, then `LIMIT :limit OFFSET :offset`. Do not concatenate any raw request value. The count statement uses `SELECT COUNT(*)` and the same predicate.
 
-- [ ] **Step 5: repository IT GREEN을 확인한다**
+- [x] **Step 5: repository IT GREEN을 확인한다**
 
 Add assertions for all four sorts and duplicate names: the second key must be `store_id ASC`. Run the Task 4 test class. Expected: PASS with MySQL 8.0.40.
 
-- [ ] **Step 6: Task 4를 커밋한다**
+- [x] **Step 6: Task 4를 커밋한다**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/store/search/repository backend/src/test/java/com/miriyum/domain/store/search/repository
