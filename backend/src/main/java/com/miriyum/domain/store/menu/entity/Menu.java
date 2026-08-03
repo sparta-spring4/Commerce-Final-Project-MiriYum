@@ -2,6 +2,7 @@ package com.miriyum.domain.store.menu.entity;
 
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.global.entity.BaseEntity;
@@ -105,6 +106,24 @@ public class Menu extends BaseEntity {
         return findVersion(draftVersionNumber).orElseThrow(Menu::stateConflict);
     }
 
+    /**
+     * 신규 거래가 캡처할 현재 게시 버전을 검증해 반환한다.
+     *
+     * @return 공개·판매 중인 현재 게시 버전
+     * @throws ServiceException 메뉴가 신규 거래를 받을 수 없는 상태인 경우
+     */
+    public MenuVersion requireTransactionVersion() {
+        requireActive();
+        MenuVersion published = findVersion(publishedVersionNumber)
+                .orElseThrow(Menu::stateConflict);
+        if (published.getStatus() != MenuVersionStatus.PUBLISHED
+                || visibility != MenuVisibility.VISIBLE
+                || sellingStatus != MenuSellingStatus.SELLING) {
+            throw stateConflict();
+        }
+        return published;
+    }
+
     public MenuVersion publish(Instant now) {
         requireActive();
         MenuVersion draft = requireDraft();
@@ -192,7 +211,7 @@ public class Menu extends BaseEntity {
         requireActive();
         versions.stream()
                 .filter(version -> version.getStatus()
-                        != com.miriyum.domain.store.menu.enums.MenuVersionStatus.RETIRED)
+                        != MenuVersionStatus.RETIRED)
                 .forEach(MenuVersion::retire);
         draftVersionNumber = null;
         scheduledVersionNumber = null;
