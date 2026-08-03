@@ -1,7 +1,6 @@
 package com.miriyum.domain.menuhold.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
@@ -9,20 +8,25 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
+import com.miriyum.global.exception.ServiceException;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
-import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
-import com.miriyum.global.exception.ServiceException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 class MenuHoldServiceConsumerContractTest {
+
+    private static final LocalDate SERVICE_DATE = LocalDate.of(2026, 8, 10);
+    private static final LocalTime START_TIME = LocalTime.of(12, 0);
+    private static final LocalTime END_TIME = LocalTime.of(13, 0);
 
     @Test
     void exposesReservationCommandsThatMustJoinTheCallerTransaction() throws Exception {
@@ -32,105 +36,101 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     @Test
-    void carriesTheReservationIdentifierAndMenuSelectionWithoutReservationTypes() {
-        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
-                "reservation-01",
-                "01K1CREATE0000000000000001",
-                List.of(new MenuSelection("menu-01", 2)));
+    void createCommandCarriesAllContextNeededWithoutReservationTypes() {
+        MenuHoldCreateCommand command = createCommand(
+                "reservation-01", "operation-create-01", List.of(selection()));
 
         assertThat(command.reservationId()).isEqualTo("reservation-01");
-        assertThat(command.operationId()).isEqualTo("01K1CREATE0000000000000001");
-        assertThat(command.menuSelections())
-                .containsExactly(new MenuSelection("menu-01", 2));
+        assertThat(command.storeId()).isEqualTo("store-01");
+        assertThat(command.consumerAccountId()).isEqualTo("consumer-01");
+        assertThat(command.serviceDate()).isEqualTo(SERVICE_DATE);
+        assertThat(command.startTime()).isEqualTo(START_TIME);
+        assertThat(command.endTime()).isEqualTo(END_TIME);
+        assertThat(command.operationId()).isEqualTo("operation-create-01");
+        assertThat(command.menuSelections()).containsExactly(selection());
     }
 
     @Test
-    void protectsCommandValuesFromInvalidOrMutableConsumerInput() {
-        List<MenuSelection> selections = new java.util.ArrayList<>();
-        selections.add(new MenuSelection("menu-01", 1));
-        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
-                "reservation-01", "01K1CREATE0000000000000001", selections);
+    void releaseAndFulfillHideTheSourceAcquireOperationFromReservation() {
+        MenuHoldReleaseCommand release =
+                new MenuHoldReleaseCommand("reservation-01", "operation-release-01");
+        MenuHoldFulfillCommand fulfill =
+                new MenuHoldFulfillCommand("reservation-01", "operation-fulfill-01");
 
-        selections.clear();
-
-        assertThat(command.menuSelections()).containsExactly(new MenuSelection("menu-01", 1));
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new MenuSelection("menu-01", 0));
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new MenuHoldReleaseCommand(
-                        "reservation-01",
-                        "same-operation",
-                        "same-operation"));
+        assertThat(release.reservationId()).isEqualTo("reservation-01");
+        assertThat(release.operationId()).isEqualTo("operation-release-01");
+        assertThat(fulfill.reservationId()).isEqualTo("reservation-01");
+        assertThat(fulfill.operationId()).isEqualTo("operation-fulfill-01");
     }
 
     @Test
-    void acceptsEmptySelectionsAndRepresentsTheNoHoldResultExplicitly() {
-        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
-                "reservation-01", "01K1CREATE0000000000000001", List.of());
+    void commandResultExposesOnlyReservationOutcome() {
+        MenuHoldCommandResult result =
+                MenuHoldCommandResult.confirmed("reservation-01");
 
-        assertThat(command.menuSelections()).isEmpty();
-        assertThat(MenuHoldCommandResult.noHold(command.reservationId()).outcome())
-                .isEqualTo(MenuHoldCommandResult.Outcome.NO_HOLD);
+        assertThat(result.reservationId()).isEqualTo("reservation-01");
+        assertThat(result.outcome()).isEqualTo(MenuHoldCommandResult.Outcome.CONFIRMED);
     }
 
     @Test
-    void releaseCarriesItsOwnOperationAndTheOriginalAcquireOperation() {
-        MenuHoldReleaseCommand command = new MenuHoldReleaseCommand(
-                "reservation-01",
-                "01K1RELEASE000000000000001",
-                "01K1CREATE0000000000000001");
+    void reservationConsumerSkipsMenuHoldForEmptySelections() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        ReservationConsumer consumer = new ReservationConsumer(fixture);
 
-        assertThat(command.operationId()).isNotEqualTo(command.sourceAcquireOperationId());
-        assertThat(command.sourceAcquireOperationId())
-                .isEqualTo("01K1CREATE0000000000000001");
+        MenuHoldCommandResult result = consumer.create(
+                "idempotency-key", "reservation-01", List.of());
+
+        assertThat(result).isEqualTo(MenuHoldCommandResult.noHold("reservation-01"));
+        assertThat(fixture.createCommands()).isEmpty();
     }
 
     @Test
-    void fulfillAlsoRejectsReuseOfTheAcquireOperation() {
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new MenuHoldFulfillCommand(
-                        "reservation-01", "same-operation", "same-operation"));
-    }
+    void reservationConsumerLocksCapacityBeforeCreateAndSkipsReplay() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        ReservationConsumer consumer = new ReservationConsumer(fixture);
 
-    @Test
-    void reservationConsumerLocksCapacityBeforeMenuHoldAndSkipsReplay() {
-        RecordingMenuHoldService service = new RecordingMenuHoldService();
-        ReservationConsumer consumer = new ReservationConsumer(service);
+        MenuHoldCommandResult first = consumer.create(
+                "idempotency-key", "reservation-01", List.of(selection()));
+        MenuHoldCommandResult replay = consumer.create(
+                "idempotency-key", "reservation-01", List.of(selection()));
 
-        MenuHoldCommandResult first = consumer.create("idempotency-key", "reservation-01");
-        MenuHoldCommandResult replay = consumer.create("idempotency-key", "reservation-01");
-
-        assertThat(service.events).containsExactly("capacity-locked", "menu-hold-created");
-        assertThat(service.createOperations).hasSize(1);
+        assertThat(consumer.events).containsExactly("capacity-locked", "menu-hold-created");
+        assertThat(fixture.createCommands()).hasSize(1);
         assertThat(replay).isSameAs(first);
     }
 
     @Test
-    void reservationConsumerUsesDistinctOperationsAndPreservesMenuHoldError() {
-        RecordingMenuHoldService service = new RecordingMenuHoldService();
-        ReservationConsumer consumer = new ReservationConsumer(service);
+    void reservationConsumerUsesNewOperationForEveryLogicalCommand() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        ReservationConsumer consumer = new ReservationConsumer(fixture);
 
-        consumer.create("create-key", "reservation-01");
-        consumer.fulfill("reservation-01", service.createOperations.getFirst());
+        consumer.create("create-key", "reservation-01", List.of(selection()));
+        consumer.release("reservation-01");
+        consumer.fulfill("reservation-02");
 
-        assertThat(service.fulfillOperations.getFirst())
-                .isNotEqualTo(service.createOperations.getFirst());
-
-        ServiceException failure = new ServiceException(MenuHoldErrorCode.INSUFFICIENT_QUANTITY);
-        service.failure = failure;
-        assertThatThrownBy(() -> consumer.create("other-key", "reservation-02"))
-                .isSameAs(failure);
+        assertThat(List.of(
+                fixture.createCommands().getFirst().operationId(),
+                fixture.releaseCommands().getFirst().operationId(),
+                fixture.fulfillCommands().getFirst().operationId()))
+                .doesNotHaveDuplicates();
     }
 
     @Test
-    void returnsAnExplicitOutcomeAndSourceAcquireOperation() {
-        MenuHoldCommandResult result = MenuHoldCommandResult.confirmed(
-                "reservation-01", "01K1CREATE0000000000000001");
+    void fixturePreservesMenuEligibilityAndQuantityErrors() {
+        ServiceException ineligible =
+                new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.failing(ineligible);
+        ReservationConsumer consumer = new ReservationConsumer(fixture);
 
-        assertThat(result.reservationId()).isEqualTo("reservation-01");
-        assertThat(result.outcome()).isEqualTo(MenuHoldCommandResult.Outcome.CONFIRMED);
-        assertThat(result.sourceAcquireOperationId())
-                .isEqualTo("01K1CREATE0000000000000001");
+        assertThatThrownBy(() -> consumer.create(
+                "create-key", "reservation-01", List.of(selection())))
+                .isSameAs(ineligible);
+        assertThat(MenuHoldErrorCode.INELIGIBLE_MENU.getCode()).isEqualTo("MENU_HOLD_001");
+        assertThat(MenuHoldErrorCode.INSUFFICIENT_QUANTITY.getCode()).isEqualTo("MENU_HOLD_002");
     }
 
     private static void assertMandatory(String methodName, Class<?> commandType)
@@ -143,66 +143,68 @@ class MenuHoldServiceConsumerContractTest {
         assertThat(method.getReturnType()).isEqualTo(MenuHoldCommandResult.class);
     }
 
+    private static MenuHoldCreateCommand createCommand(
+            String reservationId,
+            String operationId,
+            List<MenuSelection> selections
+    ) {
+        return new MenuHoldCreateCommand(
+                reservationId,
+                "store-01",
+                "consumer-01",
+                SERVICE_DATE,
+                START_TIME,
+                END_TIME,
+                operationId,
+                selections);
+    }
+
+    private static MenuSelection selection() {
+        return new MenuSelection("menu-01", 2);
+    }
+
     private static final class ReservationConsumer {
-        private final RecordingMenuHoldService menuHoldService;
+        private final ReservationMenuHoldContractFixture menuHoldService;
         private final AtomicInteger operations = new AtomicInteger();
         private final Map<String, MenuHoldCommandResult> replayResults = new HashMap<>();
+        private final java.util.ArrayList<String> events = new java.util.ArrayList<>();
 
-        private ReservationConsumer(RecordingMenuHoldService menuHoldService) {
+        private ReservationConsumer(ReservationMenuHoldContractFixture menuHoldService) {
             this.menuHoldService = menuHoldService;
         }
 
-        private MenuHoldCommandResult create(String idempotencyKey, String reservationId) {
+        private MenuHoldCommandResult create(
+                String idempotencyKey,
+                String reservationId,
+                List<MenuSelection> selections
+        ) {
             MenuHoldCommandResult replay = replayResults.get(idempotencyKey);
             if (replay != null) {
                 return replay;
             }
-            menuHoldService.events.add("capacity-locked");
-            String operationId = "operation-" + operations.incrementAndGet();
-            MenuHoldCommandResult result = menuHoldService.create(new MenuHoldCreateCommand(
-                    reservationId,
-                    operationId,
-                    List.of(new MenuSelection("menu-01", 1))));
+            if (selections.isEmpty()) {
+                return MenuHoldCommandResult.noHold(reservationId);
+            }
+            events.add("capacity-locked");
+            MenuHoldCommandResult result = menuHoldService.create(createCommand(
+                    reservationId, nextOperationId(), selections));
+            events.add("menu-hold-created");
             replayResults.put(idempotencyKey, result);
             return result;
         }
 
-        private MenuHoldCommandResult fulfill(String reservationId, String sourceOperationId) {
-            return menuHoldService.fulfill(new MenuHoldFulfillCommand(
-                    reservationId,
-                    "operation-" + operations.incrementAndGet(),
-                    sourceOperationId));
-        }
-    }
-
-    private static final class RecordingMenuHoldService implements MenuHoldService {
-        private final List<String> events = new ArrayList<>();
-        private final List<String> createOperations = new ArrayList<>();
-        private final List<String> fulfillOperations = new ArrayList<>();
-        private ServiceException failure;
-
-        @Override
-        public MenuHoldCommandResult create(MenuHoldCreateCommand command) {
-            if (failure != null) {
-                throw failure;
-            }
-            events.add("menu-hold-created");
-            createOperations.add(command.operationId());
-            return MenuHoldCommandResult.confirmed(
-                    command.reservationId(), command.operationId());
+        private MenuHoldCommandResult release(String reservationId) {
+            return menuHoldService.release(
+                    new MenuHoldReleaseCommand(reservationId, nextOperationId()));
         }
 
-        @Override
-        public MenuHoldCommandResult release(MenuHoldReleaseCommand command) {
-            return MenuHoldCommandResult.released(
-                    command.reservationId(), command.sourceAcquireOperationId());
+        private MenuHoldCommandResult fulfill(String reservationId) {
+            return menuHoldService.fulfill(
+                    new MenuHoldFulfillCommand(reservationId, nextOperationId()));
         }
 
-        @Override
-        public MenuHoldCommandResult fulfill(MenuHoldFulfillCommand command) {
-            fulfillOperations.add(command.operationId());
-            return MenuHoldCommandResult.fulfilled(
-                    command.reservationId(), command.sourceAcquireOperationId());
+        private String nextOperationId() {
+            return "operation-" + operations.incrementAndGet();
         }
     }
 }
