@@ -17,7 +17,9 @@ import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -154,7 +156,10 @@ class MenuHoldServiceConsumerContractTest {
     void reservationConsumerLocksCapacityBeforeCreateAndSkipsReplay() {
         ReservationMenuHoldContractFixture fixture =
                 ReservationMenuHoldContractFixture.succeeding();
-        ReservationConsumer consumer = new ReservationConsumer(fixture);
+        AtomicInteger generatedOperationIds = new AtomicInteger();
+        ReservationConsumer consumer = new ReservationConsumer(
+                fixture,
+                () -> "operation-" + generatedOperationIds.incrementAndGet());
 
         MenuHoldCommandResult first = consumer.create(
                 "idempotency-key", "reservation-01", List.of(selection()));
@@ -163,6 +168,7 @@ class MenuHoldServiceConsumerContractTest {
 
         assertThat(consumer.events).containsExactly("capacity-locked", "menu-hold-created");
         assertThat(fixture.createCommands()).hasSize(1);
+        assertThat(generatedOperationIds).hasValue(1);
         assertThat(replay).isSameAs(first);
     }
 
@@ -180,6 +186,21 @@ class MenuHoldServiceConsumerContractTest {
                 fixture.createCommands().getFirst().operationId(),
                 fixture.releaseCommands().getFirst().operationId(),
                 fixture.fulfillCommands().getFirst().operationId()))
+                .doesNotHaveDuplicates();
+    }
+
+    @Test
+    void reservationConsumersUseGloballyUniqueOperationsAcrossInstances() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        ReservationConsumer firstConsumer = new ReservationConsumer(fixture);
+        ReservationConsumer secondConsumer = new ReservationConsumer(fixture);
+
+        firstConsumer.create("first-key", "reservation-01", List.of(selection()));
+        secondConsumer.create("second-key", "reservation-02", List.of(selection()));
+
+        assertThat(fixture.createCommands())
+                .extracting(MenuHoldCreateCommand::operationId)
                 .doesNotHaveDuplicates();
     }
 
@@ -231,12 +252,20 @@ class MenuHoldServiceConsumerContractTest {
 
     private static final class ReservationConsumer {
         private final ReservationMenuHoldContractFixture menuHoldService;
-        private final AtomicInteger operations = new AtomicInteger();
+        private final Supplier<String> operationIdGenerator;
         private final Map<String, MenuHoldCommandResult> replayResults = new HashMap<>();
         private final java.util.ArrayList<String> events = new java.util.ArrayList<>();
 
         private ReservationConsumer(ReservationMenuHoldContractFixture menuHoldService) {
+            this(menuHoldService, () -> UUID.randomUUID().toString());
+        }
+
+        private ReservationConsumer(
+                ReservationMenuHoldContractFixture menuHoldService,
+                Supplier<String> operationIdGenerator
+        ) {
             this.menuHoldService = menuHoldService;
+            this.operationIdGenerator = operationIdGenerator;
         }
 
         private MenuHoldCommandResult create(
@@ -270,7 +299,7 @@ class MenuHoldServiceConsumerContractTest {
         }
 
         private String nextOperationId() {
-            return "operation-" + operations.incrementAndGet();
+            return operationIdGenerator.get();
         }
     }
 }
