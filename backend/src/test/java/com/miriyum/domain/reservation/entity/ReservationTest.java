@@ -8,7 +8,8 @@ import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -30,14 +31,18 @@ class ReservationTest {
         assertThat(reservation.getStoreId()).isEqualTo(22L);
         assertThat(reservation.getStoreNameSnapshot()).isEqualTo("Miri Yum Restaurant");
         assertThat(reservation.getServiceDate()).isEqualTo(LocalDate.of(2026, 8, 1));
-        assertThat(reservation.getStartTime()).isEqualTo(LocalTime.of(18, 0));
-        assertThat(reservation.getEndTime()).isEqualTo(LocalTime.of(19, 30));
+        assertThat(reservation.getStartAt()).isEqualTo(Instant.parse("2026-08-01T09:00:00Z"));
+        assertThat(reservation.getServiceEndAt())
+                .isEqualTo(Instant.parse("2026-08-01T10:30:00Z"));
+        assertThat(reservation.getOccupancyEndAt())
+                .isEqualTo(Instant.parse("2026-08-01T10:45:00Z"));
+        assertThat(reservation.getTimeZoneId()).isEqualTo("Asia/Seoul");
         assertThat(reservation.getParty().totalCount()).isEqualTo(3);
         assertThat(reservation.getContactSnapshot().getNotificationTargetReference())
                 .isEqualTo(NOTIFICATION_TARGET_REFERENCE);
         assertThat(reservation.getContactSnapshot().isContactAvailableAtConfirmation()).isTrue();
         assertThat(reservation.getCapacityPolicyVersion()).isEqualTo(3L);
-        assertThat(reservation.getReservationPolicyVersion()).isEqualTo(5L);
+        assertThat(reservation.getReservationTimePolicyVersion()).isEqualTo(5L);
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         assertThat(reservation.getCreatedAt()).isEqualTo(CREATED_AT);
         assertThat(reservation.getCancelledAt()).isNull();
@@ -192,23 +197,26 @@ class ReservationTest {
     @DisplayName("양수가 아닌 소유 관계 ID를 거부한다")
     void rejectsNonPositiveOwnerId() {
         // when & then
-        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(0L, 22L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT));
-        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 0L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT));
+        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
+                0L, 22L, "Miri Yum Restaurant", 3L, CREATED_AT));
+        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
+                11L, 0L, "Miri Yum Restaurant", 3L, CREATED_AT));
     }
 
     @Test
     @DisplayName("비어 있는 매장명 스냅샷을 거부한다")
     void rejectsBlankStoreNameSnapshot() {
         // when & then
-        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, " ", 3L, 5L, CREATED_AT));
+        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
+                11L, 22L, " ", 3L, CREATED_AT));
     }
 
     @Test
     @DisplayName("양수가 아닌 정책 버전을 거부한다")
     void rejectsNonPositivePolicyVersion() {
         // when & then
-        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, "Miri Yum Restaurant", 0L, 5L, CREATED_AT));
-        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(11L, 22L, "Miri Yum Restaurant", 3L, 0L, CREATED_AT));
+        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
+                11L, 22L, "Miri Yum Restaurant", 0L, CREATED_AT));
     }
 
     @Test
@@ -216,8 +224,8 @@ class ReservationTest {
     void rejectsMissingRequiredSnapshot() {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
-                11L, 22L, "Miri Yum Restaurant", null, LocalTime.of(18, 0), LocalTime.of(19, 30),
-                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
+                11L, 22L, "Miri Yum Restaurant", null,
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, CREATED_AT
         ));
     }
 
@@ -226,30 +234,32 @@ class ReservationTest {
     void rejectsMissingContactSnapshot() {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
-                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0), LocalTime.of(19, 30),
-                PartyComposition.of(2, 1, 0), null, 3L, 5L, CREATED_AT
+                11L, 22L, "Miri Yum Restaurant", timeSnapshot(),
+                PartyComposition.of(2, 1, 0), null, 3L, CREATED_AT
         ));
     }
 
     @Test
-    @DisplayName("종료 시각이 시작 시각보다 늦지 않으면 예약 생성을 거부한다")
-    void rejectsNonIncreasingServiceTime() {
-        // when & then
+    @DisplayName("예약 매장과 시간 정책 스냅샷의 소유 매장이 다르면 생성을 거부한다")
+    void rejectsTimeSnapshotOwnedByAnotherStore() {
+        ReservationTimePolicyVersion anotherStorePolicy =
+                ReservationTimePolicyVersion.createDraft(23L, 5L, 30, 90, 15);
+        anotherStorePolicy.activate(Instant.parse("2026-07-31T00:00:00Z"));
+        ReservationTimeSnapshot anotherStoreSnapshot = ReservationTimeSnapshot.calculate(
+                anotherStorePolicy,
+                LocalDateTime.of(2026, 8, 1, 18, 0),
+                ZoneId.of("Asia/Seoul"),
+                null
+        );
+
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
-                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0), LocalTime.of(18, 0),
-                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
-        ));
-        assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
-                11L, 22L, "Miri Yum Restaurant", LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0), LocalTime.of(17, 30),
-                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, 5L, CREATED_AT
+                11L, 22L, "Miri Yum Restaurant", anotherStoreSnapshot,
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, CREATED_AT
         ));
     }
 
     private static Reservation createConfirmedReservation() {
-        return createReservation(11L, 22L, "Miri Yum Restaurant", 3L, 5L, CREATED_AT);
+        return createReservation(11L, 22L, "Miri Yum Restaurant", 3L, CREATED_AT);
     }
 
     private static Reservation createReservation(
@@ -257,13 +267,28 @@ class ReservationTest {
             Long storeId,
             String storeNameSnapshot,
             long capacityPolicyVersion,
-            long reservationPolicyVersion,
             Instant createdAt
     ) {
         return Reservation.confirm(
-                consumerAccountId, storeId, storeNameSnapshot, LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0), LocalTime.of(19, 30), PartyComposition.of(2, 1, 0),
-                contactSnapshot(), capacityPolicyVersion, reservationPolicyVersion, createdAt
+                consumerAccountId, storeId, storeNameSnapshot, timeSnapshot(),
+                PartyComposition.of(2, 1, 0), contactSnapshot(), capacityPolicyVersion, createdAt
+        );
+    }
+
+    private static ReservationTimeSnapshot timeSnapshot() {
+        ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
+                22L,
+                5L,
+                30,
+                90,
+                15
+        );
+        policy.activate(Instant.parse("2026-07-31T00:00:00Z"));
+        return ReservationTimeSnapshot.calculate(
+                policy,
+                LocalDateTime.of(2026, 8, 1, 18, 0),
+                ZoneId.of("Asia/Seoul"),
+                null
         );
     }
 

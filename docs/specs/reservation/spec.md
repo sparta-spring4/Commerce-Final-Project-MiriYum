@@ -6,7 +6,7 @@
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
 > 관련 정책 ID: RES-001~RES-015의 1차 범위, S-001~S-003, E-003, E-005, C-001~C-013
 > OpenAPI: `docs/specs/reservation/openapi.yaml`
-> 최종 승인일: 2026-07-28
+> 최종 승인일: 2026-08-03
 
 ## 범위
 
@@ -17,6 +17,7 @@
 - 본인 예약 상세·취소
 - 매장 운영자의 매장별 예약 조회·취소·방문 완료
 - 날짜·시간 구간별 예약 가능 인원·팀 수 설정
+- 매장별 예약 시간 정책 버전과 실제 서비스·점유 종료 계산
 - 중복 예약 방지와 동시 수용량 처리
 
 ### 제외
@@ -47,12 +48,31 @@
 ### 요청
 
 - 인증된 일반 사용자가 `storeId`, `serviceDate`, `startTime`과 성인·아동·영유아 인원수를 제출한다.
-- `endTime`은 클라이언트가 임의 지정하지 않고 해당 매장의 현재 예약 시간대·서비스 소요·전환 정책으로 서버가 계산한다.
+- DST 중복 현지 시각을 선택해야 할 때만 `startOffset`을 함께 제출한다. 일반 시각에 offset을 제출해도 매장 IANA 시간대와 일치해야 한다.
+- `endTime`, `serviceEndAt`, `occupancyEndAt`은 요청하지 않는다. 해당 매장의 현재 Reservation 시간 정책으로 서버가 계산한다.
 - 전체 동행 인원은 `adultCount + childCount + infantCount`이며 영유아도 수용량에 포함한다.
 - 합계는 1명 이상이어야 하고 현재 매장 정책의 최소·최대 일행 인원 안에 있어야 한다.
 - 연락처는 인증된 일반 사용자 계정의 검증된 연락처를 거래 스냅샷으로 사용한다. 요청 본문으로 다른 사람의 연락처·소유자 ID를 받지 않는다.
 - `menuSelections`는 선택 사항이다. 없거나 빈 배열이면 `MenuHold`를 만들지 않는다.
 - 같은 메뉴·제공 구간이 반복되면 요청 경계에서 수량을 합산하고 한 항목으로 정규화한다.
+
+### 시간 정책과 종료 시각
+
+- Reservation은 매장별 `slotInterval`, `serviceDuration`, `turnoverDuration`, 버전, `effectiveAt`과 상태를 소유한다.
+- duration은 분 단위 정수다. `slotInterval`과 `serviceDuration`은 1~1440, `turnoverDuration`은 0~1440이며 `serviceDuration + turnoverDuration <= 1440`이다.
+- 정책 상태는 Reservation 소유 타입 `DRAFT`, `SCHEDULED`, `ACTIVE`, `RETIRED`, `ACTIVATION_FAILED`를 사용한다. 현재 중앙 시각에 효력이 있는 활성 버전만 요청·확정에 사용하고 같은 매장의 활성 정책과 미래 게시 정책은 각각 하나를 넘지 않는다.
+- 게시 예약 철회는 신뢰 가능한 중앙 시각이 `effectiveAt`보다 이를 때만 허용하며 효력 경계부터는 거부한다.
+- 시작 시각은 자정이 아니라 Store가 반환한 현재 예약 접수 구간의 `windowStartAt`을 기준으로 `slotInterval`에 정렬한다.
+- 계산·저장하는 시작 시각은 초와 나노초가 없는 분 단위여야 한다.
+- `serviceEndAt = startAt + serviceDuration`, `occupancyEndAt = serviceEndAt + turnoverDuration`으로 계산한다.
+- 고객 서비스 종료는 `serviceEndAt`, 수용량·중복 판정의 실제 점유 종료는 `occupancyEndAt`이다. 내부에서 모호한 `endTime`을 두 의미 중 하나로 사용하지 않는다.
+- Store의 `windowEndAt`은 예약 **시작** 접수 상한이다. `serviceEndAt`이나 `occupancyEndAt`으로 사용하지 않는다.
+- 입력 매장 순서·개수·중복을 보존하고 accepting 매장의 시간 정책만 한 번에 조회한다. 같은 시작 시각도 매장별 정책에 따라 서로 다른 점유 종료를 계산한다.
+- 정책·시간대가 없거나 비활성이고, 슬롯이 맞지 않거나 현지 시각이 존재하지 않으며, 중복 현지 시각에 유효 offset이 없으면 해당 매장은 실패 폐쇄한다.
+- 저장·비교는 `Instant`를 사용한다. `serviceDate`는 매장 현지 시작 날짜이고 실제 `startAt`, `serviceEndAt`, `occupancyEndAt`, IANA 시간대, 각 계산 offset과 duration·정책 소유 매장·버전을 거래 스냅샷으로 보존한다. 정책 소유 매장은 예약 매장과 같아야 한다.
+- 고객 응답은 `serviceDate`, `timeStatus`, offset 포함 `startAt`, offset 포함 `serviceEndAt`, `timeZoneId`만 공개한다. 내부 `occupancyEndAt`은 고객 응답에 포함하지 않는다. V15 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 응답해 임의 offset 변환이나 예외 누출을 막는다.
+- `[startAt, serviceEndAt)`의 영업시간·브레이크·휴무·휴점·폐점 충돌은 Store 소유의 contract-first Issue #104 / PR #106 batch 계약으로 검증한다. PR #84의 시작 접수 window만으로 이 전체 구간 검증을 완료했다고 간주하지 않는다.
+- Store 검증 범위에는 `[serviceEndAt, occupancyEndAt)` turnover 구간을 포함하지 않는다. PR #106이 `dev`에 병합되기 전에는 Store 일정 판정을 Reservation에서 복제하지 않으며, 시간 정책·종료 계산 코어와 별개로 Store 검증 소비 및 최종 가용성 완료를 차단한다.
 
 ### 처리 순서
 
@@ -76,7 +96,7 @@
 ## 수용량
 
 - 자원은 개별 테이블·좌석이 아니라 매장·업무 날짜·시간 구간별 전체 예약 가능 인원과 팀 수다.
-- 예약 점유 구간과 겹치는 모든 버킷에서 전체 동행 인원과 팀 1건을 함께 확보한다.
+- `[startAt, occupancyEndAt)`과 겹치는 모든 버킷에서 전체 동행 인원과 팀 1건을 함께 확보한다.
 - 어느 버킷에서든 인원 또는 팀 수가 부족하면 전체 예약이 실패한다.
 - 매장 운영자는 날짜별 버킷의 `maxPeople`, `maxTeams`, `minPartySize`, `maxPartySize`, `infantsAllowed`를 게시한다.
 - `maxPartySize`는 `maxPeople`보다 클 수 없다.
@@ -150,6 +170,8 @@
 
 - 예약은 `BIGINT` PK와 외부 문자열 ID를 사용한다.
 - 수용량 버킷·배정 이력·정책 버전과 거래 스냅샷을 보존한다.
+- 신규 예약의 `startAt`, `serviceEndAt`, `occupancyEndAt`은 실제 날짜를 포함한 `Instant`로 저장하고 계산 당시 IANA 시간대·offset·duration을 함께 보존한다.
+- V15의 `serviceDate + startTime + endTime` 행은 offset을 추측해 소급 변환하지 않는다. 새 migration은 기존 값을 보존하고 Instant 스냅샷이 없는 과거 행을 신규 가용성 근거로 사용하지 않으며 고객 조회에는 `LEGACY_UNRESOLVED`를 명시한다.
 - 매장 폐점·메뉴 종료·계정 정지가 과거 예약 행을 연쇄 삭제하지 않는다.
 - 2차·고도화 상태를 추가할 때 기존 1차 enum 의미와 공개 코드를 재사용하지 않는다.
 
@@ -163,11 +185,18 @@
 - 취소가 예약·수용량·메뉴 홀드·수량을 한 번만 종결·복구한다.
 - 방문 완료가 수량을 복구하거나 체크인·노쇼 상태를 만들지 않는다.
 - 범용 status PATCH, 결제·환불·NO_SHOW·CHANGE_PENDING API가 없다.
+- 같은 시작 시각이라도 서로 다른 매장 시간 정책은 서로 다른 `occupancyEndAt`을 만들며 입력 순서와 중복을 보존한다.
+- 고객 응답에 `timeStatus`, `serviceEndAt`, `timeZoneId`가 있고 `occupancyEndAt` 또는 모호한 `endTime`이 없다. 과거 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 안전하게 구분된다.
+- 자정 넘김과 DST 누락·중복 시각이 날짜·offset 손실 없이 처리되거나 명시적으로 실패 폐쇄된다.
 
 ## 추천안 결정 이력
 
 | 날짜 | 결정 | 선택 이유 |
 | --- | --- | --- |
+| 2026-08-04 | Store 전체 서비스 구간 검증은 Issue #104 / PR #106 선행 계약을 소비 | Store 일정 원본·충돌 판정을 Reservation에 복제하지 않고 `[startAt, serviceEndAt)`과 turnover 책임 경계를 유지 |
+| 2026-08-03 | 서비스 종료와 실제 점유 종료를 `serviceEndAt`·`occupancyEndAt`으로 분리 | 고객 표시 의미와 수용량 점유 의미를 섞지 않고 매장별 duration 적용 |
+| 2026-08-03 | 실제 시각은 Instant와 IANA 시간대·offset 스냅샷으로 보존 | 자정 넘김과 DST 중복·누락 시각을 LocalTime 비교로 손실하지 않음 |
+| 2026-08-03 | Store `windowEndAt`은 시작 접수 상한으로만 소비 | PR #84의 window를 실제 서비스·점유 종료로 오해하는 결합 방지 |
 | 2026-07-28 | 생성 요청에서 endTime을 받지 않음 | 서버의 현재 슬롯·서비스 소요 정책과 다른 임의 구간 요청 차단 |
 | 2026-07-28 | 검증된 계정 연락처를 예약 스냅샷으로 사용 | 다른 소유자·연락처를 요청으로 주입하는 문제와 불필요한 개인정보 입력 축소 |
 | 2026-07-28 | 선택 메뉴 홀드를 예약 생성에 포함 | 프론트엔드의 두 쓰기 호출로 원자성을 대신하는 구조 방지 |
