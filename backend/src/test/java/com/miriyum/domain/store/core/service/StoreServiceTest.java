@@ -7,7 +7,6 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.dto.ManagedStoreResponse;
 import com.miriyum.domain.store.core.dto.StoreCreateRequest;
 import com.miriyum.domain.store.core.dto.StoreModesRequest;
@@ -15,6 +14,7 @@ import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
