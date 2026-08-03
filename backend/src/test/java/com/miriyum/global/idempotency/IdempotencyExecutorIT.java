@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.ApiResponse;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -220,13 +221,15 @@ class IdempotencyExecutorIT {
     }
 
     @Test
-    @DisplayName("동시 같은 키·지문은 콜백 1회, 두 호출 모두 동일 결과를 반환한다")
+    @DisplayName("동시 같은 키·지문 10건은 콜백 1회, 모든 호출이 동일 결과를 반환한다")
     void concurrentSameKey_runsCallbackOnce() throws Exception {
         // given
-        ExecutorService pool = Executors.newFixedThreadPool(2);
+        int requestCount = 10;
+        int contenderCount = requestCount - 1;
+        ExecutorService pool = Executors.newFixedThreadPool(requestCount);
         CountDownLatch winnerEnteredCallback = new CountDownLatch(1);
         CountDownLatch releaseWinner = new CountDownLatch(1);
-        CountDownLatch contenderStarted = new CountDownLatch(1);
+        CountDownLatch contendersStarted = new CountDownLatch(contenderCount);
         List<IdempotentOutcome> outcomes;
 
         try {
@@ -237,21 +240,26 @@ class IdempotencyExecutorIT {
                 throw new IllegalStateException("선점 트랜잭션이 업무 콜백에 진입하지 못했습니다.");
             }
 
-            Future<IdempotentOutcome> contender = pool.submit(
-                    () -> runner.runSignallingStart(
-                            command(FINGERPRINT), result(), contenderStarted));
-            if (!contenderStarted.await(30, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("경합 트랜잭션이 시작되지 못했습니다.");
+            List<Future<IdempotentOutcome>> contenders = new ArrayList<>(contenderCount);
+            for (int i = 0; i < contenderCount; i++) {
+                contenders.add(pool.submit(
+                        () -> runner.runSignallingStart(
+                                command(FINGERPRINT), result(), contendersStarted)));
+            }
+            if (!contendersStarted.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("모든 경합 트랜잭션이 시작되지 못했습니다.");
             }
 
             // when & then
-            assertThatThrownBy(() -> contender.get(1, TimeUnit.SECONDS))
+            assertThatThrownBy(() -> contenders.getFirst().get(1, TimeUnit.SECONDS))
                     .isInstanceOf(TimeoutException.class);
 
             releaseWinner.countDown();
-            outcomes = List.of(
-                    winner.get(30, TimeUnit.SECONDS),
-                    contender.get(30, TimeUnit.SECONDS));
+            outcomes = new ArrayList<>(requestCount);
+            outcomes.add(winner.get(30, TimeUnit.SECONDS));
+            for (Future<IdempotentOutcome> contender : contenders) {
+                outcomes.add(contender.get(30, TimeUnit.SECONDS));
+            }
         } finally {
             releaseWinner.countDown();
             pool.shutdownNow();
@@ -259,12 +267,56 @@ class IdempotencyExecutorIT {
 
         // then
         assertThat(runner.callbackCount()).isEqualTo(1);
-        assertThat(outcomes).hasSize(2);
+        assertThat(outcomes).hasSize(requestCount);
         assertThat(outcomes).filteredOn(o -> !o.replayed()).hasSize(1);
+        assertThat(outcomes).filteredOn(IdempotentOutcome::replayed).hasSize(contenderCount);
         assertThat(outcomes).allSatisfy(o -> {
             assertThat(o.responseCode()).isEqualTo("SUCCESS");
             assertThat(o.data()).isEqualTo(objectMapper.readTree("{\"value\":\"hello\"}"));
         });
+    }
+
+    @Test
+    @DisplayName("REPEATABLE_READ의 이전 스냅샷 뒤 경합도 최신 성공 결과를 재생한다")
+    void repeatableReadAfterSnapshot_replaysLatestResult() throws Exception {
+        // given
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch winnerEnteredCallback = new CountDownLatch(1);
+        CountDownLatch releaseWinner = new CountDownLatch(1);
+        CountDownLatch contenderEstablishedSnapshot = new CountDownLatch(1);
+
+        try {
+            Future<IdempotentOutcome> winner = pool.submit(
+                    () -> runner.runHolding(
+                            command(FINGERPRINT), result(), winnerEnteredCallback, releaseWinner));
+            if (!winnerEnteredCallback.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("선점 트랜잭션이 업무 콜백에 진입하지 못했습니다.");
+            }
+
+            Future<IdempotentOutcome> contender = pool.submit(
+                    () -> runner.runAfterEstablishingSnapshot(
+                            command(FINGERPRINT), result(), contenderEstablishedSnapshot));
+            if (!contenderEstablishedSnapshot.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("경합 트랜잭션이 이전 스냅샷을 확정하지 못했습니다.");
+            }
+            assertThatThrownBy(() -> contender.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            // when
+            releaseWinner.countDown();
+            IdempotentOutcome first = winner.get(30, TimeUnit.SECONDS);
+            IdempotentOutcome replay = contender.get(30, TimeUnit.SECONDS);
+
+            // then
+            assertThat(first.replayed()).isFalse();
+            assertThat(replay.replayed()).isTrue();
+            assertThat(replay.responseCode()).isEqualTo("SUCCESS");
+            assertThat(replay.data()).isEqualTo(objectMapper.readTree("{\"value\":\"hello\"}"));
+            assertThat(runner.callbackCount()).isEqualTo(1);
+        } finally {
+            releaseWinner.countDown();
+            pool.shutdownNow();
+        }
     }
 
     private IdempotencyCommand command(String fingerprint) {
@@ -395,6 +447,24 @@ class IdempotencyExecutorIT {
                 CountDownLatch started
         ) {
             started.countDown();
+            return executor.execute(command, () -> {
+                callbackCount.incrementAndGet();
+                return result;
+            });
+        }
+
+        @Transactional(isolation = Isolation.REPEATABLE_READ, timeout = 5)
+        IdempotentOutcome runAfterEstablishingSnapshot(
+                IdempotencyCommand command,
+                BusinessResult<TestData> result,
+                CountDownLatch snapshotEstablished
+        ) {
+            int visibleRows = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM idempotency_commands", Integer.class);
+            if (visibleRows != 0) {
+                throw new IllegalStateException("선점 트랜잭션의 미커밋 행이 스냅샷에 노출되었습니다.");
+            }
+            snapshotEstablished.countDown();
             return executor.execute(command, () -> {
                 callbackCount.incrementAndGet();
                 return result;
