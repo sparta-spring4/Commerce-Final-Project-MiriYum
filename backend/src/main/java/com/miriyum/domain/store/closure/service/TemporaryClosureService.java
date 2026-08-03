@@ -4,6 +4,7 @@ import com.miriyum.domain.store.closure.dto.*;
 import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
 import com.miriyum.domain.store.closure.entity.TemporaryClosure;
+import com.miriyum.domain.store.closure.model.StoreClosureActorType;
 import com.miriyum.domain.store.closure.repository.*;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
@@ -17,7 +18,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -48,8 +48,8 @@ public class TemporaryClosureService {
                     StoreScheduleState state = stateRepository.findForUpdateByStoreId(storeId).orElseThrow(this::conflict);
                     Instant start = request.startAt().toInstant();
                     Instant end = request.endAt().toInstant();
-                    if (!end.isAfter(clock.instant())
-                            || !temporaryRepository.findOverlapping(List.of(storeId), start, end).isEmpty()
+                    Instant now = clock.instant();
+                    if (start.isBefore(now) || !end.isAfter(now)
                             || overlapsRegular(state, start, end, authority.timeZoneId())) throw conflict();
                     TemporaryClosure closure = temporaryRepository.saveAndFlush(TemporaryClosure.create(
                             storeId, start, end, authority.timeZoneId(), request.reason(), request.publicMessage()));
@@ -70,10 +70,7 @@ public class TemporaryClosureService {
                     TemporaryClosure closure = temporaryRepository.findForUpdate(storeId, closureId).orElseThrow(this::conflict);
                     String before = closure.statusAt(clock.instant()).name();
                     Instant changedEnd = request.endAt().toInstant();
-                    boolean overlapsOther = temporaryRepository.findOverlapping(
-                                    List.of(storeId), closure.getStartAt(), changedEnd).stream()
-                            .anyMatch(other -> !other.getId().equals(closure.getId()));
-                    if (overlapsOther || overlapsRegular(state, closure.getStartAt(), changedEnd, authority.timeZoneId())) {
+                    if (overlapsRegular(state, closure.getStartAt(), changedEnd, authority.timeZoneId())) {
                         throw conflict();
                     }
                     closure.changeEndAt(changedEnd, clock.instant());
@@ -121,9 +118,10 @@ public class TemporaryClosureService {
                 objectMapper.treeToValue(outcome.data(), TemporaryClosureResponse.class));
     }
 
-    private void audit(TemporaryClosure closure, Long actor, String action, String previous, String next,
+    private void audit(TemporaryClosure closure, long actor, String action, String previous, String next,
             String requestId, String reason) {
-        auditRepository.save(StoreClosureAuditEvent.record(closure.getStoreId(), actor, "TEMPORARY",
+        auditRepository.save(StoreClosureAuditEvent.record(closure.getStoreId(), StoreClosureActorType.STORE_OPERATOR,
+                actor, "TEMPORARY",
                 Long.toString(closure.getId()), action, previous, next, closure.getTimeZoneId(), closure.getStartAt(),
                 clock.instant(), reason, requestId));
     }

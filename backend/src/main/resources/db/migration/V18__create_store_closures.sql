@@ -14,6 +14,8 @@ CREATE TABLE store_regular_closure_versions (
         UNIQUE (store_id, version_number),
     CONSTRAINT uk_regular_closure_store_id
         UNIQUE (store_id, regular_closure_version_id),
+    CONSTRAINT uk_regular_closure_store_effective_at
+        UNIQUE (store_id, effective_at),
     CONSTRAINT fk_regular_closure_store
         FOREIGN KEY (store_id) REFERENCES stores (store_id) ON DELETE RESTRICT,
     CONSTRAINT ck_regular_closure_version CHECK (version_number >= 1),
@@ -81,6 +83,7 @@ CREATE TABLE store_temporary_closures (
 CREATE TABLE store_closure_audit_events (
     closure_audit_event_id BIGINT NOT NULL AUTO_INCREMENT,
     store_id BIGINT NOT NULL,
+    actor_type VARCHAR(20) NOT NULL,
     actor_id BIGINT NULL,
     resource_type VARCHAR(30) NOT NULL,
     resource_id VARCHAR(100) NOT NULL,
@@ -97,5 +100,7 @@ CREATE TABLE store_closure_audit_events (
     PRIMARY KEY (closure_audit_event_id),
     CONSTRAINT fk_closure_audit_store
         FOREIGN KEY (store_id) REFERENCES stores (store_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_closure_audit_actor
+        CHECK (actor_type IN ('STORE_OPERATOR', 'SYSTEM')),
     INDEX idx_closure_audit_store_occurred (store_id, occurred_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;

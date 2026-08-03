@@ -7,6 +7,7 @@ import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
 import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.store.closure.repository.StoreClosureAuditEventRepository;
 import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
+import com.miriyum.domain.store.closure.model.StoreClosureActorType;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -80,8 +81,10 @@ public class StoreClosureService {
                     Instant now = clock.instant();
                     validatePublication(request, now);
                     if (request.publicationMode() == PublicationMode.SCHEDULED) {
-                        requireNoTemporaryConflict(target, request.effectiveAt().toInstant());
-                        target.schedule(request.effectiveAt().toInstant(), request.changeReason());
+                        Instant effectiveAt = request.effectiveAt().toInstant();
+                        if (regularRepository.existsByStoreIdAndEffectiveAt(storeId, effectiveAt)) throw conflict();
+                        requireNoTemporaryConflict(target, effectiveAt);
+                        target.schedule(effectiveAt, request.changeReason());
                         audit(target, operatorId, "PUBLICATION_SCHEDULED", "DRAFT", "SCHEDULED",
                                 authority.timeZoneId(), target.getEffectiveAt(), request.changeReason(), key.value());
                     } else {
@@ -207,7 +210,10 @@ public class StoreClosureService {
 
     private void audit(RegularClosureVersion target, Long actor, String action, String previous, String next,
                        String zone, Instant effectiveAt, String reason, String requestId) {
-        auditRepository.save(StoreClosureAuditEvent.record(target.getStoreId(), actor, "REGULAR",
+        StoreClosureActorType actorType = actor == null
+                ? StoreClosureActorType.SYSTEM
+                : StoreClosureActorType.STORE_OPERATOR;
+        auditRepository.save(StoreClosureAuditEvent.record(target.getStoreId(), actorType, actor, "REGULAR",
                 Long.toString(target.getId()), action, previous, next, zone, effectiveAt,
                 clock.instant(), reason, requestId));
     }

@@ -296,6 +296,32 @@ class StoreScheduleRepositoryIT {
 
     @Test
     @Transactional
+    void regularClosureEffectiveAtIsUniquePerStore() {
+        long storeId = createStore();
+        StoreScheduleState state = initializeAndLock(storeId);
+        Instant effectiveAt = Instant.parse("2026-08-05T03:00:00Z");
+        RegularClosureVersion first = RegularClosureVersion.createDraft(
+                storeId,
+                state.allocateRegularClosureVersion(),
+                "Asia/Seoul",
+                List.of(),
+                List.of());
+        first.schedule(effectiveAt, "첫 예약");
+        regularClosureRepository.saveAndFlush(first);
+        RegularClosureVersion competing = RegularClosureVersion.createDraft(
+                storeId,
+                state.allocateRegularClosureVersion(),
+                "Asia/Seoul",
+                List.of(),
+                List.of());
+        competing.schedule(effectiveAt, "동시 예약");
+
+        assertThatThrownBy(() -> regularClosureRepository.saveAndFlush(competing))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional
     void notEvaluatedConflictStatusCannotClaimZeroConflicts() {
         long storeId = createStore();
         StoreScheduleState state = initializeAndLock(storeId);

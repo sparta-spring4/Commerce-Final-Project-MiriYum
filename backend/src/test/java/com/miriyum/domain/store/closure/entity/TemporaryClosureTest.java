@@ -73,6 +73,15 @@ class TemporaryClosureTest {
     }
 
     @Test
+    void activeClosureCannotBeCancelled() {
+        TemporaryClosure closure = closure();
+
+        assertThatThrownBy(() -> closure.cancel(START))
+                .isInstanceOf(ServiceException.class);
+        assertThat(closure.statusAt(START)).isEqualTo(TemporaryClosureStatus.ACTIVE);
+    }
+
+    @Test
     void invalidIntervalIsRejected() {
         assertThatThrownBy(() -> TemporaryClosure.create(
                 7L,

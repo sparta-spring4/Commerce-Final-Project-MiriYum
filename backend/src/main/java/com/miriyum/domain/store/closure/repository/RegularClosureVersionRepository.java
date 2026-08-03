@@ -15,6 +15,8 @@ import org.springframework.data.repository.query.Param;
 public interface RegularClosureVersionRepository extends JpaRepository<RegularClosureVersion, Long> {
     Optional<RegularClosureVersion> findByStoreIdAndVersionNumber(long storeId, long versionNumber);
 
+    boolean existsByStoreIdAndEffectiveAt(long storeId, Instant effectiveAt);
+
     @Query("select v.storeId from RegularClosureVersion v where v.id = :id")
     Optional<Long> findStoreIdById(@Param("id") long id);
 

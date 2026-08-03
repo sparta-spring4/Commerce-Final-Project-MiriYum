@@ -115,7 +115,7 @@ public class TemporaryClosure extends BaseEntity {
     }
 
     public void cancel(Instant now) {
-        if (cancelledAt != null || !now.isBefore(endAt)) {
+        if (cancelledAt != null || !now.isBefore(startAt)) {
             throw conflict();
         }
         cancelledAt = now;

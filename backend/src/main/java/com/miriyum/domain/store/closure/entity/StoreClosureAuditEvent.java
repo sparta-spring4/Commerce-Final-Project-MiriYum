@@ -1,8 +1,11 @@
 package com.miriyum.domain.store.closure.entity;
 
+import com.miriyum.domain.store.closure.model.StoreClosureActorType;
 import com.miriyum.global.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -28,6 +31,10 @@ public class StoreClosureAuditEvent extends BaseEntity {
 
     @Column(name = "actor_id")
     private Long actorId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "actor_type", nullable = false, length = 20)
+    private StoreClosureActorType actorType;
 
     @Column(name = "resource_type", nullable = false, length = 30)
     private String resourceType;
@@ -61,6 +68,7 @@ public class StoreClosureAuditEvent extends BaseEntity {
 
     public static StoreClosureAuditEvent record(
             long storeId,
+            StoreClosureActorType actorType,
             Long actorId,
             String resourceType,
             String resourceId,
@@ -73,8 +81,14 @@ public class StoreClosureAuditEvent extends BaseEntity {
             String changeReason,
             String requestId
     ) {
+        if (actorType == null
+                || (actorType == StoreClosureActorType.STORE_OPERATOR && actorId == null)
+                || (actorType == StoreClosureActorType.SYSTEM && actorId != null)) {
+            throw new IllegalArgumentException("invalid store closure audit actor");
+        }
         StoreClosureAuditEvent event = new StoreClosureAuditEvent();
         event.storeId = storeId;
+        event.actorType = actorType;
         event.actorId = actorId;
         event.resourceType = resourceType;
         event.resourceId = resourceId;

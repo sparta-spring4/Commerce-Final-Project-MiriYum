@@ -12,11 +12,13 @@ import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
 import com.miriyum.domain.store.closure.entity.TemporaryClosure;
 import com.miriyum.domain.store.closure.model.TemporaryClosureReason;
+import com.miriyum.domain.store.closure.model.StoreClosureActorType;
 import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.store.closure.repository.StoreClosureAuditEventRepository;
 import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.PublicationMode;
@@ -30,6 +32,7 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -154,6 +158,57 @@ class StoreClosureServiceTest {
                 IdempotencyKey.parse(KEY),
                 new SchedulePublicationRequest(PublicationMode.IMMEDIATE, null, "게시")))
                 .isInstanceOf(com.miriyum.global.exception.ServiceException.class);
+    }
+
+    @Test
+    void scheduledPublicationRejectsDuplicateEffectiveAt() {
+        StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        RegularClosureVersion target = version(2L, 42L);
+        Instant effectiveAt = CLOCK.instant().plusSeconds(3600);
+        given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
+        given(regularRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
+                .willReturn(Optional.of(target));
+        given(regularRepository.existsByStoreIdAndEffectiveAt(STORE_ID, effectiveAt))
+                .willReturn(true);
+        executeBusinessWork();
+
+        assertThatThrownBy(() -> service.publishRegular(
+                OPERATOR_ID,
+                STORE_ID,
+                2L,
+                IdempotencyKey.parse(KEY),
+                new SchedulePublicationRequest(
+                        PublicationMode.SCHEDULED,
+                        OffsetDateTime.ofInstant(effectiveAt, ZoneOffset.UTC),
+                        "예약 게시")))
+                .isInstanceOf(com.miriyum.global.exception.ServiceException.class);
+        assertThat(target.getStatus()).isEqualTo(ScheduleVersionStatus.DRAFT);
+    }
+
+    @Test
+    void scheduledActivationIsAuditedAsSystemActor() {
+        StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        RegularClosureVersion scheduled = version(1L, 42L);
+        scheduled.schedule(CLOCK.instant(), "예약 게시");
+        given(regularRepository.findStoreIdById(42L)).willReturn(Optional.of(STORE_ID));
+        given(storeService.inspectScheduledActivation(STORE_ID))
+                .willReturn(new StoreScheduledActivationDecision(STORE_ID, "Asia/Seoul", true));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
+        given(regularRepository.findForUpdateById(42L)).willReturn(Optional.of(scheduled));
+        given(regularRepository
+                .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
+                        STORE_ID, ScheduleVersionStatus.SCHEDULED, CLOCK.instant()))
+                .willReturn(Optional.of(scheduled));
+
+        service.activateDueRegular(42L);
+
+        ArgumentCaptor<StoreClosureAuditEvent> captor =
+                ArgumentCaptor.forClass(StoreClosureAuditEvent.class);
+        then(auditRepository).should().save(captor.capture());
+        assertThat(captor.getValue().getActorType()).isEqualTo(StoreClosureActorType.SYSTEM);
+        assertThat(captor.getValue().getActorId()).isNull();
     }
 
     private RegularClosureVersion version(long versionNumber, long id) {
