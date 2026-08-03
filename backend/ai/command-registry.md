@@ -12,4 +12,8 @@
 
 위 세 명령은 파일이 존재하고 스캐폴드 검증 중 각각 종료 코드 `0`을 반환한 후에만 활성화되었다.
 
-DB 통합, API 스모크, Docker, CI, 배포 명령은 실행 표면이 `NOT CONFIGURED`이므로 안정적인 명령 ID가 없다.
+## 러너 플랫폼별 호출
+
+위 "정확한 명령"은 Windows 로컬 기준 `.\gradlew.bat` 표기다. Linux CI 러너(`ubuntu-24.04`, `.github/workflows/backend-ci.yml`, Issue #92)에서는 같은 명령 ID를 `./gradlew`로 호출한다. 예: `backend.wrapper.version`은 `./gradlew --version`, `backend.test`는 `./gradlew test`, `backend.build`는 `./gradlew build`. 래퍼·버전·검증 대상은 동일하며 호출 표기만 플랫폼에 따라 다르다. GitHub Windows 러너는 Linux 컨테이너를 지원하지 않아 Testcontainers MySQL을 실행할 수 없으므로 CI 러너는 Linux(`./gradlew`)를 사용한다.
+
+DB 통합, API 스모크, Docker, 배포 명령은 실행 표면이 `NOT CONFIGURED`이므로 안정적인 명령 ID가 없다. CI 워크플로 자체의 활성/필수 상태는 `ai/verification-and-completion.md`가 소유하며, 실제 성공 실행과 저장소 required-check 설정이 검증되기 전까지 `NOT CONFIGURED`다.
