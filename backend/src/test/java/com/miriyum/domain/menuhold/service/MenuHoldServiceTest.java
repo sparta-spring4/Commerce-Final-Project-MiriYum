@@ -10,11 +10,8 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
-import com.miriyum.domain.menuhold.inventory.model.InventoryLedgerOperation;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
-import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryCommandRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
-import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -35,9 +32,6 @@ class MenuHoldServiceTest {
     @Mock
     private MenuInventoryLedgerRepository ledgerRepository;
 
-    @Mock
-    private MenuInventoryCommandRepository commandRepository;
-
     @Test
     void acquiresBucketsInPrimaryKeyOrderAndReturnsPoolBreakdown() {
         MenuInventoryBucket first = bucket(9L, 1, 3);
@@ -45,11 +39,6 @@ class MenuHoldServiceTest {
         InventoryAcquireRequest request = new InventoryAcquireRequest(
                 "reservation:77:create",
                 List.of(selection(9L, 2), selection(3L, 2)));
-        given(commandRepository.claimOrValidate(
-                org.mockito.ArgumentMatchers.eq(request.commandId()),
-                org.mockito.ArgumentMatchers.eq(InventoryLedgerOperation.ACQUIRE),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.isNull())).willReturn(true);
         given(bucketRepository.findBucketId(selection(9L, 2).key())).willReturn(9L);
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
         given(bucketRepository.findAllForUpdate(List.of(3L, 9L)))
@@ -73,18 +62,16 @@ class MenuHoldServiceTest {
     }
 
     @Test
-    void restoresRecordedPoolsOnceAndReplaysWithoutChangingInventoryAgain() {
+    void restoresRecordedPoolsFromSourceOperation() {
         MenuInventoryBucket bucket = bucket(3L, 2, 2);
         bucket.acquire(3);
         InventoryRestoreRequest request = new InventoryRestoreRequest(
                 "reservation:77:cancel", "reservation:77:create");
-        given(ledgerRepository.findAcquireResults(request.acquireCommandId()))
+        given(ledgerRepository.findAcquireResults(request.sourceAcquireOperationId()))
                 .willReturn(List.of(new InventoryAllocationResult(3L, 2, 1)));
-        given(ledgerRepository.existsRestoreForSourceCommand(request.acquireCommandId()))
+        given(ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId()))
                 .willReturn(false);
-        given(commandRepository.claimOrValidate(
-                request.commandId(), InventoryLedgerOperation.RESTORE,
-                request.acquireCommandId(), request.acquireCommandId())).willReturn(true);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         given(bucketRepository.incrementIfCurrent(3L, 0L, 2, 1)).willReturn(1);
         MenuHoldService service = service();
@@ -103,11 +90,6 @@ class MenuHoldServiceTest {
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(0);
-        given(commandRepository.claimOrValidate(
-                org.mockito.ArgumentMatchers.eq(request.commandId()),
-                org.mockito.ArgumentMatchers.eq(InventoryLedgerOperation.ACQUIRE),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.isNull())).willReturn(true);
         MenuHoldService service = service();
 
         assertThatThrownBy(() -> service.acquireInventory(request))
@@ -119,83 +101,31 @@ class MenuHoldServiceTest {
     }
 
     @Test
-    void rejectsAcquireCommandReusedForDifferentQuantity() {
-        InventoryAcquireRequest request = new InventoryAcquireRequest(
-                "reservation:77:create", List.of(selection(3L, 3)));
-        given(bucketRepository.findBucketId(selection(3L, 3).key())).willReturn(3L);
-        given(ledgerRepository.findAcquireResults(request.commandId()))
-                .willReturn(List.of(new InventoryAllocationResult(3L, 2, 0)));
-        MenuHoldService service = service();
-
-        assertThatThrownBy(() -> service.acquireInventory(request))
-                .isInstanceOf(ServiceException.class)
-                .extracting(error -> ((ServiceException) error).getErrorCode())
-                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-    }
-
-    @Test
-    void rejectsRestoreCommandReusedForDifferentAcquireCommand() {
-        InventoryRestoreRequest request = new InventoryRestoreRequest(
-                "reservation:77:cancel", "reservation:88:create");
-        given(ledgerRepository.findAcquireResults(request.acquireCommandId()))
-                .willReturn(List.of(new InventoryAllocationResult(3L, 2, 0)));
-        given(commandRepository.claimOrValidate(
-                request.commandId(), InventoryLedgerOperation.RESTORE,
-                request.acquireCommandId(), request.acquireCommandId()))
-                .willThrow(new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
-        MenuHoldService service = service();
-
-        assertThatThrownBy(() -> service.restoreInventory(request))
-                .isInstanceOf(ServiceException.class)
-                .extracting(error -> ((ServiceException) error).getErrorCode())
-                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-    }
-
-    @Test
     void rejectsRestoreWhenSourceAcquireLedgerDoesNotExist() {
         InventoryRestoreRequest request = new InventoryRestoreRequest(
                 "reservation:77:cancel", "reservation:missing:create");
-        given(ledgerRepository.findAcquireResults(request.acquireCommandId())).willReturn(List.of());
+        given(ledgerRepository.findAcquireResults(request.sourceAcquireOperationId()))
+                .willReturn(List.of());
         MenuHoldService service = service();
 
         assertThatThrownBy(() -> service.restoreInventory(request))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-        then(commandRepository).should(org.mockito.Mockito.never()).claimOrValidate(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void rechecksAcquireCommandAfterLockToConvergeConcurrentRetry() {
-        MenuInventoryBucket bucket = bucket(3L, 2, 0);
-        InventoryAcquireRequest request = new InventoryAcquireRequest(
-                "reservation:77:create", List.of(selection(3L, 2)));
-        InventoryAllocationResult committed = new InventoryAllocationResult(3L, 2, 0);
-        given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
-        given(ledgerRepository.findAcquireResults(request.commandId()))
-                .willReturn(List.of(committed));
-        MenuHoldService service = service();
-
-        List<InventoryAllocationResult> result = service.acquireInventory(request);
-
-        assertThat(result).containsExactly(committed);
-        assertThat(bucket.getOnlineHoldRemaining()).isEqualTo(2);
-        then(ledgerRepository).should(org.mockito.Mockito.never())
-                .saveAll(org.mockito.ArgumentMatchers.anyList());
-    }
-
-    @Test
-    void rechecksRestoreCommandAfterLockToConvergeConcurrentRetry() {
+    void rechecksSourceOperationAfterLockToPreventDuplicateRestore() {
         MenuInventoryBucket bucket = bucket(3L, 2, 1);
         bucket.acquire(2);
         InventoryRestoreRequest request = new InventoryRestoreRequest(
                 "reservation:77:cancel", "reservation:77:create");
-        given(ledgerRepository.findAcquireResults(request.acquireCommandId()))
+        given(ledgerRepository.findAcquireResults(request.sourceAcquireOperationId()))
                 .willReturn(List.of(new InventoryAllocationResult(3L, 2, 0)));
+        given(ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId()))
+                .willReturn(false, true);
+        given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         MenuHoldService service = service();
 
         service.restoreInventory(request);
@@ -206,7 +136,7 @@ class MenuHoldServiceTest {
     }
 
     private MenuHoldService service() {
-        return new MenuHoldService(bucketRepository, ledgerRepository, commandRepository);
+        return new MenuHoldService(bucketRepository, ledgerRepository);
     }
 
     private static InventoryAcquireRequest.Selection selection(long menuId, int quantity) {

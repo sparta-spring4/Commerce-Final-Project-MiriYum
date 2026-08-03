@@ -50,29 +50,10 @@ CREATE TABLE menu_inventory_buckets (
     )
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
-CREATE TABLE menu_inventory_commands (
-    command_id VARCHAR(100) NOT NULL,
-    operation_type VARCHAR(20) NOT NULL,
-    request_fingerprint CHAR(64) NOT NULL,
-    source_command_id VARCHAR(100) NULL,
-    created_at DATETIME(6) NOT NULL,
-    updated_at DATETIME(6) NOT NULL,
-    PRIMARY KEY (command_id),
-    CONSTRAINT fk_menu_inventory_command_source
-        FOREIGN KEY (source_command_id)
-        REFERENCES menu_inventory_commands (command_id) ON DELETE RESTRICT,
-    CONSTRAINT ck_menu_inventory_command_operation
-        CHECK (operation_type IN ('ACQUIRE', 'RESTORE')),
-    CONSTRAINT ck_menu_inventory_command_source CHECK (
-        (operation_type = 'ACQUIRE' AND source_command_id IS NULL)
-        OR (operation_type = 'RESTORE' AND source_command_id IS NOT NULL)
-    )
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
-
 CREATE TABLE menu_inventory_ledger (
     menu_inventory_ledger_id BIGINT NOT NULL AUTO_INCREMENT,
-    command_id VARCHAR(100) NOT NULL,
-    source_command_id VARCHAR(100) NULL,
+    operation_id VARCHAR(100) NOT NULL,
+    source_operation_id VARCHAR(100) NULL,
     menu_inventory_bucket_id BIGINT NOT NULL,
     operation_type VARCHAR(20) NOT NULL,
     pool_type VARCHAR(20) NOT NULL,
@@ -82,26 +63,20 @@ CREATE TABLE menu_inventory_ledger (
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (menu_inventory_ledger_id),
-    CONSTRAINT uk_menu_inventory_ledger_command_pool UNIQUE (
-        command_id, menu_inventory_bucket_id, operation_type, pool_type
+    CONSTRAINT uk_menu_inventory_ledger_operation_pool UNIQUE (
+        operation_id, menu_inventory_bucket_id, operation_type, pool_type
     ),
     CONSTRAINT uk_menu_inventory_restore_source_pool UNIQUE (
-        source_command_id, menu_inventory_bucket_id, operation_type, pool_type
+        source_operation_id, menu_inventory_bucket_id, operation_type, pool_type
     ),
     CONSTRAINT fk_menu_inventory_ledger_bucket
         FOREIGN KEY (menu_inventory_bucket_id)
         REFERENCES menu_inventory_buckets (menu_inventory_bucket_id) ON DELETE RESTRICT,
-    CONSTRAINT fk_menu_inventory_ledger_command
-        FOREIGN KEY (command_id)
-        REFERENCES menu_inventory_commands (command_id) ON DELETE RESTRICT,
-    CONSTRAINT fk_menu_inventory_ledger_source_command
-        FOREIGN KEY (source_command_id)
-        REFERENCES menu_inventory_commands (command_id) ON DELETE RESTRICT,
     CONSTRAINT ck_menu_inventory_ledger_operation
         CHECK (operation_type IN ('ACQUIRE', 'RESTORE')),
     CONSTRAINT ck_menu_inventory_ledger_source CHECK (
-        (operation_type = 'ACQUIRE' AND source_command_id IS NULL)
-        OR (operation_type = 'RESTORE' AND source_command_id IS NOT NULL)
+        (operation_type = 'ACQUIRE' AND source_operation_id IS NULL)
+        OR (operation_type = 'RESTORE' AND source_operation_id IS NOT NULL)
     ),
     CONSTRAINT ck_menu_inventory_ledger_pool
         CHECK (pool_type IN ('ONLINE_HOLD', 'SHARED')),

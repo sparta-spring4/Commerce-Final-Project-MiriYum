@@ -7,12 +7,9 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.InventoryAllocation;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryLedger;
-import com.miriyum.domain.menuhold.inventory.model.InventoryLedgerOperation;
 import com.miriyum.domain.menuhold.inventory.model.InventoryPoolType;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
-import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryCommandRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
-import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,7 +27,6 @@ public class MenuHoldService {
 
     private final MenuInventoryBucketRepository bucketRepository;
     private final MenuInventoryLedgerRepository ledgerRepository;
-    private final MenuInventoryCommandRepository commandRepository;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public List<InventoryAllocationResult> acquireInventory(InventoryAcquireRequest request) {
@@ -41,22 +37,6 @@ public class MenuHoldService {
                 throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
             }
             quantitiesByBucketId.merge(bucketId, selection.quantity(), Math::addExact);
-        }
-        boolean newCommand = commandRepository.claimOrValidate(
-                request.commandId(),
-                InventoryLedgerOperation.ACQUIRE,
-                acquireCanonicalInput(quantitiesByBucketId),
-                null);
-        if (!newCommand) {
-            List<InventoryAllocationResult> replay = ledgerRepository
-                    .findAcquireResults(request.commandId());
-            if (replay.isEmpty()) {
-                throw new IllegalStateException("completed inventory command has no acquire ledger");
-            }
-            if (!matchesRequestedQuantities(replay, quantitiesByBucketId)) {
-                throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-            }
-            return replay;
         }
         List<Long> orderedIds = quantitiesByBucketId.keySet().stream().sorted().toList();
         List<MenuInventoryBucket> buckets = bucketRepository.findAllForUpdate(orderedIds);
@@ -78,50 +58,24 @@ public class MenuHoldService {
                     bucket.getId(),
                     allocation.onlineHoldQuantity(),
                     allocation.sharedQuantity()));
-            appendAcquireEvents(request.commandId(), bucket, allocation, events);
+            appendAcquireEvents(request.operationId(), bucket, allocation, events);
         }
         ledgerRepository.saveAll(events);
         return List.copyOf(results);
     }
 
-    private static boolean matchesRequestedQuantities(
-            List<InventoryAllocationResult> replay,
-            Map<Long, Integer> quantitiesByBucketId
-    ) {
-        if (replay.size() != quantitiesByBucketId.size()) {
-            return false;
-        }
-        return replay.stream().allMatch(result ->
-                quantitiesByBucketId.getOrDefault(result.bucketId(), -1)
-                        == result.onlineHoldQuantity() + result.sharedQuantity());
-    }
-
-    private static String acquireCanonicalInput(Map<Long, Integer> quantitiesByBucketId) {
-        return quantitiesByBucketId.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> entry.getKey() + ":" + entry.getValue())
-                .collect(Collectors.joining(";", "ACQUIRE|", ""));
-    }
-
     @Transactional(propagation = Propagation.MANDATORY)
     public void restoreInventory(InventoryRestoreRequest request) {
         List<InventoryAllocationResult> acquired = ledgerRepository
-                .findAcquireResults(request.acquireCommandId());
+                .findAcquireResults(request.sourceAcquireOperationId());
         if (acquired.isEmpty()) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-        }
-        boolean newCommand = commandRepository.claimOrValidate(
-                request.commandId(),
-                InventoryLedgerOperation.RESTORE,
-                request.acquireCommandId(),
-                request.acquireCommandId());
-        if (!newCommand) {
-            return;
         }
         Map<Long, InventoryAllocationResult> allocationsByBucketId = acquired.stream()
                 .collect(Collectors.toMap(
                         InventoryAllocationResult::bucketId, allocation -> allocation));
-        if (ledgerRepository.existsRestoreForSourceCommand(request.acquireCommandId())) {
+        if (ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId())) {
             return;
         }
         List<Long> orderedIds = allocationsByBucketId.keySet().stream().sorted().toList();
@@ -129,7 +83,8 @@ public class MenuHoldService {
         if (buckets.size() != orderedIds.size()) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
         }
-        if (ledgerRepository.existsRestoreForSourceCommand(request.acquireCommandId())) {
+        if (ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId())) {
             return;
         }
         List<MenuInventoryLedger> events = new ArrayList<>();
@@ -145,20 +100,21 @@ public class MenuHoldService {
                 throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
             }
             appendRestoreEvents(
-                    request.commandId(), request.acquireCommandId(), bucket, allocation, events);
+                    request.operationId(), request.sourceAcquireOperationId(),
+                    bucket, allocation, events);
         }
         ledgerRepository.saveAll(events);
     }
 
     private static void appendAcquireEvents(
-            String commandId,
+            String operationId,
             MenuInventoryBucket bucket,
             InventoryAllocation allocation,
             List<MenuInventoryLedger> events
     ) {
         if (allocation.onlineHoldQuantity() > 0) {
             events.add(MenuInventoryLedger.acquired(
-                    commandId,
+                    operationId,
                     bucket.getId(),
                     InventoryPoolType.ONLINE_HOLD,
                     allocation.onlineHoldQuantity(),
@@ -166,7 +122,7 @@ public class MenuHoldService {
         }
         if (allocation.sharedQuantity() > 0) {
             events.add(MenuInventoryLedger.acquired(
-                    commandId,
+                    operationId,
                     bucket.getId(),
                     InventoryPoolType.SHARED,
                     allocation.sharedQuantity(),
@@ -175,16 +131,16 @@ public class MenuHoldService {
     }
 
     private static void appendRestoreEvents(
-            String commandId,
-            String sourceCommandId,
+            String operationId,
+            String sourceOperationId,
             MenuInventoryBucket bucket,
             InventoryAllocation allocation,
             List<MenuInventoryLedger> events
     ) {
         if (allocation.onlineHoldQuantity() > 0) {
             events.add(MenuInventoryLedger.restored(
-                    commandId,
-                    sourceCommandId,
+                    operationId,
+                    sourceOperationId,
                     bucket.getId(),
                     InventoryPoolType.ONLINE_HOLD,
                     allocation.onlineHoldQuantity(),
@@ -192,8 +148,8 @@ public class MenuHoldService {
         }
         if (allocation.sharedQuantity() > 0) {
             events.add(MenuInventoryLedger.restored(
-                    commandId,
-                    sourceCommandId,
+                    operationId,
+                    sourceOperationId,
                     bucket.getId(),
                     InventoryPoolType.SHARED,
                     allocation.sharedQuantity(),

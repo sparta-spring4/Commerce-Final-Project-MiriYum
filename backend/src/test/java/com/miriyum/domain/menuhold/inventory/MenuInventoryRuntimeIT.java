@@ -110,23 +110,22 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
-    void acquireReplayAndRestoreAreDurableAndExactlyOnce() {
+    void acquireAndDistinctRestoreOperationsRestoreSourceOnlyOnce() {
         MenuInventoryBucket bucket = transactionTemplate.execute(status ->
                 bucketRepository.saveAndFlush(bucket(menuId, 2, 3)));
         InventoryAcquireRequest acquire = new InventoryAcquireRequest(
                 "reservation:77:create", List.of(selection(menuId, 4)));
 
-        List<InventoryAllocationResult> first = transactionTemplate.execute(status ->
-                menuHoldService.acquireInventory(acquire));
-        List<InventoryAllocationResult> replay = transactionTemplate.execute(status ->
+        List<InventoryAllocationResult> acquired = transactionTemplate.execute(status ->
                 menuHoldService.acquireInventory(acquire));
         transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
-                new InventoryRestoreRequest("reservation:77:cancel", acquire.commandId())));
+                new InventoryRestoreRequest("reservation:77:cancel:1", acquire.operationId())));
         transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
-                new InventoryRestoreRequest("reservation:77:cancel", acquire.commandId())));
+                new InventoryRestoreRequest("reservation:77:cancel:2", acquire.operationId())));
 
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
-        assertThat(replay).isEqualTo(first);
+        assertThat(acquired).containsExactly(
+                new InventoryAllocationResult(bucket.getId(), 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
         assertThat(ledgerRepository.count()).isEqualTo(4);

@@ -4,9 +4,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 
-public record InventoryAcquireRequest(String commandId, List<Selection> selections) {
+public record InventoryAcquireRequest(String operationId, List<Selection> selections) {
     public InventoryAcquireRequest {
-        if (commandId == null || commandId.isBlank() || commandId.length() > 100
+        if (operationId == null || operationId.isBlank() || operationId.length() > 100
                 || selections == null || selections.isEmpty()) {
             throw new IllegalArgumentException("inventory acquire request is required");
         }

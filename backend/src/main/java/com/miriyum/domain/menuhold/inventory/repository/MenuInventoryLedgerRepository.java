@@ -12,26 +12,26 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface MenuInventoryLedgerRepository
         extends JpaRepository<MenuInventoryLedger, Long> {
 
-    List<MenuInventoryLedger> findAllByCommandIdAndOperationTypeOrderByBucketIdAscPoolTypeAsc(
-            String commandId,
+    List<MenuInventoryLedger> findAllByOperationIdAndOperationTypeOrderByBucketIdAscPoolTypeAsc(
+            String operationId,
             InventoryLedgerOperation operationType);
 
-    default List<InventoryAllocationResult> findAcquireResults(String commandId) {
-        return findResults(commandId, InventoryLedgerOperation.ACQUIRE);
+    default List<InventoryAllocationResult> findAcquireResults(String operationId) {
+        return findResults(operationId, InventoryLedgerOperation.ACQUIRE);
     }
 
-    default boolean existsRestoreForSourceCommand(String sourceCommandId) {
-        return existsBySourceCommandIdAndOperationType(
-                sourceCommandId, InventoryLedgerOperation.RESTORE);
+    default boolean existsRestoreForSourceOperation(String sourceOperationId) {
+        return existsBySourceOperationIdAndOperationType(
+                sourceOperationId, InventoryLedgerOperation.RESTORE);
     }
 
     private List<InventoryAllocationResult> findResults(
-            String commandId,
+            String operationId,
             InventoryLedgerOperation operationType
     ) {
         Map<Long, int[]> quantities = new LinkedHashMap<>();
-        findAllByCommandIdAndOperationTypeOrderByBucketIdAscPoolTypeAsc(
-                commandId, operationType).forEach(ledger -> {
+        findAllByOperationIdAndOperationTypeOrderByBucketIdAscPoolTypeAsc(
+                operationId, operationType).forEach(ledger -> {
                     int[] value = quantities.computeIfAbsent(ledger.getBucketId(), ignored -> new int[2]);
                     int quantity = Math.abs(ledger.getQuantityDelta());
                     if (ledger.getPoolType() == InventoryPoolType.ONLINE_HOLD) {
@@ -46,7 +46,7 @@ public interface MenuInventoryLedgerRepository
                 .toList();
     }
 
-    boolean existsBySourceCommandIdAndOperationType(
-            String sourceCommandId,
+    boolean existsBySourceOperationIdAndOperationType(
+            String sourceOperationId,
             InventoryLedgerOperation operationType);
 }

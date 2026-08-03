@@ -26,11 +26,11 @@ public class MenuInventoryLedger extends BaseEntity {
     @Column(name = "menu_inventory_ledger_id")
     private Long id;
 
-    @Column(name = "command_id", nullable = false, length = 100)
-    private String commandId;
+    @Column(name = "operation_id", nullable = false, length = 100)
+    private String operationId;
 
-    @Column(name = "source_command_id", length = 100)
-    private String sourceCommandId;
+    @Column(name = "source_operation_id", length = 100)
+    private String sourceOperationId;
 
     @Column(name = "menu_inventory_bucket_id", nullable = false)
     private long bucketId;
@@ -53,31 +53,32 @@ public class MenuInventoryLedger extends BaseEntity {
     private int quantityAfter;
 
     public static MenuInventoryLedger acquired(
-            String commandId,
+            String operationId,
             long bucketId,
             InventoryPoolType poolType,
             int quantity,
             int remainingAfter
     ) {
-        return create(commandId, null, bucketId, InventoryLedgerOperation.ACQUIRE, poolType,
+        return create(operationId, null, bucketId, InventoryLedgerOperation.ACQUIRE, poolType,
                 -quantity, remainingAfter + quantity, remainingAfter);
     }
 
     public static MenuInventoryLedger restored(
-            String commandId,
-            String sourceCommandId,
+            String operationId,
+            String sourceOperationId,
             long bucketId,
             InventoryPoolType poolType,
             int quantity,
             int remainingAfter
     ) {
-        return create(commandId, sourceCommandId, bucketId, InventoryLedgerOperation.RESTORE, poolType,
+        return create(operationId, sourceOperationId, bucketId,
+                InventoryLedgerOperation.RESTORE, poolType,
                 quantity, remainingAfter - quantity, remainingAfter);
     }
 
     private static MenuInventoryLedger create(
-            String commandId,
-            String sourceCommandId,
+            String operationId,
+            String sourceOperationId,
             long bucketId,
             InventoryLedgerOperation operationType,
             InventoryPoolType poolType,
@@ -86,8 +87,8 @@ public class MenuInventoryLedger extends BaseEntity {
             int after
     ) {
         MenuInventoryLedger ledger = new MenuInventoryLedger();
-        ledger.commandId = commandId;
-        ledger.sourceCommandId = sourceCommandId;
+        ledger.operationId = operationId;
+        ledger.sourceOperationId = sourceOperationId;
         ledger.bucketId = bucketId;
         ledger.operationType = operationType;
         ledger.poolType = poolType;
