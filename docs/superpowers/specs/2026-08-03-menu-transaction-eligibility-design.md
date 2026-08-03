@@ -1,8 +1,8 @@
 # Menu Transaction Eligibility Contract Design
 
-**Date:** 2026-08-03  
-**Issue:** #85  
-**Base:** `origin/dev`  
+**Date:** 2026-08-03
+**Issue:** #85
+**Base:** `origin/dev`
 **Blocks:** #42
 
 ## Goal
