@@ -5,9 +5,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Applies the account-level login delay policy after a password mismatch is confirmed.
@@ -20,19 +19,29 @@ public class LoginDelayGuard {
     private final LoginFailureDelayRepository loginFailureDelayRepository;
     private final LoginDelayPolicy loginDelayPolicy;
     private final Clock clock;
+    private final LoginDelayTransactionExecutor transactionExecutor;
 
     public LoginDelayGuard(
             LoginFailureDelayRepository loginFailureDelayRepository,
             LoginDelayPolicy loginDelayPolicy,
-            Clock clock
+            Clock clock,
+            LoginDelayTransactionExecutor transactionExecutor
     ) {
         this.loginFailureDelayRepository = loginFailureDelayRepository;
         this.loginDelayPolicy = loginDelayPolicy;
         this.clock = clock;
+        this.transactionExecutor = transactionExecutor;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public LoginAttempt tryAcquireAttempt(TokenNamespace namespace, long accountId) {
+        try {
+            return transactionExecutor.execute(() -> acquireAttempt(namespace, accountId));
+        } catch (PessimisticLockingFailureException exception) {
+            return LoginAttempt.busy();
+        }
+    }
+
+    private LoginAttempt acquireAttempt(TokenNamespace namespace, long accountId) {
         LocalDateTime now = LocalDateTime.now(clock);
         String token = UUID.randomUUID().toString();
         LocalDateTime expiresAt = now.plus(ATTEMPT_LEASE);
@@ -49,8 +58,21 @@ public class LoginDelayGuard {
                 .orElseGet(LoginAttempt::busy);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean completeAttempt(
+            TokenNamespace namespace,
+            long accountId,
+            LoginAttempt attempt,
+            boolean passwordMatches
+    ) {
+        try {
+            return transactionExecutor.execute(() -> completeAttemptInTransaction(
+                    namespace, accountId, attempt, passwordMatches));
+        } catch (PessimisticLockingFailureException exception) {
+            return false;
+        }
+    }
+
+    private boolean completeAttemptInTransaction(
             TokenNamespace namespace,
             long accountId,
             LoginAttempt attempt,
@@ -74,9 +96,15 @@ public class LoginDelayGuard {
         return true;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void releaseAttempt(TokenNamespace namespace, long accountId, LoginAttempt attempt) {
-        loginFailureDelayRepository.releaseAttempt(
-                namespace.value(), accountId, attempt.token(), LocalDateTime.now(clock));
+        try {
+            transactionExecutor.execute(() -> {
+                loginFailureDelayRepository.releaseAttempt(
+                        namespace.value(), accountId, attempt.token(), LocalDateTime.now(clock));
+                return true;
+            });
+        } catch (PessimisticLockingFailureException ignored) {
+            // The lease expires after 30 seconds; do not mask the original login failure.
+        }
     }
 }
