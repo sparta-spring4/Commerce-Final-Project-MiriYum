@@ -42,7 +42,7 @@ class StoreTransactionEligibilityServiceTest {
 
     @Test
     void reservationEligibilityRejectsMissingStore() {
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.empty());
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
         assertStoreError(
                 () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
@@ -53,7 +53,7 @@ class StoreTransactionEligibilityServiceTest {
     void reservationEligibilityRejectsStoreWithoutApprovedVerification() {
         Store store = eligibleStore(true, true);
         ReflectionTestUtils.setField(store, "verificationStatus", null);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
@@ -65,7 +65,7 @@ class StoreTransactionEligibilityServiceTest {
         Store store = eligibleStore(true, true);
         ReflectionTestUtils.setField(
                 store, "operationStatus", OperationStatus.TEMPORARILY_CLOSED);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
@@ -76,7 +76,7 @@ class StoreTransactionEligibilityServiceTest {
     void reservationEligibilityRejectsClosedStore() {
         Store store = eligibleStore(true, true);
         store.close();
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
@@ -86,7 +86,7 @@ class StoreTransactionEligibilityServiceTest {
     @Test
     void reservationEligibilityRejectsDisabledReservationMode() {
         Store store = eligibleStore(false, true);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requireReservationTransactionEligibility(STORE_ID),
@@ -95,7 +95,7 @@ class StoreTransactionEligibilityServiceTest {
 
     @Test
     void pickupEligibilityRejectsMissingStore() {
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.empty());
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -106,7 +106,7 @@ class StoreTransactionEligibilityServiceTest {
     void pickupEligibilityRejectsStoreWithoutApprovedVerification() {
         Store store = eligibleStore(true, true);
         ReflectionTestUtils.setField(store, "verificationStatus", null);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -118,7 +118,7 @@ class StoreTransactionEligibilityServiceTest {
         Store store = eligibleStore(true, true);
         ReflectionTestUtils.setField(
                 store, "operationStatus", OperationStatus.TEMPORARILY_CLOSED);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -129,7 +129,7 @@ class StoreTransactionEligibilityServiceTest {
     void pickupEligibilityRejectsClosedStore() {
         Store store = eligibleStore(true, true);
         store.close();
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -139,7 +139,7 @@ class StoreTransactionEligibilityServiceTest {
     @Test
     void pickupEligibilityRejectsStoreWithoutCentralPickupEligibility() {
         Store store = ineligiblePickupStore();
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -149,7 +149,7 @@ class StoreTransactionEligibilityServiceTest {
     @Test
     void pickupEligibilityRejectsDisabledPickupMode() {
         Store store = eligibleStore(true, false);
-        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertStoreError(
                 () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
@@ -158,7 +158,7 @@ class StoreTransactionEligibilityServiceTest {
 
     @Test
     void reservationEligibilityReturnsPurposeSpecificProof() {
-        given(storeRepository.findById(STORE_ID))
+        given(storeRepository.findByIdForUpdate(STORE_ID))
                 .willReturn(Optional.of(eligibleStore(true, true)));
 
         StoreReservationTransactionEligibility result =
@@ -166,13 +166,13 @@ class StoreTransactionEligibilityServiceTest {
 
         assertThat(result)
                 .isEqualTo(new StoreReservationTransactionEligibility(STORE_ID));
-        then(storeRepository).should().findById(STORE_ID);
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
     }
 
     @Test
     void pickupEligibilityReturnsPurposeSpecificProof() {
-        given(storeRepository.findById(STORE_ID))
+        given(storeRepository.findByIdForUpdate(STORE_ID))
                 .willReturn(Optional.of(eligibleStore(true, true)));
 
         StorePickupTransactionEligibility result =
@@ -180,7 +180,7 @@ class StoreTransactionEligibilityServiceTest {
 
         assertThat(result)
                 .isEqualTo(new StorePickupTransactionEligibility(STORE_ID));
-        then(storeRepository).should().findById(STORE_ID);
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
     }
 

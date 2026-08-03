@@ -10,10 +10,11 @@ import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 후속 거래 도메인에 Store 자체의 현재 거래 자격을 공개한다.
+ * 후속 거래 도메인이 신규 거래를 확정하기 직전에 Store 자격을 잠금 검증한다.
  */
 @Service
 public class StoreTransactionEligibilityService {
@@ -25,13 +26,13 @@ public class StoreTransactionEligibilityService {
     }
 
     /**
-     * 운영자 principal 없이 일반 예약 신규 거래 가능 상태를 검증한다.
+     * 운영자 principal 없이 일반 예약 신규 거래 자격을 최종 잠금 검증한다.
      *
      * @param storeId 대상 매장 식별자
      * @return 일반 예약 거래 자격을 통과한 매장
      * @throws ServiceException 매장이 없거나 현재 일반 예약 거래를 받을 수 없는 경우
      */
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreReservationTransactionEligibility
             requireReservationTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
@@ -43,13 +44,13 @@ public class StoreTransactionEligibilityService {
     }
 
     /**
-     * 운영자 principal 없이 Pickup 신규 거래 가능 상태를 검증한다.
+     * 운영자 principal 없이 Pickup 신규 거래 자격을 최종 잠금 검증한다.
      *
      * @param storeId 대상 매장 식별자
      * @return Pickup 거래 자격을 통과한 매장
      * @throws ServiceException 매장이 없거나 현재 Pickup 거래를 받을 수 없는 경우
      */
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StorePickupTransactionEligibility
             requirePickupTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
@@ -64,7 +65,7 @@ public class StoreTransactionEligibilityService {
     }
 
     private Store loadStore(long storeId) {
-        return storeRepository.findById(storeId)
+        return storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
     }
 

@@ -12,6 +12,7 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 class StoreTransactionEligibilityPublicContractTest {
@@ -35,8 +36,8 @@ class StoreTransactionEligibilityPublicContractTest {
                 .isEqualTo(StorePickupTransactionEligibility.class);
         assertThat(reservation.getParameterTypes()).containsExactly(long.class);
         assertThat(pickup.getParameterTypes()).containsExactly(long.class);
-        assertReadOnly(reservation);
-        assertReadOnly(pickup);
+        assertLockingTransactionGate(reservation);
+        assertLockingTransactionGate(pickup);
     }
 
     @Test
@@ -72,14 +73,20 @@ class StoreTransactionEligibilityPublicContractTest {
                 .allSatisfy(this::assertNotStoreInternalType);
     }
 
-    private void assertReadOnly(Method method) {
+    private void assertLockingTransactionGate(Method method) {
         Transactional transactional = method.getAnnotation(Transactional.class);
         assertThat(transactional)
                 .as("%s must declare a transaction boundary", method.getName())
                 .isNotNull();
         assertThat(transactional.readOnly())
-                .as("%s must be read-only", method.getName())
-                .isTrue();
+                .as("%s must allow a pessimistic write lock", method.getName())
+                .isFalse();
+        assertThat(transactional.isolation())
+                .as("%s must use READ_COMMITTED", method.getName())
+                .isEqualTo(Isolation.READ_COMMITTED);
+        assertThat(transactional.timeout())
+                .as("%s must bound lock waiting", method.getName())
+                .isEqualTo(5);
     }
 
     private void assertStoreIdOnlyDto(Class<?> dtoType) {
