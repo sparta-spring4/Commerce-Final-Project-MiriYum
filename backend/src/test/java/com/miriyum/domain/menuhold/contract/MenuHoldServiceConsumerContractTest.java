@@ -52,6 +52,37 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     @Test
+    void createCommandNormalizesDuplicateMenusBeforeTheFixtureRecordsIt() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        MenuHoldCreateCommand command = createCommand(
+                "reservation-01",
+                "operation-create-01",
+                List.of(
+                        new MenuSelection("menu-01", 2),
+                        new MenuSelection("menu-02", 1),
+                        new MenuSelection("menu-01", 3)));
+
+        fixture.create(command);
+
+        assertThat(fixture.createCommands().getFirst().menuSelections()).containsExactly(
+                new MenuSelection("menu-01", 5),
+                new MenuSelection("menu-02", 1));
+    }
+
+    @Test
+    void createCommandRejectsAnOverflowingDuplicateMenuQuantity() {
+        assertThatThrownBy(() -> createCommand(
+                "reservation-01",
+                "operation-create-01",
+                List.of(
+                        new MenuSelection("menu-01", Integer.MAX_VALUE),
+                        new MenuSelection("menu-01", 1))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menu selection quantity sum exceeds integer range");
+    }
+
+    @Test
     void createCommandAcceptsAnOvernightServiceWindow() {
         MenuHoldCreateCommand command = new MenuHoldCreateCommand(
                 "reservation-01",
