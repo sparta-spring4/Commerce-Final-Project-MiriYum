@@ -412,6 +412,18 @@ class StoreServiceTest {
     }
 
     @Test
+    void transactionEligibilityDisablesMenuHoldWhenReservationModeIsDisabled() {
+        Store store = transactionStore();
+        ReflectionTestUtils.setField(store, "reservationEnabled", false);
+        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result.menuHoldEligible()).isFalse();
+    }
+
+    @Test
     void transactionEligibilityCombinesStorePickupEligibility() {
         Store store = transactionStore();
         ReflectionTestUtils.setField(

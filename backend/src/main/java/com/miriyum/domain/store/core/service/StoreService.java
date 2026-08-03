@@ -210,7 +210,8 @@ public class StoreService {
         }
 
         MenuVersion published = menu.requireTransactionVersion();
-        boolean menuHoldEligible = store.isMenuHoldEnabled()
+        boolean menuHoldEligible = store.isReservationEnabled()
+                && store.isMenuHoldEnabled()
                 && published.isHoldSelectionAllowed();
         boolean pickupEligible = store.isPickupEnabled()
                 && store.getPickupEligibility() == PickupEligibility.ELIGIBLE
