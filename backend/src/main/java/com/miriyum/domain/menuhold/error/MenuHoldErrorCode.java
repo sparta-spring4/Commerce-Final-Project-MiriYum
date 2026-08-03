@@ -4,6 +4,7 @@ import com.miriyum.global.exception.ErrorCode;
 import org.springframework.http.HttpStatus;
 
 public enum MenuHoldErrorCode implements ErrorCode {
+    INELIGIBLE_MENU(HttpStatus.CONFLICT, "MENU_HOLD_001", "현재 메뉴 상태 또는 자격에서 홀드할 수 없습니다."),
     INSUFFICIENT_QUANTITY(HttpStatus.CONFLICT, "MENU_HOLD_002", "요청한 구간의 온라인 메뉴 수량이 부족합니다."),
     BUCKET_NOT_FOUND(HttpStatus.NOT_FOUND, "MENU_HOLD_003", "메뉴 수량 버킷을 찾을 수 없습니다."),
     POOL_ALLOCATION_EXCEEDS_SUPPLY(
