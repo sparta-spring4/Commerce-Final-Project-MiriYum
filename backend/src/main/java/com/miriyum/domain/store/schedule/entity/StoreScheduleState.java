@@ -25,11 +25,17 @@ public class StoreScheduleState extends BaseEntity {
     @Column(name = "active_reservation_schedule_version_id")
     private Long activeReservationScheduleVersionId;
 
+    @Column(name = "active_regular_closure_version_id")
+    private Long activeRegularClosureVersionId;
+
     @Column(name = "next_operating_version", nullable = false)
     private long nextOperatingVersion;
 
     @Column(name = "next_reservation_version", nullable = false)
     private long nextReservationVersion;
+
+    @Column(name = "next_regular_closure_version", nullable = false)
+    private long nextRegularClosureVersion;
 
     private StoreScheduleState(
             long storeId,
@@ -39,6 +45,7 @@ public class StoreScheduleState extends BaseEntity {
         this.storeId = storeId;
         this.nextOperatingVersion = nextOperatingVersion;
         this.nextReservationVersion = nextReservationVersion;
+        this.nextRegularClosureVersion = 1L;
     }
 
     public static StoreScheduleState initialize(long storeId) {
@@ -53,6 +60,10 @@ public class StoreScheduleState extends BaseEntity {
         return nextReservationVersion++;
     }
 
+    public long allocateRegularClosureVersion() {
+        return nextRegularClosureVersion++;
+    }
+
     public void activateOperating(long versionId) {
         activeOperatingScheduleVersionId = versionId;
         activeReservationScheduleVersionId = null;
@@ -60,5 +71,9 @@ public class StoreScheduleState extends BaseEntity {
 
     public void activateReservation(long versionId) {
         activeReservationScheduleVersionId = versionId;
+    }
+
+    public void activateRegularClosure(long versionId) {
+        activeRegularClosureVersionId = versionId;
     }
 }
