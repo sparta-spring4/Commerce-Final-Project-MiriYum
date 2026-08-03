@@ -67,7 +67,7 @@ class LoginDelayIntegrationTest {
     private static final String WRONG_PASSWORD = "WrongPassword123!";
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
