@@ -10,11 +10,13 @@ import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 후속 거래 도메인이 신규 거래를 확정하기 직전에 Store 자격을 잠금 검증한다.
+ * 호출자가 시작한 실제 거래 생성 트랜잭션에 참여하며 isolation과 timeout도 호출자가 소유한다.
  */
 @Service
 public class StoreTransactionEligibilityService {
@@ -31,8 +33,9 @@ public class StoreTransactionEligibilityService {
      * @param storeId 대상 매장 식별자
      * @return 일반 예약 거래 자격을 통과한 매장
      * @throws ServiceException 매장이 없거나 현재 일반 예약 거래를 받을 수 없는 경우
+     * @throws IllegalTransactionStateException 활성 거래 생성 트랜잭션 없이 호출한 경우
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    @Transactional(propagation = Propagation.MANDATORY)
     public StoreReservationTransactionEligibility
             requireReservationTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
@@ -49,8 +52,9 @@ public class StoreTransactionEligibilityService {
      * @param storeId 대상 매장 식별자
      * @return Pickup 거래 자격을 통과한 매장
      * @throws ServiceException 매장이 없거나 현재 Pickup 거래를 받을 수 없는 경우
+     * @throws IllegalTransactionStateException 활성 거래 생성 트랜잭션 없이 호출한 경우
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    @Transactional(propagation = Propagation.MANDATORY)
     public StorePickupTransactionEligibility
             requirePickupTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
