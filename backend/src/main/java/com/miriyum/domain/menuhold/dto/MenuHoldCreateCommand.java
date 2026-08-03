@@ -1,8 +1,9 @@
 package com.miriyum.domain.menuhold.dto;
 
-import java.util.List;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.List;
 
 /** 예약 생성 트랜잭션이 메뉴 홀드 생성에 전달하는 공개 명령이다. */
 public record MenuHoldCreateCommand(
@@ -11,6 +12,7 @@ public record MenuHoldCreateCommand(
         String consumerAccountId,
         LocalDate serviceDate,
         LocalTime startTime,
+        LocalDate endDate,
         LocalTime endTime,
         String operationId,
         List<MenuSelection> menuSelections
@@ -23,7 +25,9 @@ public record MenuHoldCreateCommand(
         if (serviceDate == null) {
             throw new IllegalArgumentException("serviceDate must not be null");
         }
-        if (startTime == null || endTime == null || !startTime.isBefore(endTime)) {
+        if (startTime == null || endDate == null || endTime == null
+                || !LocalDateTime.of(serviceDate, startTime)
+                        .isBefore(LocalDateTime.of(endDate, endTime))) {
             throw new IllegalArgumentException("service time range must be increasing");
         }
         requireText(operationId, "operationId");

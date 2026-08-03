@@ -45,9 +45,43 @@ class MenuHoldServiceConsumerContractTest {
         assertThat(command.consumerAccountId()).isEqualTo("consumer-01");
         assertThat(command.serviceDate()).isEqualTo(SERVICE_DATE);
         assertThat(command.startTime()).isEqualTo(START_TIME);
+        assertThat(command.endDate()).isEqualTo(SERVICE_DATE);
         assertThat(command.endTime()).isEqualTo(END_TIME);
         assertThat(command.operationId()).isEqualTo("operation-create-01");
         assertThat(command.menuSelections()).containsExactly(selection());
+    }
+
+    @Test
+    void createCommandAcceptsAnOvernightServiceWindow() {
+        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
+                "reservation-01",
+                "store-01",
+                "consumer-01",
+                SERVICE_DATE,
+                LocalTime.of(23, 30),
+                SERVICE_DATE.plusDays(1),
+                LocalTime.of(0, 30),
+                "operation-create-01",
+                List.of(selection()));
+
+        assertThat(command.endDate()).isEqualTo(LocalDate.of(2026, 8, 11));
+        assertThat(command.endTime()).isEqualTo(LocalTime.of(0, 30));
+    }
+
+    @Test
+    void createCommandRejectsAServiceWindowThatDoesNotIncrease() {
+        assertThatThrownBy(() -> new MenuHoldCreateCommand(
+                "reservation-01",
+                "store-01",
+                "consumer-01",
+                SERVICE_DATE,
+                LocalTime.of(23, 30),
+                SERVICE_DATE,
+                LocalTime.of(0, 30),
+                "operation-create-01",
+                List.of(selection())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("service time range must be increasing");
     }
 
     @Test
@@ -154,6 +188,7 @@ class MenuHoldServiceConsumerContractTest {
                 "consumer-01",
                 SERVICE_DATE,
                 START_TIME,
+                SERVICE_DATE,
                 END_TIME,
                 operationId,
                 selections);
