@@ -15,6 +15,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -68,6 +70,9 @@ class IdempotencyExecutorIT {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private ClaimSynchronizer claimSynchronizer;
+
     @BeforeEach
     void reset() {
         jdbcTemplate.execute(
@@ -75,6 +80,7 @@ class IdempotencyExecutorIT {
                         + "(probe_id BIGINT NOT NULL PRIMARY KEY)");
         jdbcTemplate.execute("TRUNCATE TABLE idempotency_commands");
         jdbcTemplate.execute("TRUNCATE TABLE idempotency_business_probe");
+        claimSynchronizer.disarm();
         runner.resetCallbackCount();
     }
 
@@ -229,7 +235,6 @@ class IdempotencyExecutorIT {
         ExecutorService pool = Executors.newFixedThreadPool(requestCount);
         CountDownLatch winnerEnteredCallback = new CountDownLatch(1);
         CountDownLatch releaseWinner = new CountDownLatch(1);
-        CountDownLatch contendersStarted = new CountDownLatch(contenderCount);
         List<IdempotentOutcome> outcomes;
 
         try {
@@ -240,15 +245,13 @@ class IdempotencyExecutorIT {
                 throw new IllegalStateException("선점 트랜잭션이 업무 콜백에 진입하지 못했습니다.");
             }
 
+            claimSynchronizer.arm(contenderCount);
             List<Future<IdempotentOutcome>> contenders = new ArrayList<>(contenderCount);
             for (int i = 0; i < contenderCount; i++) {
                 contenders.add(pool.submit(
-                        () -> runner.runSignallingStart(
-                                command(FINGERPRINT), result(), contendersStarted)));
+                        () -> runner.run(command(FINGERPRINT), result())));
             }
-            if (!contendersStarted.await(30, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("모든 경합 트랜잭션이 시작되지 못했습니다.");
-            }
+            claimSynchronizer.awaitAllAndRelease();
 
             // when & then
             assertThatThrownBy(() -> contenders.getFirst().get(1, TimeUnit.SECONDS))
@@ -261,6 +264,7 @@ class IdempotencyExecutorIT {
                 outcomes.add(contender.get(30, TimeUnit.SECONDS));
             }
         } finally {
+            claimSynchronizer.disarm();
             releaseWinner.countDown();
             pool.shutdownNow();
         }
@@ -370,12 +374,88 @@ class IdempotencyExecutorIT {
     @TestConfiguration
     static class TestConfig {
         @Bean
+        ClaimSynchronizer claimSynchronizer() {
+            return new ClaimSynchronizer();
+        }
+
+        @Bean
+        @Primary
+        IdempotencyRecordRepository synchronizingIdempotencyRecordRepository(
+                JdbcTemplate jdbcTemplate,
+                ClaimSynchronizer claimSynchronizer
+        ) {
+            return new SynchronizingIdempotencyRecordRepository(jdbcTemplate, claimSynchronizer);
+        }
+
+        @Bean
         TestCommandRunner testCommandRunner(
                 IdempotencyExecutor executor,
                 JdbcTemplate jdbcTemplate
         ) {
             return new TestCommandRunner(executor, jdbcTemplate);
         }
+    }
+
+    static class SynchronizingIdempotencyRecordRepository extends IdempotencyRecordRepository {
+        private final ClaimSynchronizer claimSynchronizer;
+
+        SynchronizingIdempotencyRecordRepository(
+                JdbcTemplate jdbcTemplate,
+                ClaimSynchronizer claimSynchronizer
+        ) {
+            super(jdbcTemplate);
+            this.claimSynchronizer = claimSynchronizer;
+        }
+
+        @Override
+        public boolean claim(IdempotencyCommand command) {
+            claimSynchronizer.awaitIfArmed();
+            return super.claim(command);
+        }
+    }
+
+    static class ClaimSynchronizer {
+        private final AtomicReference<ClaimGate> gate = new AtomicReference<>();
+
+        void arm(int contenderCount) {
+            if (!gate.compareAndSet(null, new ClaimGate(
+                    new CountDownLatch(contenderCount), new CountDownLatch(1)))) {
+                throw new IllegalStateException("claim 동기화 지점이 이미 활성화되어 있습니다.");
+            }
+        }
+
+        void awaitIfArmed() {
+            ClaimGate current = gate.get();
+            if (current == null) {
+                return;
+            }
+            current.arrived().countDown();
+            TestCommandRunner.await(current.release(), "claim 동기화 해제 신호를 받지 못했습니다.");
+        }
+
+        void awaitAllAndRelease() {
+            ClaimGate current = requireGate();
+            TestCommandRunner.await(current.arrived(), "모든 경합자가 claim 직전에 도착하지 못했습니다.");
+            current.release().countDown();
+        }
+
+        void disarm() {
+            ClaimGate current = gate.getAndSet(null);
+            if (current != null) {
+                current.release().countDown();
+            }
+        }
+
+        private ClaimGate requireGate() {
+            ClaimGate current = gate.get();
+            if (current == null) {
+                throw new IllegalStateException("claim 동기화 지점이 활성화되지 않았습니다.");
+            }
+            return current;
+        }
+    }
+
+    record ClaimGate(CountDownLatch arrived, CountDownLatch release) {
     }
 
     static class TestCommandRunner {
@@ -436,19 +516,6 @@ class IdempotencyExecutorIT {
                 callbackCount.incrementAndGet();
                 callbackEntered.countDown();
                 await(releaseCallback, "선점 트랜잭션 해제 신호를 받지 못했습니다.");
-                return result;
-            });
-        }
-
-        @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
-        IdempotentOutcome runSignallingStart(
-                IdempotencyCommand command,
-                BusinessResult<TestData> result,
-                CountDownLatch started
-        ) {
-            started.countDown();
-            return executor.execute(command, () -> {
-                callbackCount.incrementAndGet();
                 return result;
             });
         }
