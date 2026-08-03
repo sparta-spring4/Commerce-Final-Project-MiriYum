@@ -862,4 +862,4 @@ components:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
           example:
             code: MENU_HOLD_004
-            message: 총 공급 수량과 수량 풀 배분을 확인해 주세요.
+            message: 수량 풀 배분 합계가 총 공급 수량을 초과합니다.
