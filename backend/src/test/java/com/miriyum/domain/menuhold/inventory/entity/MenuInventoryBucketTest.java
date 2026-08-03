@@ -9,6 +9,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class MenuInventoryBucketTest {
 
@@ -62,7 +63,10 @@ class MenuInventoryBucketTest {
     void restoringQuantityDoesNotReleaseManualSoldOut() {
         MenuInventoryBucket bucket = bucket(10, 2, 5, 3, true);
         InventoryAllocation allocation = bucket.acquire(4);
-        bucket.markSoldOut();
+        ReflectionTestUtils.setField(
+                bucket,
+                "availabilityStatus",
+                InventoryAvailabilityStatus.SOLD_OUT);
 
         bucket.restore(allocation);
 

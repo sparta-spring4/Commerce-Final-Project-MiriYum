@@ -136,10 +136,6 @@ public class MenuInventoryBucket extends BaseEntity {
         return onlineHoldRemaining + (sharedOnlineAllowed ? sharedRemaining : 0);
     }
 
-    public void markSoldOut() {
-        availabilityStatus = InventoryAvailabilityStatus.SOLD_OUT;
-    }
-
     public InventoryAllocation acquire(int quantity) {
         InventoryAllocation allocation = planAcquire(quantity);
         onlineHoldRemaining -= allocation.onlineHoldQuantity();
