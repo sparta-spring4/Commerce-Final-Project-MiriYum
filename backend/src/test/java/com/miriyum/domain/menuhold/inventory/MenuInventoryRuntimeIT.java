@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.BDDMockito.willAnswer;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
@@ -44,6 +45,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -77,7 +79,7 @@ class MenuInventoryRuntimeIT {
     @Autowired
     private MenuInventoryBucketRepository bucketRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private MenuInventoryLedgerRepository ledgerRepository;
 
     @Autowired
@@ -192,16 +194,27 @@ class MenuInventoryRuntimeIT {
                 "reservation:99:create", List.of(selection(menuId, 2)));
         transactionTemplate.execute(status -> menuHoldService.acquireInventory(acquire));
 
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch bothObservedNoRestore = new CountDownLatch(2);
+        CountDownLatch allowBucketLock = new CountDownLatch(1);
+        willAnswer(invocation -> {
+            boolean exists = (Boolean) invocation.callRealMethod();
+            if (!exists) {
+                bothObservedNoRestore.countDown();
+                if (!allowBucketLock.await(10, TimeUnit.SECONDS)) {
+                    throw new AssertionError("restore race barrier timed out");
+                }
+            }
+            return exists;
+        }).given(ledgerRepository).existsRestoreForSourceOperation(acquire.operationId());
+
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<Boolean> first = executor.submit(() -> restoreConcurrently(
-                    "reservation:99:cancel:1", acquire.operationId(), ready, start));
+                    "reservation:99:cancel:1", acquire.operationId()));
             Future<Boolean> second = executor.submit(() -> restoreConcurrently(
-                    "reservation:99:cancel:2", acquire.operationId(), ready, start));
+                    "reservation:99:cancel:2", acquire.operationId()));
 
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
+            assertThat(bothObservedNoRestore.await(10, TimeUnit.SECONDS)).isTrue();
+            allowBucketLock.countDown();
 
             assertThat(first.get(20, TimeUnit.SECONDS)).isTrue();
             assertThat(second.get(20, TimeUnit.SECONDS)).isTrue();
@@ -214,14 +227,8 @@ class MenuInventoryRuntimeIT {
 
     private boolean restoreConcurrently(
             String operationId,
-            String sourceOperationId,
-            CountDownLatch ready,
-            CountDownLatch start
-    ) throws InterruptedException {
-        ready.countDown();
-        if (!start.await(10, TimeUnit.SECONDS)) {
-            return false;
-        }
+            String sourceOperationId
+    ) {
         try {
             transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
                     new InventoryRestoreRequest(operationId, sourceOperationId)));
