@@ -1,159 +1,45 @@
 package com.miriyum.domain.menuhold.service;
 
-import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
-import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
-import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
-import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
-import com.miriyum.domain.menuhold.inventory.entity.InventoryAllocation;
-import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
-import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryLedger;
-import com.miriyum.domain.menuhold.inventory.model.InventoryPoolType;
-import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
-import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
-import com.miriyum.global.exception.ServiceException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
+import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
-@RequiredArgsConstructor
-public class MenuHoldService {
+/**
+ * 일반 예약 조정자가 메뉴 홀드 생성·해제·이행 완료에 사용하는 공개 계약이다.
+ *
+ * <p>예약 조정자는 멱등 결과를 선점한 뒤 예약 aggregate와 수용량 버킷을 잠그고 이 계약을
+ * 호출해야 한다. 생성·해제·이행 완료의 각 논리 작업에는 외부 Idempotency-Key와 다른 전역 고유
+ * operationId를 발급하며, 다른 예약·메뉴 집합·수량·명령 종류에 재사용하지 않는다.
+ * 멱등 결과 replay에서는 이 서비스를 다시 호출하지 않는다.</p>
+ *
+ * <p>구현은 호출자의 트랜잭션에 참여해야 하며 새 트랜잭션을 시작하지 않는다. 메뉴홀드,
+ * Store 또는 공통 오류는 원래 {@code ErrorCode}를 담은 {@code ServiceException} 그대로
+ * 전달하고 예약 오류로 변환하지 않는다.</p>
+ */
+public interface MenuHoldService {
 
-    private final MenuInventoryBucketRepository bucketRepository;
-    private final MenuInventoryLedgerRepository ledgerRepository;
-
+    /**
+     * 선택 메뉴가 없으면 홀드를 만들지 않고 {@code NO_HOLD}를 반환한다. 선택 메뉴가 있으면
+     * 모든 수량 확보와 {@code CONFIRMED} 홀드가 함께 성공해야 한다.
+     * 메뉴 상태·자격 위반은 {@code MENU_HOLD_001}, 수량 부족은 {@code MENU_HOLD_002}로
+     * 실패한다. Store·공통 오류를 포함한 {@code ServiceException}은 다른 오류로 변환하지 않는다.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public List<InventoryAllocationResult> acquireInventory(InventoryAcquireRequest request) {
-        Map<Long, Integer> quantitiesByBucketId = new HashMap<>();
-        for (InventoryAcquireRequest.Selection selection : request.selections()) {
-            Long bucketId = bucketRepository.findBucketId(selection.key());
-            if (bucketId == null) {
-                throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-            }
-            quantitiesByBucketId.merge(bucketId, selection.quantity(), Math::addExact);
-        }
-        List<Long> orderedIds = quantitiesByBucketId.keySet().stream().sorted().toList();
-        List<MenuInventoryBucket> buckets = bucketRepository.findAllForUpdate(orderedIds);
-        if (buckets.size() != orderedIds.size()) {
-            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-        }
+    MenuHoldCommandResult create(MenuHoldCreateCommand command);
 
-        List<InventoryAllocationResult> results = new ArrayList<>();
-        List<MenuInventoryLedger> events = new ArrayList<>();
-        for (MenuInventoryBucket bucket : buckets) {
-            InventoryAllocation allocation = bucket.planAcquire(quantitiesByBucketId.get(bucket.getId()));
-            int updated = bucketRepository.decrementIfCurrent(
-                    bucket.getId(), bucket.getLockVersion(),
-                    allocation.onlineHoldQuantity(), allocation.sharedQuantity());
-            if (updated != 1) {
-                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
-            }
-            results.add(new InventoryAllocationResult(
-                    bucket.getId(),
-                    allocation.onlineHoldQuantity(),
-                    allocation.sharedQuantity()));
-            appendAcquireEvents(request.operationId(), bucket, allocation, events);
-        }
-        ledgerRepository.saveAll(events);
-        return List.copyOf(results);
-    }
-
+    /**
+     * 예약 취소 시 예약에 연결된 홀드와 내부 원 확보 operation을 찾아 수량을 정확히 한 번 복구한다.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void restoreInventory(InventoryRestoreRequest request) {
-        List<InventoryAllocationResult> acquired = ledgerRepository
-                .findAcquireResults(request.sourceAcquireOperationId());
-        if (acquired.isEmpty()) {
-            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-        }
-        Map<Long, InventoryAllocationResult> allocationsByBucketId = acquired.stream()
-                .collect(Collectors.toMap(
-                        InventoryAllocationResult::bucketId, allocation -> allocation));
-        if (ledgerRepository.existsRestoreForSourceOperation(
-                request.sourceAcquireOperationId())) {
-            return;
-        }
-        List<Long> orderedIds = allocationsByBucketId.keySet().stream().sorted().toList();
-        List<MenuInventoryBucket> buckets = bucketRepository.findAllForUpdate(orderedIds);
-        if (buckets.size() != orderedIds.size()) {
-            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
-        }
-        if (ledgerRepository.existsRestoreForSourceOperationForUpdate(
-                request.sourceAcquireOperationId())) {
-            return;
-        }
-        List<MenuInventoryLedger> events = new ArrayList<>();
-        for (MenuInventoryBucket bucket : buckets) {
-            InventoryAllocationResult requested = allocationsByBucketId.get(bucket.getId());
-            InventoryAllocation allocation = new InventoryAllocation(
-                    requested.onlineHoldQuantity(), requested.sharedQuantity());
-            bucket.validateRestore(allocation);
-            int updated = bucketRepository.incrementIfCurrent(
-                    bucket.getId(), bucket.getLockVersion(),
-                    allocation.onlineHoldQuantity(), allocation.sharedQuantity());
-            if (updated != 1) {
-                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
-            }
-            appendRestoreEvents(
-                    request.operationId(), request.sourceAcquireOperationId(),
-                    bucket, allocation, events);
-        }
-        ledgerRepository.saveAll(events);
-    }
+    MenuHoldCommandResult release(MenuHoldReleaseCommand command);
 
-    private static void appendAcquireEvents(
-            String operationId,
-            MenuInventoryBucket bucket,
-            InventoryAllocation allocation,
-            List<MenuInventoryLedger> events
-    ) {
-        if (allocation.onlineHoldQuantity() > 0) {
-            events.add(MenuInventoryLedger.acquired(
-                    operationId,
-                    bucket.getId(),
-                    InventoryPoolType.ONLINE_HOLD,
-                    allocation.onlineHoldQuantity(),
-                    bucket.getOnlineHoldRemaining() - allocation.onlineHoldQuantity()));
-        }
-        if (allocation.sharedQuantity() > 0) {
-            events.add(MenuInventoryLedger.acquired(
-                    operationId,
-                    bucket.getId(),
-                    InventoryPoolType.SHARED,
-                    allocation.sharedQuantity(),
-                    bucket.getSharedRemaining() - allocation.sharedQuantity()));
-        }
-    }
-
-    private static void appendRestoreEvents(
-            String operationId,
-            String sourceOperationId,
-            MenuInventoryBucket bucket,
-            InventoryAllocation allocation,
-            List<MenuInventoryLedger> events
-    ) {
-        if (allocation.onlineHoldQuantity() > 0) {
-            events.add(MenuInventoryLedger.restored(
-                    operationId,
-                    sourceOperationId,
-                    bucket.getId(),
-                    InventoryPoolType.ONLINE_HOLD,
-                    allocation.onlineHoldQuantity(),
-                    bucket.getOnlineHoldRemaining() + allocation.onlineHoldQuantity()));
-        }
-        if (allocation.sharedQuantity() > 0) {
-            events.add(MenuInventoryLedger.restored(
-                    operationId,
-                    sourceOperationId,
-                    bucket.getId(),
-                    InventoryPoolType.SHARED,
-                    allocation.sharedQuantity(),
-                    bucket.getSharedRemaining() + allocation.sharedQuantity()));
-        }
-    }
+    /**
+     * 예약 방문 완료 시 수량 복구 없이 홀드를 이행 완료로 종결한다. 이행 operationId는
+     * 다른 논리 작업의 operationId와 달라야 한다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    MenuHoldCommandResult fulfill(MenuHoldFulfillCommand command);
 }

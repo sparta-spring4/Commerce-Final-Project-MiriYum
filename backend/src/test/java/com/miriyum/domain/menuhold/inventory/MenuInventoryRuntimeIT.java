@@ -1,4 +1,4 @@
-package com.miriyum.domain.menuhold.inventory;
+package com.miriyum.domain.menuhold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -12,7 +12,6 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
-import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
@@ -74,7 +73,7 @@ class MenuInventoryRuntimeIT {
     }
 
     @Autowired
-    private MenuHoldService menuHoldService;
+    private MenuInventoryService menuHoldService;
 
     @Autowired
     private MenuInventoryBucketRepository bucketRepository;

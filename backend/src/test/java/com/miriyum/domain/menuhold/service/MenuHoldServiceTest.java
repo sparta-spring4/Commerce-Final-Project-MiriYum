@@ -46,7 +46,7 @@ class MenuHoldServiceTest {
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(1);
         given(bucketRepository.decrementIfCurrent(9L, 0L, 1, 1)).willReturn(1);
 
-        MenuHoldService service = service();
+        MenuInventoryService service = service();
 
         List<InventoryAllocationResult> results = service.acquireInventory(request);
 
@@ -74,7 +74,7 @@ class MenuHoldServiceTest {
                 .willReturn(false);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         given(bucketRepository.incrementIfCurrent(3L, 0L, 2, 1)).willReturn(1);
-        MenuHoldService service = service();
+        MenuInventoryService service = service();
 
         service.restoreInventory(request);
 
@@ -90,7 +90,7 @@ class MenuHoldServiceTest {
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(0);
-        MenuHoldService service = service();
+        MenuInventoryService service = service();
 
         assertThatThrownBy(() -> service.acquireInventory(request))
                 .isInstanceOf(ServiceException.class)
@@ -106,7 +106,7 @@ class MenuHoldServiceTest {
                 "reservation:77:cancel", "reservation:missing:create");
         given(ledgerRepository.findAcquireResults(request.sourceAcquireOperationId()))
                 .willReturn(List.of());
-        MenuHoldService service = service();
+        MenuInventoryService service = service();
 
         assertThatThrownBy(() -> service.restoreInventory(request))
                 .isInstanceOf(ServiceException.class)
@@ -129,7 +129,7 @@ class MenuHoldServiceTest {
                 request.sourceAcquireOperationId()))
                 .willReturn(true);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
-        MenuHoldService service = service();
+        MenuInventoryService service = service();
 
         service.restoreInventory(request);
 
@@ -138,8 +138,8 @@ class MenuHoldServiceTest {
                 .saveAll(org.mockito.ArgumentMatchers.anyList());
     }
 
-    private MenuHoldService service() {
-        return new MenuHoldService(bucketRepository, ledgerRepository);
+    private MenuInventoryService service() {
+        return new MenuInventoryService(bucketRepository, ledgerRepository);
     }
 
     private static InventoryAcquireRequest.Selection selection(long menuId, int quantity) {
