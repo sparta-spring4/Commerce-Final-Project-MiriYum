@@ -60,6 +60,19 @@ class StoreServiceIntervalPolicyTest {
         assertThat(policy.accepts(request("2026-11-01T04:30:00Z", "2026-11-01T07:30:00Z"), sources)).isFalse();
     }
 
+    @Test void midnightTransitionForRegularDayMaterializationFailsClosed() {
+        RegularClosureVersion regular = RegularClosureVersion.createDraft(1, 1, "America/Sao_Paulo", List.of(), List.of());
+        regular.activate(Instant.parse("2018-01-01T00:00:00Z"), "게시");
+        List<WeeklyInterval> operating = List.of(
+                interval(DayOfWeek.SUNDAY, 1, 0, 3, 0, ScheduleIntervalKind.BUSINESS_HOURS));
+        List<WeeklyInterval> reservation = List.of(
+                interval(DayOfWeek.SUNDAY, 1, 0, 3, 0, ScheduleIntervalKind.RESERVATION_SLOT));
+        var sources = new StoreServiceIntervalPolicy.Sources(
+                true, "America/Sao_Paulo", operating, reservation, regular, List.of());
+
+        assertThat(policy.accepts(request("2018-11-04T03:30:00Z", "2018-11-04T04:30:00Z"), sources)).isFalse();
+    }
+
     private StoreServiceIntervalRequest request(String start, String end) {
         return new StoreServiceIntervalRequest(1, Instant.parse(start), Instant.parse(end));
     }

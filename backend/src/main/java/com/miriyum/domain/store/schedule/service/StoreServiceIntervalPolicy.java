@@ -33,6 +33,7 @@ public final class StoreServiceIntervalPolicy {
                 sources.operatingIntervals(), ScheduleIntervalKind.BREAK_TIME, false) != Match.NO) return false;
         LocalDate first = request.startAt().atZone(zone).toLocalDate();
         LocalDate last = request.serviceEndAt().minusNanos(1).atZone(zone).toLocalDate();
+        if (!hasStrictDayBoundaries(first, last, zone)) return false;
         if (first.datesUntil(last.plusDays(1)).anyMatch(sources.regularClosure()::isClosedOn)) return false;
         return sources.temporaryClosures().stream()
                 .noneMatch(c -> c.getCancelledAt() == null && c.overlaps(request.startAt(), request.serviceEndAt()));
@@ -78,6 +79,12 @@ public final class StoreServiceIntervalPolicy {
         ZoneRules rules = zone.getRules();
         List<ZoneOffset> offsets = rules.getValidOffsets(value);
         return offsets.size() == 1 ? value.toInstant(offsets.getFirst()) : null;
+    }
+
+    private boolean hasStrictDayBoundaries(LocalDate first, LocalDate last, ZoneId zone) {
+        return first.datesUntil(last.plusDays(1)).allMatch(date ->
+                strictInstant(date.atStartOfDay(), zone) != null
+                        && strictInstant(date.plusDays(1).atStartOfDay(), zone) != null);
     }
 
     private enum Match { YES, NO, INVALID }

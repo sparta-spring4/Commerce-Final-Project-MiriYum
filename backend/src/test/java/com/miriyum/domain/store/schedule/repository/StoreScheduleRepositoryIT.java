@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.core.entity.Store;
+import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
+import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
@@ -13,12 +15,15 @@ import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
+import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
+import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
 import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.model.WeeklyInterval;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.domain.store.schedule.service.StoreScheduleService;
+import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -72,7 +77,13 @@ class StoreScheduleRepositoryIT {
     private ReservationScheduleVersionRepository reservationRepository;
 
     @Autowired
+    private RegularClosureVersionRepository regularClosureRepository;
+
+    @Autowired
     private StoreScheduleService scheduleService;
+
+    @Autowired
+    private StoreServiceIntervalValidationService intervalValidationService;
 
     @Autowired
     private StoreRepository storeRepository;
@@ -89,6 +100,10 @@ class StoreScheduleRepositoryIT {
     @BeforeEach
     void cleanRows() {
         jdbcTemplate.execute("DELETE FROM store_schedule_state");
+        jdbcTemplate.execute("DELETE FROM store_closure_audit_events");
+        jdbcTemplate.execute("DELETE FROM store_temporary_closures");
+        jdbcTemplate.execute("DELETE FROM store_regular_closure_entries");
+        jdbcTemplate.execute("DELETE FROM store_regular_closure_versions");
         jdbcTemplate.execute("DELETE FROM store_reservation_schedule_entries");
         jdbcTemplate.execute("DELETE FROM store_reservation_schedule_versions");
         jdbcTemplate.execute("DELETE FROM store_operating_schedule_entries");
@@ -449,6 +464,40 @@ class StoreScheduleRepositoryIT {
                 .isEqualTo(LocalDateTime.of(2026, 8, 3, 1, 0));
         assertThat(results.getLast()).isEqualTo(results.getFirst());
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(2L);
+    }
+
+    @Test
+    @Transactional
+    void serviceIntervalBatchUsesSixQueriesAndPreservesDuplicates() {
+        long storeId = createStore("service-interval-owner@example.com", "1234567894");
+        StoreScheduleState state = initializeAndLock(storeId);
+        OperatingScheduleVersion operating = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(storeId, state.allocateOperatingVersion(),
+                        List.of(business(17, 0, 21, 0, 1020, 1260))));
+        state.activateOperating(operating.getId());
+        ReservationScheduleVersion reservation = reservationRepository.saveAndFlush(
+                ReservationScheduleVersion.create(storeId, state.allocateReservationVersion(), operating.getId(),
+                        List.of(reservation(18, 0, 20, 0, 1080, 1200))));
+        state.activateReservation(reservation.getId());
+        RegularClosureVersion regular = regularClosureRepository.saveAndFlush(
+                RegularClosureVersion.createDraft(storeId, state.allocateRegularClosureVersion(),
+                        "Asia/Seoul", List.of(), List.of()));
+        regular.activate(Instant.parse("2026-08-01T00:00:00Z"), "빈 휴무표 게시");
+        state.activateRegularClosure(regular.getId());
+        entityManager.flush();
+        entityManager.clear();
+        Statistics statistics = entityManager.getEntityManagerFactory()
+                .unwrap(org.hibernate.SessionFactory.class).getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+        StoreServiceIntervalRequest request = new StoreServiceIntervalRequest(
+                storeId, Instant.parse("2026-08-03T09:00:00Z"), Instant.parse("2026-08-03T09:45:00Z"));
+
+        var results = intervalValidationService.validateServiceIntervals(List.of(request, request));
+
+        assertThat(results).hasSize(2).extracting(result -> result.status())
+                .containsExactly(StoreServiceIntervalStatus.ACCEPTING, StoreServiceIntervalStatus.ACCEPTING);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(6L);
     }
 
     @Test

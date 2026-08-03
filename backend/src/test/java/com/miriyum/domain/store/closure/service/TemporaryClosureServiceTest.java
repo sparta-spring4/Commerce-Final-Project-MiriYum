@@ -53,7 +53,7 @@ class TemporaryClosureServiceTest {
                 new TemporaryClosureCreateRequest(OffsetDateTime.parse("2026-08-03T18:00:00+09:00"),
                         OffsetDateTime.parse("2026-08-03T19:00:00+09:00"), TemporaryClosureReason.OTHER, null));
 
-        assertThat(result.data().startAt()).isEqualTo("2026-08-03T09:00:00Z");
+        assertThat(result.data().startAt()).isEqualTo(Instant.parse("2026-08-03T09:00:00Z"));
         assertThat(result.data().status()).isEqualTo(TemporaryClosureStatus.SCHEDULED);
         then(audit).should().save(any());
     }
