@@ -317,4 +317,3 @@ git commit -m "feat(store): 휴무 운영 API 계약 완성"
 - [ ] **Step 9: Review Issue #104 acceptance criteria**
 
 Map each criterion to production code and a passing test. Record any unmet criterion as blocked; do not open a ready PR with a silent gap.
-
