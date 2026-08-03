@@ -2,8 +2,8 @@ package com.miriyum.domain.auth.logindelay;
 
 import java.time.Duration;
 import java.util.function.Supplier;
-import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -36,17 +36,18 @@ public class LoginDelayTransactionExecutor {
     }
 
     public <T> T execute(Supplier<T> operation) {
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        int retryCount = 0;
+        while (true) {
             try {
                 return transactionOperations.execute(status -> operation.get());
             } catch (PessimisticLockingFailureException exception) {
-                if (attempt == MAX_ATTEMPTS) {
+                if (retryCount == MAX_ATTEMPTS - 1) {
                     throw exception;
                 }
-                backoff(attempt, exception);
+                retryCount++;
+                backoff(retryCount, exception);
             }
         }
-        throw new IllegalStateException("Login-delay transaction retry loop terminated unexpectedly");
     }
 
     private void backoff(int attempt, PessimisticLockingFailureException cause) {

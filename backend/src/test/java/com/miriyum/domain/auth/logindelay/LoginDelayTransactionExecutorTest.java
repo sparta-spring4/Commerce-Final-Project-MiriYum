@@ -11,12 +11,12 @@ import static org.mockito.Mockito.verify;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionOperations;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 class LoginDelayTransactionExecutorTest {
@@ -52,7 +52,6 @@ class LoginDelayTransactionExecutorTest {
         verify(transactionOperations, times(3)).execute(any());
     }
 
-    @SuppressWarnings("unchecked")
     private static <T> T invokeCallback(TransactionCallback<T> callback) {
         return callback.doInTransaction(mock(TransactionStatus.class));
     }
