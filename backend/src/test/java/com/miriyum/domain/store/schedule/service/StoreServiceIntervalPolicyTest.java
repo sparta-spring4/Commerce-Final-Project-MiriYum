@@ -1,0 +1,43 @@
+package com.miriyum.domain.store.schedule.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
+import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
+import com.miriyum.domain.store.schedule.model.ScheduleIntervalKind;
+import com.miriyum.domain.store.schedule.model.WeeklyInterval;
+import java.time.*;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+class StoreServiceIntervalPolicyTest {
+    private final StoreServiceIntervalPolicy policy = new StoreServiceIntervalPolicy();
+
+    @Test void requiresWholeServiceIntervalInsideBusinessAndOutsideBreak() {
+        RegularClosureVersion regular = RegularClosureVersion.createDraft(1, 1, "Asia/Seoul", List.of(), List.of());
+        regular.activate(Instant.parse("2026-08-01T00:00:00Z"), "게시");
+        List<WeeklyInterval> operating = List.of(
+                interval(DayOfWeek.MONDAY, 17, 0, 21, 0, ScheduleIntervalKind.BUSINESS_HOURS),
+                interval(DayOfWeek.MONDAY, 19, 0, 19, 30, ScheduleIntervalKind.BREAK_TIME));
+        List<WeeklyInterval> reservation = List.of(
+                interval(DayOfWeek.MONDAY, 18, 0, 20, 0, ScheduleIntervalKind.RESERVATION_SLOT));
+        var sources = new StoreServiceIntervalPolicy.Sources(true, "Asia/Seoul", operating, reservation, regular, List.of());
+
+        assertThat(policy.accepts(request("2026-08-03T09:00:00Z", "2026-08-03T09:45:00Z"), sources)).isTrue();
+        assertThat(policy.accepts(request("2026-08-03T09:00:00Z", "2026-08-03T10:15:00Z"), sources)).isFalse();
+        assertThat(policy.accepts(request("2026-08-03T09:00:00Z", "2026-08-03T12:30:00Z"), sources)).isFalse();
+    }
+
+    @Test void missingRegularClosureSourceFailsClosed() {
+        var sources = new StoreServiceIntervalPolicy.Sources(true, "Asia/Seoul", List.of(), List.of(), null, List.of());
+        assertThat(policy.accepts(request("2026-08-03T09:00:00Z", "2026-08-03T10:00:00Z"), sources)).isFalse();
+    }
+
+    private StoreServiceIntervalRequest request(String start, String end) {
+        return new StoreServiceIntervalRequest(1, Instant.parse(start), Instant.parse(end));
+    }
+    private WeeklyInterval interval(DayOfWeek day, int sh, int sm, int eh, int em, ScheduleIntervalKind kind) {
+        int start = (day.getValue() - 1) * 1440 + sh * 60 + sm;
+        int end = (day.getValue() - 1) * 1440 + eh * 60 + em;
+        return new WeeklyInterval(day, LocalTime.of(sh, sm), LocalTime.of(eh, em), false, kind, start, end);
+    }
+}
