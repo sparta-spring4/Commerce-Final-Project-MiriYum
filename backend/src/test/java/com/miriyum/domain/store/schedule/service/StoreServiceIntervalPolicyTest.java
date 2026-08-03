@@ -32,6 +32,34 @@ class StoreServiceIntervalPolicyTest {
         assertThat(policy.accepts(request("2026-08-03T09:00:00Z", "2026-08-03T10:00:00Z"), sources)).isFalse();
     }
 
+    @Test void dstGapBreakBoundaryFailsClosedInsteadOfBeingDropped() {
+        RegularClosureVersion regular = RegularClosureVersion.createDraft(1, 1, "America/New_York", List.of(), List.of());
+        regular.activate(Instant.parse("2026-01-01T00:00:00Z"), "게시");
+        List<WeeklyInterval> operating = List.of(
+                interval(DayOfWeek.SUNDAY, 0, 0, 5, 0, ScheduleIntervalKind.BUSINESS_HOURS),
+                interval(DayOfWeek.SUNDAY, 2, 0, 3, 0, ScheduleIntervalKind.BREAK_TIME));
+        List<WeeklyInterval> reservation = List.of(
+                interval(DayOfWeek.SUNDAY, 0, 0, 5, 0, ScheduleIntervalKind.RESERVATION_SLOT));
+        var sources = new StoreServiceIntervalPolicy.Sources(
+                true, "America/New_York", operating, reservation, regular, List.of());
+
+        assertThat(policy.accepts(request("2026-03-08T06:30:00Z", "2026-03-08T07:30:00Z"), sources)).isFalse();
+    }
+
+    @Test void dstOverlapBreakBoundaryFailsClosedInsteadOfBeingDropped() {
+        RegularClosureVersion regular = RegularClosureVersion.createDraft(1, 1, "America/New_York", List.of(), List.of());
+        regular.activate(Instant.parse("2026-01-01T00:00:00Z"), "게시");
+        List<WeeklyInterval> operating = List.of(
+                interval(DayOfWeek.SUNDAY, 0, 0, 3, 0, ScheduleIntervalKind.BUSINESS_HOURS),
+                interval(DayOfWeek.SUNDAY, 1, 0, 2, 0, ScheduleIntervalKind.BREAK_TIME));
+        List<WeeklyInterval> reservation = List.of(
+                interval(DayOfWeek.SUNDAY, 0, 0, 3, 0, ScheduleIntervalKind.RESERVATION_SLOT));
+        var sources = new StoreServiceIntervalPolicy.Sources(
+                true, "America/New_York", operating, reservation, regular, List.of());
+
+        assertThat(policy.accepts(request("2026-11-01T04:30:00Z", "2026-11-01T07:30:00Z"), sources)).isFalse();
+    }
+
     private StoreServiceIntervalRequest request(String start, String end) {
         return new StoreServiceIntervalRequest(1, Instant.parse(start), Instant.parse(end));
     }

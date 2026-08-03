@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.closure.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -9,8 +10,11 @@ import com.miriyum.domain.store.closure.dto.RegularClosureDraftRequest;
 import com.miriyum.domain.store.closure.dto.RegularClosureResponse;
 import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
+import com.miriyum.domain.store.closure.entity.TemporaryClosure;
+import com.miriyum.domain.store.closure.model.TemporaryClosureReason;
 import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.store.closure.repository.StoreClosureAuditEventRepository;
+import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
@@ -50,6 +54,7 @@ class StoreClosureServiceTest {
     @Mock private StoreService storeService;
     @Mock private StoreScheduleStateRepository stateRepository;
     @Mock private RegularClosureVersionRepository regularRepository;
+    @Mock private TemporaryClosureRepository temporaryRepository;
     @Mock private StoreClosureAuditEventRepository auditRepository;
     @Mock private IdempotencyExecutor idempotencyExecutor;
 
@@ -63,6 +68,7 @@ class StoreClosureServiceTest {
                 storeService,
                 stateRepository,
                 regularRepository,
+                temporaryRepository,
                 auditRepository,
                 idempotencyExecutor,
                 objectMapper,
@@ -123,6 +129,31 @@ class StoreClosureServiceTest {
         assertThat(result.data().status()).isEqualTo(ScheduleVersionStatus.ACTIVE);
         assertThat(previous.getStatus()).isEqualTo(ScheduleVersionStatus.RETIRED);
         assertThat(state.getActiveRegularClosureVersionId()).isEqualTo(42L);
+    }
+
+    @Test
+    void immediatePublicationRejectsRegularRuleConflictingWithTemporaryClosure() {
+        StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        RegularClosureVersion target = RegularClosureVersion.createDraft(
+                STORE_ID, 1L, "Asia/Seoul", List.of(DayOfWeek.MONDAY), List.of());
+        ReflectionTestUtils.setField(target, "id", 42L);
+        TemporaryClosure temporary = TemporaryClosure.create(
+                STORE_ID,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z"),
+                "Asia/Seoul", TemporaryClosureReason.OTHER, null);
+        given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
+                .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+        given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
+        given(regularRepository.findByStoreIdAndVersionNumber(STORE_ID, 1L)).willReturn(Optional.of(target));
+        given(temporaryRepository.findNonCancelledEndingAfter(STORE_ID, CLOCK.instant()))
+                .willReturn(List.of(temporary));
+        executeBusinessWork();
+
+        assertThatThrownBy(() -> service.publishRegular(OPERATOR_ID, STORE_ID, 1L,
+                IdempotencyKey.parse(KEY),
+                new SchedulePublicationRequest(PublicationMode.IMMEDIATE, null, "게시")))
+                .isInstanceOf(com.miriyum.global.exception.ServiceException.class);
     }
 
     private RegularClosureVersion version(long versionNumber, long id) {

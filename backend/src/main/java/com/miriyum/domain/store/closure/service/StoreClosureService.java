@@ -6,6 +6,7 @@ import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
 import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.store.closure.repository.StoreClosureAuditEventRepository;
+import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -24,6 +25,8 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,7 @@ public class StoreClosureService {
     private final StoreService storeService;
     private final StoreScheduleStateRepository stateRepository;
     private final RegularClosureVersionRepository regularRepository;
+    private final TemporaryClosureRepository temporaryRepository;
     private final StoreClosureAuditEventRepository auditRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -76,10 +80,12 @@ public class StoreClosureService {
                     Instant now = clock.instant();
                     validatePublication(request, now);
                     if (request.publicationMode() == PublicationMode.SCHEDULED) {
+                        requireNoTemporaryConflict(target, request.effectiveAt().toInstant());
                         target.schedule(request.effectiveAt().toInstant(), request.changeReason());
                         audit(target, operatorId, "PUBLICATION_SCHEDULED", "DRAFT", "SCHEDULED",
                                 authority.timeZoneId(), target.getEffectiveAt(), request.changeReason(), key.value());
                     } else {
+                        requireNoTemporaryConflict(target, now);
                         retireActive(state);
                         target.activate(now, request.changeReason());
                         state.activateRegularClosure(target.getId());
@@ -135,6 +141,13 @@ public class StoreClosureService {
                         authority.timeZoneId(), target.getEffectiveAt(), target.getChangeReason(), "scheduled-regular-" + versionId);
                 return;
             }
+            if (hasTemporaryConflict(target, now)) {
+                target.failActivation();
+                audit(target, null, "ACTIVATION_FAILED", "SCHEDULED", "ACTIVATION_FAILED",
+                        authority.timeZoneId(), target.getEffectiveAt(), target.getChangeReason(),
+                        "scheduled-regular-" + versionId);
+                return;
+            }
             retireActive(state);
             target.activate(now, target.getChangeReason());
             state.activateRegularClosure(target.getId());
@@ -148,6 +161,23 @@ public class StoreClosureService {
     private void retireActive(StoreScheduleState state) {
         Long activeId = state.getActiveRegularClosureVersionId();
         if (activeId != null) regularRepository.findById(activeId).orElseThrow(this::conflict).retire();
+    }
+
+    private void requireNoTemporaryConflict(RegularClosureVersion target, Instant effectiveFrom) {
+        if (hasTemporaryConflict(target, effectiveFrom)) throw conflict();
+    }
+
+    private boolean hasTemporaryConflict(RegularClosureVersion target, Instant effectiveFrom) {
+        ZoneId zone = ZoneId.of(target.getTimeZoneId());
+        return temporaryRepository.findNonCancelledEndingAfter(target.getStoreId(), effectiveFrom)
+                .stream().anyMatch(closure -> {
+                    Instant relevantStart = closure.getStartAt().isBefore(effectiveFrom)
+                            ? effectiveFrom : closure.getStartAt();
+                    LocalDate first = relevantStart.atZone(zone).toLocalDate();
+                    LocalDate last = closure.getEndAt().minusNanos(1).atZone(zone).toLocalDate();
+                    return !first.isAfter(last)
+                            && first.datesUntil(last.plusDays(1)).anyMatch(target::isClosedOn);
+                });
     }
 
     private StoreScheduleState initializeAndLock(long storeId) {

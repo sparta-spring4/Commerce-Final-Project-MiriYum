@@ -25,12 +25,12 @@ public final class StoreServiceIntervalPolicy {
                 || sources.regularClosure() == null || sources.temporaryClosures() == null) return false;
         final ZoneId zone;
         try { zone = ZoneId.of(sources.timeZoneId()); } catch (DateTimeException ex) { return false; }
-        if (!insideAny(request.startAt(), request.startAt().plusNanos(1), zone,
-                sources.reservationIntervals(), ScheduleIntervalKind.RESERVATION_SLOT)) return false;
-        if (!insideAny(request.startAt(), request.serviceEndAt(), zone,
-                sources.operatingIntervals(), ScheduleIntervalKind.BUSINESS_HOURS)) return false;
-        if (overlapsAny(request.startAt(), request.serviceEndAt(), zone,
-                sources.operatingIntervals(), ScheduleIntervalKind.BREAK_TIME)) return false;
+        if (match(request.startAt(), request.startAt().plusNanos(1), zone,
+                sources.reservationIntervals(), ScheduleIntervalKind.RESERVATION_SLOT, true) != Match.YES) return false;
+        if (match(request.startAt(), request.serviceEndAt(), zone,
+                sources.operatingIntervals(), ScheduleIntervalKind.BUSINESS_HOURS, true) != Match.YES) return false;
+        if (match(request.startAt(), request.serviceEndAt(), zone,
+                sources.operatingIntervals(), ScheduleIntervalKind.BREAK_TIME, false) != Match.NO) return false;
         LocalDate first = request.startAt().atZone(zone).toLocalDate();
         LocalDate last = request.serviceEndAt().minusNanos(1).atZone(zone).toLocalDate();
         if (first.datesUntil(last.plusDays(1)).anyMatch(sources.regularClosure()::isClosedOn)) return false;
@@ -38,26 +38,31 @@ public final class StoreServiceIntervalPolicy {
                 .noneMatch(c -> c.getCancelledAt() == null && c.overlaps(request.startAt(), request.serviceEndAt()));
     }
 
-    private boolean insideAny(Instant start, Instant end, ZoneId zone, List<WeeklyInterval> intervals,
-            ScheduleIntervalKind kind) {
-        return intervals.stream().filter(i -> i.kind() == kind)
-                .anyMatch(i -> occurrences(i, start, zone).stream()
-                        .anyMatch(o -> !start.isBefore(o.start) && !end.isAfter(o.end)));
+    private Match match(Instant start, Instant end, ZoneId zone, List<WeeklyInterval> intervals,
+            ScheduleIntervalKind kind, boolean containment) {
+        boolean matched = false;
+        for (WeeklyInterval interval : intervals) {
+            if (interval.kind() != kind) continue;
+            for (Occurrence occurrence : occurrences(interval, start, end, zone)) {
+                if (!occurrence.valid()) return Match.INVALID;
+                boolean current = containment
+                        ? !start.isBefore(occurrence.start()) && !end.isAfter(occurrence.end())
+                        : occurrence.start().isBefore(end) && start.isBefore(occurrence.end());
+                matched |= current;
+            }
+        }
+        return matched ? Match.YES : Match.NO;
     }
 
-    private boolean overlapsAny(Instant start, Instant end, ZoneId zone, List<WeeklyInterval> intervals,
-            ScheduleIntervalKind kind) {
-        return intervals.stream().filter(i -> i.kind() == kind)
-                .anyMatch(i -> occurrences(i, start, zone).stream()
-                        .anyMatch(o -> o.start.isBefore(end) && start.isBefore(o.end)));
-    }
-
-    private List<Occurrence> occurrences(WeeklyInterval interval, Instant reference, ZoneId zone) {
+    private List<Occurrence> occurrences(WeeklyInterval interval, Instant reference, Instant requestEnd, ZoneId zone) {
         LocalDate local = reference.atZone(zone).toLocalDate();
+        LocalDate requestLastDate = requestEnd.minusNanos(1).atZone(zone).toLocalDate();
         LocalDate monday = local.minusDays(local.getDayOfWeek().getValue() - 1L);
         return java.util.stream.LongStream.of(-7, 0, 7)
                 .mapToObj(offset -> occurrence(interval, monday.plusDays(offset), zone))
-                .filter(java.util.Objects::nonNull).toList();
+                .filter(candidate -> !candidate.localEnd().toLocalDate().isBefore(local)
+                        && !candidate.localStart().toLocalDate().isAfter(requestLastDate))
+                .toList();
     }
 
     private Occurrence occurrence(WeeklyInterval interval, LocalDate monday, ZoneId zone) {
@@ -65,8 +70,8 @@ public final class StoreServiceIntervalPolicy {
         LocalDateTime end = monday.atStartOfDay().plusMinutes(interval.weekEndMinute());
         Instant startInstant = strictInstant(start, zone);
         Instant endInstant = strictInstant(end, zone);
-        return startInstant == null || endInstant == null || !startInstant.isBefore(endInstant)
-                ? null : new Occurrence(startInstant, endInstant);
+        boolean valid = startInstant != null && endInstant != null && startInstant.isBefore(endInstant);
+        return new Occurrence(start, end, startInstant, endInstant, valid);
     }
 
     private Instant strictInstant(LocalDateTime value, ZoneId zone) {
@@ -75,5 +80,9 @@ public final class StoreServiceIntervalPolicy {
         return offsets.size() == 1 ? value.toInstant(offsets.getFirst()) : null;
     }
 
-    private record Occurrence(Instant start, Instant end) { }
+    private enum Match { YES, NO, INVALID }
+    private record Occurrence(
+            LocalDateTime localStart, LocalDateTime localEnd,
+            Instant start, Instant end, boolean valid
+    ) { }
 }

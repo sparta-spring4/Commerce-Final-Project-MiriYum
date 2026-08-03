@@ -6,6 +6,7 @@ import com.miriyum.domain.store.closure.repository.RegularClosureVersionReposito
 import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.schedule.dto.*;
 import com.miriyum.domain.store.schedule.entity.*;
@@ -59,8 +60,10 @@ public class StoreServiceIntervalValidationService {
                 ReservationScheduleVersion res = reservation.get(state.getActiveReservationScheduleVersionId());
                 RegularClosureVersion reg = regular.get(state.getActiveRegularClosureVersionId());
                 boolean consistent = op != null && res != null && reg != null
+                        && store.getVerificationStatus() == VerificationStatus.APPROVED
                         && op.getStoreId().equals(store.getId()) && res.getStoreId().equals(store.getId())
                         && reg.getStoreId().equals(store.getId())
+                        && Objects.equals(res.getValidatedOperatingVersionId(), op.getId())
                         && store.getTimeZoneId().equals(op.getTimeZoneId())
                         && store.getTimeZoneId().equals(res.getTimeZoneId())
                         && store.getTimeZoneId().equals(reg.getTimeZoneId());

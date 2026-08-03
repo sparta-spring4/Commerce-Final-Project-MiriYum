@@ -25,4 +25,12 @@ public interface TemporaryClosureRepository extends JpaRepository<TemporaryClosu
             @Param("storeIds") Collection<Long> storeIds,
             @Param("startAt") Instant startAt,
             @Param("endAt") Instant endAt);
+
+    @Query("""
+            select c from TemporaryClosure c
+            where c.storeId = :storeId and c.cancelledAt is null and c.endAt > :effectiveFrom
+            """)
+    List<TemporaryClosure> findNonCancelledEndingAfter(
+            @Param("storeId") long storeId,
+            @Param("effectiveFrom") Instant effectiveFrom);
 }
