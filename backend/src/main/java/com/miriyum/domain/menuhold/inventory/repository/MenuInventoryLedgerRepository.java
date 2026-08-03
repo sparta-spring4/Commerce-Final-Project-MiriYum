@@ -4,10 +4,14 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryLedger;
 import com.miriyum.domain.menuhold.inventory.model.InventoryLedgerOperation;
 import com.miriyum.domain.menuhold.inventory.model.InventoryPoolType;
+import jakarta.persistence.LockModeType;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface MenuInventoryLedgerRepository
         extends JpaRepository<MenuInventoryLedger, Long> {
@@ -23,6 +27,23 @@ public interface MenuInventoryLedgerRepository
     default boolean existsRestoreForSourceOperation(String sourceOperationId) {
         return existsBySourceOperationIdAndOperationType(
                 sourceOperationId, InventoryLedgerOperation.RESTORE);
+    }
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select ledger
+            from MenuInventoryLedger ledger
+            where ledger.sourceOperationId = :sourceOperationId
+              and ledger.operationType = :operationType
+            order by ledger.bucketId asc, ledger.poolType asc
+            """)
+    List<MenuInventoryLedger> findAllBySourceOperationIdForUpdate(
+            @Param("sourceOperationId") String sourceOperationId,
+            @Param("operationType") InventoryLedgerOperation operationType);
+
+    default boolean existsRestoreForSourceOperationForUpdate(String sourceOperationId) {
+        return !findAllBySourceOperationIdForUpdate(
+                sourceOperationId, InventoryLedgerOperation.RESTORE).isEmpty();
     }
 
     private List<InventoryAllocationResult> findResults(

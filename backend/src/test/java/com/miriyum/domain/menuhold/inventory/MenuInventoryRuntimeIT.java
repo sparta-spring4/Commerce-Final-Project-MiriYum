@@ -32,6 +32,11 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -111,6 +116,7 @@ class MenuInventoryRuntimeIT {
 
     @Test
     void acquireAndDistinctRestoreOperationsRestoreSourceOnlyOnce() {
+        long ledgerCountBefore = ledgerRepository.count();
         MenuInventoryBucket bucket = transactionTemplate.execute(status ->
                 bucketRepository.saveAndFlush(bucket(menuId, 2, 3)));
         InventoryAcquireRequest acquire = new InventoryAcquireRequest(
@@ -128,7 +134,25 @@ class MenuInventoryRuntimeIT {
                 new InventoryAllocationResult(bucket.getId(), 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
-        assertThat(ledgerRepository.count()).isEqualTo(4);
+        assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 4);
+    }
+
+    @Test
+    void operationIdsDifferingOnlyByCaseRemainDistinct() {
+        long ledgerCountBefore = ledgerRepository.count();
+        MenuInventoryBucket bucket = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 2, 0)));
+
+        transactionTemplate.execute(status -> menuHoldService.acquireInventory(
+                new InventoryAcquireRequest(
+                        "reservation:case:A", List.of(selection(menuId, 1)))));
+        transactionTemplate.execute(status -> menuHoldService.acquireInventory(
+                new InventoryAcquireRequest(
+                        "reservation:case:a", List.of(selection(menuId, 1)))));
+
+        MenuInventoryBucket depleted = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(depleted.getOnlineHoldRemaining()).isZero();
+        assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 2);
     }
 
     @Test
@@ -157,6 +181,54 @@ class MenuInventoryRuntimeIT {
         assertThat(bucketRepository.findById(first.getId()).orElseThrow()
                 .getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore);
+    }
+
+    @Test
+    void concurrentDistinctRestoreOperationsConvergeOnSingleSourceRestore() throws Exception {
+        long ledgerCountBefore = ledgerRepository.count();
+        MenuInventoryBucket bucket = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 2, 0)));
+        InventoryAcquireRequest acquire = new InventoryAcquireRequest(
+                "reservation:99:create", List.of(selection(menuId, 2)));
+        transactionTemplate.execute(status -> menuHoldService.acquireInventory(acquire));
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> first = executor.submit(() -> restoreConcurrently(
+                    "reservation:99:cancel:1", acquire.operationId(), ready, start));
+            Future<Boolean> second = executor.submit(() -> restoreConcurrently(
+                    "reservation:99:cancel:2", acquire.operationId(), ready, start));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(first.get(20, TimeUnit.SECONDS)).isTrue();
+            assertThat(second.get(20, TimeUnit.SECONDS)).isTrue();
+        }
+
+        MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
+        assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 2);
+    }
+
+    private boolean restoreConcurrently(
+            String operationId,
+            String sourceOperationId,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) throws InterruptedException {
+        ready.countDown();
+        if (!start.await(10, TimeUnit.SECONDS)) {
+            return false;
+        }
+        try {
+            transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
+                    new InventoryRestoreRequest(operationId, sourceOperationId)));
+            return true;
+        } catch (ServiceException exception) {
+            return false;
+        }
     }
 
     private static InventoryAcquireRequest.Selection selection(long selectedMenuId, int quantity) {

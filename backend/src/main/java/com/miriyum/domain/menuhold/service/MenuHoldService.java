@@ -83,7 +83,7 @@ public class MenuHoldService {
         if (buckets.size() != orderedIds.size()) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
         }
-        if (ledgerRepository.existsRestoreForSourceOperation(
+        if (ledgerRepository.existsRestoreForSourceOperationForUpdate(
                 request.sourceAcquireOperationId())) {
             return;
         }

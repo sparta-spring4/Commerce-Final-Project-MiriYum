@@ -124,7 +124,10 @@ class MenuHoldServiceTest {
                 .willReturn(List.of(new InventoryAllocationResult(3L, 2, 0)));
         given(ledgerRepository.existsRestoreForSourceOperation(
                 request.sourceAcquireOperationId()))
-                .willReturn(false, true);
+                .willReturn(false);
+        given(ledgerRepository.existsRestoreForSourceOperationForUpdate(
+                request.sourceAcquireOperationId()))
+                .willReturn(true);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
         MenuHoldService service = service();
 

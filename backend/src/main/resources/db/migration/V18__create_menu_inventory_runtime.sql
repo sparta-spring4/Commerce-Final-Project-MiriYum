@@ -52,8 +52,8 @@ CREATE TABLE menu_inventory_buckets (
 
 CREATE TABLE menu_inventory_ledger (
     menu_inventory_ledger_id BIGINT NOT NULL AUTO_INCREMENT,
-    operation_id VARCHAR(100) NOT NULL,
-    source_operation_id VARCHAR(100) NULL,
+    operation_id VARCHAR(100) COLLATE utf8mb4_0900_as_cs NOT NULL,
+    source_operation_id VARCHAR(100) COLLATE utf8mb4_0900_as_cs NULL,
     menu_inventory_bucket_id BIGINT NOT NULL,
     operation_type VARCHAR(20) NOT NULL,
     pool_type VARCHAR(20) NOT NULL,

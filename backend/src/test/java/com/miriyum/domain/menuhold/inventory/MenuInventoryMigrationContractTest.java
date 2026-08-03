@@ -21,8 +21,8 @@ class MenuInventoryMigrationContractTest {
                 .doesNotContain("CREATE TABLE menu_inventory_commands")
                 .contains("CREATE TABLE menu_inventory_ledger")
                 .contains("uk_menu_inventory_ledger_operation_pool")
-                .contains("operation_id VARCHAR(100)")
-                .contains("source_operation_id VARCHAR(100)")
+                .contains("operation_id VARCHAR(100) COLLATE utf8mb4_0900_as_cs NOT NULL")
+                .contains("source_operation_id VARCHAR(100) COLLATE utf8mb4_0900_as_cs NULL")
                 .contains("uk_menu_inventory_restore_source_pool")
                 .contains("ON DELETE RESTRICT");
     }
