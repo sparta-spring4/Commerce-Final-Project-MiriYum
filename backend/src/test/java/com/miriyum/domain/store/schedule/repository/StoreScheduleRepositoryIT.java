@@ -53,7 +53,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.store.schedule.activation-enabled=false",
+            "miriyum.menu.schedule.enabled=false"
         })
 class StoreScheduleRepositoryIT {
 
@@ -469,34 +471,29 @@ class StoreScheduleRepositoryIT {
     @Test
     @Transactional
     void serviceIntervalBatchUsesSixQueriesAndPreservesDuplicates() {
-        long storeId = createStore("service-interval-owner@example.com", "1234567894");
-        StoreScheduleState state = initializeAndLock(storeId);
-        OperatingScheduleVersion operating = operatingRepository.saveAndFlush(
-                OperatingScheduleVersion.create(storeId, state.allocateOperatingVersion(),
-                        List.of(business(17, 0, 21, 0, 1020, 1260))));
-        state.activateOperating(operating.getId());
-        ReservationScheduleVersion reservation = reservationRepository.saveAndFlush(
-                ReservationScheduleVersion.create(storeId, state.allocateReservationVersion(), operating.getId(),
-                        List.of(reservation(18, 0, 20, 0, 1080, 1200))));
-        state.activateReservation(reservation.getId());
-        RegularClosureVersion regular = regularClosureRepository.saveAndFlush(
-                RegularClosureVersion.createDraft(storeId, state.allocateRegularClosureVersion(),
-                        "Asia/Seoul", List.of(), List.of()));
-        regular.activate(Instant.parse("2026-08-01T00:00:00Z"), "빈 휴무표 게시");
-        state.activateRegularClosure(regular.getId());
+        long firstStoreId = createIntervalStore(
+                "first-service-interval-owner@example.com", "1234567894", 21);
+        long secondStoreId = createIntervalStore(
+                "second-service-interval-owner@example.com", "1234567895", 20);
         entityManager.flush();
         entityManager.clear();
         Statistics statistics = entityManager.getEntityManagerFactory()
                 .unwrap(org.hibernate.SessionFactory.class).getStatistics();
         statistics.setStatisticsEnabled(true);
         statistics.clear();
-        StoreServiceIntervalRequest request = new StoreServiceIntervalRequest(
-                storeId, Instant.parse("2026-08-03T09:00:00Z"), Instant.parse("2026-08-03T09:45:00Z"));
+        StoreServiceIntervalRequest first = new StoreServiceIntervalRequest(
+                firstStoreId, Instant.parse("2026-08-03T09:00:00Z"), Instant.parse("2026-08-03T09:45:00Z"));
+        StoreServiceIntervalRequest second = new StoreServiceIntervalRequest(
+                secondStoreId, Instant.parse("2026-08-03T09:00:00Z"), Instant.parse("2026-08-03T10:15:00Z"));
 
-        var results = intervalValidationService.validateServiceIntervals(List.of(request, request));
+        var results = intervalValidationService.validateServiceIntervals(List.of(first, second, first));
 
-        assertThat(results).hasSize(2).extracting(result -> result.status())
-                .containsExactly(StoreServiceIntervalStatus.ACCEPTING, StoreServiceIntervalStatus.ACCEPTING);
+        assertThat(results).hasSize(3).extracting(result -> result.storeId())
+                .containsExactly(firstStoreId, secondStoreId, firstStoreId);
+        assertThat(results).extracting(result -> result.status()).containsExactly(
+                StoreServiceIntervalStatus.ACCEPTING,
+                StoreServiceIntervalStatus.ACCEPTING,
+                StoreServiceIntervalStatus.ACCEPTING);
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(6L);
     }
 
@@ -594,6 +591,26 @@ class StoreScheduleRepositoryIT {
     private StoreScheduleState initializeAndLock(long storeId) {
         stateRepository.initialize(storeId);
         return stateRepository.findForUpdateByStoreId(storeId).orElseThrow();
+    }
+
+    private long createIntervalStore(String email, String registrationNumber, int businessEndHour) {
+        long storeId = createStore(email, registrationNumber);
+        StoreScheduleState state = initializeAndLock(storeId);
+        OperatingScheduleVersion operating = operatingRepository.saveAndFlush(
+                OperatingScheduleVersion.create(storeId, state.allocateOperatingVersion(),
+                        List.of(business(17, 0, businessEndHour, 30, 1020,
+                                businessEndHour * 60 + 30))));
+        state.activateOperating(operating.getId());
+        ReservationScheduleVersion reservation = reservationRepository.saveAndFlush(
+                ReservationScheduleVersion.create(storeId, state.allocateReservationVersion(), operating.getId(),
+                        List.of(reservation(18, 0, 19, 30, 1080, 1170))));
+        state.activateReservation(reservation.getId());
+        RegularClosureVersion regular = regularClosureRepository.saveAndFlush(
+                RegularClosureVersion.createDraft(storeId, state.allocateRegularClosureVersion(),
+                        "Asia/Seoul", List.of(), List.of()));
+        regular.activate(Instant.parse("2026-08-01T00:00:00Z"), "빈 휴무표 게시");
+        state.activateRegularClosure(regular.getId());
+        return storeId;
     }
 
     private long createStore() {

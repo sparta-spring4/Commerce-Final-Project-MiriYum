@@ -1570,8 +1570,8 @@ components:
         version: { type: integer, format: int64, minimum: 1 }
         status: { $ref: "#/components/schemas/ScheduleVersionStatus" }
         timeZoneId: { $ref: "#/components/schemas/TimeZoneId" }
-        effectiveAt: { type: string, format: date-time, nullable: true }
-        changeReason: { type: string, nullable: true, maxLength: 500 }
+        effectiveAt: { type: [string, "null"], format: date-time }
+        changeReason: { type: [string, "null"], maxLength: 500 }
         weeklyDays:
           type: array
           uniqueItems: true
@@ -1591,7 +1591,7 @@ components:
         endAt: { type: string, format: date-time }
         timeZoneId: { $ref: "#/components/schemas/TimeZoneId" }
         reason: { type: string, enum: [MAINTENANCE, STAFFING, PRIVATE_EVENT, OTHER] }
-        publicMessage: { type: string, nullable: true, maxLength: 200 }
+        publicMessage: { type: [string, "null"], maxLength: 200 }
         status: { type: string, enum: [SCHEDULED, ACTIVE, ENDED, CANCELLED] }
         changeVersion: { type: integer, format: int64, minimum: 1 }
     RegularClosureSuccessResponse:
