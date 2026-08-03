@@ -52,7 +52,8 @@ Validation follows the shared lock and information-disclosure order:
 1. Load and lock Store by `storeId`.
    - Missing Store: `STORE_001`.
    - Verification status other than `APPROVED`: `STORE_007`.
-   - Operation status `CLOSED`: `STORE_005`.
+   - Operation status other than `OPEN`, including `TEMPORARILY_CLOSED` and
+     `CLOSED`: `STORE_005`.
 2. Load and lock Menu by `menuId`.
    - Missing Menu: `STORE_009`.
    - Menu belongs to another Store: `STORE_009`.
@@ -117,7 +118,7 @@ performed.
 
 `StoreServiceTest` supplies contract-level coverage for:
 
-- missing, unapproved, and closed Store;
+- missing, unapproved, temporarily closed, and closed Store;
 - missing Menu and Menu belonging to another Store;
 - retired, unpublished, hidden, paused, and sold-out Menu;
 - valid `PUBLISHED + VISIBLE + SELLING` Menu;
