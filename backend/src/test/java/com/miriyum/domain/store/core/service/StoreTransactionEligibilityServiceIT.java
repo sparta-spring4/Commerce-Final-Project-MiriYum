@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.core.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.core.entity.Store;
@@ -26,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -70,6 +72,24 @@ class StoreTransactionEligibilityServiceIT {
     void cleanRows() {
         storeRepository.deleteAll();
         operatorRepository.deleteAll();
+    }
+
+    @Test
+    void reservationGateRejectsInvocationWithoutCreationTransaction() {
+        long storeId = createStore();
+
+        assertThatThrownBy(() ->
+                eligibilityService.requireReservationTransactionEligibility(storeId))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void pickupGateRejectsInvocationWithoutCreationTransaction() {
+        long storeId = createStore();
+
+        assertThatThrownBy(() ->
+                eligibilityService.requirePickupTransactionEligibility(storeId))
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test
@@ -131,7 +151,8 @@ class StoreTransactionEligibilityServiceIT {
                 await(stateChangeLocked);
                 gateAttempted.countDown();
                 try {
-                    eligibilityService.requireReservationTransactionEligibility(storeId);
+                    transactionTemplate.executeWithoutResult(ignored ->
+                            eligibilityService.requireReservationTransactionEligibility(storeId));
                     return null;
                 } catch (ServiceException exception) {
                     return exception.getErrorCode();

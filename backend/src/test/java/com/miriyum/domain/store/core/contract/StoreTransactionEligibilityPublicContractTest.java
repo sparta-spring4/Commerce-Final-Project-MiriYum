@@ -12,7 +12,9 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 class StoreTransactionEligibilityPublicContractTest {
@@ -36,8 +38,8 @@ class StoreTransactionEligibilityPublicContractTest {
                 .isEqualTo(StorePickupTransactionEligibility.class);
         assertThat(reservation.getParameterTypes()).containsExactly(long.class);
         assertThat(pickup.getParameterTypes()).containsExactly(long.class);
-        assertLockingTransactionGate(reservation);
-        assertLockingTransactionGate(pickup);
+        assertMandatoryLockingTransactionGate(reservation);
+        assertMandatoryLockingTransactionGate(pickup);
     }
 
     @Test
@@ -73,20 +75,23 @@ class StoreTransactionEligibilityPublicContractTest {
                 .allSatisfy(this::assertNotStoreInternalType);
     }
 
-    private void assertLockingTransactionGate(Method method) {
+    private void assertMandatoryLockingTransactionGate(Method method) {
         Transactional transactional = method.getAnnotation(Transactional.class);
         assertThat(transactional)
                 .as("%s must declare a transaction boundary", method.getName())
                 .isNotNull();
+        assertThat(transactional.propagation())
+                .as("%s must join an existing creation transaction", method.getName())
+                .isEqualTo(Propagation.MANDATORY);
         assertThat(transactional.readOnly())
                 .as("%s must allow a pessimistic write lock", method.getName())
                 .isFalse();
         assertThat(transactional.isolation())
-                .as("%s must use READ_COMMITTED", method.getName())
-                .isEqualTo(Isolation.READ_COMMITTED);
+                .as("%s must leave isolation to the creation transaction", method.getName())
+                .isEqualTo(Isolation.DEFAULT);
         assertThat(transactional.timeout())
-                .as("%s must bound lock waiting", method.getName())
-                .isEqualTo(5);
+                .as("%s must leave timeout to the creation transaction", method.getName())
+                .isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT);
     }
 
     private void assertStoreIdOnlyDto(Class<?> dtoType) {
