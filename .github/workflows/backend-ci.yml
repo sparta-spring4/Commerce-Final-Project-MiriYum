@@ -1,0 +1,97 @@
+# backend/ 의 등록된 검증 명령(ai/command-registry.md 의 root.verify.backend)을
+# 원격 러너의 깨끗한 checkout 에서 재현한다. Issue #92.
+#
+# 이 워크플로는 배포 자동화가 아니라 검증 자동화다. 배포 대상·비밀·산출물 게시가 없다.
+# job 이름 backend-ci 는 required check 로 등록될 이름이므로 등록 후 바꾸지 않는다(#92).
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+# 저장소 내용 읽기만 필요하다. 쓰기 권한을 주지 않는다.
+permissions:
+  contents: read
+
+# 같은 ref 의 이전 실행은 취소해 러너 낭비를 막는다.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-ci:
+    name: backend-ci
+    runs-on: ubuntu-24.04
+    # 22개 클래스가 각자 MySQL 컨테이너를 띄운다. 로컬(캐시 있음) 기준선 약 9분에
+    # CI 첫 실행의 이미지 pull·의존성 다운로드를 더해 여유를 두되, hang 시 러너를
+    # 장시간 점유하지 않도록 상한을 둔다. 실측 후 조정한다.
+    timeout-minutes: 30
+    defaults:
+      run:
+        # 모든 gradle 명령은 backend/ 에서 실행한다(레지스트리 계약).
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21 (Temurin)
+        # Gradle toolchain 자동 provisioning 은 고정되지 않은 외부 다운로드이므로 쓰지 않고
+        # JDK 를 명시 설치한다.
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # backend.wrapper.version: Wrapper 가 Gradle 9.6.1 을 보고하는지 확인한다.
+      - name: Gradle wrapper version
+        run: |
+          version_output=$(./gradlew --version)
+          echo "$version_output"
+          if ! echo "$version_output" | grep -q "Gradle 9.6.1"; then
+            echo "::error::Gradle 9.6.1 이 아니다"
+            exit 1
+          fi
+
+      # backend.test: 전체 테스트. Testcontainers MySQL 이 실제로 뜬다.
+      - name: Test
+        run: ./gradlew test
+
+      # 조용한 skip 으로 인한 거짓 초록을 막는다. Docker 미가용 등으로 통합 테스트가
+      # 건너뛰어지면 실패한다(docs 09 구현 테스트 gate, #92 인수 조건).
+      - name: Assert no skipped tests
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          tests = failures = errors = skipped = 0
+          files = glob.glob('build/test-results/test/*.xml')
+          if not files:
+              print('::error::테스트 결과 XML 이 없다')
+              sys.exit(1)
+          for f in files:
+              root = ET.parse(f).getroot()
+              tests += int(root.get('tests', 0))
+              failures += int(root.get('failures', 0))
+              errors += int(root.get('errors', 0))
+              skipped += int(root.get('skipped', 0))
+          print(f'classes={len(files)} tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          if skipped:
+              print(f'::error::skipped={skipped} (0 이어야 한다)')
+              sys.exit(1)
+          PY
+
+      # backend.build: 컴파일·테스트·패키징. 위 test 가 up-to-date 라 재실행되지 않는다.
+      - name: Build
+        run: ./gradlew build
+
+      # 실패 시에만 테스트 리포트를 올려 원격에서 원인을 추적할 수 있게 한다.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-test-reports
+          path: backend/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
