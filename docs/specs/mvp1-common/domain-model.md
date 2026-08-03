@@ -253,7 +253,7 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
 - `MenuSellingStatus.SOLD_OUT`은 매장 운영자가 설정·복구하는 메뉴 전체 수동 품절이며 중앙 수량으로 자동 변경하지 않는다.
 - `InventoryAvailabilityStatus.SOLD_OUT`은 메뉴 전체 상태가 아니라 `menuId + serviceDate + [startTime, endTime) + policyVersion`으로 식별하는 홀드·픽업 구간별 중앙 수량 판정이다.
 - 두 `SOLD_OUT`은 문자열이 같아도 저장 위치·소유자·판정 단위와 효과가 다른 별도 타입이며 하나의 enum이나 열로 합치지 않는다.
-- 수량 관리 메뉴는 중앙 온라인 가용량이 0이 되면 해당 구간을 `InventoryAvailabilityStatus.SOLD_OUT`, 유효한 복구·증가로 1개 이상이 되면 다른 상태 조건을 확인한 뒤 `AVAILABLE`로 판정할 수 있다. 수량 복구가 메뉴 전체 수동 `SOLD_OUT`·`PAUSED`·`HIDDEN`을 자동 해제하지 않는다.
+- 수량 관리 메뉴는 중앙 온라인 가용량이 0이 되면 해당 구간을 `InventoryAvailabilityStatus.SOLD_OUT`으로 판정한다. 유효한 복구·증가로 온라인 가용량이 양수가 되어도 수동 `SOLD_OUT`을 자동 해제하지 않으며, 구간 상태를 `AVAILABLE`로 전환할 때 다른 상태 조건을 함께 검증한다. 수량 복구가 메뉴 전체 수동 `SOLD_OUT`·`PAUSED`·`HIDDEN`도 자동 해제하지 않는다.
 
 ### 최종 신규 선택 가능 조건
 
@@ -263,7 +263,10 @@ AND VISIBLE
 AND SELLING
 AND (
   수량 관리 대상이 아님
-  OR 해당 날짜·시간 구간이 AVAILABLE
+  OR (
+    해당 날짜·시간 구간의 최종 InventoryAvailabilityStatus가 AVAILABLE
+    AND 온라인 가용량 > 0
+  )
 )
 ```
 
@@ -654,7 +657,7 @@ menus
 - 온라인 신규 거래의 구간별 수량 가용성은 사용 가능한 `ONLINE_HOLD`와 정책상 접근 가능한 `SHARED` 잔여 수량으로 판정한다.
 - 온라인 가용량이 0이면 해당 메뉴·제공 구간을 `SOLD_OUT`으로 판정하지만 다른 구간이나 `ONSITE` 수량까지 품절로 변경하지 않는다.
 - 품절 전환은 신규 홀드와 픽업만 차단하고 기존 확정 거래를 자동 취소하거나 다른 메뉴로 바꾸지 않는다.
-- 실제 수량이 복구되어 온라인 가용성이 생겨도 판매·공개·마감 상태를 별도로 검증한 뒤 신규 거래 가능 여부를 판정한다.
+- 실제 수량이 복구되어 온라인 가용성이 생겨도 최종 `InventoryAvailabilityStatus`가 `AVAILABLE`인지와 판매·공개·마감 상태를 별도로 검증한 뒤 신규 거래 가능 여부를 판정한다.
 
 ### 소유권과 미확정 물리 제약
 
