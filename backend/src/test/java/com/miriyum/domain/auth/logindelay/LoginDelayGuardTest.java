@@ -1,6 +1,7 @@
 package com.miriyum.domain.auth.logindelay;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
@@ -43,6 +44,16 @@ class LoginDelayGuardTest {
                 TokenNamespace.CONSUMER, 1L, LoginAttempt.acquired("attempt-token"), true);
 
         assertThat(completed).isFalse();
+    }
+
+    @Test
+    void doesNotMaskTheOriginalLoginResultWhenReleaseRetriesAreExhausted() {
+        LoginDelayGuard guard = guard();
+        given(transactionExecutor.execute(any())).willThrow(new CannotAcquireLockException("deadlock"));
+
+        assertThatCode(() -> guard.releaseAttempt(
+                TokenNamespace.CONSUMER, 1L, LoginAttempt.acquired("attempt-token")))
+                .doesNotThrowAnyException();
     }
 
     private LoginDelayGuard guard() {
