@@ -690,7 +690,10 @@ paths:
     patch:
       tags: [Store Management]
       summary: 메뉴 판매 상태 변경
-      description: 일반 메뉴의 SOLD_OUT은 운영자가 수동 변경한다. 홀드 메뉴의 자동 품절·복구는 중앙 수량 도메인의 확정 결과만 사용한다.
+      description: >-
+        SELLING, SOLD_OUT, PAUSED는 운영자가 관리하는 메뉴 전체 수동 판매 상태다.
+        메뉴 홀드·픽업의 중앙 AVAILABLE/SOLD_OUT은 제공 날짜·시간 구간별 수량 판정이며
+        이 명령이나 메뉴 기본 판매 상태를 자동 변경하지 않는다.
       operationId: changeMenuSellingStatus
       security:
         - bearerAuth: []

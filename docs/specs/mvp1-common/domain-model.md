@@ -229,8 +229,8 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
 |---|---|---|---|
 | 메뉴 버전 | `DRAFT`, `SCHEDULED`, `PUBLISHED`, `RETIRED` | 작성 중, 게시 예약, 게시 중, 종료된 불변 메뉴 버전 | 2번·매장 도메인 |
 | 공개 여부 | `VISIBLE`, `HIDDEN` | 검색·목록·상세에서 사용자에게 공개할지 여부 | 2번·매장 도메인 |
-| 판매 제어 | `SELLING`, `PAUSED` | 매장 운영자가 신규 거래를 받을지 중단할지 여부 | 2번·매장 도메인 |
-| 수량 가용성 | `AVAILABLE`, `SOLD_OUT` | 홀드·픽업 수량 관리 메뉴의 날짜·시간 구간별 신규 수량 가능 여부 | 4번·메뉴 홀드·픽업 도메인 |
+| 메뉴 전체 수동 판매 제어 (`MenuSellingStatus`) | `SELLING`, `SOLD_OUT`, `PAUSED` | 매장 운영자가 메뉴 전체의 신규 판매를 허용·수동 품절·중단할지 여부 | 2번·매장 도메인 |
+| 구간 수량 가용성 (`InventoryAvailabilityStatus`) | `AVAILABLE`, `SOLD_OUT` | 홀드·픽업 수량 관리 메뉴의 날짜·시간 구간별 신규 수량 가능 여부 | 4번·메뉴 홀드·픽업 도메인 |
 
 ### 상태 전이
 
@@ -239,9 +239,10 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
                        │ 취소
                        └──────────▶ DRAFT
 
-공개 여부: VISIBLE ◀──────────────▶ HIDDEN
-판매 제어: SELLING ◀──────────────▶ PAUSED
-수량 가용성: AVAILABLE ◀──────────▶ SOLD_OUT
+공개 여부: VISIBLE ◀────────────────────────▶ HIDDEN
+메뉴 전체 수동 판매 제어: SELLING / SOLD_OUT / PAUSED
+                          (운영자 명령으로 세 상태 사이를 전환)
+구간 수량 가용성: AVAILABLE ◀──────────────▶ SOLD_OUT
 ```
 
 - 즉시 게시는 `DRAFT`에서 `PUBLISHED`로 바로 전이할 수 있다.
@@ -249,8 +250,10 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
 - `RETIRED` 버전은 과거 거래 스냅샷 재현을 위해 보존하며 다시 활성화하지 않는다.
 - `HIDDEN`은 공개 노출만 차단하며 재고 부족을 뜻하지 않는다.
 - `PAUSED`는 매장 운영자의 판매 중단이며 수량이 0이라는 뜻이 아니다.
-- `SOLD_OUT`은 메뉴 전체의 영구 상태가 아니라 홀드·픽업 날짜·시간 구간별 수량 가용성이다.
-- 수량 관리 메뉴는 중앙 수량이 0이 되면 `SOLD_OUT`, 유효한 복구·증가로 1개 이상이 되면 `AVAILABLE`로 판정할 수 있다.
+- `MenuSellingStatus.SOLD_OUT`은 매장 운영자가 설정·복구하는 메뉴 전체 수동 품절이며 중앙 수량으로 자동 변경하지 않는다.
+- `InventoryAvailabilityStatus.SOLD_OUT`은 메뉴 전체 상태가 아니라 `menuId + serviceDate + [startTime, endTime) + policyVersion`으로 식별하는 홀드·픽업 구간별 중앙 수량 판정이다.
+- 두 `SOLD_OUT`은 문자열이 같아도 저장 위치·소유자·판정 단위와 효과가 다른 별도 타입이며 하나의 enum이나 열로 합치지 않는다.
+- 수량 관리 메뉴는 중앙 온라인 가용량이 0이 되면 해당 구간을 `InventoryAvailabilityStatus.SOLD_OUT`, 유효한 복구·증가로 1개 이상이 되면 다른 상태 조건을 확인한 뒤 `AVAILABLE`로 판정할 수 있다. 수량 복구가 메뉴 전체 수동 `SOLD_OUT`·`PAUSED`·`HIDDEN`을 자동 해제하지 않는다.
 
 ### 최종 신규 선택 가능 조건
 
@@ -265,7 +268,7 @@ AND (
 ```
 
 - 검색·목록에 표시할 수 있는 조건과 홀드·픽업으로 신규 선택할 수 있는 조건은 같지 않다.
-- `PUBLISHED + VISIBLE + SELLING + SOLD_OUT` 메뉴는 매장 운영자가 숨기지 않은 경우 품절 표시와 함께 조회할 수 있지만 신규 수량 거래는 차단한다.
+- `PUBLISHED + VISIBLE + SELLING + 구간 SOLD_OUT` 메뉴는 매장 운영자가 숨기지 않은 경우 해당 구간의 품절 표시와 함께 조회할 수 있지만 그 구간의 신규 수량 거래는 차단한다.
 - 직접 링크나 오래된 검색 결과를 사용해도 쓰기 시점에 네 상태 축과 중앙 수량을 다시 검증한다.
 
 ### 소유권과 변경 규칙
@@ -278,11 +281,11 @@ AND (
 
 ### 인수 조건
 
-- `HIDDEN`, `PAUSED`, `SOLD_OUT`이 서로 다른 저장 상태와 사용자 표시로 구분된다.
-- 수량이 복구되어도 `PAUSED` 또는 `HIDDEN`인 메뉴가 자동으로 판매·공개 상태가 되지 않는다.
-- 메뉴를 다시 공개해도 `PAUSED` 또는 해당 구간 `SOLD_OUT`이면 신규 홀드·픽업을 생성할 수 없다.
+- `HIDDEN`, `MenuSellingStatus.PAUSED`, 메뉴 전체 수동 `MenuSellingStatus.SOLD_OUT`, 구간 `InventoryAvailabilityStatus.SOLD_OUT`이 서로 다른 저장 상태·타입과 사용자 표시로 구분된다.
+- 수량이 복구되어도 메뉴 전체 수동 `SOLD_OUT`, `PAUSED` 또는 `HIDDEN`인 메뉴가 자동으로 판매·공개 상태가 되지 않는다.
+- 메뉴를 다시 공개해도 메뉴 전체 수동 `SOLD_OUT`·`PAUSED` 또는 해당 구간 `SOLD_OUT`이면 신규 홀드·픽업을 생성할 수 없다.
 - 하나의 `MenuStatus` enum에 게시·노출·판매·수량 값을 혼합하지 않는다.
-- 날짜·시간 구간이 다른 두 수량 상태가 메뉴 기본정보 행을 서로 덮어쓰지 않는다.
+- 날짜·시간 구간이 다른 두 수량 상태가 서로 또는 메뉴 기본정보의 수동 판매 상태를 덮어쓰지 않는다.
 
 ## S-006 1차 MVP 계정 상태와 권한
 
