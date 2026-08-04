@@ -1,0 +1,9 @@
+# 로컬 빌드 결과물, IDE 파일, 비밀값은 Docker 빌드 컨텍스트에서 제외한다.
+.gradle
+build
+out
+.idea
+.git
+*.iml
+*.log
+.env

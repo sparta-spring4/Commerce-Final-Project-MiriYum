@@ -1,18 +1,23 @@
 package com.miriyum.domain.reservation.service;
 
+import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationTimeRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationRequest;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationTimePolicyResponse;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
+import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreService;
@@ -36,8 +41,10 @@ import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,6 +67,10 @@ public class ReservationService {
     private static final String PRINCIPAL_NAMESPACE = "store-operator";
     private static final String SUCCESS_RESPONSE_CODE = "SUCCESS";
     private static final String TIME_POLICY_RESOURCE_TYPE = "RESERVATION_TIME_POLICY";
+    private static final Comparator<ReservationCapacityBucket> BUCKET_ORDER =
+            Comparator.comparing(ReservationCapacityBucket::getStartTime)
+                    .thenComparing(ReservationCapacityBucket::getEndTime)
+                    .thenComparingLong(ReservationCapacityBucket::getPolicyVersion);
 
     private final StoreScheduleService storeScheduleService;
     private final StoreServiceIntervalValidationService storeServiceIntervalValidationService;
@@ -69,6 +80,7 @@ public class ReservationService {
     private final ReservationTimePolicyAuditRepository timePolicyAuditRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ReservationCapacityBucketRepository capacityBucketRepository;
 
     public ReservationService(
             StoreScheduleService storeScheduleService,
@@ -78,7 +90,8 @@ public class ReservationService {
             IdempotencyExecutor idempotencyExecutor,
             ReservationTimePolicyAuditRepository timePolicyAuditRepository,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            ReservationCapacityBucketRepository capacityBucketRepository
     ) {
         this.storeScheduleService = storeScheduleService;
         this.storeServiceIntervalValidationService = storeServiceIntervalValidationService;
@@ -88,6 +101,7 @@ public class ReservationService {
         this.timePolicyAuditRepository = timePolicyAuditRepository;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.capacityBucketRepository = capacityBucketRepository;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -370,6 +384,118 @@ public class ReservationService {
     }
 
     /**
+     * 매장 한 곳의 현재 예약 가능 여부를 판정한다.
+     *
+     * @param storeId 대상 매장 ID
+     * @param condition 고객이 선택한 시작 시각·일행 조건
+     * @return 수용량 원장 기준 판정 결과
+     */
+    @Transactional(readOnly = true)
+    public ReservationAvailabilityResult getAvailability(
+            long storeId,
+            ReservationAvailabilityCondition condition
+    ) {
+        requirePositiveStoreId(storeId);
+        return getAvailabilities(List.of(storeId), condition).getFirst();
+    }
+
+    /**
+     * 여러 매장의 현재 예약 가능 여부를 한 번의 버킷 조회로 판정한다.
+     *
+     * <p>결과는 입력 매장 순서를 그대로 보존한다. 매장별 시간 정책으로 계산한 점유 종료 중 가장
+     * 늦은 시각까지 버킷을 한 번 조회한 뒤 각 매장의 실제 종료 시각으로 다시 필터링한다. 현재
+     * 수용량 버킷의 현지 날짜·시각 계약으로 모호하게 표현되는 자정 넘김과 DST 중복 구간은 시각을
+     * 추측하지 않고 실패 폐쇄한다. 이 조회 결과는 예약 생성 성공을 보장하지 않으며 생성
+     * 트랜잭션에서 현재 정책과 점유량을 다시 검증해야 한다.</p>
+     *
+     * @param storeIds 판정 대상 매장 ID 목록
+     * @param condition 모든 대상에 공통으로 적용할 시작 시각·일행 조건
+     * @return 입력 매장과 같은 순서의 가용성 결과
+     */
+    @Transactional(readOnly = true)
+    public List<ReservationAvailabilityResult> getAvailabilities(
+            List<Long> storeIds,
+            ReservationAvailabilityCondition condition
+    ) {
+        if (storeIds == null) {
+            throw new IllegalArgumentException("storeIds must not be null");
+        }
+        if (condition == null) {
+            throw new IllegalArgumentException("condition must not be null");
+        }
+        List<Long> candidateStoreIds = List.copyOf(storeIds);
+        candidateStoreIds.forEach(ReservationService::requirePositiveStoreId);
+        if (candidateStoreIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<ReservationTimeResolutionResult> timeResults = resolveReservationTimes(
+                candidateStoreIds,
+                new ReservationTimeRequest(
+                        condition.serviceDate(),
+                        condition.startTime(),
+                        condition.startOffset()
+                )
+        );
+        if (timeResults == null || timeResults.size() != candidateStoreIds.size()) {
+            return unavailableAvailabilityResults(candidateStoreIds);
+        }
+
+        CapacityWindow[] capacityWindows = new CapacityWindow[candidateStoreIds.size()];
+        Set<Long> queryStoreIds = new LinkedHashSet<>();
+        LocalTime latestEndTime = null;
+        for (int index = 0; index < candidateStoreIds.size(); index++) {
+            long storeId = candidateStoreIds.get(index);
+            CapacityWindow capacityWindow = toCapacityWindow(
+                    storeId,
+                    timeResults.get(index),
+                    condition
+            );
+            capacityWindows[index] = capacityWindow;
+            if (capacityWindow != null) {
+                queryStoreIds.add(storeId);
+                latestEndTime = latestEndTime == null
+                        ? capacityWindow.endTime()
+                        : laterOf(latestEndTime, capacityWindow.endTime());
+            }
+        }
+        if (queryStoreIds.isEmpty()) {
+            return unavailableAvailabilityResults(candidateStoreIds);
+        }
+
+        List<ReservationCapacityBucket> buckets =
+                capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                        List.copyOf(queryStoreIds),
+                        condition.serviceDate(),
+                        condition.startTime(),
+                        latestEndTime
+                );
+        if (buckets == null) {
+            return unavailableAvailabilityResults(candidateStoreIds);
+        }
+        Map<Long, List<ReservationCapacityBucket>> bucketsByStore =
+                groupBucketsByStore(buckets);
+
+        List<ReservationAvailabilityResult> results =
+                new ArrayList<>(candidateStoreIds.size());
+        for (int index = 0; index < candidateStoreIds.size(); index++) {
+            long storeId = candidateStoreIds.get(index);
+            CapacityWindow window = capacityWindows[index];
+            ReservationAvailabilityStatus status = window == null
+                    ? ReservationAvailabilityStatus.UNAVAILABLE
+                    : availabilityOf(
+                            bucketsByStore.get(storeId),
+                            window.startTime(),
+                            window.endTime(),
+                            condition.partySize(),
+                            condition.includesInfants()
+                    );
+            results.add(new ReservationAvailabilityResult(storeId, status));
+        }
+        return List.copyOf(results);
+    }
+
+    /**
      * Store의 시작 접수 window와 Reservation의 현재 시간 정책으로 매장별 실제 종료를 계산한다.
      *
      * <p>결과는 입력 순서·개수·중복을 보존한다. Store의 {@code windowEndAt}은 시작 접수
@@ -620,6 +746,137 @@ public class ReservationService {
         return conflict;
     }
 
+    private static Map<Long, List<ReservationCapacityBucket>> groupBucketsByStore(
+            List<ReservationCapacityBucket> buckets
+    ) {
+        Map<Long, List<ReservationCapacityBucket>> bucketsByStore = new HashMap<>();
+        for (ReservationCapacityBucket bucket : buckets) {
+            bucketsByStore.computeIfAbsent(
+                    bucket.getStoreId(),
+                    ignored -> new ArrayList<>()
+            ).add(bucket);
+        }
+        bucketsByStore.values().forEach(storeBuckets -> storeBuckets.sort(BUCKET_ORDER));
+        return bucketsByStore;
+    }
+
+    private static ReservationAvailabilityStatus availabilityOf(
+            List<ReservationCapacityBucket> buckets,
+            LocalTime startTime,
+            LocalTime endTime,
+            int partySize,
+            boolean includesInfants
+    ) {
+        if (buckets == null || buckets.isEmpty()) {
+            return ReservationAvailabilityStatus.UNAVAILABLE;
+        }
+
+        LocalTime cursor = startTime;
+        Long policyVersion = null;
+        for (ReservationCapacityBucket bucket : buckets) {
+            if (!bucket.getStartTime().isBefore(endTime)
+                    || !bucket.getEndTime().isAfter(startTime)) {
+                continue;
+            }
+            if (policyVersion == null) {
+                policyVersion = bucket.getPolicyVersion();
+            } else if (bucket.getPolicyVersion() != policyVersion) {
+                return ReservationAvailabilityStatus.UNAVAILABLE;
+            }
+            LocalTime coveredStart = laterOf(bucket.getStartTime(), startTime);
+            LocalTime coveredEnd = earlierOf(bucket.getEndTime(), endTime);
+            if (!coveredStart.equals(cursor) || !coveredEnd.isAfter(coveredStart)) {
+                return ReservationAvailabilityStatus.UNAVAILABLE;
+            }
+            if (!bucket.canAccept(partySize, includesInfants)) {
+                return ReservationAvailabilityStatus.UNAVAILABLE;
+            }
+            cursor = coveredEnd;
+        }
+
+        return policyVersion != null && cursor.equals(endTime)
+                ? ReservationAvailabilityStatus.AVAILABLE
+                : ReservationAvailabilityStatus.UNAVAILABLE;
+    }
+
+    private static CapacityWindow toCapacityWindow(
+            long storeId,
+            ReservationTimeResolutionResult result,
+            ReservationAvailabilityCondition condition
+    ) {
+        if (result == null
+                || result.storeId() != storeId
+                || result.status() != ReservationTimeResolutionStatus.RESOLVED
+                || result.time() == null) {
+            return null;
+        }
+        ResolvedReservationTime time = result.time();
+        if (time.policyStoreId() != storeId
+                || !time.serviceDate().equals(condition.serviceDate())) {
+            return null;
+        }
+
+        try {
+            ZoneId zoneId = ZoneId.of(time.timeZoneId());
+            var start = time.startAt().atZone(zoneId);
+            var occupancyEnd = time.occupancyEndAt().atZone(zoneId);
+            if (!start.toLocalDate().equals(condition.serviceDate())
+                    || !occupancyEnd.toLocalDate().equals(condition.serviceDate())
+                    || !start.toLocalTime().equals(condition.startTime())
+                    || !start.toLocalTime().isBefore(occupancyEnd.toLocalTime())
+                    || start.getSecond() != 0
+                    || start.getNano() != 0
+                    || occupancyEnd.getSecond() != 0
+                    || occupancyEnd.getNano() != 0
+                    || start.getOffset().getTotalSeconds() != time.startOffsetSeconds()
+                    || occupancyEnd.getOffset().getTotalSeconds()
+                    != time.occupancyEndOffsetSeconds()
+                    || !start.getOffset().equals(occupancyEnd.getOffset())) {
+                return null;
+            }
+            var startOffsets = zoneId.getRules().getValidOffsets(start.toLocalDateTime());
+            var occupancyEndOffsets =
+                    zoneId.getRules().getValidOffsets(occupancyEnd.toLocalDateTime());
+            if (startOffsets.size() != 1
+                    || occupancyEndOffsets.size() != 1
+                    || !startOffsets.getFirst().equals(start.getOffset())
+                    || !occupancyEndOffsets.getFirst().equals(occupancyEnd.getOffset())) {
+                return null;
+            }
+            return new CapacityWindow(
+                    start.toLocalTime(),
+                    occupancyEnd.toLocalTime()
+            );
+        } catch (DateTimeException exception) {
+            return null;
+        }
+    }
+
+    private static List<ReservationAvailabilityResult> unavailableAvailabilityResults(
+            List<Long> storeIds
+    ) {
+        return storeIds.stream()
+                .map(storeId -> new ReservationAvailabilityResult(
+                        storeId,
+                        ReservationAvailabilityStatus.UNAVAILABLE
+                ))
+                .toList();
+    }
+
+    private static LocalTime laterOf(LocalTime first, LocalTime second) {
+        return first.isAfter(second) ? first : second;
+    }
+
+    private static LocalTime earlierOf(LocalTime first, LocalTime second) {
+        return first.isBefore(second) ? first : second;
+    }
+
+    private static void requirePositiveStoreId(long storeId) {
+        if (storeId <= 0) {
+            throw new IllegalArgumentException("storeId must be positive");
+        }
+    }
+
     private static List<Long> validateRequest(
             List<Long> storeIds,
             ReservationTimeRequest request
@@ -736,5 +993,11 @@ public class ReservationService {
             }
         }
         return true;
+    }
+
+    private record CapacityWindow(
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
     }
 }

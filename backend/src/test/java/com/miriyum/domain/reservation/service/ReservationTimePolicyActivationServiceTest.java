@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.then;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
@@ -52,6 +53,9 @@ class ReservationTimePolicyActivationServiceTest {
     @Mock
     private ReservationTimePolicyAuditRepository auditRepository;
 
+    @Mock
+    private ReservationCapacityBucketRepository capacityBucketRepository;
+
     private ReservationService reservationService;
 
     @BeforeEach
@@ -64,7 +68,8 @@ class ReservationTimePolicyActivationServiceTest {
                 idempotencyExecutor,
                 auditRepository,
                 new ObjectMapper(),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                capacityBucketRepository
         );
     }
 

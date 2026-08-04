@@ -779,7 +779,7 @@ components:
           $ref: "#/components/schemas/StoreLocalTime"
         maxPeople:
           type: integer
-          minimum: 0
+          minimum: 1
           maximum: 10000
         maxTeams:
           type: integer
@@ -828,7 +828,7 @@ components:
           $ref: "#/components/schemas/StoreLocalTime"
         maxPeople:
           type: integer
-          minimum: 0
+          minimum: 1
         maxTeams:
           type: integer
           minimum: 0
