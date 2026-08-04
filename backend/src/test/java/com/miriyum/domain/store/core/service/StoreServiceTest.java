@@ -663,6 +663,45 @@ class StoreServiceTest {
     }
 
     @Test
+    void replayedLegacyCreateDefaultsMissingGeocodingToUnverified() {
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        true,
+                        201,
+                        "SUCCESS",
+                        "STORE",
+                        Long.toString(STORE_ID),
+                        objectMapper.readTree("""
+                                {
+                                  "storeId": "7",
+                                  "name": "미리윰",
+                                  "region": "SEOUL",
+                                  "address": "서울시 중구",
+                                  "timeZoneId": "Asia/Seoul",
+                                  "storeCategoryCode": "CAFE_BAKERY",
+                                  "verificationStatus": "APPROVED",
+                                  "operationStatus": "OPEN",
+                                  "pickupEligibility": "ELIGIBLE",
+                                  "modes": {
+                                    "reservationEnabled": true,
+                                    "menuHoldEnabled": true,
+                                    "pickupEnabled": true
+                                  }
+                                }
+                                """)));
+
+        StoreCommandResult result = storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest());
+
+        assertThat(result.data().geocoding().status()).isEqualTo(GeocodingStatus.UNVERIFIED);
+        assertThat(result.data().geocoding().addressVersion()).isEqualTo(1L);
+        assertThat(result.data().geocoding().latitude()).isNull();
+        assertThat(result.data().geocoding().longitude()).isNull();
+    }
+
+    @Test
     void newCreateProviderFailureDoesNotSaveStore() {
         ServiceException providerFailure =
                 new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);

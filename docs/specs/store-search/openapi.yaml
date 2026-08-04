@@ -298,6 +298,8 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/StoreStateConflict"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operator/stores/{storeId}/operating-hours:
     put:
       tags: [Store Management]
@@ -1093,6 +1095,7 @@ components:
         - operationStatus
         - pickupEligibility
         - modes
+        - geocoding
       properties:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -1118,6 +1121,43 @@ components:
           $ref: "#/components/schemas/PickupEligibility"
         modes:
           $ref: "#/components/schemas/StoreModes"
+        geocoding:
+          $ref: "#/components/schemas/StoreGeocoding"
+    StoreGeocoding:
+      type: object
+      description: 현재 매장 주소 버전의 좌표 검증 상태. 외부 제공자 메타데이터는 공개하지 않는다.
+      additionalProperties: false
+      required:
+        - status
+        - latitude
+        - longitude
+        - verifiedAddress
+        - verifiedAt
+        - addressVersion
+      properties:
+        status:
+          type: string
+          enum: [UNVERIFIED, VERIFIED]
+        latitude:
+          type: [number, "null"]
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: [number, "null"]
+          format: double
+          minimum: -180
+          maximum: 180
+        verifiedAddress:
+          type: [string, "null"]
+          maxLength: 300
+        verifiedAt:
+          type: [string, "null"]
+          format: date-time
+        addressVersion:
+          type: integer
+          format: int64
+          minimum: 1
     PublicMenu:
       type: object
       additionalProperties: false
@@ -1992,7 +2032,7 @@ components:
             code: STORE_003
             message: 대상 매장의 운영 권한이 없습니다.
     StoreStateConflict:
-      description: 현재 매장 상태 또는 등록 업종의 픽업 자격 때문에 변경 불가
+      description: 현재 매장 상태, 등록 업종의 픽업 자격 또는 주소 선행 검증 이후 동시 변경 때문에 수정 불가
       content:
         application/json:
           schema:
@@ -2006,6 +2046,10 @@ components:
               value:
                 code: STORE_008
                 message: 등록 업종에 픽업 자격이 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 다른 요청이 먼저 반영되었습니다. 최신 상태를 확인한 뒤 다시 시도해 주세요.
     SchedulePublicationConflict:
       description: 매장 운영·입점 검증 상태 또는 일정 구간·잠금 충돌
       content:
