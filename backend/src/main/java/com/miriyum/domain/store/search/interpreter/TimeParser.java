@@ -17,12 +17,17 @@ final class TimeParser {
             "(?<![\\p{L}\\p{N}])([0-9]{1,2}):([0-9]{2})(?![\\p{L}\\p{N}])");
     private static final Pattern AMBIGUOUS_PERIOD_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(점심|저녁)(?:\\s*쯤)?(?![\\p{L}\\p{N}])");
+    private static final Pattern APPROXIMATE_TIME_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])(?:(?:오전|오후)\\s*[0-9]{1,2}\\s*시"
+                    + "(?:\\s*[0-9]{1,2}\\s*분)?|[0-9]{1,2}:[0-9]{2})"
+                    + "\\s*쯤(?![\\p{L}\\p{N}])");
 
     private TimeParser() {
     }
 
     static Result parse(String input) {
         boolean hasAmbiguousPeriod = AMBIGUOUS_PERIOD_PATTERN.matcher(input).find();
+        boolean hasApproximateTime = APPROXIMATE_TIME_PATTERN.matcher(input).find();
         boolean hasInvalidTime = false;
         Matcher matcher = AM_PM_PATTERN.matcher(input);
         LinkedHashSet<LocalTime> values = new LinkedHashSet<>();
@@ -66,7 +71,9 @@ final class TimeParser {
                             WarningField.TIME)));
         }
         LocalTime value = values.isEmpty() ? null : values.getFirst();
-        List<InterpretationWarning> warnings = hasAmbiguousPeriod || hasInvalidTime
+        List<InterpretationWarning> warnings = hasAmbiguousPeriod
+                        || hasApproximateTime
+                        || hasInvalidTime
                 ? List.of(new InterpretationWarning(
                         WarningCode.AMBIGUOUS_TIME,
                         WarningField.TIME))

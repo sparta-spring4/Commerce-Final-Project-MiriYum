@@ -166,6 +166,27 @@ class RuleInterpreterTemporalTest {
                 WarningField.TIME));
     }
 
+    @Test
+    @DisplayName("쯤이 붙은 명시 시각은 정확한 조건으로 추측하지 않는다")
+    void preservesApproximateTime() {
+        // given
+        RuleInterpreter interpreter = new RuleInterpreter(
+                Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC));
+        String input = "오후 7시쯤 예약";
+
+        // when
+        InterpretationResult result = interpreter.interpret(request(
+                input,
+                ZoneId.of("Asia/Seoul")));
+
+        // then
+        assertThat(result.condition().reservationTime()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_TIME,
+                WarningField.TIME));
+    }
+
     private InterpretationRequest request(String input, ZoneId zoneId) {
         return new InterpretationRequest(
                 input,

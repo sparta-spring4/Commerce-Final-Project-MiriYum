@@ -52,18 +52,33 @@ public final class RuleInterpreter {
         PartySizeParser.Result partySize = PartySizeParser.parse(normalized);
         DateParser.Result date = DateParser.parse(normalized, clock, request.zoneId());
         TimeParser.Result time = TimeParser.parse(normalized);
+        CrossFieldResolution cross = resolveDictionaryStructuredOverlaps(
+                dictionary,
+                price.acceptedSpans(),
+                partySize.acceptedSpans(),
+                date.acceptedSpans(),
+                time.acceptedSpans());
+        dictionary = cross.dictionary();
 
         List<TextSpan> acceptedSpans = new ArrayList<>();
         acceptedSpans.addAll(spansOf(dictionary.regions()));
         acceptedSpans.addAll(spansOf(dictionary.storeCategories()));
         acceptedSpans.addAll(spansOf(dictionary.menuCategories()));
         acceptedSpans.addAll(spansOf(dictionary.tags()));
-        acceptedSpans.addAll(price.acceptedSpans());
-        acceptedSpans.addAll(partySize.acceptedSpans());
-        acceptedSpans.addAll(date.acceptedSpans());
-        acceptedSpans.addAll(time.acceptedSpans());
+        if (!cross.rejectPrice()) {
+            acceptedSpans.addAll(price.acceptedSpans());
+        }
+        if (!cross.rejectPartySize()) {
+            acceptedSpans.addAll(partySize.acceptedSpans());
+        }
+        if (!cross.rejectDate()) {
+            acceptedSpans.addAll(date.acceptedSpans());
+        }
+        if (!cross.rejectTime()) {
+            acceptedSpans.addAll(time.acceptedSpans());
+        }
         List<InterpretationWarning> warnings = new ArrayList<>();
-        if (dictionary.ambiguous()) {
+        if (dictionary.ambiguous() || cross.ambiguous()) {
             warnings.add(new InterpretationWarning(
                     WarningCode.AMBIGUOUS_DICTIONARY_TERM,
                     WarningField.DICTIONARY));
@@ -77,16 +92,68 @@ public final class RuleInterpreter {
                 codesOf(dictionary.storeCategories()),
                 codesOf(dictionary.menuCategories()),
                 codesOf(dictionary.tags()),
-                price.value(),
-                partySize.value(),
-                date.value(),
-                time.value(),
+                cross.rejectPrice() ? null : price.value(),
+                cross.rejectPartySize() ? null : partySize.value(),
+                cross.rejectDate() ? null : date.value(),
+                cross.rejectTime() ? null : time.value(),
                 removeAcceptedSpans(normalized, acceptedSpans));
         return new InterpretationResult(
                 RULE_VERSION,
                 request.vocabulary().version(),
                 condition,
                 warnings);
+    }
+
+    private static CrossFieldResolution resolveDictionaryStructuredOverlaps(
+            DictionaryResolution dictionary,
+            List<TextSpan> priceSpans,
+            List<TextSpan> partySizeSpans,
+            List<TextSpan> dateSpans,
+            List<TextSpan> timeSpans) {
+        List<MatchedToken<String>> dictionaryTokens = new ArrayList<>();
+        dictionaryTokens.addAll(dictionary.regions());
+        dictionaryTokens.addAll(dictionary.storeCategories());
+        dictionaryTokens.addAll(dictionary.menuCategories());
+        dictionaryTokens.addAll(dictionary.tags());
+
+        List<TextSpan> structuredSpans = new ArrayList<>();
+        structuredSpans.addAll(priceSpans);
+        structuredSpans.addAll(partySizeSpans);
+        structuredSpans.addAll(dateSpans);
+        structuredSpans.addAll(timeSpans);
+
+        Set<MatchedToken<String>> rejectedDictionary = new HashSet<>();
+        for (MatchedToken<String> token : dictionaryTokens) {
+            if (structuredSpans.stream().anyMatch(token.span()::overlaps)) {
+                rejectedDictionary.add(token);
+            }
+        }
+        boolean rejectPrice = overlapsDictionary(priceSpans, dictionaryTokens);
+        boolean rejectPartySize = overlapsDictionary(partySizeSpans, dictionaryTokens);
+        boolean rejectDate = overlapsDictionary(dateSpans, dictionaryTokens);
+        boolean rejectTime = overlapsDictionary(timeSpans, dictionaryTokens);
+        boolean ambiguous = !rejectedDictionary.isEmpty();
+
+        DictionaryResolution resolvedDictionary = new DictionaryResolution(
+                withoutRejected(dictionary.regions(), rejectedDictionary),
+                withoutRejected(dictionary.storeCategories(), rejectedDictionary),
+                withoutRejected(dictionary.menuCategories(), rejectedDictionary),
+                withoutRejected(dictionary.tags(), rejectedDictionary),
+                dictionary.ambiguous());
+        return new CrossFieldResolution(
+                resolvedDictionary,
+                rejectPrice,
+                rejectPartySize,
+                rejectDate,
+                rejectTime,
+                ambiguous);
+    }
+
+    private static boolean overlapsDictionary(
+            List<TextSpan> spans,
+            List<MatchedToken<String>> dictionaryTokens) {
+        return spans.stream().anyMatch(span -> dictionaryTokens.stream()
+                .anyMatch(token -> span.overlaps(token.span())));
     }
 
     private static DictionaryResolution resolveDictionaryTokens(
@@ -148,6 +215,15 @@ public final class RuleInterpreter {
             List<MatchedToken<String>> storeCategories,
             List<MatchedToken<String>> menuCategories,
             List<MatchedToken<String>> tags,
+            boolean ambiguous) {
+    }
+
+    private record CrossFieldResolution(
+            DictionaryResolution dictionary,
+            boolean rejectPrice,
+            boolean rejectPartySize,
+            boolean rejectDate,
+            boolean rejectTime,
             boolean ambiguous) {
     }
 }

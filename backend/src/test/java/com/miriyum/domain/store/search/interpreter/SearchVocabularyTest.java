@@ -49,6 +49,22 @@ class SearchVocabularyTest {
     }
 
     @Test
+    @DisplayName("입력과 같은 공백 정규화 뒤 충돌하는 별칭을 거부한다")
+    void rejectsAliasCollisionAfterWhitespaceNormalization() {
+        // when & then
+        assertThatThrownBy(() -> new SearchVocabulary(
+                "catalog-v1",
+                List.of(
+                        new VocabularyEntry("REGION_A", List.of("  성수\t")),
+                        new VocabularyEntry("REGION_B", List.of("성수"))),
+                List.of(),
+                List.of(),
+                List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("alias");
+    }
+
+    @Test
     @DisplayName("가격 범위가 역전되면 거부한다")
     void rejectsReversedPriceRange() {
         // when & then

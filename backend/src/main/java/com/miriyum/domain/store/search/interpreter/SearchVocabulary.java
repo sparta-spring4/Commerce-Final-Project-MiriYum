@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.search.interpreter;
 
-import java.text.Normalizer;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -65,7 +64,7 @@ public record SearchVocabulary(
     }
 
     private static String normalizeAlias(String alias) {
-        return Normalizer.normalize(alias, Normalizer.Form.NFKC)
+        return SearchInputNormalizer.normalize(alias)
                 .toLowerCase(Locale.ROOT);
     }
 }
