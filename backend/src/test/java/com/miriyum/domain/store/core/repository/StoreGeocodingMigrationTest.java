@@ -23,7 +23,7 @@ class StoreGeocodingMigrationTest {
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @Test
-    @DisplayName("V21은 레거시 매장을 주소 버전 1의 좌표 없는 미검증 상태로 이관한다")
+    @DisplayName("V23은 레거시 매장을 주소 버전 1의 좌표 없는 미검증 상태로 이관한다")
     void migratesLegacyStoreToUnverifiedAddressVersionOne() throws Exception {
         cleanDatabase();
         migrateToVersion19();
@@ -40,9 +40,7 @@ class StoreGeocodingMigrationTest {
                             longitude,
                             verified_address,
                             geocoding_verified_at,
-                            geocoding_address_version,
-                            geocoding_provider,
-                            geocoding_provider_api_version
+                            geocoding_address_version
                      FROM stores
                      WHERE business_registration_number = '1234567890'
                      """)) {
@@ -54,13 +52,15 @@ class StoreGeocodingMigrationTest {
             assertThat(row.getString("verified_address")).isNull();
             assertThat(row.getTimestamp("geocoding_verified_at")).isNull();
             assertThat(row.getObject("geocoding_address_version")).isNull();
-            assertThat(row.getString("geocoding_provider")).isNull();
-            assertThat(row.getString("geocoding_provider_api_version")).isNull();
+            try (ResultSet providerColumns = connection.getMetaData().getColumns(
+                    connection.getCatalog(), null, "stores", "geocoding_provider%")) {
+                assertThat(providerColumns.next()).isFalse();
+            }
         }
     }
 
     @Test
-    @DisplayName("V21은 불완전하거나 현재 주소 버전과 불일치한 검증 좌표를 거부한다")
+    @DisplayName("V23은 불완전하거나 현재 주소 버전과 불일치한 검증 좌표를 거부한다")
     void rejectsInvalidVerifiedCoordinateShapes() throws Exception {
         cleanDatabase();
         migrateToVersion19();
@@ -182,9 +182,7 @@ class StoreGeocodingMigrationTest {
                     longitude = %s,
                     verified_address = '서울 중구 세종대로 110',
                     geocoding_verified_at = '2026-08-04 09:00:00.000000',
-                    geocoding_address_version = %s,
-                    geocoding_provider = 'KAKAO_LOCAL',
-                    geocoding_provider_api_version = 'v2'
+                    geocoding_address_version = %s
                 WHERE business_registration_number = '1234567890'
                 """.formatted(latitude, longitude, geocodingAddressVersion);
     }

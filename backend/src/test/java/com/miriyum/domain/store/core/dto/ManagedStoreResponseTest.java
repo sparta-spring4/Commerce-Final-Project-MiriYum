@@ -84,9 +84,7 @@ class ManagedStoreResponseTest {
                         new BigDecimal("37.566826000000000"),
                         new BigDecimal("126.978656700000000"),
                         "서울 중구 세종대로 110",
-                        Instant.parse("2026-08-04T09:00:00Z"),
-                        "KAKAO_LOCAL",
-                        "v2"));
+                        Instant.parse("2026-08-04T09:00:00Z")));
         ReflectionTestUtils.setField(store, "id", 7L);
 
         ManagedStoreResponse response = ManagedStoreResponse.from(store);

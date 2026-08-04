@@ -7,8 +7,6 @@ ALTER TABLE stores
     ADD COLUMN verified_address VARCHAR(300) NULL AFTER longitude,
     ADD COLUMN geocoding_verified_at DATETIME(6) NULL AFTER verified_address,
     ADD COLUMN geocoding_address_version BIGINT NULL AFTER geocoding_verified_at,
-    ADD COLUMN geocoding_provider VARCHAR(30) NULL AFTER geocoding_address_version,
-    ADD COLUMN geocoding_provider_api_version VARCHAR(30) NULL AFTER geocoding_provider,
     ADD CONSTRAINT ck_stores_address_version
         CHECK (address_version >= 1),
     ADD CONSTRAINT ck_stores_geocoding_status
@@ -22,8 +20,6 @@ ALTER TABLE stores
                 AND verified_address IS NULL
                 AND geocoding_verified_at IS NULL
                 AND geocoding_address_version IS NULL
-                AND geocoding_provider IS NULL
-                AND geocoding_provider_api_version IS NULL
             )
             OR
             (
@@ -34,9 +30,5 @@ ALTER TABLE stores
                 AND CHAR_LENGTH(TRIM(verified_address)) > 0
                 AND geocoding_verified_at IS NOT NULL
                 AND geocoding_address_version = address_version
-                AND geocoding_provider IS NOT NULL
-                AND CHAR_LENGTH(TRIM(geocoding_provider)) > 0
-                AND geocoding_provider_api_version IS NOT NULL
-                AND CHAR_LENGTH(TRIM(geocoding_provider_api_version)) > 0
             )
         );

@@ -78,8 +78,6 @@ class StoreGeocodingValidatorTest {
         assertThat(verified.longitude()).isEqualByComparingTo("126.978656700000000");
         assertThat(verified.verifiedAddress()).isEqualTo(REQUESTED_ADDRESS);
         assertThat(verified.verifiedAt()).isEqualTo(VERIFIED_AT);
-        assertThat(verified.provider()).isEqualTo("KAKAO_LOCAL");
-        assertThat(verified.providerApiVersion()).isEqualTo("v2");
     }
 
     @Test

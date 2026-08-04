@@ -101,12 +101,6 @@ public class Store extends BaseEntity {
     @Column(name = "geocoding_address_version")
     private Long geocodingAddressVersion;
 
-    @Column(name = "geocoding_provider", length = 30)
-    private String geocodingProvider;
-
-    @Column(name = "geocoding_provider_api_version", length = 30)
-    private String geocodingProviderApiVersion;
-
     @Column(name = "time_zone_id", nullable = false, length = 64)
     private String timeZoneId;
 
@@ -355,8 +349,6 @@ public class Store extends BaseEntity {
         this.longitude = required.longitude();
         this.verifiedAddress = required.verifiedAddress();
         this.geocodingVerifiedAt = required.verifiedAt();
-        this.geocodingProvider = required.provider();
-        this.geocodingProviderApiVersion = required.providerApiVersion();
         this.geocodingAddressVersion = addressVersion;
         this.geocodingStatus = GeocodingStatus.VERIFIED;
     }
@@ -383,12 +375,6 @@ public class Store extends BaseEntity {
         Objects.requireNonNull(
                 required.verifiedAt(),
                 "geocoding verified time is required");
-        requireNonBlank(
-                required.provider(),
-                "geocoding provider is required");
-        requireNonBlank(
-                required.providerApiVersion(),
-                "geocoding provider API version is required");
         return required;
     }
 

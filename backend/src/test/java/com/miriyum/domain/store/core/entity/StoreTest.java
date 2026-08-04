@@ -45,8 +45,6 @@ class StoreTest {
         assertThat(store.getVerifiedAddress()).isEqualTo("서울 중구 세종대로 110");
         assertThat(store.getGeocodingVerifiedAt()).isEqualTo(GEOCODING_VERIFIED_AT);
         assertThat(store.getGeocodingAddressVersion()).isEqualTo(1L);
-        assertThat(store.getGeocodingProvider()).isEqualTo("KAKAO_LOCAL");
-        assertThat(store.getGeocodingProviderApiVersion()).isEqualTo("v2");
     }
 
     @Test
@@ -61,8 +59,6 @@ class StoreTest {
         assertThat(store.getVerifiedAddress()).isNull();
         assertThat(store.getGeocodingVerifiedAt()).isNull();
         assertThat(store.getGeocodingAddressVersion()).isNull();
-        assertThat(store.getGeocodingProvider()).isNull();
-        assertThat(store.getGeocodingProviderApiVersion()).isNull();
     }
 
     @Test
@@ -76,9 +72,7 @@ class StoreTest {
                 new BigDecimal("35.179554300000000"),
                 new BigDecimal("129.075641600000000"),
                 "부산 연제구 중앙대로 1001",
-                Instant.parse("2026-08-04T10:00:00Z"),
-                "KAKAO_LOCAL",
-                "v2");
+                Instant.parse("2026-08-04T10:00:00Z"));
 
         store.update(
                 null, null, Region.BUSAN, "부산 연제구 중앙대로 1001",
@@ -131,7 +125,7 @@ class StoreTest {
     }
 
     @Test
-    @DisplayName("불완전한 검증 메타데이터는 위치와 주소 버전을 바꾸기 전에 거부한다")
+    @DisplayName("불완전한 검증 좌표는 위치와 주소 버전을 바꾸기 전에 거부한다")
     void incompleteVerifiedGeocodingIsRejectedBeforeMutation() {
         Store store = createVerifiedStore(verifiedGeocoding(
                 "37.566826000000000",
@@ -140,10 +134,8 @@ class StoreTest {
         VerifiedStoreGeocoding incomplete = new VerifiedStoreGeocoding(
                 new BigDecimal("35.179554300000000"),
                 new BigDecimal("129.075641600000000"),
-                "부산 연제구 중앙대로 1001",
-                Instant.parse("2026-08-04T10:00:00Z"),
                 " ",
-                "v2");
+                Instant.parse("2026-08-04T10:00:00Z"));
 
         assertThatThrownBy(() -> store.update(
                 null, null, Region.BUSAN, "부산 연제구 중앙대로 1001",
@@ -519,9 +511,7 @@ class StoreTest {
                 new BigDecimal(latitude),
                 new BigDecimal(longitude),
                 verifiedAddress,
-                GEOCODING_VERIFIED_AT,
-                "KAKAO_LOCAL",
-                "v2");
+                GEOCODING_VERIFIED_AT);
     }
 
     private List<VerifiedStoreGeocoding> invalidGeocodings() {

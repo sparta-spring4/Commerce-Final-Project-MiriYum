@@ -12,8 +12,8 @@ import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.model.StoreGeocodingCandidate;
 import com.miriyum.domain.store.core.model.StoreGeocodingResult;
-import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
-import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
+import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -44,7 +44,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.identity-verification.dev-stub-enabled=true",
+            "miriyum.menu.schedule.enabled=false",
+            "miriyum.store.schedule.activation-enabled=false",
+            "miriyum.reservation.time-policy.activation-enabled=false",
+            "spring.task.scheduling.enabled=false"
         })
 class StoreGeocodingTransactionIT {
 
@@ -62,7 +67,7 @@ class StoreGeocodingTransactionIT {
     private StoreService storeService;
 
     @Autowired
-    private StoreOperatorAccountRepository operatorRepository;
+    private StoreOperatorAuthService storeOperatorAuthService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -75,7 +80,6 @@ class StoreGeocodingTransactionIT {
         jdbcTemplate.execute("DELETE FROM idempotency_commands");
         jdbcTemplate.execute("DELETE FROM store_tag_assignment");
         jdbcTemplate.execute("DELETE FROM stores");
-        jdbcTemplate.execute("DELETE FROM store_operator_accounts");
     }
 
     @Test
@@ -199,9 +203,7 @@ class StoreGeocodingTransactionIT {
                         longitude = NULL,
                         verified_address = NULL,
                         geocoding_verified_at = NULL,
-                        geocoding_address_version = NULL,
-                        geocoding_provider = NULL,
-                        geocoding_provider_api_version = NULL
+                        geocoding_address_version = NULL
                     WHERE store_id = ?
                     """, "서울 중구 을지로 100", storeId);
             assertThat(updated).isEqualTo(1);
@@ -228,8 +230,14 @@ class StoreGeocodingTransactionIT {
     }
 
     private long createOperator(String email) {
-        return operatorRepository.saveAndFlush(
-                StoreOperatorAccount.create(email, "hashed", "운영자")).getId();
+        return Long.parseLong(storeOperatorAuthService.signUp(
+                new StoreOperatorSignUpRequest(
+                        email,
+                        "Password123!",
+                        "Password123!",
+                        "email-ref",
+                        "identity-ref",
+                        "지오코딩 운영자")).accountId());
     }
 
     private StoreCreateRequest createRequest() {

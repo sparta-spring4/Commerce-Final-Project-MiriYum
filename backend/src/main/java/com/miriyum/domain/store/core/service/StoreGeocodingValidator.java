@@ -62,9 +62,7 @@ public class StoreGeocodingValidator {
                 latitude,
                 longitude,
                 verifiedAddress,
-                verifiedAt,
-                result.provider(),
-                result.providerApiVersion());
+                verifiedAt);
     }
 
     private static void requireResult(StoreGeocodingResult result) {
