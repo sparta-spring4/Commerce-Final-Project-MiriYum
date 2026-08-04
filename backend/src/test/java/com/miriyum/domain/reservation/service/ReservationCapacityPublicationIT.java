@@ -21,10 +21,8 @@ import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -120,9 +118,6 @@ class ReservationCapacityPublicationIT {
     private PlatformTransactionManager transactionManager;
 
     @MockitoBean
-    private StoreScheduleService storeScheduleService;
-
-    @MockitoBean
     private StoreServiceIntervalValidationService intervalValidationService;
 
     @BeforeEach
@@ -144,7 +139,6 @@ class ReservationCapacityPublicationIT {
         // given
         OwnerStore owner = createStore("capacity-replay@example.com", "1234567890");
         seedConsumerAndReservation(owner.storeId());
-        givenOneHourWindow(owner.storeId());
         acceptEveryStoreInterval();
         ReservationCapacitiesRequest request = request(4, 0);
 
@@ -211,7 +205,6 @@ class ReservationCapacityPublicationIT {
     void concurrentPublicationsReceiveDistinctSequentialVersions() throws Exception {
         // given
         OwnerStore owner = createStore("capacity-parallel@example.com", "1234567891");
-        givenOneHourWindow(owner.storeId());
         acceptEveryStoreInterval();
         CountDownLatch startGate = new CountDownLatch(1);
 
@@ -259,7 +252,6 @@ class ReservationCapacityPublicationIT {
         // given
         OwnerStore owner = createStore("capacity-cancel-race@example.com", "1234567893");
         long reservationId = seedConsumerAndReservation(owner.storeId());
-        givenOneHourWindow(owner.storeId());
         acceptEveryStoreInterval();
         commandFacade.replace(
                 owner.operatorId(),
@@ -362,7 +354,6 @@ class ReservationCapacityPublicationIT {
     void bucketPersistenceFailureRollsBackTheIdempotencyClaim() {
         // given
         OwnerStore owner = createStore("capacity-rollback@example.com", "1234567892");
-        givenOneHourWindow(owner.storeId());
         acceptEveryStoreInterval();
         doAnswer(invocation -> {
             List<ReservationCapacityBucket> buckets = invocation.getArgument(0);
@@ -406,20 +397,6 @@ class ReservationCapacityPublicationIT {
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1"
         )).getId();
         return new OwnerStore(operatorId, storeId);
-    }
-
-    private void givenOneHourWindow(long storeId) {
-        LocalDateTime start = LocalDateTime.of(SERVICE_DATE, LocalTime.of(18, 0));
-        given(storeScheduleService.resolveReservationWindows(
-                List.of(storeId),
-                SERVICE_DATE,
-                LocalTime.of(18, 0)
-        )).willReturn(List.of(StoreReservationWindowResult.accepting(
-                storeId,
-                "Asia/Seoul",
-                start,
-                start.plusHours(1)
-        )));
     }
 
     private void acceptEveryStoreInterval() {

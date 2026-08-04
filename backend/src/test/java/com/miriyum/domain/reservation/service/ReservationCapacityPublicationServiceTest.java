@@ -1,11 +1,9 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
-import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
@@ -15,22 +13,18 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
-import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
-import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -58,9 +52,6 @@ class ReservationCapacityPublicationServiceTest {
     private StoreService storeService;
 
     @Mock
-    private StoreScheduleService storeScheduleService;
-
-    @Mock
     private StoreServiceIntervalValidationService intervalValidationService;
 
     @Mock
@@ -83,7 +74,6 @@ class ReservationCapacityPublicationServiceTest {
         objectMapper = new ObjectMapper();
         service = new ReservationCapacityPublicationService(
                 storeService,
-                storeScheduleService,
                 intervalValidationService,
                 new ReservationCapacityPolicy(),
                 capacityBucketRepository,
@@ -111,17 +101,6 @@ class ReservationCapacityPublicationServiceTest {
         // given
         given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
                 .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
-        LocalDateTime windowStart = LocalDateTime.of(SERVICE_DATE, LocalTime.of(18, 0));
-        given(storeScheduleService.resolveReservationWindows(
-                List.of(STORE_ID),
-                SERVICE_DATE,
-                LocalTime.of(18, 0)
-        )).willReturn(List.of(StoreReservationWindowResult.accepting(
-                STORE_ID,
-                "Asia/Seoul",
-                windowStart,
-                windowStart.plusHours(1)
-        )));
         StoreServiceIntervalRequest firstInterval = new StoreServiceIntervalRequest(
                 STORE_ID,
                 Instant.parse("2026-08-10T09:00:00Z"),
@@ -188,12 +167,10 @@ class ReservationCapacityPublicationServiceTest {
     }
 
     @Test
-    void publishesEverySeparatedReservationWindowAsOnePolicyVersion() {
+    void publishesSeparatedBucketsAsOnePolicyVersion() {
         // given
         given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
                 .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
-        givenWindow(LocalTime.of(11, 0), LocalTime.of(12, 0));
-        givenWindow(LocalTime.of(18, 0), LocalTime.of(19, 0));
         List<StoreServiceIntervalRequest> intervals = List.of(
                 interval("2026-08-10T02:00:00Z", "2026-08-10T02:30:00Z"),
                 interval("2026-08-10T02:30:00Z", "2026-08-10T03:00:00Z"),
@@ -239,50 +216,49 @@ class ReservationCapacityPublicationServiceTest {
                         LocalTime.of(18, 0),
                         LocalTime.of(18, 30)
                 );
-        then(storeScheduleService).should().resolveReservationWindows(
-                List.of(STORE_ID),
-                SERVICE_DATE,
-                LocalTime.of(18, 0)
-        );
     }
 
     @Test
-    void rejectsMissingBucketInsideAReservationWindow() {
+    void publishesSeparatedBucketsWithoutRequiringFullWindowCoverage() {
         // given
         given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
                 .willReturn(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
-        givenWindow(LocalTime.of(18, 0), LocalTime.of(19, 0));
+        List<StoreServiceIntervalRequest> intervals = List.of(
+                interval("2026-08-10T09:00:00Z", "2026-08-10T09:30:00Z"),
+                interval("2026-08-10T09:45:00Z", "2026-08-10T10:00:00Z")
+        );
+        given(intervalValidationService.validateServiceIntervals(intervals))
+                .willReturn(intervals.stream()
+                        .map(request -> StoreServiceIntervalResult.of(request, true))
+                        .toList());
+        given(capacityBucketRepository.findLatestPolicyBucketsForUpdate(
+                STORE_ID,
+                SERVICE_DATE
+        )).willReturn(List.of(existingBucket(2L)));
+        given(reservationRepository.findConfirmedForCapacityPublication(
+                STORE_ID,
+                SERVICE_DATE
+        )).willReturn(List.of());
+        givenSuccessfulSave();
         ReservationCapacitiesRequest request = new ReservationCapacitiesRequest(List.of(
                 bucket(18, 0, 18, 30, 8, 2),
                 bucket(18, 45, 19, 0, 8, 2)
         ));
 
-        // when & then
-        assertThatThrownBy(() -> service.replaceCapacities(
+        // when
+        ReservationCapacityCommandResult result = service.replaceCapacities(
                 OPERATOR_ID,
                 STORE_ID,
                 SERVICE_DATE,
                 IdempotencyKey.parse(KEY),
                 request
-        )).isInstanceOfSatisfying(ServiceException.class, exception ->
-                assertThat(exception.getErrorCode()).isEqualTo(
-                        ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT
-                ));
-        then(capacityBucketRepository).should(never()).saveAllAndFlush(any());
-    }
+        );
 
-    private void givenWindow(LocalTime startTime, LocalTime endTime) {
-        LocalDateTime startAt = LocalDateTime.of(SERVICE_DATE, startTime);
-        given(storeScheduleService.resolveReservationWindows(
-                List.of(STORE_ID),
-                SERVICE_DATE,
-                startTime
-        )).willReturn(List.of(StoreReservationWindowResult.accepting(
-                STORE_ID,
-                "Asia/Seoul",
-                startAt,
-                LocalDateTime.of(SERVICE_DATE, endTime)
-        )));
+        // then
+        assertThat(result.data().policyVersion()).isEqualTo(3L);
+        assertThat(result.data().buckets())
+                .extracting(bucket -> bucket.startTime())
+                .containsExactly(LocalTime.of(18, 0), LocalTime.of(18, 45));
     }
 
     private static StoreServiceIntervalRequest interval(String startAt, String endAt) {

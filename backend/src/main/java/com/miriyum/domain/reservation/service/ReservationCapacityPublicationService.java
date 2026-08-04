@@ -12,12 +12,9 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -48,7 +45,6 @@ public class ReservationCapacityPublicationService {
     private static final String RESOURCE_TYPE = "RESERVATION_CAPACITY_POLICY";
 
     private final StoreService storeService;
-    private final StoreScheduleService storeScheduleService;
     private final StoreServiceIntervalValidationService intervalValidationService;
     private final ReservationCapacityPolicy capacityPolicy;
     private final ReservationCapacityBucketRepository capacityBucketRepository;
@@ -59,7 +55,6 @@ public class ReservationCapacityPublicationService {
 
     public ReservationCapacityPublicationService(
             StoreService storeService,
-            StoreScheduleService storeScheduleService,
             StoreServiceIntervalValidationService intervalValidationService,
             ReservationCapacityPolicy capacityPolicy,
             ReservationCapacityBucketRepository capacityBucketRepository,
@@ -69,7 +64,6 @@ public class ReservationCapacityPublicationService {
             ObjectMapper objectMapper
     ) {
         this.storeService = storeService;
-        this.storeScheduleService = storeScheduleService;
         this.intervalValidationService = intervalValidationService;
         this.capacityPolicy = capacityPolicy;
         this.capacityBucketRepository = capacityBucketRepository;
@@ -169,13 +163,6 @@ public class ReservationCapacityPublicationService {
             throw conflict(exception);
         }
 
-        requireCompleteRepresentedReservationWindows(
-                storeId,
-                serviceDate,
-                authority.timeZoneId(),
-                buckets
-        );
-
         List<ResolvedBucket> resolved = buckets.stream()
                 .map(bucket -> new ResolvedBucket(
                         bucket,
@@ -196,74 +183,6 @@ public class ReservationCapacityPublicationService {
             throw conflict();
         }
         return resolved;
-    }
-
-    private void requireCompleteRepresentedReservationWindows(
-            long storeId,
-            LocalDate serviceDate,
-            String timeZoneId,
-            List<CapacityBucketRequest> buckets
-    ) {
-        int bucketIndex = 0;
-        while (bucketIndex < buckets.size()) {
-            CapacityBucketRequest first = buckets.get(bucketIndex);
-            StoreReservationWindowResult window = singleWindow(
-                    storeScheduleService.resolveReservationWindows(
-                            List.of(storeId),
-                            serviceDate,
-                            first.startTime()
-                    ),
-                    storeId,
-                    timeZoneId
-            );
-            LocalDateTime windowStart = window.windowStartAt();
-            LocalDateTime windowEnd = window.windowEndAt();
-            LocalDateTime cursor = LocalDateTime.of(serviceDate, first.startTime());
-            if (!windowStart.equals(cursor)
-                    || !windowStart.toLocalDate().equals(serviceDate)
-                    || !windowEnd.toLocalDate().equals(serviceDate)) {
-                throw conflict();
-            }
-
-            while (bucketIndex < buckets.size() && cursor.isBefore(windowEnd)) {
-                CapacityBucketRequest bucket = buckets.get(bucketIndex);
-                LocalDateTime bucketStart = LocalDateTime.of(
-                        serviceDate,
-                        bucket.startTime()
-                );
-                LocalDateTime bucketEnd = LocalDateTime.of(
-                        serviceDate,
-                        bucket.endTime()
-                );
-                if (!bucketStart.equals(cursor)
-                        || bucketEnd.isAfter(windowEnd)) {
-                    throw conflict();
-                }
-                cursor = bucketEnd;
-                bucketIndex++;
-            }
-            if (!cursor.equals(windowEnd)) {
-                throw conflict();
-            }
-        }
-    }
-
-    private static StoreReservationWindowResult singleWindow(
-            List<StoreReservationWindowResult> windows,
-            long storeId,
-            String timeZoneId
-    ) {
-        if (windows == null || windows.size() != 1) {
-            throw conflict();
-        }
-        StoreReservationWindowResult window = windows.getFirst();
-        if (window == null
-                || window.storeId() != storeId
-                || window.status() != StoreReservationWindowStatus.ACCEPTING
-                || !timeZoneId.equals(window.timeZoneId())) {
-            throw conflict();
-        }
-        return window;
     }
 
     private static boolean matchesIntervals(
