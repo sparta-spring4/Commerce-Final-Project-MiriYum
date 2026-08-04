@@ -1,0 +1,178 @@
+name: Backend CD
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    branches: [dev]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Deploy an existing immutable 40-character Git SHA image tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: backend-cd-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
+  EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
+
+jobs:
+  deploy:
+    name: build-and-deploy-backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'dev') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+
+    steps:
+      - name: Validate deployment configuration
+        env:
+          ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          for value in "$AWS_REGION" "$ECR_REPOSITORY" "$EC2_INSTANCE_ID" "$ROLE_TO_ASSUME"; do
+            if [ -z "$value" ]; then
+              echo "::error::Required GitHub Actions variable is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Select immutable image tag
+        id: image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            image_tag="$WORKFLOW_SHA"
+          else
+            image_tag="$MANUAL_TAG"
+          fi
+
+          if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Only a full 40-character Git SHA image tag can be deployed."
+            exit 1
+          fi
+
+          echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout successful CI revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Checkout manual deployment revision
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@4625ce35226a7557230889aae2f52eb50ec3dcda # v2.0.1
+
+      - name: Set up QEMU for ARM64 builds
+        if: github.event_name == 'workflow_run'
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'workflow_run'
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build and push ARM64 backend image
+        if: github.event_name == 'workflow_run'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: backend
+          file: backend/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload deployment files with SSM
+        id: ssm
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
+          nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
+          script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          cat > ssm-command.json <<EOF
+          {
+            "DocumentName": "AWS-RunShellScript",
+            "InstanceIds": ["$EC2_INSTANCE_ID"],
+            "TimeoutSeconds": 900,
+            "Parameters": {
+              "commands": [
+                "set -Eeuo pipefail",
+                "install -d -m 0755 /opt/miriyum/nginx",
+                "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
+                "echo '$nginx_base64' | base64 --decode > /opt/miriyum/nginx/default.conf",
+                "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
+                "chmod 700 /opt/miriyum/deploy.sh",
+                "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
+              ]
+            }
+          }
+          EOF
+
+          command_id=$(aws ssm send-command --cli-input-json file://ssm-command.json --query 'Command.CommandId' --output text)
+          echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM deployment result
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          for attempt in {1..90}; do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+
+            case "$status" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query 'StandardOutputContent' \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query '{status:Status,stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+                  --output json
+                exit 1
+                ;;
+            esac
+
+            sleep 10
+          done
+
+          echo "::error::SSM deployment did not finish within 15 minutes. Command: $COMMAND_ID"
+          exit 1

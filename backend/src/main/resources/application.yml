@@ -9,6 +9,15 @@ spring:
     deserialization:
       fail-on-unknown-properties: true
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
 miriyum:
   jwt:
     secret: ${MIRIYUM_JWT_SECRET}

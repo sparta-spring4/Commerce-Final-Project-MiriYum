@@ -15,7 +15,9 @@ MiriYum은 `1차 MVP`, `2차 MVP`와 `고도화`까지 **방식 A**를 유지한
 
 React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한다. Spring MVC는 웹 경계, Spring Security는 계정 유형별 인증·인가, Spring Data JPA와 좁은 명시적 SQL은 MySQL 접근, Flyway는 스키마 이력을 담당한다.
 
-`1차 MVP` 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
+`1차 MVP`의 최종 사용자 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
+
+프론트엔드 배포 범위가 아직 승인되지 않은 동안 [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)은 1차 MVP의 **백엔드 API 사전 배포**만 구성한다. 이 경로는 Nginx가 `/api`만 Spring Boot에 프록시하고, Vite 정적 파일·사용자 shell·최종 same-origin 사용자 흐름은 제공하지 않는다. 따라서 이 경로의 성공은 최종 사용자 배포나 핵심 흐름 E2E 성공을 뜻하지 않는다. 프론트엔드 소유자가 배포 범위를 승인하는 후속 Issue에서 Nginx의 `/` 정적 제공과 `/api` 프록시를 함께 구성해 same-origin 배포를 완성한다.
 
 ```text
 frontend/
