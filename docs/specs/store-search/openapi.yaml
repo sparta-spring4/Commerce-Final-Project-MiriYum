@@ -473,6 +473,138 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/SchedulePublicationConflict"
+  /api/v1/store-operator/stores/{storeId}/regular-closures:
+    put:
+      tags: [Store Management]
+      summary: 정기 휴무 전체 초안 저장
+      operationId: createRegularClosureDraft
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegularClosureDraftRequest" }
+      responses:
+        "200":
+          description: 저장된 정기 휴무 초안
+          content: { application/json: { schema: { $ref: "#/components/schemas/RegularClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
+  /api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication:
+    post:
+      tags: [Store Management]
+      summary: 정기 휴무 초안 즉시 또는 예약 게시
+      operationId: publishRegularClosureDraft
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SchedulePublicationRequest" } } }
+      responses:
+        "200":
+          description: 게시 처리된 정기 휴무 버전
+          content: { application/json: { schema: { $ref: "#/components/schemas/RegularClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
+  /api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication-cancellation:
+    post:
+      tags: [Store Management]
+      summary: 정기 휴무 예약 게시 취소
+      operationId: cancelRegularClosurePublication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/ScheduleVersion"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SchedulePublicationCancellationRequest" } } }
+      responses:
+        "200":
+          description: 초안으로 돌아간 정기 휴무 버전
+          content: { application/json: { schema: { $ref: "#/components/schemas/RegularClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
+  /api/v1/store-operator/stores/{storeId}/temporary-closures:
+    post:
+      tags: [Store Management]
+      summary: 임시 휴무 등록
+      operationId: createTemporaryClosure
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureCreateRequest" } } }
+      responses:
+        "200":
+          description: 등록된 임시 휴무
+          content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
+  /api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/end-at:
+    put:
+      tags: [Store Management]
+      summary: 임시 휴무 종료 시각 변경
+      operationId: changeTemporaryClosureEndAt
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - { name: closureId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureEndAtRequest" } } }
+      responses:
+        "200":
+          description: 변경된 임시 휴무
+          content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
+  /api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/cancellation:
+    post:
+      tags: [Store Management]
+      summary: 임시 휴무 취소
+      operationId: cancelTemporaryClosure
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - { name: closureId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureCancellationRequest" } } }
+      responses:
+        "200":
+          description: 취소된 임시 휴무
+          content: { application/json: { schema: { $ref: "#/components/schemas/TemporaryClosureSuccessResponse" } } }
+        "400": { $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StoreAccessDenied" }
+        "404": { $ref: "#/components/responses/StoreNotFound" }
+        "409": { $ref: "#/components/responses/SchedulePublicationConflict" }
   /api/v1/store-operator/stores/{storeId}/menus:
     get:
       tags: [Store Management]
@@ -1394,6 +1526,91 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+    RegularClosureDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [weeklyDays, dates]
+      properties:
+        weeklyDays:
+          type: array
+          maxItems: 7
+          uniqueItems: true
+          items: { type: string, enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY] }
+        dates:
+          type: array
+          maxItems: 366
+          uniqueItems: true
+          items: { type: string, format: date }
+    TemporaryClosureCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [startAt, endAt, reason]
+      properties:
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        reason: { type: string, enum: [MAINTENANCE, STAFFING, PRIVATE_EVENT, OTHER] }
+        publicMessage: { type: string, maxLength: 200 }
+    TemporaryClosureEndAtRequest:
+      type: object
+      additionalProperties: false
+      required: [endAt, changeReason]
+      properties:
+        endAt: { type: string, format: date-time }
+        changeReason: { type: string, minLength: 1, maxLength: 500 }
+    TemporaryClosureCancellationRequest:
+      type: object
+      additionalProperties: false
+      required: [changeReason]
+      properties:
+        changeReason: { type: string, minLength: 1, maxLength: 500 }
+    RegularClosureData:
+      type: object
+      additionalProperties: false
+      required: [version, status, timeZoneId, weeklyDays, dates]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        status: { $ref: "#/components/schemas/ScheduleVersionStatus" }
+        timeZoneId: { $ref: "#/components/schemas/TimeZoneId" }
+        effectiveAt: { type: [string, "null"], format: date-time }
+        changeReason: { type: [string, "null"], maxLength: 500 }
+        weeklyDays:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY] }
+        dates:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: date }
+    TemporaryClosureData:
+      type: object
+      additionalProperties: false
+      required: [closureId, storeId, startAt, endAt, timeZoneId, reason, status, changeVersion]
+      properties:
+        closureId: { type: integer, format: int64, minimum: 1 }
+        storeId: { type: integer, format: int64, minimum: 1 }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        timeZoneId: { $ref: "#/components/schemas/TimeZoneId" }
+        reason: { type: string, enum: [MAINTENANCE, STAFFING, PRIVATE_EVENT, OTHER] }
+        publicMessage: { type: [string, "null"], maxLength: 200 }
+        status: { type: string, enum: [SCHEDULED, ACTIVE, ENDED, CANCELLED] }
+        changeVersion: { type: integer, format: int64, minimum: 1 }
+    RegularClosureSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode" }
+        message: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage" }
+        data: { $ref: "#/components/schemas/RegularClosureData" }
+    TemporaryClosureSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode" }
+        message: { $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage" }
+        data: { $ref: "#/components/schemas/TemporaryClosureData" }
     MenuWriteRequest:
       type: object
       additionalProperties: false
