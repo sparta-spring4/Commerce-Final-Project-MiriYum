@@ -7,7 +7,9 @@ import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.PickupEligibility;
+import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
+import com.miriyum.domain.store.core.model.VerifiedStoreGeocoding;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
@@ -15,6 +17,7 @@ import com.miriyum.domain.store.menu.entity.Menu;
 import com.miriyum.domain.store.menu.entity.MenuVersion;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -25,6 +28,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -51,17 +55,20 @@ public class StoreService {
     private final StoreRepository storeRepository;
     private final MenuRepository menuRepository;
     private final StoreCatalogPolicy catalogPolicy;
+    private final StoreGeocodingPort geocodingPort;
+    private final StoreGeocodingValidator geocodingValidator;
+    private final StoreCommandTransactionExecutor transactionExecutor;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreCommandResult create(
             long operatorAccountId,
             IdempotencyKey idempotencyKey,
             StoreCreateRequest request
     ) {
         operatorAccountService.getMe(operatorAccountId);
+        GeocodingPreflight geocoding = geocode(request.region(), request.address());
 
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
@@ -70,30 +77,33 @@ public class StoreService {
                 idempotencyKey.value(),
                 StoreCommandFingerprint.forCreate(request));
 
-        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
-            catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
-            StoreModesRequest modes = request.modes();
-            LocalDateTime onboardingAcceptedAt =
-                    LocalDateTime.ofInstant(clock.instant(), BUSINESS_ZONE);
-            Store store = Store.create(
-                    operatorAccountId,
-                    request.businessRegistrationNumber(),
-                    request.businessType(),
-                    request.name(),
-                    request.description(),
-                    request.region(),
-                    request.address(),
-                    request.storeCategoryCode(),
-                    Set.copyOf(request.tagCodes()),
-                    modes.reservationEnabled(),
-                    modes.menuHoldEnabled(),
-                    modes.pickupEnabled(),
-                    request.timeZoneId(),
-                    onboardingAcceptedAt,
-                    REQUIRED_TERMS_VERSION);
-            Store saved = saveStore(store);
-            return success(HttpStatus.CREATED, saved);
-        });
+        IdempotentOutcome outcome = transactionExecutor.execute(() ->
+                idempotencyExecutor.execute(command, () -> {
+                    VerifiedStoreGeocoding verified = geocoding.requireVerified();
+                    catalogPolicy.validate(request.storeCategoryCode(), request.tagCodes());
+                    StoreModesRequest modes = request.modes();
+                    LocalDateTime onboardingAcceptedAt =
+                            LocalDateTime.ofInstant(clock.instant(), BUSINESS_ZONE);
+                    Store store = Store.createVerified(
+                            operatorAccountId,
+                            request.businessRegistrationNumber(),
+                            request.businessType(),
+                            request.name(),
+                            request.description(),
+                            request.region(),
+                            request.address(),
+                            request.storeCategoryCode(),
+                            Set.copyOf(request.tagCodes()),
+                            modes.reservationEnabled(),
+                            modes.menuHoldEnabled(),
+                            modes.pickupEnabled(),
+                            request.timeZoneId(),
+                            onboardingAcceptedAt,
+                            REQUIRED_TERMS_VERSION,
+                            verified);
+                    Store saved = saveStore(store);
+                    return success(HttpStatus.CREATED, saved);
+                }));
         return commandResult(outcome);
     }
 
@@ -103,7 +113,6 @@ public class StoreService {
         return ManagedStoreResponse.from(loadManagedStore(operatorAccountId, storeId));
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreCommandResult update(
             long operatorAccountId,
             long storeId,
@@ -112,6 +121,10 @@ public class StoreService {
     ) {
         operatorAccountService.getMe(operatorAccountId);
         requireStoreOwnership(operatorAccountId, storeId);
+        GeocodingPreflight geocoding = updateGeocodingPreflight(
+                operatorAccountId,
+                storeId,
+                request);
 
         IdempotencyCommand command = new IdempotencyCommand(
                 PRINCIPAL_NAMESPACE,
@@ -120,31 +133,90 @@ public class StoreService {
                 idempotencyKey.value(),
                 StoreCommandFingerprint.forUpdate(storeId, request));
 
-        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
-            Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
-            String categoryCode = request.storeCategoryCode() == null
-                    ? store.getStoreCategoryCode()
-                    : request.storeCategoryCode();
-            List<String> tagCodes = request.tagCodes() == null
-                    ? List.copyOf(store.getTagCodes())
-                    : request.tagCodes();
-            catalogPolicy.validate(categoryCode, tagCodes);
-            StoreModesRequest modes = request.modes();
-            store.update(
-                    request.name(),
-                    request.description(),
-                    request.region(),
-                    request.address(),
-                    request.storeCategoryCode(),
-                    request.tagCodes() == null ? null : Set.copyOf(request.tagCodes()),
-                    modes == null ? null : modes.reservationEnabled(),
-                    modes == null ? null : modes.menuHoldEnabled(),
-                    modes == null ? null : modes.pickupEnabled(),
-                    request.operationStatus());
-            Store saved = saveStore(store);
-            return success(HttpStatus.OK, saved);
-        });
+        IdempotentOutcome outcome = transactionExecutor.execute(() ->
+                idempotencyExecutor.execute(command, () -> {
+                    Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+                    VerifiedStoreGeocoding verified = verifiedForUpdate(
+                            store,
+                            request,
+                            geocoding);
+                    String categoryCode = request.storeCategoryCode() == null
+                            ? store.getStoreCategoryCode()
+                            : request.storeCategoryCode();
+                    List<String> tagCodes = request.tagCodes() == null
+                            ? List.copyOf(store.getTagCodes())
+                            : request.tagCodes();
+                    catalogPolicy.validate(categoryCode, tagCodes);
+                    StoreModesRequest modes = request.modes();
+                    store.update(
+                            request.name(),
+                            request.description(),
+                            request.region(),
+                            request.address(),
+                            request.storeCategoryCode(),
+                            request.tagCodes() == null
+                                    ? null
+                                    : Set.copyOf(request.tagCodes()),
+                            modes == null ? null : modes.reservationEnabled(),
+                            modes == null ? null : modes.menuHoldEnabled(),
+                            modes == null ? null : modes.pickupEnabled(),
+                            request.operationStatus(),
+                            verified);
+                    Store saved = saveStore(store);
+                    return success(HttpStatus.OK, saved);
+                }));
         return commandResult(outcome);
+    }
+
+    private GeocodingPreflight updateGeocodingPreflight(
+            long operatorAccountId,
+            long storeId,
+            StoreUpdateRequest request
+    ) {
+        if (request.region() == null && request.address() == null) {
+            return null;
+        }
+        Region region = request.region();
+        String address = request.address();
+        if (region == null || address == null) {
+            Store snapshot = loadManagedStore(operatorAccountId, storeId);
+            region = region == null ? snapshot.getRegion() : region;
+            address = address == null ? snapshot.getAddress() : address;
+        }
+        return geocode(region, address);
+    }
+
+    private GeocodingPreflight geocode(Region region, String address) {
+        try {
+            return GeocodingPreflight.succeeded(
+                    region,
+                    address,
+                    geocodingValidator.validate(
+                            region,
+                            address,
+                            geocodingPort.geocode(address),
+                            clock.instant()));
+        } catch (ServiceException failure) {
+            return GeocodingPreflight.failed(region, address, failure);
+        }
+    }
+
+    private VerifiedStoreGeocoding verifiedForUpdate(
+            Store store,
+            StoreUpdateRequest request,
+            GeocodingPreflight geocoding
+    ) {
+        if (geocoding == null) {
+            return null;
+        }
+        Region effectiveRegion = request.region() == null
+                ? store.getRegion()
+                : request.region();
+        String effectiveAddress = request.address() == null
+                ? store.getAddress()
+                : request.address();
+        geocoding.requireSource(effectiveRegion, effectiveAddress);
+        return geocoding.requireVerified();
     }
 
     @Transactional(readOnly = true)
@@ -325,5 +397,42 @@ public class StoreService {
         ManagedStoreResponse response =
                 objectMapper.treeToValue(outcome.data(), ManagedStoreResponse.class);
         return new StoreCommandResult(outcome.httpStatus(), response);
+    }
+
+    private record GeocodingPreflight(
+            Region region,
+            String address,
+            VerifiedStoreGeocoding verified,
+            ServiceException failure
+    ) {
+
+        private static GeocodingPreflight succeeded(
+                Region region,
+                String address,
+                VerifiedStoreGeocoding verified
+        ) {
+            return new GeocodingPreflight(region, address, verified, null);
+        }
+
+        private static GeocodingPreflight failed(
+                Region region,
+                String address,
+                ServiceException failure
+        ) {
+            return new GeocodingPreflight(region, address, null, failure);
+        }
+
+        private void requireSource(Region effectiveRegion, String effectiveAddress) {
+            if (region != effectiveRegion || !Objects.equals(address, effectiveAddress)) {
+                throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
+        }
+
+        private VerifiedStoreGeocoding requireVerified() {
+            if (failure != null) {
+                throw failure;
+            }
+            return verified;
+        }
     }
 }

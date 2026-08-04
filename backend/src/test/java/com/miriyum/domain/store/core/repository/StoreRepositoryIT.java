@@ -3,6 +3,7 @@ package com.miriyum.domain.store.core.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doAnswer;
 
 import com.miriyum.MiriyumApplication;
@@ -11,7 +12,10 @@ import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.core.model.StoreGeocodingCandidate;
+import com.miriyum.domain.store.core.model.StoreGeocodingResult;
 import com.miriyum.domain.store.core.service.StoreCommandResult;
+import com.miriyum.domain.store.core.service.StoreGeocodingPort;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -38,6 +42,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -83,6 +88,9 @@ class StoreRepositoryIT {
 
     @MockitoSpyBean
     private IdempotencyExecutor idempotencyExecutor;
+
+    @MockitoBean
+    private StoreGeocodingPort geocodingPort;
 
     @Autowired
     private StoreService storeService;
@@ -266,6 +274,16 @@ class StoreRepositoryIT {
                 "새 이름", null, null, null, null, null, null, null);
         StoreUpdateRequest relocate = new StoreUpdateRequest(
                 null, null, null, "새 주소", null, null, null, null);
+        given(geocodingPort.geocode("새 주소")).willReturn(new StoreGeocodingResult(
+                1,
+                List.of(new StoreGeocodingCandidate(
+                        "새 주소",
+                        null,
+                        "서울",
+                        "126.978656700000000",
+                        "37.566826000000000")),
+                "KAKAO_LOCAL",
+                "v2"));
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<StoreCommandResult> first = executor.submit(() ->
