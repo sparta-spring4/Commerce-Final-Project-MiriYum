@@ -107,9 +107,27 @@ public class MenuHoldServiceRuntime {
         try {
             holdRepository.saveAndFlush(hold);
         } catch (DataIntegrityViolationException exception) {
-            throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            if (containsConstraint(exception, "uk_menu_holds_reservation")
+                    || containsConstraint(exception, "uk_menu_holds_acquire_operation")) {
+                ServiceException conflict =
+                        new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+                conflict.initCause(exception);
+                throw conflict;
+            }
+            throw exception;
         }
         return MenuHoldCommandResult.confirmed(command.reservationId());
+    }
+
+    private static boolean containsConstraint(Throwable failure, String marker) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current.getMessage() != null && current.getMessage().contains(marker)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static long parseId(String value) {
