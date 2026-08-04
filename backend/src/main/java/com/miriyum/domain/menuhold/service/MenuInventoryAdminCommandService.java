@@ -135,8 +135,11 @@ public class MenuInventoryAdminCommandService {
         }
         MenuTransactionEligibility eligibility =
                 storeService.requireMenuTransactionEligibility(storeId, menuId);
-        if (!eligibility.menuHoldEligible()
-                || onlineCapacity + (sharedOnlineAllowed ? sharedCapacity : 0) <= 0) {
+        if (onlineCapacity + (sharedOnlineAllowed ? sharedCapacity : 0) <= 0) {
+            throw new ServiceException(
+                    MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+        if (!eligibility.menuHoldEligible()) {
             throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
         }
     }

@@ -146,6 +146,19 @@ class MenuInventoryBucketTest {
                 .isEqualTo(MenuHoldErrorCode.QUANTITY_IN_USE);
     }
 
+    @Test
+    void rejectsAvailablePolicyWhenCarriedUsageLeavesNoOnlineQuantity() {
+        MenuInventoryBucket current = bucket(5, 5, 0, 0, true);
+        current.acquire(5);
+
+        assertThatThrownBy(() -> current.publishNextPolicy(
+                5, 5, 0, 0, true,
+                InventoryAvailabilityStatus.AVAILABLE))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+    }
+
     private static MenuInventoryBucket bucket(
             int total,
             int online,

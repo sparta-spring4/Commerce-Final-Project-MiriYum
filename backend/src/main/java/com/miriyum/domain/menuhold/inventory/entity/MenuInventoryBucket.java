@@ -196,6 +196,11 @@ public class MenuInventoryBucket extends BaseEntity {
         next.onsiteRemaining = newOnsiteCapacity - onsiteInUse;
         next.sharedRemaining = newSharedCapacity - sharedInUse;
         next.availabilityStatus = newAvailabilityStatus;
+        if (newAvailabilityStatus == InventoryAvailabilityStatus.AVAILABLE
+                && next.availableOnlineQuantity() <= 0) {
+            throw new ServiceException(
+                    MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
         return next;
     }
 
@@ -210,7 +215,6 @@ public class MenuInventoryBucket extends BaseEntity {
         if (quantity <= 0) {
             throw new IllegalArgumentException("inventory quantity must be positive");
         }
-        int usableShared = sharedOnlineAllowed ? sharedRemaining : 0;
         if (availableOnlineQuantity() < quantity
                 || availabilityStatus == InventoryAvailabilityStatus.SOLD_OUT) {
             throw new ServiceException(MenuHoldErrorCode.INSUFFICIENT_QUANTITY);
