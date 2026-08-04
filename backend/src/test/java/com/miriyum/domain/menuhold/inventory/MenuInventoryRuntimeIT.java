@@ -3,6 +3,7 @@ package com.miriyum.domain.menuhold.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.BDDMockito.willReturn;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
@@ -14,20 +15,30 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryPolicyChange;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketCreateCommand;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
+import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.menu.entity.Menu;
+import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
+import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.menu.model.AllergenDisclosure;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
 import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.store.menu.service.MenuQueryService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -86,7 +97,16 @@ class MenuInventoryRuntimeIT {
     private MenuInventoryPolicyService policyService;
 
     @Autowired
+    private MenuInventoryAdminCommandService adminCommandService;
+
+    @Autowired
     private MenuInventoryPolicyAuditRepository policyAuditRepository;
+
+    @MockitoSpyBean
+    private StoreService storeService;
+
+    @MockitoSpyBean
+    private MenuQueryService menuQueryService;
 
     @MockitoSpyBean
     private MenuInventoryLedgerRepository ledgerRepository;
@@ -104,12 +124,14 @@ class MenuInventoryRuntimeIT {
     private TransactionTemplate transactionTemplate;
 
     private long menuId;
+    private long operatorId;
+    private long storeId;
 
     @BeforeEach
     void setUpMenu() {
         int sequence = SEQUENCE.incrementAndGet();
         menuId = transactionTemplate.execute(status -> {
-            long operatorId = operatorRepository.saveAndFlush(
+            operatorId = operatorRepository.saveAndFlush(
                     StoreOperatorAccount.create(
                             "inventory-owner-" + sequence + "@example.com", "hashed", "owner"))
                     .getId();
@@ -119,10 +141,66 @@ class MenuInventoryRuntimeIT {
                     true, true, true, "Asia/Seoul",
                     LocalDateTime.of(2026, 8, 1, 9, 0),
                     "STORE_ONBOARDING_REQUIRED_TERMS_V1"));
+            storeId = store.getId();
             return menuRepository.saveAndFlush(Menu.create(
                     store.getId(), menuContent(), operatorId,
                     Instant.parse("2026-08-01T00:00:00Z"))).getId();
         });
+    }
+
+    @Test
+    void repeatedCreateKeyReplaysWithoutDuplicateBucketOrAudit() {
+        stubAdminContracts();
+        long bucketCountBefore = bucketRepository.count();
+        long auditCountBefore = policyAuditRepository.count();
+        IdempotencyKey key = IdempotencyKey.parse(
+                "123e4567-e89b-12d3-a456-426614174101");
+        InventoryBucketCreateCommand request = createCommand(5);
+
+        MenuInventoryCommandResult first = adminCommandService.create(
+                operatorId, storeId, key, request);
+        MenuInventoryCommandResult replay = adminCommandService.create(
+                operatorId, storeId, key, request);
+
+        assertThat(replay.data().inventoryBucketId())
+                .isEqualTo(first.data().inventoryBucketId());
+        assertThat(bucketRepository.count()).isEqualTo(bucketCountBefore + 1);
+        assertThat(policyAuditRepository.count()).isEqualTo(auditCountBefore + 1);
+    }
+
+    @Test
+    void reusedCreateKeyWithDifferentFingerprintIsRejected() {
+        stubAdminContracts();
+        IdempotencyKey key = IdempotencyKey.parse(
+                "123e4567-e89b-12d3-a456-426614174102");
+        adminCommandService.create(operatorId, storeId, key, createCommand(5));
+
+        assertThatThrownBy(() -> adminCommandService.create(
+                operatorId, storeId, key, createCommand(6)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+    }
+
+    @Test
+    void repeatedUpdateKeyReplaysWithoutAnotherPolicyOrAudit() {
+        stubAdminContracts();
+        MenuInventoryBucket current = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 3)));
+        long bucketCountBefore = bucketRepository.count();
+        long auditCountBefore = policyAuditRepository.count();
+        IdempotencyKey key = IdempotencyKey.parse(
+                "123e4567-e89b-12d3-a456-426614174103");
+
+        MenuInventoryCommandResult first = adminCommandService.update(
+                operatorId, storeId, current.getId(), key, policyChange());
+        MenuInventoryCommandResult replay = adminCommandService.update(
+                operatorId, storeId, current.getId(), key, policyChange());
+
+        assertThat(replay.data().inventoryBucketId())
+                .isEqualTo(first.data().inventoryBucketId());
+        assertThat(bucketRepository.count()).isEqualTo(bucketCountBefore + 1);
+        assertThat(policyAuditRepository.count()).isEqualTo(auditCountBefore + 1);
     }
 
     @Test
@@ -403,6 +481,38 @@ class MenuInventoryRuntimeIT {
     private static InventoryPolicyChange policyChange() {
         return new InventoryPolicyChange(
                 12, 6, 2, 4, true,
+                com.miriyum.domain.menuhold.inventory.model
+                        .InventoryAvailabilityStatus.AVAILABLE);
+    }
+
+    private void stubAdminContracts() {
+        ManagedMenuResponse menu = new ManagedMenuResponse(
+                String.valueOf(menuId), String.valueOf(storeId),
+                MenuVisibility.VISIBLE, MenuSellingStatus.SELLING,
+                false, null, null, null);
+        willReturn(menu).given(menuQueryService)
+                .get(operatorId, storeId, menuId);
+        willReturn(new StoreScheduleAuthority(storeId, "Asia/Seoul"))
+                .given(storeService)
+                .requireSchedulePublicationAuthority(operatorId, storeId);
+        willReturn(new MenuTransactionEligibility(
+                storeId, menuId, 1, true, false))
+                .given(storeService)
+                .requireMenuTransactionEligibility(storeId, menuId);
+    }
+
+    private InventoryBucketCreateCommand createCommand(int totalSupply) {
+        return new InventoryBucketCreateCommand(
+                menuId,
+                LocalDate.of(2026, 8, 12),
+                LocalTime.of(12, 0),
+                LocalDate.of(2026, 8, 12),
+                LocalTime.of(13, 0),
+                totalSupply,
+                3,
+                1,
+                1,
+                true,
                 com.miriyum.domain.menuhold.inventory.model
                         .InventoryAvailabilityStatus.AVAILABLE);
     }
