@@ -9,6 +9,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -66,6 +68,30 @@ public interface MenuInventoryBucketRepository
             @Param("startTime") LocalTime startTime,
             @Param("endDate") LocalDate endDate,
             @Param("endTime") LocalTime endTime);
+
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
+            where bucket.menuId in :menuIds
+              and (:serviceDate is null or bucket.serviceDate = :serviceDate)
+              and (:menuId is null or bucket.menuId = :menuId)
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = bucket.menuId
+                    and candidate.serviceDate = bucket.serviceDate
+                    and candidate.startTime = bucket.startTime
+                    and candidate.endDate = bucket.endDate
+                    and candidate.endTime = bucket.endTime
+              )
+            order by bucket.serviceDate asc, bucket.startTime asc,
+                     bucket.menuId asc, bucket.id asc
+            """)
+    Page<MenuInventoryBucket> findCurrentPage(
+            @Param("menuIds") Collection<Long> menuIds,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("menuId") Long menuId,
+            Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

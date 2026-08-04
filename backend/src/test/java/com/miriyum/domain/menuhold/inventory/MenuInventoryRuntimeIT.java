@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -183,6 +184,24 @@ class MenuInventoryRuntimeIT {
 
         assertThat(current.getInventoryPolicyVersion()).isEqualTo(2L);
         assertThat(current.getOnlineHoldCapacity()).isEqualTo(3);
+    }
+
+    @Test
+    void listsOnlyCurrentPoliciesForTheManagedMenuIds() {
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 0));
+            bucketRepository.saveAndFlush(bucket(menuId, 2L, 3, 0));
+        });
+
+        var page = bucketRepository.findCurrentPage(
+                List.of(menuId),
+                LocalDate.of(2026, 8, 10),
+                menuId,
+                PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent().getFirst().getInventoryPolicyVersion())
+                .isEqualTo(2L);
     }
 
     @Test

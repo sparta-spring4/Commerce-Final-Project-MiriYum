@@ -99,12 +99,34 @@ public class MenuInventoryBucket extends BaseEntity {
             int sharedQuantity,
             boolean sharedOnlineAllowed
     ) {
+        return create(menuId, serviceDate, startTime, endDate, endTime,
+                timeZoneId, inventoryPolicyVersion, totalSupply,
+                onlineHoldQuantity, onsiteQuantity, sharedQuantity,
+                sharedOnlineAllowed, InventoryAvailabilityStatus.AVAILABLE);
+    }
+
+    public static MenuInventoryBucket create(
+            long menuId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            LocalDate endDate,
+            LocalTime endTime,
+            String timeZoneId,
+            long inventoryPolicyVersion,
+            int totalSupply,
+            int onlineHoldQuantity,
+            int onsiteQuantity,
+            int sharedQuantity,
+            boolean sharedOnlineAllowed,
+            InventoryAvailabilityStatus availabilityStatus
+    ) {
         if (menuId <= 0 || serviceDate == null || startTime == null || endDate == null
                 || endTime == null || timeZoneId == null || timeZoneId.isBlank()
                 || !LocalDateTime.of(serviceDate, startTime)
                         .isBefore(LocalDateTime.of(endDate, endTime))
                 || inventoryPolicyVersion <= 0
-                || totalSupply < 0 || onlineHoldQuantity < 0 || onsiteQuantity < 0
+                || availabilityStatus == null || totalSupply < 0
+                || onlineHoldQuantity < 0 || onsiteQuantity < 0
                 || sharedQuantity < 0) {
             throw new IllegalArgumentException("invalid menu inventory bucket");
         }
@@ -128,7 +150,7 @@ public class MenuInventoryBucket extends BaseEntity {
         bucket.sharedRemaining = sharedQuantity;
         bucket.sharedCapacity = sharedQuantity;
         bucket.sharedOnlineAllowed = sharedOnlineAllowed;
-        bucket.availabilityStatus = InventoryAvailabilityStatus.AVAILABLE;
+        bucket.availabilityStatus = availabilityStatus;
         return bucket;
     }
 

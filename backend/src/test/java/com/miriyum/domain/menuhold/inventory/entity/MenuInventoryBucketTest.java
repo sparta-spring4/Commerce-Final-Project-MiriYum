@@ -95,6 +95,18 @@ class MenuInventoryBucketTest {
     }
 
     @Test
+    void createsAnInitialPolicyAsManuallySoldOut() {
+        MenuInventoryBucket bucket = MenuInventoryBucket.create(
+                11L, LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                "Asia/Seoul", 1L, 5, 3, 1, 1, true,
+                InventoryAvailabilityStatus.SOLD_OUT);
+
+        assertThat(bucket.getAvailabilityStatus())
+                .isEqualTo(InventoryAvailabilityStatus.SOLD_OUT);
+    }
+
+    @Test
     void publishesNextPolicyWithoutChangingTheCurrentVersion() {
         MenuInventoryBucket current = bucket(10, 5, 2, 3, true);
         current.acquire(4);
