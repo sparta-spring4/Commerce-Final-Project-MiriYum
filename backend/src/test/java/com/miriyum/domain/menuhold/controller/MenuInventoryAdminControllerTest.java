@@ -61,6 +61,8 @@ class MenuInventoryAdminControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].policyVersion").value(2))
+                .andExpect(jsonPath("$.data.items[0].startTime").value("12:00"))
+                .andExpect(jsonPath("$.data.items[0].endTime").value("13:00"))
                 .andExpect(jsonPath("$.data.items[0].sharedOnlineAllowed").value(true))
                 .andExpect(jsonPath("$.data.items[0].endDate").value("2026-08-10"))
                 .andExpect(jsonPath("$.data.page.totalElements").value(1));
@@ -129,6 +131,19 @@ class MenuInventoryAdminControllerTest {
                                 "\"sharedOnlineAllowed\":false,", "")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
+
+    @Test
+    void secondPrecisionInventoryTimeIsRejectedBeforeCreateService() throws Exception {
+        authenticate();
+
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createJson().replace("12:00", "12:00:30")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
     }
 
     @Test

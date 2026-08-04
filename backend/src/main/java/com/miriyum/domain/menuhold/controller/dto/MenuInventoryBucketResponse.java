@@ -1,5 +1,6 @@
 package com.miriyum.domain.menuhold.controller.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketView;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
 import java.time.LocalDate;
@@ -9,9 +10,9 @@ public record MenuInventoryBucketResponse(
         long inventoryBucketId,
         long menuId,
         LocalDate serviceDate,
-        LocalTime startTime,
+        @JsonFormat(pattern = "HH:mm") LocalTime startTime,
         LocalDate endDate,
-        LocalTime endTime,
+        @JsonFormat(pattern = "HH:mm") LocalTime endTime,
         long policyVersion,
         int totalSupply,
         InventoryPoolsRequest pools,
