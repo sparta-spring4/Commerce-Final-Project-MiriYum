@@ -53,7 +53,7 @@ public class MenuHoldServiceRuntime {
             throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
         }
 
-        Map<Long, Long> menuVersions = new HashMap<>();
+        Map<Long, MenuTransactionEligibility> eligibilityByMenuId = new HashMap<>();
         for (MenuSelection selection : selections) {
             long menuId = parseId(selection.menuId());
             MenuTransactionEligibility eligibility;
@@ -68,7 +68,7 @@ public class MenuHoldServiceRuntime {
             if (!eligibility.menuHoldEligible()) {
                 throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
             }
-            menuVersions.put(menuId, (long) eligibility.publishedVersionNumber());
+            eligibilityByMenuId.put(menuId, eligibility);
         }
 
         List<CurrentInventorySelection> current = inventoryService.loadCurrentSelections(
@@ -108,7 +108,10 @@ public class MenuHoldServiceRuntime {
                 command.endDate(), command.endTime(), command.operationId(), acquired.stream()
                         .map(selection -> new MenuHoldItemSnapshot(
                                 selection.menuId(), selection.bucketId(),
-                                menuVersions.get(selection.menuId()),
+                                eligibilityByMenuId.get(selection.menuId())
+                                        .publishedVersionNumber(),
+                                eligibilityByMenuId.get(selection.menuId()).menuName(),
+                                eligibilityByMenuId.get(selection.menuId()).unitPrice(),
                                 selection.inventoryPolicyVersion(), selection.quantity()))
                         .toList());
         try {

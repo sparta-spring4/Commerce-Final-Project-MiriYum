@@ -39,7 +39,7 @@ class MenuHoldCreateServiceTest {
     void createsConfirmedHoldAfterEligibilityIntervalAndInventorySucceed() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
-                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+                .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
@@ -65,7 +65,7 @@ class MenuHoldCreateServiceTest {
     void rejectsMalformedServiceIntervalResultBeforeInventoryAcquisition() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
-                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+                .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
@@ -85,7 +85,7 @@ class MenuHoldCreateServiceTest {
     void rejectsAcceptingServiceIntervalResultForDifferentRequest() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
-                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+                .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
@@ -112,7 +112,7 @@ class MenuHoldCreateServiceTest {
                 Instant.parse("2026-11-01T07:30:00Z"),
                 "operation-dst-overlap", List.of(new MenuSelection("40", 1)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
-                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+                .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "America/New_York", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 1);
@@ -162,7 +162,7 @@ class MenuHoldCreateServiceTest {
             MenuHoldCreateCommand command
     ) {
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
-                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+                .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
@@ -181,6 +181,11 @@ class MenuHoldCreateServiceTest {
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
                 storeService, intervalService, inventoryService, holdRepository);
+    }
+
+    private static MenuTransactionEligibility eligibility() {
+        return new MenuTransactionEligibility(
+                20L, 40L, 7, "아메리카노", 5_000, true, false);
     }
 
     private static MenuHoldCreateCommand command(List<MenuSelection> selections) {

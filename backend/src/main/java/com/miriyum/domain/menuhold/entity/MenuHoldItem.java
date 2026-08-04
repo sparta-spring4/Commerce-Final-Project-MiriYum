@@ -38,6 +38,12 @@ public class MenuHoldItem extends BaseEntity {
     @Column(name = "menu_policy_version", nullable = false)
     private long menuPolicyVersion;
 
+    @Column(name = "menu_name_snapshot", nullable = false, length = 100)
+    private String menuNameSnapshot;
+
+    @Column(name = "unit_price_snapshot", nullable = false)
+    private int unitPriceSnapshot;
+
     @Column(name = "inventory_policy_version", nullable = false)
     private long inventoryPolicyVersion;
 
@@ -50,6 +56,8 @@ public class MenuHoldItem extends BaseEntity {
         item.menuId = snapshot.menuId();
         item.menuInventoryBucketId = snapshot.menuInventoryBucketId();
         item.menuPolicyVersion = snapshot.menuPolicyVersion();
+        item.menuNameSnapshot = snapshot.menuName();
+        item.unitPriceSnapshot = snapshot.unitPrice();
         item.inventoryPolicyVersion = snapshot.inventoryPolicyVersion();
         item.quantity = snapshot.quantity();
         return item;

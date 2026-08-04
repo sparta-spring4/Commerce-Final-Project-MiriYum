@@ -119,7 +119,8 @@ class MenuHoldRuntimeIT {
             menuId = menuRepository.saveAndFlush(Menu.create(
                     storeId, menuContent(), operatorId, Instant.parse("2026-08-01T00:00:00Z"))).getId();
         });
-        willReturn(new MenuTransactionEligibility(storeId, menuId, 1, true, false))
+        willReturn(new MenuTransactionEligibility(
+                storeId, menuId, 1, "Americano", 5_000, true, false))
                 .given(storeService).requireMenuTransactionEligibility(storeId, menuId);
         willAnswer(invocation -> invocation.<List<com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest>>getArgument(0)
                 .stream().map(request -> new StoreServiceIntervalResult(
@@ -144,6 +145,44 @@ class MenuHoldRuntimeIT {
             assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
         });
         assertThat(bucketRepository.findById(bucket.getId()).orElseThrow().getOnlineHoldRemaining()).isZero();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT menu_name_snapshot, unit_price_snapshot
+                  FROM menu_hold_items item
+                  JOIN menu_holds hold ON hold.menu_hold_id = item.menu_hold_id
+                 WHERE hold.reservation_id = ?
+                """, reservation.getId()))
+                .containsEntry("menu_name_snapshot", "Americano")
+                .containsEntry("unit_price_snapshot", 5_000);
+    }
+
+    @Test
+    @DisplayName("홀드 확정 뒤 메뉴가 변경·종료되어도 거래 스냅샷은 유지된다")
+    void preservesMenuSnapshotAfterPublishedMenuChangesAndRetires() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "snapshot-immutable")));
+
+        transactions.executeWithoutResult(status -> {
+            Menu menu = menuRepository.findById(menuId).orElseThrow();
+            menu.publish(Instant.parse("2026-08-01T00:00:01Z"));
+            menu.appendDraft(menuContent("Cafe Latte", 6_500), 1L,
+                    Instant.parse("2026-08-01T00:00:02Z"));
+            menu.publish(Instant.parse("2026-08-01T00:00:03Z"));
+            menu.retire(Instant.parse("2026-08-01T00:00:04Z"));
+            menuRepository.saveAndFlush(menu);
+        });
+
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT menu_name_snapshot, unit_price_snapshot, menu_policy_version
+                  FROM menu_hold_items item
+                  JOIN menu_holds hold ON hold.menu_hold_id = item.menu_hold_id
+                 WHERE hold.reservation_id = ?
+                """, reservation.getId()))
+                .containsEntry("menu_name_snapshot", "Americano")
+                .containsEntry("unit_price_snapshot", 5_000)
+                .containsEntry("menu_policy_version", 1L);
     }
 
     @Test
@@ -217,6 +256,8 @@ class MenuHoldRuntimeIT {
         assertThat(constraintNames("menu_hold_items", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_hold_items_versions",
+                        "ck_menu_hold_items_name_snapshot",
+                        "ck_menu_hold_items_unit_price_snapshot",
                         "ck_menu_hold_items_quantity");
 
         assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation"))
@@ -246,6 +287,31 @@ class MenuHoldRuntimeIT {
                 "UPDATE menu_hold_items SET quantity = 0 WHERE menu_hold_item_id = ?", itemId))
                 .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("ck_menu_hold_items_quantity");
+    }
+
+    @Test
+    @DisplayName("빈 메뉴명과 음수 단가는 실제 MySQL 스냅샷 CHECK 제약으로 거부된다")
+    void mysqlRejectsInvalidMenuDisplaySnapshot() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "check-display-snapshot")));
+        Long itemId = jdbcTemplate.queryForObject(
+                "SELECT menu_hold_item_id FROM menu_hold_items WHERE menu_hold_id = "
+                        + "(SELECT menu_hold_id FROM menu_holds WHERE reservation_id = ?)",
+                Long.class, reservation.getId());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE menu_hold_items SET menu_name_snapshot = ' ' "
+                        + "WHERE menu_hold_item_id = ?", itemId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_hold_items_name_snapshot");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE menu_hold_items SET unit_price_snapshot = -1 "
+                        + "WHERE menu_hold_item_id = ?", itemId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_hold_items_unit_price_snapshot");
     }
 
     @Test
@@ -397,7 +463,11 @@ class MenuHoldRuntimeIT {
     }
 
     private static MenuContent menuContent() {
-        return new MenuContent("Americano", "", 5000, false, "BEVERAGE", List.of(),
+        return menuContent("Americano", 5_000);
+    }
+
+    private static MenuContent menuContent(String name, int price) {
+        return new MenuContent(name, "", price, false, "BEVERAGE", List.of(),
                 List.of(), true, true, DisclosureRegistrationStatus.REGISTERED,
                 List.of(new AllergenDisclosure(AllergenIngredientCode.MILK,
                         AllergenDisclosureStatus.CONTAINS)),

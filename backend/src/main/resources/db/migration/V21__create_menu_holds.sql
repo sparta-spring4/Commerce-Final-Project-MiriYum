@@ -33,6 +33,8 @@ CREATE TABLE menu_hold_items (
     menu_id BIGINT NOT NULL,
     menu_inventory_bucket_id BIGINT NOT NULL,
     menu_policy_version BIGINT NOT NULL,
+    menu_name_snapshot VARCHAR(100) NOT NULL,
+    unit_price_snapshot INT NOT NULL,
     inventory_policy_version BIGINT NOT NULL,
     quantity INT NOT NULL,
     created_at DATETIME(6) NOT NULL,
@@ -45,6 +47,10 @@ CREATE TABLE menu_hold_items (
     CONSTRAINT ck_menu_hold_items_versions CHECK (
         menu_policy_version > 0 AND inventory_policy_version > 0
     ),
+    CONSTRAINT ck_menu_hold_items_name_snapshot CHECK (
+        CHAR_LENGTH(TRIM(menu_name_snapshot)) BETWEEN 1 AND 100
+    ),
+    CONSTRAINT ck_menu_hold_items_unit_price_snapshot CHECK (unit_price_snapshot >= 0),
     CONSTRAINT ck_menu_hold_items_quantity CHECK (quantity > 0),
     INDEX idx_menu_hold_items_bucket (menu_inventory_bucket_id, menu_hold_item_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;

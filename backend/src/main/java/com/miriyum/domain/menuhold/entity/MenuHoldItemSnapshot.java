@@ -4,11 +4,15 @@ public record MenuHoldItemSnapshot(
         long menuId,
         long menuInventoryBucketId,
         long menuPolicyVersion,
+        String menuName,
+        int unitPrice,
         long inventoryPolicyVersion,
         int quantity
 ) {
     public MenuHoldItemSnapshot {
         if (menuId <= 0 || menuInventoryBucketId <= 0 || menuPolicyVersion <= 0
+                || menuName == null || menuName.isBlank() || menuName.length() > 100
+                || unitPrice < 0
                 || inventoryPolicyVersion <= 0 || quantity <= 0) {
             throw new IllegalArgumentException("invalid menu hold item snapshot");
         }
