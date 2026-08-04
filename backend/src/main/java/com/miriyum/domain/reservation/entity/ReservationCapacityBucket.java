@@ -79,7 +79,7 @@ public class ReservationCapacityBucket {
         this.startTime = requireNonNull(startTime, "startTime");
         this.endTime = requireNonNull(endTime, "endTime");
         requireIncreasingServiceTime(this.startTime, this.endTime);
-        this.maxPeople = requireNonNegative(maxPeople, "maxPeople");
+        this.maxPeople = requirePositive(maxPeople, "maxPeople");
         this.maxTeams = requireNonNegative(maxTeams, "maxTeams");
         this.occupiedPeople = requireNonNegative(occupiedPeople, "occupiedPeople");
         this.occupiedTeams = requireNonNegative(occupiedTeams, "occupiedTeams");

@@ -66,7 +66,7 @@ class ReservationCapacitiesRequestTest {
     }
 
     @Test
-    @DisplayName("최대 인원과 최대 팀 수는 0을 허용하지만 누락할 수 없다")
+    @DisplayName("최대 인원과 최대 팀 수는 누락할 수 없다")
     void validatesRequiredCapacityFields() {
         // given
         CapacityBucketRequest missingCapacities = new CapacityBucketRequest(
@@ -91,6 +91,33 @@ class ReservationCapacitiesRequestTest {
                 "buckets[0].maxPeople",
                 "buckets[0].maxTeams"
         );
+    }
+
+    @Test
+    @DisplayName("최대 인원 0은 거부하고 최대 팀 수 0은 허용한다")
+    void rejectsZeroMaxPeopleButAllowsZeroMaxTeams() {
+        // given
+        CapacityBucketRequest zeroCapacities = new CapacityBucketRequest(
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30),
+                0,
+                0,
+                1,
+                1,
+                true
+        );
+
+        // when
+        List<String> paths = VALIDATOR.validate(
+                        new ReservationCapacitiesRequest(List.of(zeroCapacities))
+                ).stream()
+                .map(violation -> violation.getPropertyPath().toString())
+                .toList();
+
+        // then
+        assertThat(paths)
+                .contains("buckets[0].maxPeople")
+                .doesNotContain("buckets[0].maxTeams");
     }
 
     private static CapacityBucketRequest validBucket() {

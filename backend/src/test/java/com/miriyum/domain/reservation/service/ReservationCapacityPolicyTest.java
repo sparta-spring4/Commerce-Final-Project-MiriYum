@@ -133,6 +133,47 @@ class ReservationCapacityPolicyTest {
         assertCapacityConflict(() -> capacityPolicy.validateAndSort(request));
     }
 
+    @Test
+    @DisplayName("최대 인원 0은 수용량 설정 충돌로 거부한다")
+    void rejectsZeroMaxPeople() {
+        // given
+        ReservationCapacitiesRequest request = new ReservationCapacitiesRequest(
+                List.of(bucket(
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30),
+                        0,
+                        4,
+                        1,
+                        1
+                ))
+        );
+
+        // when & then
+        assertCapacityConflict(() -> capacityPolicy.validateAndSort(request));
+    }
+
+    @Test
+    @DisplayName("최대 팀 수 0은 신규 예약 차단 설정으로 허용한다")
+    void allowsZeroMaxTeams() {
+        // given
+        CapacityBucketRequest bucket = bucket(
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30),
+                1,
+                0,
+                1,
+                1
+        );
+
+        // when
+        List<CapacityBucketRequest> normalized = capacityPolicy.validateAndSort(
+                new ReservationCapacitiesRequest(List.of(bucket))
+        );
+
+        // then
+        assertThat(normalized).containsExactly(bucket);
+    }
+
     private static CapacityBucketRequest bucket(
             LocalTime startTime,
             LocalTime endTime,

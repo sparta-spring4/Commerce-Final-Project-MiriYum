@@ -326,6 +326,47 @@ class ReservationCapacityBucketTest {
         );
     }
 
+    @Test
+    @DisplayName("최대 인원 0은 양수 불변식 위반으로 거부한다")
+    void rejectsZeroMaxPeople() {
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                ReservationCapacityBucket.create(
+                        22L,
+                        LocalDate.of(2026, 8, 1),
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30),
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        1,
+                        true,
+                        3L
+                )
+        ).withMessage("maxPeople must be positive");
+    }
+
+    @Test
+    @DisplayName("최대 팀 수 0은 신규 예약 차단 상태로 보존한다")
+    void allowsZeroMaxTeams() {
+        // when
+        ReservationCapacityBucket bucket = capacityBucket(
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                true
+        );
+
+        // then
+        assertThat(bucket.getMaxTeams()).isZero();
+        assertThat(bucket.canAccept(1, false)).isFalse();
+    }
+
     private static ReservationCapacityBucket capacityBucket(
             int maxPeople,
             int maxTeams,

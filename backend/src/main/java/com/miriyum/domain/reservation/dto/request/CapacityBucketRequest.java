@@ -19,7 +19,7 @@ import java.time.LocalTime;
 public record CapacityBucketRequest(
         @NotNull LocalTime startTime,
         @NotNull LocalTime endTime,
-        @NotNull @Min(0) @Max(10_000) Integer maxPeople,
+        @NotNull @Min(1) @Max(10_000) Integer maxPeople,
         @NotNull @Min(0) @Max(10_000) Integer maxTeams,
         @Min(1) @Max(100) int minPartySize,
         @Min(1) @Max(100) int maxPartySize,

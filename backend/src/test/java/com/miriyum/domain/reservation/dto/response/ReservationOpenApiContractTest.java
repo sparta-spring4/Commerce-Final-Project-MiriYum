@@ -127,6 +127,22 @@ class ReservationOpenApiContractTest {
                 );
     }
 
+    @Test
+    void capacityRequestRequiresPositivePeopleAndAllowsZeroTeams() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> properties = map(
+                map(schemas.get("CapacityBucketRequest")).get("properties")
+        );
+
+        assertThat(map(properties.get("maxPeople")))
+                .containsEntry("minimum", 1);
+        assertThat(map(properties.get("maxTeams")))
+                .containsEntry("minimum", 0);
+    }
+
     private static void assertPolicyCommand(
             Map<String, Object> operation,
             String requestSchemaRef

@@ -65,7 +65,7 @@ public class ReservationCapacityPolicy {
         }
         if (bucket.maxPeople() == null
                 || bucket.maxTeams() == null
-                || bucket.maxPeople() < 0
+                || bucket.maxPeople() < 1
                 || bucket.maxPeople() > MAX_CAPACITY
                 || bucket.maxTeams() < 0
                 || bucket.maxTeams() > MAX_CAPACITY) {
