@@ -640,6 +640,7 @@ components:
         - menuId
         - serviceDate
         - startTime
+        - endDate
         - endTime
         - totalSupply
         - pools
@@ -651,6 +652,8 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         startTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         endTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         totalSupply:
@@ -682,6 +685,7 @@ components:
         - menuId
         - serviceDate
         - startTime
+        - endDate
         - endTime
         - policyVersion
         - totalSupply
@@ -697,6 +701,8 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         startTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         endTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         policyVersion:
