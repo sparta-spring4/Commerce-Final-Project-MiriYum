@@ -211,7 +211,8 @@ class RuleInterpreterNumericTest {
         "1만원~2천원 맛집",
         "1만원~2원 맛집",
         "1천원~2원 맛집",
-        "1천~2천원 맛집"
+        "1천~2천원 맛집",
+        "1~2천원 맛집"
     })
     @DisplayName("서로 다른 단위의 가격 범위는 승인 문법으로 소비하지 않는다")
     void preservesMixedUnitPriceRange(String input) {

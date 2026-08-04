@@ -82,9 +82,10 @@ final class PriceParser {
             boolean hasLeftWon = rangeMatcher.group(3) != null;
             String explicitRightUnit = rangeMatcher.group(5);
             boolean bareLeftEndpoint = explicitLeftUnit == null && !hasLeftWon;
-            boolean unsupportedUnitForm = explicitLeftUnit != null && !hasLeftWon
-                    || !bareLeftEndpoint
-                    && !java.util.Objects.equals(explicitLeftUnit, explicitRightUnit);
+            boolean unsupportedUnitForm = (bareLeftEndpoint && "천".equals(explicitRightUnit))
+                    || (explicitLeftUnit != null && !hasLeftWon)
+                    || (!bareLeftEndpoint
+                    && !java.util.Objects.equals(explicitLeftUnit, explicitRightUnit));
             if (unsupportedUnitForm) {
                 ambiguousBandStart = earliest(
                         ambiguousBandStart, span.startInclusive());
