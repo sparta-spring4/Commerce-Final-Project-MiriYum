@@ -48,19 +48,31 @@ public final class RuleInterpreter {
                 storeCategoryTokens,
                 menuCategoryTokens,
                 tagTokens);
+        PriceParser.Result price = PriceParser.parse(normalized);
+        PartySizeParser.Result partySize = PartySizeParser.parse(normalized);
 
         List<TextSpan> acceptedSpans = new ArrayList<>();
         acceptedSpans.addAll(spansOf(dictionary.regions()));
         acceptedSpans.addAll(spansOf(dictionary.storeCategories()));
         acceptedSpans.addAll(spansOf(dictionary.menuCategories()));
         acceptedSpans.addAll(spansOf(dictionary.tags()));
+        acceptedSpans.addAll(price.acceptedSpans());
+        acceptedSpans.addAll(partySize.acceptedSpans());
+        List<InterpretationWarning> warnings = new ArrayList<>();
+        if (dictionary.ambiguous()) {
+            warnings.add(new InterpretationWarning(
+                    WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                    WarningField.DICTIONARY));
+        }
+        warnings.addAll(price.warnings());
+        warnings.addAll(partySize.warnings());
         InterpretedSearchCondition condition = new InterpretedSearchCondition(
                 codesOf(dictionary.regions()),
                 codesOf(dictionary.storeCategories()),
                 codesOf(dictionary.menuCategories()),
                 codesOf(dictionary.tags()),
-                null,
-                null,
+                price.value(),
+                partySize.value(),
                 null,
                 null,
                 removeAcceptedSpans(normalized, acceptedSpans));
@@ -68,11 +80,7 @@ public final class RuleInterpreter {
                 RULE_VERSION,
                 request.vocabulary().version(),
                 condition,
-                dictionary.ambiguous()
-                        ? List.of(new InterpretationWarning(
-                                WarningCode.AMBIGUOUS_DICTIONARY_TERM,
-                                WarningField.DICTIONARY))
-                        : List.of());
+                warnings);
     }
 
     private static DictionaryResolution resolveDictionaryTokens(
