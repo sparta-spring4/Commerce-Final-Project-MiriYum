@@ -227,6 +227,36 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
+    void restoringAnOlderPolicyAllocationAlsoRestoresTheCurrentPolicy() {
+        MenuInventoryBucket first = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+        InventoryAcquireRequest acquire = new InventoryAcquireRequest(
+                "reservation:policy-restore:create",
+                List.of(selection(menuId, 2)));
+        transactionTemplate.execute(status -> menuHoldService.acquireInventory(acquire));
+
+        MenuInventoryBucket second = policyService.publishNextPolicy(
+                7L,
+                "MENU_INVENTORY_UPDATE",
+                "123e4567-e89b-12d3-a456-426614174110",
+                first.getId(),
+                new InventoryPolicyChange(
+                        5, 5, 0, 0, true,
+                        com.miriyum.domain.menuhold.inventory.model
+                                .InventoryAvailabilityStatus.AVAILABLE));
+
+        transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
+                new InventoryRestoreRequest(
+                        "reservation:policy-restore:cancel",
+                        acquire.operationId())));
+
+        MenuInventoryBucket restoredFirst = bucketRepository.findById(first.getId()).orElseThrow();
+        MenuInventoryBucket restoredCurrent = bucketRepository.findById(second.getId()).orElseThrow();
+        assertThat(restoredFirst.getOnlineHoldRemaining()).isEqualTo(5);
+        assertThat(restoredCurrent.getOnlineHoldRemaining()).isEqualTo(5);
+    }
+
+    @Test
     void operationIdsDifferingOnlyByCaseRemainDistinct() {
         long ledgerCountBefore = ledgerRepository.count();
         MenuInventoryBucket bucket = transactionTemplate.execute(status ->

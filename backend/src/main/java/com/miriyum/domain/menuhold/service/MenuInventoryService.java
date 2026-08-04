@@ -93,18 +93,36 @@ class MenuInventoryService {
             InventoryAllocationResult requested = allocationsByBucketId.get(bucket.getId());
             InventoryAllocation allocation = new InventoryAllocation(
                     requested.onlineHoldQuantity(), requested.sharedQuantity());
-            bucket.validateRestore(allocation);
-            int updated = bucketRepository.incrementIfCurrent(
-                    bucket.getId(), bucket.getLockVersion(),
-                    allocation.onlineHoldQuantity(), allocation.sharedQuantity());
-            if (updated != 1) {
-                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            restoreBucket(request, bucket, allocation, events);
+
+            MenuInventoryBucket current = bucketRepository.findCurrentForUpdate(
+                            bucket.getMenuId(), bucket.getServiceDate(),
+                            bucket.getStartTime(), bucket.getEndDate(), bucket.getEndTime())
+                    .orElseThrow(() -> new ServiceException(
+                            MenuHoldErrorCode.BUCKET_NOT_FOUND));
+            if (!current.getId().equals(bucket.getId())) {
+                restoreBucket(request, current, allocation, events);
             }
-            appendRestoreEvents(
-                    request.operationId(), request.sourceAcquireOperationId(),
-                    bucket, allocation, events);
         }
         ledgerRepository.saveAll(events);
+    }
+
+    private void restoreBucket(
+            InventoryRestoreRequest request,
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation,
+            List<MenuInventoryLedger> events
+    ) {
+        bucket.validateRestore(allocation);
+        int updated = bucketRepository.incrementIfCurrent(
+                bucket.getId(), bucket.getLockVersion(),
+                allocation.onlineHoldQuantity(), allocation.sharedQuantity());
+        if (updated != 1) {
+            throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+        appendRestoreEvents(
+                request.operationId(), request.sourceAcquireOperationId(),
+                bucket, allocation, events);
     }
 
     private static void appendAcquireEvents(
