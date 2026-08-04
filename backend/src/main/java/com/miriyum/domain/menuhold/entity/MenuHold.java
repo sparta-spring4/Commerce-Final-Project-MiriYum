@@ -65,9 +65,11 @@ public class MenuHold extends BaseEntity {
                 || acquireOperationId.length() > 100 || snapshots == null || snapshots.isEmpty()) {
             throw new IllegalArgumentException("invalid confirmed menu hold");
         }
-        if (new HashSet<>(snapshots.stream().map(MenuHoldItemSnapshot::menuId).toList()).size()
+        if (new HashSet<>(snapshots.stream()
+                .map(MenuHoldItemSnapshot::menuInventoryBucketId).toList()).size()
                 != snapshots.size()) {
-            throw new IllegalArgumentException("menu hold items must have unique menus");
+            throw new IllegalArgumentException(
+                    "menu hold items must have unique inventory buckets");
         }
         MenuHold hold = new MenuHold();
         hold.reservationId = reservationId;

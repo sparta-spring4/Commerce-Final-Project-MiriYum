@@ -26,7 +26,19 @@ class MenuHoldTest {
     }
 
     @Test
-    void rejectsDuplicateSelectedMenus() {
+    void acceptsSameMenuInDifferentInventoryBuckets() {
+        MenuHold hold = MenuHold.confirmed(
+                10L, 20L, 30L, LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), "operation-1",
+                List.of(
+                        new MenuHoldItemSnapshot(40L, 50L, 2L, 3L, 4),
+                        new MenuHoldItemSnapshot(40L, 51L, 2L, 3L, 1)));
+
+        assertThat(hold.getItems()).hasSize(2);
+    }
+
+    @Test
+    void rejectsDuplicateInventoryBuckets() {
         MenuHoldItemSnapshot item = new MenuHoldItemSnapshot(40L, 50L, 2L, 3L, 4);
 
         assertThatThrownBy(() -> MenuHold.confirmed(
@@ -34,6 +46,6 @@ class MenuHoldTest {
                 LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), "operation-1",
                 List.of(item, item)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("menu hold items must have unique menus");
+                .hasMessage("menu hold items must have unique inventory buckets");
     }
 }

@@ -38,7 +38,7 @@ CREATE TABLE menu_hold_items (
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (menu_hold_item_id),
-    CONSTRAINT uk_menu_hold_items_hold_menu UNIQUE (menu_hold_id, menu_id),
+    CONSTRAINT uk_menu_hold_items_hold_bucket UNIQUE (menu_hold_id, menu_inventory_bucket_id),
     CONSTRAINT fk_menu_hold_items_hold FOREIGN KEY (menu_hold_id) REFERENCES menu_holds (menu_hold_id) ON DELETE RESTRICT,
     CONSTRAINT fk_menu_hold_items_menu FOREIGN KEY (menu_id) REFERENCES menus (menu_id) ON DELETE RESTRICT,
     CONSTRAINT fk_menu_hold_items_bucket FOREIGN KEY (menu_inventory_bucket_id) REFERENCES menu_inventory_buckets (menu_inventory_bucket_id) ON DELETE RESTRICT,
