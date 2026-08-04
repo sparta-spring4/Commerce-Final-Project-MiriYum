@@ -12,6 +12,8 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
+import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryPolicyChange;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -77,6 +80,12 @@ class MenuInventoryRuntimeIT {
 
     @Autowired
     private MenuInventoryBucketRepository bucketRepository;
+
+    @Autowired
+    private MenuInventoryPolicyService policyService;
+
+    @Autowired
+    private MenuInventoryPolicyAuditRepository policyAuditRepository;
 
     @MockitoSpyBean
     private MenuInventoryLedgerRepository ledgerRepository;
@@ -154,6 +163,99 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket depleted = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(depleted.getOnlineHoldRemaining()).isZero();
         assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 2);
+    }
+
+    @Test
+    void locksAndReturnsTheHighestPolicyVersionForAnInterval() {
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 0));
+            bucketRepository.saveAndFlush(bucket(menuId, 2L, 3, 0));
+        });
+
+        MenuInventoryBucket current = transactionTemplate.execute(status ->
+                bucketRepository.findCurrentForUpdate(
+                                menuId,
+                                LocalDate.of(2026, 8, 10),
+                                LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10),
+                                LocalTime.of(13, 0))
+                        .orElseThrow());
+
+        assertThat(current.getInventoryPolicyVersion()).isEqualTo(2L);
+        assertThat(current.getOnlineHoldCapacity()).isEqualTo(3);
+    }
+
+    @Test
+    void publishesNextPolicyAndAuditInOneTransaction() {
+        MenuInventoryBucket current = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 3)));
+        long auditCountBefore = policyAuditRepository.count();
+
+        MenuInventoryBucket next = policyService.publishNextPolicy(
+                7L,
+                "MENU_INVENTORY_UPDATE",
+                "123e4567-e89b-12d3-a456-426614174000",
+                current.getId(),
+                new InventoryPolicyChange(
+                        12, 6, 2, 4, true,
+                        com.miriyum.domain.menuhold.inventory.model
+                                .InventoryAvailabilityStatus.SOLD_OUT));
+
+        assertThat(next.getInventoryPolicyVersion()).isEqualTo(2L);
+        assertThat(bucketRepository.findById(current.getId()).orElseThrow()
+                .getInventoryPolicyVersion()).isEqualTo(1L);
+        assertThat(policyAuditRepository.count()).isEqualTo(auditCountBefore + 1);
+        assertThat(policyAuditRepository.findAll().getLast().getBucketId())
+                .isEqualTo(next.getId());
+    }
+
+    @Test
+    void concurrentUpdatesPublishOnlyOneNextPolicyAndAudit() throws Exception {
+        MenuInventoryBucket current = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 3)));
+        long bucketCountBefore = bucketRepository.count();
+        long auditCountBefore = policyAuditRepository.count();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> first = executor.submit(() -> publishConcurrently(
+                    current.getId(),
+                    "123e4567-e89b-12d3-a456-426614174001", ready, start));
+            Future<Boolean> second = executor.submit(() -> publishConcurrently(
+                    current.getId(),
+                    "123e4567-e89b-12d3-a456-426614174002", ready, start));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS),
+                    second.get(20, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+        }
+
+        assertThat(bucketRepository.count()).isEqualTo(bucketCountBefore + 1);
+        assertThat(policyAuditRepository.count()).isEqualTo(auditCountBefore + 1);
+    }
+
+    @Test
+    void auditConflictRollsBackTheNewPolicyVersion() {
+        MenuInventoryBucket first = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 3)));
+        String key = "123e4567-e89b-12d3-a456-426614174003";
+        MenuInventoryBucket second = policyService.publishNextPolicy(
+                7L, "MENU_INVENTORY_UPDATE", key, first.getId(),
+                policyChange());
+        long bucketCountBefore = bucketRepository.count();
+        long auditCountBefore = policyAuditRepository.count();
+
+        assertThatThrownBy(() -> policyService.publishNextPolicy(
+                7L, "MENU_INVENTORY_UPDATE", key, second.getId(),
+                policyChange()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(bucketRepository.count()).isEqualTo(bucketCountBefore);
+        assertThat(policyAuditRepository.count()).isEqualTo(auditCountBefore);
     }
 
     @Test
@@ -249,6 +351,49 @@ class MenuInventoryRuntimeIT {
     }
 
     private static MenuInventoryBucket bucket(long selectedMenuId, int online, int shared) {
+        return bucket(selectedMenuId, 1L, online, shared);
+    }
+
+    private boolean publishConcurrently(
+            long bucketId,
+            String key,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return false;
+            }
+            policyService.publishNextPolicy(
+                    7L, "MENU_INVENTORY_UPDATE", key, bucketId,
+                    policyChange());
+            return true;
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode()
+                    == MenuHoldErrorCode.INVENTORY_STATE_CONFLICT) {
+                return false;
+            }
+            throw exception;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private static InventoryPolicyChange policyChange() {
+        return new InventoryPolicyChange(
+                12, 6, 2, 4, true,
+                com.miriyum.domain.menuhold.inventory.model
+                        .InventoryAvailabilityStatus.AVAILABLE);
+    }
+
+    private static MenuInventoryBucket bucket(
+            long selectedMenuId,
+            long policyVersion,
+            int online,
+            int shared
+    ) {
         return MenuInventoryBucket.create(
                 selectedMenuId,
                 LocalDate.of(2026, 8, 10),
@@ -256,7 +401,7 @@ class MenuInventoryRuntimeIT {
                 LocalDate.of(2026, 8, 10),
                 LocalTime.of(13, 0),
                 "Asia/Seoul",
-                1L,
+                policyVersion,
                 online + shared,
                 online,
                 0,

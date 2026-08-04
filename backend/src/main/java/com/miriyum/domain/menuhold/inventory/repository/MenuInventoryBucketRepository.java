@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -39,6 +40,32 @@ public interface MenuInventoryBucketRepository
             @Param("endDate") LocalDate endDate,
             @Param("endTime") LocalTime endTime,
             @Param("policyVersion") long policyVersion);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
+            where bucket.menuId = :menuId
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime = :startTime
+              and bucket.endDate = :endDate
+              and bucket.endTime = :endTime
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = :menuId
+                    and candidate.serviceDate = :serviceDate
+                    and candidate.startTime = :startTime
+                    and candidate.endDate = :endDate
+                    and candidate.endTime = :endTime
+              )
+            """)
+    Optional<MenuInventoryBucket> findCurrentForUpdate(
+            @Param("menuId") long menuId,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("endDate") LocalDate endDate,
+            @Param("endTime") LocalTime endTime);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
