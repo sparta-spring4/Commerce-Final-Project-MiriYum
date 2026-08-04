@@ -139,8 +139,8 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 ### 휴무와 예약 서비스 전체 구간 검증
 
-- `windowEndAt`은 예약을 시작할 수 있는 마지막 경계이며 실제 이용·정리 종료 시각이 아니다. Reservation은 매장별 `serviceDuration + turnoverDuration`으로 `serviceEndAt`을 계산한다.
-- Store는 Reservation이 전달한 `[startAt, serviceEndAt)` 전체가 하나의 활성 영업 구간 안에 있고 브레이크타임, 정기 휴무, 취소되지 않은 임시 휴무와 겹치지 않는지 판정한다. 정리시간도 영업시간 안에 포함되어야 한다.
+- `windowEndAt`은 예약을 시작할 수 있는 접수 구간의 상한이며 고객 서비스 종료나 실제 점유 종료가 아니다. Reservation은 매장별 시간 정책에 따라 `serviceEndAt = startAt + serviceDuration`, `occupancyEndAt = serviceEndAt + turnoverDuration`으로 두 종료 시각을 각각 계산한다.
+- Store는 Reservation이 전달한 서비스 구간 `[startAt, serviceEndAt)` 전체가 하나의 활성 영업 구간 안에 있고 브레이크타임, 정기 휴무, 취소되지 않은 임시 휴점과 겹치지 않는지 판정한다. turnover 구간 `[serviceEndAt, occupancyEndAt)`은 현재 Store 일정 검증 범위와 입력에 포함하지 않으며 Reservation의 수용량·중복 판정에 사용한다.
 - 정기 휴무는 요일 반복 또는 특정 날짜의 종일 규칙을 불변 버전으로 관리한다. 명시적으로 게시된 빈 버전은 정기 휴무 없음이며 활성 버전 자체가 없으면 판정은 fail-closed다.
 - 임시 휴무는 중앙 `Instant` 반개구간과 등록 시점 매장 `timeZoneId` 스냅샷을 보관한다. 상태는 현재 시각에 따라 `SCHEDULED`, `ACTIVE`, `ENDED`, `CANCELLED`로 파생한다.
 - batch 판정은 입력 순서·개수·중복을 보존하며 Store, 활성 영업/예약/정기 휴무 일정, 임시 휴무를 고정된 수의 일괄 조회로 적재한다. 소스 누락·소유자/시간대 불일치·DST의 존재하지 않거나 중복되는 현지 경계는 `NOT_ACCEPTING`이다.
