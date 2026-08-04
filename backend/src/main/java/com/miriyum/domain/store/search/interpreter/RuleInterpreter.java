@@ -50,6 +50,8 @@ public final class RuleInterpreter {
                 tagTokens);
         PriceParser.Result price = PriceParser.parse(normalized);
         PartySizeParser.Result partySize = PartySizeParser.parse(normalized);
+        DateParser.Result date = DateParser.parse(normalized, clock, request.zoneId());
+        TimeParser.Result time = TimeParser.parse(normalized);
 
         List<TextSpan> acceptedSpans = new ArrayList<>();
         acceptedSpans.addAll(spansOf(dictionary.regions()));
@@ -58,6 +60,8 @@ public final class RuleInterpreter {
         acceptedSpans.addAll(spansOf(dictionary.tags()));
         acceptedSpans.addAll(price.acceptedSpans());
         acceptedSpans.addAll(partySize.acceptedSpans());
+        acceptedSpans.addAll(date.acceptedSpans());
+        acceptedSpans.addAll(time.acceptedSpans());
         List<InterpretationWarning> warnings = new ArrayList<>();
         if (dictionary.ambiguous()) {
             warnings.add(new InterpretationWarning(
@@ -66,6 +70,8 @@ public final class RuleInterpreter {
         }
         warnings.addAll(price.warnings());
         warnings.addAll(partySize.warnings());
+        warnings.addAll(date.warnings());
+        warnings.addAll(time.warnings());
         InterpretedSearchCondition condition = new InterpretedSearchCondition(
                 codesOf(dictionary.regions()),
                 codesOf(dictionary.storeCategories()),
@@ -73,8 +79,8 @@ public final class RuleInterpreter {
                 codesOf(dictionary.tags()),
                 price.value(),
                 partySize.value(),
-                null,
-                null,
+                date.value(),
+                time.value(),
                 removeAcceptedSpans(normalized, acceptedSpans));
         return new InterpretationResult(
                 RULE_VERSION,
