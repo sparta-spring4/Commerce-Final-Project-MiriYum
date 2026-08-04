@@ -17,6 +17,8 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.entity.Store;
@@ -42,6 +44,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -234,16 +237,23 @@ class MenuHoldRuntimeIT {
     }
 
     private Reservation reservation() {
-        return Reservation.confirm(consumerId, storeId, "store", LocalDate.of(2026, 8, 10),
-                LocalTime.NOON, LocalTime.of(13, 0), PartyComposition.of(2, 0, 0),
+        ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
+                storeId, 1L, 30, 60, 0);
+        policy.activate(Instant.parse("2026-08-01T00:00:00Z"), "메뉴 홀드 통합 테스트");
+        ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                policy, LocalDateTime.of(2026, 8, 10, 12, 0), ZoneId.of("Asia/Seoul"), null);
+        return Reservation.confirm(consumerId, storeId, "store", timeSnapshot,
+                PartyComposition.of(2, 0, 0),
                 ReservationContactSnapshot.contactable("consumer:" + consumerId),
-                1L, 1L, Instant.parse("2026-08-01T00:00:00Z"));
+                1L, Instant.parse("2026-08-01T00:00:00Z"));
     }
 
     private MenuHoldCreateCommand command(long reservationId, int quantity, String operationId) {
         return new MenuHoldCreateCommand(String.valueOf(reservationId), String.valueOf(storeId),
                 String.valueOf(consumerId), LocalDate.of(2026, 8, 10), LocalTime.NOON,
-                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), operationId,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                Instant.parse("2026-08-10T03:00:00Z"),
+                Instant.parse("2026-08-10T04:00:00Z"), operationId,
                 List.of(new MenuSelection(String.valueOf(menuId), quantity)));
     }
 

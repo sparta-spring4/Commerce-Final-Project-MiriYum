@@ -13,6 +13,7 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
@@ -79,6 +80,57 @@ class MenuHoldCreateServiceTest {
                 .isEqualTo(MenuHoldErrorCode.INELIGIBLE_MENU);
     }
 
+    @Test
+    void rejectsAcceptingServiceIntervalResultForDifferentRequest() {
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+        CurrentInventorySelection inventory = new CurrentInventorySelection(
+                40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
+                command.endDate(), command.endTime(), 2);
+        given(inventoryService.loadCurrentSelections(
+                List.of(new MenuSelection("40", 2)), command.serviceDate(), command.startTime(),
+                command.endDate(), command.endTime())).willReturn(List.of(inventory));
+        given(intervalService.validateServiceIntervals(org.mockito.ArgumentMatchers.anyList()))
+                .willReturn(List.of(new StoreServiceIntervalResult(
+                        999L, command.startAt(), command.serviceEndAt(),
+                        StoreServiceIntervalStatus.ACCEPTING)));
+
+        assertThatThrownBy(() -> service().create(command))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.INELIGIBLE_MENU);
+    }
+
+    @Test
+    void validatesTheExactInstantSelectedForDstOverlap() {
+        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
+                "10", "20", "30", LocalDate.of(2026, 11, 1), LocalTime.of(1, 30),
+                LocalDate.of(2026, 11, 1), LocalTime.of(2, 30),
+                Instant.parse("2026-11-01T06:30:00Z"),
+                Instant.parse("2026-11-01T07:30:00Z"),
+                "operation-dst-overlap", List.of(new MenuSelection("40", 1)));
+        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+                .willReturn(new MenuTransactionEligibility(20L, 40L, 7, true, false));
+        CurrentInventorySelection inventory = new CurrentInventorySelection(
+                40L, 50L, 3L, "America/New_York", command.serviceDate(), command.startTime(),
+                command.endDate(), command.endTime(), 1);
+        given(inventoryService.loadCurrentSelections(
+                command.menuSelections(), command.serviceDate(), command.startTime(),
+                command.endDate(), command.endTime())).willReturn(List.of(inventory));
+        StoreServiceIntervalRequest exactRequest = new StoreServiceIntervalRequest(
+                20L, command.startAt(), command.serviceEndAt());
+        given(intervalService.validateServiceIntervals(List.of(exactRequest)))
+                .willReturn(List.of(StoreServiceIntervalResult.of(exactRequest, true)));
+        given(inventoryService.acquireCurrentInventory(command.operationId(), List.of(inventory)))
+                .willReturn(List.of(inventory));
+        given(holdRepository.saveAndFlush(org.mockito.ArgumentMatchers.any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(service().create(command))
+                .isEqualTo(MenuHoldCommandResult.confirmed(command.reservationId()));
+    }
+
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
                 storeService, intervalService, inventoryService, holdRepository);
@@ -87,6 +139,9 @@ class MenuHoldCreateServiceTest {
     private static MenuHoldCreateCommand command(List<MenuSelection> selections) {
         return new MenuHoldCreateCommand(
                 "10", "20", "30", LocalDate.of(2026, 8, 10), LocalTime.NOON,
-                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), "operation-1", selections);
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                Instant.parse("2026-08-10T03:00:00Z"),
+                Instant.parse("2026-08-10T04:00:00Z"),
+                "operation-1", selections);
     }
 }

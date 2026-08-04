@@ -3,6 +3,7 @@ package com.miriyum.domain.menuhold.dto;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,8 @@ public record MenuHoldCreateCommand(
         LocalTime startTime,
         LocalDate endDate,
         LocalTime endTime,
+        Instant startAt,
+        Instant serviceEndAt,
         String operationId,
         List<MenuSelection> menuSelections
 ) {
@@ -31,6 +34,9 @@ public record MenuHoldCreateCommand(
                 || !LocalDateTime.of(serviceDate, startTime)
                         .isBefore(LocalDateTime.of(endDate, endTime))) {
             throw new IllegalArgumentException("service time range must be increasing");
+        }
+        if (startAt == null || serviceEndAt == null || !startAt.isBefore(serviceEndAt)) {
+            throw new IllegalArgumentException("resolved service time range must be increasing");
         }
         requireText(operationId, "operationId");
         if (menuSelections == null) {

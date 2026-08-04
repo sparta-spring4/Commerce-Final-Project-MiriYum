@@ -12,6 +12,7 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.global.exception.ServiceException;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.HashMap;
@@ -94,6 +95,8 @@ class MenuHoldServiceConsumerContractTest {
                 LocalTime.of(23, 30),
                 SERVICE_DATE.plusDays(1),
                 LocalTime.of(0, 30),
+                Instant.parse("2026-08-10T14:30:00Z"),
+                Instant.parse("2026-08-10T15:30:00Z"),
                 "operation-create-01",
                 List.of(selection()));
 
@@ -111,6 +114,8 @@ class MenuHoldServiceConsumerContractTest {
                 LocalTime.of(23, 30),
                 SERVICE_DATE,
                 LocalTime.of(0, 30),
+                Instant.parse("2026-08-10T14:30:00Z"),
+                Instant.parse("2026-08-10T15:30:00Z"),
                 "operation-create-01",
                 List.of(selection())))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -242,6 +247,8 @@ class MenuHoldServiceConsumerContractTest {
                 START_TIME,
                 SERVICE_DATE,
                 END_TIME,
+                Instant.parse("2026-08-10T03:00:00Z"),
+                Instant.parse("2026-08-10T04:00:00Z"),
                 operationId,
                 selections);
     }

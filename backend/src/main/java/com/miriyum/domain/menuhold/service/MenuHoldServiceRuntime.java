@@ -15,12 +15,12 @@ import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -77,15 +77,21 @@ public class MenuHoldServiceRuntime {
         List<StoreServiceIntervalRequest> intervalRequests = current.stream()
                 .map(selection -> new StoreServiceIntervalRequest(
                         storeId,
-                        LocalDateTime.of(command.serviceDate(), command.startTime())
-                                .atZone(ZoneId.of(selection.timeZoneId())).toInstant(),
-                        LocalDateTime.of(command.endDate(), command.endTime())
-                                .atZone(ZoneId.of(selection.timeZoneId())).toInstant()))
+                        command.startAt(),
+                        command.serviceEndAt()))
                 .toList();
         var intervalResults = intervalService.validateServiceIntervals(intervalRequests);
-        if (intervalResults.size() != intervalRequests.size()
-                || intervalResults.stream()
-                        .anyMatch(result -> result.status() != StoreServiceIntervalStatus.ACCEPTING)) {
+        if (intervalResults == null
+                || intervalResults.size() != intervalRequests.size()
+                || !IntStream.range(0, intervalRequests.size()).allMatch(index -> {
+                    var request = intervalRequests.get(index);
+                    var result = intervalResults.get(index);
+                    return result != null
+                            && result.storeId() == request.storeId()
+                            && Objects.equals(result.startAt(), request.startAt())
+                            && Objects.equals(result.serviceEndAt(), request.serviceEndAt())
+                            && result.status() == StoreServiceIntervalStatus.ACCEPTING;
+                })) {
             throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
         }
         List<CurrentInventorySelection> acquired =
