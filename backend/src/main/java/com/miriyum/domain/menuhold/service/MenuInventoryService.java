@@ -4,6 +4,9 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
+import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
+import com.miriyum.domain.menuhold.inventory.dto.CurrentInventoryBucketView;
+import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.inventory.entity.InventoryAllocation;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryLedger;
@@ -28,6 +31,41 @@ class MenuInventoryService {
 
     private final MenuInventoryBucketRepository bucketRepository;
     private final MenuInventoryLedgerRepository ledgerRepository;
+
+    List<CurrentInventorySelection> loadCurrentSelections(
+            List<MenuSelection> selections,
+            java.time.LocalDate serviceDate,
+            java.time.LocalTime startTime,
+            java.time.LocalDate endDate,
+            java.time.LocalTime endTime
+    ) {
+        Map<Long, Integer> quantities = selections.stream().collect(Collectors.toMap(
+                selection -> Long.parseLong(selection.menuId()),
+                MenuSelection::quantity));
+        List<CurrentInventoryBucketView> buckets = bucketRepository.findCurrentSelections(
+                quantities.keySet(), serviceDate, startTime, endDate, endTime);
+        if (buckets.size() != quantities.size()) {
+            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+        }
+        return buckets.stream().map(bucket -> new CurrentInventorySelection(
+                bucket.getMenuId(), bucket.getBucketId(), bucket.getInventoryPolicyVersion(),
+                bucket.getTimeZoneId(), bucket.getServiceDate(), bucket.getStartTime(),
+                bucket.getEndDate(), bucket.getEndTime(), quantities.get(bucket.getMenuId()))).toList();
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    List<CurrentInventorySelection> acquireCurrentInventory(
+            String operationId,
+            List<CurrentInventorySelection> selections
+    ) {
+        acquireInventory(new InventoryAcquireRequest(operationId, selections.stream()
+                .map(selection -> new InventoryAcquireRequest.Selection(
+                        selection.menuId(), selection.serviceDate(), selection.startTime(),
+                        selection.endDate(), selection.endTime(),
+                        selection.inventoryPolicyVersion(), selection.quantity()))
+                .toList()));
+        return selections;
+    }
 
     @Transactional(propagation = Propagation.MANDATORY)
     List<InventoryAllocationResult> acquireInventory(InventoryAcquireRequest request) {
