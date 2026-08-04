@@ -1,4 +1,4 @@
--- Issue #89: Reservation 소유의 매장별 시간 정책 버전.
+-- Issue #89: Reservation 소유의 매장별 시간 정책 버전 (Flyway V20).
 CREATE TABLE reservation_time_policy_versions (
     reservation_time_policy_version_id BIGINT NOT NULL AUTO_INCREMENT,
     store_id BIGINT NOT NULL,
@@ -9,6 +9,8 @@ CREATE TABLE reservation_time_policy_versions (
     status VARCHAR(30) NOT NULL,
     effective_at DATETIME(6) NULL,
     activated_at DATETIME(6) NULL,
+    publication_requested_at DATETIME(6) NULL,
+    change_reason VARCHAR(500) NULL,
     active_store_guard BIGINT GENERATED ALWAYS AS (
         CASE WHEN status = 'ACTIVE' THEN store_id ELSE NULL END
     ) STORED,
@@ -58,23 +60,124 @@ CREATE TABLE reservation_time_policy_versions (
                 status = 'SCHEDULED'
                 AND effective_at IS NOT NULL
                 AND activated_at IS NULL
+                AND publication_requested_at IS NOT NULL
+                AND change_reason IS NOT NULL
+                AND CHAR_LENGTH(TRIM(change_reason)) BETWEEN 1 AND 500
             )
             OR (
                 status IN ('ACTIVE', 'RETIRED')
                 AND effective_at IS NOT NULL
                 AND activated_at IS NOT NULL
                 AND activated_at >= effective_at
+                AND publication_requested_at IS NOT NULL
+                AND change_reason IS NOT NULL
+                AND CHAR_LENGTH(TRIM(change_reason)) BETWEEN 1 AND 500
             )
             OR (
                 status = 'ACTIVATION_FAILED'
                 AND effective_at IS NOT NULL
                 AND activated_at IS NULL
+                AND publication_requested_at IS NOT NULL
+                AND change_reason IS NOT NULL
+                AND CHAR_LENGTH(TRIM(change_reason)) BETWEEN 1 AND 500
             )
         ),
     INDEX idx_reservation_time_policy_effectivity (
         store_id,
         status,
         effective_at
+    ),
+    INDEX idx_reservation_time_policy_due_activation (
+        status,
+        effective_at,
+        reservation_time_policy_version_id
+    )
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE reservation_time_policy_audits (
+    reservation_time_policy_audit_id BIGINT NOT NULL AUTO_INCREMENT,
+    store_id BIGINT NOT NULL,
+    actor_type VARCHAR(30) NOT NULL,
+    actor_id BIGINT NULL,
+    target_version BIGINT NOT NULL,
+    previous_active_version BIGINT NULL,
+    new_active_version BIGINT NULL,
+    before_status VARCHAR(30) NULL,
+    after_status VARCHAR(30) NOT NULL,
+    requested_at DATETIME(6) NOT NULL,
+    effective_at DATETIME(6) NULL,
+    occurred_at DATETIME(6) NOT NULL,
+    change_reason VARCHAR(500) NULL,
+    outcome VARCHAR(30) NOT NULL,
+    command_id VARCHAR(128) NOT NULL,
+    conflict_check_status VARCHAR(30) NOT NULL,
+    conflict_count BIGINT NULL,
+    PRIMARY KEY (reservation_time_policy_audit_id),
+    CONSTRAINT fk_reservation_time_policy_audit_store
+        FOREIGN KEY (store_id)
+        REFERENCES stores (store_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_reservation_time_policy_audit_actor
+        FOREIGN KEY (actor_id)
+        REFERENCES store_operator_accounts (store_operator_account_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_reservation_time_policy_audit_target
+        FOREIGN KEY (store_id, target_version)
+        REFERENCES reservation_time_policy_versions (store_id, version_number)
+        ON DELETE RESTRICT,
+    CONSTRAINT ck_reservation_time_policy_audit_actor
+        CHECK (
+            (actor_type = 'STORE_OPERATOR' AND actor_id IS NOT NULL)
+            OR (actor_type = 'SYSTEM' AND actor_id IS NULL)
+        ),
+    CONSTRAINT ck_reservation_time_policy_audit_statuses
+        CHECK (
+            before_status IS NULL
+            OR before_status IN (
+                'DRAFT',
+                'SCHEDULED',
+                'ACTIVE',
+                'RETIRED',
+                'ACTIVATION_FAILED'
+            )
+        ),
+    CONSTRAINT ck_reservation_time_policy_audit_after_status
+        CHECK (
+            after_status IN (
+                'DRAFT',
+                'SCHEDULED',
+                'ACTIVE',
+                'RETIRED',
+                'ACTIVATION_FAILED'
+            )
+        ),
+    CONSTRAINT ck_reservation_time_policy_audit_outcome
+        CHECK (outcome IN ('SUCCEEDED', 'ACTIVATION_FAILED')),
+    CONSTRAINT ck_reservation_time_policy_audit_conflict
+        CHECK (
+            (
+                conflict_check_status = 'NOT_EVALUATED'
+                AND conflict_count IS NULL
+            )
+            OR (
+                conflict_check_status = 'EVALUATED'
+                AND conflict_count IS NOT NULL
+                AND conflict_count >= 0
+            )
+        ),
+    CONSTRAINT ck_reservation_time_policy_audit_reason
+        CHECK (
+            change_reason IS NULL
+            OR CHAR_LENGTH(TRIM(change_reason)) BETWEEN 1 AND 500
+        ),
+    INDEX idx_reservation_time_policy_audit_store_occurred (
+        store_id,
+        occurred_at,
+        reservation_time_policy_audit_id
+    ),
+    INDEX idx_reservation_time_policy_audit_command (
+        actor_type,
+        command_id
     )
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 

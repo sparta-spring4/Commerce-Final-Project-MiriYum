@@ -6,7 +6,7 @@
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
 > 관련 정책 ID: RES-001~RES-015의 1차 범위, S-001~S-003, E-003, E-005, C-001~C-013
 > OpenAPI: `docs/specs/reservation/openapi.yaml`
-> 최종 승인일: 2026-08-03
+> 최종 승인일: 2026-08-04
 
 ## 범위
 
@@ -40,6 +40,9 @@
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
+| 시간 정책 초안 | `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
+| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
+| 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellation` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
 `PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이, 결제·노쇼 상태 선도입과 담당자별 중복 구현을 유발하므로 사용하지 않는다.
 
@@ -72,7 +75,20 @@
 - 저장·비교는 `Instant`를 사용한다. `serviceDate`는 매장 현지 시작 날짜이고 실제 `startAt`, `serviceEndAt`, `occupancyEndAt`, IANA 시간대, 각 계산 offset과 duration·정책 소유 매장·버전을 거래 스냅샷으로 보존한다. 정책 소유 매장은 예약 매장과 같아야 한다.
 - 고객 응답은 `serviceDate`, `timeStatus`, offset 포함 `startAt`, offset 포함 `serviceEndAt`, `timeZoneId`만 공개한다. 내부 `occupancyEndAt`은 고객 응답에 포함하지 않는다. V15 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 응답해 임의 offset 변환이나 예외 누출을 막는다.
 - `[startAt, serviceEndAt)`의 영업시간·브레이크·휴무·휴점·폐점 충돌은 Store 소유의 contract-first Issue #104 / PR #106 batch 계약으로 검증한다. PR #84의 시작 접수 window만으로 이 전체 구간 검증을 완료했다고 간주하지 않는다.
-- Store 검증 범위에는 `[serviceEndAt, occupancyEndAt)` turnover 구간을 포함하지 않는다. PR #106이 `dev`에 병합되기 전에는 Store 일정 판정을 Reservation에서 복제하지 않으며, 시간 정책·종료 계산 코어와 별개로 Store 검증 소비 및 최종 가용성 완료를 차단한다.
+- Reservation은 시간 계산에 성공한 항목만 입력 순서·개수·중복을 보존해 PR #106의 Store batch 계약에 전달한다. Store 검증 범위에는 `[serviceEndAt, occupancyEndAt)` turnover 구간을 포함하지 않는다. Store의 `NOT_ACCEPTING`은 해당 Reservation 결과의 `UNAVAILABLE`로 변환하고, batch 응답의 개수·순서·매장·구간이 요청과 일치하지 않거나 응답 상태가 없으면 입력 전체를 실패 폐쇄한다.
+
+### 운영자 시간 정책 lifecycle
+
+- 공개 경로는 공통 정본 C-008에 따라 모두 `/api/v1/store-operator/stores/{storeId}/reservation-time-policies` 아래에 둔다. 세 쓰기 명령은 bearer 인증과 `Idempotency-Key`를 필수로 사용하고 요청 본문에서 계정 ID·역할을 받지 않는다.
+- 초안 요청은 분 단위 `slotInterval`, `serviceDuration`, `turnoverDuration`만 받는다. 게시 요청은 `publicationMode: IMMEDIATE | SCHEDULED`, 조건부 `effectiveAt`, 1~500자의 `changeReason`을 받고 철회 요청은 `changeReason`만 받는다. 알 수 없는 필드는 거부한다.
+- 응답은 문자열 `storeId`, 숫자 `version`, 세 duration, 상태, nullable `effectiveAt`만 공개한다. Entity·내부 PK·감사 필드는 공개하지 않는다.
+- 멱등 기록을 선점한 뒤 Store 공개 계약 `StoreService.requireSchedulePublicationAuthority()`로 Store 행을 잠그고 계정·대표 운영자 소유권·입점 승인·폐점 상태를 검증한다. Reservation은 Store Entity·Repository를 직접 참조하지 않는다.
+- Store 행 잠금 아래에서 매장별 다음 version을 할당한다. 즉시 게시는 `DRAFT -> ACTIVE`와 기존 ACTIVE의 `RETIRED`를 한 트랜잭션에서 처리한다. 예약 게시는 `DRAFT -> SCHEDULED`로 전이하되 현재 ACTIVE를 유지하고, 효력 시각의 worker 전환 때만 기존 ACTIVE를 퇴역시킨다.
+- 예약 게시 철회는 `now < effectiveAt`인 `SCHEDULED`만 `DRAFT`로 되돌린다. 같은 매장의 ACTIVE와 미래 SCHEDULED는 각각 최대 하나다.
+- worker는 Store 공개 계약 `StoreService.inspectScheduledActivation()`을 사용한다. 일시 장애는 SCHEDULED를 유지해 다시 처리하고, 결정적인 Store 자격·상태 실패만 `ACTIVATION_FAILED`로 기록한다.
+- 효력 시각이 지났지만 아직 전환되지 않은 SCHEDULED가 있으면 기존 ACTIVE를 계속 적용하지 않고 해당 매장을 실패 폐쇄한다.
+- 정책 lifecycle 감사는 actor type/ID, 대상 version, 이전·새 ACTIVE version, 전이 전후 상태, 요청·효력·처리 시각, 사유, 결과, 명령 ID를 append-only로 보존한다. 기존 예약 영향 조회가 연결되기 전에는 `conflictCheckStatus=NOT_EVALUATED`, `conflictCount=null`을 기록한다.
+- 공개 Service 계산 결과는 순수 scalar DTO다. JPA Entity나 `@Embeddable ReservationTimeSnapshot`을 결과 DTO 필드로 노출하지 않는다.
 
 ### 처리 순서
 
@@ -153,15 +169,17 @@
 | `RESERVATION_007` | 409 | 조회 뒤 정책·수용량 버전이 변경됨 |
 | `RESERVATION_008` | 409 | 수용량 설정이 시간대·현재 점유와 충돌 |
 | `RESERVATION_009` | 409 | 요청 인원이 매장 최소·최대 정책을 벗어남 |
+| `RESERVATION_010` | 409 | 대상 시간 정책 버전·상태·게시 유일성 때문에 lifecycle 명령 불가 |
 
 메뉴 자격·수량 부족은 `MENU_HOLD_###`, 매장 상태·소속은 `STORE_###` 오류를 그대로 사용한다. 다른 도메인 오류를 편의상 RESERVATION 코드로 변환하지 않는다.
 
 ## 트랜잭션·동시성·재시도
 
-- 생성·취소·방문 완료·수용량 게시는 모두 `Idempotency-Key`를 요구한다.
+- 생성·취소·방문 완료·수용량 게시·시간 정책 lifecycle 명령은 모두 `Idempotency-Key`를 요구한다.
 - 조정하는 `ReservationService`가 C-007의 5초 트랜잭션 경계와 `READ_COMMITTED`를 사용한다.
+- 시간 정책 명령의 잠금 순서는 멱등 기록 → Store 행 → 대상 정책 → 현재 ACTIVE다.
 - 잠금은 E-005에 따라 멱등 기록 → 예약 aggregate → 수용량 버킷 → 메뉴 재고 풀 순서와 각 PK 오름차순을 지킨다.
-- 교착·일시 잠금·낙관 버전 충돌만 최대 총 3회 새 트랜잭션으로 재시도한다.
+- 교착·일시 잠금·낙관 버전 충돌만 최초 실행 포함 최대 총 3회 새 트랜잭션으로 재시도한다. 첫 실패 뒤 100~200ms, 두 번째 실패 뒤 300~500ms 지터를 트랜잭션 밖에서 기다린다.
 - 수용량·중복·상태·메뉴 재고 부족은 업무 결과이므로 자동 재시도하지 않는다.
 - 최종 충돌은 `COMMON_008`을 사용하고 성공이나 자원 부족을 추측하지 않는다.
 - H2·mock만으로 동시성 성공을 주장하지 않고 Testcontainers MySQL에서 마지막 수용량과 메뉴 수량 경합을 검증한다.
@@ -171,6 +189,7 @@
 - 예약은 `BIGINT` PK와 외부 문자열 ID를 사용한다.
 - 수용량 버킷·배정 이력·정책 버전과 거래 스냅샷을 보존한다.
 - 신규 예약의 `startAt`, `serviceEndAt`, `occupancyEndAt`은 실제 날짜를 포함한 `Instant`로 저장하고 계산 당시 IANA 시간대·offset·duration을 함께 보존한다.
+- 시간 정책 버전에는 게시 사유를 보존하고, due worker 조회 인덱스와 append-only lifecycle 감사 원장을 둔다.
 - V15의 `serviceDate + startTime + endTime` 행은 offset을 추측해 소급 변환하지 않는다. 새 migration은 기존 값을 보존하고 Instant 스냅샷이 없는 과거 행을 신규 가용성 근거로 사용하지 않으며 고객 조회에는 `LEGACY_UNRESOLVED`를 명시한다.
 - 매장 폐점·메뉴 종료·계정 정지가 과거 예약 행을 연쇄 삭제하지 않는다.
 - 2차·고도화 상태를 추가할 때 기존 1차 enum 의미와 공개 코드를 재사용하지 않는다.
@@ -186,6 +205,7 @@
 - 방문 완료가 수량을 복구하거나 체크인·노쇼 상태를 만들지 않는다.
 - 범용 status PATCH, 결제·환불·NO_SHOW·CHANGE_PENDING API가 없다.
 - 같은 시작 시각이라도 서로 다른 매장 시간 정책은 서로 다른 `occupancyEndAt`을 만들며 입력 순서와 중복을 보존한다.
+- 시간 계산에 성공한 후보만 `[startAt, serviceEndAt)`으로 Store batch 검증하며 turnover 구간을 보내지 않는다. Store의 `NOT_ACCEPTING`은 `UNAVAILABLE`이고 계약과 다른 batch 응답은 전체 실패 폐쇄된다.
 - 고객 응답에 `timeStatus`, `serviceEndAt`, `timeZoneId`가 있고 `occupancyEndAt` 또는 모호한 `endTime`이 없다. 과거 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 안전하게 구분된다.
 - 자정 넘김과 DST 누락·중복 시각이 날짜·offset 손실 없이 처리되거나 명시적으로 실패 폐쇄된다.
 

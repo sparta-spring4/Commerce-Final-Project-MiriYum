@@ -52,6 +52,12 @@ public class ReservationTimePolicyVersion extends BaseEntity {
     @Column(name = "activated_at")
     private Instant activatedAt;
 
+    @Column(name = "publication_requested_at")
+    private Instant publicationRequestedAt;
+
+    @Column(name = "change_reason", length = 500)
+    private String changeReason;
+
     protected ReservationTimePolicyVersion() {
     }
 
@@ -125,15 +131,18 @@ public class ReservationTimePolicyVersion extends BaseEntity {
      * @throws IllegalArgumentException 시각이 없거나 효력 시각이 미래가 아닌 경우
      * @throws ServiceException 현재 상태가 초안이 아닌 경우
      */
-    public void schedule(Instant scheduledAt, Instant now) {
+    public void schedule(Instant scheduledAt, Instant now, String publicationReason) {
         requireStatus(ReservationTimePolicyStatus.DRAFT);
         Instant validatedScheduledAt = requireNonNull(scheduledAt, "scheduledAt");
         Instant validatedNow = requireNonNull(now, "now");
         if (!validatedScheduledAt.isAfter(validatedNow)) {
             throw new IllegalArgumentException("scheduledAt must be after now");
         }
+        String validatedReason = requireReason(publicationReason);
         status = ReservationTimePolicyStatus.SCHEDULED;
         effectiveAt = validatedScheduledAt;
+        publicationRequestedAt = validatedNow;
+        changeReason = validatedReason;
     }
 
     /**
@@ -144,6 +153,11 @@ public class ReservationTimePolicyVersion extends BaseEntity {
      * @throws ServiceException 초안 또는 게시 예약 상태가 아닌 경우
      */
     public void activate(Instant activationAt) {
+        requireStatus(ReservationTimePolicyStatus.SCHEDULED);
+        activate(activationAt, changeReason);
+    }
+
+    public void activate(Instant activationAt, String publicationReason) {
         Instant validatedActivationAt = requireNonNull(activationAt, "activationAt");
         if (status == ReservationTimePolicyStatus.SCHEDULED
                 && validatedActivationAt.isBefore(effectiveAt)) {
@@ -153,9 +167,19 @@ public class ReservationTimePolicyVersion extends BaseEntity {
                 && status != ReservationTimePolicyStatus.SCHEDULED) {
             throw invalidTransition();
         }
+        String validatedReason = requireReason(publicationReason);
+        if (status == ReservationTimePolicyStatus.SCHEDULED
+                && changeReason != null
+                && !changeReason.equals(validatedReason)) {
+            throw new IllegalArgumentException(
+                    "scheduled publication reason must not change during activation"
+            );
+        }
         if (status == ReservationTimePolicyStatus.DRAFT) {
             effectiveAt = validatedActivationAt;
+            publicationRequestedAt = validatedActivationAt;
         }
+        changeReason = validatedReason;
         status = ReservationTimePolicyStatus.ACTIVE;
         activatedAt = validatedActivationAt;
     }
@@ -227,6 +251,15 @@ public class ReservationTimePolicyVersion extends BaseEntity {
         return value;
     }
 
+    private static String requireReason(String value) {
+        if (value == null || value.isBlank() || value.length() > 500) {
+            throw new IllegalArgumentException(
+                    "changeReason must be between 1 and 500 characters"
+            );
+        }
+        return value;
+    }
+
     public Long getId() {
         return id;
     }
@@ -261,5 +294,13 @@ public class ReservationTimePolicyVersion extends BaseEntity {
 
     public Instant getActivatedAt() {
         return activatedAt;
+    }
+
+    public Instant getPublicationRequestedAt() {
+        return publicationRequestedAt;
+    }
+
+    public String getChangeReason() {
+        return changeReason;
     }
 }

@@ -244,7 +244,10 @@ class ReservationTest {
     void rejectsTimeSnapshotOwnedByAnotherStore() {
         ReservationTimePolicyVersion anotherStorePolicy =
                 ReservationTimePolicyVersion.createDraft(23L, 5L, 30, 90, 15);
-        anotherStorePolicy.activate(Instant.parse("2026-07-31T00:00:00Z"));
+        anotherStorePolicy.activate(
+                Instant.parse("2026-07-31T00:00:00Z"),
+                "다른 매장 활성 정책"
+        );
         ReservationTimeSnapshot anotherStoreSnapshot = ReservationTimeSnapshot.calculate(
                 anotherStorePolicy,
                 LocalDateTime.of(2026, 8, 1, 18, 0),
@@ -283,7 +286,7 @@ class ReservationTest {
                 90,
                 15
         );
-        policy.activate(Instant.parse("2026-07-31T00:00:00Z"));
+        policy.activate(Instant.parse("2026-07-31T00:00:00Z"), "활성 정책");
         return ReservationTimeSnapshot.calculate(
                 policy,
                 LocalDateTime.of(2026, 8, 1, 18, 0),

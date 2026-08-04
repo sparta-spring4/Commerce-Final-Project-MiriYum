@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 class ReservationTimePolicyVersionTest {
 
     private static final Instant NOW = Instant.parse("2026-08-03T12:00:00Z");
+    private static final String REASON = "운영 시간 정책 변경";
 
     @Test
     @DisplayName("매장별 예약 시간 정책 초안은 버전과 분 단위 duration을 보존한다")
@@ -73,12 +74,14 @@ class ReservationTimePolicyVersionTest {
         Instant effectiveAt = NOW.plusSeconds(3600);
 
         // when
-        policy.schedule(effectiveAt, NOW);
+        policy.schedule(effectiveAt, NOW, REASON);
 
         // then
         assertThat(policy.getStatus()).isEqualTo(ReservationTimePolicyStatus.SCHEDULED);
         assertThat(policy.getEffectiveAt()).isEqualTo(effectiveAt);
         assertThat(policy.getActivatedAt()).isNull();
+        assertThat(policy.getPublicationRequestedAt()).isEqualTo(NOW);
+        assertThat(policy.getChangeReason()).isEqualTo(REASON);
 
         // when
         policy.cancelPublication(effectiveAt.minusNanos(1));
@@ -96,12 +99,14 @@ class ReservationTimePolicyVersionTest {
         ReservationTimePolicyVersion policy = policy();
 
         // when
-        policy.activate(NOW);
+        policy.activate(NOW, REASON);
 
         // then
         assertThat(policy.getStatus()).isEqualTo(ReservationTimePolicyStatus.ACTIVE);
         assertThat(policy.getEffectiveAt()).isEqualTo(NOW);
         assertThat(policy.getActivatedAt()).isEqualTo(NOW);
+        assertThat(policy.getPublicationRequestedAt()).isEqualTo(NOW);
+        assertThat(policy.getChangeReason()).isEqualTo(REASON);
 
         // when
         policy.retire();
@@ -116,7 +121,7 @@ class ReservationTimePolicyVersionTest {
         // given
         ReservationTimePolicyVersion policy = policy();
         Instant effectiveAt = NOW.plusSeconds(3600);
-        policy.schedule(effectiveAt, NOW);
+        policy.schedule(effectiveAt, NOW, REASON);
 
         // when
         policy.activate(effectiveAt);
@@ -132,7 +137,7 @@ class ReservationTimePolicyVersionTest {
     void marksScheduledActivationAsFailed() {
         // given
         ReservationTimePolicyVersion policy = policy();
-        policy.schedule(NOW.plusSeconds(3600), NOW);
+        policy.schedule(NOW.plusSeconds(3600), NOW, REASON);
 
         // when
         policy.failActivation();
@@ -147,12 +152,12 @@ class ReservationTimePolicyVersionTest {
     @DisplayName("과거나 현재 시각으로 게시 예약하거나 효력 전에 활성화할 수 없다")
     void rejectsInvalidEffectivityBoundaries() {
         assertThatIllegalArgumentException().isThrownBy(() ->
-                policy().schedule(NOW, NOW));
+                policy().schedule(NOW, NOW, REASON));
         assertThatIllegalArgumentException().isThrownBy(() ->
-                policy().schedule(NOW.minusSeconds(1), NOW));
+                policy().schedule(NOW.minusSeconds(1), NOW, REASON));
 
         ReservationTimePolicyVersion scheduled = policy();
-        scheduled.schedule(NOW.plusSeconds(3600), NOW);
+        scheduled.schedule(NOW.plusSeconds(3600), NOW, REASON);
         assertThatIllegalArgumentException().isThrownBy(() ->
                 scheduled.activate(NOW.plusSeconds(3599)));
     }
@@ -162,9 +167,9 @@ class ReservationTimePolicyVersionTest {
     void rejectsPublicationCancellationAtOrAfterEffectiveTime() {
         Instant effectiveAt = NOW.plusSeconds(3600);
         ReservationTimePolicyVersion atBoundary = policy();
-        atBoundary.schedule(effectiveAt, NOW);
+        atBoundary.schedule(effectiveAt, NOW, REASON);
         ReservationTimePolicyVersion afterBoundary = policy();
-        afterBoundary.schedule(effectiveAt, NOW);
+        afterBoundary.schedule(effectiveAt, NOW, REASON);
 
         assertThatIllegalArgumentException().isThrownBy(() ->
                 atBoundary.cancelPublication(effectiveAt));
@@ -184,6 +189,23 @@ class ReservationTimePolicyVersionTest {
 
         assertThat(exception.getErrorCode())
                 .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
+    }
+
+    @Test
+    @DisplayName("즉시·예약 게시에는 비어 있지 않은 변경 사유가 필요하다")
+    void requiresPublicationReason() {
+        ReservationTimePolicyVersion missingScheduledReason = policy();
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                missingScheduledReason.schedule(NOW.plusSeconds(3600), NOW, null));
+        assertThat(missingScheduledReason.getStatus())
+                .isEqualTo(ReservationTimePolicyStatus.DRAFT);
+        assertThat(missingScheduledReason.getEffectiveAt()).isNull();
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                policy().schedule(NOW.plusSeconds(3600), NOW, "  "));
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                policy().activate(NOW, null));
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                policy().activate(NOW, "  "));
     }
 
     private static ReservationTimePolicyVersion policy() {

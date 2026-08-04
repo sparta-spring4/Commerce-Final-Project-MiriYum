@@ -26,7 +26,7 @@ class CustomerReservationTimeResponseTest {
                 90,
                 30
         );
-        policy.activate(Instant.parse("2026-08-01T00:00:00Z"));
+        policy.activate(Instant.parse("2026-08-01T00:00:00Z"), "활성 정책");
         ReservationTimeSnapshot snapshot = ReservationTimeSnapshot.calculate(
                 policy,
                 LocalDateTime.of(2026, 8, 3, 23, 30),

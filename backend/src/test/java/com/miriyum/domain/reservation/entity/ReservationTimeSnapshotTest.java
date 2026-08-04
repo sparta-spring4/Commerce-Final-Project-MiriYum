@@ -165,7 +165,7 @@ class ReservationTimeSnapshotTest {
                 serviceDurationMinutes,
                 turnoverDurationMinutes
         );
-        policy.activate(Instant.parse("2026-08-01T00:00:00Z"));
+        policy.activate(Instant.parse("2026-08-01T00:00:00Z"), "활성 정책");
         return policy;
     }
 }

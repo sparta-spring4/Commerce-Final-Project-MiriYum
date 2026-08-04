@@ -16,10 +16,7 @@ class ReservationOpenApiContractTest {
     @Test
     void perStoreTimeAndLegacyCustomerResponseRemainExplicit() throws IOException {
         Path contract = Path.of("..", "docs", "specs", "reservation", "openapi.yaml");
-        Map<String, Object> document;
-        try (InputStream input = Files.newInputStream(contract)) {
-            document = new Yaml().load(input);
-        }
+        Map<String, Object> document = load(contract);
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         assertThat(map(schemas.get("StoreLocalDate")).get("description").toString())
@@ -45,6 +42,116 @@ class ReservationOpenApiContractTest {
                 .containsExactly("RESOLVED", "LEGACY_UNRESOLVED");
         assertCustomerTimeShape(map(schemas.get("ReservationDetail")));
         assertCustomerTimeShape(map(schemas.get("ReservationSummary")));
+    }
+
+    @Test
+    void operatorTimePolicyLifecycleUsesCanonicalVersionedContracts() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+
+        String draftsPath =
+                "/api/v1/store-operator/stores/{storeId}/reservation-time-policies";
+        String publicationPath = draftsPath + "/{version}/publication";
+        String cancellationPath = draftsPath + "/{version}/publication-cancellation";
+
+        assertThat(paths).containsKeys(draftsPath, publicationPath, cancellationPath);
+        assertThat(paths).doesNotContainKeys(
+                "/store-operator/stores/{storeId}/reservation-time-policies",
+                "/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication",
+                "/store-operator/stores/{storeId}/reservation-time-policies/{version}"
+                        + "/publication-cancellation"
+        );
+
+        assertPolicyCommand(
+                map(map(paths.get(draftsPath)).get("put")),
+                "#/components/schemas/ReservationTimePolicyDraftRequest"
+        );
+        assertPolicyCommand(
+                map(map(paths.get(publicationPath)).get("post")),
+                "#/components/schemas/ReservationTimePolicyPublicationRequest"
+        );
+        assertPolicyCommand(
+                map(map(paths.get(cancellationPath)).get("post")),
+                "#/components/schemas/ReservationTimePolicyPublicationCancellationRequest"
+        );
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        assertThat(schemas).containsKeys(
+                "ReservationTimePolicyDraftRequest",
+                "ReservationTimePolicyPublicationRequest",
+                "ReservationTimePolicyPublicationCancellationRequest",
+                "ReservationTimePolicyResponse",
+                "ReservationTimePolicyStatus"
+        );
+        assertThat(list(map(schemas.get("ReservationTimePolicyStatus")).get("enum")))
+                .containsExactly(
+                        "DRAFT",
+                        "SCHEDULED",
+                        "ACTIVE",
+                        "RETIRED",
+                        "ACTIVATION_FAILED"
+                );
+
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        assertThat(responses).containsKey("ReservationTimePolicyConflict");
+        assertThat(responses.get("ReservationTimePolicyConflict").toString())
+                .contains("RESERVATION_010");
+
+        Map<String, Object> aggregate = load(
+                Path.of("..", "docs", "specs", "mvp1-openapi.yaml")
+        );
+        Map<String, Object> aggregatePaths = map(aggregate.get("paths"));
+        assertThat(map(aggregatePaths.get(draftsPath)))
+                .containsEntry(
+                        "$ref",
+                        "./reservation/openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                                + "~1reservation-time-policies"
+                );
+        assertThat(map(aggregatePaths.get(publicationPath)))
+                .containsEntry(
+                        "$ref",
+                        "./reservation/openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                                + "~1reservation-time-policies~1{version}~1publication"
+                );
+        assertThat(map(aggregatePaths.get(cancellationPath)))
+                .containsEntry(
+                        "$ref",
+                        "./reservation/openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                                + "~1reservation-time-policies~1{version}"
+                                + "~1publication-cancellation"
+                );
+    }
+
+    private static void assertPolicyCommand(
+            Map<String, Object> operation,
+            String requestSchemaRef
+    ) {
+        assertThat(list(operation.get("security"))).anySatisfy(requirement ->
+                assertThat(map(requirement)).containsKey("bearerAuth"));
+        assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry(
+                        "$ref",
+                        "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                ));
+
+        Map<String, Object> requestBody = map(operation.get("requestBody"));
+        Map<String, Object> content = map(requestBody.get("content"));
+        Map<String, Object> json = map(content.get("application/json"));
+        assertThat(map(json.get("schema"))).containsEntry("$ref", requestSchemaRef);
+
+        assertThat(map(operation.get("responses")))
+                .containsKeys("200", "400", "401", "403", "404", "409");
+    }
+
+    private static Map<String, Object> load(Path contract) throws IOException {
+        try (InputStream input = Files.newInputStream(contract)) {
+            return new Yaml().load(input);
+        }
     }
 
     private static void assertCustomerTimeShape(Map<String, Object> schema) {
