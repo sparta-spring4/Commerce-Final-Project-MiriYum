@@ -49,4 +49,6 @@ These are staging Environment variables, not application secrets. Application an
 
 An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. The CD job additionally requires the triggering CI event to be a `push` from this repository, so a successful pull request CI result, including a fork PR, never receives OIDC or SSM deployment authority. Before automatic build and deployment, the workflow compares the completed CI SHA with the current remote `dev` HEAD and skips stale runs. A manual `Backend CD (Staging)` dispatch is allowed only from `dev` and accepts a full 40-character SHA tag; this is the only path that intentionally deploys a previous ECR image for staging rollback.
 
+If an image push succeeds but a later SSM deployment step fails, rerun the failed workflow instead of deleting or overwriting the immutable ECR tag. The workflow checks whether the same SHA tag already exists and reuses it, then retries only the remaining deployment path.
+
 After each deployment, record the GitHub Actions run URL, ECR image digest, SSM command ID, and EC2 loopback health result. Until those four runtime results exist, deployment evidence remains `NOT RUN`.
