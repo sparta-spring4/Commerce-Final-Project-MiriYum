@@ -53,12 +53,42 @@ class MenuInventoryPolicyAuditTest {
                 .isEqualTo(InventoryAvailabilityStatus.SOLD_OUT);
     }
 
+    @Test
+    void recordsSharedOnlinePermissionForAFlagOnlyPolicyUpdate() {
+        MenuInventoryBucket current = bucket(1L, 10, 5, 2, 3, true);
+        ReflectionTestUtils.setField(current, "id", 41L);
+        MenuInventoryBucket next = current.publishNextPolicy(
+                10, 5, 2, 3, false, InventoryAvailabilityStatus.AVAILABLE);
+        ReflectionTestUtils.setField(next, "id", 42L);
+
+        MenuInventoryPolicyAudit audit = MenuInventoryPolicyAudit.updated(
+                7L, "MENU_INVENTORY_UPDATE",
+                "123e4567-e89b-12d3-a456-426614174001", current, next);
+
+        assertThat(audit.getSharedOnlineAllowedBefore()).isTrue();
+        assertThat(audit.isSharedOnlineAllowedAfter()).isFalse();
+        assertThat(audit.getTotalSupplyDelta()).isZero();
+        assertThat(audit.getAvailabilityBefore())
+                .isEqualTo(audit.getAvailabilityAfter());
+    }
+
     private static MenuInventoryBucket bucket(
             long version,
             int total,
             int online,
             int onsite,
             int shared
+    ) {
+        return bucket(version, total, online, onsite, shared, true);
+    }
+
+    private static MenuInventoryBucket bucket(
+            long version,
+            int total,
+            int online,
+            int onsite,
+            int shared,
+            boolean sharedOnlineAllowed
     ) {
         return MenuInventoryBucket.create(
                 11L,
@@ -72,6 +102,6 @@ class MenuInventoryPolicyAuditTest {
                 online,
                 onsite,
                 shared,
-                true);
+                sharedOnlineAllowed);
     }
 }

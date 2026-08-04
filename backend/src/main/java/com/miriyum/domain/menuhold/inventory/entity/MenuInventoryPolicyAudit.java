@@ -79,6 +79,12 @@ public class MenuInventoryPolicyAudit extends BaseEntity {
     @Column(name = "shared_capacity_after", nullable = false)
     private int sharedCapacityAfter;
 
+    @Column(name = "shared_online_allowed_before")
+    private Boolean sharedOnlineAllowedBefore;
+
+    @Column(name = "shared_online_allowed_after", nullable = false)
+    private boolean sharedOnlineAllowedAfter;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "availability_before", length = 20)
     private InventoryAvailabilityStatus availabilityBefore;
@@ -112,6 +118,7 @@ public class MenuInventoryPolicyAudit extends BaseEntity {
         audit.onsiteCapacityDelta = audit.onsiteCapacityAfter;
         audit.sharedCapacityAfter = created.getSharedCapacity();
         audit.sharedCapacityDelta = audit.sharedCapacityAfter;
+        audit.sharedOnlineAllowedAfter = created.isSharedOnlineAllowed();
         audit.availabilityAfter = created.getAvailabilityStatus();
         return audit;
     }
@@ -148,6 +155,8 @@ public class MenuInventoryPolicyAudit extends BaseEntity {
         audit.sharedCapacityBefore = before.getSharedCapacity();
         audit.sharedCapacityAfter = after.getSharedCapacity();
         audit.sharedCapacityDelta = audit.sharedCapacityAfter - audit.sharedCapacityBefore;
+        audit.sharedOnlineAllowedBefore = before.isSharedOnlineAllowed();
+        audit.sharedOnlineAllowedAfter = after.isSharedOnlineAllowed();
         audit.availabilityBefore = before.getAvailabilityStatus();
         audit.availabilityAfter = after.getAvailabilityStatus();
         return audit;

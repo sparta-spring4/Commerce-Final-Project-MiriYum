@@ -18,6 +18,8 @@ CREATE TABLE menu_inventory_policy_audits (
     shared_capacity_before INT NOT NULL,
     shared_capacity_delta INT NOT NULL,
     shared_capacity_after INT NOT NULL,
+    shared_online_allowed_before BOOLEAN NULL,
+    shared_online_allowed_after BOOLEAN NOT NULL,
     availability_before VARCHAR(20) NULL,
     availability_after VARCHAR(20) NOT NULL,
     created_at DATETIME(6) NOT NULL,
