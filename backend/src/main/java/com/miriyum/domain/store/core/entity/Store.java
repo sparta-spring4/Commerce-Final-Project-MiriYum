@@ -44,6 +44,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Store extends BaseEntity {
 
+    private static final BigDecimal MIN_LATITUDE = new BigDecimal("-90");
+    private static final BigDecimal MAX_LATITUDE = new BigDecimal("90");
+    private static final BigDecimal MIN_LONGITUDE = new BigDecimal("-180");
+    private static final BigDecimal MAX_LONGITUDE = new BigDecimal("180");
+    private static final int COORDINATE_PRECISION = 18;
+    private static final int COORDINATE_SCALE = 15;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "store_id")
@@ -360,8 +367,16 @@ public class Store extends BaseEntity {
         VerifiedStoreGeocoding required = Objects.requireNonNull(
                 geocoding,
                 "verified geocoding is required");
-        Objects.requireNonNull(required.latitude(), "latitude is required");
-        Objects.requireNonNull(required.longitude(), "longitude is required");
+        requireCoordinate(
+                required.latitude(),
+                MIN_LATITUDE,
+                MAX_LATITUDE,
+                "latitude");
+        requireCoordinate(
+                required.longitude(),
+                MIN_LONGITUDE,
+                MAX_LONGITUDE,
+                "longitude");
         requireNonBlank(
                 required.verifiedAddress(),
                 "verified address is required");
@@ -375,6 +390,25 @@ public class Store extends BaseEntity {
                 required.providerApiVersion(),
                 "geocoding provider API version is required");
         return required;
+    }
+
+    private static void requireCoordinate(
+            BigDecimal value,
+            BigDecimal minimum,
+            BigDecimal maximum,
+            String fieldName
+    ) {
+        BigDecimal required = Objects.requireNonNull(
+                value,
+                fieldName + " is required");
+        BigDecimal normalized = required.stripTrailingZeros();
+        if (required.compareTo(minimum) < 0
+                || required.compareTo(maximum) > 0
+                || normalized.precision() > COORDINATE_PRECISION
+                || normalized.scale() > COORDINATE_SCALE) {
+            throw new IllegalArgumentException(
+                    fieldName + " is outside the supported coordinate range or precision");
+        }
     }
 
     private static String requireNonBlank(String value, String message) {

@@ -15,6 +15,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -154,6 +155,37 @@ class StoreTest {
         assertThat(store.getAddressVersion()).isEqualTo(1L);
         assertThat(store.getGeocodingAddressVersion()).isEqualTo(1L);
         assertThat(store.getLatitude()).isEqualByComparingTo("37.566826000000000");
+    }
+
+    @Test
+    @DisplayName("검증 생성은 좌표 범위와 DECIMAL(18,15) 정밀도를 벗어난 값을 거부한다")
+    void verifiedCreateRejectsOutOfRangeAndOverPrecisionCoordinates() {
+        for (VerifiedStoreGeocoding invalid : invalidGeocodings()) {
+            assertThatThrownBy(() -> createVerifiedStore(invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("위치 변경은 잘못된 좌표를 거부하고 기존 위치와 좌표를 보존한다")
+    void locationUpdateRejectsInvalidCoordinatesBeforeMutation() {
+        for (VerifiedStoreGeocoding invalid : invalidGeocodings()) {
+            Store store = createVerifiedStore(verifiedGeocoding(
+                    "37.566826000000000",
+                    "126.978656700000000",
+                    "서울 중구 세종대로 110"));
+
+            assertThatThrownBy(() -> store.update(
+                    null, null, Region.BUSAN, "부산 연제구 중앙대로 1001",
+                    null, null, null, null, null, null, invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(store.getRegion()).isEqualTo(Region.SEOUL);
+            assertThat(store.getAddress()).isEqualTo("서울 중구 세종대로 110");
+            assertThat(store.getAddressVersion()).isEqualTo(1L);
+            assertThat(store.getLatitude()).isEqualByComparingTo("37.566826000000000");
+            assertThat(store.getLongitude()).isEqualByComparingTo("126.978656700000000");
+        }
     }
 
     @Test
@@ -490,5 +522,21 @@ class StoreTest {
                 GEOCODING_VERIFIED_AT,
                 "KAKAO_LOCAL",
                 "v2");
+    }
+
+    private List<VerifiedStoreGeocoding> invalidGeocodings() {
+        return List.of(
+                verifiedGeocoding(
+                        "91.000000000000000",
+                        "126.978656700000000",
+                        "서울 중구 세종대로 110"),
+                verifiedGeocoding(
+                        "37.566826000000000",
+                        "181.000000000000000",
+                        "서울 중구 세종대로 110"),
+                verifiedGeocoding(
+                        "37.1234567890123456",
+                        "126.978656700000000",
+                        "서울 중구 세종대로 110"));
     }
 }

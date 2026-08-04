@@ -176,28 +176,41 @@ public class StoreService {
         if (request.region() == null && request.address() == null) {
             return null;
         }
-        Region region = request.region();
-        String address = request.address();
-        if (region == null || address == null) {
-            Store snapshot = loadManagedStore(operatorAccountId, storeId);
-            region = region == null ? snapshot.getRegion() : region;
-            address = address == null ? snapshot.getAddress() : address;
-        }
-        return geocode(region, address);
+        Store snapshot = loadManagedStore(operatorAccountId, storeId);
+        Region region = request.region() == null
+                ? snapshot.getRegion()
+                : request.region();
+        String address = request.address() == null
+                ? snapshot.getAddress()
+                : request.address();
+        return geocode(region, address, snapshot.getAddressVersion());
     }
 
     private GeocodingPreflight geocode(Region region, String address) {
+        return geocode(region, address, null);
+    }
+
+    private GeocodingPreflight geocode(
+            Region region,
+            String address,
+            Long sourceAddressVersion
+    ) {
         try {
             return GeocodingPreflight.succeeded(
                     region,
                     address,
+                    sourceAddressVersion,
                     geocodingValidator.validate(
                             region,
                             address,
                             geocodingPort.geocode(address),
                             clock.instant()));
         } catch (ServiceException failure) {
-            return GeocodingPreflight.failed(region, address, failure);
+            return GeocodingPreflight.failed(
+                    region,
+                    address,
+                    sourceAddressVersion,
+                    failure);
         }
     }
 
@@ -215,7 +228,10 @@ public class StoreService {
         String effectiveAddress = request.address() == null
                 ? store.getAddress()
                 : request.address();
-        geocoding.requireSource(effectiveRegion, effectiveAddress);
+        geocoding.requireSource(
+                effectiveRegion,
+                effectiveAddress,
+                store.getAddressVersion());
         return geocoding.requireVerified();
     }
 
@@ -402,6 +418,7 @@ public class StoreService {
     private record GeocodingPreflight(
             Region region,
             String address,
+            Long sourceAddressVersion,
             VerifiedStoreGeocoding verified,
             ServiceException failure
     ) {
@@ -409,21 +426,40 @@ public class StoreService {
         private static GeocodingPreflight succeeded(
                 Region region,
                 String address,
+                Long sourceAddressVersion,
                 VerifiedStoreGeocoding verified
         ) {
-            return new GeocodingPreflight(region, address, verified, null);
+            return new GeocodingPreflight(
+                    region,
+                    address,
+                    sourceAddressVersion,
+                    verified,
+                    null);
         }
 
         private static GeocodingPreflight failed(
                 Region region,
                 String address,
+                Long sourceAddressVersion,
                 ServiceException failure
         ) {
-            return new GeocodingPreflight(region, address, null, failure);
+            return new GeocodingPreflight(
+                    region,
+                    address,
+                    sourceAddressVersion,
+                    null,
+                    failure);
         }
 
-        private void requireSource(Region effectiveRegion, String effectiveAddress) {
-            if (region != effectiveRegion || !Objects.equals(address, effectiveAddress)) {
+        private void requireSource(
+                Region effectiveRegion,
+                String effectiveAddress,
+                long effectiveAddressVersion
+        ) {
+            if (sourceAddressVersion == null
+                    || sourceAddressVersion != effectiveAddressVersion
+                    || region != effectiveRegion
+                    || !Objects.equals(address, effectiveAddress)) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }
         }

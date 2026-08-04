@@ -18,6 +18,12 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -140,6 +146,85 @@ class StoreGeocodingTransactionIT {
                 .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
 
         assertThat(locationRow(storeId)).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("지오코딩 중 다른 위치 버전이 commit되면 잠금 후 stale 요청을 거부한다")
+    void interveningLocationCommitRejectsStalePreflight() throws Exception {
+        long operatorId = createOperator("geocoding-concurrency@example.com");
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult(
+                        "서울 중구 세종대로 110",
+                        "서울",
+                        "37.566826000000000",
+                        "126.978656700000000"));
+        StoreCommandResult created = storeService.create(
+                operatorId,
+                IdempotencyKey.parse("123e4567-e89b-12d3-a456-426614174104"),
+                createRequest());
+        long storeId = Long.parseLong(created.data().storeId());
+
+        CountDownLatch providerStarted = new CountDownLatch(1);
+        CountDownLatch providerMayReturn = new CountDownLatch(1);
+        given(geocodingPort.geocode("서울 중구 세종대로 120"))
+                .willAnswer(invocation -> {
+                    providerStarted.countDown();
+                    if (!providerMayReturn.await(10, TimeUnit.SECONDS)) {
+                        throw new AssertionError("provider release was not signalled");
+                    }
+                    return geocodingResult(
+                            "서울 중구 세종대로 120",
+                            "서울",
+                            "37.566900000000000",
+                            "126.978700000000000");
+                });
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<StoreCommandResult> staleUpdate = executor.submit(() -> storeService.update(
+                    operatorId,
+                    storeId,
+                    IdempotencyKey.parse("123e4567-e89b-12d3-a456-426614174105"),
+                    new StoreUpdateRequest(
+                            null, null, Region.SEOUL, "서울 중구 세종대로 120",
+                            null, null, null, null)));
+
+            assertThat(providerStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            int updated = jdbcTemplate.update("""
+                    UPDATE stores
+                    SET address = ?,
+                        address_version = address_version + 1,
+                        geocoding_status = 'UNVERIFIED',
+                        latitude = NULL,
+                        longitude = NULL,
+                        verified_address = NULL,
+                        geocoding_verified_at = NULL,
+                        geocoding_address_version = NULL,
+                        geocoding_provider = NULL,
+                        geocoding_provider_api_version = NULL
+                    WHERE store_id = ?
+                    """, "서울 중구 을지로 100", storeId);
+            assertThat(updated).isEqualTo(1);
+            providerMayReturn.countDown();
+
+            assertThatThrownBy(() -> staleUpdate.get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .satisfies(error -> {
+                        ServiceException cause = (ServiceException) error.getCause();
+                        assertThat(cause.getErrorCode())
+                                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                    });
+
+            StoreLocationRow row = locationRow(storeId);
+            assertThat(row.address()).isEqualTo("서울 중구 을지로 100");
+            assertThat(row.addressVersion()).isEqualTo(2L);
+            assertThat(row.geocodingStatus()).isEqualTo("UNVERIFIED");
+            assertThat(row.latitude()).isNull();
+            assertThat(row.longitude()).isNull();
+        } finally {
+            providerMayReturn.countDown();
+            executor.shutdownNow();
+        }
     }
 
     private long createOperator(String email) {

@@ -24,8 +24,12 @@ public class StoreGeocodingValidator {
     private static final BigDecimal MAX_LATITUDE = new BigDecimal("90");
     private static final BigDecimal MIN_LONGITUDE = new BigDecimal("-180");
     private static final BigDecimal MAX_LONGITUDE = new BigDecimal("180");
+    private static final int COORDINATE_PRECISION = 18;
+    private static final int COORDINATE_SCALE = 15;
     private static final Pattern ADDRESS_SEPARATORS =
             Pattern.compile("[\\s\\p{Z}\\-_,.()\\[\\]]+");
+    private static final Pattern DETAIL_ADDRESS_TOKEN = Pattern.compile(
+            "(?:지하)?[0-9a-z가-힣]+(?:층|호|동|실|관|빌딩|건물|상가)");
 
     /**
      * 후보 수, 주소·지역, 좌표와 최소 제공자 메타데이터를 검증한다.
@@ -85,8 +89,11 @@ public class StoreGeocodingValidator {
         }
         try {
             BigDecimal coordinate = new BigDecimal(value);
+            BigDecimal normalized = coordinate.stripTrailingZeros();
             if (coordinate.compareTo(minimum) < 0
-                    || coordinate.compareTo(maximum) > 0) {
+                    || coordinate.compareTo(maximum) > 0
+                    || normalized.precision() > COORDINATE_PRECISION
+                    || normalized.scale() > COORDINATE_SCALE) {
                 throw validationFailure();
             }
             return coordinate;
@@ -117,7 +124,26 @@ public class StoreGeocodingValidator {
         if (requested.isEmpty() || provider.isEmpty()) {
             return false;
         }
-        return requested.equals(provider) || requested.startsWith(provider + " ");
+        if (requested.equals(provider)) {
+            return true;
+        }
+        String providerPrefix = provider + " ";
+        if (!requested.startsWith(providerPrefix)) {
+            return false;
+        }
+        return safeDetailSuffix(requested.substring(providerPrefix.length()));
+    }
+
+    private static boolean safeDetailSuffix(String suffix) {
+        if (suffix.isBlank()) {
+            return false;
+        }
+        for (String token : suffix.split(" ")) {
+            if (!DETAIL_ADDRESS_TOKEN.matcher(token).matches()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void requireRegion(Region region, String region1DepthName) {

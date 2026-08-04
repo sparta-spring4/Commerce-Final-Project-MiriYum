@@ -6,7 +6,7 @@
 
 **Architecture:** `StoreService` performs provider-neutral geocoding before opening a database transaction, captures success or failure, and enters a short transaction through `StoreCommandTransactionExecutor` so `IdempotencyExecutor` can either replay an old result or execute the new write. `KakaoLocalGeocodingAdapter` only maps HTTP data into provider-neutral candidates; `StoreGeocodingValidator` owns strict address, Region, cardinality, and coordinate checks; `Store` owns versioned coordinate invariants.
 
-**Tech Stack:** Java 21, Spring Boot 4.1.0, Spring MVC `RestClient`, Spring Data JPA, Flyway V20, MySQL 8, JUnit 5, Mockito, WireMock 3.13.1 standalone, Testcontainers MySQL.
+**Tech Stack:** Java 21, Spring Boot 4.1.0, Spring MVC `RestClient`, Spring Data JPA, Flyway V21, MySQL 8, JUnit 5, Mockito, WireMock 3.13.1 standalone, Testcontainers MySQL.
 
 ## Global Constraints
 
@@ -24,7 +24,7 @@
 
 ## File map
 
-- `backend/src/main/resources/db/migration/V20__add_store_geocoding.sql`: columns, legacy backfill, coordinate/version CHECK constraints.
+- `backend/src/main/resources/db/migration/V21__add_store_geocoding.sql`: columns, legacy backfill, coordinate/version CHECK constraints.
 - `backend/src/main/java/com/miriyum/domain/store/core/enums/GeocodingStatus.java`: `UNVERIFIED` and `VERIFIED` persistence vocabulary.
 - `backend/src/main/java/com/miriyum/domain/store/core/model/StoreGeocodingCandidate.java`: provider-neutral raw candidate strings.
 - `backend/src/main/java/com/miriyum/domain/store/core/model/StoreGeocodingResult.java`: provider-neutral cardinality and candidate envelope.
@@ -48,7 +48,7 @@
 ### Task 1: Versioned geocoding persistence invariant
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V20__add_store_geocoding.sql`
+- Create: `backend/src/main/resources/db/migration/V21__add_store_geocoding.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/store/core/enums/GeocodingStatus.java`
 - Create: `backend/src/main/java/com/miriyum/domain/store/core/model/VerifiedStoreGeocoding.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/store/core/entity/Store.java`
@@ -145,7 +145,7 @@ public record VerifiedStoreGeocoding(
 
 `Store.createVerified` must require verified data, initialize `addressVersion` to 1, and call a private `applyVerifiedGeocoding`. Preserve the existing public `Store.create` signature for legacy-compatible test fixtures and initialize it to `addressVersion = 1`, `UNVERIFIED`, and null coordinate metadata; `StoreService` must stop using this legacy factory in Task 4. Add the location-aware `Store.update` overload while retaining the current signature as a temporary compile-compatible delegate that passes null geocoding and therefore fails closed if old code attempts a location change. Task 4 switches `StoreService` to the verified overload and removes that delegate if no callers remain. The location-aware method must calculate `boolean locationTouched = region != null || address != null`; only that branch requires verified data, updates effective Region/address, increments `addressVersion`, and replaces all geocoding fields. Other field updates retain current geocoding unchanged.
 
-- [ ] **Step 4: Write the failing V20 migration test**
+- [ ] **Step 4: Write the failing V21 migration test**
 
 Start MySQL with Flyway target 19, insert a legacy store, migrate to 20, and assert:
 
@@ -158,7 +158,7 @@ assertThat(row.getObject("geocoding_address_version")).isNull();
 
 Also issue direct SQL that attempts `VERIFIED` with missing metadata, mismatched versions, latitude 91, and longitude 181; each statement must throw `SQLException`.
 
-- [ ] **Step 5: Implement V20 and pass entity/migration tests**
+- [ ] **Step 5: Implement V21 and pass entity/migration tests**
 
 Use `DECIMAL(18,15)` for both coordinates, `DATETIME(6)` for `geocoding_verified_at`, and CHECK constraints with these two valid shapes:
 
@@ -191,7 +191,7 @@ Run both focused test classes. Expected: PASS.
 - [ ] **Step 6: Commit the persistence invariant**
 
 ```bash
-git add backend/src/main/resources/db/migration/V20__add_store_geocoding.sql backend/src/main/java/com/miriyum/domain/store/core backend/src/test/java/com/miriyum/domain/store/core
+git add backend/src/main/resources/db/migration/V21__add_store_geocoding.sql backend/src/main/java/com/miriyum/domain/store/core backend/src/test/java/com/miriyum/domain/store/core
 git commit -m "feat(store): persist versioned geocoding coordinates"
 ```
 
@@ -266,7 +266,7 @@ Accept both road and parcel matches, repeated whitespace/punctuation differences
 
 - [ ] **Step 5: Implement strict semantic matching and pass the suite**
 
-Normalize with Unicode NFKC, lowercase, and removal of Unicode whitespace plus `-_,.()[]`. A provider address is valid only when the normalized request equals it or starts with it and the remaining suffix is nonempty detail text; never accept a provider address that merely contains the request. Validate Region against normalized `region1DepthName` before creating `VerifiedStoreGeocoding`.
+Normalize with Unicode NFKC, lowercase, and removal of Unicode whitespace plus `-_,.()[]`. A provider address is valid only when the normalized request equals it or starts with it and every remaining token is a floor/unit/building detail token such as `3층`, `301호`, `A동`, `본관`, or `미리윰빌딩`; never accept a second address or an arbitrary sentence as detail text. Validate Region against normalized `region1DepthName` before creating `VerifiedStoreGeocoding`.
 
 Run the focused validator test. Expected: PASS.
 
@@ -519,7 +519,7 @@ Expected: no committed literal key or sensitive header value.
 
 Run: `git diff --name-only origin/dev...HEAD`
 
-Expected: every path is one of the exact issue paths; V20 is the only new migration and no frontend path appears.
+Expected: every path is one of the exact issue paths; V21 is the only geocoding migration and no frontend path appears.
 
 - [ ] **Step 5: Request independent code review and remediate important findings**
 

@@ -64,11 +64,11 @@ Store service는 `StoreGeocodingPort`만 의존한다. `KakaoLocalGeocodingAdapt
 4. 요청 `Region`이 Kakao 주소의 `region_1depth_name`과 일치한다.
 5. 검증 주소와 좌표를 구성하는 필수 필드가 존재한다.
 
-주소 정규화는 Unicode·공백·일반 구두점 차이를 제거하되 행정구역이나 도로/번지 숫자를 바꾸지 않는다. Kakao가 반환하는 정식 주소 뒤에 입력의 상세 주소가 붙은 경우는 허용한다. 정식 주소 자체가 입력의 접두부로 확인되지 않는 fuzzy 후보는 거절한다.
+주소 정규화는 Unicode·공백·일반 구두점 차이를 제거하되 행정구역이나 도로/번지 숫자를 바꾸지 않는다. Kakao가 반환하는 정식 주소 뒤에는 층·호·동·실·관·빌딩·건물·상가 형태의 상세주소 token만 허용한다. 두 번째 주소나 일반 문장은 상세주소로 허용하지 않으며, 정식 주소 자체가 입력의 접두부로 확인되지 않는 fuzzy 후보도 거절한다.
 
 ## 5. Persistence model and invariants
 
-`stores`에 V20 migration으로 다음 컬럼을 추가한다.
+`stores`에 V21 migration으로 다음 컬럼을 추가한다.
 
 - `address_version BIGINT NOT NULL DEFAULT 1`
 - `geocoding_status VARCHAR(...) NOT NULL DEFAULT 'UNVERIFIED'`
@@ -134,7 +134,7 @@ geocoding:
 - Validator unit: 단일/0/복수 후보, 상세 주소 정규화, 주소·Region 불일치, 필수 필드, 좌표 parsing/range
 - WireMock adapter: 성공, 0건, 복수, timeout, 429, 5xx, malformed JSON
 - Service: network call이 transaction 밖임, 실패 시 미저장, 변경 실패 시 기존 값 보존, 주소·Region 없는 PATCH 미호출, Region-only 재검증, preflight 후 동시 변경 거절, 동일 key replay
-- Testcontainers MySQL: V20 legacy backfill, CHECK constraints, 주소 버전·좌표 원자 저장
+- Testcontainers MySQL: V21 legacy backfill, CHECK constraints, 주소 버전·좌표 원자 저장
 - MockMvc/OpenAPI: `geocoding` 응답과 400/503 mapping
 - final gates: focused tests, backend full test, `git diff --check`, Issue allowlist audit
 

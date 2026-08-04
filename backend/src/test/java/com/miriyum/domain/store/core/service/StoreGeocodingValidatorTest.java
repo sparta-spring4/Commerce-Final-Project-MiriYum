@@ -101,6 +101,24 @@ class StoreGeocodingValidatorTest {
         assertThat(verified.verifiedAddress()).isEqualTo("서울특별시 중구 세종대로 110");
     }
 
+    @ParameterizedTest
+    @MethodSource("unsafeDetailAddresses")
+    @DisplayName("정식 주소 뒤의 두 번째 주소나 일반 문장은 상세주소로 허용하지 않는다")
+    void rejectsUnsafeDetailSuffix(String requestedAddress) {
+        StoreGeocodingCandidate candidate = new StoreGeocodingCandidate(
+                "서울 중구 세종대로 110",
+                null,
+                "서울",
+                "126.978656700000000",
+                "37.566826000000000");
+
+        assertValidationFailure(() -> validator.validate(
+                Region.SEOUL,
+                requestedAddress,
+                result(candidate),
+                VERIFIED_AT));
+    }
+
     @Test
     @DisplayName("도로명 주소가 달라도 지번 주소가 일치하면 해당 정식 주소를 사용한다")
     void acceptsMatchingParcelAddress() {
@@ -248,6 +266,8 @@ class StoreGeocodingValidatorTest {
                 Arguments.of(candidate("-90.000000000000001", "126.978656700000000")),
                 Arguments.of(candidate("37.566826000000000", "180.000000000000001")),
                 Arguments.of(candidate("37.566826000000000", "-180.000000000000001")),
+                Arguments.of(candidate("37.1234567890123456", "126.978656700000000")),
+                Arguments.of(candidate("37.566826000000000", "126.1234567890123456")),
                 Arguments.of(candidate(" ", "126.978656700000000")),
                 Arguments.of(candidate("37.566826000000000", null)));
     }
@@ -286,6 +306,12 @@ class StoreGeocodingValidatorTest {
                 Arguments.of(Region.DAEGU, "대구 중구 공평로 88", "대구"),
                 Arguments.of(Region.DAEJEON, "대전 서구 둔산로 100", "대전광역시"),
                 Arguments.of(Region.GWANGJU, "광주 서구 내방로 111", "광주"));
+    }
+
+    private static Stream<String> unsafeDetailAddresses() {
+        return Stream.of(
+                "서울 중구 세종대로 110 서울 중구 을지로 100",
+                "서울 중구 세종대로 110 배달은 후문으로");
     }
 
     private static StoreGeocodingResult result(StoreGeocodingCandidate candidate) {

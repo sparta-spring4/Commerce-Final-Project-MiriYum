@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.store.core.dto.ManagedStoreResponse;
 import com.miriyum.domain.store.core.dto.StoreCreateRequest;
@@ -625,6 +626,71 @@ class StoreServiceTest {
         assertThat(locked.getAddress()).isEqualTo("서울시 중구");
         assertThat(locked.getAddressVersion()).isEqualTo(1L);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void bothLocationFieldsRejectInterveningAddressVersionChange() {
+        Store snapshot = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(snapshot, "id", STORE_ID);
+        Store locked = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(locked, "id", STORE_ID);
+        ReflectionTestUtils.setField(locked, "addressVersion", 2L);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, Region.SEOUL, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        lenient().when(storeRepository.findById(STORE_ID)).thenReturn(Optional.of(snapshot));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(locked));
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        assertThat(locked.getAddress()).isEqualTo("서울시 중구");
+        assertThat(locked.getAddressVersion()).isEqualTo(2L);
+        then(storeRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    void explicitAddressRejectsInterveningAddressChangeWithSameRegion() {
+        Store snapshot = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(snapshot, "id", STORE_ID);
+        Store locked = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(locked, "id", STORE_ID);
+        ReflectionTestUtils.setField(locked, "address", "서울 중구 을지로 100");
+        ReflectionTestUtils.setField(locked, "addressVersion", 2L);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, null, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(snapshot));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(locked));
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        assertThat(locked.getAddress()).isEqualTo("서울 중구 을지로 100");
+        assertThat(locked.getAddressVersion()).isEqualTo(2L);
+        then(storeRepository).should(never()).saveAndFlush(any());
     }
 
     @Test
