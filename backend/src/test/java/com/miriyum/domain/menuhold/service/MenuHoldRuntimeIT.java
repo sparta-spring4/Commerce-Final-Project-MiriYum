@@ -448,12 +448,12 @@ class MenuHoldRuntimeIT {
     }
 
     private MenuHoldCreateCommand command(long reservationId, int quantity, String operationId) {
-        return new MenuHoldCreateCommand(String.valueOf(reservationId), String.valueOf(storeId),
-                String.valueOf(consumerId), LocalDate.of(2026, 8, 10), LocalTime.NOON,
+        return new MenuHoldCreateCommand(reservationId, storeId,
+                consumerId, LocalDate.of(2026, 8, 10), LocalTime.NOON,
                 LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                 Instant.parse("2026-08-10T03:00:00Z"),
                 Instant.parse("2026-08-10T04:00:00Z"), operationId,
-                List.of(new MenuSelection(String.valueOf(menuId), quantity)));
+                List.of(new MenuSelection(menuId, quantity)));
     }
 
     private MenuInventoryBucket bucket(int online) {

@@ -40,7 +40,7 @@ class MenuInventoryService {
             java.time.LocalTime endTime
     ) {
         Map<Long, Integer> quantities = selections.stream().collect(Collectors.toMap(
-                selection -> Long.parseLong(selection.menuId()),
+                MenuSelection::menuId,
                 MenuSelection::quantity));
         List<CurrentInventoryBucketView> buckets = bucketRepository.findCurrentSelections(
                 quantities.keySet(), serviceDate, startTime, endDate, endTime);

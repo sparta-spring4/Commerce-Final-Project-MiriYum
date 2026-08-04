@@ -37,14 +37,14 @@ class MenuHoldCreateServiceTest {
 
     @Test
     void createsConfirmedHoldAfterEligibilityIntervalAndInventorySucceed() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
         given(inventoryService.loadCurrentSelections(
-                List.of(new MenuSelection("40", 2)), command.serviceDate(), command.startTime(),
+                List.of(new MenuSelection(40L, 2)), command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime())).willReturn(List.of(inventory));
         given(intervalService.validateServiceIntervals(org.mockito.ArgumentMatchers.anyList()))
                 .willReturn(List.of(new StoreServiceIntervalResult(
@@ -58,19 +58,19 @@ class MenuHoldCreateServiceTest {
 
         MenuHoldCommandResult result = service().create(command);
 
-        assertThat(result).isEqualTo(MenuHoldCommandResult.confirmed("10"));
+        assertThat(result).isEqualTo(MenuHoldCommandResult.confirmed(10L));
     }
 
     @Test
     void rejectsMalformedServiceIntervalResultBeforeInventoryAcquisition() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
         given(inventoryService.loadCurrentSelections(
-                List.of(new MenuSelection("40", 2)), command.serviceDate(), command.startTime(),
+                List.of(new MenuSelection(40L, 2)), command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime())).willReturn(List.of(inventory));
         given(intervalService.validateServiceIntervals(org.mockito.ArgumentMatchers.anyList()))
                 .willReturn(List.of());
@@ -83,14 +83,14 @@ class MenuHoldCreateServiceTest {
 
     @Test
     void rejectsAcceptingServiceIntervalResultForDifferentRequest() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), 2);
         given(inventoryService.loadCurrentSelections(
-                List.of(new MenuSelection("40", 2)), command.serviceDate(), command.startTime(),
+                List.of(new MenuSelection(40L, 2)), command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime())).willReturn(List.of(inventory));
         given(intervalService.validateServiceIntervals(org.mockito.ArgumentMatchers.anyList()))
                 .willReturn(List.of(new StoreServiceIntervalResult(
@@ -106,11 +106,11 @@ class MenuHoldCreateServiceTest {
     @Test
     void validatesTheExactInstantSelectedForDstOverlap() {
         MenuHoldCreateCommand command = new MenuHoldCreateCommand(
-                "10", "20", "30", LocalDate.of(2026, 11, 1), LocalTime.of(1, 30),
+                10L, 20L, 30L, LocalDate.of(2026, 11, 1), LocalTime.of(1, 30),
                 LocalDate.of(2026, 11, 1), LocalTime.of(2, 30),
                 Instant.parse("2026-11-01T06:30:00Z"),
                 Instant.parse("2026-11-01T07:30:00Z"),
-                "operation-dst-overlap", List.of(new MenuSelection("40", 1)));
+                "operation-dst-overlap", List.of(new MenuSelection(40L, 1)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
@@ -134,7 +134,7 @@ class MenuHoldCreateServiceTest {
 
     @Test
     void rejectsInventoryIntervalThatDoesNotMatchResolvedInstants() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         given(storeService.requireMenuTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection mismatchedInventory = new CurrentInventorySelection(
@@ -154,7 +154,7 @@ class MenuHoldCreateServiceTest {
 
     @Test
     void propagatesUnexpectedDataIntegrityViolationWithoutMaskingIt() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         prepareSuccessfulDependencies(command);
         DataIntegrityViolationException failure =
                 new DataIntegrityViolationException("fk_menu_holds_reservation");
@@ -166,7 +166,7 @@ class MenuHoldCreateServiceTest {
 
     @Test
     void mapsKnownDuplicateConstraintToInventoryStateConflict() {
-        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
         prepareSuccessfulDependencies(command);
         given(holdRepository.saveAndFlush(org.mockito.ArgumentMatchers.any()))
                 .willThrow(new DataIntegrityViolationException(
@@ -210,7 +210,7 @@ class MenuHoldCreateServiceTest {
 
     private static MenuHoldCreateCommand command(List<MenuSelection> selections) {
         return new MenuHoldCreateCommand(
-                "10", "20", "30", LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                10L, 20L, 30L, LocalDate.of(2026, 8, 10), LocalTime.NOON,
                 LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                 Instant.parse("2026-08-10T03:00:00Z"),
                 Instant.parse("2026-08-10T04:00:00Z"),

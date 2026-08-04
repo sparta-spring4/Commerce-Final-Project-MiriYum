@@ -44,11 +44,11 @@ public class MenuHoldServiceRuntime {
         if (command.menuSelections().isEmpty()) {
             return MenuHoldCommandResult.noHold(command.reservationId());
         }
-        long reservationId = parseId(command.reservationId());
-        long storeId = parseId(command.storeId());
-        long consumerId = parseId(command.consumerAccountId());
+        long reservationId = command.reservationId();
+        long storeId = command.storeId();
+        long consumerId = command.consumerAccountId();
         List<MenuSelection> selections = command.menuSelections().stream()
-                .sorted(Comparator.comparingLong(selection -> parseId(selection.menuId())))
+                .sorted(Comparator.comparingLong(MenuSelection::menuId))
                 .toList();
         if (holdRepository.existsByReservationId(reservationId)
                 || holdRepository.existsByAcquireOperationId(command.operationId())) {
@@ -57,7 +57,7 @@ public class MenuHoldServiceRuntime {
 
         Map<Long, MenuTransactionEligibility> eligibilityByMenuId = new HashMap<>();
         for (MenuSelection selection : selections) {
-            long menuId = parseId(selection.menuId());
+            long menuId = selection.menuId();
             MenuTransactionEligibility eligibility;
             try {
                 eligibility = storeService.requireMenuTransactionEligibility(storeId, menuId);
@@ -169,15 +169,4 @@ public class MenuHoldServiceRuntime {
         return false;
     }
 
-    private static long parseId(String value) {
-        try {
-            long id = Long.parseLong(value);
-            if (id <= 0) {
-                throw new NumberFormatException();
-            }
-            return id;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException("public ID must be a positive BIGINT", exception);
-        }
-    }
 }

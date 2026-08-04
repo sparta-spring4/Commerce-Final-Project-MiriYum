@@ -41,11 +41,11 @@ class MenuHoldServiceConsumerContractTest {
     @Test
     void createCommandCarriesAllContextNeededWithoutReservationTypes() {
         MenuHoldCreateCommand command = createCommand(
-                "reservation-01", "operation-create-01", List.of(selection()));
+                1L, "operation-create-01", List.of(selection()));
 
-        assertThat(command.reservationId()).isEqualTo("reservation-01");
-        assertThat(command.storeId()).isEqualTo("store-01");
-        assertThat(command.consumerAccountId()).isEqualTo("consumer-01");
+        assertThat(command.reservationId()).isEqualTo(1L);
+        assertThat(command.storeId()).isEqualTo(2L);
+        assertThat(command.consumerAccountId()).isEqualTo(3L);
         assertThat(command.serviceDate()).isEqualTo(SERVICE_DATE);
         assertThat(command.startTime()).isEqualTo(START_TIME);
         assertThat(command.endDate()).isEqualTo(SERVICE_DATE);
@@ -55,32 +55,48 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     @Test
+    void internalCommandsRejectNonPositiveIds() {
+        assertThatThrownBy(() -> createCommandWithIds(0L, 2L, 3L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("reservationId must be positive");
+        assertThatThrownBy(() -> createCommandWithIds(1L, 0L, 3L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeId must be positive");
+        assertThatThrownBy(() -> createCommandWithIds(1L, 2L, 0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("consumerAccountId must be positive");
+        assertThatThrownBy(() -> new MenuSelection(0L, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menuId must be positive");
+    }
+
+    @Test
     void createCommandNormalizesDuplicateMenusBeforeTheFixtureRecordsIt() {
         ReservationMenuHoldContractFixture fixture =
                 ReservationMenuHoldContractFixture.succeeding();
         MenuHoldCreateCommand command = createCommand(
-                "reservation-01",
+                1L,
                 "operation-create-01",
                 List.of(
-                        new MenuSelection("menu-01", 2),
-                        new MenuSelection("menu-02", 1),
-                        new MenuSelection("menu-01", 3)));
+                        new MenuSelection(4L, 2),
+                        new MenuSelection(5L, 1),
+                        new MenuSelection(4L, 3)));
 
         fixture.create(command);
 
         assertThat(fixture.createCommands().getFirst().menuSelections()).containsExactly(
-                new MenuSelection("menu-01", 5),
-                new MenuSelection("menu-02", 1));
+                new MenuSelection(4L, 5),
+                new MenuSelection(5L, 1));
     }
 
     @Test
     void createCommandRejectsAnOverflowingDuplicateMenuQuantity() {
         assertThatThrownBy(() -> createCommand(
-                "reservation-01",
+                1L,
                 "operation-create-01",
                 List.of(
-                        new MenuSelection("menu-01", Integer.MAX_VALUE),
-                        new MenuSelection("menu-01", 1))))
+                        new MenuSelection(4L, Integer.MAX_VALUE),
+                        new MenuSelection(4L, 1))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("menu selection quantity sum exceeds integer range");
     }
@@ -88,9 +104,9 @@ class MenuHoldServiceConsumerContractTest {
     @Test
     void createCommandAcceptsAnOvernightServiceWindow() {
         MenuHoldCreateCommand command = new MenuHoldCreateCommand(
-                "reservation-01",
-                "store-01",
-                "consumer-01",
+                1L,
+                2L,
+                3L,
                 SERVICE_DATE,
                 LocalTime.of(23, 30),
                 SERVICE_DATE.plusDays(1),
@@ -107,9 +123,9 @@ class MenuHoldServiceConsumerContractTest {
     @Test
     void createCommandRejectsAServiceWindowThatDoesNotIncrease() {
         assertThatThrownBy(() -> new MenuHoldCreateCommand(
-                "reservation-01",
-                "store-01",
-                "consumer-01",
+                1L,
+                2L,
+                3L,
                 SERVICE_DATE,
                 LocalTime.of(23, 30),
                 SERVICE_DATE,
@@ -125,22 +141,22 @@ class MenuHoldServiceConsumerContractTest {
     @Test
     void releaseAndFulfillHideTheSourceAcquireOperationFromReservation() {
         MenuHoldReleaseCommand release =
-                new MenuHoldReleaseCommand("reservation-01", "operation-release-01");
+                new MenuHoldReleaseCommand(1L, "operation-release-01");
         MenuHoldFulfillCommand fulfill =
-                new MenuHoldFulfillCommand("reservation-01", "operation-fulfill-01");
+                new MenuHoldFulfillCommand(1L, "operation-fulfill-01");
 
-        assertThat(release.reservationId()).isEqualTo("reservation-01");
+        assertThat(release.reservationId()).isEqualTo(1L);
         assertThat(release.operationId()).isEqualTo("operation-release-01");
-        assertThat(fulfill.reservationId()).isEqualTo("reservation-01");
+        assertThat(fulfill.reservationId()).isEqualTo(1L);
         assertThat(fulfill.operationId()).isEqualTo("operation-fulfill-01");
     }
 
     @Test
     void commandResultExposesOnlyReservationOutcome() {
         MenuHoldCommandResult result =
-                MenuHoldCommandResult.confirmed("reservation-01");
+                MenuHoldCommandResult.confirmed(1L);
 
-        assertThat(result.reservationId()).isEqualTo("reservation-01");
+        assertThat(result.reservationId()).isEqualTo(1L);
         assertThat(result.outcome()).isEqualTo(MenuHoldCommandResult.Outcome.CONFIRMED);
     }
 
@@ -151,9 +167,9 @@ class MenuHoldServiceConsumerContractTest {
         ReservationConsumer consumer = new ReservationConsumer(fixture);
 
         MenuHoldCommandResult result = consumer.create(
-                "idempotency-key", "reservation-01", List.of());
+                "idempotency-key", 1L, List.of());
 
-        assertThat(result).isEqualTo(MenuHoldCommandResult.noHold("reservation-01"));
+        assertThat(result).isEqualTo(MenuHoldCommandResult.noHold(1L));
         assertThat(fixture.createCommands()).isEmpty();
     }
 
@@ -167,9 +183,9 @@ class MenuHoldServiceConsumerContractTest {
                 () -> "operation-" + generatedOperationIds.incrementAndGet());
 
         MenuHoldCommandResult first = consumer.create(
-                "idempotency-key", "reservation-01", List.of(selection()));
+                "idempotency-key", 1L, List.of(selection()));
         MenuHoldCommandResult replay = consumer.create(
-                "idempotency-key", "reservation-01", List.of(selection()));
+                "idempotency-key", 1L, List.of(selection()));
 
         assertThat(consumer.events).containsExactly("capacity-locked", "menu-hold-created");
         assertThat(fixture.createCommands()).hasSize(1);
@@ -183,9 +199,9 @@ class MenuHoldServiceConsumerContractTest {
                 ReservationMenuHoldContractFixture.succeeding();
         ReservationConsumer consumer = new ReservationConsumer(fixture);
 
-        consumer.create("create-key", "reservation-01", List.of(selection()));
-        consumer.release("reservation-01");
-        consumer.fulfill("reservation-02");
+        consumer.create("create-key", 1L, List.of(selection()));
+        consumer.release(1L);
+        consumer.fulfill(2L);
 
         assertThat(List.of(
                 fixture.createCommands().getFirst().operationId(),
@@ -201,8 +217,8 @@ class MenuHoldServiceConsumerContractTest {
         ReservationConsumer firstConsumer = new ReservationConsumer(fixture);
         ReservationConsumer secondConsumer = new ReservationConsumer(fixture);
 
-        firstConsumer.create("first-key", "reservation-01", List.of(selection()));
-        secondConsumer.create("second-key", "reservation-02", List.of(selection()));
+        firstConsumer.create("first-key", 1L, List.of(selection()));
+        secondConsumer.create("second-key", 2L, List.of(selection()));
 
         assertThat(fixture.createCommands())
                 .extracting(MenuHoldCreateCommand::operationId)
@@ -218,7 +234,7 @@ class MenuHoldServiceConsumerContractTest {
         ReservationConsumer consumer = new ReservationConsumer(fixture);
 
         assertThatThrownBy(() -> consumer.create(
-                "create-key", "reservation-01", List.of(selection())))
+                "create-key", 1L, List.of(selection())))
                 .isSameAs(ineligible);
         assertThat(MenuHoldErrorCode.INELIGIBLE_MENU.getCode()).isEqualTo("MENU_HOLD_001");
         assertThat(MenuHoldErrorCode.INSUFFICIENT_QUANTITY.getCode()).isEqualTo("MENU_HOLD_002");
@@ -235,14 +251,14 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     private static MenuHoldCreateCommand createCommand(
-            String reservationId,
+            long reservationId,
             String operationId,
             List<MenuSelection> selections
     ) {
         return new MenuHoldCreateCommand(
                 reservationId,
-                "store-01",
-                "consumer-01",
+                2L,
+                3L,
                 SERVICE_DATE,
                 START_TIME,
                 SERVICE_DATE,
@@ -253,8 +269,27 @@ class MenuHoldServiceConsumerContractTest {
                 selections);
     }
 
+    private static MenuHoldCreateCommand createCommandWithIds(
+            long reservationId,
+            long storeId,
+            long consumerAccountId
+    ) {
+        return new MenuHoldCreateCommand(
+                reservationId,
+                storeId,
+                consumerAccountId,
+                SERVICE_DATE,
+                START_TIME,
+                SERVICE_DATE,
+                END_TIME,
+                Instant.parse("2026-08-10T03:00:00Z"),
+                Instant.parse("2026-08-10T04:00:00Z"),
+                "operation-create-01",
+                List.of(selection()));
+    }
+
     private static MenuSelection selection() {
-        return new MenuSelection("menu-01", 2);
+        return new MenuSelection(4L, 2);
     }
 
     private static final class ReservationConsumer {
@@ -277,7 +312,7 @@ class MenuHoldServiceConsumerContractTest {
 
         private MenuHoldCommandResult create(
                 String idempotencyKey,
-                String reservationId,
+                long reservationId,
                 List<MenuSelection> selections
         ) {
             MenuHoldCommandResult replay = replayResults.get(idempotencyKey);
@@ -295,12 +330,12 @@ class MenuHoldServiceConsumerContractTest {
             return result;
         }
 
-        private MenuHoldCommandResult release(String reservationId) {
+        private MenuHoldCommandResult release(long reservationId) {
             return menuHoldService.release(
                     new MenuHoldReleaseCommand(reservationId, nextOperationId()));
         }
 
-        private MenuHoldCommandResult fulfill(String reservationId) {
+        private MenuHoldCommandResult fulfill(long reservationId) {
             return menuHoldService.fulfill(
                     new MenuHoldFulfillCommand(reservationId, nextOperationId()));
         }

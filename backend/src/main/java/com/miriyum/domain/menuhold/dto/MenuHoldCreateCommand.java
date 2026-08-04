@@ -10,9 +10,9 @@ import java.util.Map;
 
 /** 예약 생성 트랜잭션이 메뉴 홀드 생성에 전달하는 공개 명령이다. */
 public record MenuHoldCreateCommand(
-        String reservationId,
-        String storeId,
-        String consumerAccountId,
+        long reservationId,
+        long storeId,
+        long consumerAccountId,
         LocalDate serviceDate,
         LocalTime startTime,
         LocalDate endDate,
@@ -24,9 +24,9 @@ public record MenuHoldCreateCommand(
 ) {
 
     public MenuHoldCreateCommand {
-        requireText(reservationId, "reservationId");
-        requireText(storeId, "storeId");
-        requireText(consumerAccountId, "consumerAccountId");
+        requirePositive(reservationId, "reservationId");
+        requirePositive(storeId, "storeId");
+        requirePositive(consumerAccountId, "consumerAccountId");
         if (serviceDate == null) {
             throw new IllegalArgumentException("serviceDate must not be null");
         }
@@ -45,7 +45,7 @@ public record MenuHoldCreateCommand(
         if (menuSelections.stream().anyMatch(java.util.Objects::isNull)) {
             throw new IllegalArgumentException("menuSelections must not contain null");
         }
-        Map<String, Integer> quantitiesByMenuId = new LinkedHashMap<>();
+        Map<Long, Integer> quantitiesByMenuId = new LinkedHashMap<>();
         for (MenuSelection selection : menuSelections) {
             try {
                 quantitiesByMenuId.merge(
@@ -63,6 +63,12 @@ public record MenuHoldCreateCommand(
     private static void requireText(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");
+        }
+    }
+
+    private static void requirePositive(long value, String field) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(field + " must be positive");
         }
     }
 }
