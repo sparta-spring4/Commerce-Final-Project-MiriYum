@@ -43,11 +43,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -62,6 +67,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
+@Import(ReservationCapacityPublicationIT.LockOrderTestConfiguration.class)
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
@@ -74,6 +80,8 @@ import org.testcontainers.utility.DockerImageName;
 class ReservationCapacityPublicationIT {
 
     private static final LocalDate SERVICE_DATE = LocalDate.of(2026, 8, 10);
+    private static volatile CountDownLatch reservationLockQueryStarted;
+    private static final AtomicInteger RESERVATION_LOCK_QUERY_ATTEMPTS = new AtomicInteger();
 
     @Container
     static final MySQLContainer MYSQL =
@@ -119,6 +127,8 @@ class ReservationCapacityPublicationIT {
 
     @BeforeEach
     void cleanRows() {
+        reservationLockQueryStarted = null;
+        RESERVATION_LOCK_QUERY_ATTEMPTS.set(0);
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
@@ -244,15 +254,30 @@ class ReservationCapacityPublicationIT {
     }
 
     @Test
-    void publicationExcludesAReservationCancelledWhileItWaitsForTheReservationLock()
+    void publicationAndCancellationLockReservationBeforeCapacityBucketWithoutDeadlock()
             throws Exception {
         // given
         OwnerStore owner = createStore("capacity-cancel-race@example.com", "1234567893");
         long reservationId = seedConsumerAndReservation(owner.storeId());
         givenOneHourWindow(owner.storeId());
         acceptEveryStoreInterval();
-        CountDownLatch cancellationUpdated = new CountDownLatch(1);
-        CountDownLatch allowCancellationCommit = new CountDownLatch(1);
+        commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(5),
+                request(8, 2)
+        );
+        Long currentBucketId = jdbcTemplate.queryForObject(
+                "SELECT reservation_capacity_bucket_id "
+                        + "FROM reservation_capacity_allocations "
+                        + "WHERE reservation_id = ?",
+                Long.class,
+                reservationId
+        );
+        CountDownLatch cancellationLockedReservation = new CountDownLatch(1);
+        CountDownLatch publicationStartedReservationLock = new CountDownLatch(1);
+        reservationLockQueryStarted = publicationStartedReservationLock;
 
         // when
         ReservationCapacityCommandResult publication;
@@ -266,42 +291,66 @@ class ReservationCapacityPublicationIT {
                                     Long.class,
                                     reservationId
                             );
+                            cancellationLockedReservation.countDown();
+                            assertThat(await(
+                                    publicationStartedReservationLock,
+                                    5,
+                                    TimeUnit.SECONDS
+                            )).isTrue();
+                            Long allocationBucketId = jdbcTemplate.queryForObject(
+                                    "SELECT reservation_capacity_bucket_id "
+                                            + "FROM reservation_capacity_allocations "
+                                            + "WHERE reservation_id = ? FOR UPDATE",
+                                    Long.class,
+                                    reservationId
+                            );
+                            assertThat(allocationBucketId).isEqualTo(currentBucketId);
+                            jdbcTemplate.queryForObject(
+                                    "SELECT reservation_capacity_bucket_id "
+                                            + "FROM reservation_capacity_buckets "
+                                            + "WHERE reservation_capacity_bucket_id = ? "
+                                            + "FOR UPDATE",
+                                    Long.class,
+                                    allocationBucketId
+                            );
                             jdbcTemplate.update(
                                     "UPDATE reservations "
                                             + "SET status = 'CANCELLED', cancelled_at = NOW(6) "
                                             + "WHERE reservation_id = ?",
                                     reservationId
                             );
-                            cancellationUpdated.countDown();
-                            await(allowCancellationCommit, 4, TimeUnit.SECONDS);
+                            jdbcTemplate.update(
+                                    "UPDATE reservation_capacity_buckets "
+                                            + "SET occupied_people = occupied_people - 5, "
+                                            + "occupied_teams = occupied_teams - 1 "
+                                            + "WHERE reservation_capacity_bucket_id = ?",
+                                    allocationBucketId
+                            );
+                            jdbcTemplate.update(
+                                    "DELETE FROM reservation_capacity_allocations "
+                                            + "WHERE reservation_id = ?",
+                                    reservationId
+                            );
                         });
                 return null;
             });
-            assertThat(cancellationUpdated.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(cancellationLockedReservation.await(5, TimeUnit.SECONDS)).isTrue();
             Future<ReservationCapacityCommandResult> pendingPublication = executor.submit(
                     () -> commandFacade.replace(
                             owner.operatorId(),
                             owner.storeId(),
                             SERVICE_DATE,
-                            key(5),
+                            key(6),
                             request(8, 2)
                     )
             );
-            ReservationCapacityCommandResult completedBeforeCancellation = null;
-            try {
-                completedBeforeCancellation = pendingPublication.get(2, TimeUnit.SECONDS);
-            } catch (TimeoutException expectedLockWait) {
-                // The locking query must wait until the cancellation commits.
-            } finally {
-                allowCancellationCommit.countDown();
-            }
             cancellation.get(10, TimeUnit.SECONDS);
-            publication = completedBeforeCancellation == null
-                    ? pendingPublication.get(10, TimeUnit.SECONDS)
-                    : completedBeforeCancellation;
+            publication = pendingPublication.get(10, TimeUnit.SECONDS);
         }
 
         // then
+        assertThat(RESERVATION_LOCK_QUERY_ATTEMPTS).hasValue(1);
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
         assertThat(publication.data().buckets()).singleElement().satisfies(bucket -> {
             assertThat(bucket.occupiedPeople()).isZero();
             assertThat(bucket.occupiedTeams()).isZero();
@@ -488,5 +537,28 @@ class ReservationCapacityPublicationIT {
     }
 
     private record OwnerStore(long operatorId, long storeId) {
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class LockOrderTestConfiguration {
+
+        @Bean
+        HibernatePropertiesCustomizer reservationLockQueryObserver() {
+            StatementInspector inspector = sql -> {
+                CountDownLatch latch = reservationLockQueryStarted;
+                String normalized = sql.toLowerCase(java.util.Locale.ROOT);
+                if (latch != null
+                        && normalized.contains(" from reservations ")
+                        && normalized.contains(" for update")) {
+                    RESERVATION_LOCK_QUERY_ATTEMPTS.incrementAndGet();
+                    latch.countDown();
+                }
+                return sql;
+            };
+            return properties -> properties.put(
+                    "hibernate.session_factory.statement_inspector",
+                    inspector
+            );
+        }
     }
 }

@@ -106,17 +106,17 @@ public class ReservationCapacityPublicationService {
                     authority,
                     normalized
             );
+            List<Reservation> confirmed =
+                    reservationRepository.findConfirmedForCapacityPublication(
+                            storeId,
+                            serviceDate
+                    );
             List<ReservationCapacityBucket> current =
                     capacityBucketRepository.findLatestPolicyBucketsForUpdate(
                             storeId,
                             serviceDate
                     );
             long nextVersion = nextVersion(current);
-            List<Reservation> confirmed =
-                    reservationRepository.findConfirmedForCapacityPublication(
-                            storeId,
-                            serviceDate
-                    );
             List<ReservationCapacityBucket> next = createBuckets(
                     storeId,
                     serviceDate,

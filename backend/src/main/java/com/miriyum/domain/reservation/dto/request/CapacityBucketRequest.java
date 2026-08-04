@@ -25,4 +25,16 @@ public record CapacityBucketRequest(
         @Min(1) @Max(100) int maxPartySize,
         @NotNull Boolean infantsAllowed
 ) {
+
+    public CapacityBucketRequest {
+        if (hasSubMinutePrecision(startTime) || hasSubMinutePrecision(endTime)) {
+            throw new IllegalArgumentException(
+                    "capacity bucket times must use minute precision"
+            );
+        }
+    }
+
+    private static boolean hasSubMinutePrecision(LocalTime time) {
+        return time != null && (time.getSecond() != 0 || time.getNano() != 0);
+    }
 }
