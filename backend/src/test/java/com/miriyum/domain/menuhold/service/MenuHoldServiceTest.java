@@ -16,7 +16,6 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -75,8 +74,8 @@ class MenuHoldServiceTest {
         given(ledgerRepository.existsRestoreForSourceOperation(
                 request.sourceAcquireOperationId()))
                 .willReturn(false);
-        given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
-        givenCurrent(bucket);
+        given(bucketRepository.findRequestedAndCurrentForUpdate(List.of(3L)))
+                .willReturn(List.of(bucket));
         given(bucketRepository.incrementIfCurrent(3L, 0L, 2, 1)).willReturn(1);
         MenuInventoryService service = service();
 
@@ -84,6 +83,41 @@ class MenuHoldServiceTest {
 
         then(bucketRepository).should().incrementIfCurrent(3L, 0L, 2, 1);
         then(ledgerRepository).should().saveAll(org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void restoresOriginalAndCurrentBucketsUnderOneOrderedLock() {
+        MenuInventoryBucket original = bucket(3L, 1L, 2, 0);
+        MenuInventoryBucket current = bucket(3L, 2L, 2, 0);
+        ReflectionTestUtils.setField(current, "id", 9L);
+        original.acquire(2);
+        current.acquire(2);
+        InventoryRestoreRequest request = new InventoryRestoreRequest(
+                "reservation:77:cancel", "reservation:77:create");
+        given(ledgerRepository.findAcquireResults(request.sourceAcquireOperationId()))
+                .willReturn(List.of(new InventoryAllocationResult(3L, 2, 0)));
+        given(ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId()))
+                .willReturn(false);
+        given(bucketRepository.findRequestedAndCurrentForUpdate(List.of(3L)))
+                .willReturn(List.of(original, current));
+        given(bucketRepository.incrementIfCurrent(3L, 0L, 2, 0)).willReturn(1);
+        given(bucketRepository.incrementIfCurrent(9L, 0L, 2, 0)).willReturn(1);
+        MenuInventoryService service = service();
+
+        service.restoreInventory(request);
+
+        then(bucketRepository).should()
+                .findRequestedAndCurrentForUpdate(List.of(3L));
+        then(bucketRepository).should(org.mockito.Mockito.never())
+                .findCurrentForUpdate(
+                        org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+        then(bucketRepository).should().incrementIfCurrent(3L, 0L, 2, 0);
+        then(bucketRepository).should().incrementIfCurrent(9L, 0L, 2, 0);
     }
 
     @Test
@@ -133,7 +167,8 @@ class MenuHoldServiceTest {
         given(ledgerRepository.existsRestoreForSourceOperationForUpdate(
                 request.sourceAcquireOperationId()))
                 .willReturn(true);
-        given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
+        given(bucketRepository.findRequestedAndCurrentForUpdate(List.of(3L)))
+                .willReturn(List.of(bucket));
         MenuInventoryService service = service();
 
         service.restoreInventory(request);
@@ -145,13 +180,6 @@ class MenuHoldServiceTest {
 
     private MenuInventoryService service() {
         return new MenuInventoryService(bucketRepository, ledgerRepository);
-    }
-
-    private void givenCurrent(MenuInventoryBucket bucket) {
-        given(bucketRepository.findCurrentForUpdate(
-                bucket.getMenuId(), bucket.getServiceDate(), bucket.getStartTime(),
-                bucket.getEndDate(), bucket.getEndTime()))
-                .willReturn(Optional.of(bucket));
     }
 
     private static InventoryAcquireRequest.Selection selection(long menuId, int quantity) {
@@ -166,6 +194,15 @@ class MenuHoldServiceTest {
     }
 
     private static MenuInventoryBucket bucket(long id, int online, int shared) {
+        return bucket(id, 1L, online, shared);
+    }
+
+    private static MenuInventoryBucket bucket(
+            long id,
+            long policyVersion,
+            int online,
+            int shared
+    ) {
         MenuInventoryBucket bucket = MenuInventoryBucket.create(
                 id,
                 LocalDate.of(2026, 8, 10),
@@ -173,7 +210,7 @@ class MenuHoldServiceTest {
                 LocalDate.of(2026, 8, 10),
                 LocalTime.of(13, 0),
                 "Asia/Seoul",
-                1L,
+                policyVersion,
                 online + shared,
                 online,
                 0,

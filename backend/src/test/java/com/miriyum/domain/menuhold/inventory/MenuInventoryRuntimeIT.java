@@ -374,6 +374,54 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
+    void olderPolicyMultiMenuRestoreAndCurrentAcquireCompleteWithoutDeadlock()
+            throws Exception {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeRepository.findAll().getFirst().getId(),
+                        menuContent(),
+                        operatorRepository.findAll().getFirst().getId(),
+                        Instant.parse("2026-08-01T00:00:03Z"))).getId());
+        List<MenuInventoryBucket> originals = transactionTemplate.execute(status -> List.of(
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)),
+                bucketRepository.saveAndFlush(bucket(secondMenuId, 1L, 5, 0))));
+        InventoryAcquireRequest originalAcquire = new InventoryAcquireRequest(
+                "reservation:restore-current-lock:create",
+                List.of(selection(menuId, 1L, 1), selection(secondMenuId, 1L, 1)));
+        transactionTemplate.execute(status -> menuHoldService.acquireInventory(originalAcquire));
+        List<MenuInventoryBucket> currents = transactionTemplate.execute(status -> List.of(
+                bucketRepository.saveAndFlush(bucket(secondMenuId, 2L, 4, 0)),
+                bucketRepository.saveAndFlush(bucket(menuId, 2L, 4, 0))));
+        InventoryAcquireRequest currentAcquire = new InventoryAcquireRequest(
+                "reservation:restore-current-lock:latest",
+                List.of(selection(menuId, 2L, 1), selection(secondMenuId, 2L, 1)));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> restoreResult = executor.submit(() ->
+                    restoreConcurrently(
+                            "reservation:restore-current-lock:cancel",
+                            originalAcquire.operationId(), ready, start));
+            Future<Object> acquireResult = executor.submit(() ->
+                    acquireConcurrently(currentAcquire, ready, start));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(restoreResult.get(20, TimeUnit.SECONDS)).isEqualTo(Boolean.TRUE);
+            assertThat(acquireResult.get(20, TimeUnit.SECONDS)).isNull();
+        }
+
+        assertThat(originals)
+                .allSatisfy(bucket -> assertThat(bucketRepository.findById(bucket.getId())
+                        .orElseThrow().getOnlineHoldRemaining()).isEqualTo(5));
+        assertThat(currents)
+                .allSatisfy(bucket -> assertThat(bucketRepository.findById(bucket.getId())
+                        .orElseThrow().getOnlineHoldRemaining()).isEqualTo(4));
+    }
+
+    @Test
     void listsOnlyCurrentPoliciesForTheManagedMenuIds() {
         transactionTemplate.executeWithoutResult(status -> {
             bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 0));
@@ -561,6 +609,30 @@ class MenuInventoryRuntimeIT {
             }
             transactionTemplate.execute(status -> menuHoldService.acquireInventory(request));
             return null;
+        } catch (ServiceException exception) {
+            return exception.getErrorCode();
+        } catch (RuntimeException exception) {
+            return exception.getClass();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return InterruptedException.class;
+        }
+    }
+
+    private Object restoreConcurrently(
+            String operationId,
+            String sourceOperationId,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return AssertionError.class;
+            }
+            transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
+                    new InventoryRestoreRequest(operationId, sourceOperationId)));
+            return Boolean.TRUE;
         } catch (ServiceException exception) {
             return exception.getErrorCode();
         } catch (RuntimeException exception) {

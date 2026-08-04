@@ -115,10 +115,16 @@ class MenuInventoryService {
             return;
         }
         List<Long> orderedIds = allocationsByBucketId.keySet().stream().sorted().toList();
-        List<MenuInventoryBucket> buckets = bucketRepository.findAllForUpdate(orderedIds);
-        if (buckets.size() != orderedIds.size()) {
+        List<MenuInventoryBucket> lockedBuckets =
+                bucketRepository.findRequestedAndCurrentForUpdate(orderedIds);
+        Map<Long, MenuInventoryBucket> bucketsById = lockedBuckets.stream()
+                .collect(Collectors.toMap(MenuInventoryBucket::getId, bucket -> bucket));
+        if (!bucketsById.keySet().containsAll(orderedIds)) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
         }
+        List<MenuInventoryBucket> buckets = orderedIds.stream()
+                .map(bucketsById::get)
+                .toList();
         if (ledgerRepository.existsRestoreForSourceOperationForUpdate(
                 request.sourceAcquireOperationId())) {
             return;
@@ -130,9 +136,10 @@ class MenuInventoryService {
                     requested.onlineHoldQuantity(), requested.sharedQuantity());
             restoreBucket(request, bucket, allocation, events);
 
-            MenuInventoryBucket current = bucketRepository.findCurrentForUpdate(
-                            bucket.getMenuId(), bucket.getServiceDate(),
-                            bucket.getStartTime(), bucket.getEndDate(), bucket.getEndTime())
+            MenuInventoryBucket current = lockedBuckets.stream()
+                    .filter(candidate -> samePolicyInterval(bucket, candidate))
+                    .max(java.util.Comparator.comparingLong(
+                            MenuInventoryBucket::getInventoryPolicyVersion))
                     .orElseThrow(() -> new ServiceException(
                             MenuHoldErrorCode.BUCKET_NOT_FOUND));
             if (!current.getId().equals(bucket.getId())) {
