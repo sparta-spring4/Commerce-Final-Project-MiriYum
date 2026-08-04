@@ -118,6 +118,60 @@ class ReservationCapacityControllerTest {
     }
 
     @Test
+    void rejectsHHmmssCapacityTimesEvenWhenSecondsAreZero() throws Exception {
+        // given
+        authenticateStoreOperator();
+        given(commandFacade.replace(
+                eq(11L),
+                eq(7L),
+                eq(LocalDate.of(2026, 8, 10)),
+                any(IdempotencyKey.class),
+                any()
+        )).willReturn(successfulResult());
+
+        // when & then
+        mockMvc.perform(put(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest().replace(
+                                "\"startTime\": \"18:00\"",
+                                "\"startTime\": \"18:00:00\""
+                        )))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsHHmmssCapacityEndTimesEvenWhenSecondsAreZero() throws Exception {
+        // given
+        authenticateStoreOperator();
+        given(commandFacade.replace(
+                eq(11L),
+                eq(7L),
+                eq(LocalDate.of(2026, 8, 10)),
+                any(IdempotencyKey.class),
+                any()
+        )).willReturn(successfulResult());
+
+        // when & then
+        mockMvc.perform(put(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest().replace(
+                                "\"endTime\": \"18:30\"",
+                                "\"endTime\": \"18:30:00\""
+                        )))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
     void returnsStoreNotFoundWhenTheManagementTargetDoesNotExist() throws Exception {
         // given
         authenticateStoreOperator();
