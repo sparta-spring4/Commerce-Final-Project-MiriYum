@@ -23,7 +23,7 @@ The runtime `.env` is created manually on EC2 and remains server-local. The CD w
 ## One-time AWS setup
 
 1. Configure a GitHub OIDC provider with issuer `https://token.actions.githubusercontent.com` and audience `sts.amazonaws.com`.
-2. Create `miriyum-github-staging-cd-role` and restrict its trust policy to `repo:sparta-spring4/Commerce-Final-Project-MiriYum:ref:refs/heads/dev`.
+2. Create `miriyum-github-staging-cd-role` and restrict its trust policy subject to `repo:sparta-spring4/Commerce-Final-Project-MiriYum:environment:staging`. The `staging` Environment branch policy and the workflow job condition separately restrict this Environment to successful original-repository `dev` pushes.
 3. Grant the role only ECR push access to `miriyum-backend` and SSM command/invocation access to the staging EC2 instance using `AWS-RunShellScript`. Do not reuse this role for a future production instance.
 4. In repository Settings, Environments, create `staging`. Set its deployment branches to only `dev`; do not configure required reviewers because this is an integration-test environment. Register these variables in the `staging` Environment, not as repository-wide variables:
 
