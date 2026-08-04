@@ -10,11 +10,12 @@ import jakarta.validation.constraints.NotNull;
 public record MenuInventoryUpdateRequest(
         @NotNull @Min(0) @Max(1_000_000) Integer totalSupply,
         @NotNull @Valid InventoryPoolsRequest pools,
+        @NotNull Boolean sharedOnlineAllowed,
         @NotNull InventoryAvailabilityStatus availabilityStatus
 ) {
     public InventoryPolicyChange toCommand() {
         return new InventoryPolicyChange(
                 totalSupply, pools.onlineHold(), pools.onsite(), pools.shared(),
-                true, availabilityStatus);
+                sharedOnlineAllowed, availabilityStatus);
     }
 }

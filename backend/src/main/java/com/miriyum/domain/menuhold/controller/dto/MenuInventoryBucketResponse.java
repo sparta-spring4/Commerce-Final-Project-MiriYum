@@ -15,6 +15,7 @@ public record MenuInventoryBucketResponse(
         long policyVersion,
         int totalSupply,
         InventoryPoolsRequest pools,
+        boolean sharedOnlineAllowed,
         int availableOnlineQuantity,
         InventoryAvailabilityStatus availabilityStatus
 ) {
@@ -25,6 +26,7 @@ public record MenuInventoryBucketResponse(
                 view.policyVersion(), view.totalSupply(),
                 new InventoryPoolsRequest(view.onlineHoldCapacity(),
                         view.onsiteCapacity(), view.sharedCapacity()),
+                view.sharedOnlineAllowed(),
                 view.availableOnlineQuantity(), view.availabilityStatus());
     }
 }

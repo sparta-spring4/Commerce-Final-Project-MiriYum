@@ -18,12 +18,13 @@ public record MenuInventoryCreateRequest(
         @NotNull LocalTime endTime,
         @NotNull @Min(0) @Max(1_000_000) Integer totalSupply,
         @NotNull @Valid InventoryPoolsRequest pools,
+        @NotNull Boolean sharedOnlineAllowed,
         @NotNull InventoryAvailabilityStatus availabilityStatus
 ) {
     public InventoryBucketCreateCommand toCommand() {
         return new InventoryBucketCreateCommand(
                 menuId, serviceDate, startTime, endDate, endTime, totalSupply,
-                pools.onlineHold(), pools.onsite(), pools.shared(), true,
+                pools.onlineHold(), pools.onsite(), pools.shared(), sharedOnlineAllowed,
                 availabilityStatus);
     }
 }

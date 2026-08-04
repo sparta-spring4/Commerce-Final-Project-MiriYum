@@ -644,6 +644,7 @@ components:
         - endTime
         - totalSupply
         - pools
+        - sharedOnlineAllowed
         - availabilityStatus
       properties:
         menuId:
@@ -662,12 +663,14 @@ components:
           maximum: 1000000
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availabilityStatus:
           $ref: "#/components/schemas/InventoryAvailabilityStatus"
     MenuInventoryUpdateRequest:
       type: object
       additionalProperties: false
-      required: [totalSupply, pools, availabilityStatus]
+      required: [totalSupply, pools, sharedOnlineAllowed, availabilityStatus]
       properties:
         totalSupply:
           type: integer
@@ -675,6 +678,8 @@ components:
           maximum: 1000000
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availabilityStatus:
           $ref: "#/components/schemas/InventoryAvailabilityStatus"
     MenuInventoryBucket:
@@ -690,6 +695,7 @@ components:
         - policyVersion
         - totalSupply
         - pools
+        - sharedOnlineAllowed
         - availableOnlineQuantity
         - availabilityStatus
       properties:
@@ -714,6 +720,8 @@ components:
           minimum: 0
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availableOnlineQuantity:
           type: integer
           minimum: 0

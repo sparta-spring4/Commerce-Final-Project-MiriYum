@@ -32,11 +32,18 @@ class MenuInventoryOpenApiContractTest {
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> create = map(schemas.get("MenuInventoryCreateRequest"));
+        Map<String, Object> update = map(schemas.get("MenuInventoryUpdateRequest"));
         Map<String, Object> response = map(schemas.get("MenuInventoryBucket"));
-        assertThat(list(create.get("required"))).contains("endDate");
-        assertThat(map(create.get("properties"))).containsKey("endDate");
-        assertThat(list(response.get("required"))).contains("endDate");
-        assertThat(map(response.get("properties"))).containsKey("endDate");
+        assertThat(list(create.get("required")))
+                .contains("endDate", "sharedOnlineAllowed");
+        assertThat(map(create.get("properties")))
+                .containsKeys("endDate", "sharedOnlineAllowed");
+        assertThat(list(update.get("required"))).contains("sharedOnlineAllowed");
+        assertThat(map(update.get("properties"))).containsKey("sharedOnlineAllowed");
+        assertThat(list(response.get("required")))
+                .contains("endDate", "sharedOnlineAllowed");
+        assertThat(map(response.get("properties")))
+                .containsKeys("endDate", "sharedOnlineAllowed");
     }
 
     @SuppressWarnings("unchecked")
