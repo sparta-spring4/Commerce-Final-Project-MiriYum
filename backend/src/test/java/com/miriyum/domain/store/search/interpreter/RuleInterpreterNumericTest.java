@@ -228,6 +228,40 @@ class RuleInterpreterNumericTest {
     }
 
     @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "1만원~abc",
+        "1만원 ~ 2",
+        "1만원~",
+        "1만원 ~ ",
+        "1만원~abc123",
+        "1만원~?"
+    })
+    @DisplayName("불완전 가격 범위를 왼쪽 정확 가격으로 부분 해석하지 않는다")
+    void preservesIncompletePriceRangeAsWhole(String input) {
+        InterpretationResult result = interpret(input);
+
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input.strip());
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_PRICE,
+                WarningField.PRICE));
+    }
+
+    @Test
+    @DisplayName("연속 범위 구분자에서 첫 완전 범위 prefix만 소비하지 않는다")
+    void preservesChainedPriceRangeAsWhole() {
+        String input = "1만원~2만원~3만원";
+
+        InterpretationResult result = interpret(input);
+
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_PRICE,
+                WarningField.PRICE));
+    }
+
+    @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"검색-2명", "검색+2명"})
     @DisplayName("단어에 붙은 부호 뒤 숫자에서 인원 해석을 재시작하지 않는다")
     void doesNotRestartPartyMatchAfterAttachedSign(String input) {

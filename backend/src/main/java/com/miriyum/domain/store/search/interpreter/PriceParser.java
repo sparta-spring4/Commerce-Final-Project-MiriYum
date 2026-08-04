@@ -10,11 +10,16 @@ final class PriceParser {
     private static final String NUMBER = "(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)";
     private static final Pattern RANGE_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*(원)?\\s*(?:~|～|-)\\s*"
-                    + "(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
+                    + "(" + NUMBER + ")\\s*(천|만)?\\s*원"
+                    + "(?!\\s*(?:~|～|-))(?![\\p{L}\\p{N}])");
     private static final Pattern BOUND_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
     private static final Pattern EXACT_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원"
+                    + "(?!\\s*(?:~|～|-))(?![\\p{L}\\p{N}])");
+    private static final Pattern RANGE_PREFIX_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}+\\-.,~～])" + NUMBER
+                    + "\\s*(?:천|만)?\\s*원\\s*(?:~|～|-)");
     private static final Pattern AMBIGUOUS_BAND_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}+\\-.,~～])" + NUMBER + "\\s*만원대(?![\\p{L}\\p{N}])");
     private static final Pattern MALFORMED_RANGE_PATTERN = Pattern.compile(
@@ -36,6 +41,19 @@ final class PriceParser {
         List<TextSpan> spans = new ArrayList<>();
         List<TextSpan> recognizedSpans = new ArrayList<>();
         Integer outOfRangeNumberStart = null;
+
+        Matcher rangePrefixMatcher = RANGE_PREFIX_PATTERN.matcher(input);
+        while (rangePrefixMatcher.find()) {
+            Matcher validRange = RANGE_PATTERN.matcher(input);
+            validRange.region(rangePrefixMatcher.start(), input.length());
+            if (validRange.lookingAt()) {
+                continue;
+            }
+            TextSpan span = new TextSpan(
+                    rangePrefixMatcher.start(), rangePrefixMatcher.end());
+            recognizedSpans.add(span);
+            ambiguousBandStart = earliest(ambiguousBandStart, span.startInclusive());
+        }
 
         Matcher malformedRangeMatcher = MALFORMED_RANGE_PATTERN.matcher(input);
         while (malformedRangeMatcher.find()) {

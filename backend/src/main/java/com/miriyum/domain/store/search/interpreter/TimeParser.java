@@ -12,9 +12,20 @@ final class TimeParser {
 
     private static final Pattern AM_PM_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(오전|오후)\\s*([0-9]{1,2})\\s*시"
-                    + "(?:\\s*([0-9]{1,2})\\s*분)?(?![\\p{L}\\p{N}])");
+                    + "(?:\\s*([0-9]{1,2})\\s*분"
+                    + "|(?!\\s*\\S*[0-9]\\S*\\s*분))"
+                    + "(?!\\s*[:.]\\S)(?![\\p{L}\\p{N}])");
     private static final Pattern TWENTY_FOUR_HOUR_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([0-9]{1,2}):([0-9]{2})(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}])([0-9]{1,2}):([0-9]{2})"
+                    + "(?![:.]\\S)(?![\\p{L}\\p{N}])");
+    private static final Pattern MALFORMED_AM_PM_EXTENSION_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])(오전|오후)\\s*[0-9]{1,2}\\s*시"
+                    + "(?:\\s*(?![0-9]{1,2}\\s*분)\\S*[0-9]\\S*\\s*분"
+                    + "|\\s*[:.]\\S+)"
+                    + "(?![\\p{L}\\p{N}])");
+    private static final Pattern MALFORMED_24_HOUR_EXTENSION_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])[0-9]{1,2}:[0-9]{2}[:.]\\S+"
+                    + "(?![\\p{L}\\p{N}])");
     private static final Pattern AMBIGUOUS_PERIOD_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(점심|저녁)(?:\\s*쯤)?(?![\\p{L}\\p{N}])");
     private static final Pattern APPROXIMATE_TIME_PATTERN = Pattern.compile(
@@ -29,6 +40,10 @@ final class TimeParser {
         Integer ambiguousTimeStart = firstMatchStart(AMBIGUOUS_PERIOD_PATTERN, input);
         ambiguousTimeStart = earliest(
                 ambiguousTimeStart, firstMatchStart(APPROXIMATE_TIME_PATTERN, input));
+        ambiguousTimeStart = earliest(ambiguousTimeStart,
+                firstMatchStart(MALFORMED_AM_PM_EXTENSION_PATTERN, input));
+        ambiguousTimeStart = earliest(ambiguousTimeStart,
+                firstMatchStart(MALFORMED_24_HOUR_EXTENSION_PATTERN, input));
         Matcher matcher = AM_PM_PATTERN.matcher(input);
         LinkedHashSet<LocalTime> values = new LinkedHashSet<>();
         List<TextSpan> spans = new ArrayList<>();
@@ -71,6 +86,8 @@ final class TimeParser {
         }
         addMatches(AMBIGUOUS_PERIOD_PATTERN, input, recognizedSpans);
         addMatches(APPROXIMATE_TIME_PATTERN, input, recognizedSpans);
+        addMatches(MALFORMED_AM_PM_EXTENSION_PATTERN, input, recognizedSpans);
+        addMatches(MALFORMED_24_HOUR_EXTENSION_PATTERN, input, recognizedSpans);
         if (values.size() > 1) {
             return new Result(
                     null,

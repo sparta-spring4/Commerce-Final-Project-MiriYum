@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class RuleInterpreterTemporalTest {
 
@@ -185,6 +186,59 @@ class RuleInterpreterTemporalTest {
         assertThat(result.warnings()).containsExactly(new InterpretationWarning(
                 WarningCode.AMBIGUOUS_TIME,
                 WarningField.TIME));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "오후 7시 300분 예약",
+        "오후 7시 3.5분 예약",
+        "19:30:45 예약",
+        "19:30:ab 예약",
+        "19:30.5 예약"
+    })
+    @DisplayName("지원하지 않는 시각 확장을 짧은 정상 prefix로 부분 해석하지 않는다")
+    void preservesMalformedExtendedTimeAsWhole(String input) {
+        RuleInterpreter interpreter = new RuleInterpreter(
+                Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC));
+
+        InterpretationResult result = interpreter.interpret(request(
+                input, ZoneId.of("Asia/Seoul")));
+
+        assertThat(result.condition().reservationTime()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_TIME,
+                WarningField.TIME));
+    }
+
+    @Test
+    @DisplayName("정상 시각 뒤 일반 단어와 독립 명사 분은 minute suffix로 오인하지 않는다")
+    void keepsOrdinaryWordEndingBeforePersonNoun() {
+        RuleInterpreter interpreter = new RuleInterpreter(
+                Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC));
+
+        InterpretationResult result = interpreter.interpret(request(
+                "오후 7시 예약하실 분", ZoneId.of("Asia/Seoul")));
+
+        assertThat(result.condition().reservationTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(result.condition().remainingKeyword()).isEqualTo("예약하실 분");
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"19:30. 예약", "오후 7시. 예약"})
+    @DisplayName("독립 마침표를 malformed 시각 확장으로 오인하지 않는다")
+    void acceptsSentencePeriodAfterValidTime(String input) {
+        RuleInterpreter interpreter = new RuleInterpreter(
+                Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC));
+
+        InterpretationResult result = interpreter.interpret(request(
+                input, ZoneId.of("Asia/Seoul")));
+
+        assertThat(result.condition().reservationTime()).isEqualTo(LocalTime.of(19, 30)
+                .withMinute(input.startsWith("오후") ? 0 : 30));
+        assertThat(result.condition().remainingKeyword()).isEqualTo(". 예약");
+        assertThat(result.warnings()).isEmpty();
     }
 
     private InterpretationRequest request(String input, ZoneId zoneId) {
