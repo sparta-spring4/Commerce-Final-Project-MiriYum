@@ -16,6 +16,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreService;
@@ -71,6 +72,9 @@ class ReservationTimePolicyCommandServiceTest {
     @Mock
     private ReservationTimePolicyAuditRepository auditRepository;
 
+    @Mock
+    private ReservationCapacityBucketRepository capacityBucketRepository;
+
     private ObjectMapper objectMapper;
     private ReservationService reservationService;
 
@@ -85,7 +89,8 @@ class ReservationTimePolicyCommandServiceTest {
                 idempotencyExecutor,
                 auditRepository,
                 objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                capacityBucketRepository
         );
         given(idempotencyExecutor.execute(any(), any()))
                 .willAnswer(invocation -> executeWork(invocation.getArgument(1)));
