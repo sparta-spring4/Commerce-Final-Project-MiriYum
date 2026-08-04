@@ -94,8 +94,15 @@ public class MenuHoldServiceRuntime {
                 })) {
             throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
         }
-        List<CurrentInventorySelection> acquired =
-                inventoryService.acquireCurrentInventory(command.operationId(), current);
+        List<CurrentInventorySelection> acquired;
+        try {
+            acquired = inventoryService.acquireCurrentInventory(command.operationId(), current);
+        } catch (DataIntegrityViolationException exception) {
+            if (containsConstraint(exception, "uk_menu_inventory_ledger_operation_pool")) {
+                throw conflictCausedBy(exception);
+            }
+            throw exception;
+        }
         MenuHold hold = MenuHold.confirmed(
                 reservationId, storeId, consumerId, command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime(), command.operationId(), acquired.stream()
@@ -109,14 +116,20 @@ public class MenuHoldServiceRuntime {
         } catch (DataIntegrityViolationException exception) {
             if (containsConstraint(exception, "uk_menu_holds_reservation")
                     || containsConstraint(exception, "uk_menu_holds_acquire_operation")) {
-                ServiceException conflict =
-                        new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
-                conflict.initCause(exception);
-                throw conflict;
+                throw conflictCausedBy(exception);
             }
             throw exception;
         }
         return MenuHoldCommandResult.confirmed(command.reservationId());
+    }
+
+    private static ServiceException conflictCausedBy(
+            DataIntegrityViolationException exception
+    ) {
+        ServiceException conflict =
+                new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        conflict.initCause(exception);
+        return conflict;
     }
 
     private static boolean containsConstraint(Throwable failure, String marker) {

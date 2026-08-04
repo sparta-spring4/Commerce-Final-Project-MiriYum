@@ -58,6 +58,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -91,6 +93,7 @@ class MenuHoldRuntimeIT {
     @Autowired StoreOperatorAccountRepository operatorRepository;
     @Autowired StoreRepository storeRepository;
     @Autowired MenuRepository menuRepository;
+    @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TransactionTemplate transactions;
     @MockitoSpyBean StoreService storeService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
@@ -195,6 +198,115 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("V21의 FK·CHECK·유일 인덱스가 실제 MySQL에 정확히 생성된다")
+    void mysqlSchemaDefinesExactConstraintsAndIndexOrder() {
+        assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
+                .containsExactlyInAnyOrder(
+                        "fk_menu_holds_reservation",
+                        "fk_menu_holds_store",
+                        "fk_menu_holds_consumer");
+        assertThat(constraintNames("menu_hold_items", "FOREIGN KEY"))
+                .containsExactlyInAnyOrder(
+                        "fk_menu_hold_items_hold",
+                        "fk_menu_hold_items_menu",
+                        "fk_menu_hold_items_bucket");
+        assertThat(constraintNames("menu_holds", "CHECK"))
+                .containsExactlyInAnyOrder(
+                        "ck_menu_holds_service_interval",
+                        "ck_menu_holds_status");
+        assertThat(constraintNames("menu_hold_items", "CHECK"))
+                .containsExactlyInAnyOrder(
+                        "ck_menu_hold_items_versions",
+                        "ck_menu_hold_items_quantity");
+
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation"))
+                .isEqualTo("reservation_id");
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_acquire_operation"))
+                .isEqualTo("acquire_operation_id");
+        assertThat(indexColumns("menu_hold_items", "uk_menu_hold_items_hold_bucket"))
+                .isEqualTo("menu_hold_id,menu_inventory_bucket_id");
+        assertThat(indexColumns("menu_hold_items", "idx_menu_hold_items_bucket"))
+                .isEqualTo("menu_inventory_bucket_id,menu_hold_item_id");
+    }
+
+    @Test
+    @DisplayName("메뉴 홀드 항목의 0 수량은 실제 MySQL CHECK 제약으로 거부된다")
+    void mysqlRejectsInvalidMenuHoldItemQuantity() {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status ->
+                service.create(command(reservation.getId(), 1, "check-quantity")));
+        Long itemId = jdbcTemplate.queryForObject(
+                "SELECT menu_hold_item_id FROM menu_hold_items WHERE menu_hold_id = "
+                        + "(SELECT menu_hold_id FROM menu_holds WHERE reservation_id = ?)",
+                Long.class, reservation.getId());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE menu_hold_items SET quantity = 0 WHERE menu_hold_item_id = ?", itemId))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_hold_items_quantity");
+    }
+
+    @Test
+    @DisplayName("동일 예약 동시 생성은 한 홀드만 확정하고 추가 차감하지 않는다")
+    void concurrentDuplicateReservationCreatesOnlyOneHold() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status -> bucketRepository.saveAndFlush(bucket(2)));
+        Reservation reservation = transactions.execute(status -> reservationRepository.saveAndFlush(reservation()));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> first = executor.submit(() -> createConcurrently(
+                    reservation.getId(), "duplicate-reservation-1", ready, start));
+            Future<Object> second = executor.submit(() -> createConcurrently(
+                    reservation.getId(), "duplicate-reservation-2", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(
+                            MenuHoldStatus.CONFIRMED,
+                            MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+        assertThat(holdRepository.findAll().stream()
+                .filter(hold -> hold.getReservationId() == reservation.getId())).hasSize(1);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow().getOnlineHoldRemaining())
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("동일 operationId 동시 생성은 한 홀드만 확정하고 추가 차감하지 않는다")
+    void concurrentDuplicateOperationCreatesOnlyOneHold() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status -> bucketRepository.saveAndFlush(bucket(2)));
+        Reservation firstReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        Reservation secondReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> first = executor.submit(() -> createConcurrently(
+                    firstReservation.getId(), "duplicate-operation", ready, start));
+            Future<Object> second = executor.submit(() -> createConcurrently(
+                    secondReservation.getId(), "duplicate-operation", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(
+                            MenuHoldStatus.CONFIRMED,
+                            MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+        assertThat(holdRepository.findAll().stream()
+                .filter(hold -> hold.getAcquireOperationId().equals("duplicate-operation")))
+                .hasSize(1);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow().getOnlineHoldRemaining())
+                .isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("마지막 온라인 수량 경합에서 한 예약만 확정된다")
     void concurrentCreatesCannotOversellTheLastQuantity() throws Exception {
         MenuInventoryBucket bucket = transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
@@ -234,6 +346,27 @@ class MenuHoldRuntimeIT {
             Thread.currentThread().interrupt();
             return InterruptedException.class;
         }
+    }
+
+    private List<String> constraintNames(String tableName, String constraintType) {
+        return jdbcTemplate.queryForList("""
+                SELECT constraint_name
+                  FROM information_schema.table_constraints
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                   AND constraint_type = ?
+                 ORDER BY constraint_name
+                """, String.class, tableName, constraintType);
+    }
+
+    private String indexColumns(String tableName, String indexName) {
+        return jdbcTemplate.queryForObject("""
+                SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',')
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                   AND index_name = ?
+                """, String.class, tableName, indexName);
     }
 
     private Reservation reservation() {
