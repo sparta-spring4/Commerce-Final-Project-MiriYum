@@ -13,7 +13,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 
 /**
  * 일반 방문 예약의 거래 스냅샷과 승인된 종결 전이를 소유한다.
@@ -36,14 +35,8 @@ public class Reservation {
     @Column(name = "store_name_snapshot", nullable = false, length = 100)
     private String storeNameSnapshot;
 
-    @Column(name = "service_date", nullable = false)
-    private LocalDate serviceDate;
-
-    @Column(name = "start_time", nullable = false)
-    private LocalTime startTime;
-
-    @Column(name = "end_time", nullable = false)
-    private LocalTime endTime;
+    @Embedded
+    private ReservationTimeSnapshot timeSnapshot;
 
     @Embedded
     private PartyComposition party;
@@ -53,9 +46,6 @@ public class Reservation {
 
     @Column(name = "capacity_policy_version", nullable = false)
     private long capacityPolicyVersion;
-
-    @Column(name = "reservation_policy_version", nullable = false)
-    private long reservationPolicyVersion;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -77,29 +67,24 @@ public class Reservation {
             Long consumerAccountId,
             Long storeId,
             String storeNameSnapshot,
-            LocalDate serviceDate,
-            LocalTime startTime,
-            LocalTime endTime,
+            ReservationTimeSnapshot timeSnapshot,
             PartyComposition party,
             ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
-            long reservationPolicyVersion,
             Instant createdAt
     ) {
         this.consumerAccountId = requirePositive(consumerAccountId, "consumerAccountId");
         this.storeId = requirePositive(storeId, "storeId");
         this.storeNameSnapshot = requireStoreName(storeNameSnapshot);
-        this.serviceDate = requireNonNull(serviceDate, "serviceDate");
-        this.startTime = requireNonNull(startTime, "startTime");
-        this.endTime = requireNonNull(endTime, "endTime");
-        requireIncreasingServiceTime(this.startTime, this.endTime);
+        this.timeSnapshot = requireNonNull(timeSnapshot, "timeSnapshot");
+        if (!this.timeSnapshot.belongsToStore(this.storeId)) {
+            throw new IllegalArgumentException(
+                    "timeSnapshot policy store must match reservation store"
+            );
+        }
         this.party = requireNonNull(party, "party");
         this.contactSnapshot = requireNonNull(contactSnapshot, "contactSnapshot");
         this.capacityPolicyVersion = requirePositive(capacityPolicyVersion, "capacityPolicyVersion");
-        this.reservationPolicyVersion = requirePositive(
-                reservationPolicyVersion,
-                "reservationPolicyVersion"
-        );
         this.status = ReservationStatus.CONFIRMED;
         this.createdAt = requireNonNull(createdAt, "createdAt");
     }
@@ -110,13 +95,10 @@ public class Reservation {
      * @param consumerAccountId 예약 대표자 계정 ID
      * @param storeId 대상 매장 ID
      * @param storeNameSnapshot 예약 당시 매장 표시명
-     * @param serviceDate 매장 업무 날짜
-     * @param startTime 방문 시작 시각
-     * @param endTime 점유 종료 시각
+     * @param timeSnapshot 서버가 현재 시간 정책으로 계산한 서비스·점유 구간 스냅샷
      * @param party 예약 당시 인원 구성
      * @param contactSnapshot 예약 당시 불투명 알림 대상과 연락 가능 상태
      * @param capacityPolicyVersion 적용 수용량 정책 버전
-     * @param reservationPolicyVersion 적용 예약 정책 버전
      * @param createdAt 예약 확정 시각
      * @return 즉시 확정된 예약
      * @throws IllegalArgumentException 필수 값이 없거나 ID·정책 버전·매장명이 유효하지 않은 경우
@@ -125,26 +107,20 @@ public class Reservation {
             Long consumerAccountId,
             Long storeId,
             String storeNameSnapshot,
-            LocalDate serviceDate,
-            LocalTime startTime,
-            LocalTime endTime,
+            ReservationTimeSnapshot timeSnapshot,
             PartyComposition party,
             ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
-            long reservationPolicyVersion,
             Instant createdAt
     ) {
         return new Reservation(
                 consumerAccountId,
                 storeId,
                 storeNameSnapshot,
-                serviceDate,
-                startTime,
-                endTime,
+                timeSnapshot,
                 party,
                 contactSnapshot,
                 capacityPolicyVersion,
-                reservationPolicyVersion,
                 createdAt
         );
     }
@@ -212,12 +188,6 @@ public class Reservation {
         return value;
     }
 
-    private static void requireIncreasingServiceTime(LocalTime startTime, LocalTime endTime) {
-        if (!startTime.isBefore(endTime)) {
-            throw new IllegalArgumentException("endTime must be after startTime");
-        }
-    }
-
     private static String requireStoreName(String value) {
         if (value == null || value.isBlank() || value.length() > 100) {
             throw new IllegalArgumentException(
@@ -244,15 +214,27 @@ public class Reservation {
     }
 
     public LocalDate getServiceDate() {
-        return serviceDate;
+        return timeSnapshot.getServiceDate();
     }
 
-    public LocalTime getStartTime() {
-        return startTime;
+    public Instant getStartAt() {
+        return timeSnapshot.getStartAt();
     }
 
-    public LocalTime getEndTime() {
-        return endTime;
+    public Instant getServiceEndAt() {
+        return timeSnapshot.getServiceEndAt();
+    }
+
+    public Instant getOccupancyEndAt() {
+        return timeSnapshot.getOccupancyEndAt();
+    }
+
+    public String getTimeZoneId() {
+        return timeSnapshot.getTimeZoneId();
+    }
+
+    public ReservationTimeSnapshot getTimeSnapshot() {
+        return timeSnapshot;
     }
 
     public PartyComposition getParty() {
@@ -267,8 +249,8 @@ public class Reservation {
         return capacityPolicyVersion;
     }
 
-    public long getReservationPolicyVersion() {
-        return reservationPolicyVersion;
+    public long getReservationTimePolicyVersion() {
+        return timeSnapshot.getReservationTimePolicyVersion();
     }
 
     public ReservationStatus getStatus() {
