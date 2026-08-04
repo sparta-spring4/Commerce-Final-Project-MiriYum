@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class StoreClosureMigrationContractTest {
 
     @Test
-    void migrationProtectsScheduledEffectiveAtAndAuditActorType() throws IOException {
+    void migrationProtectsScheduledEffectiveAtAndAuditMetadata() throws IOException {
         String sql = Files.readString(Path.of(
                 "src/main/resources/db/migration/V18__create_store_closures.sql"));
 
@@ -18,6 +18,13 @@ class StoreClosureMigrationContractTest {
                 "CONSTRAINT uk_regular_closure_store_effective_at",
                 "UNIQUE (store_id, effective_at)",
                 "actor_type VARCHAR(20) NOT NULL",
-                "CHECK (actor_type IN ('STORE_OPERATOR', 'SYSTEM'))");
+                "CHECK (actor_type IN ('STORE_OPERATOR', 'SYSTEM'))",
+                "conflict_check_status VARCHAR(20) NOT NULL",
+                "conflict_count INT NULL",
+                "CHECK (conflict_check_status IN ('NOT_EVALUATED', 'EVALUATED'))",
+                "conflict_check_status = 'NOT_EVALUATED'",
+                "conflict_count IS NULL",
+                "conflict_check_status = 'EVALUATED'",
+                "conflict_count >= 0");
     }
 }

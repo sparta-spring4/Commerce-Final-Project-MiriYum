@@ -95,6 +95,8 @@ CREATE TABLE store_closure_audit_events (
     occurred_at DATETIME(6) NOT NULL,
     change_reason VARCHAR(500) NULL,
     request_id VARCHAR(100) NOT NULL,
+    conflict_check_status VARCHAR(20) NOT NULL,
+    conflict_count INT NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (closure_audit_event_id),
@@ -102,5 +104,16 @@ CREATE TABLE store_closure_audit_events (
         FOREIGN KEY (store_id) REFERENCES stores (store_id) ON DELETE RESTRICT,
     CONSTRAINT ck_closure_audit_actor
         CHECK (actor_type IN ('STORE_OPERATOR', 'SYSTEM')),
+    CONSTRAINT ck_closure_audit_conflict_check
+        CHECK (conflict_check_status IN ('NOT_EVALUATED', 'EVALUATED')),
+    CONSTRAINT ck_closure_audit_conflict_result
+        CHECK (
+            (conflict_check_status = 'NOT_EVALUATED'
+                AND conflict_count IS NULL)
+            OR
+            (conflict_check_status = 'EVALUATED'
+                AND conflict_count IS NOT NULL
+                AND conflict_count >= 0)
+        ),
     INDEX idx_closure_audit_store_occurred (store_id, occurred_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
