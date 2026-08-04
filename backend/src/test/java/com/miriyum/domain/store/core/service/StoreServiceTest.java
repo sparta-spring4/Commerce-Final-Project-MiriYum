@@ -370,7 +370,7 @@ class StoreServiceTest {
     @Test
     void transactionEligibilityReturnsCurrentPublishedVersionAndCapabilities() {
         Menu menu = publishedMenu(true, true);
-        menu.appendDraft(menuContent(true, true), OPERATOR_ID,
+        menu.appendDraft(menuContent("카페라떼", 6_500, true, true), OPERATOR_ID,
                 FIXED_CLOCK.instant().plusSeconds(2));
         menu.publish(FIXED_CLOCK.instant().plusSeconds(3));
         stubTransactionStoreAndMenu(transactionStore(), menu);
@@ -379,11 +379,27 @@ class StoreServiceTest {
                 storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result).isEqualTo(new MenuTransactionEligibility(
-                STORE_ID, MENU_ID, 2, true, true));
+                STORE_ID, MENU_ID, 2, "카페라떼", 6_500, true, true));
         InOrder lockOrder = inOrder(storeRepository, menuRepository);
         lockOrder.verify(storeRepository).findByIdForUpdate(STORE_ID);
         lockOrder.verify(menuRepository).findByIdForUpdate(MENU_ID);
         then(operatorAccountService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsBlankMenuName() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, " ", 5_000, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menuName must not be blank");
+    }
+
+    @Test
+    void transactionEligibilityRejectsNegativeUnitPrice() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, "아메리카노", -1, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unitPrice must not be negative");
     }
 
     @Test
@@ -681,10 +697,19 @@ class StoreServiceTest {
     }
 
     private MenuContent menuContent(boolean holdAllowed, boolean pickupAllowed) {
+        return menuContent("아메리카노", 5_000, holdAllowed, pickupAllowed);
+    }
+
+    private MenuContent menuContent(
+            String name,
+            int price,
+            boolean holdAllowed,
+            boolean pickupAllowed
+    ) {
         return new MenuContent(
-                "아메리카노",
+                name,
                 "설명",
-                5_000,
+                price,
                 false,
                 "COFFEE",
                 List.of(),
