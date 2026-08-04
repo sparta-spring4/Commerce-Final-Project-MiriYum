@@ -1,5 +1,5 @@
 # CI를 통과한 dev 리비전을 ARM64 이미지로 빌드하고 앱 비밀값 없이 SSM으로 배포한다.
-name: Backend CD
+name: Backend CD (Staging)
 
 on:
   workflow_run:
@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   # 진행 중인 배포는 취소하지 않는다. 새 이미지는 기존 health 확인이 끝날 때까지 대기한다.
-  group: backend-cd-dev
+  group: backend-cd-staging
   cancel-in-progress: false
 
 env:
@@ -29,9 +29,11 @@ env:
 
 jobs:
   deploy:
-    name: build-and-deploy-backend
+    name: build-and-deploy-backend-staging
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # staging Environment의 변수와 배포 이력을 사용한다. 운영 Environment는 이 워크플로에서 사용하지 않는다.
+    environment: staging
     if: >-
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
