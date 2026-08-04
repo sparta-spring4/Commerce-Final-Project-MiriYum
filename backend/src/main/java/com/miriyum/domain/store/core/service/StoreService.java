@@ -220,6 +220,8 @@ public class StoreService {
                 storeId,
                 menuId,
                 published.getVersionNumber(),
+                published.getName(),
+                published.getPrice(),
                 menuHoldEligible,
                 pickupEligible);
     }
