@@ -1,0 +1,234 @@
+package com.miriyum.domain.menuhold.service;
+
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
+import com.miriyum.domain.menuhold.inventory.entity.InventoryAllocation;
+import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
+import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryLedger;
+import com.miriyum.domain.menuhold.inventory.model.InventoryPoolType;
+import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
+import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
+import com.miriyum.global.exception.ServiceException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+/** 메뉴 수량 버킷의 확보와 복구를 소유하는 내부 런타임 서비스다. */
+@Service
+@RequiredArgsConstructor
+class MenuInventoryService {
+
+    private final MenuInventoryBucketRepository bucketRepository;
+    private final MenuInventoryLedgerRepository ledgerRepository;
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    List<InventoryAllocationResult> acquireInventory(InventoryAcquireRequest request) {
+        Map<Long, Integer> quantitiesByBucketId = new HashMap<>();
+        for (InventoryAcquireRequest.Selection selection : request.selections()) {
+            Long bucketId = bucketRepository.findBucketId(selection.key());
+            if (bucketId == null) {
+                throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+            }
+            quantitiesByBucketId.merge(bucketId, selection.quantity(), Math::addExact);
+        }
+        List<Long> orderedIds = quantitiesByBucketId.keySet().stream().sorted().toList();
+        List<MenuInventoryBucket> lockedBuckets =
+                bucketRepository.findRequestedAndCurrentForUpdate(orderedIds);
+        Map<Long, MenuInventoryBucket> bucketsById = lockedBuckets.stream()
+                .collect(Collectors.toMap(MenuInventoryBucket::getId, bucket -> bucket));
+        if (!bucketsById.keySet().containsAll(orderedIds)) {
+            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+        }
+        List<MenuInventoryBucket> buckets = orderedIds.stream()
+                .map(bucketsById::get)
+                .toList();
+        requireCurrentPolicies(buckets, lockedBuckets);
+
+        List<InventoryAllocationResult> results = new ArrayList<>();
+        List<MenuInventoryLedger> events = new ArrayList<>();
+        for (MenuInventoryBucket bucket : buckets) {
+            InventoryAllocation allocation = bucket.planAcquire(quantitiesByBucketId.get(bucket.getId()));
+            int updated = bucketRepository.decrementIfCurrent(
+                    bucket.getId(), bucket.getLockVersion(),
+                    allocation.onlineHoldQuantity(), allocation.sharedQuantity());
+            if (updated != 1) {
+                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            }
+            results.add(new InventoryAllocationResult(
+                    bucket.getId(),
+                    allocation.onlineHoldQuantity(),
+                    allocation.sharedQuantity()));
+            appendAcquireEvents(request.operationId(), bucket, allocation, events);
+        }
+        ledgerRepository.saveAll(events);
+        return List.copyOf(results);
+    }
+
+    private void requireCurrentPolicies(
+            List<MenuInventoryBucket> requestedBuckets,
+            List<MenuInventoryBucket> lockedBuckets
+    ) {
+        for (MenuInventoryBucket requested : requestedBuckets) {
+            long currentVersion = lockedBuckets.stream()
+                    .filter(candidate -> samePolicyInterval(requested, candidate))
+                    .mapToLong(MenuInventoryBucket::getInventoryPolicyVersion)
+                    .max()
+                    .orElseThrow(() -> new ServiceException(
+                            MenuHoldErrorCode.BUCKET_NOT_FOUND));
+            if (requested.getInventoryPolicyVersion() != currentVersion) {
+                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            }
+        }
+    }
+
+    private boolean samePolicyInterval(
+            MenuInventoryBucket first,
+            MenuInventoryBucket second
+    ) {
+        return first.getMenuId() == second.getMenuId()
+                && first.getServiceDate().equals(second.getServiceDate())
+                && first.getStartTime().equals(second.getStartTime())
+                && first.getEndDate().equals(second.getEndDate())
+                && first.getEndTime().equals(second.getEndTime());
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    void restoreInventory(InventoryRestoreRequest request) {
+        List<InventoryAllocationResult> acquired = ledgerRepository
+                .findAcquireResults(request.sourceAcquireOperationId());
+        if (acquired.isEmpty()) {
+            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+        }
+        Map<Long, InventoryAllocationResult> allocationsByBucketId = acquired.stream()
+                .collect(Collectors.toMap(
+                        InventoryAllocationResult::bucketId, allocation -> allocation));
+        if (ledgerRepository.existsRestoreForSourceOperation(
+                request.sourceAcquireOperationId())) {
+            return;
+        }
+        List<Long> orderedIds = allocationsByBucketId.keySet().stream().sorted().toList();
+        List<MenuInventoryBucket> lockedBuckets =
+                bucketRepository.findRequestedAndCurrentForUpdate(orderedIds);
+        Map<Long, MenuInventoryBucket> bucketsById = lockedBuckets.stream()
+                .collect(Collectors.toMap(MenuInventoryBucket::getId, bucket -> bucket));
+        if (!bucketsById.keySet().containsAll(orderedIds)) {
+            throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+        }
+        List<MenuInventoryBucket> buckets = orderedIds.stream()
+                .map(bucketsById::get)
+                .toList();
+        if (ledgerRepository.existsRestoreForSourceOperationForUpdate(
+                request.sourceAcquireOperationId())) {
+            return;
+        }
+        List<MenuInventoryLedger> events = new ArrayList<>();
+        for (MenuInventoryBucket bucket : buckets) {
+            InventoryAllocationResult requested = allocationsByBucketId.get(bucket.getId());
+            InventoryAllocation allocation = new InventoryAllocation(
+                    requested.onlineHoldQuantity(), requested.sharedQuantity());
+            restoreBucket(request, bucket, allocation, events);
+
+            MenuInventoryBucket current = lockedBuckets.stream()
+                    .filter(candidate -> samePolicyInterval(bucket, candidate))
+                    .max(java.util.Comparator.comparingLong(
+                            MenuInventoryBucket::getInventoryPolicyVersion))
+                    .orElseThrow(() -> new ServiceException(
+                            MenuHoldErrorCode.BUCKET_NOT_FOUND));
+            if (!current.getId().equals(bucket.getId())) {
+                synchronizeCurrentPolicy(current, allocation);
+            }
+        }
+        ledgerRepository.saveAll(events);
+    }
+
+    private void restoreBucket(
+            InventoryRestoreRequest request,
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation,
+            List<MenuInventoryLedger> events
+    ) {
+        incrementBucket(bucket, allocation);
+        appendRestoreEvents(
+                request.operationId(), request.sourceAcquireOperationId(),
+                bucket, allocation, events);
+    }
+
+    private void synchronizeCurrentPolicy(
+            MenuInventoryBucket current,
+            InventoryAllocation allocation
+    ) {
+        incrementBucket(current, allocation);
+    }
+
+    private void incrementBucket(
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation
+    ) {
+        bucket.validateRestore(allocation);
+        int updated = bucketRepository.incrementIfCurrent(
+                bucket.getId(), bucket.getLockVersion(),
+                allocation.onlineHoldQuantity(), allocation.sharedQuantity());
+        if (updated != 1) {
+            throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+    }
+
+    private static void appendAcquireEvents(
+            String operationId,
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation,
+            List<MenuInventoryLedger> events
+    ) {
+        if (allocation.onlineHoldQuantity() > 0) {
+            events.add(MenuInventoryLedger.acquired(
+                    operationId,
+                    bucket.getId(),
+                    InventoryPoolType.ONLINE_HOLD,
+                    allocation.onlineHoldQuantity(),
+                    bucket.getOnlineHoldRemaining() - allocation.onlineHoldQuantity()));
+        }
+        if (allocation.sharedQuantity() > 0) {
+            events.add(MenuInventoryLedger.acquired(
+                    operationId,
+                    bucket.getId(),
+                    InventoryPoolType.SHARED,
+                    allocation.sharedQuantity(),
+                    bucket.getSharedRemaining() - allocation.sharedQuantity()));
+        }
+    }
+
+    private static void appendRestoreEvents(
+            String operationId,
+            String sourceOperationId,
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation,
+            List<MenuInventoryLedger> events
+    ) {
+        if (allocation.onlineHoldQuantity() > 0) {
+            events.add(MenuInventoryLedger.restored(
+                    operationId,
+                    sourceOperationId,
+                    bucket.getId(),
+                    InventoryPoolType.ONLINE_HOLD,
+                    allocation.onlineHoldQuantity(),
+                    bucket.getOnlineHoldRemaining() + allocation.onlineHoldQuantity()));
+        }
+        if (allocation.sharedQuantity() > 0) {
+            events.add(MenuInventoryLedger.restored(
+                    operationId,
+                    sourceOperationId,
+                    bucket.getId(),
+                    InventoryPoolType.SHARED,
+                    allocation.sharedQuantity(),
+                    bucket.getSharedRemaining() + allocation.sharedQuantity()));
+        }
+    }
+}

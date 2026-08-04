@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorAccountUpdateRequest;
 import com.miriyum.domain.storeoperator.dto.response.StoreOperatorAccountResponse;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
+import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -24,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class StoreOperatorAccountServiceTest {
@@ -64,7 +69,7 @@ class StoreOperatorAccountServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 계정을 조회하면 AUTH_011을 던진다")
+    @DisplayName("존재하지 않는 계정을 조회하면 C-013에 따라 401 AUTH_003을 던진다")
     void rejectsUnknownAccount() {
         // given
         given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.empty());
@@ -73,7 +78,47 @@ class StoreOperatorAccountServiceTest {
         assertThatThrownBy(() -> storeOperatorAccountService.getMe(ACCOUNT_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("비활성 계정을 조회하면 계정 부재와 달리 403 AUTH_011을 던진다")
+    void rejectsSuspendedAccount() {
+        // given
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
+        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+        // when & then
+        assertThatThrownBy(() -> storeOperatorAccountService.getMe(ACCOUNT_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+    }
+
+    @Test
+    @DisplayName("계정 부재와 비활성 계정은 서로 다른 상태 코드로 갈린다")
+    void separatesMissingAccountFromSuspendedAccount() {
+        assertThat(AuthErrorCode.ACCESS_TOKEN_INVALID.getHttpStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(AuthErrorCode.ACCOUNT_RESTRICTED.getHttpStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("계정이 없으면 멱등 실행기를 호출하기 전에 401 AUTH_003으로 거절한다")
+    void rejectsUpdateBeforeIdempotentExecutionWhenAccountMissing() {
+        // given
+        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> storeOperatorAccountService.updateDisplayName(
+                UPDATE_COMMAND, ACCOUNT_ID, new StoreOperatorAccountUpdateRequest("새상호명")))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+
+        // 재생 경로는 업무 콜백을 실행하지 않으므로, 계정 확인이 콜백 안에 있으면 저장된 200이
+        // 그대로 나간다. 실행기에 들어가기 전에 막혔는지를 호출 자체로 고정한다.
+        then(idempotencyExecutor).should(never()).execute(any(), any());
     }
 
     @Test

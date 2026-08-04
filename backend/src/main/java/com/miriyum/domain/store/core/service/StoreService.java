@@ -6,9 +6,14 @@ import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.store.menu.entity.Menu;
+import com.miriyum.domain.store.menu.entity.MenuVersion;
+import com.miriyum.domain.store.menu.repository.MenuRepository;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -44,6 +49,7 @@ public class StoreService {
 
     private final StoreOperatorAccountService operatorAccountService;
     private final StoreRepository storeRepository;
+    private final MenuRepository menuRepository;
     private final StoreCatalogPolicy catalogPolicy;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -161,6 +167,63 @@ public class StoreService {
         return scheduleAuthority(store);
     }
 
+    /**
+     * 메뉴 신규 명령을 위해 Store 행을 잠그고 현재 운영 가능 상태를 검증한다.
+     *
+     * @param operatorAccountId 인증된 매장 운영자 계정 식별자
+     * @param storeId 대상 매장 식별자
+     * @return 메뉴 콘텐츠 검증에 필요한 중앙 매장 판정
+     * @throws ServiceException 소유권이 없거나 현재 매장 상태에서 메뉴를 변경할 수 없는 경우
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public StoreMenuAuthority requireMenuMutationAuthority(
+            long operatorAccountId,
+            long storeId
+    ) {
+        operatorAccountService.getMe(operatorAccountId);
+        Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
+        requireScheduleState(store);
+        return new StoreMenuAuthority(store.getId(), store.getPickupEligibility());
+    }
+
+    /**
+     * 신규 메뉴 홀드·픽업 거래를 위해 Store와 Menu를 잠금 순서대로 검증한다.
+     *
+     * @param storeId 대상 매장 식별자
+     * @param menuId 대상 메뉴 식별자
+     * @return 현재 게시 버전과 최종 거래 기능 판정
+     * @throws ServiceException 매장·메뉴가 없거나 신규 거래를 받을 수 없는 경우
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public MenuTransactionEligibility requireMenuTransactionEligibility(
+            long storeId,
+            long menuId
+    ) {
+        Store store = storeRepository.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        requireTransactionState(store);
+
+        Menu menu = menuRepository.findByIdForUpdate(menuId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
+        if (menu.getStoreId() != storeId) {
+            throw new ServiceException(StoreErrorCode.MENU_NOT_FOUND);
+        }
+
+        MenuVersion published = menu.requireTransactionVersion();
+        boolean menuHoldEligible = store.isReservationEnabled()
+                && store.isMenuHoldEnabled()
+                && published.isHoldSelectionAllowed();
+        boolean pickupEligible = store.isPickupEnabled()
+                && store.getPickupEligibility() == PickupEligibility.ELIGIBLE
+                && published.isPickupSelectionAllowed();
+        return new MenuTransactionEligibility(
+                storeId,
+                menuId,
+                published.getVersionNumber(),
+                menuHoldEligible,
+                pickupEligible);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public StoreScheduledActivationDecision inspectScheduledActivation(
             long storeId
@@ -182,6 +245,16 @@ public class StoreService {
                     StoreErrorCode.VERIFICATION_STATE_CONFLICT);
         }
         if (store.getOperationStatus() == OperationStatus.CLOSED) {
+            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
+        }
+    }
+
+    private void requireTransactionState(Store store) {
+        if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
+            throw new ServiceException(
+                    StoreErrorCode.VERIFICATION_STATE_CONFLICT);
+        }
+        if (store.getOperationStatus() != OperationStatus.OPEN) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
     }

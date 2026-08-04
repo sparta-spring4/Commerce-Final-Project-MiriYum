@@ -13,6 +13,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,7 +52,7 @@ class StoreOperatorAccountControllerTest {
     private static final String VALID_IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -117,6 +118,52 @@ class StoreOperatorAccountControllerTest {
                 // null 값을 따로 검증해 OpenAPI의 nullable 계약을 고정한다.
                 .andExpect(jsonPath("$.data").value(hasKey("phoneNumber")))
                 .andExpect(jsonPath("$.data.phoneNumber").value(nullValue()));
+    }
+
+    /**
+     * C-013은 "subject에 해당하는 현재 계정을 확인할 수 없음"을 401로 정한다. 계정이 사라진 뒤에도
+     * Access Token은 최대 1시간 살아 있으므로 이 경로가 실제로 열린다(이슈 #72).
+     *
+     * <p>응답이 잘못된 토큰의 401과 완전히 같아야 계정 삭제 여부가 드러나지 않는다. ErrorResponse는
+     * {@code code}·{@code message}만 담고 시각·경로 같은 변동 필드가 없어 본문을 그대로 비교한다.</p>
+     */
+    @Test
+    @DisplayName("계정이 사라진 뒤 유효한 토큰으로 조회하면 잘못된 토큰과 똑같은 401 AUTH_003을 반환한다")
+    void getMeWithDeletedAccountIsIndistinguishableFromInvalidToken() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
+
+        String deletedAccountBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        String invalidTokenBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(deletedAccountBody).isEqualTo(invalidTokenBody);
+    }
+
+    @Test
+    @DisplayName("계정이 비활성이면 계정 부재와 달리 403과 AUTH_011을 반환한다")
+    void getMeWithSuspendedAccountReturnsForbidden() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        jdbcTemplate.update(
+                "UPDATE store_operator_accounts SET status = 'SUSPENDED' WHERE store_operator_account_id = ?",
+                accountId);
+
+        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_011"));
     }
 
     @Test
@@ -189,6 +236,35 @@ class StoreOperatorAccountControllerTest {
         mockMvc.perform(get("/api/v1/store-operator-accounts/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.data.displayName").value("첫상호명"));
+    }
+
+    /**
+     * 멱등 재생은 저장된 결과를 그대로 돌려주므로, 계정 확인이 업무 콜백 안에 있으면 계정이 사라진
+     * 뒤에도 최초 200이 재생돼 C-013 판정을 우회한다. 인증 경계를 멱등 실행기 앞으로 옮긴 뒤의
+     * 회귀를 HTTP 수준에서 고정한다(PR #78 리뷰 지적).
+     */
+    @Test
+    @DisplayName("수정 성공 후 계정이 사라지면 같은 Idempotency-Key 재요청도 401 AUTH_003을 반환한다")
+    void updateMeDoesNotReplayStoredResultAfterAccountDisappears() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"첫상호명\"}"))
+                .andExpect(status().isOk());
+
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
+
+        // 같은 키·같은 본문이라 멱등 기록은 그대로 남아 있지만, 인증 경계가 먼저 걸린다.
+        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\": \"첫상호명\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"));
     }
 
     private void assertSingleSucceededIdempotencyRecord() {

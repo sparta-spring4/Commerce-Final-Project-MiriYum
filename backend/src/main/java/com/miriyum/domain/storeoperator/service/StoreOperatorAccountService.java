@@ -46,6 +46,10 @@ public class StoreOperatorAccountService {
      * <p>이 메서드가 트랜잭션을 소유하고 {@link IdempotencyExecutor}는 {@code MANDATORY}로 참여한다.
      * 같은 키·같은 지문 재요청은 업무 로직을 다시 실행하지 않고 최초 결과를 재생하며, 같은 키를 다른
      * 지문으로 재사용하면 {@code COMMON_007}로 거절한다.</p>
+     *
+     * <p>현재 계정의 존재·활성 확인은 요청마다 성립해야 하는 인증 경계이므로 멱등 실행기 <b>앞</b>에서
+     * 수행한다. 콜백 안에 두면 재생 경로에서 콜백이 실행되지 않아, 최초 수정 이후 계정이 사라져도
+     * 같은 키·같은 지문 재요청이 저장된 200을 그대로 돌려준다.</p>
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public IdempotentOutcome updateDisplayName(
@@ -53,8 +57,8 @@ public class StoreOperatorAccountService {
             Long accountId,
             StoreOperatorAccountUpdateRequest request
     ) {
+        StoreOperatorAccount account = getActiveAccount(accountId);
         return idempotencyExecutor.execute(command, () -> {
-            StoreOperatorAccount account = getActiveAccount(accountId);
             account.changeDisplayName(request.displayName());
             return new BusinessResult<>(HttpStatus.OK.value(), SUCCESS_RESPONSE_CODE,
                     RESOURCE_TYPE, String.valueOf(account.getId()),
@@ -62,9 +66,18 @@ public class StoreOperatorAccountService {
         });
     }
 
+    /**
+     * JWT subject에 해당하는 현재 계정을 확인한다.
+     *
+     * <p>{@code docs/specs/mvp1-common/spec.md}의 {@code C-013}은 "subject에 해당하는 현재 계정을
+     * 확인할 수 없음"을 {@code 401}로, "유효한 principal이지만 현재 계정 상태가 이용을 허용하지 않음"을
+     * {@code 403}으로 구분한다. 계정이 없으면 그 토큰으로는 더 이상 주체를 특정할 수 없으므로 일반
+     * Access Token 오류와 같은 {@code AUTH_003}(401)으로 응답한다. 오류 코드와 메시지가 같아
+     * 응답만으로는 계정 삭제 여부를 알 수 없다(이슈 #72).</p>
+     */
     private StoreOperatorAccount getActiveAccount(Long accountId) {
         StoreOperatorAccount account = storeOperatorAccountRepository.findById(accountId)
-                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED));
+                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }

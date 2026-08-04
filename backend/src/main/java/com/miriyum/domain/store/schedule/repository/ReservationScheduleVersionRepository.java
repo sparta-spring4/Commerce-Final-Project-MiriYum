@@ -4,6 +4,7 @@ import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
@@ -14,6 +15,17 @@ import org.springframework.data.repository.query.Param;
 
 public interface ReservationScheduleVersionRepository
         extends JpaRepository<ReservationScheduleVersion, Long> {
+
+    @Query("""
+            select distinct version
+            from ReservationScheduleVersion version
+            left join fetch version.entries
+            where version.id in :ids
+              and version.status = :status
+            """)
+    List<ReservationScheduleVersion> findActiveByIdsWithEntries(
+            @Param("ids") Collection<Long> ids,
+            @Param("status") ScheduleVersionStatus status);
 
     List<ReservationScheduleVersion> findAllByStoreIdOrderByVersionNumber(long storeId);
 
