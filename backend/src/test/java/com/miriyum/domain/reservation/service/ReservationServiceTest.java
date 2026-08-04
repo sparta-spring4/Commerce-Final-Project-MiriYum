@@ -773,13 +773,14 @@ class ReservationServiceTest {
     }
 
     @Test
-    @DisplayName("일괄 판정은 저장소를 한 번 조회하고 입력 매장 순서대로 대응한다")
-    void getAvailabilitiesUsesOneQueryAndPreservesInputOrder() {
+    @DisplayName("일괄 판정은 저장소를 한 번 조회하고 입력 매장의 순서와 중복을 보존한다")
+    void getAvailabilitiesUsesOneQueryAndPreservesInputOrderAndDuplicates() {
         ReservationAvailabilityCondition condition = capacityCondition(2, false);
-        List<Long> storeIds = List.of(30L, 10L, 20L);
+        List<Long> storeIds = List.of(30L, 10L, 20L, 30L);
+        List<Long> queriedStoreIds = List.of(30L, 10L, 20L);
         givenResolvedCapacityTimes(storeIds, CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
-                storeIds,
+                queriedStoreIds,
                 CAPACITY_SERVICE_DATE,
                 START_TIME,
                 CAPACITY_END_TIME
@@ -805,11 +806,15 @@ class ReservationServiceTest {
                 new ReservationAvailabilityResult(
                         20L,
                         ReservationAvailabilityStatus.AVAILABLE
+                ),
+                new ReservationAvailabilityResult(
+                        30L,
+                        ReservationAvailabilityStatus.AVAILABLE
                 )
         );
         then(capacityBucketRepository).should(times(1))
                 .findLatestPolicyBucketsOverlapping(
-                        storeIds,
+                        queriedStoreIds,
                         CAPACITY_SERVICE_DATE,
                         START_TIME,
                         CAPACITY_END_TIME
