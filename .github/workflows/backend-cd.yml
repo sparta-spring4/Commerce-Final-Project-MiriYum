@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   # 진행 중인 배포는 취소하지 않는다. 새 이미지는 기존 health 확인이 끝날 때까지 대기한다.
@@ -28,12 +27,12 @@ env:
   EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
 
 jobs:
-  deploy:
-    name: build-and-deploy-backend-staging
+  verify-source:
+    name: verify-staging-deployment-source
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    # staging Environment의 변수와 배포 이력을 사용한다. 운영 Environment는 이 워크플로에서 사용하지 않는다.
-    environment: staging
+    timeout-minutes: 5
+    permissions:
+      contents: read
     if: >-
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.event == 'push' &&
@@ -41,6 +40,40 @@ jobs:
        github.event.workflow_run.head_branch == 'dev' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+    outputs:
+      deployable: ${{ steps.source.outputs.deployable }}
+
+    steps:
+      - name: Verify automatic deployment uses the current dev revision
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            current_dev_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/dev" --jq '.object.sha')
+
+            if [ "$current_dev_sha" != "$WORKFLOW_SHA" ]; then
+              echo "deployable=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current dev is $current_dev_sha."
+              exit 0
+            fi
+          fi
+
+          echo "deployable=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: build-and-deploy-backend-staging
+    needs: verify-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # staging Environment의 변수와 배포 이력을 사용한다. 운영 Environment는 이 워크플로에서 사용하지 않는다.
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    if: needs.verify-source.outputs.deployable == 'true'
 
     steps:
       - name: Validate deployment configuration
@@ -152,7 +185,7 @@ jobs:
         env:
           COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
         run: |
-          for attempt in {1..90}; do
+          for ((attempt = 0; attempt < 90; attempt++)); do
             status=$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$EC2_INSTANCE_ID" \

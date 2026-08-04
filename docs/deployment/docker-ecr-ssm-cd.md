@@ -13,10 +13,11 @@ This workflow is deliberately limited to the `staging` GitHub Environment and de
 ## Flow
 
 1. `Backend CI` succeeds on a push to `dev`. CI results from `pull_request` events and forks are not deployment inputs.
-2. `Backend CD (Staging)` checks out that exact successful commit and builds `linux/arm64` from `backend/Dockerfile`.
-3. The image is pushed to private ECR with only the full 40-character Git SHA tag.
-4. GitHub Actions sends the compose file, Nginx configuration, and deploy script through SSM to `/opt/miriyum`.
-5. The EC2 script logs in to ECR, pulls the immutable image, runs Docker Compose, and checks `http://127.0.0.1:8080/actuator/health`.
+2. For automatic deployment, `Backend CD (Staging)` reads the current remote `dev` HEAD before it receives OIDC credentials. If it differs from the successful CI SHA, the run is stale and the deploy job is skipped.
+3. `Backend CD (Staging)` checks out that exact current successful commit and builds `linux/arm64` from `backend/Dockerfile`.
+4. The image is pushed to private ECR with only the full 40-character Git SHA tag.
+5. GitHub Actions sends the compose file, Nginx configuration, and deploy script through SSM to `/opt/miriyum`.
+6. The EC2 script logs in to ECR, pulls the immutable image, runs Docker Compose, and checks `http://127.0.0.1:8080/actuator/health`.
 
 The runtime `.env` is created manually on EC2 and remains server-local. The CD workflow never creates it, uploads it, or writes its values to GitHub Actions logs.
 
@@ -46,6 +47,6 @@ These are staging Environment variables, not application secrets. Application an
 
 ## Release and rollback
 
-An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. The CD job additionally requires the triggering CI event to be a `push` from this repository, so a successful pull request CI result, including a fork PR, never receives OIDC or SSM deployment authority. A manual `Backend CD (Staging)` dispatch is allowed only from `dev` and accepts a full 40-character SHA tag. Use it to deploy an already-pushed previous ECR image when rolling back staging.
+An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. The CD job additionally requires the triggering CI event to be a `push` from this repository, so a successful pull request CI result, including a fork PR, never receives OIDC or SSM deployment authority. Before automatic build and deployment, the workflow compares the completed CI SHA with the current remote `dev` HEAD and skips stale runs. A manual `Backend CD (Staging)` dispatch is allowed only from `dev` and accepts a full 40-character SHA tag; this is the only path that intentionally deploys a previous ECR image for staging rollback.
 
 After each deployment, record the GitHub Actions run URL, ECR image digest, SSM command ID, and EC2 loopback health result. Until those four runtime results exist, deployment evidence remains `NOT RUN`.
