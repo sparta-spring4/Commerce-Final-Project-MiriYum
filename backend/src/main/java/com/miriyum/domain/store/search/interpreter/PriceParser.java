@@ -9,7 +9,7 @@ final class PriceParser {
 
     private static final String NUMBER = "(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)";
     private static final Pattern RANGE_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
+            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*(원)?\\s*(?:~|～|-)\\s*"
                     + "(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern BOUND_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
@@ -78,22 +78,23 @@ final class PriceParser {
                 continue;
             }
             recognizedSpans.add(span);
-            if (rangeMatcher.group(2) != null
-                    && rangeMatcher.group(4) != null
-                    && !rangeMatcher.group(2).equals(rangeMatcher.group(4))) {
+            String explicitLeftUnit = rangeMatcher.group(2);
+            boolean hasLeftWon = rangeMatcher.group(3) != null;
+            String explicitRightUnit = rangeMatcher.group(5);
+            boolean bareLeftEndpoint = explicitLeftUnit == null && !hasLeftWon;
+            boolean unsupportedUnitForm = explicitLeftUnit != null && !hasLeftWon
+                    || !bareLeftEndpoint
+                    && !java.util.Objects.equals(explicitLeftUnit, explicitRightUnit);
+            if (unsupportedUnitForm) {
                 ambiguousBandStart = earliest(
                         ambiguousBandStart, span.startInclusive());
                 continue;
             }
-            String leftUnit = rangeMatcher.group(2) == null
-                    ? rangeMatcher.group(4)
-                    : rangeMatcher.group(2);
-            String rightUnit = rangeMatcher.group(4) == null
-                    ? rangeMatcher.group(2)
-                    : rangeMatcher.group(4);
+            String leftUnit = bareLeftEndpoint ? explicitRightUnit : explicitLeftUnit;
+            String rightUnit = explicitRightUnit;
             try {
                 long left = toWon(rangeMatcher.group(1), leftUnit);
-                long right = toWon(rangeMatcher.group(3), rightUnit);
+                long right = toWon(rangeMatcher.group(4), rightUnit);
                 minimum = maximum(minimum, left);
                 maximum = minimum(maximum, right);
                 spans.add(span);
