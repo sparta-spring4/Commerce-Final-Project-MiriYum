@@ -21,7 +21,7 @@ public interface ReservationCapacityBucketRepository
      * @param storeIds 판정 대상 매장 ID 목록
      * @param serviceDate 매장 업무 날짜
      * @param startTime 요청 점유 시작 시각
-     * @param endTime 요청 점유 종료 시각
+     * @param queryEndTime 후보 중 가장 늦은 점유 종료 조회 상한. 최종 판정은 매장별 종료를 사용한다.
      * @return 매장·구간 순서로 정렬된 최신 정책 버킷
      */
     @Query("""
@@ -29,7 +29,7 @@ public interface ReservationCapacityBucketRepository
             from ReservationCapacityBucket bucket
             where bucket.storeId in :storeIds
               and bucket.serviceDate = :serviceDate
-              and bucket.startTime < :endTime
+              and bucket.startTime < :queryEndTime
               and bucket.endTime > :startTime
               and bucket.policyVersion = (
                   select max(latest.policyVersion)
@@ -46,6 +46,6 @@ public interface ReservationCapacityBucketRepository
             @Param("storeIds") Collection<Long> storeIds,
             @Param("serviceDate") LocalDate serviceDate,
             @Param("startTime") LocalTime startTime,
-            @Param("endTime") LocalTime endTime
+            @Param("queryEndTime") LocalTime queryEndTime
     );
 }

@@ -26,6 +26,7 @@ import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -460,9 +461,196 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("매장별로 계산한 서로 다른 점유 종료 시각으로 수용량을 한 번에 판정한다")
+    void getAvailabilitiesUsesPerStoreResolvedOccupancyEnds() {
+        List<Long> storeIds = List.of(1L, 2L);
+        LocalDateTime requestedAt = LocalDateTime.of(CAPACITY_SERVICE_DATE, START_TIME);
+        given(storeScheduleService.resolveReservationWindows(
+                storeIds,
+                CAPACITY_SERVICE_DATE,
+                START_TIME
+        )).willReturn(List.of(
+                StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt,
+                        requestedAt.plusHours(2)
+                ),
+                StoreReservationWindowResult.accepting(
+                        2L,
+                        "Asia/Seoul",
+                        requestedAt,
+                        requestedAt.plusHours(2)
+                )
+        ));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        )).willReturn(List.of(
+                activePolicy(1L, 30, 60, 0),
+                activePolicy(2L, 30, 90, 0)
+        ));
+        StoreServiceIntervalRequest store1Interval = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-08-02T09:00:00Z"),
+                Instant.parse("2026-08-02T10:00:00Z")
+        );
+        StoreServiceIntervalRequest store2Interval = new StoreServiceIntervalRequest(
+                2L,
+                Instant.parse("2026-08-02T09:00:00Z"),
+                Instant.parse("2026-08-02T10:30:00Z")
+        );
+        given(storeServiceIntervalValidationService.validateServiceIntervals(
+                List.of(store1Interval, store2Interval)
+        )).willReturn(List.of(
+                StoreServiceIntervalResult.of(store1Interval, true),
+                StoreServiceIntervalResult.of(store2Interval, true)
+        ));
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                storeIds,
+                CAPACITY_SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 30)
+        )).willReturn(List.of(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30), 0, 0),
+                capacityBucket(1L, LocalTime.of(18, 30), LocalTime.of(19, 0), 0, 0),
+                capacityBucket(1L, LocalTime.of(19, 0), LocalTime.of(19, 30), 0, 0),
+                capacityBucket(2L, LocalTime.of(18, 0), LocalTime.of(18, 30), 0, 0),
+                capacityBucket(2L, LocalTime.of(18, 30), LocalTime.of(19, 0), 0, 0),
+                capacityBucket(2L, LocalTime.of(19, 0), LocalTime.of(19, 30), 0, 0)
+        ));
+
+        List<ReservationAvailabilityResult> results = reservationService.getAvailabilities(
+                storeIds,
+                new ReservationAvailabilityCondition(
+                        CAPACITY_SERVICE_DATE,
+                        START_TIME,
+                        null,
+                        2,
+                        false
+                )
+        );
+
+        assertThat(results).containsExactly(
+                new ReservationAvailabilityResult(
+                        1L,
+                        ReservationAvailabilityStatus.AVAILABLE
+                ),
+                new ReservationAvailabilityResult(
+                        2L,
+                        ReservationAvailabilityStatus.AVAILABLE
+                )
+        );
+        then(capacityBucketRepository).should(times(1))
+                .findLatestPolicyBucketsOverlapping(
+                        storeIds,
+                        CAPACITY_SERVICE_DATE,
+                        START_TIME,
+                        LocalTime.of(19, 30)
+                );
+    }
+
+    @Test
+    @DisplayName("DST 중복 구간은 로컬 수용량 버킷으로 추측하지 않고 실패 폐쇄한다")
+    void getAvailabilityFailsClosedForAmbiguousDstCapacityWindow() {
+        LocalDate serviceDate = LocalDate.of(2026, 10, 25);
+        LocalTime startTime = LocalTime.of(2, 30);
+        LocalDateTime requestedAt = LocalDateTime.of(serviceDate, startTime);
+        List<Long> storeIds = List.of(1L);
+        given(storeScheduleService.resolveReservationWindows(storeIds, serviceDate, startTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Europe/Paris",
+                        requestedAt.minusMinutes(30),
+                        requestedAt.plusMinutes(30)
+                )));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        )).willReturn(List.of(activePolicy(1L, 30, 60, 0)));
+        StoreServiceIntervalRequest interval = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-10-25T00:30:00Z"),
+                Instant.parse("2026-10-25T01:30:00Z")
+        );
+        given(storeServiceIntervalValidationService.validateServiceIntervals(
+                List.of(interval)
+        )).willReturn(List.of(StoreServiceIntervalResult.of(interval, true)));
+
+        ReservationAvailabilityResult result = reservationService.getAvailability(
+                1L,
+                new ReservationAvailabilityCondition(
+                        serviceDate,
+                        startTime,
+                        ZoneOffset.ofHours(2),
+                        2,
+                        false
+                )
+        );
+
+        assertThat(result).isEqualTo(new ReservationAvailabilityResult(
+                1L,
+                ReservationAvailabilityStatus.UNAVAILABLE
+        ));
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("자정을 넘는 점유 구간은 로컬 수용량 버킷으로 추측하지 않고 실패 폐쇄한다")
+    void getAvailabilityFailsClosedForCrossMidnightCapacityWindow() {
+        LocalDate serviceDate = LocalDate.of(2026, 8, 2);
+        LocalTime startTime = LocalTime.of(23, 30);
+        LocalDateTime requestedAt = LocalDateTime.of(serviceDate, startTime);
+        List<Long> storeIds = List.of(1L);
+        given(storeScheduleService.resolveReservationWindows(storeIds, serviceDate, startTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt.minusMinutes(30),
+                        requestedAt.plusMinutes(30)
+                )));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        )).willReturn(List.of(activePolicy(1L, 30, 90, 0)));
+        StoreServiceIntervalRequest interval = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-08-02T14:30:00Z"),
+                Instant.parse("2026-08-02T16:00:00Z")
+        );
+        given(storeServiceIntervalValidationService.validateServiceIntervals(
+                List.of(interval)
+        )).willReturn(List.of(StoreServiceIntervalResult.of(interval, true)));
+
+        ReservationAvailabilityResult result = reservationService.getAvailability(
+                1L,
+                new ReservationAvailabilityCondition(
+                        serviceDate,
+                        startTime,
+                        null,
+                        2,
+                        false
+                )
+        );
+
+        assertThat(result).isEqualTo(new ReservationAvailabilityResult(
+                1L,
+                ReservationAvailabilityStatus.UNAVAILABLE
+        ));
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
     @DisplayName("요청 구간을 연속으로 덮는 모든 버킷에 여유가 있으면 예약 가능하다")
     void getAvailabilityReturnsAvailableWhenEveryContiguousBucketCanAccept() {
         ReservationAvailabilityCondition condition = capacityCondition(4, false);
+        givenResolvedCapacityTimes(List.of(22L), CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 List.of(22L),
                 CAPACITY_SERVICE_DATE,
@@ -486,6 +674,7 @@ class ReservationServiceTest {
     @DisplayName("필요한 구간 사이에 버킷 공백이 있으면 예약 불가다")
     void getAvailabilityReturnsUnavailableWhenCoverageHasGap() {
         ReservationAvailabilityCondition condition = capacityCondition(2, false);
+        givenResolvedCapacityTimes(List.of(22L), CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 List.of(22L),
                 CAPACITY_SERVICE_DATE,
@@ -507,6 +696,7 @@ class ReservationServiceTest {
     @DisplayName("필요 구간에서 버킷이 겹치면 예약 불가다")
     void getAvailabilityReturnsUnavailableWhenCoverageOverlaps() {
         ReservationAvailabilityCondition condition = capacityCondition(2, false);
+        givenResolvedCapacityTimes(List.of(22L), CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 List.of(22L),
                 CAPACITY_SERVICE_DATE,
@@ -528,6 +718,7 @@ class ReservationServiceTest {
     @DisplayName("필요 구간에 서로 다른 정책 버전이 섞이면 예약 불가다")
     void getAvailabilityReturnsUnavailableWhenPolicyVersionsAreMixed() {
         ReservationAvailabilityCondition condition = capacityCondition(2, false);
+        givenResolvedCapacityTimes(List.of(22L), CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 List.of(22L),
                 CAPACITY_SERVICE_DATE,
@@ -563,6 +754,7 @@ class ReservationServiceTest {
     @DisplayName("겹치는 버킷 중 하나라도 수용량이 부족하면 전체 예약 불가다")
     void getAvailabilityReturnsUnavailableWhenAnyBucketIsInsufficient() {
         ReservationAvailabilityCondition condition = capacityCondition(4, false);
+        givenResolvedCapacityTimes(List.of(22L), CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 List.of(22L),
                 CAPACITY_SERVICE_DATE,
@@ -585,6 +777,7 @@ class ReservationServiceTest {
     void getAvailabilitiesUsesOneQueryAndPreservesInputOrder() {
         ReservationAvailabilityCondition condition = capacityCondition(2, false);
         List<Long> storeIds = List.of(30L, 10L, 20L);
+        givenResolvedCapacityTimes(storeIds, CAPACITY_END_TIME);
         given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
                 storeIds,
                 CAPACITY_SERVICE_DATE,
@@ -642,6 +835,53 @@ class ReservationServiceTest {
                 );
     }
 
+    private void givenResolvedCapacityTimes(
+            List<Long> storeIds,
+            LocalTime occupancyEndTime
+    ) {
+        LocalDateTime requestedAt =
+                LocalDateTime.of(CAPACITY_SERVICE_DATE, START_TIME);
+        int durationMinutes = Math.toIntExact(
+                Duration.between(START_TIME, occupancyEndTime).toMinutes()
+        );
+        List<StoreReservationWindowResult> windows = storeIds.stream()
+                .map(storeId -> StoreReservationWindowResult.accepting(
+                        storeId,
+                        "Asia/Seoul",
+                        requestedAt,
+                        requestedAt.plusHours(2)
+                ))
+                .toList();
+        List<ReservationTimePolicyVersion> policies = storeIds.stream()
+                .distinct()
+                .map(storeId -> activePolicy(storeId, 30, durationMinutes, 0))
+                .toList();
+        Instant startAt = requestedAt.toInstant(ZoneOffset.ofHours(9));
+        List<StoreServiceIntervalRequest> intervals = storeIds.stream()
+                .map(storeId -> new StoreServiceIntervalRequest(
+                        storeId,
+                        startAt,
+                        startAt.plus(Duration.ofMinutes(durationMinutes))
+                ))
+                .toList();
+
+        given(storeScheduleService.resolveReservationWindows(
+                storeIds,
+                CAPACITY_SERVICE_DATE,
+                START_TIME
+        )).willReturn(windows);
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        )).willReturn(policies);
+        given(storeServiceIntervalValidationService.validateServiceIntervals(intervals))
+                .willReturn(intervals.stream()
+                        .map(interval -> StoreServiceIntervalResult.of(interval, true))
+                        .toList());
+    }
+
     private static ReservationAvailabilityCondition capacityCondition(
             int partySize,
             boolean includesInfants
@@ -649,7 +889,7 @@ class ReservationServiceTest {
         return new ReservationAvailabilityCondition(
                 CAPACITY_SERVICE_DATE,
                 START_TIME,
-                CAPACITY_END_TIME,
+                null,
                 partySize,
                 includesInfants
         );
