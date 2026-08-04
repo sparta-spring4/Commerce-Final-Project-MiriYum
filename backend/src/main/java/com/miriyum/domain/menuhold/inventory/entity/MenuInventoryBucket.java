@@ -136,6 +136,47 @@ public class MenuInventoryBucket extends BaseEntity {
         return onlineHoldRemaining + (sharedOnlineAllowed ? sharedRemaining : 0);
     }
 
+    public MenuInventoryBucket publishNextPolicy(
+            int newTotalSupply,
+            int newOnlineHoldCapacity,
+            int newOnsiteCapacity,
+            int newSharedCapacity,
+            boolean newSharedOnlineAllowed,
+            InventoryAvailabilityStatus newAvailabilityStatus
+    ) {
+        if (newAvailabilityStatus == null) {
+            throw new IllegalArgumentException("availability status is required");
+        }
+
+        int onlineInUse = onlineHoldCapacity - onlineHoldRemaining;
+        int onsiteInUse = onsiteCapacity - onsiteRemaining;
+        int sharedInUse = sharedCapacity - sharedRemaining;
+        if (newOnlineHoldCapacity < onlineInUse
+                || newOnsiteCapacity < onsiteInUse
+                || newSharedCapacity < sharedInUse) {
+            throw new ServiceException(MenuHoldErrorCode.QUANTITY_IN_USE);
+        }
+
+        MenuInventoryBucket next = create(
+                menuId,
+                serviceDate,
+                startTime,
+                endDate,
+                endTime,
+                timeZoneId,
+                inventoryPolicyVersion + 1,
+                newTotalSupply,
+                newOnlineHoldCapacity,
+                newOnsiteCapacity,
+                newSharedCapacity,
+                newSharedOnlineAllowed);
+        next.onlineHoldRemaining = newOnlineHoldCapacity - onlineInUse;
+        next.onsiteRemaining = newOnsiteCapacity - onsiteInUse;
+        next.sharedRemaining = newSharedCapacity - sharedInUse;
+        next.availabilityStatus = newAvailabilityStatus;
+        return next;
+    }
+
     public InventoryAllocation acquire(int quantity) {
         InventoryAllocation allocation = planAcquire(quantity);
         onlineHoldRemaining -= allocation.onlineHoldQuantity();

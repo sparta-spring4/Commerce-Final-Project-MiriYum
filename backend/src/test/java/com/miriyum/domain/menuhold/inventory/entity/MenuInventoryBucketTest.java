@@ -94,6 +94,46 @@ class MenuInventoryBucketTest {
         assertThat(bucket.getTimeZoneId()).isEqualTo("Asia/Seoul");
     }
 
+    @Test
+    void publishesNextPolicyWithoutChangingTheCurrentVersion() {
+        MenuInventoryBucket current = bucket(10, 5, 2, 3, true);
+        current.acquire(4);
+
+        MenuInventoryBucket next = current.publishNextPolicy(
+                12,
+                6,
+                2,
+                4,
+                true,
+                InventoryAvailabilityStatus.AVAILABLE);
+
+        assertThat(current.getInventoryPolicyVersion()).isEqualTo(1L);
+        assertThat(current.getOnlineHoldCapacity()).isEqualTo(5);
+        assertThat(current.getOnlineHoldRemaining()).isEqualTo(1);
+        assertThat(next.getInventoryPolicyVersion()).isEqualTo(2L);
+        assertThat(next.getOnlineHoldCapacity()).isEqualTo(6);
+        assertThat(next.getOnlineHoldRemaining()).isEqualTo(2);
+        assertThat(next.getSharedCapacity()).isEqualTo(4);
+        assertThat(next.getSharedRemaining()).isEqualTo(4);
+    }
+
+    @Test
+    void rejectsNextPolicyThatWouldDiscardQuantityAlreadyInUse() {
+        MenuInventoryBucket current = bucket(10, 5, 2, 3, true);
+        current.acquire(4);
+
+        assertThatThrownBy(() -> current.publishNextPolicy(
+                8,
+                3,
+                2,
+                3,
+                true,
+                InventoryAvailabilityStatus.AVAILABLE))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.QUANTITY_IN_USE);
+    }
+
     private static MenuInventoryBucket bucket(
             int total,
             int online,
