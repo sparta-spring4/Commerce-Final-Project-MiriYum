@@ -188,6 +188,51 @@ class RuleInterpreterNumericTest {
                 WarningField.PRICE));
     }
 
+    @Test
+    @DisplayName("음수 시작 가격 범위는 뒤쪽 가격만 재해석하지 않는다")
+    void preservesNegativePriceRangeAsWhole() {
+        // given
+        String input = "-1~2만원 맛집";
+
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.OUT_OF_RANGE_NUMBER,
+                WarningField.PRICE));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"1천~2만원 맛집", "1만원~2천원 맛집"})
+    @DisplayName("서로 다른 단위의 가격 범위는 승인 문법으로 소비하지 않는다")
+    void preservesMixedUnitPriceRange(String input) {
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_PRICE,
+                WarningField.PRICE));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"검색-2명", "검색+2명"})
+    @DisplayName("단어에 붙은 부호 뒤 숫자에서 인원 해석을 재시작하지 않는다")
+    void doesNotRestartPartyMatchAfterAttachedSign(String input) {
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().partySize()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).isEmpty();
+    }
+
     private InterpretationResult interpret(String input) {
         SearchVocabulary vocabulary =
                 new SearchVocabulary("catalog-v1", List.of(), List.of(), List.of(), List.of());

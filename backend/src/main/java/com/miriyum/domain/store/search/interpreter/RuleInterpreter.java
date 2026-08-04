@@ -43,6 +43,11 @@ public final class RuleInterpreter {
                 DictionaryMatcher.match(normalized, request.vocabulary().menuCategories());
         List<MatchedToken<String>> tagTokens =
                 DictionaryMatcher.match(normalized, request.vocabulary().tags());
+        List<MatchedToken<String>> allDictionaryTokens = new ArrayList<>();
+        allDictionaryTokens.addAll(regionTokens);
+        allDictionaryTokens.addAll(storeCategoryTokens);
+        allDictionaryTokens.addAll(menuCategoryTokens);
+        allDictionaryTokens.addAll(tagTokens);
 
         DictionaryResolution dictionary = resolveDictionaryTokens(
                 regionTokens,
@@ -60,24 +65,27 @@ public final class RuleInterpreter {
                 date.recognizedSpans(),
                 time.recognizedSpans());
         dictionary = cross.dictionary();
+        price = PriceParser.parse(maskOverlappingCandidates(
+                normalized, price.recognizedSpans(), allDictionaryTokens));
+        partySize = PartySizeParser.parse(maskOverlappingCandidates(
+                normalized, partySize.recognizedSpans(), allDictionaryTokens));
+        date = DateParser.parse(
+                maskOverlappingCandidates(
+                        normalized, date.recognizedSpans(), allDictionaryTokens),
+                clock,
+                request.zoneId());
+        time = TimeParser.parse(maskOverlappingCandidates(
+                normalized, time.recognizedSpans(), allDictionaryTokens));
 
         List<TextSpan> acceptedSpans = new ArrayList<>();
         acceptedSpans.addAll(spansOf(dictionary.regions()));
         acceptedSpans.addAll(spansOf(dictionary.storeCategories()));
         acceptedSpans.addAll(spansOf(dictionary.menuCategories()));
         acceptedSpans.addAll(spansOf(dictionary.tags()));
-        if (!cross.rejectPrice()) {
-            acceptedSpans.addAll(price.acceptedSpans());
-        }
-        if (!cross.rejectPartySize()) {
-            acceptedSpans.addAll(partySize.acceptedSpans());
-        }
-        if (!cross.rejectDate()) {
-            acceptedSpans.addAll(date.acceptedSpans());
-        }
-        if (!cross.rejectTime()) {
-            acceptedSpans.addAll(time.acceptedSpans());
-        }
+        acceptedSpans.addAll(price.acceptedSpans());
+        acceptedSpans.addAll(partySize.acceptedSpans());
+        acceptedSpans.addAll(date.acceptedSpans());
+        acceptedSpans.addAll(time.acceptedSpans());
         List<LocatedWarning> locatedWarnings = new ArrayList<>();
         if (dictionary.ambiguous() || cross.ambiguous()) {
             locatedWarnings.add(new LocatedWarning(
@@ -100,10 +108,10 @@ public final class RuleInterpreter {
                 codesOf(dictionary.storeCategories()),
                 codesOf(dictionary.menuCategories()),
                 codesOf(dictionary.tags()),
-                cross.rejectPrice() ? null : price.value(),
-                cross.rejectPartySize() ? null : partySize.value(),
-                cross.rejectDate() ? null : date.value(),
-                cross.rejectTime() ? null : time.value(),
+                price.value(),
+                partySize.value(),
+                date.value(),
+                time.value(),
                 removeAcceptedSpans(normalized, acceptedSpans));
         return new InterpretationResult(
                 RULE_VERSION,
@@ -136,10 +144,6 @@ public final class RuleInterpreter {
                 rejectedDictionary.add(token);
             }
         }
-        boolean rejectPrice = overlapsDictionary(priceSpans, dictionaryTokens);
-        boolean rejectPartySize = overlapsDictionary(partySizeSpans, dictionaryTokens);
-        boolean rejectDate = overlapsDictionary(dateSpans, dictionaryTokens);
-        boolean rejectTime = overlapsDictionary(timeSpans, dictionaryTokens);
         boolean ambiguous = !rejectedDictionary.isEmpty();
         Integer ambiguityStart = rejectedDictionary.stream()
                 .map(MatchedToken::span)
@@ -159,19 +163,8 @@ public final class RuleInterpreter {
                 dictionary.ambiguityStart());
         return new CrossFieldResolution(
                 resolvedDictionary,
-                rejectPrice,
-                rejectPartySize,
-                rejectDate,
-                rejectTime,
                 ambiguous,
                 ambiguityStart);
-    }
-
-    private static boolean overlapsDictionary(
-            List<TextSpan> spans,
-            List<MatchedToken<String>> dictionaryTokens) {
-        return spans.stream().anyMatch(span -> dictionaryTokens.stream()
-                .anyMatch(token -> span.overlaps(token.span())));
     }
 
     private static DictionaryResolution resolveDictionaryTokens(
@@ -236,6 +229,26 @@ public final class RuleInterpreter {
         return SearchInputNormalizer.normalize(remaining.toString());
     }
 
+    private static String maskOverlappingCandidates(
+            String input,
+            List<TextSpan> recognizedSpans,
+            List<MatchedToken<String>> dictionaryTokens) {
+        List<TextSpan> rejectedSpans = recognizedSpans.stream()
+                .filter(span -> dictionaryTokens.stream()
+                        .anyMatch(token -> span.overlaps(token.span())))
+                .toList();
+        if (rejectedSpans.isEmpty()) {
+            return input;
+        }
+        StringBuilder masked = new StringBuilder(input);
+        for (TextSpan span : rejectedSpans) {
+            for (int index = span.startInclusive(); index < span.endExclusive(); index++) {
+                masked.setCharAt(index, ' ');
+            }
+        }
+        return masked.toString();
+    }
+
     private static int earliest(Integer left, Integer right) {
         if (left == null) {
             return right == null ? 0 : right;
@@ -254,10 +267,6 @@ public final class RuleInterpreter {
 
     private record CrossFieldResolution(
             DictionaryResolution dictionary,
-            boolean rejectPrice,
-            boolean rejectPartySize,
-            boolean rejectDate,
-            boolean rejectTime,
             boolean ambiguous,
             Integer ambiguityStart) {
     }

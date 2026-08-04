@@ -9,16 +9,19 @@ final class PriceParser {
 
     private static final String NUMBER = "(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)";
     private static final Pattern RANGE_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
+            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
                     + "(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern BOUND_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
     private static final Pattern EXACT_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,~～])(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern AMBIGUOUS_BAND_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}+\\-.,])" + NUMBER + "\\s*만원대(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,~～])" + NUMBER + "\\s*만원대(?![\\p{L}\\p{N}])");
+    private static final Pattern MALFORMED_RANGE_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])([-+]?[0-9][0-9,.]*)\\s*(?:천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
+                    + "([-+]?[0-9][0-9,.]*)\\s*(?:천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern MALFORMED_PRICE_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([-+]?[0-9][0-9,.]*)\\s*(?:천|만)?\\s*원"
+            "(?<![\\p{L}\\p{N}~～])([-+]?[0-9][0-9,.]*)\\s*(?:천|만)?\\s*원"
                     + "(?:\\s*(?:이상|이하|미만|초과))?(?![\\p{L}\\p{N}])");
     private static final Pattern CANONICAL_PRICE_NUMBER = Pattern.compile(NUMBER);
 
@@ -33,6 +36,21 @@ final class PriceParser {
         List<TextSpan> spans = new ArrayList<>();
         List<TextSpan> recognizedSpans = new ArrayList<>();
         Integer outOfRangeNumberStart = null;
+
+        Matcher malformedRangeMatcher = MALFORMED_RANGE_PATTERN.matcher(input);
+        while (malformedRangeMatcher.find()) {
+            String left = malformedRangeMatcher.group(1);
+            String right = malformedRangeMatcher.group(2);
+            if (CANONICAL_PRICE_NUMBER.matcher(left).matches()
+                    && CANONICAL_PRICE_NUMBER.matcher(right).matches()) {
+                continue;
+            }
+            TextSpan span = new TextSpan(
+                    malformedRangeMatcher.start(), malformedRangeMatcher.end());
+            recognizedSpans.add(span);
+            outOfRangeNumberStart = earliest(
+                    outOfRangeNumberStart, span.startInclusive());
+        }
 
         Matcher malformedPriceMatcher = MALFORMED_PRICE_PATTERN.matcher(input);
         while (malformedPriceMatcher.find()) {
@@ -56,7 +74,17 @@ final class PriceParser {
         Matcher rangeMatcher = RANGE_PATTERN.matcher(input);
         while (rangeMatcher.find()) {
             TextSpan span = new TextSpan(rangeMatcher.start(), rangeMatcher.end());
+            if (overlapsAny(span, recognizedSpans)) {
+                continue;
+            }
             recognizedSpans.add(span);
+            if (rangeMatcher.group(2) != null
+                    && rangeMatcher.group(4) != null
+                    && !rangeMatcher.group(2).equals(rangeMatcher.group(4))) {
+                ambiguousBandStart = earliest(
+                        ambiguousBandStart, span.startInclusive());
+                continue;
+            }
             String leftUnit = rangeMatcher.group(2) == null
                     ? rangeMatcher.group(4)
                     : rangeMatcher.group(2);

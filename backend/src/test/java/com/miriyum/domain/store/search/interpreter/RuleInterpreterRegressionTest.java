@@ -118,7 +118,7 @@ class RuleInterpreterRegressionTest {
     }
 
     @Test
-    @DisplayName("충돌로 거부된 인원 span과 겹치는 사전 조건도 소비하지 않는다")
+    @DisplayName("사전과 겹친 인원 span만 거부하고 독립 후보를 유지한다")
     void preservesDictionaryOverlapWithConflictingPartyCandidate() {
         // given
         SearchVocabulary vocabulary = new SearchVocabulary(
@@ -136,15 +136,11 @@ class RuleInterpreterRegressionTest {
 
         // then
         assertThat(result.condition().tagCodes()).isEmpty();
-        assertThat(result.condition().partySize()).isNull();
-        assertThat(result.condition().remainingKeyword()).isEqualTo("2명 3명");
-        assertThat(result.warnings()).containsExactly(
-                new InterpretationWarning(
-                        WarningCode.AMBIGUOUS_DICTIONARY_TERM,
-                        WarningField.DICTIONARY),
-                new InterpretationWarning(
-                        WarningCode.CONFLICTING_PARTY_SIZE,
-                        WarningField.PARTY_SIZE));
+        assertThat(result.condition().partySize()).isEqualTo(3);
+        assertThat(result.condition().remainingKeyword()).isEqualTo("2명");
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                WarningField.DICTIONARY));
     }
 
     @Test
@@ -168,13 +164,9 @@ class RuleInterpreterRegressionTest {
         assertThat(result.condition().tagCodes()).isEmpty();
         assertThat(result.condition().priceRange()).isNull();
         assertThat(result.condition().remainingKeyword()).isEqualTo("2만원대");
-        assertThat(result.warnings()).containsExactly(
-                new InterpretationWarning(
-                        WarningCode.AMBIGUOUS_DICTIONARY_TERM,
-                        WarningField.DICTIONARY),
-                new InterpretationWarning(
-                        WarningCode.AMBIGUOUS_PRICE,
-                        WarningField.PRICE));
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                WarningField.DICTIONARY));
     }
 
     @Test
@@ -195,6 +187,32 @@ class RuleInterpreterRegressionTest {
                 new InterpretationWarning(
                         WarningCode.AMBIGUOUS_PRICE,
                         WarningField.PRICE));
+    }
+
+    @Test
+    @DisplayName("사전과 겹친 후보만 거부하고 독립 구조화 후보는 유지한다")
+    void keepsIndependentStructuredCandidateAfterDictionaryOverlap() {
+        // given
+        SearchVocabulary vocabulary = new SearchVocabulary(
+                "catalog-v1",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new VocabularyEntry("TAG_VIP_PARTY", List.of("VIP 2명"))));
+
+        // when
+        InterpretationResult result = interpreter.interpret(new InterpretationRequest(
+                "VIP 2명 2명",
+                vocabulary,
+                ZoneId.of("Asia/Seoul")));
+
+        // then
+        assertThat(result.condition().tagCodes()).isEmpty();
+        assertThat(result.condition().partySize()).isEqualTo(2);
+        assertThat(result.condition().remainingKeyword()).isEqualTo("VIP 2명");
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                WarningField.DICTIONARY));
     }
 
     private SearchVocabulary regressionVocabulary() {

@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 final class PartySizeParser {
 
     private static final Pattern PARTY_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([-+]?[0-9][0-9,.]*)\\s*명(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,])([-+]?[0-9][0-9,.]*)\\s*명(?![\\p{L}\\p{N}])");
     private static final Pattern CANONICAL_INTEGER = Pattern.compile("-?[0-9]+");
 
     private PartySizeParser() {
