@@ -7,7 +7,10 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -44,10 +47,89 @@ public interface MenuInventoryBucketRepository
     @Query("""
             select bucket
             from MenuInventoryBucket bucket
+            where bucket.menuId = :menuId
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime = :startTime
+              and bucket.endDate = :endDate
+              and bucket.endTime = :endTime
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = :menuId
+                    and candidate.serviceDate = :serviceDate
+                    and candidate.startTime = :startTime
+                    and candidate.endDate = :endDate
+                    and candidate.endTime = :endTime
+              )
+            """)
+    Optional<MenuInventoryBucket> findCurrentForUpdate(
+            @Param("menuId") long menuId,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("endDate") LocalDate endDate,
+            @Param("endTime") LocalTime endTime);
+
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
+            where bucket.menuId in :menuIds
+              and (:serviceDate is null or bucket.serviceDate = :serviceDate)
+              and (:menuId is null or bucket.menuId = :menuId)
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = bucket.menuId
+                    and candidate.serviceDate = bucket.serviceDate
+                    and candidate.startTime = bucket.startTime
+                    and candidate.endDate = bucket.endDate
+                    and candidate.endTime = bucket.endTime
+              )
+            order by bucket.serviceDate asc, bucket.startTime asc,
+                     bucket.menuId asc, bucket.id asc
+            """)
+    Page<MenuInventoryBucket> findCurrentPage(
+            @Param("menuIds") Collection<Long> menuIds,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("menuId") Long menuId,
+            Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
             where bucket.id in :ids
             order by bucket.id
             """)
     List<MenuInventoryBucket> findAllForUpdate(@Param("ids") Collection<Long> ids);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
+            where bucket.id in :requestedIds
+               or exists (
+                  select requested.id
+                  from MenuInventoryBucket requested
+                  where requested.id in :requestedIds
+                    and requested.menuId = bucket.menuId
+                    and requested.serviceDate = bucket.serviceDate
+                    and requested.startTime = bucket.startTime
+                    and requested.endDate = bucket.endDate
+                    and requested.endTime = bucket.endTime
+                    and bucket.inventoryPolicyVersion = (
+                        select max(candidate.inventoryPolicyVersion)
+                        from MenuInventoryBucket candidate
+                        where candidate.menuId = requested.menuId
+                          and candidate.serviceDate = requested.serviceDate
+                          and candidate.startTime = requested.startTime
+                          and candidate.endDate = requested.endDate
+                          and candidate.endTime = requested.endTime
+                    )
+               )
+            order by bucket.id
+            """)
+    List<MenuInventoryBucket> findRequestedAndCurrentForUpdate(
+            @Param("requestedIds") Collection<Long> requestedIds);
 
     @Modifying
     @Query(value = """

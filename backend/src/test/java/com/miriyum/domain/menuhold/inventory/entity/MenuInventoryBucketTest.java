@@ -94,6 +94,71 @@ class MenuInventoryBucketTest {
         assertThat(bucket.getTimeZoneId()).isEqualTo("Asia/Seoul");
     }
 
+    @Test
+    void createsAnInitialPolicyAsManuallySoldOut() {
+        MenuInventoryBucket bucket = MenuInventoryBucket.create(
+                11L, LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                "Asia/Seoul", 1L, 5, 3, 1, 1, true,
+                InventoryAvailabilityStatus.SOLD_OUT);
+
+        assertThat(bucket.getAvailabilityStatus())
+                .isEqualTo(InventoryAvailabilityStatus.SOLD_OUT);
+    }
+
+    @Test
+    void publishesNextPolicyWithoutChangingTheCurrentVersion() {
+        MenuInventoryBucket current = bucket(10, 5, 2, 3, true);
+        current.acquire(4);
+
+        MenuInventoryBucket next = current.publishNextPolicy(
+                12,
+                6,
+                2,
+                4,
+                true,
+                InventoryAvailabilityStatus.AVAILABLE);
+
+        assertThat(current.getInventoryPolicyVersion()).isEqualTo(1L);
+        assertThat(current.getOnlineHoldCapacity()).isEqualTo(5);
+        assertThat(current.getOnlineHoldRemaining()).isEqualTo(1);
+        assertThat(next.getInventoryPolicyVersion()).isEqualTo(2L);
+        assertThat(next.getOnlineHoldCapacity()).isEqualTo(6);
+        assertThat(next.getOnlineHoldRemaining()).isEqualTo(2);
+        assertThat(next.getSharedCapacity()).isEqualTo(4);
+        assertThat(next.getSharedRemaining()).isEqualTo(4);
+    }
+
+    @Test
+    void rejectsNextPolicyThatWouldDiscardQuantityAlreadyInUse() {
+        MenuInventoryBucket current = bucket(10, 5, 2, 3, true);
+        current.acquire(4);
+
+        assertThatThrownBy(() -> current.publishNextPolicy(
+                8,
+                3,
+                2,
+                3,
+                true,
+                InventoryAvailabilityStatus.AVAILABLE))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.QUANTITY_IN_USE);
+    }
+
+    @Test
+    void rejectsAvailablePolicyWhenCarriedUsageLeavesNoOnlineQuantity() {
+        MenuInventoryBucket current = bucket(5, 5, 0, 0, true);
+        current.acquire(5);
+
+        assertThatThrownBy(() -> current.publishNextPolicy(
+                5, 5, 0, 0, true,
+                InventoryAvailabilityStatus.AVAILABLE))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+    }
+
     private static MenuInventoryBucket bucket(
             int total,
             int online,

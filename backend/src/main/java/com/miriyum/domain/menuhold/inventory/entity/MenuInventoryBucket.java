@@ -99,12 +99,34 @@ public class MenuInventoryBucket extends BaseEntity {
             int sharedQuantity,
             boolean sharedOnlineAllowed
     ) {
+        return create(menuId, serviceDate, startTime, endDate, endTime,
+                timeZoneId, inventoryPolicyVersion, totalSupply,
+                onlineHoldQuantity, onsiteQuantity, sharedQuantity,
+                sharedOnlineAllowed, InventoryAvailabilityStatus.AVAILABLE);
+    }
+
+    public static MenuInventoryBucket create(
+            long menuId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            LocalDate endDate,
+            LocalTime endTime,
+            String timeZoneId,
+            long inventoryPolicyVersion,
+            int totalSupply,
+            int onlineHoldQuantity,
+            int onsiteQuantity,
+            int sharedQuantity,
+            boolean sharedOnlineAllowed,
+            InventoryAvailabilityStatus availabilityStatus
+    ) {
         if (menuId <= 0 || serviceDate == null || startTime == null || endDate == null
                 || endTime == null || timeZoneId == null || timeZoneId.isBlank()
                 || !LocalDateTime.of(serviceDate, startTime)
                         .isBefore(LocalDateTime.of(endDate, endTime))
                 || inventoryPolicyVersion <= 0
-                || totalSupply < 0 || onlineHoldQuantity < 0 || onsiteQuantity < 0
+                || availabilityStatus == null || totalSupply < 0
+                || onlineHoldQuantity < 0 || onsiteQuantity < 0
                 || sharedQuantity < 0) {
             throw new IllegalArgumentException("invalid menu inventory bucket");
         }
@@ -128,12 +150,58 @@ public class MenuInventoryBucket extends BaseEntity {
         bucket.sharedRemaining = sharedQuantity;
         bucket.sharedCapacity = sharedQuantity;
         bucket.sharedOnlineAllowed = sharedOnlineAllowed;
-        bucket.availabilityStatus = InventoryAvailabilityStatus.AVAILABLE;
+        bucket.availabilityStatus = availabilityStatus;
         return bucket;
     }
 
     public int availableOnlineQuantity() {
         return onlineHoldRemaining + (sharedOnlineAllowed ? sharedRemaining : 0);
+    }
+
+    public MenuInventoryBucket publishNextPolicy(
+            int newTotalSupply,
+            int newOnlineHoldCapacity,
+            int newOnsiteCapacity,
+            int newSharedCapacity,
+            boolean newSharedOnlineAllowed,
+            InventoryAvailabilityStatus newAvailabilityStatus
+    ) {
+        if (newAvailabilityStatus == null) {
+            throw new IllegalArgumentException("availability status is required");
+        }
+
+        int onlineInUse = onlineHoldCapacity - onlineHoldRemaining;
+        int onsiteInUse = onsiteCapacity - onsiteRemaining;
+        int sharedInUse = sharedCapacity - sharedRemaining;
+        if (newOnlineHoldCapacity < onlineInUse
+                || newOnsiteCapacity < onsiteInUse
+                || newSharedCapacity < sharedInUse) {
+            throw new ServiceException(MenuHoldErrorCode.QUANTITY_IN_USE);
+        }
+
+        MenuInventoryBucket next = create(
+                menuId,
+                serviceDate,
+                startTime,
+                endDate,
+                endTime,
+                timeZoneId,
+                inventoryPolicyVersion + 1,
+                newTotalSupply,
+                newOnlineHoldCapacity,
+                newOnsiteCapacity,
+                newSharedCapacity,
+                newSharedOnlineAllowed);
+        next.onlineHoldRemaining = newOnlineHoldCapacity - onlineInUse;
+        next.onsiteRemaining = newOnsiteCapacity - onsiteInUse;
+        next.sharedRemaining = newSharedCapacity - sharedInUse;
+        next.availabilityStatus = newAvailabilityStatus;
+        if (newAvailabilityStatus == InventoryAvailabilityStatus.AVAILABLE
+                && next.availableOnlineQuantity() <= 0) {
+            throw new ServiceException(
+                    MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+        return next;
     }
 
     public InventoryAllocation acquire(int quantity) {
@@ -147,7 +215,6 @@ public class MenuInventoryBucket extends BaseEntity {
         if (quantity <= 0) {
             throw new IllegalArgumentException("inventory quantity must be positive");
         }
-        int usableShared = sharedOnlineAllowed ? sharedRemaining : 0;
         if (availableOnlineQuantity() < quantity
                 || availabilityStatus == InventoryAvailabilityStatus.SOLD_OUT) {
             throw new ServiceException(MenuHoldErrorCode.INSUFFICIENT_QUANTITY);

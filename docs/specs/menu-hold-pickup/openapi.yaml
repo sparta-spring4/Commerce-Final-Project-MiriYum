@@ -332,6 +332,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
     post:
@@ -362,6 +364,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
         "409":
           $ref: "#/components/responses/MenuInventoryConflict"
   /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
@@ -640,9 +644,11 @@ components:
         - menuId
         - serviceDate
         - startTime
+        - endDate
         - endTime
         - totalSupply
         - pools
+        - sharedOnlineAllowed
         - availabilityStatus
       properties:
         menuId:
@@ -651,6 +657,8 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         startTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         endTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         totalSupply:
@@ -659,12 +667,14 @@ components:
           maximum: 1000000
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availabilityStatus:
           $ref: "#/components/schemas/InventoryAvailabilityStatus"
     MenuInventoryUpdateRequest:
       type: object
       additionalProperties: false
-      required: [totalSupply, pools, availabilityStatus]
+      required: [totalSupply, pools, sharedOnlineAllowed, availabilityStatus]
       properties:
         totalSupply:
           type: integer
@@ -672,6 +682,8 @@ components:
           maximum: 1000000
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availabilityStatus:
           $ref: "#/components/schemas/InventoryAvailabilityStatus"
     MenuInventoryBucket:
@@ -682,10 +694,12 @@ components:
         - menuId
         - serviceDate
         - startTime
+        - endDate
         - endTime
         - policyVersion
         - totalSupply
         - pools
+        - sharedOnlineAllowed
         - availableOnlineQuantity
         - availabilityStatus
       properties:
@@ -697,6 +711,8 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         startTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+        endDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         endTime:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         policyVersion:
@@ -708,6 +724,8 @@ components:
           minimum: 0
         pools:
           $ref: "#/components/schemas/InventoryPools"
+        sharedOnlineAllowed:
+          type: boolean
         availableOnlineQuantity:
           type: integer
           minimum: 0
@@ -809,6 +827,15 @@ components:
           example:
             code: STORE_003
             message: 대상 매장의 운영 권한이 없습니다.
+    MenuNotFound:
+      description: 대상 매장에서 메뉴를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_009
+            message: 메뉴를 찾을 수 없습니다.
     PickupEligibilityConflict:
       description: 중앙 픽업 자격이 없음
       content:
