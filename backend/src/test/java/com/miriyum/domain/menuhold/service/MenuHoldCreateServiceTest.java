@@ -133,6 +133,26 @@ class MenuHoldCreateServiceTest {
     }
 
     @Test
+    void rejectsInventoryIntervalThatDoesNotMatchResolvedInstants() {
+        MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
+        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+                .willReturn(eligibility());
+        CurrentInventorySelection mismatchedInventory = new CurrentInventorySelection(
+                40L, 50L, 3L, "Asia/Seoul",
+                LocalDate.of(2026, 8, 10), LocalTime.of(18, 0),
+                LocalDate.of(2026, 8, 10), LocalTime.of(19, 0), 2);
+        given(inventoryService.loadCurrentSelections(
+                command.menuSelections(), command.serviceDate(), command.startTime(),
+                command.endDate(), command.endTime()))
+                .willReturn(List.of(mismatchedInventory));
+
+        assertThatThrownBy(() -> service().create(command))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.INELIGIBLE_MENU);
+    }
+
+    @Test
     void propagatesUnexpectedDataIntegrityViolationWithoutMaskingIt() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection("40", 2)));
         prepareSuccessfulDependencies(command);

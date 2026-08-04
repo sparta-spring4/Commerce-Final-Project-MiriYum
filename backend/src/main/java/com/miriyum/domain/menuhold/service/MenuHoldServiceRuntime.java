@@ -15,6 +15,8 @@ import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -74,6 +76,10 @@ public class MenuHoldServiceRuntime {
         List<CurrentInventorySelection> current = inventoryService.loadCurrentSelections(
                 selections, command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime());
+        if (current.stream().anyMatch(selection ->
+                !matchesResolvedInterval(command, selection))) {
+            throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
+        }
         List<StoreServiceIntervalRequest> intervalRequests = current.stream()
                 .map(selection -> new StoreServiceIntervalRequest(
                         storeId,
@@ -124,6 +130,23 @@ public class MenuHoldServiceRuntime {
             throw exception;
         }
         return MenuHoldCommandResult.confirmed(command.reservationId());
+    }
+
+    private static boolean matchesResolvedInterval(
+            MenuHoldCreateCommand command,
+            CurrentInventorySelection selection
+    ) {
+        try {
+            ZoneId zone = ZoneId.of(selection.timeZoneId());
+            var localStart = command.startAt().atZone(zone);
+            var localEnd = command.serviceEndAt().atZone(zone);
+            return localStart.toLocalDate().equals(selection.serviceDate())
+                    && localStart.toLocalTime().equals(selection.startTime())
+                    && localEnd.toLocalDate().equals(selection.endDate())
+                    && localEnd.toLocalTime().equals(selection.endTime());
+        } catch (DateTimeException exception) {
+            return false;
+        }
     }
 
     private static ServiceException conflictCausedBy(
