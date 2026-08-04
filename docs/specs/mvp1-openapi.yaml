@@ -110,6 +110,12 @@ paths:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservations~1{reservationId}~1fulfillments"
   /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-capacities~1{serviceDate}"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-policies:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-time-policies"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-time-policies~1{version}~1publication"
+  /api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operator~1stores~1{storeId}~1reservation-time-policies~1{version}~1publication-cancellation"
 
   /api/v1/stores/{storeId}/menu-hold-availability:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menu-hold-availability"
