@@ -106,6 +106,14 @@ class StoreSearchQueryTest {
     }
 
     @Test
+    void rejectsReservationStartTimeBelowMinutePrecision() {
+        assertValidationFailed(() -> StoreSearchQuery.from(
+                null, null, null,
+                LocalDate.of(2026, 8, 3), LocalTime.of(18, 30, 1), 2,
+                false, "name,asc", 0, 20));
+    }
+
+    @Test
     void rejectsPageAndSizeOutsidePublicContract() {
         // when & then
         assertValidationFailed(() -> StoreSearchQuery.from(
@@ -166,14 +174,13 @@ class StoreSearchQueryTest {
     }
 
     @Test
-    void convertsBlankKeywordToNoPatternAndKeepsBackslashLiteral() {
+    void rejectsExplicitBlankKeywordAndKeepsBackslashLiteral() {
         // when
-        StoreSearchQuery blank = queryWithKeyword(" \t ");
         StoreSearchQuery backslash = queryWithKeyword("A\\B");
 
         // then
-        assertThat(blank.normalizedKeyword()).isNull();
-        assertThat(blank.likePattern()).isNull();
+        assertValidationFailed(() -> queryWithKeyword(""));
+        assertValidationFailed(() -> queryWithKeyword(" \t "));
         assertThat(backslash.normalizedKeyword()).isEqualTo("a\\b");
         assertThat(backslash.likePattern()).isEqualTo("%a\\b%");
     }

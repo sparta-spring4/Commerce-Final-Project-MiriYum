@@ -39,6 +39,7 @@
 | `region` | `SEOUL`, `BUSAN`, `DAEGU`, `DAEJEON`, `GWANGJU` |
 | `storeCategoryCode` | 중앙 catalog에서 받은 매장 주 카테고리 코드 |
 | 예약 조건 | `serviceDate`, `startTime`, `partySize`를 모두 보낸 경우에만 가용성 판정 |
+| `includesInfants` | 영유아가 한 명 이상 포함되면 `true`, 생략하면 `false` |
 | `availableOnly` | 완전한 예약 조건이 있을 때만 `true` 허용 |
 
 예약 조건 일부만 보내거나 `availableOnly=true`인데 완전한 예약 조건이 없으면 `COMMON_001`로 거부한다. 임의 기본 날짜·시간·인원으로 가용성을 추측하지 않는다.
@@ -50,11 +51,11 @@
 - `AVAILABLE`: 요청한 모든 구간에서 인원 수와 팀 1건을 확보할 수 있음
 - `UNAVAILABLE`: 영업·접수 시간·수용량 가운데 하나 이상이 부족
 
-2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationService`가 제공하는 예약 가능 일괄 조회 공개 메서드를 사용한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
+2번 도메인은 수용량을 직접 계산하거나 저장하지 않고 3번 도메인의 `ReservationService`가 제공하는 예약 가능 일괄 조회 공개 메서드를 사용한다. `partySize`와 `includesInfants`는 이 공개 DTO에 그대로 전달한다. 메뉴 홀드 가능 수량이 상세에 필요하면 4번 도메인의 조회 계약을 사용하며 메뉴 재고 repository를 직접 참조하지 않는다.
 
 ### 검색 구현 선택
 
-1차 MVP는 MySQL의 정규화된 검색용 필드와 인덱스를 사용한 단순 포함 검색으로 제한한다. QueryDSL, 전문 검색 엔진, 위치 검색과 개인화 점수는 뒤 단계다. 검색 필드 정규화와 escape를 서버가 수행하고 클라이언트가 SQL wildcard나 정렬 열을 직접 선택하지 못하게 한다.
+1차 MVP는 MySQL `utf8mb4_0900_ai_ci` collation과 parameter-bound `LIKE`를 사용한 단순 포함 검색으로 제한한다. 서버는 입력 공백·대소문자와 SQL wildcard를 정규화·escape하고 클라이언트가 SQL 표현이나 정렬 열을 직접 선택하지 못하게 한다. 양쪽 wildcard를 쓰는 포함 검색에는 B-tree가 키워드 탐색을 보장하지 않으므로 이를 검색 인덱스로 오인하지 않는다. V22의 복합 인덱스는 공개 매장 범위·고정 정렬과 현재 게시 메뉴 join 후보를 줄이는 용도이며, 키워드 검색량이 이 방식의 한계를 넘으면 별도 승인된 전문 검색 단계로 이관한다. QueryDSL 고급 필터, 전문 검색 엔진, 위치 검색과 개인화 점수는 뒤 단계다.
 
 이 선택은 검색 품질보다 계약과 소유권을 먼저 검증하고 새 의존성을 억지로 넣지 않기 위한 것이다.
 

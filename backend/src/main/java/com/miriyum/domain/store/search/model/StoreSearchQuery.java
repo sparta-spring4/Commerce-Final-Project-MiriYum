@@ -84,6 +84,9 @@ public record StoreSearchQuery(
         }
 
         String normalizedKeyword = normalizeKeyword(keyword);
+        if (keyword != null && normalizedKeyword == null) {
+            throw validationFailed();
+        }
         ReservationSearchCondition reservationCondition = allReservationValues
                 ? new ReservationSearchCondition(serviceDate, startTime, partySize)
                 : null;

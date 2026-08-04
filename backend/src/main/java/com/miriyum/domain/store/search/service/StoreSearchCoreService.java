@@ -8,60 +8,200 @@ import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import com.miriyum.domain.store.search.repository.StoreSearchCandidate;
 import com.miriyum.domain.store.search.repository.StoreSearchRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 공개 매장 후보 조회와 공개 응답 투영을 조정하는 1단계 검색 서비스다.
- *
- * <p>예약 도메인의 매장별 가용성 계약이 연결되기 전까지 예약 조건이 없는 검색만
- * 실행하며, 모든 결과를 {@link ReservationAvailability#NOT_REQUESTED}로 표시한다.</p>
+ * 공개 매장 후보, 예약 도메인의 일괄 가용성, 응답 직전 최신 매장 상태를 조합한다.
  */
 @Service
 public class StoreSearchCoreService {
 
+    static final int AVAILABILITY_BATCH_SIZE = 200;
+
     private final StoreSearchCatalogPolicy catalogPolicy;
     private final StoreSearchRepository repository;
+    private final ReservationService reservationService;
 
     /**
-     * 공개 카테고리 정책과 매장 후보 저장소로 검색 서비스를 구성한다.
-     *
-     * @param catalogPolicy 카테고리 활성 상태 경계 정책
-     * @param repository 공개 매장 후보 저장소
+     * 공개 카테고리 정책, 후보 저장소, 예약 공개 서비스를 구성한다.
      */
     public StoreSearchCoreService(
             StoreSearchCatalogPolicy catalogPolicy,
-            StoreSearchRepository repository
+            StoreSearchRepository repository,
+            ReservationService reservationService
     ) {
         this.catalogPolicy = catalogPolicy;
         this.repository = repository;
+        this.reservationService = reservationService;
     }
 
     /**
-     * 예약 가용성을 요청하지 않은 공개 매장 검색을 실행한다.
-     *
-     * <p>카테고리 필터가 있으면 현재 활성 코드인지 먼저 검증한다. 반환 페이지의 후보
-     * 필드와 페이지 메타데이터는 보존하고, 예약 가용성은 항상
-     * {@link ReservationAvailability#NOT_REQUESTED}로 투영한다.</p>
-     *
-     * @param query 검증과 정규화를 마친 공개 매장 검색 조건
-     * @return 예약 가용성을 요청하지 않은 공개 매장 요약 페이지
-     * @throws IllegalStateException 예약 조건이 포함되어 2단계 가용성 계약이 필요한 경우
-     * @throws ServiceException 카테고리 코드가 미승인 또는 비활성이어서
-     *                          {@link StoreErrorCode#CATALOG_CODE_INVALID}인 경우
+     * 예약 조건이 없는 호환 호출을 실행한다.
      */
-    @Transactional(readOnly = true)
     public Page<PublicStoreSummary> searchWithoutAvailability(StoreSearchQuery query) {
         if (query.reservationCondition() != null) {
             throw new IllegalStateException(
                     "reservation availability contract is not connected");
         }
-        catalogPolicy.requireActiveStoreCategory(query.storeCategoryCode());
-        return repository.search(query).map(this::toSummary);
+        return search(query, false);
     }
 
-    private PublicStoreSummary toSummary(StoreSearchCandidate candidate) {
+    public Page<PublicStoreSummary> search(StoreSearchQuery query, boolean includesInfants) {
+        catalogPolicy.requireActiveStoreCategory(query.storeCategoryCode());
+        if (query.availableOnly()) {
+            return searchAvailableOnly(query, includesInfants);
+        }
+        Page<StoreSearchCandidate> candidates = repository.search(query);
+        List<StoreSearchCandidate> currentCandidates =
+                repository.refreshCurrentlyPublic(candidates.getContent());
+        List<ReservationAvailability> availabilities = availabilityFor(
+                currentCandidates, query, includesInfants);
+        Map<Long, ReservationAvailability> availabilityById = availabilityById(
+                currentCandidates, availabilities);
+        List<StoreSearchCandidate> finalCandidates =
+                repository.refreshCurrentlyPublic(currentCandidates);
+        List<PublicStoreSummary> summaries = finalCandidates.stream()
+                .map(candidate -> toSummary(candidate,
+                        reconcileLatestStoreState(
+                                candidate, availabilityById.get(candidate.storeId()))))
+                .toList();
+        long removed = candidates.getNumberOfElements() - summaries.size();
+        long total = Math.max(0L, candidates.getTotalElements() - removed);
+        return new PageImpl<>(summaries, candidates.getPageable(), total);
+    }
+
+    private Page<PublicStoreSummary> searchAvailableOnly(
+            StoreSearchQuery query,
+            boolean includesInfants
+    ) {
+        long requestedOffset = (long) query.page() * query.size();
+        long totalAvailable = 0;
+        StoreSearchCandidate cursor = null;
+        List<PublicStoreSummary> page = new ArrayList<>(query.size());
+        while (true) {
+            List<StoreSearchCandidate> chunk = repository.searchChunk(
+                    query, cursor, AVAILABILITY_BATCH_SIZE);
+            if (chunk.isEmpty()) {
+                break;
+            }
+            List<StoreSearchCandidate> current = repository.refreshCurrentlyPublic(chunk);
+            List<ReservationAvailability> availabilities = availabilityFor(
+                    current, query, includesInfants);
+            Map<Long, ReservationAvailability> availabilityById = availabilityById(
+                    current, availabilities);
+            List<StoreSearchCandidate> finalCandidates =
+                    repository.refreshCurrentlyPublic(current);
+            for (StoreSearchCandidate candidate : finalCandidates) {
+                if (reconcileLatestStoreState(
+                        candidate, availabilityById.get(candidate.storeId()))
+                        != ReservationAvailability.AVAILABLE) {
+                    continue;
+                }
+                if (totalAvailable >= requestedOffset && page.size() < query.size()) {
+                    page.add(toSummary(candidate, ReservationAvailability.AVAILABLE));
+                }
+                totalAvailable++;
+            }
+            cursor = chunk.getLast();
+            if (chunk.size() < AVAILABILITY_BATCH_SIZE) {
+                break;
+            }
+        }
+        return new PageImpl<>(
+                page,
+                PageRequest.of(query.page(), query.size()),
+                totalAvailable);
+    }
+
+    private List<ReservationAvailability> availabilityFor(
+            List<StoreSearchCandidate> candidates,
+            StoreSearchQuery query,
+            boolean includesInfants
+    ) {
+        if (query.reservationCondition() == null) {
+            return candidates.stream()
+                    .map(ignored -> ReservationAvailability.NOT_REQUESTED)
+                    .toList();
+        }
+        List<Long> storeIds = candidates.stream().map(StoreSearchCandidate::storeId).toList();
+        if (storeIds.isEmpty()) {
+            return List.of();
+        }
+        var condition = query.reservationCondition();
+        List<ReservationAvailabilityResult> results = reservationService.getAvailabilities(
+                storeIds,
+                new ReservationAvailabilityCondition(
+                        condition.serviceDate(), condition.startTime(), null,
+                        condition.partySize(), includesInfants));
+        if (!matches(storeIds, results)) {
+            return storeIds.stream()
+                    .map(ignored -> ReservationAvailability.UNAVAILABLE)
+                    .toList();
+        }
+        return results.stream()
+                .map(result -> result.availability() == ReservationAvailabilityStatus.AVAILABLE
+                        ? ReservationAvailability.AVAILABLE
+                        : ReservationAvailability.UNAVAILABLE)
+                .toList();
+    }
+
+    private static boolean matches(
+            List<Long> storeIds,
+            List<ReservationAvailabilityResult> results
+    ) {
+        if (results == null || storeIds.size() != results.size()) {
+            return false;
+        }
+        for (int index = 0; index < storeIds.size(); index++) {
+            ReservationAvailabilityResult result = results.get(index);
+            if (result == null || result.storeId() != storeIds.get(index)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Map<Long, ReservationAvailability> availabilityById(
+            List<StoreSearchCandidate> candidates,
+            List<ReservationAvailability> availabilities
+    ) {
+        Map<Long, ReservationAvailability> byId = new LinkedHashMap<>();
+        for (int index = 0; index < candidates.size(); index++) {
+            byId.put(candidates.get(index).storeId(), availabilities.get(index));
+        }
+        return byId;
+    }
+
+    private static ReservationAvailability reconcileLatestStoreState(
+            StoreSearchCandidate candidate,
+            ReservationAvailability batchAvailability
+    ) {
+        if (batchAvailability == ReservationAvailability.NOT_REQUESTED) {
+            return batchAvailability;
+        }
+        if (candidate.operationStatus()
+                != com.miriyum.domain.store.core.enums.OperationStatus.OPEN
+                || !candidate.reservationEnabled()) {
+            return ReservationAvailability.UNAVAILABLE;
+        }
+        return batchAvailability;
+    }
+
+    private PublicStoreSummary toSummary(
+            StoreSearchCandidate candidate,
+            ReservationAvailability availability
+    ) {
         return new PublicStoreSummary(
                 Long.toString(candidate.storeId()),
                 candidate.name(),
@@ -73,6 +213,6 @@ public class StoreSearchCoreService {
                         candidate.reservationEnabled(),
                         candidate.menuHoldEnabled(),
                         candidate.pickupEnabled()),
-                ReservationAvailability.NOT_REQUESTED);
+                availability);
     }
 }

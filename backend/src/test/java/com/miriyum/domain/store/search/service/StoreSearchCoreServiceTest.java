@@ -3,7 +3,11 @@ package com.miriyum.domain.store.search.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
@@ -15,6 +19,10 @@ import com.miriyum.domain.store.search.repository.StoreSearchCandidate;
 import com.miriyum.domain.store.search.repository.StoreSearchRepository;
 import com.miriyum.domain.store.service.CatalogKind;
 import com.miriyum.domain.store.service.CatalogService;
+import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,6 +33,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -39,12 +48,15 @@ class StoreSearchCoreServiceTest {
     @Mock
     private StoreSearchRepository repository;
 
+    @Mock
+    private ReservationService reservationService;
+
     private StoreSearchCoreService service;
 
     @BeforeEach
     void setUp() {
         service = new StoreSearchCoreService(
-                new StoreSearchCatalogPolicy(catalogService), repository);
+                new StoreSearchCatalogPolicy(catalogService), repository, reservationService);
     }
 
     @Test
@@ -67,6 +79,8 @@ class StoreSearchCoreServiceTest {
                 .willReturn(true);
         given(repository.search(query)).willReturn(new PageImpl<>(
                 List.of(candidate), PageRequest.of(2, 20), 41));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
 
         // when
         Page<PublicStoreSummary> result = service.searchWithoutAvailability(query);
@@ -114,6 +128,164 @@ class StoreSearchCoreServiceTest {
     }
 
     @Test
+    void composesReservationBatchInCandidateOrderAndPreservesInfantMeaning() {
+        StoreSearchQuery query = reservationQuery(false);
+        List<StoreSearchCandidate> candidates = List.of(candidate(7L), candidate(3L));
+        given(repository.search(query)).willReturn(new PageImpl<>(
+                candidates, PageRequest.of(0, 20), 2));
+        given(repository.refreshCurrentlyPublic(candidates)).willReturn(candidates);
+        given(reservationService.getAvailabilities(
+                eq(List.of(7L, 3L)), any(ReservationAvailabilityCondition.class)))
+                .willReturn(List.of(
+                        new ReservationAvailabilityResult(
+                                7L, ReservationAvailabilityStatus.AVAILABLE),
+                        new ReservationAvailabilityResult(
+                                3L, ReservationAvailabilityStatus.UNAVAILABLE)));
+
+        Page<PublicStoreSummary> result = service.search(query, true);
+
+        assertThat(result.getContent())
+                .extracting(PublicStoreSummary::storeId,
+                        PublicStoreSummary::reservationAvailability)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("7", ReservationAvailability.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple("3", ReservationAvailability.UNAVAILABLE));
+        then(reservationService).should().getAvailabilities(
+                eq(List.of(7L, 3L)),
+                eq(new ReservationAvailabilityCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), null, 4, true)));
+    }
+
+    @Test
+    void failsClosedWhenReservationBatchDoesNotPreserveCandidateOrder() {
+        StoreSearchQuery query = reservationQuery(false);
+        given(repository.search(query)).willReturn(new PageImpl<>(
+                List.of(candidate(7L), candidate(3L)), PageRequest.of(0, 20), 2));
+        List<StoreSearchCandidate> candidates = List.of(candidate(7L), candidate(3L));
+        given(repository.refreshCurrentlyPublic(candidates)).willReturn(candidates);
+        given(reservationService.getAvailabilities(eq(List.of(7L, 3L)), any()))
+                .willReturn(List.of(
+                        new ReservationAvailabilityResult(
+                                3L, ReservationAvailabilityStatus.AVAILABLE),
+                        new ReservationAvailabilityResult(
+                                7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        Page<PublicStoreSummary> result = service.search(query, false);
+
+        assertThat(result.getContent())
+                .extracting(PublicStoreSummary::reservationAvailability)
+                .containsOnly(ReservationAvailability.UNAVAILABLE);
+    }
+
+    @Test
+    void removesStoreThatIsNoLongerPublicBeforeReturningResponse() {
+        StoreSearchQuery query = reservationQuery(false);
+        given(repository.search(query)).willReturn(new PageImpl<>(
+                List.of(candidate(7L), candidate(3L)), PageRequest.of(0, 20), 2));
+        List<StoreSearchCandidate> candidates = List.of(candidate(7L), candidate(3L));
+        given(repository.refreshCurrentlyPublic(candidates))
+                .willReturn(List.of(candidate(3L)));
+        given(repository.refreshCurrentlyPublic(List.of(candidate(3L))))
+                .willReturn(List.of(candidate(3L)));
+        given(reservationService.getAvailabilities(eq(List.of(3L)), any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        3L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        Page<PublicStoreSummary> result = service.search(query, false);
+
+        assertThat(result.getContent()).extracting(PublicStoreSummary::storeId)
+                .containsExactly("3");
+    }
+
+    @Test
+    void availableOnlyFiltersBeforePagingAndReportsExactTotal() {
+        StoreSearchQuery query = StoreSearchQuery.from(
+                null, null, null,
+                LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 4,
+                true, "name,asc", 1, 1);
+        List<StoreSearchCandidate> candidates =
+                List.of(candidate(1L), candidate(2L), candidate(3L));
+        given(repository.searchChunk(query, null, StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
+                .willReturn(candidates);
+        given(repository.refreshCurrentlyPublic(candidates)).willReturn(candidates);
+        given(reservationService.getAvailabilities(eq(List.of(1L, 2L, 3L)), any()))
+                .willReturn(List.of(
+                        new ReservationAvailabilityResult(1L, ReservationAvailabilityStatus.AVAILABLE),
+                        new ReservationAvailabilityResult(2L, ReservationAvailabilityStatus.UNAVAILABLE),
+                        new ReservationAvailabilityResult(3L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        Page<PublicStoreSummary> result = service.search(query, false);
+
+        assertThat(result.getContent()).extracting(PublicStoreSummary::storeId)
+                .containsExactly("3");
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void availableOnlyScansInBoundedReservationBatches() {
+        StoreSearchQuery query = StoreSearchQuery.from(
+                null, null, null,
+                LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 4,
+                true, "name,asc", 0, 1);
+        List<StoreSearchCandidate> first = java.util.stream.LongStream.rangeClosed(1, 200)
+                .mapToObj(this::candidate).toList();
+        List<StoreSearchCandidate> second = List.of(candidate(201L));
+        given(repository.searchChunk(query, null, StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
+                .willReturn(first);
+        given(repository.searchChunk(
+                query, first.getLast(), StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
+                .willReturn(second);
+        given(repository.refreshCurrentlyPublic(first)).willReturn(first);
+        given(repository.refreshCurrentlyPublic(second)).willReturn(second);
+        given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation ->
+                ((List<Long>) invocation.getArgument(0)).stream()
+                        .map(id -> new ReservationAvailabilityResult(
+                                id, ReservationAvailabilityStatus.AVAILABLE))
+                        .toList());
+
+        Page<PublicStoreSummary> result = service.search(query, false);
+
+        assertThat(result.getContent()).extracting(PublicStoreSummary::storeId)
+                .containsExactly("1");
+        assertThat(result.getTotalElements()).isEqualTo(201);
+        ArgumentCaptor<List<Long>> ids = ArgumentCaptor.forClass(List.class);
+        then(reservationService).should(times(2)).getAvailabilities(ids.capture(), any());
+        assertThat(ids.getAllValues()).allSatisfy(batch ->
+                assertThat(batch).hasSizeLessThanOrEqualTo(
+                        StoreSearchCoreService.AVAILABILITY_BATCH_SIZE));
+    }
+
+    @Test
+    void reprojectsLatestStoreFieldsAfterReservationBatch() {
+        StoreSearchQuery query = reservationQuery(false);
+        StoreSearchCandidate before = candidate(7L);
+        StoreSearchCandidate latest = new StoreSearchCandidate(
+                7L, "최신 이름", Region.SEOUL, "최신 주소", "KOREAN",
+                OperationStatus.TEMPORARILY_CLOSED, false, false, true,
+                before.createdAt());
+        given(repository.search(query)).willReturn(new PageImpl<>(
+                List.of(before), PageRequest.of(0, 20), 1));
+        given(repository.refreshCurrentlyPublic(List.of(before))).willReturn(List.of(before));
+        given(repository.refreshCurrentlyPublic(List.of(before))).willReturn(
+                List.of(before), List.of(latest));
+        given(reservationService.getAvailabilities(eq(List.of(7L)), any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        Page<PublicStoreSummary> result = service.search(query, false);
+
+        assertThat(result.getContent()).singleElement().satisfies(summary -> {
+            assertThat(summary.name()).isEqualTo("최신 이름");
+            assertThat(summary.address()).isEqualTo("최신 주소");
+            assertThat(summary.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
+            assertThat(summary.modes().reservationEnabled()).isFalse();
+            assertThat(summary.reservationAvailability())
+                    .isEqualTo(ReservationAvailability.UNAVAILABLE);
+        });
+    }
+
+    @Test
     @DisplayName("비활성 카테고리 필터를 STORE_004로 거절한다")
     void rejectsInactiveCategoryThroughRealPolicy() {
         // given
@@ -142,5 +314,19 @@ class StoreSearchCoreServiceTest {
                 null,
                 2,
                 20);
+    }
+
+    private StoreSearchQuery reservationQuery(boolean availableOnly) {
+        return StoreSearchQuery.from(
+                null, null, null,
+                LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 4,
+                availableOnly, "name,asc", 0, 20);
+    }
+
+    private StoreSearchCandidate candidate(long storeId) {
+        return new StoreSearchCandidate(
+                storeId, "매장 " + storeId, Region.SEOUL, "서울",
+                "KOREAN", OperationStatus.OPEN, true, true, true,
+                LocalDateTime.of(2026, 8, 2, 9, 0));
     }
 }

@@ -6,6 +6,10 @@ import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -98,6 +102,75 @@ public class StoreSearchRepository {
                 content,
                 PageRequest.of(query.page(), query.size()),
                 total == null ? 0 : total);
+    }
+
+    /**
+     * 외부 가용성으로 필터링한 뒤 정확한 페이지를 만들 때 전체 후보를 안정 정렬로 조회한다.
+     */
+    public List<StoreSearchCandidate> searchChunk(
+            StoreSearchQuery query,
+            StoreSearchCandidate after,
+            int limit
+    ) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("positive limit required");
+        }
+        String sql = SELECT_COLUMNS
+                + PUBLIC_SEARCH_PREDICATE
+                + " AND " + query.sort().cursorPredicate()
+                + " ORDER BY " + query.sort().orderByClause()
+                + " LIMIT :limit";
+        MapSqlParameterSource parameters = parameters(query)
+                .addValue("limit", limit)
+                .addValue("cursorId", after == null ? null : after.storeId())
+                .addValue("cursorName", after == null ? null : after.name())
+                .addValue("cursorCreatedAt", after == null ? null : after.createdAt());
+        return jdbcTemplate.query(sql, parameters, CANDIDATE_ROW_MAPPER);
+    }
+
+    /**
+     * 응답 직전에 여전히 공개 가능한 매장만 입력 순서대로 남긴다.
+     */
+    public List<Long> retainCurrentlyPublic(List<Long> storeIds) {
+        if (storeIds == null || storeIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("positive store IDs are required");
+        }
+        if (storeIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> current = jdbcTemplate.queryForList("""
+                SELECT store_id
+                FROM stores
+                WHERE store_id IN (:storeIds)
+                  AND verification_status = 'APPROVED'
+                  AND operation_status <> 'CLOSED'
+                """, new MapSqlParameterSource("storeIds", storeIds), Long.class);
+        Set<Long> currentSet = new HashSet<>(current);
+        return storeIds.stream().filter(currentSet::contains).toList();
+    }
+
+    /** Re-reads current public fields and preserves the requested candidate order. */
+    public List<StoreSearchCandidate> refreshCurrentlyPublic(
+            List<StoreSearchCandidate> candidates
+    ) {
+        if (candidates == null || candidates.stream().anyMatch(candidate -> candidate == null)) {
+            throw new IllegalArgumentException("candidates are required");
+        }
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        List<Long> storeIds = candidates.stream().map(StoreSearchCandidate::storeId).toList();
+        String sql = SELECT_COLUMNS + """
+                FROM stores s
+                WHERE s.store_id IN (:storeIds)
+                  AND s.verification_status = 'APPROVED'
+                  AND s.operation_status <> 'CLOSED'
+                """;
+        List<StoreSearchCandidate> current = jdbcTemplate.query(
+                sql, new MapSqlParameterSource("storeIds", storeIds), CANDIDATE_ROW_MAPPER);
+        Map<Long, StoreSearchCandidate> byId = new LinkedHashMap<>();
+        current.forEach(candidate -> byId.put(candidate.storeId(), candidate));
+        return storeIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
     }
 
     private static MapSqlParameterSource parameters(StoreSearchQuery query) {

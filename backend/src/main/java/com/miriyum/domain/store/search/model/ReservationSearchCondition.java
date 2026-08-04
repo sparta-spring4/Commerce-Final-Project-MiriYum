@@ -26,6 +26,8 @@ public record ReservationSearchCondition(
     public ReservationSearchCondition {
         if (serviceDate == null
                 || startTime == null
+                || startTime.getSecond() != 0
+                || startTime.getNano() != 0
                 || partySize < 1
                 || partySize > 100) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);

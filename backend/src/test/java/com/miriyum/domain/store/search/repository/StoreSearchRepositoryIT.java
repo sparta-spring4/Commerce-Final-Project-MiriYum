@@ -46,7 +46,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.menu.schedule.enabled=false"
+            "miriyum.menu.schedule.enabled=false",
+            "miriyum.store.schedule.activation-enabled=false",
+            "miriyum.reservation.time-policy.activation-enabled=false",
+            "spring.task.scheduling.enabled=false"
         })
 class StoreSearchRepositoryIT {
 
@@ -65,6 +68,9 @@ class StoreSearchRepositoryIT {
 
     @Autowired
     private StoreSearchRepository repository;
+
+    @Autowired
+    private StorePublicReadRepository publicReadRepository;
 
     @Autowired
     private StoreRepository storeRepository;
@@ -369,6 +375,118 @@ class StoreSearchRepositoryIT {
                 content(currentName), store.getStoreOperatorAccountId(), NOW.plusSeconds(2));
         menu.publish(NOW.plusSeconds(3));
         menuRepository.saveAndFlush(menu);
+    }
+
+    @Test
+    @Transactional
+    void searchChunkUsesExplicitWindowAndKeepsStableSort() {
+        Store first = createStore("가 매장", Region.SEOUL, "KOREAN", false);
+        Store second = createStore("나 매장", Region.SEOUL, "KOREAN", false);
+        flushAndClear();
+
+        List<Long> result = repository.searchChunk(
+                        query(null, null, null, "name,asc", 1, 1), null, 100).stream()
+                .map(StoreSearchCandidate::storeId)
+                .toList();
+
+        assertThat(result).containsSubsequence(first.getId(), second.getId());
+    }
+
+    @Test
+    @Transactional
+    void keysetChunksMatchPagedOrderForEveryPublicSort() {
+        Store first = createStore("동일", Region.SEOUL, "KOREAN", false);
+        Store second = createStore("동일", Region.SEOUL, "KOREAN", false);
+        Store third = createStore("후순위", Region.SEOUL, "KOREAN", false);
+        setCreatedAt(first, "2026-08-01 09:00:00");
+        setCreatedAt(second, "2026-08-01 09:00:00");
+        setCreatedAt(third, "2026-08-02 09:00:00");
+        flushAndClear();
+
+        for (String sort : List.of(
+                "name,asc", "name,desc", "createdAt,asc", "createdAt,desc")) {
+            StoreSearchQuery searchQuery = query(null, Region.SEOUL, "KOREAN", sort, 0, 20);
+            List<Long> expected = repository.search(searchQuery).getContent().stream()
+                    .map(StoreSearchCandidate::storeId).toList();
+            List<Long> actual = new java.util.ArrayList<>();
+            StoreSearchCandidate cursor = null;
+            while (true) {
+                List<StoreSearchCandidate> chunk = repository.searchChunk(
+                        searchQuery, cursor, 1);
+                if (chunk.isEmpty()) {
+                    break;
+                }
+                actual.add(chunk.getFirst().storeId());
+                cursor = chunk.getLast();
+            }
+            assertThat(actual).as(sort).containsExactlyElementsOf(expected);
+        }
+    }
+
+    @Test
+    @Transactional
+    void retainCurrentlyPublicPreservesInputOrderAndDuplicates() {
+        Store open = createStore("공개 매장", Region.SEOUL, "KOREAN", false);
+        Store closed = createStore("폐점 매장", Region.SEOUL, "KOREAN", false);
+        closed.close();
+        storeRepository.saveAndFlush(closed);
+        flushAndClear();
+
+        List<Long> result = repository.retainCurrentlyPublic(
+                List.of(closed.getId(), open.getId(), open.getId()));
+
+        assertThat(result).containsExactly(open.getId(), open.getId());
+    }
+
+    @Test
+    @Transactional
+    void refreshCurrentlyPublicReadsLatestFieldsAndDropsClosedStores() {
+        Store changed = createStore("변경 전", Region.SEOUL, "KOREAN", false);
+        Store closed = createStore("곧 폐점", Region.SEOUL, "KOREAN", false);
+        flushAndClear();
+        List<StoreSearchCandidate> candidates = repository.searchChunk(
+                query(null, null, null, "name,asc", 0, 20), null, 100);
+        StoreSearchCandidate changedBefore = candidates.stream()
+                .filter(candidate -> candidate.storeId() == changed.getId()).findFirst().orElseThrow();
+        StoreSearchCandidate closedBefore = candidates.stream()
+                .filter(candidate -> candidate.storeId() == closed.getId()).findFirst().orElseThrow();
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET name = '변경 후', operation_status = 'TEMPORARILY_CLOSED',
+                    reservation_enabled = FALSE
+                WHERE store_id = ?
+                """, changed.getId());
+        jdbcTemplate.update("UPDATE stores SET operation_status = 'CLOSED' WHERE store_id = ?",
+                closed.getId());
+
+        List<StoreSearchCandidate> refreshed = repository.refreshCurrentlyPublic(
+                List.of(closedBefore, changedBefore));
+
+        assertThat(refreshed).singleElement().satisfies(current -> {
+            assertThat(current.storeId()).isEqualTo(changed.getId());
+            assertThat(current.name()).isEqualTo("변경 후");
+            assertThat(current.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
+            assertThat(current.reservationEnabled()).isFalse();
+        });
+    }
+
+    @Test
+    @Transactional
+    void publicReadProjectsOnlyCurrentPublishedVisibleMenus() {
+        Store store = createStore("공개 상세", Region.SEOUL, "KOREAN", false);
+        replacePublishedMenu(store, "과거 메뉴", "현재 메뉴");
+        publishMenu(store, "숨김 메뉴", MenuSellingStatus.SELLING, MenuVisibility.HIDDEN, false);
+        flushAndClear();
+
+        var snapshot = publicReadRepository.findPublicStore(store.getId());
+        var menus = publicReadRepository.findPublicMenus(store.getId());
+
+        assertThat(snapshot).get().satisfies(found -> {
+            assertThat(found.name()).isEqualTo("공개 상세");
+            assertThat(found.operationStatus()).isEqualTo(OperationStatus.OPEN);
+        });
+        assertThat(menus).extracting(com.miriyum.domain.store.search.dto.PublicMenu::name)
+                .containsExactly("현재 메뉴");
     }
 
     private MenuContent content(String name) {
