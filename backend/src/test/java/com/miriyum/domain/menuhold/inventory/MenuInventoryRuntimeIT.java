@@ -11,6 +11,7 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
+import com.miriyum.domain.menuhold.inventory.model.InventoryLedgerOperation;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
@@ -254,6 +255,13 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket restoredCurrent = bucketRepository.findById(second.getId()).orElseThrow();
         assertThat(restoredFirst.getOnlineHoldRemaining()).isEqualTo(5);
         assertThat(restoredCurrent.getOnlineHoldRemaining()).isEqualTo(5);
+        assertThat(ledgerRepository.findAll().stream()
+                .filter(event -> event.getOperationType()
+                        == InventoryLedgerOperation.RESTORE)
+                .filter(event -> acquire.operationId().equals(
+                        event.getSourceOperationId()))
+                .mapToInt(event -> event.getQuantityDelta())
+                .sum()).isEqualTo(2);
     }
 
     @Test

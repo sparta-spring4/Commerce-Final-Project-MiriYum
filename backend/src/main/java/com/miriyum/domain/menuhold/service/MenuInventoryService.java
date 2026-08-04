@@ -115,7 +115,7 @@ class MenuInventoryService {
                     .orElseThrow(() -> new ServiceException(
                             MenuHoldErrorCode.BUCKET_NOT_FOUND));
             if (!current.getId().equals(bucket.getId())) {
-                restoreBucket(request, current, allocation, events);
+                synchronizeCurrentPolicy(current, allocation);
             }
         }
         ledgerRepository.saveAll(events);
@@ -127,6 +127,23 @@ class MenuInventoryService {
             InventoryAllocation allocation,
             List<MenuInventoryLedger> events
     ) {
+        incrementBucket(bucket, allocation);
+        appendRestoreEvents(
+                request.operationId(), request.sourceAcquireOperationId(),
+                bucket, allocation, events);
+    }
+
+    private void synchronizeCurrentPolicy(
+            MenuInventoryBucket current,
+            InventoryAllocation allocation
+    ) {
+        incrementBucket(current, allocation);
+    }
+
+    private void incrementBucket(
+            MenuInventoryBucket bucket,
+            InventoryAllocation allocation
+    ) {
         bucket.validateRestore(allocation);
         int updated = bucketRepository.incrementIfCurrent(
                 bucket.getId(), bucket.getLockVersion(),
@@ -134,9 +151,6 @@ class MenuInventoryService {
         if (updated != 1) {
             throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
         }
-        appendRestoreEvents(
-                request.operationId(), request.sourceAcquireOperationId(),
-                bucket, allocation, events);
     }
 
     private static void appendAcquireEvents(
