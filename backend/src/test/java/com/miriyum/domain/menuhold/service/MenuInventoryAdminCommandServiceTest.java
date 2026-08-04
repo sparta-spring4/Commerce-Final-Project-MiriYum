@@ -54,7 +54,8 @@ class MenuInventoryAdminCommandServiceTest {
         given(storeService.requireSchedulePublicationAuthority(7L, 3L))
                 .willReturn(new StoreScheduleAuthority(3L, "Asia/Seoul"));
         given(storeService.requireMenuTransactionEligibility(3L, 11L))
-                .willReturn(new MenuTransactionEligibility(3L, 11L, 2, true, false));
+                .willReturn(new MenuTransactionEligibility(
+                        3L, 11L, 2, "아메리카노", 5_000, true, false));
         given(bucketRepository.saveAndFlush(any())).willAnswer(invocation -> {
             MenuInventoryBucket bucket = invocation.getArgument(0);
             ReflectionTestUtils.setField(bucket, "id", 41L);
@@ -106,7 +107,8 @@ class MenuInventoryAdminCommandServiceTest {
                 "11", "3", MenuVisibility.VISIBLE, MenuSellingStatus.SELLING,
                 false, null, null, null));
         given(storeService.requireMenuTransactionEligibility(3L, 11L))
-                .willReturn(new MenuTransactionEligibility(3L, 11L, 2, true, false));
+                .willReturn(new MenuTransactionEligibility(
+                        3L, 11L, 2, "아메리카노", 5_000, true, false));
         given(bucketRepository.findById(41L)).willReturn(java.util.Optional.of(current));
         given(policyService.publishNextPolicy(
                 any(Long.class), any(), any(), any(Long.class), any()))

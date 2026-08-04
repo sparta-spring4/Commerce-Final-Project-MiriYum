@@ -707,7 +707,7 @@ class MenuInventoryRuntimeIT {
                 .given(storeService)
                 .requireSchedulePublicationAuthority(operatorId, storeId);
         willReturn(new MenuTransactionEligibility(
-                storeId, menuId, 1, true, false))
+                storeId, menuId, 1, "Americano", 5_000, true, false))
                 .given(storeService)
                 .requireMenuTransactionEligibility(storeId, menuId);
     }

@@ -387,6 +387,22 @@ class StoreServiceTest {
     }
 
     @Test
+    void transactionEligibilityRejectsBlankMenuName() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, " ", 5_000, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menuName must not be blank");
+    }
+
+    @Test
+    void transactionEligibilityRejectsNegativeUnitPrice() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, "아메리카노", -1, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unitPrice must not be negative");
+    }
+
+    @Test
     void transactionEligibilityCombinesPublishedVersionCapabilities() {
         Menu menu = publishedMenu(false, false);
         stubTransactionStoreAndMenu(transactionStore(), menu);

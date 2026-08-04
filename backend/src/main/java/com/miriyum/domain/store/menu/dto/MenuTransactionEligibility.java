@@ -20,16 +20,12 @@ public record MenuTransactionEligibility(
         boolean menuHoldEligible,
         boolean pickupEligible
 ) {
-
-    /** 기존 소비자 fixture의 생성자 호환성을 유지한다. */
-    public MenuTransactionEligibility(
-            long storeId,
-            long menuId,
-            int publishedVersionNumber,
-            boolean menuHoldEligible,
-            boolean pickupEligible
-    ) {
-        this(storeId, menuId, publishedVersionNumber, "", 0,
-                menuHoldEligible, pickupEligible);
+    public MenuTransactionEligibility {
+        if (menuName == null || menuName.isBlank()) {
+            throw new IllegalArgumentException("menuName must not be blank");
+        }
+        if (unitPrice < 0) {
+            throw new IllegalArgumentException("unitPrice must not be negative");
+        }
     }
 }
