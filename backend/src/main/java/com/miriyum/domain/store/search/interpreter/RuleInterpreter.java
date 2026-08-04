@@ -2,6 +2,7 @@ package com.miriyum.domain.store.search.interpreter;
 
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -54,10 +55,10 @@ public final class RuleInterpreter {
         TimeParser.Result time = TimeParser.parse(normalized);
         CrossFieldResolution cross = resolveDictionaryStructuredOverlaps(
                 dictionary,
-                price.acceptedSpans(),
-                partySize.acceptedSpans(),
-                date.acceptedSpans(),
-                time.acceptedSpans());
+                price.recognizedSpans(),
+                partySize.recognizedSpans(),
+                date.recognizedSpans(),
+                time.recognizedSpans());
         dictionary = cross.dictionary();
 
         List<TextSpan> acceptedSpans = new ArrayList<>();
@@ -77,16 +78,23 @@ public final class RuleInterpreter {
         if (!cross.rejectTime()) {
             acceptedSpans.addAll(time.acceptedSpans());
         }
-        List<InterpretationWarning> warnings = new ArrayList<>();
+        List<LocatedWarning> locatedWarnings = new ArrayList<>();
         if (dictionary.ambiguous() || cross.ambiguous()) {
-            warnings.add(new InterpretationWarning(
-                    WarningCode.AMBIGUOUS_DICTIONARY_TERM,
-                    WarningField.DICTIONARY));
+            locatedWarnings.add(new LocatedWarning(
+                    new InterpretationWarning(
+                            WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                            WarningField.DICTIONARY),
+                    earliest(dictionary.ambiguityStart(), cross.ambiguityStart())));
         }
-        warnings.addAll(price.warnings());
-        warnings.addAll(partySize.warnings());
-        warnings.addAll(date.warnings());
-        warnings.addAll(time.warnings());
+        locatedWarnings.addAll(price.warnings());
+        locatedWarnings.addAll(partySize.warnings());
+        locatedWarnings.addAll(date.warnings());
+        locatedWarnings.addAll(time.warnings());
+        List<InterpretationWarning> warnings = locatedWarnings.stream()
+                .sorted(Comparator.comparingInt(LocatedWarning::sourceStart)
+                        .thenComparingInt(located -> located.warning().code().ordinal()))
+                .map(LocatedWarning::warning)
+                .toList();
         InterpretedSearchCondition condition = new InterpretedSearchCondition(
                 codesOf(dictionary.regions()),
                 codesOf(dictionary.storeCategories()),
@@ -133,20 +141,30 @@ public final class RuleInterpreter {
         boolean rejectDate = overlapsDictionary(dateSpans, dictionaryTokens);
         boolean rejectTime = overlapsDictionary(timeSpans, dictionaryTokens);
         boolean ambiguous = !rejectedDictionary.isEmpty();
+        Integer ambiguityStart = rejectedDictionary.stream()
+                .map(MatchedToken::span)
+                .mapToInt(TextSpan::startInclusive)
+                .min()
+                .stream()
+                .boxed()
+                .findFirst()
+                .orElse(null);
 
         DictionaryResolution resolvedDictionary = new DictionaryResolution(
                 withoutRejected(dictionary.regions(), rejectedDictionary),
                 withoutRejected(dictionary.storeCategories(), rejectedDictionary),
                 withoutRejected(dictionary.menuCategories(), rejectedDictionary),
                 withoutRejected(dictionary.tags(), rejectedDictionary),
-                dictionary.ambiguous());
+                dictionary.ambiguous(),
+                dictionary.ambiguityStart());
         return new CrossFieldResolution(
                 resolvedDictionary,
                 rejectPrice,
                 rejectPartySize,
                 rejectDate,
                 rejectTime,
-                ambiguous);
+                ambiguous,
+                ambiguityStart);
     }
 
     private static boolean overlapsDictionary(
@@ -181,7 +199,15 @@ public final class RuleInterpreter {
                 withoutRejected(storeCategories, rejected),
                 withoutRejected(menuCategories, rejected),
                 withoutRejected(tags, rejected),
-                !rejected.isEmpty());
+                !rejected.isEmpty(),
+                rejected.stream()
+                        .map(MatchedToken::span)
+                        .mapToInt(TextSpan::startInclusive)
+                        .min()
+                        .stream()
+                        .boxed()
+                        .findFirst()
+                        .orElse(null));
     }
 
     private static List<MatchedToken<String>> withoutRejected(
@@ -210,12 +236,20 @@ public final class RuleInterpreter {
         return SearchInputNormalizer.normalize(remaining.toString());
     }
 
+    private static int earliest(Integer left, Integer right) {
+        if (left == null) {
+            return right == null ? 0 : right;
+        }
+        return right == null ? left : Math.min(left, right);
+    }
+
     private record DictionaryResolution(
             List<MatchedToken<String>> regions,
             List<MatchedToken<String>> storeCategories,
             List<MatchedToken<String>> menuCategories,
             List<MatchedToken<String>> tags,
-            boolean ambiguous) {
+            boolean ambiguous,
+            Integer ambiguityStart) {
     }
 
     private record CrossFieldResolution(
@@ -224,6 +258,7 @@ public final class RuleInterpreter {
             boolean rejectPartySize,
             boolean rejectDate,
             boolean rejectTime,
-            boolean ambiguous) {
+            boolean ambiguous,
+            Integer ambiguityStart) {
     }
 }

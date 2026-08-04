@@ -156,6 +156,38 @@ class RuleInterpreterNumericTest {
                 WarningField.PRICE));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"1,,2명 예약", "1.5명 예약"})
+    @DisplayName("형식이 잘못된 인원 숫자는 일부만 해석하지 않는다")
+    void preservesMalformedPartyNumber(String input) {
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().partySize()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.INVALID_PARTY_SIZE,
+                WarningField.PARTY_SIZE));
+    }
+
+    @Test
+    @DisplayName("음수 가격은 양수 부분만 해석하지 않는다")
+    void preservesNegativePriceNumber() {
+        // given
+        String input = "-1만원 맛집";
+
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.OUT_OF_RANGE_NUMBER,
+                WarningField.PRICE));
+    }
+
     private InterpretationResult interpret(String input) {
         SearchVocabulary vocabulary =
                 new SearchVocabulary("catalog-v1", List.of(), List.of(), List.of(), List.of());

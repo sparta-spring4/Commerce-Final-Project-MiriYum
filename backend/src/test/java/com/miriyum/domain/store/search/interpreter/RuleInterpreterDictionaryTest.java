@@ -101,6 +101,27 @@ class RuleInterpreterDictionaryTest {
         assertThat(result.condition().remainingKeyword()).isEmpty();
     }
 
+    @Test
+    @DisplayName("부분 중첩 별칭은 시작 위치보다 전체 길이를 우선한다")
+    void selectsGloballyLongestOverlappingAlias() {
+        // given
+        SearchVocabulary vocabulary = new SearchVocabulary(
+                "catalog-v1",
+                List.of(
+                        new VocabularyEntry("REGION_SHORT", List.of("--")),
+                        new VocabularyEntry("REGION_LONG", List.of("--b"))),
+                List.of(),
+                List.of(),
+                List.of());
+
+        // when
+        InterpretationResult result = interpret("---b", vocabulary);
+
+        // then
+        assertThat(result.condition().regionCodes()).containsExactly("REGION_LONG");
+        assertThat(result.condition().remainingKeyword()).isEqualTo("-");
+    }
+
     private InterpretationResult interpret(String input, SearchVocabulary vocabulary) {
         return interpreter.interpret(new InterpretationRequest(
                 input,

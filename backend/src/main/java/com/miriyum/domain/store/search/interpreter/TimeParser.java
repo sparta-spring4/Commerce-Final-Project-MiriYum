@@ -26,13 +26,16 @@ final class TimeParser {
     }
 
     static Result parse(String input) {
-        boolean hasAmbiguousPeriod = AMBIGUOUS_PERIOD_PATTERN.matcher(input).find();
-        boolean hasApproximateTime = APPROXIMATE_TIME_PATTERN.matcher(input).find();
-        boolean hasInvalidTime = false;
+        Integer ambiguousTimeStart = firstMatchStart(AMBIGUOUS_PERIOD_PATTERN, input);
+        ambiguousTimeStart = earliest(
+                ambiguousTimeStart, firstMatchStart(APPROXIMATE_TIME_PATTERN, input));
         Matcher matcher = AM_PM_PATTERN.matcher(input);
         LinkedHashSet<LocalTime> values = new LinkedHashSet<>();
         List<TextSpan> spans = new ArrayList<>();
+        List<TextSpan> recognizedSpans = new ArrayList<>();
         while (matcher.find()) {
+            TextSpan span = new TextSpan(matcher.start(), matcher.end());
+            recognizedSpans.add(span);
             try {
                 int hour = Integer.parseInt(matcher.group(2));
                 int minute = matcher.group(3) == null ? 0 : Integer.parseInt(matcher.group(3));
@@ -44,50 +47,87 @@ final class TimeParser {
                     normalizedHour += 12;
                 }
                 values.add(LocalTime.of(normalizedHour, minute));
-                spans.add(new TextSpan(matcher.start(), matcher.end()));
+                spans.add(span);
             } catch (DateTimeException exception) {
-                hasInvalidTime = true;
+                ambiguousTimeStart = earliest(
+                        ambiguousTimeStart, span.startInclusive());
             }
         }
         Matcher twentyFourHourMatcher = TWENTY_FOUR_HOUR_PATTERN.matcher(input);
         while (twentyFourHourMatcher.find()) {
+            TextSpan span = new TextSpan(
+                    twentyFourHourMatcher.start(),
+                    twentyFourHourMatcher.end());
+            recognizedSpans.add(span);
             try {
                 int hour = Integer.parseInt(twentyFourHourMatcher.group(1));
                 int minute = Integer.parseInt(twentyFourHourMatcher.group(2));
                 values.add(LocalTime.of(hour, minute));
-                spans.add(new TextSpan(
-                        twentyFourHourMatcher.start(),
-                        twentyFourHourMatcher.end()));
+                spans.add(span);
             } catch (DateTimeException exception) {
-                hasInvalidTime = true;
+                ambiguousTimeStart = earliest(
+                        ambiguousTimeStart, span.startInclusive());
             }
         }
+        addMatches(AMBIGUOUS_PERIOD_PATTERN, input, recognizedSpans);
+        addMatches(APPROXIMATE_TIME_PATTERN, input, recognizedSpans);
         if (values.size() > 1) {
             return new Result(
                     null,
                     List.of(),
-                    List.of(new InterpretationWarning(
-                            WarningCode.CONFLICTING_TIME,
-                            WarningField.TIME)));
+                    recognizedSpans,
+                    List.of(new LocatedWarning(
+                            new InterpretationWarning(
+                                    WarningCode.CONFLICTING_TIME,
+                                    WarningField.TIME),
+                            earliestStart(recognizedSpans))));
         }
         LocalTime value = values.isEmpty() ? null : values.getFirst();
-        List<InterpretationWarning> warnings = hasAmbiguousPeriod
-                        || hasApproximateTime
-                        || hasInvalidTime
-                ? List.of(new InterpretationWarning(
-                        WarningCode.AMBIGUOUS_TIME,
-                        WarningField.TIME))
+        List<LocatedWarning> warnings = ambiguousTimeStart != null
+                ? List.of(new LocatedWarning(
+                        new InterpretationWarning(
+                                WarningCode.AMBIGUOUS_TIME,
+                                WarningField.TIME),
+                        ambiguousTimeStart))
                 : List.of();
-        return new Result(value, spans, warnings);
+        return new Result(value, spans, recognizedSpans, warnings);
+    }
+
+    private static Integer firstMatchStart(Pattern pattern, String input) {
+        Matcher matcher = pattern.matcher(input);
+        return matcher.find() ? matcher.start() : null;
+    }
+
+    private static Integer earliest(Integer current, Integer candidate) {
+        if (current == null) {
+            return candidate;
+        }
+        return candidate == null ? current : Math.min(current, candidate);
+    }
+
+    private static int earliestStart(List<TextSpan> spans) {
+        return spans.stream().mapToInt(TextSpan::startInclusive).min().orElse(0);
+    }
+
+    private static void addMatches(Pattern pattern, String input, List<TextSpan> spans) {
+        Matcher matcher = pattern.matcher(input);
+        while (matcher.find()) {
+            TextSpan span = new TextSpan(matcher.start(), matcher.end());
+            if (spans.stream().noneMatch(span::equals)) {
+                spans.add(span);
+            }
+        }
     }
 
     record Result(
             LocalTime value,
             List<TextSpan> acceptedSpans,
-            List<InterpretationWarning> warnings) {
+            List<TextSpan> recognizedSpans,
+            List<LocatedWarning> warnings) {
 
         Result {
             acceptedSpans = List.copyOf(acceptedSpans);
+            recognizedSpans = List.copyOf(recognizedSpans);
             warnings = List.copyOf(warnings);
         }
     }

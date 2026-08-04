@@ -21,9 +21,9 @@ final class DictionaryMatcher {
         }
 
         candidates.sort(Comparator
-                .comparingInt((MatchedToken<String> token) -> token.span().startInclusive())
-                .thenComparing(Comparator.comparingInt(
-                        (MatchedToken<String> token) -> token.span().length()).reversed()));
+                .comparingInt((MatchedToken<String> token) -> token.span().length())
+                .reversed()
+                .thenComparingInt(token -> token.span().startInclusive()));
 
         List<MatchedToken<String>> selected = new ArrayList<>();
         for (MatchedToken<String> candidate : candidates) {
@@ -31,6 +31,7 @@ final class DictionaryMatcher {
                 selected.add(candidate);
             }
         }
+        selected.sort(Comparator.comparingInt(token -> token.span().startInclusive()));
         return List.copyOf(selected);
     }
 

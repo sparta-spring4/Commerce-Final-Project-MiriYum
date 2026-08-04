@@ -7,30 +7,47 @@ import java.util.regex.Pattern;
 
 final class PriceParser {
 
+    private static final String NUMBER = "(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)";
     private static final Pattern RANGE_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([0-9][0-9,]*)\\s*(천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
-                    + "([0-9][0-9,]*)\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원?\\s*(?:~|～|-)\\s*"
+                    + "(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern BOUND_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([0-9][0-9,]*)\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원\\s*(이상|이하|미만|초과)(?![\\p{L}\\p{N}])");
     private static final Pattern EXACT_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])([0-9][0-9,]*)\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,])(" + NUMBER + ")\\s*(천|만)?\\s*원(?![\\p{L}\\p{N}])");
     private static final Pattern AMBIGUOUS_BAND_PATTERN = Pattern.compile(
-            "(?<![\\p{L}\\p{N}])[0-9][0-9,]*\\s*만원대(?![\\p{L}\\p{N}])");
+            "(?<![\\p{L}\\p{N}+\\-.,])" + NUMBER + "\\s*만원대(?![\\p{L}\\p{N}])");
+    private static final Pattern MALFORMED_PRICE_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])([-+]?[0-9][0-9,.]*)\\s*(?:천|만)?\\s*원"
+                    + "(?:\\s*(?:이상|이하|미만|초과))?(?![\\p{L}\\p{N}])");
+    private static final Pattern CANONICAL_PRICE_NUMBER = Pattern.compile(NUMBER);
 
     private PriceParser() {
     }
 
     static Result parse(String input) {
         Matcher ambiguousBandMatcher = AMBIGUOUS_BAND_PATTERN.matcher(input);
-        boolean hasAmbiguousBand = false;
+        Integer ambiguousBandStart = null;
         Long minimum = null;
         Long maximum = null;
         List<TextSpan> spans = new ArrayList<>();
         List<TextSpan> recognizedSpans = new ArrayList<>();
-        boolean hasOutOfRangeNumber = false;
+        Integer outOfRangeNumberStart = null;
+
+        Matcher malformedPriceMatcher = MALFORMED_PRICE_PATTERN.matcher(input);
+        while (malformedPriceMatcher.find()) {
+            String rawNumber = malformedPriceMatcher.group(1);
+            if (CANONICAL_PRICE_NUMBER.matcher(rawNumber).matches()) {
+                continue;
+            }
+            TextSpan span = new TextSpan(malformedPriceMatcher.start(), malformedPriceMatcher.end());
+            recognizedSpans.add(span);
+            outOfRangeNumberStart = earliest(
+                    outOfRangeNumberStart, span.startInclusive());
+        }
 
         while (ambiguousBandMatcher.find()) {
-            hasAmbiguousBand = true;
+            ambiguousBandStart = earliest(ambiguousBandStart, ambiguousBandMatcher.start());
             recognizedSpans.add(new TextSpan(
                     ambiguousBandMatcher.start(),
                     ambiguousBandMatcher.end()));
@@ -53,7 +70,8 @@ final class PriceParser {
                 maximum = minimum(maximum, right);
                 spans.add(span);
             } catch (ArithmeticException | NumberFormatException exception) {
-                hasOutOfRangeNumber = true;
+                outOfRangeNumberStart = earliest(
+                        outOfRangeNumberStart, span.startInclusive());
             }
         }
 
@@ -76,7 +94,8 @@ final class PriceParser {
                 }
                 spans.add(span);
             } catch (ArithmeticException | NumberFormatException exception) {
-                hasOutOfRangeNumber = true;
+                outOfRangeNumberStart = earliest(
+                        outOfRangeNumberStart, span.startInclusive());
             }
         }
 
@@ -93,7 +112,8 @@ final class PriceParser {
                 maximum = minimum(maximum, amount);
                 spans.add(span);
             } catch (ArithmeticException | NumberFormatException exception) {
-                hasOutOfRangeNumber = true;
+                outOfRangeNumberStart = earliest(
+                        outOfRangeNumberStart, span.startInclusive());
             }
         }
         if (minimum != null && maximum != null && minimum > maximum) {
@@ -101,34 +121,50 @@ final class PriceParser {
                     null,
                     List.of(),
                     recognizedSpans,
-                    List.of(new InterpretationWarning(
-                            WarningCode.CONFLICTING_PRICE,
-                            WarningField.PRICE)));
+                    List.of(new LocatedWarning(
+                            new InterpretationWarning(
+                                    WarningCode.CONFLICTING_PRICE,
+                                    WarningField.PRICE),
+                            earliestStart(recognizedSpans))));
         }
         if ((minimum != null && minimum < 0) || (maximum != null && maximum < 0)) {
             return new Result(
                     null,
                     List.of(),
                     recognizedSpans,
-                    List.of(new InterpretationWarning(
-                            WarningCode.OUT_OF_RANGE_NUMBER,
-                            WarningField.PRICE)));
+                    List.of(new LocatedWarning(
+                            new InterpretationWarning(
+                                    WarningCode.OUT_OF_RANGE_NUMBER,
+                                    WarningField.PRICE),
+                            earliestStart(recognizedSpans))));
         }
         PriceRange range = minimum == null && maximum == null
                 ? null
                 : new PriceRange(minimum, maximum);
-        List<InterpretationWarning> warnings = new ArrayList<>();
-        if (hasAmbiguousBand) {
-            warnings.add(new InterpretationWarning(
-                    WarningCode.AMBIGUOUS_PRICE,
-                    WarningField.PRICE));
+        List<LocatedWarning> warnings = new ArrayList<>();
+        if (ambiguousBandStart != null) {
+            warnings.add(new LocatedWarning(
+                    new InterpretationWarning(
+                            WarningCode.AMBIGUOUS_PRICE,
+                            WarningField.PRICE),
+                    ambiguousBandStart));
         }
-        if (hasOutOfRangeNumber) {
-            warnings.add(new InterpretationWarning(
-                    WarningCode.OUT_OF_RANGE_NUMBER,
-                    WarningField.PRICE));
+        if (outOfRangeNumberStart != null) {
+            warnings.add(new LocatedWarning(
+                    new InterpretationWarning(
+                            WarningCode.OUT_OF_RANGE_NUMBER,
+                            WarningField.PRICE),
+                    outOfRangeNumberStart));
         }
         return new Result(range, spans, recognizedSpans, warnings);
+    }
+
+    private static Integer earliest(Integer current, int candidate) {
+        return current == null ? candidate : Math.min(current, candidate);
+    }
+
+    private static int earliestStart(List<TextSpan> spans) {
+        return spans.stream().mapToInt(TextSpan::startInclusive).min().orElse(0);
     }
 
     private static long toWon(String rawNumber, String unit) {
@@ -157,7 +193,7 @@ final class PriceParser {
             PriceRange value,
             List<TextSpan> acceptedSpans,
             List<TextSpan> recognizedSpans,
-            List<InterpretationWarning> warnings) {
+            List<LocatedWarning> warnings) {
 
         Result {
             acceptedSpans = List.copyOf(acceptedSpans);

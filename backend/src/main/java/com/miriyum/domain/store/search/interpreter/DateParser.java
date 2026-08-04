@@ -29,9 +29,12 @@ final class DateParser {
         Matcher matcher = RELATIVE_PATTERN.matcher(input);
         LinkedHashSet<LocalDate> values = new LinkedHashSet<>();
         List<TextSpan> spans = new ArrayList<>();
-        boolean hasInvalidDate = false;
+        List<TextSpan> recognizedSpans = new ArrayList<>();
+        Integer invalidDateStart = null;
         LocalDate today = LocalDate.now(clock.withZone(zoneId));
         while (matcher.find()) {
+            TextSpan span = new TextSpan(matcher.start(), matcher.end());
+            recognizedSpans.add(span);
             LocalDate value = switch (matcher.group(1)) {
                 case "오늘" -> today;
                 case "내일" -> today.plusDays(1);
@@ -39,66 +42,88 @@ final class DateParser {
                 default -> throw new IllegalStateException("unsupported relative date");
             };
             values.add(value);
-            spans.add(new TextSpan(matcher.start(), matcher.end()));
+            spans.add(span);
         }
 
         Matcher isoMatcher = ISO_PATTERN.matcher(input);
         while (isoMatcher.find()) {
+            TextSpan span = new TextSpan(isoMatcher.start(), isoMatcher.end());
+            recognizedSpans.add(span);
             try {
                 values.add(LocalDate.of(
                         Integer.parseInt(isoMatcher.group(1)),
                         Integer.parseInt(isoMatcher.group(2)),
                         Integer.parseInt(isoMatcher.group(3))));
-                spans.add(new TextSpan(isoMatcher.start(), isoMatcher.end()));
+                spans.add(span);
             } catch (DateTimeException exception) {
-                hasInvalidDate = true;
+                invalidDateStart = earliest(invalidDateStart, span.startInclusive());
             }
         }
 
         Matcher koreanMatcher = KOREAN_PATTERN.matcher(input);
         while (koreanMatcher.find()) {
+            TextSpan span = new TextSpan(koreanMatcher.start(), koreanMatcher.end());
+            recognizedSpans.add(span);
             try {
                 values.add(LocalDate.of(
                         Integer.parseInt(koreanMatcher.group(1)),
                         Integer.parseInt(koreanMatcher.group(2)),
                         Integer.parseInt(koreanMatcher.group(3))));
-                spans.add(new TextSpan(koreanMatcher.start(), koreanMatcher.end()));
+                spans.add(span);
             } catch (DateTimeException exception) {
-                hasInvalidDate = true;
+                invalidDateStart = earliest(invalidDateStart, span.startInclusive());
             }
         }
 
         Matcher yearlessMatcher = YEARLESS_PATTERN.matcher(input);
         while (yearlessMatcher.find()) {
             TextSpan span = new TextSpan(yearlessMatcher.start(), yearlessMatcher.end());
+            if (recognizedSpans.stream().noneMatch(span::overlaps)) {
+                recognizedSpans.add(span);
+            }
             if (spans.stream().noneMatch(span::overlaps)) {
-                hasInvalidDate = true;
+                invalidDateStart = earliest(invalidDateStart, span.startInclusive());
             }
         }
         if (values.size() > 1) {
             return new Result(
                     null,
                     List.of(),
-                    List.of(new InterpretationWarning(
-                            WarningCode.CONFLICTING_DATE,
-                            WarningField.DATE)));
+                    recognizedSpans,
+                    List.of(new LocatedWarning(
+                            new InterpretationWarning(
+                                    WarningCode.CONFLICTING_DATE,
+                                    WarningField.DATE),
+                            earliestStart(recognizedSpans))));
         }
         LocalDate value = values.isEmpty() ? null : values.getFirst();
-        List<InterpretationWarning> warnings = hasInvalidDate
-                ? List.of(new InterpretationWarning(
-                        WarningCode.AMBIGUOUS_DATE,
-                        WarningField.DATE))
+        List<LocatedWarning> warnings = invalidDateStart != null
+                ? List.of(new LocatedWarning(
+                        new InterpretationWarning(
+                                WarningCode.AMBIGUOUS_DATE,
+                                WarningField.DATE),
+                        invalidDateStart))
                 : List.of();
-        return new Result(value, spans, warnings);
+        return new Result(value, spans, recognizedSpans, warnings);
+    }
+
+    private static Integer earliest(Integer current, int candidate) {
+        return current == null ? candidate : Math.min(current, candidate);
+    }
+
+    private static int earliestStart(List<TextSpan> spans) {
+        return spans.stream().mapToInt(TextSpan::startInclusive).min().orElse(0);
     }
 
     record Result(
             LocalDate value,
             List<TextSpan> acceptedSpans,
-            List<InterpretationWarning> warnings) {
+            List<TextSpan> recognizedSpans,
+            List<LocatedWarning> warnings) {
 
         Result {
             acceptedSpans = List.copyOf(acceptedSpans);
+            recognizedSpans = List.copyOf(recognizedSpans);
             warnings = List.copyOf(warnings);
         }
     }

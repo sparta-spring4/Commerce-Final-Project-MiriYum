@@ -117,6 +117,86 @@ class RuleInterpreterRegressionTest {
         assertThat(second).isEqualTo(first);
     }
 
+    @Test
+    @DisplayName("충돌로 거부된 인원 span과 겹치는 사전 조건도 소비하지 않는다")
+    void preservesDictionaryOverlapWithConflictingPartyCandidate() {
+        // given
+        SearchVocabulary vocabulary = new SearchVocabulary(
+                "catalog-v1",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new VocabularyEntry("TAG_TWO_PEOPLE", List.of("2명"))));
+
+        // when
+        InterpretationResult result = interpreter.interpret(new InterpretationRequest(
+                "2명 3명",
+                vocabulary,
+                ZoneId.of("Asia/Seoul")));
+
+        // then
+        assertThat(result.condition().tagCodes()).isEmpty();
+        assertThat(result.condition().partySize()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo("2명 3명");
+        assertThat(result.warnings()).containsExactly(
+                new InterpretationWarning(
+                        WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                        WarningField.DICTIONARY),
+                new InterpretationWarning(
+                        WarningCode.CONFLICTING_PARTY_SIZE,
+                        WarningField.PARTY_SIZE));
+    }
+
+    @Test
+    @DisplayName("모호해서 거부된 가격 span과 겹치는 사전 조건도 소비하지 않는다")
+    void preservesDictionaryOverlapWithAmbiguousPriceCandidate() {
+        // given
+        SearchVocabulary vocabulary = new SearchVocabulary(
+                "catalog-v1",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new VocabularyEntry("TAG_PRICE_BAND", List.of("2만원대"))));
+
+        // when
+        InterpretationResult result = interpreter.interpret(new InterpretationRequest(
+                "2만원대",
+                vocabulary,
+                ZoneId.of("Asia/Seoul")));
+
+        // then
+        assertThat(result.condition().tagCodes()).isEmpty();
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo("2만원대");
+        assertThat(result.warnings()).containsExactly(
+                new InterpretationWarning(
+                        WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                        WarningField.DICTIONARY),
+                new InterpretationWarning(
+                        WarningCode.AMBIGUOUS_PRICE,
+                        WarningField.PRICE));
+    }
+
+    @Test
+    @DisplayName("경고는 파서 종류가 아니라 원문 위치 순서로 반환한다")
+    void ordersWarningsBySourcePosition() {
+        // when
+        InterpretationResult result = interpreter.interpret(new InterpretationRequest(
+                "저녁 2만원대",
+                new SearchVocabulary(
+                        "catalog-v1", List.of(), List.of(), List.of(), List.of()),
+                ZoneId.of("Asia/Seoul")));
+
+        // then
+        assertThat(result.warnings()).containsExactly(
+                new InterpretationWarning(
+                        WarningCode.AMBIGUOUS_TIME,
+                        WarningField.TIME),
+                new InterpretationWarning(
+                        WarningCode.AMBIGUOUS_PRICE,
+                        WarningField.PRICE));
+    }
+
     private SearchVocabulary regressionVocabulary() {
         return new SearchVocabulary(
                 "catalog-v1",
