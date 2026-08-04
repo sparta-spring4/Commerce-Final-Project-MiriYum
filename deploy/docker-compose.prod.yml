@@ -23,7 +23,8 @@ services:
 
   backend:
     # 배포 시 CD 워크플로가 변경 불가능한 ECR 이미지 태그를 주입한다.
-    image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to an immutable ECR image tag}
+    # deploy.sh가 BACKEND_IMAGE 누락을 먼저 검사하므로 Compose에는 단일 이미지 참조만 둔다.
+    image: "${BACKEND_IMAGE}"
     environment:
       MIRIYUM_DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
       MIRIYUM_DB_USERNAME: ${MYSQL_USER}

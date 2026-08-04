@@ -13,9 +13,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 
 /**
  * 배포용 health probe가 인증 없이 접근되고 실제 MySQL 컨테이너에서 애플리케이션 준비 상태를
@@ -30,7 +30,7 @@ class HealthEndpointIntegrationTest {
 
     @Container
     @ServiceConnection
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
+    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
 
     @LocalServerPort
     private int port;
@@ -45,8 +45,10 @@ class HealthEndpointIntegrationTest {
                 .build();
 
         // when
-        HttpResponse<String> response = HttpClient.newHttpClient().send(
-                request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response;
+        try (HttpClient httpClient = HttpClient.newHttpClient()) {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        }
 
         // then
         assertThat(response.statusCode()).isEqualTo(200);

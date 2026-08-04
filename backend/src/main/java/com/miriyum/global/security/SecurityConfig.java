@@ -41,7 +41,7 @@ public class SecurityConfig {
      */
     @Bean
     @Order(0)
-    public SecurityFilterChain healthEndpointFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain healthEndpointFilterChain(HttpSecurity http) {
         http
                 .securityMatcher(EndpointRequest.to("health"))
                 .csrf(AbstractHttpConfigurer::disable)
@@ -81,7 +81,7 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
             ObjectMapper objectMapper
-    ) throws Exception {
+    ) {
         http
                 .securityMatcher("/api/v1/consumer-accounts/**")
                 .csrf(AbstractHttpConfigurer::disable)
@@ -102,7 +102,7 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
             ObjectMapper objectMapper
-    ) throws Exception {
+    ) {
         http
                 .securityMatcher("/api/v1/store-operator-accounts/**")
                 .csrf(AbstractHttpConfigurer::disable)
@@ -123,7 +123,7 @@ public class SecurityConfig {
             HttpSecurity http,
             RateLimiter rateLimiter,
             ObjectMapper objectMapper
-    ) throws Exception {
+    ) {
         http
                 .securityMatcher("/api/v1/consumer-auth/**", "/api/v1/store-operator-auth/**")
                 .csrf(AbstractHttpConfigurer::disable)
@@ -135,7 +135,7 @@ public class SecurityConfig {
 
     @Bean
     @Order(4)
-    public SecurityFilterChain defaultFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain defaultFilterChain(HttpSecurity http) {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
