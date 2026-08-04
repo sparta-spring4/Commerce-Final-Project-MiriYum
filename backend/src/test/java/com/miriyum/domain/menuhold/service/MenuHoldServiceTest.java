@@ -16,6 +16,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -43,6 +44,8 @@ class MenuHoldServiceTest {
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
         given(bucketRepository.findAllForUpdate(List.of(3L, 9L)))
                 .willReturn(List.of(second, first));
+        givenCurrent(first);
+        givenCurrent(second);
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(1);
         given(bucketRepository.decrementIfCurrent(9L, 0L, 1, 1)).willReturn(1);
 
@@ -73,6 +76,7 @@ class MenuHoldServiceTest {
                 request.sourceAcquireOperationId()))
                 .willReturn(false);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
+        givenCurrent(bucket);
         given(bucketRepository.incrementIfCurrent(3L, 0L, 2, 1)).willReturn(1);
         MenuInventoryService service = service();
 
@@ -89,6 +93,7 @@ class MenuHoldServiceTest {
                 "reservation:77:create", List.of(selection(3L, 2)));
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
         given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
+        givenCurrent(bucket);
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(0);
         MenuInventoryService service = service();
 
@@ -140,6 +145,13 @@ class MenuHoldServiceTest {
 
     private MenuInventoryService service() {
         return new MenuInventoryService(bucketRepository, ledgerRepository);
+    }
+
+    private void givenCurrent(MenuInventoryBucket bucket) {
+        given(bucketRepository.findCurrentForUpdate(
+                bucket.getMenuId(), bucket.getServiceDate(), bucket.getStartTime(),
+                bucket.getEndDate(), bucket.getEndTime()))
+                .willReturn(Optional.of(bucket));
     }
 
     private static InventoryAcquireRequest.Selection selection(long menuId, int quantity) {

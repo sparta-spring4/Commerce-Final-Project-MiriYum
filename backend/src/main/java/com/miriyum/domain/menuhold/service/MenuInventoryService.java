@@ -44,6 +44,7 @@ class MenuInventoryService {
         if (buckets.size() != orderedIds.size()) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
         }
+        requireCurrentPolicies(buckets);
 
         List<InventoryAllocationResult> results = new ArrayList<>();
         List<MenuInventoryLedger> events = new ArrayList<>();
@@ -63,6 +64,19 @@ class MenuInventoryService {
         }
         ledgerRepository.saveAll(events);
         return List.copyOf(results);
+    }
+
+    private void requireCurrentPolicies(List<MenuInventoryBucket> buckets) {
+        for (MenuInventoryBucket bucket : buckets) {
+            MenuInventoryBucket current = bucketRepository.findCurrentForUpdate(
+                            bucket.getMenuId(), bucket.getServiceDate(),
+                            bucket.getStartTime(), bucket.getEndDate(), bucket.getEndTime())
+                    .orElseThrow(() -> new ServiceException(
+                            MenuHoldErrorCode.BUCKET_NOT_FOUND));
+            if (!current.getId().equals(bucket.getId())) {
+                throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            }
+        }
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

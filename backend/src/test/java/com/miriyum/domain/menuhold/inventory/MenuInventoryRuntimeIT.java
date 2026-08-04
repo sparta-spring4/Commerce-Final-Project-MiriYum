@@ -295,6 +295,35 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
+    void rejectsAcquisitionAgainstAnOlderPolicyVersion() {
+        MenuInventoryBucket first = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+        MenuInventoryBucket second = policyService.publishNextPolicy(
+                7L,
+                "MENU_INVENTORY_UPDATE",
+                "123e4567-e89b-12d3-a456-426614174111",
+                first.getId(),
+                new InventoryPolicyChange(
+                        5, 5, 0, 0, true,
+                        com.miriyum.domain.menuhold.inventory.model
+                                .InventoryAvailabilityStatus.AVAILABLE));
+        InventoryAcquireRequest staleAcquire = new InventoryAcquireRequest(
+                "reservation:stale-policy:create",
+                List.of(selection(menuId, 1L, 5)));
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status ->
+                menuHoldService.acquireInventory(staleAcquire)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+
+        assertThat(bucketRepository.findById(first.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isEqualTo(5);
+        assertThat(bucketRepository.findById(second.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isEqualTo(5);
+    }
+
+    @Test
     void listsOnlyCurrentPoliciesForTheManagedMenuIds() {
         transactionTemplate.executeWithoutResult(status -> {
             bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 0));
@@ -467,13 +496,21 @@ class MenuInventoryRuntimeIT {
     }
 
     private static InventoryAcquireRequest.Selection selection(long selectedMenuId, int quantity) {
+        return selection(selectedMenuId, 1L, quantity);
+    }
+
+    private static InventoryAcquireRequest.Selection selection(
+            long selectedMenuId,
+            long policyVersion,
+            int quantity
+    ) {
         return new InventoryAcquireRequest.Selection(
                 selectedMenuId,
                 LocalDate.of(2026, 8, 10),
                 LocalTime.of(12, 0),
                 LocalDate.of(2026, 8, 10),
                 LocalTime.of(13, 0),
-                1L,
+                policyVersion,
                 quantity);
     }
 
