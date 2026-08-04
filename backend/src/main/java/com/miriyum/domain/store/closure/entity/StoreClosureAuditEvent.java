@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.closure.entity;
 
 import com.miriyum.domain.store.closure.model.StoreClosureActorType;
+import com.miriyum.domain.store.schedule.model.ConflictCheckStatus;
 import com.miriyum.global.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -66,6 +67,13 @@ public class StoreClosureAuditEvent extends BaseEntity {
     @Column(name = "request_id", nullable = false, length = 100)
     private String requestId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "conflict_check_status", nullable = false, length = 20)
+    private ConflictCheckStatus conflictCheckStatus;
+
+    @Column(name = "conflict_count")
+    private Integer conflictCount;
+
     public static StoreClosureAuditEvent record(
             long storeId,
             StoreClosureActorType actorType,
@@ -100,6 +108,7 @@ public class StoreClosureAuditEvent extends BaseEntity {
         event.occurredAt = occurredAt;
         event.changeReason = changeReason;
         event.requestId = requestId;
+        event.conflictCheckStatus = ConflictCheckStatus.NOT_EVALUATED;
         return event;
     }
 }

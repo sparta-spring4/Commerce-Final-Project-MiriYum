@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.*;
 import static org.mockito.Mockito.lenient;
+import com.miriyum.domain.store.closure.dto.TemporaryClosureCancellationRequest;
 import com.miriyum.domain.store.closure.dto.TemporaryClosureCreateRequest;
 import com.miriyum.domain.store.closure.dto.TemporaryClosureEndAtRequest;
 import com.miriyum.domain.store.closure.entity.StoreClosureAuditEvent;
@@ -15,6 +16,7 @@ import com.miriyum.domain.store.closure.model.TemporaryClosureStatus;
 import com.miriyum.domain.store.closure.repository.*;
 import com.miriyum.domain.store.core.service.*;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
+import com.miriyum.domain.store.schedule.model.ConflictCheckStatus;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.global.idempotency.*;
 import java.time.*;
@@ -65,6 +67,8 @@ class TemporaryClosureServiceTest {
         then(audit).should().save(captor.capture());
         assertThat(captor.getValue().getActorType()).isEqualTo(StoreClosureActorType.STORE_OPERATOR);
         assertThat(captor.getValue().getActorId()).isEqualTo(11L);
+        assertThat(captor.getValue().getAction()).isEqualTo("CREATED");
+        assertNotEvaluated(captor.getValue());
     }
 
     @Test void createsClosureWhenAnotherTemporaryClosureOverlaps() {
@@ -122,6 +126,35 @@ class TemporaryClosureServiceTest {
                 new TemporaryClosureEndAtRequest(OffsetDateTime.parse("2026-08-03T15:00:00+09:00")));
 
         assertThat(result.data().endAt()).isEqualTo(Instant.parse("2026-08-03T06:00:00Z"));
+        StoreClosureAuditEvent event = capturedAuditEvent();
+        assertThat(event.getAction()).isEqualTo("END_CHANGED");
+        assertNotEvaluated(event);
+    }
+
+    @Test void cancelsScheduledClosureWithUnknownConflictCountInAudit() {
+        TemporaryClosure target = TemporaryClosure.create(7,
+                Instant.parse("2026-08-03T04:00:00Z"), Instant.parse("2026-08-03T05:00:00Z"),
+                "Asia/Seoul", TemporaryClosureReason.OTHER, null);
+        ReflectionTestUtils.setField(target, "id", 3L);
+        given(stores.requireSchedulePublicationAuthority(11, 7))
+                .willReturn(new StoreScheduleAuthority(7, "Asia/Seoul"));
+        given(states.findForUpdateByStoreId(7))
+                .willReturn(Optional.of(StoreScheduleState.initialize(7)));
+        given(temporary.findForUpdate(7, 3L)).willReturn(Optional.of(target));
+        given(idempotency.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<com.miriyum.global.idempotency.BusinessResult<?>> work = invocation.getArgument(1);
+            var result = work.get();
+            return new IdempotentOutcome(false, result.httpStatus(), result.responseCode(), result.resourceType(),
+                    result.resourceId(), mapper.valueToTree(result.data()));
+        });
+
+        service.cancel(11, 7, 3L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440004"),
+                new TemporaryClosureCancellationRequest("휴점 취소"));
+
+        StoreClosureAuditEvent event = capturedAuditEvent();
+        assertThat(event.getAction()).isEqualTo("CANCELLED");
+        assertNotEvaluated(event);
     }
 
     @Test void rejectsClosureStartingInThePast() {
@@ -140,5 +173,17 @@ class TemporaryClosureServiceTest {
                         OffsetDateTime.parse("2026-08-03T13:00:00+09:00"), TemporaryClosureReason.OTHER, null)))
                 .isInstanceOf(com.miriyum.global.exception.ServiceException.class);
         then(temporary).should(never()).saveAndFlush(any());
+    }
+
+    private StoreClosureAuditEvent capturedAuditEvent() {
+        ArgumentCaptor<StoreClosureAuditEvent> captor =
+                ArgumentCaptor.forClass(StoreClosureAuditEvent.class);
+        then(audit).should().save(captor.capture());
+        return captor.getValue();
+    }
+
+    private void assertNotEvaluated(StoreClosureAuditEvent event) {
+        assertThat(event.getConflictCheckStatus()).isEqualTo(ConflictCheckStatus.NOT_EVALUATED);
+        assertThat(event.getConflictCount()).isNull();
     }
 }
