@@ -82,6 +82,25 @@ class RuleInterpreterDictionaryTest {
         assertThat(result.condition().remainingKeyword()).isEqualTo("맛집");
     }
 
+    @Test
+    @DisplayName("소문자 변환 길이가 달라져도 원문 span을 정확히 소비한다")
+    void preservesDisplayIndexesAcrossCaseFoldingExpansion() {
+        // given
+        SearchVocabulary vocabulary = new SearchVocabulary(
+                "catalog-v1",
+                List.of(new VocabularyEntry("REGION_CASE_EXPANSION", List.of("İ"))),
+                List.of(),
+                List.of(),
+                List.of());
+
+        // when
+        InterpretationResult result = interpret("İ", vocabulary);
+
+        // then
+        assertThat(result.condition().regionCodes()).containsExactly("REGION_CASE_EXPANSION");
+        assertThat(result.condition().remainingKeyword()).isEmpty();
+    }
+
     private InterpretationResult interpret(String input, SearchVocabulary vocabulary) {
         return interpreter.interpret(new InterpretationRequest(
                 input,

@@ -21,14 +21,25 @@ final class PriceParser {
     }
 
     static Result parse(String input) {
-        boolean hasAmbiguousBand = AMBIGUOUS_BAND_PATTERN.matcher(input).find();
+        Matcher ambiguousBandMatcher = AMBIGUOUS_BAND_PATTERN.matcher(input);
+        boolean hasAmbiguousBand = false;
         Long minimum = null;
         Long maximum = null;
         List<TextSpan> spans = new ArrayList<>();
+        List<TextSpan> recognizedSpans = new ArrayList<>();
         boolean hasOutOfRangeNumber = false;
+
+        while (ambiguousBandMatcher.find()) {
+            hasAmbiguousBand = true;
+            recognizedSpans.add(new TextSpan(
+                    ambiguousBandMatcher.start(),
+                    ambiguousBandMatcher.end()));
+        }
 
         Matcher rangeMatcher = RANGE_PATTERN.matcher(input);
         while (rangeMatcher.find()) {
+            TextSpan span = new TextSpan(rangeMatcher.start(), rangeMatcher.end());
+            recognizedSpans.add(span);
             String leftUnit = rangeMatcher.group(2) == null
                     ? rangeMatcher.group(4)
                     : rangeMatcher.group(2);
@@ -40,7 +51,7 @@ final class PriceParser {
                 long right = toWon(rangeMatcher.group(3), rightUnit);
                 minimum = maximum(minimum, left);
                 maximum = minimum(maximum, right);
-                spans.add(new TextSpan(rangeMatcher.start(), rangeMatcher.end()));
+                spans.add(span);
             } catch (ArithmeticException | NumberFormatException exception) {
                 hasOutOfRangeNumber = true;
             }
@@ -49,9 +60,10 @@ final class PriceParser {
         Matcher matcher = BOUND_PATTERN.matcher(input);
         while (matcher.find()) {
             TextSpan span = new TextSpan(matcher.start(), matcher.end());
-            if (overlapsAny(span, spans)) {
+            if (overlapsAny(span, recognizedSpans)) {
                 continue;
             }
+            recognizedSpans.add(span);
             try {
                 long amount = toWon(matcher.group(1), matcher.group(2));
                 String operator = matcher.group(3);
@@ -71,9 +83,10 @@ final class PriceParser {
         Matcher exactMatcher = EXACT_PATTERN.matcher(input);
         while (exactMatcher.find()) {
             TextSpan span = new TextSpan(exactMatcher.start(), exactMatcher.end());
-            if (overlapsAny(span, spans)) {
+            if (overlapsAny(span, recognizedSpans)) {
                 continue;
             }
+            recognizedSpans.add(span);
             try {
                 long amount = toWon(exactMatcher.group(1), exactMatcher.group(2));
                 minimum = maximum(minimum, amount);
@@ -87,8 +100,18 @@ final class PriceParser {
             return new Result(
                     null,
                     List.of(),
+                    recognizedSpans,
                     List.of(new InterpretationWarning(
                             WarningCode.CONFLICTING_PRICE,
+                            WarningField.PRICE)));
+        }
+        if ((minimum != null && minimum < 0) || (maximum != null && maximum < 0)) {
+            return new Result(
+                    null,
+                    List.of(),
+                    recognizedSpans,
+                    List.of(new InterpretationWarning(
+                            WarningCode.OUT_OF_RANGE_NUMBER,
                             WarningField.PRICE)));
         }
         PriceRange range = minimum == null && maximum == null
@@ -105,7 +128,7 @@ final class PriceParser {
                     WarningCode.OUT_OF_RANGE_NUMBER,
                     WarningField.PRICE));
         }
-        return new Result(range, spans, warnings);
+        return new Result(range, spans, recognizedSpans, warnings);
     }
 
     private static long toWon(String rawNumber, String unit) {
@@ -133,10 +156,12 @@ final class PriceParser {
     record Result(
             PriceRange value,
             List<TextSpan> acceptedSpans,
+            List<TextSpan> recognizedSpans,
             List<InterpretationWarning> warnings) {
 
         Result {
             acceptedSpans = List.copyOf(acceptedSpans);
+            recognizedSpans = List.copyOf(recognizedSpans);
             warnings = List.copyOf(warnings);
         }
     }

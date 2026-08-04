@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class RuleInterpreterNumericTest {
 
@@ -135,6 +136,24 @@ class RuleInterpreterNumericTest {
         assertThat(result.warnings()).containsExactly(new InterpretationWarning(
                 WarningCode.OUT_OF_RANGE_NUMBER,
                 WarningField.PARTY_SIZE));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "0원 미만 맛집",
+        "9223372036854775807원 초과 맛집"
+    })
+    @DisplayName("원화 범위를 벗어나는 배타 경계는 조건으로 소비하지 않는다")
+    void preservesExclusivePriceBoundaryOutsideWonRange(String input) {
+        // when
+        InterpretationResult result = interpret(input);
+
+        // then
+        assertThat(result.condition().priceRange()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(input);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.OUT_OF_RANGE_NUMBER,
+                WarningField.PRICE));
     }
 
     private InterpretationResult interpret(String input) {

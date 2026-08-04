@@ -1,10 +1,8 @@
 package com.miriyum.domain.store.search.interpreter;
 
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -48,23 +46,27 @@ public record SearchVocabulary(
             List<VocabularyEntry> entries,
             String fieldName) {
         Set<String> codes = new HashSet<>();
-        Map<String, String> aliasesByCode = new HashMap<>();
+        List<String> normalizedAliases = new ArrayList<>();
         for (VocabularyEntry entry : entries) {
             if (!codes.add(entry.code())) {
                 throw new IllegalArgumentException(fieldName + " contains duplicate code");
             }
             for (String alias : entry.aliases()) {
                 String normalizedAlias = normalizeAlias(alias);
-                String existingCode = aliasesByCode.putIfAbsent(normalizedAlias, entry.code());
-                if (existingCode != null) {
+                if (normalizedAlias.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            fieldName + " contains alias that normalizes to empty");
+                }
+                if (normalizedAliases.stream()
+                        .anyMatch(existing -> existing.equalsIgnoreCase(normalizedAlias))) {
                     throw new IllegalArgumentException(fieldName + " contains duplicate alias");
                 }
+                normalizedAliases.add(normalizedAlias);
             }
         }
     }
 
     private static String normalizeAlias(String alias) {
-        return SearchInputNormalizer.normalize(alias)
-                .toLowerCase(Locale.ROOT);
+        return SearchInputNormalizer.normalize(alias);
     }
 }

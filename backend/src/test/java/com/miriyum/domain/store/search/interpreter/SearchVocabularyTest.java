@@ -65,6 +65,20 @@ class SearchVocabularyTest {
     }
 
     @Test
+    @DisplayName("정규화 뒤 비는 제어 문자 별칭을 거부한다")
+    void rejectsAliasThatNormalizesToEmpty() {
+        // when & then
+        assertThatThrownBy(() -> new SearchVocabulary(
+                "catalog-v1",
+                List.of(new VocabularyEntry("REGION_CONTROL", List.of("\u0000\t"))),
+                List.of(),
+                List.of(),
+                List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("alias");
+    }
+
+    @Test
     @DisplayName("가격 범위가 역전되면 거부한다")
     void rejectsReversedPriceRange() {
         // when & then

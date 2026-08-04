@@ -3,7 +3,6 @@ package com.miriyum.domain.store.search.interpreter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 
 final class DictionaryMatcher {
 
@@ -13,12 +12,11 @@ final class DictionaryMatcher {
     static List<MatchedToken<String>> match(
             String normalizedInput,
             List<VocabularyEntry> entries) {
-        String comparisonInput = normalizedInput.toLowerCase(Locale.ROOT);
         List<MatchedToken<String>> candidates = new ArrayList<>();
         for (VocabularyEntry entry : entries) {
             for (String rawAlias : entry.aliases()) {
-                String alias = SearchInputNormalizer.normalize(rawAlias).toLowerCase(Locale.ROOT);
-                collectMatches(comparisonInput, alias, entry.code(), candidates);
+                String alias = SearchInputNormalizer.normalize(rawAlias);
+                collectMatches(normalizedInput, alias, entry.code(), candidates);
             }
         }
 
@@ -37,21 +35,18 @@ final class DictionaryMatcher {
     }
 
     private static void collectMatches(
-            String comparisonInput,
+            String input,
             String alias,
             String code,
             List<MatchedToken<String>> candidates) {
-        int fromIndex = 0;
-        while (fromIndex < comparisonInput.length()) {
-            int start = comparisonInput.indexOf(alias, fromIndex);
-            if (start < 0) {
-                return;
+        for (int start = 0; start + alias.length() <= input.length(); start++) {
+            if (!input.regionMatches(true, start, alias, 0, alias.length())) {
+                continue;
             }
             int end = start + alias.length();
-            if (hasIndependentBoundaries(comparisonInput, start, end)) {
+            if (hasIndependentBoundaries(input, start, end)) {
                 candidates.add(new MatchedToken<>(code, new TextSpan(start, end)));
             }
-            fromIndex = start + Math.max(1, alias.length());
         }
     }
 
