@@ -147,7 +147,7 @@ public record VerifiedStoreGeocoding(
 
 - [ ] **Step 4: Write the failing V21 migration test**
 
-Start MySQL with Flyway target 19, insert a legacy store, migrate to 20, and assert:
+Start MySQL with Flyway target 19, insert a legacy store, migrate through reservation V20 to latest V21, and assert:
 
 ```java
 assertThat(row.getLong("address_version")).isEqualTo(1L);
