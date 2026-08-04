@@ -23,9 +23,11 @@ class MenuInventoryOpenApiContractTest {
         }
 
         Map<String, Object> paths = map(document.get("paths"));
-        assertThat(map(paths.get(
-                "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets")))
-                .containsKeys("get", "post");
+        Map<String, Object> collectionRoute = map(paths.get(
+                "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets"));
+        assertThat(collectionRoute).containsKeys("get", "post");
+        assertMenuNotFoundResponse(map(collectionRoute.get("get")));
+        assertMenuNotFoundResponse(map(collectionRoute.get("post")));
         assertThat(map(paths.get(
                 "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}")))
                 .containsKey("patch");
@@ -44,6 +46,12 @@ class MenuInventoryOpenApiContractTest {
                 .contains("endDate", "sharedOnlineAllowed");
         assertThat(map(response.get("properties")))
                 .containsKeys("endDate", "sharedOnlineAllowed");
+    }
+
+    private static void assertMenuNotFoundResponse(Map<String, Object> operation) {
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(map(responses.get("404")))
+                .containsEntry("$ref", "#/components/responses/MenuNotFound");
     }
 
     @SuppressWarnings("unchecked")
