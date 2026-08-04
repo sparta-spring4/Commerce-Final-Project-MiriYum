@@ -10,6 +10,7 @@ import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
+import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
 import com.miriyum.global.exception.ServiceException;
@@ -48,12 +49,14 @@ public class TemporaryClosureService {
                     StoreScheduleState state = stateRepository.findForUpdateByStoreId(storeId).orElseThrow(this::conflict);
                     Instant start = request.startAt().toInstant();
                     Instant end = request.endAt().toInstant();
-                    Instant now = clock.instant();
-                    if (start.isBefore(now) || !end.isAfter(now)
+                    Instant requestedAt = clock.instant();
+                    if (start.isBefore(requestedAt) || !end.isAfter(requestedAt)
                             || overlapsRegular(state, start, end, authority.timeZoneId())) throw conflict();
                     TemporaryClosure closure = temporaryRepository.saveAndFlush(TemporaryClosure.create(
                             storeId, start, end, authority.timeZoneId(), request.reason(), request.publicMessage()));
-                    audit(closure, actor, "CREATED", null, closure.statusAt(clock.instant()).name(), key.value(), null);
+                    audit(closure, actor, "CREATED", null,
+                            closure.statusAt(requestedAt).name(), key.value(), null,
+                            requestedAt, null, closure.getEndAt());
                     return closure;
                 });
     }
@@ -68,13 +71,17 @@ public class TemporaryClosureService {
                     stateRepository.initialize(storeId);
                     StoreScheduleState state = stateRepository.findForUpdateByStoreId(storeId).orElseThrow(this::conflict);
                     TemporaryClosure closure = temporaryRepository.findForUpdate(storeId, closureId).orElseThrow(this::conflict);
-                    String before = closure.statusAt(clock.instant()).name();
+                    Instant requestedAt = clock.instant();
+                    String before = closure.statusAt(requestedAt).name();
+                    Instant previousEndAt = closure.getEndAt();
                     Instant changedEnd = request.endAt().toInstant();
                     if (overlapsRegular(state, closure.getStartAt(), changedEnd, authority.timeZoneId())) {
                         throw conflict();
                     }
-                    closure.changeEndAt(changedEnd, clock.instant());
-                    audit(closure, actor, "END_CHANGED", before, closure.statusAt(clock.instant()).name(), key.value(), null);
+                    closure.changeEndAt(changedEnd, requestedAt);
+                    audit(closure, actor, "END_CHANGED", before,
+                            closure.statusAt(requestedAt).name(), key.value(), request.changeReason(),
+                            requestedAt, previousEndAt, closure.getEndAt());
                     return closure;
                 });
     }
@@ -89,9 +96,11 @@ public class TemporaryClosureService {
                     stateRepository.initialize(storeId);
                     stateRepository.findForUpdateByStoreId(storeId).orElseThrow(this::conflict);
                     TemporaryClosure closure = temporaryRepository.findForUpdate(storeId, closureId).orElseThrow(this::conflict);
-                    String before = closure.statusAt(clock.instant()).name();
-                    closure.cancel(clock.instant());
-                    audit(closure, actor, "CANCELLED", before, "CANCELLED", key.value(), request.changeReason());
+                    Instant requestedAt = clock.instant();
+                    String before = closure.statusAt(requestedAt).name();
+                    closure.cancel(requestedAt);
+                    audit(closure, actor, "CANCELLED", before, "CANCELLED", key.value(),
+                            request.changeReason(), requestedAt, closure.getEndAt(), closure.getEndAt());
                     return closure;
                 });
     }
@@ -119,11 +128,14 @@ public class TemporaryClosureService {
     }
 
     private void audit(TemporaryClosure closure, long actor, String action, String previous, String next,
-            String requestId, String reason) {
+            String requestId, String reason, Instant requestedAt,
+            Instant previousEndAt, Instant newEndAt) {
         auditRepository.save(StoreClosureAuditEvent.record(closure.getStoreId(), StoreClosureActorType.STORE_OPERATOR,
                 actor, "TEMPORARY",
-                Long.toString(closure.getId()), action, previous, next, closure.getTimeZoneId(), closure.getStartAt(),
-                clock.instant(), reason, requestId));
+                Long.toString(closure.getId()), null, null, action, previous, next,
+                closure.getTimeZoneId(), requestedAt, closure.getStartAt(), clock.instant(), reason, requestId,
+                ScheduleAuditOutcome.SUCCEEDED, closure.getStartAt(), previousEndAt, newEndAt,
+                closure.getReason()));
     }
 
     private ServiceException conflict() { return new ServiceException(StoreErrorCode.SCHEDULE_CONFLICT); }

@@ -32,7 +32,8 @@ final class StoreClosureFingerprint {
     }
 
     static String temporaryEnd(long storeId, long closureId, TemporaryClosureEndAtRequest request) {
-        return RequestFingerprint.of("temporary-end|" + storeId + "|" + closureId + "|" + request.endAt().toInstant());
+        return RequestFingerprint.of("temporary-end|" + storeId + "|" + closureId + "|"
+                + request.endAt().toInstant() + "|" + request.changeReason());
     }
 
     static String temporaryCancel(long storeId, long closureId, TemporaryClosureCancellationRequest request) {

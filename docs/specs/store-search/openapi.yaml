@@ -1553,9 +1553,10 @@ components:
     TemporaryClosureEndAtRequest:
       type: object
       additionalProperties: false
-      required: [endAt]
+      required: [endAt, changeReason]
       properties:
         endAt: { type: string, format: date-time }
+        changeReason: { type: string, minLength: 1, maxLength: 500 }
     TemporaryClosureCancellationRequest:
       type: object
       additionalProperties: false

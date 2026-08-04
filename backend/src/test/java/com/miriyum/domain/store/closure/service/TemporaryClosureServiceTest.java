@@ -17,6 +17,7 @@ import com.miriyum.domain.store.closure.repository.*;
 import com.miriyum.domain.store.core.service.*;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ConflictCheckStatus;
+import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.global.idempotency.*;
 import java.time.*;
@@ -68,6 +69,9 @@ class TemporaryClosureServiceTest {
         assertThat(captor.getValue().getActorType()).isEqualTo(StoreClosureActorType.STORE_OPERATOR);
         assertThat(captor.getValue().getActorId()).isEqualTo(11L);
         assertThat(captor.getValue().getAction()).isEqualTo("CREATED");
+        assertTemporaryAudit(captor.getValue(),
+                Instant.parse("2026-08-03T09:00:00Z"), null,
+                Instant.parse("2026-08-03T10:00:00Z"), TemporaryClosureReason.OTHER);
         assertNotEvaluated(captor.getValue());
     }
 
@@ -123,11 +127,16 @@ class TemporaryClosureServiceTest {
 
         var result = service.changeEndAt(11, 7, 3L,
                 IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440003"),
-                new TemporaryClosureEndAtRequest(OffsetDateTime.parse("2026-08-03T15:00:00+09:00")));
+                new TemporaryClosureEndAtRequest(
+                        OffsetDateTime.parse("2026-08-03T15:00:00+09:00"), "운영 연장"));
 
         assertThat(result.data().endAt()).isEqualTo(Instant.parse("2026-08-03T06:00:00Z"));
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("END_CHANGED");
+        assertTemporaryAudit(event, Instant.parse("2026-08-03T04:00:00Z"),
+                Instant.parse("2026-08-03T05:00:00Z"),
+                Instant.parse("2026-08-03T06:00:00Z"), TemporaryClosureReason.OTHER);
+        assertThat(event.getChangeReason()).isEqualTo("운영 연장");
         assertNotEvaluated(event);
     }
 
@@ -154,6 +163,10 @@ class TemporaryClosureServiceTest {
 
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("CANCELLED");
+        assertTemporaryAudit(event, Instant.parse("2026-08-03T04:00:00Z"),
+                Instant.parse("2026-08-03T05:00:00Z"),
+                Instant.parse("2026-08-03T05:00:00Z"), TemporaryClosureReason.OTHER);
+        assertThat(event.getChangeReason()).isEqualTo("휴점 취소");
         assertNotEvaluated(event);
     }
 
@@ -183,7 +196,24 @@ class TemporaryClosureServiceTest {
     }
 
     private void assertNotEvaluated(StoreClosureAuditEvent event) {
+        assertThat(event.getPreviousActiveVersion()).isNull();
+        assertThat(event.getNewActiveVersion()).isNull();
+        assertThat(event.getRequestedAt()).isEqualTo(clock.instant());
+        assertThat(event.getOutcome()).isEqualTo(ScheduleAuditOutcome.SUCCEEDED);
         assertThat(event.getConflictCheckStatus()).isEqualTo(ConflictCheckStatus.NOT_EVALUATED);
         assertThat(event.getConflictCount()).isNull();
+    }
+
+    private void assertTemporaryAudit(
+            StoreClosureAuditEvent event,
+            Instant startAt,
+            Instant previousEndAt,
+            Instant newEndAt,
+            TemporaryClosureReason reason
+    ) {
+        assertThat(event.getClosureStartAt()).isEqualTo(startAt);
+        assertThat(event.getPreviousClosureEndAt()).isEqualTo(previousEndAt);
+        assertThat(event.getNewClosureEndAt()).isEqualTo(newEndAt);
+        assertThat(event.getTemporaryClosureReason()).isEqualTo(reason);
     }
 }

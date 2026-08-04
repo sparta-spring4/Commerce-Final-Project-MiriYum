@@ -87,14 +87,22 @@ CREATE TABLE store_closure_audit_events (
     actor_id BIGINT NULL,
     resource_type VARCHAR(30) NOT NULL,
     resource_id VARCHAR(100) NOT NULL,
+    previous_active_version BIGINT NULL,
+    new_active_version BIGINT NULL,
     action VARCHAR(50) NOT NULL,
     previous_state VARCHAR(30) NULL,
     new_state VARCHAR(30) NOT NULL,
     time_zone_id VARCHAR(64) NOT NULL,
+    requested_at DATETIME(6) NOT NULL,
     effective_at DATETIME(6) NULL,
     occurred_at DATETIME(6) NOT NULL,
     change_reason VARCHAR(500) NULL,
     request_id VARCHAR(100) NOT NULL,
+    outcome VARCHAR(20) NOT NULL,
+    closure_start_at DATETIME(6) NULL,
+    previous_closure_end_at DATETIME(6) NULL,
+    new_closure_end_at DATETIME(6) NULL,
+    temporary_closure_reason VARCHAR(30) NULL,
     conflict_check_status VARCHAR(20) NOT NULL,
     conflict_count INT NULL,
     created_at DATETIME(6) NOT NULL,
@@ -104,6 +112,32 @@ CREATE TABLE store_closure_audit_events (
         FOREIGN KEY (store_id) REFERENCES stores (store_id) ON DELETE RESTRICT,
     CONSTRAINT ck_closure_audit_actor
         CHECK (actor_type IN ('STORE_OPERATOR', 'SYSTEM')),
+    CONSTRAINT ck_closure_audit_resource_type
+        CHECK (resource_type IN ('REGULAR', 'TEMPORARY')),
+    CONSTRAINT ck_closure_audit_outcome
+        CHECK (outcome IN ('SUCCEEDED', 'FAILED')),
+    CONSTRAINT ck_closure_audit_temporary_reason
+        CHECK (temporary_closure_reason IS NULL OR temporary_closure_reason IN (
+            'MAINTENANCE', 'STAFFING', 'PRIVATE_EVENT', 'OTHER'
+        )),
+    CONSTRAINT ck_closure_audit_temporary_shape
+        CHECK (
+            (resource_type = 'TEMPORARY'
+                AND previous_active_version IS NULL
+                AND new_active_version IS NULL
+                AND closure_start_at IS NOT NULL
+                AND new_closure_end_at IS NOT NULL
+                AND closure_start_at < new_closure_end_at
+                AND (previous_closure_end_at IS NULL
+                    OR closure_start_at < previous_closure_end_at)
+                AND temporary_closure_reason IS NOT NULL)
+            OR
+            (resource_type = 'REGULAR'
+                AND closure_start_at IS NULL
+                AND previous_closure_end_at IS NULL
+                AND new_closure_end_at IS NULL
+                AND temporary_closure_reason IS NULL)
+        ),
     CONSTRAINT ck_closure_audit_conflict_check
         CHECK (conflict_check_status IN ('NOT_EVALUATED', 'EVALUATED')),
     CONSTRAINT ck_closure_audit_conflict_result

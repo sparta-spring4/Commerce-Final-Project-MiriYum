@@ -18,4 +18,17 @@ class TemporaryClosureRequestTest {
         assertThat(validator.validate(new TemporaryClosureCreateRequest(start, start,
                 TemporaryClosureReason.OTHER, null))).isNotEmpty();
     }
+
+    @Test void endChangeRequiresNonBlankReason() {
+        OffsetDateTime endAt = OffsetDateTime.parse("2026-08-03T20:00:00+09:00");
+
+        assertThat(validator.validate(new TemporaryClosureEndAtRequest(endAt, "정비 연장")))
+                .isEmpty();
+        assertThat(validator.validate(new TemporaryClosureEndAtRequest(endAt, " ")))
+                .isNotEmpty();
+        assertThat(validator.validate(new TemporaryClosureEndAtRequest(endAt, "가".repeat(500))))
+                .isEmpty();
+        assertThat(validator.validate(new TemporaryClosureEndAtRequest(endAt, "가".repeat(501))))
+                .isNotEmpty();
+    }
 }

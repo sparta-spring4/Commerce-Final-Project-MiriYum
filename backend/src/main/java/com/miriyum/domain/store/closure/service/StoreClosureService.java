@@ -15,6 +15,7 @@ import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequ
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.PublicationMode;
+import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
@@ -58,10 +59,13 @@ public class StoreClosureService {
                         StoreClosureFingerprint.regularDraft(storeId, request)), () -> {
                     StoreScheduleAuthority authority = storeService.requireSchedulePublicationAuthority(operatorId, storeId);
                     StoreScheduleState state = initializeAndLock(storeId);
+                    Instant requestedAt = clock.instant();
                     RegularClosureVersion target = regularRepository.saveAndFlush(
                             RegularClosureVersion.createDraft(storeId, state.allocateRegularClosureVersion(),
                                     authority.timeZoneId(), request.weeklyDays(), request.dates()));
-                    audit(target, operatorId, "DRAFT_CREATED", null, "DRAFT", authority.timeZoneId(), null, null, key.value());
+                    audit(target, operatorId, null, null, "DRAFT_CREATED", null, "DRAFT",
+                            authority.timeZoneId(), requestedAt, null, null, key.value(),
+                            ScheduleAuditOutcome.SUCCEEDED);
                     return success(target);
                 });
         return result(outcome, RegularClosureResponse.class);
@@ -84,16 +88,21 @@ public class StoreClosureService {
                         Instant effectiveAt = request.effectiveAt().toInstant();
                         if (regularRepository.existsByStoreIdAndEffectiveAt(storeId, effectiveAt)) throw conflict();
                         requireNoTemporaryConflict(target, effectiveAt);
+                        Long activeVersion = activeRegularClosureVersionNumber(state);
                         target.schedule(effectiveAt, request.changeReason());
-                        audit(target, operatorId, "PUBLICATION_SCHEDULED", "DRAFT", "SCHEDULED",
-                                authority.timeZoneId(), target.getEffectiveAt(), request.changeReason(), key.value());
+                        audit(target, operatorId, activeVersion, activeVersion,
+                                "PUBLICATION_SCHEDULED", "DRAFT", "SCHEDULED",
+                                authority.timeZoneId(), now, target.getEffectiveAt(),
+                                request.changeReason(), key.value(), ScheduleAuditOutcome.SUCCEEDED);
                     } else {
                         requireNoTemporaryConflict(target, now);
-                        retireActive(state);
+                        Long previousActiveVersion = retireActive(state);
                         target.activate(now, request.changeReason());
                         state.activateRegularClosure(target.getId());
-                        audit(target, operatorId, "ACTIVATED", "DRAFT", "ACTIVE",
-                                authority.timeZoneId(), now, request.changeReason(), key.value());
+                        audit(target, operatorId, previousActiveVersion, target.getVersionNumber(),
+                                "ACTIVATED", "DRAFT", "ACTIVE", authority.timeZoneId(),
+                                now, now, request.changeReason(), key.value(),
+                                ScheduleAuditOutcome.SUCCEEDED);
                     }
                     return success(target);
                 });
@@ -109,13 +118,18 @@ public class StoreClosureService {
                 command(operatorId, "STORE_REGULAR_CLOSURE_PUBLICATION_CANCEL", key,
                         StoreClosureFingerprint.regularCancellation(storeId, version, request)), () -> {
                     StoreScheduleAuthority authority = storeService.requireSchedulePublicationAuthority(operatorId, storeId);
-                    initializeAndLock(storeId);
+                    StoreScheduleState state = initializeAndLock(storeId);
                     RegularClosureVersion target = regularRepository.findByStoreIdAndVersionNumber(storeId, version)
                             .orElseThrow(this::conflict);
-                    if (target.getEffectiveAt() == null || !target.getEffectiveAt().isAfter(clock.instant())) throw conflict();
+                    Instant requestedAt = clock.instant();
+                    Instant effectiveAt = target.getEffectiveAt();
+                    if (effectiveAt == null || !effectiveAt.isAfter(requestedAt)) throw conflict();
+                    Long activeVersion = activeRegularClosureVersionNumber(state);
                     target.cancelPublication();
-                    audit(target, operatorId, "PUBLICATION_CANCELLED", "SCHEDULED", "DRAFT",
-                            authority.timeZoneId(), null, request.changeReason(), key.value());
+                    audit(target, operatorId, activeVersion, activeVersion,
+                            "PUBLICATION_CANCELLED", "SCHEDULED", "DRAFT",
+                            authority.timeZoneId(), requestedAt, effectiveAt,
+                            request.changeReason(), key.value(), ScheduleAuditOutcome.SUCCEEDED);
                     return success(target);
                 });
         return result(outcome, RegularClosureResponse.class);
@@ -140,30 +154,49 @@ public class StoreClosureService {
             if (earliest == null || !earliest.getId().equals(versionId)) return;
             if (!decision.activationAllowed()) {
                 target.failActivation();
-                audit(target, null, "ACTIVATION_FAILED", "SCHEDULED", "ACTIVATION_FAILED",
-                        authority.timeZoneId(), target.getEffectiveAt(), target.getChangeReason(), "scheduled-regular-" + versionId);
+                Long activeVersion = activeRegularClosureVersionNumber(state);
+                audit(target, null, activeVersion, activeVersion,
+                        "ACTIVATION_FAILED", "SCHEDULED", "ACTIVATION_FAILED",
+                        authority.timeZoneId(), target.getEffectiveAt(), target.getEffectiveAt(),
+                        target.getChangeReason(), "scheduled-regular-" + versionId,
+                        ScheduleAuditOutcome.FAILED);
                 return;
             }
             if (hasTemporaryConflict(target, now)) {
                 target.failActivation();
-                audit(target, null, "ACTIVATION_FAILED", "SCHEDULED", "ACTIVATION_FAILED",
-                        authority.timeZoneId(), target.getEffectiveAt(), target.getChangeReason(),
-                        "scheduled-regular-" + versionId);
+                Long activeVersion = activeRegularClosureVersionNumber(state);
+                audit(target, null, activeVersion, activeVersion,
+                        "ACTIVATION_FAILED", "SCHEDULED", "ACTIVATION_FAILED",
+                        authority.timeZoneId(), target.getEffectiveAt(), target.getEffectiveAt(),
+                        target.getChangeReason(), "scheduled-regular-" + versionId,
+                        ScheduleAuditOutcome.FAILED);
                 return;
             }
-            retireActive(state);
+            Long previousActiveVersion = retireActive(state);
             target.activate(now, target.getChangeReason());
             state.activateRegularClosure(target.getId());
-            audit(target, null, "ACTIVATED", "SCHEDULED", "ACTIVE", authority.timeZoneId(),
-                    target.getEffectiveAt(), target.getChangeReason(), "scheduled-regular-" + versionId);
+            audit(target, null, previousActiveVersion, target.getVersionNumber(),
+                    "ACTIVATED", "SCHEDULED", "ACTIVE", authority.timeZoneId(),
+                    target.getEffectiveAt(), target.getEffectiveAt(), target.getChangeReason(),
+                    "scheduled-regular-" + versionId, ScheduleAuditOutcome.SUCCEEDED);
         } catch (ServiceException ignored) {
             // The owning Store is not activatable. The surrounding transaction rolls back.
         }
     }
 
-    private void retireActive(StoreScheduleState state) {
+    private Long retireActive(StoreScheduleState state) {
         Long activeId = state.getActiveRegularClosureVersionId();
-        if (activeId != null) regularRepository.findById(activeId).orElseThrow(this::conflict).retire();
+        if (activeId == null) return null;
+        RegularClosureVersion active = regularRepository.findById(activeId).orElseThrow(this::conflict);
+        active.retire();
+        return active.getVersionNumber();
+    }
+
+    private Long activeRegularClosureVersionNumber(StoreScheduleState state) {
+        Long activeId = state.getActiveRegularClosureVersionId();
+        return activeId == null ? null : regularRepository.findById(activeId)
+                .map(RegularClosureVersion::getVersionNumber)
+                .orElseThrow(this::conflict);
     }
 
     private void requireNoTemporaryConflict(RegularClosureVersion target, Instant effectiveFrom) {
@@ -208,14 +241,19 @@ public class StoreClosureService {
         return new ScheduleCommandResult<>(outcome.httpStatus(), objectMapper.treeToValue(outcome.data(), type));
     }
 
-    private void audit(RegularClosureVersion target, Long actor, String action, String previous, String next,
-                       String zone, Instant effectiveAt, String reason, String requestId) {
+    private void audit(RegularClosureVersion target, Long actor,
+                       Long previousActiveVersion, Long newActiveVersion,
+                       String action, String previous, String next, String zone,
+                       Instant requestedAt, Instant effectiveAt, String reason,
+                       String requestId, ScheduleAuditOutcome outcome) {
         StoreClosureActorType actorType = actor == null
                 ? StoreClosureActorType.SYSTEM
                 : StoreClosureActorType.STORE_OPERATOR;
         auditRepository.save(StoreClosureAuditEvent.record(target.getStoreId(), actorType, actor, "REGULAR",
-                Long.toString(target.getId()), action, previous, next, zone, effectiveAt,
-                clock.instant(), reason, requestId));
+                Long.toString(target.getId()), previousActiveVersion, newActiveVersion,
+                action, previous, next, zone, requestedAt, effectiveAt,
+                clock.instant(), reason, requestId, outcome,
+                null, null, null, null));
     }
 
     private ServiceException conflict() { return new ServiceException(StoreErrorCode.SCHEDULE_CONFLICT); }

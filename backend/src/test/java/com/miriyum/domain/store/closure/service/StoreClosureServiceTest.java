@@ -24,6 +24,7 @@ import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ConflictCheckStatus;
 import com.miriyum.domain.store.schedule.model.PublicationMode;
+import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.repository.StoreScheduleStateRepository;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
@@ -107,6 +108,8 @@ class StoreClosureServiceTest {
         assertThat(state.getActiveRegularClosureVersionId()).isNull();
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("DRAFT_CREATED");
+        assertAuditMetadata(event, null, null, CLOCK.instant(), null,
+                ScheduleAuditOutcome.SUCCEEDED);
         assertNotEvaluated(event);
     }
 
@@ -139,12 +142,17 @@ class StoreClosureServiceTest {
         assertThat(state.getActiveRegularClosureVersionId()).isEqualTo(42L);
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("ACTIVATED");
+        assertAuditMetadata(event, 1L, 2L, CLOCK.instant(), CLOCK.instant(),
+                ScheduleAuditOutcome.SUCCEEDED);
         assertNotEvaluated(event);
     }
 
     @Test
     void scheduledPublicationAuditPreservesUnknownConflictCount() {
         StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        RegularClosureVersion previous = version(1L, 41L);
+        previous.activate(CLOCK.instant().minusSeconds(60), "기존 게시");
+        state.activateRegularClosure(41L);
         RegularClosureVersion target = version(2L, 42L);
         Instant effectiveAt = CLOCK.instant().plusSeconds(3600);
         given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
@@ -152,6 +160,7 @@ class StoreClosureServiceTest {
         given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
         given(regularRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
                 .willReturn(Optional.of(target));
+        given(regularRepository.findById(41L)).willReturn(Optional.of(previous));
         given(temporaryRepository.findNonCancelledEndingAfter(STORE_ID, effectiveAt))
                 .willReturn(List.of());
         executeBusinessWork();
@@ -168,12 +177,17 @@ class StoreClosureServiceTest {
 
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("PUBLICATION_SCHEDULED");
+        assertAuditMetadata(event, 1L, 1L, CLOCK.instant(), effectiveAt,
+                ScheduleAuditOutcome.SUCCEEDED);
         assertNotEvaluated(event);
     }
 
     @Test
     void publicationCancellationAuditPreservesUnknownConflictCount() {
         StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        RegularClosureVersion previous = version(1L, 41L);
+        previous.activate(CLOCK.instant().minusSeconds(60), "기존 게시");
+        state.activateRegularClosure(41L);
         RegularClosureVersion target = version(2L, 42L);
         target.schedule(CLOCK.instant().plusSeconds(3600), "예약 게시");
         given(storeService.requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID))
@@ -181,6 +195,7 @@ class StoreClosureServiceTest {
         given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
         given(regularRepository.findByStoreIdAndVersionNumber(STORE_ID, 2L))
                 .willReturn(Optional.of(target));
+        given(regularRepository.findById(41L)).willReturn(Optional.of(previous));
         executeBusinessWork();
 
         service.cancelRegularPublication(
@@ -192,6 +207,8 @@ class StoreClosureServiceTest {
 
         StoreClosureAuditEvent event = capturedAuditEvent();
         assertThat(event.getAction()).isEqualTo("PUBLICATION_CANCELLED");
+        assertAuditMetadata(event, 1L, 1L, CLOCK.instant(),
+                CLOCK.instant().plusSeconds(3600), ScheduleAuditOutcome.SUCCEEDED);
         assertNotEvaluated(event);
     }
 
@@ -250,13 +267,18 @@ class StoreClosureServiceTest {
     @Test
     void scheduledActivationIsAuditedAsSystemActor() {
         StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
-        RegularClosureVersion scheduled = version(1L, 42L);
-        scheduled.schedule(CLOCK.instant(), "예약 게시");
+        RegularClosureVersion previous = version(1L, 41L);
+        previous.activate(CLOCK.instant().minusSeconds(60), "기존 게시");
+        state.activateRegularClosure(41L);
+        RegularClosureVersion scheduled = version(2L, 42L);
+        Instant effectiveAt = CLOCK.instant().minusSeconds(30);
+        scheduled.schedule(effectiveAt, "예약 게시");
         given(regularRepository.findStoreIdById(42L)).willReturn(Optional.of(STORE_ID));
         given(storeService.inspectScheduledActivation(STORE_ID))
                 .willReturn(new StoreScheduledActivationDecision(STORE_ID, "Asia/Seoul", true));
         given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
         given(regularRepository.findForUpdateById(42L)).willReturn(Optional.of(scheduled));
+        given(regularRepository.findById(41L)).willReturn(Optional.of(previous));
         given(regularRepository
                 .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
                         STORE_ID, ScheduleVersionStatus.SCHEDULED, CLOCK.instant()))
@@ -268,19 +290,26 @@ class StoreClosureServiceTest {
         assertThat(event.getAction()).isEqualTo("ACTIVATED");
         assertThat(event.getActorType()).isEqualTo(StoreClosureActorType.SYSTEM);
         assertThat(event.getActorId()).isNull();
+        assertAuditMetadata(event, 1L, 2L, effectiveAt, effectiveAt,
+                ScheduleAuditOutcome.SUCCEEDED);
         assertNotEvaluated(event);
     }
 
     @Test
     void scheduledActivationFailureAuditPreservesUnknownConflictCount() {
         StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
-        RegularClosureVersion scheduled = version(1L, 42L);
-        scheduled.schedule(CLOCK.instant(), "예약 게시");
+        RegularClosureVersion previous = version(1L, 41L);
+        previous.activate(CLOCK.instant().minusSeconds(60), "기존 게시");
+        state.activateRegularClosure(41L);
+        RegularClosureVersion scheduled = version(2L, 42L);
+        Instant effectiveAt = CLOCK.instant().minusSeconds(30);
+        scheduled.schedule(effectiveAt, "예약 게시");
         given(regularRepository.findStoreIdById(42L)).willReturn(Optional.of(STORE_ID));
         given(storeService.inspectScheduledActivation(STORE_ID))
                 .willReturn(new StoreScheduledActivationDecision(STORE_ID, "Asia/Seoul", false));
         given(stateRepository.findForUpdateByStoreId(STORE_ID)).willReturn(Optional.of(state));
         given(regularRepository.findForUpdateById(42L)).willReturn(Optional.of(scheduled));
+        given(regularRepository.findById(41L)).willReturn(Optional.of(previous));
         given(regularRepository
                 .findFirstByStoreIdAndStatusAndEffectiveAtLessThanEqualOrderByEffectiveAtAscVersionNumberAsc(
                         STORE_ID, ScheduleVersionStatus.SCHEDULED, CLOCK.instant()))
@@ -292,6 +321,8 @@ class StoreClosureServiceTest {
         assertThat(event.getAction()).isEqualTo("ACTIVATION_FAILED");
         assertThat(event.getActorType()).isEqualTo(StoreClosureActorType.SYSTEM);
         assertThat(event.getActorId()).isNull();
+        assertAuditMetadata(event, 1L, 1L, effectiveAt, effectiveAt,
+                ScheduleAuditOutcome.FAILED);
         assertNotEvaluated(event);
     }
 
@@ -305,6 +336,22 @@ class StoreClosureServiceTest {
     private void assertNotEvaluated(StoreClosureAuditEvent event) {
         assertThat(event.getConflictCheckStatus()).isEqualTo(ConflictCheckStatus.NOT_EVALUATED);
         assertThat(event.getConflictCount()).isNull();
+    }
+
+    private void assertAuditMetadata(
+            StoreClosureAuditEvent event,
+            Long previousActiveVersion,
+            Long newActiveVersion,
+            Instant requestedAt,
+            Instant effectiveAt,
+            ScheduleAuditOutcome outcome
+    ) {
+        assertThat(event.getPreviousActiveVersion()).isEqualTo(previousActiveVersion);
+        assertThat(event.getNewActiveVersion()).isEqualTo(newActiveVersion);
+        assertThat(event.getRequestedAt()).isEqualTo(requestedAt);
+        assertThat(event.getEffectiveAt()).isEqualTo(effectiveAt);
+        assertThat(event.getOccurredAt()).isEqualTo(CLOCK.instant());
+        assertThat(event.getOutcome()).isEqualTo(outcome);
     }
 
     private RegularClosureVersion version(long versionNumber, long id) {
