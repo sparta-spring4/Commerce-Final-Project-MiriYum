@@ -1,8 +1,12 @@
 package com.miriyum.domain.store.search.interpreter;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /** 외부 AI나 조회 계층 없이 검색 원문을 허용 조건과 키워드로 결정적으로 해석한다. */
 public final class RuleInterpreter {
@@ -30,20 +34,106 @@ public final class RuleInterpreter {
     public InterpretationResult interpret(InterpretationRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         String normalized = SearchInputNormalizer.normalize(request.rawInput());
+        List<MatchedToken<String>> regionTokens =
+                DictionaryMatcher.match(normalized, request.vocabulary().regions());
+        List<MatchedToken<String>> storeCategoryTokens =
+                DictionaryMatcher.match(normalized, request.vocabulary().storeCategories());
+        List<MatchedToken<String>> menuCategoryTokens =
+                DictionaryMatcher.match(normalized, request.vocabulary().menuCategories());
+        List<MatchedToken<String>> tagTokens =
+                DictionaryMatcher.match(normalized, request.vocabulary().tags());
+
+        DictionaryResolution dictionary = resolveDictionaryTokens(
+                regionTokens,
+                storeCategoryTokens,
+                menuCategoryTokens,
+                tagTokens);
+
+        List<TextSpan> acceptedSpans = new ArrayList<>();
+        acceptedSpans.addAll(spansOf(dictionary.regions()));
+        acceptedSpans.addAll(spansOf(dictionary.storeCategories()));
+        acceptedSpans.addAll(spansOf(dictionary.menuCategories()));
+        acceptedSpans.addAll(spansOf(dictionary.tags()));
         InterpretedSearchCondition condition = new InterpretedSearchCondition(
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
+                codesOf(dictionary.regions()),
+                codesOf(dictionary.storeCategories()),
+                codesOf(dictionary.menuCategories()),
+                codesOf(dictionary.tags()),
                 null,
                 null,
                 null,
                 null,
-                normalized);
+                removeAcceptedSpans(normalized, acceptedSpans));
         return new InterpretationResult(
                 RULE_VERSION,
                 request.vocabulary().version(),
                 condition,
-                List.of());
+                dictionary.ambiguous()
+                        ? List.of(new InterpretationWarning(
+                                WarningCode.AMBIGUOUS_DICTIONARY_TERM,
+                                WarningField.DICTIONARY))
+                        : List.of());
+    }
+
+    private static DictionaryResolution resolveDictionaryTokens(
+            List<MatchedToken<String>> regions,
+            List<MatchedToken<String>> storeCategories,
+            List<MatchedToken<String>> menuCategories,
+            List<MatchedToken<String>> tags) {
+        List<List<MatchedToken<String>>> groups =
+                List.of(regions, storeCategories, menuCategories, tags);
+        Set<MatchedToken<String>> rejected = new HashSet<>();
+        for (int leftGroup = 0; leftGroup < groups.size(); leftGroup++) {
+            for (int rightGroup = leftGroup + 1; rightGroup < groups.size(); rightGroup++) {
+                for (MatchedToken<String> left : groups.get(leftGroup)) {
+                    for (MatchedToken<String> right : groups.get(rightGroup)) {
+                        if (left.span().overlaps(right.span())) {
+                            rejected.add(left);
+                            rejected.add(right);
+                        }
+                    }
+                }
+            }
+        }
+        return new DictionaryResolution(
+                withoutRejected(regions, rejected),
+                withoutRejected(storeCategories, rejected),
+                withoutRejected(menuCategories, rejected),
+                withoutRejected(tags, rejected),
+                !rejected.isEmpty());
+    }
+
+    private static List<MatchedToken<String>> withoutRejected(
+            List<MatchedToken<String>> tokens,
+            Set<MatchedToken<String>> rejected) {
+        return tokens.stream().filter(token -> !rejected.contains(token)).toList();
+    }
+
+    private static List<String> codesOf(List<MatchedToken<String>> tokens) {
+        LinkedHashSet<String> codes = new LinkedHashSet<>();
+        tokens.forEach(token -> codes.add(token.value()));
+        return List.copyOf(codes);
+    }
+
+    private static List<TextSpan> spansOf(List<? extends MatchedToken<?>> tokens) {
+        return tokens.stream().map(MatchedToken::span).toList();
+    }
+
+    private static String removeAcceptedSpans(String input, List<TextSpan> spans) {
+        StringBuilder remaining = new StringBuilder(input);
+        for (TextSpan span : spans) {
+            for (int index = span.startInclusive(); index < span.endExclusive(); index++) {
+                remaining.setCharAt(index, ' ');
+            }
+        }
+        return SearchInputNormalizer.normalize(remaining.toString());
+    }
+
+    private record DictionaryResolution(
+            List<MatchedToken<String>> regions,
+            List<MatchedToken<String>> storeCategories,
+            List<MatchedToken<String>> menuCategories,
+            List<MatchedToken<String>> tags,
+            boolean ambiguous) {
     }
 }
