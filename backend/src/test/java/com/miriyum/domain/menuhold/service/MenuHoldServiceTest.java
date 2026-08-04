@@ -42,10 +42,8 @@ class MenuHoldServiceTest {
                 List.of(selection(9L, 2), selection(3L, 2)));
         given(bucketRepository.findBucketId(selection(9L, 2).key())).willReturn(9L);
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
-        given(bucketRepository.findAllForUpdate(List.of(3L, 9L)))
+        given(bucketRepository.findRequestedAndCurrentForUpdate(List.of(3L, 9L)))
                 .willReturn(List.of(second, first));
-        givenCurrent(first);
-        givenCurrent(second);
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(1);
         given(bucketRepository.decrementIfCurrent(9L, 0L, 1, 1)).willReturn(1);
 
@@ -59,9 +57,11 @@ class MenuHoldServiceTest {
         assertThat(results.getLast().onlineHoldQuantity()).isEqualTo(1);
         assertThat(results.getLast().sharedQuantity()).isEqualTo(1);
         InOrder order = org.mockito.Mockito.inOrder(bucketRepository, ledgerRepository);
-        order.verify(bucketRepository).findAllForUpdate(List.of(3L, 9L));
+        order.verify(bucketRepository)
+                .findRequestedAndCurrentForUpdate(List.of(3L, 9L));
         order.verify(ledgerRepository).saveAll(org.mockito.ArgumentMatchers.anyList());
-        then(bucketRepository).should().findAllForUpdate(List.of(3L, 9L));
+        then(bucketRepository).should()
+                .findRequestedAndCurrentForUpdate(List.of(3L, 9L));
     }
 
     @Test
@@ -92,8 +92,8 @@ class MenuHoldServiceTest {
         InventoryAcquireRequest request = new InventoryAcquireRequest(
                 "reservation:77:create", List.of(selection(3L, 2)));
         given(bucketRepository.findBucketId(selection(3L, 2).key())).willReturn(3L);
-        given(bucketRepository.findAllForUpdate(List.of(3L))).willReturn(List.of(bucket));
-        givenCurrent(bucket);
+        given(bucketRepository.findRequestedAndCurrentForUpdate(List.of(3L)))
+                .willReturn(List.of(bucket));
         given(bucketRepository.decrementIfCurrent(3L, 0L, 2, 0)).willReturn(0);
         MenuInventoryService service = service();
 

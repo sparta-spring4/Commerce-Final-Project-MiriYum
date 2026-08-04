@@ -40,11 +40,17 @@ class MenuInventoryService {
             quantitiesByBucketId.merge(bucketId, selection.quantity(), Math::addExact);
         }
         List<Long> orderedIds = quantitiesByBucketId.keySet().stream().sorted().toList();
-        List<MenuInventoryBucket> buckets = bucketRepository.findAllForUpdate(orderedIds);
-        if (buckets.size() != orderedIds.size()) {
+        List<MenuInventoryBucket> lockedBuckets =
+                bucketRepository.findRequestedAndCurrentForUpdate(orderedIds);
+        Map<Long, MenuInventoryBucket> bucketsById = lockedBuckets.stream()
+                .collect(Collectors.toMap(MenuInventoryBucket::getId, bucket -> bucket));
+        if (!bucketsById.keySet().containsAll(orderedIds)) {
             throw new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
         }
-        requireCurrentPolicies(buckets);
+        List<MenuInventoryBucket> buckets = orderedIds.stream()
+                .map(bucketsById::get)
+                .toList();
+        requireCurrentPolicies(buckets, lockedBuckets);
 
         List<InventoryAllocationResult> results = new ArrayList<>();
         List<MenuInventoryLedger> events = new ArrayList<>();
@@ -66,17 +72,32 @@ class MenuInventoryService {
         return List.copyOf(results);
     }
 
-    private void requireCurrentPolicies(List<MenuInventoryBucket> buckets) {
-        for (MenuInventoryBucket bucket : buckets) {
-            MenuInventoryBucket current = bucketRepository.findCurrentForUpdate(
-                            bucket.getMenuId(), bucket.getServiceDate(),
-                            bucket.getStartTime(), bucket.getEndDate(), bucket.getEndTime())
+    private void requireCurrentPolicies(
+            List<MenuInventoryBucket> requestedBuckets,
+            List<MenuInventoryBucket> lockedBuckets
+    ) {
+        for (MenuInventoryBucket requested : requestedBuckets) {
+            long currentVersion = lockedBuckets.stream()
+                    .filter(candidate -> samePolicyInterval(requested, candidate))
+                    .mapToLong(MenuInventoryBucket::getInventoryPolicyVersion)
+                    .max()
                     .orElseThrow(() -> new ServiceException(
                             MenuHoldErrorCode.BUCKET_NOT_FOUND));
-            if (!current.getId().equals(bucket.getId())) {
+            if (requested.getInventoryPolicyVersion() != currentVersion) {
                 throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
             }
         }
+    }
+
+    private boolean samePolicyInterval(
+            MenuInventoryBucket first,
+            MenuInventoryBucket second
+    ) {
+        return first.getMenuId() == second.getMenuId()
+                && first.getServiceDate().equals(second.getServiceDate())
+                && first.getStartTime().equals(second.getStartTime())
+                && first.getEndDate().equals(second.getEndDate())
+                && first.getEndTime().equals(second.getEndTime());
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

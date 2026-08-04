@@ -102,6 +102,35 @@ public interface MenuInventoryBucketRepository
             """)
     List<MenuInventoryBucket> findAllForUpdate(@Param("ids") Collection<Long> ids);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from MenuInventoryBucket bucket
+            where bucket.id in :requestedIds
+               or exists (
+                  select requested.id
+                  from MenuInventoryBucket requested
+                  where requested.id in :requestedIds
+                    and requested.menuId = bucket.menuId
+                    and requested.serviceDate = bucket.serviceDate
+                    and requested.startTime = bucket.startTime
+                    and requested.endDate = bucket.endDate
+                    and requested.endTime = bucket.endTime
+                    and bucket.inventoryPolicyVersion = (
+                        select max(candidate.inventoryPolicyVersion)
+                        from MenuInventoryBucket candidate
+                        where candidate.menuId = requested.menuId
+                          and candidate.serviceDate = requested.serviceDate
+                          and candidate.startTime = requested.startTime
+                          and candidate.endDate = requested.endDate
+                          and candidate.endTime = requested.endTime
+                    )
+               )
+            order by bucket.id
+            """)
+    List<MenuInventoryBucket> findRequestedAndCurrentForUpdate(
+            @Param("requestedIds") Collection<Long> requestedIds);
+
     @Modifying
     @Query(value = """
             update menu_inventory_buckets

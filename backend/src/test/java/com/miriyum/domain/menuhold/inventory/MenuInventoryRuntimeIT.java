@@ -332,6 +332,48 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
+    void crossedStaleMultiMenuAcquisitionsAreBothRejectedAsPolicyConflicts()
+            throws Exception {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeRepository.findAll().getFirst().getId(),
+                        menuContent(),
+                        operatorRepository.findAll().getFirst().getId(),
+                        Instant.parse("2026-08-01T00:00:02Z"))).getId());
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0));
+            bucketRepository.saveAndFlush(bucket(secondMenuId, 1L, 5, 0));
+            bucketRepository.saveAndFlush(bucket(secondMenuId, 2L, 5, 0));
+            bucketRepository.saveAndFlush(bucket(menuId, 2L, 5, 0));
+        });
+        InventoryAcquireRequest first = new InventoryAcquireRequest(
+                "reservation:crossed-stale:first",
+                List.of(selection(menuId, 1L, 1),
+                        selection(secondMenuId, 2L, 1)));
+        InventoryAcquireRequest second = new InventoryAcquireRequest(
+                "reservation:crossed-stale:second",
+                List.of(selection(secondMenuId, 1L, 1),
+                        selection(menuId, 2L, 1)));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> firstResult = executor.submit(() ->
+                    acquireConcurrently(first, ready, start));
+            Future<Object> secondResult = executor.submit(() ->
+                    acquireConcurrently(second, ready, start));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(
+                    firstResult.get(20, TimeUnit.SECONDS),
+                    secondResult.get(20, TimeUnit.SECONDS)))
+                    .containsOnly(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        }
+    }
+
+    @Test
     void listsOnlyCurrentPoliciesForTheManagedMenuIds() {
         transactionTemplate.executeWithoutResult(status -> {
             bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 0));
@@ -505,6 +547,28 @@ class MenuInventoryRuntimeIT {
 
     private static InventoryAcquireRequest.Selection selection(long selectedMenuId, int quantity) {
         return selection(selectedMenuId, 1L, quantity);
+    }
+
+    private Object acquireConcurrently(
+            InventoryAcquireRequest request,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return AssertionError.class;
+            }
+            transactionTemplate.execute(status -> menuHoldService.acquireInventory(request));
+            return null;
+        } catch (ServiceException exception) {
+            return exception.getErrorCode();
+        } catch (RuntimeException exception) {
+            return exception.getClass();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return InterruptedException.class;
+        }
     }
 
     private static InventoryAcquireRequest.Selection selection(
