@@ -1,3 +1,4 @@
+# CI를 통과한 dev 리비전을 ARM64 이미지로 빌드하고 앱 비밀값 없이 SSM으로 배포한다.
 name: Backend CD
 
 on:
@@ -17,6 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
+  # 진행 중인 배포는 취소하지 않는다. 새 이미지는 기존 health 확인이 끝날 때까지 대기한다.
   group: backend-cd-dev
   cancel-in-progress: false
 
@@ -114,6 +116,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
+          # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
           nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)

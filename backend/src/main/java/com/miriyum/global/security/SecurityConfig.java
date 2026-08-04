@@ -33,6 +33,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * 컨테이너 배포 확인에 쓰는 최소 범위의 Actuator health 엔드포인트만 허용한다.
+     * 여기서 허용한다는 뜻은 인증을 요구하지 않는다는 뜻이며, 외부 공개 여부는 Nginx와
+     * backend의 127.0.0.1 포트 바인딩으로 별도 제어한다. 다른 관리 엔드포인트는 노출하지 않고
+     * Nginx 공개 경로에서도 Actuator를 차단한다.
+     */
     @Bean
     @Order(0)
     public SecurityFilterChain healthEndpointFilterChain(HttpSecurity http) throws Exception {

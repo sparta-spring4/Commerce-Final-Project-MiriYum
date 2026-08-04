@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SSM이 EC2에서 실행한다. 변경 불가능한 ECR 이미지를 받고 127.0.0.1의 health를 확인한다.
 set -Eeuo pipefail
 
 APP_DIR=/opt/miriyum
@@ -19,6 +20,7 @@ for command in aws curl docker; do
   command -v "${command}" >/dev/null
 done
 
+# 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 account_id=$(aws sts get-caller-identity --query Account --output text)
 registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
@@ -27,6 +29,7 @@ aws ecr get-login-password --region "${AWS_REGION}" \
 
 export BACKEND_IMAGE
 
+# 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
 

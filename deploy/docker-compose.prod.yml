@@ -1,7 +1,9 @@
+# EC2 API 사전 배포용 스택이다. 프론트엔드 배포 시 Nginx에 정적 파일 제공을 추가한다.
 name: miriyum
 
 services:
   mysql:
+    # 데이터베이스는 Docker 네트워크 안에만 두며 호스트 포트를 공개하지 않는다.
     image: mysql:8.0.40
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -20,6 +22,7 @@ services:
     restart: unless-stopped
 
   backend:
+    # 배포 시 CD 워크플로가 변경 불가능한 ECR 이미지 태그를 주입한다.
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to an immutable ECR image tag}
     environment:
       MIRIYUM_DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
@@ -33,10 +36,12 @@ services:
       mysql:
         condition: service_healthy
     ports:
+      # EC2 내부 확인만 가능하도록 127.0.0.1에만 backend 포트를 연결한다.
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   nginx:
+    # Nginx만 외부에 공개하며 /api만 프록시하고 Actuator는 노출하지 않는다.
     image: nginx:1.27-alpine
     depends_on:
       - backend
