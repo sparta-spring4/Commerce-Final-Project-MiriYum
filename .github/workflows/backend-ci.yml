@@ -101,8 +101,6 @@ jobs:
           cache-dependency-path: |
             backend/**/*.gradle*
             backend/**/gradle-wrapper.properties
-          # unit-test job만 캐시를 저장해 병렬 job의 동일 키 저장 경쟁을 피한다.
-          cache-read-only: true
 
       - name: Gradle wrapper version
         run: |
