@@ -10,6 +10,10 @@ import java.util.regex.Pattern;
 
 final class TimeParser {
 
+    private static final String KOREAN_RANGE_ENDPOINT =
+            "(?:(?:오전|오후)\\s*)?[0-9]{1,2}\\s*시(?:\\s*[0-9]{1,2}\\s*분)?";
+    private static final String TIME_RANGE_ENDPOINT =
+            "(?:" + KOREAN_RANGE_ENDPOINT + "|[0-9]{1,2}:[0-9]{2})";
     private static final Pattern AM_PM_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(오전|오후)\\s*([0-9]{1,2})\\s*시"
                     + "(?:\\s*([0-9]{1,2})\\s*분"
@@ -26,6 +30,13 @@ final class TimeParser {
     private static final Pattern MALFORMED_24_HOUR_EXTENSION_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])[0-9]{1,2}:[0-9]{2}[:.]\\S+"
                     + "(?![\\p{L}\\p{N}])");
+    private static final Pattern UNSUPPORTED_TIME_RANGE_PATTERN = Pattern.compile(
+            "(?<![\\p{L}\\p{N}])"
+                    + TIME_RANGE_ENDPOINT
+                    + "\\s*[-~～]\\s*"
+                    + TIME_RANGE_ENDPOINT
+                    + "(?:(?=\\s*(?:까지|쯤)(?![\\p{L}\\p{N}]))"
+                    + "|(?![\\p{L}\\p{N}]))");
     private static final Pattern AMBIGUOUS_PERIOD_PATTERN = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(점심|저녁)(?:\\s*쯤)?(?![\\p{L}\\p{N}])");
     private static final Pattern APPROXIMATE_TIME_PATTERN = Pattern.compile(
@@ -37,6 +48,8 @@ final class TimeParser {
     }
 
     static Result parse(String input) {
+        List<TextSpan> spans = new ArrayList<>();
+        List<TextSpan> recognizedSpans = new ArrayList<>();
         Integer ambiguousTimeStart = firstMatchStart(AMBIGUOUS_PERIOD_PATTERN, input);
         ambiguousTimeStart = earliest(
                 ambiguousTimeStart, firstMatchStart(APPROXIMATE_TIME_PATTERN, input));
@@ -44,12 +57,20 @@ final class TimeParser {
                 firstMatchStart(MALFORMED_AM_PM_EXTENSION_PATTERN, input));
         ambiguousTimeStart = earliest(ambiguousTimeStart,
                 firstMatchStart(MALFORMED_24_HOUR_EXTENSION_PATTERN, input));
+        Matcher unsupportedRangeMatcher = UNSUPPORTED_TIME_RANGE_PATTERN.matcher(input);
+        while (unsupportedRangeMatcher.find()) {
+            TextSpan span = new TextSpan(
+                    unsupportedRangeMatcher.start(), unsupportedRangeMatcher.end());
+            recognizedSpans.add(span);
+            ambiguousTimeStart = earliest(ambiguousTimeStart, span.startInclusive());
+        }
         Matcher matcher = AM_PM_PATTERN.matcher(input);
         LinkedHashSet<LocalTime> values = new LinkedHashSet<>();
-        List<TextSpan> spans = new ArrayList<>();
-        List<TextSpan> recognizedSpans = new ArrayList<>();
         while (matcher.find()) {
             TextSpan span = new TextSpan(matcher.start(), matcher.end());
+            if (overlapsAny(span, recognizedSpans)) {
+                continue;
+            }
             recognizedSpans.add(span);
             try {
                 int hour = Integer.parseInt(matcher.group(2));
@@ -73,6 +94,9 @@ final class TimeParser {
             TextSpan span = new TextSpan(
                     twentyFourHourMatcher.start(),
                     twentyFourHourMatcher.end());
+            if (overlapsAny(span, recognizedSpans)) {
+                continue;
+            }
             recognizedSpans.add(span);
             try {
                 int hour = Integer.parseInt(twentyFourHourMatcher.group(1));
@@ -134,6 +158,10 @@ final class TimeParser {
                 spans.add(span);
             }
         }
+    }
+
+    private static boolean overlapsAny(TextSpan candidate, List<TextSpan> spans) {
+        return spans.stream().anyMatch(candidate::overlaps);
     }
 
     record Result(

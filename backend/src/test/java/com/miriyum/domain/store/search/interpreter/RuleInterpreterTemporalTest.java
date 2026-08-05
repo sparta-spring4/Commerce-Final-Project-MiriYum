@@ -211,6 +211,38 @@ class RuleInterpreterTemporalTest {
                 WarningField.TIME));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("unsupportedTimeRangeCases")
+    @DisplayName("지원하지 않는 시각 범위는 한쪽 시각으로 부분 해석하지 않는다")
+    void preservesUnsupportedTimeRangeAsWhole(String input, String expectedKeyword) {
+        RuleInterpreter interpreter = new RuleInterpreter(
+                Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC));
+
+        InterpretationResult result = interpreter.interpret(request(
+                input, ZoneId.of("Asia/Seoul")));
+
+        assertThat(result.condition().reservationTime()).isNull();
+        assertThat(result.condition().remainingKeyword()).isEqualTo(expectedKeyword);
+        assertThat(result.warnings()).containsExactly(new InterpretationWarning(
+                WarningCode.AMBIGUOUS_TIME,
+                WarningField.TIME));
+    }
+
+    private static Stream<Arguments> unsupportedTimeRangeCases() {
+        return Stream.of(
+                Arguments.of("오후 7시-8시 예약", "오후 7시-8시 예약"),
+                Arguments.of("오후 7시~8시 예약", "오후 7시~8시 예약"),
+                Arguments.of("오후 7시～8시 예약", "오후 7시~8시 예약"),
+                Arguments.of("7시-오후 8시 예약", "7시-오후 8시 예약"),
+                Arguments.of("7시-20:00 예약", "7시-20:00 예약"),
+                Arguments.of("오전 7시-오후 8시 예약", "오전 7시-오후 8시 예약"),
+                Arguments.of(
+                        "오후 7시 30분 ~ 8시 15분 예약",
+                        "오후 7시 30분 ~ 8시 15분 예약"),
+                Arguments.of("오후 7시-8시까지 예약", "오후 7시-8시까지 예약"),
+                Arguments.of("19:00～20:00쯤 예약", "19:00~20:00쯤 예약"));
+    }
+
     @Test
     @DisplayName("정상 시각 뒤 일반 단어와 독립 명사 분은 minute suffix로 오인하지 않는다")
     void keepsOrdinaryWordEndingBeforePersonNoun() {
