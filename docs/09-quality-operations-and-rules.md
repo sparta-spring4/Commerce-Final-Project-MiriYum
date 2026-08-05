@@ -160,7 +160,7 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 | 계획된 휴지·종료 전 | staging EC2, Docker Compose | 다음 `dev` 병합 또는 수동 배포가 없음을 확인한 뒤 필요한 증거와 데이터 보존 여부를 확인하고 EC2를 중지한다. 재개 시에는 EC2 시작, instance status check, SSM online 확인을 마친 뒤 배포한다. |
 | 주 1회 | Budgets, Cost Explorer | 실제 비용과 예측 비용, 태그별 비용 반영 상태를 확인한다. Budget 알림 미수신은 비용이 임계값에 도달하지 않았으면 `NOT RUN`으로 남긴다. |
 | 리소스 생성 전 | NAT Gateway, ALB, RDS, ElastiCache, MSK | 가격 계산·목적·종료일·소유자를 Issue에 기록하고 팀 승인을 받는다. |
-| 프로젝트 종료 전 | EC2, EBS volume/snapshot, ECR image, CloudWatch Logs, S3 object, IAM role | 더 이상 필요 없는 리소스와 데이터 보존 필요성을 확인한 뒤 삭제한다. EC2 종료 전에는 필요한 DB·로그·증빙을 별도 보관한다. |
+| 프로젝트 종료 전 | EC2, EBS volume/snapshot, Elastic IP/Public IPv4, ECR image, CloudWatch Logs, S3 object, IAM role | 더 이상 필요 없는 리소스와 데이터 보존 필요성을 확인한 뒤 삭제한다. EC2 종료 전에는 필요한 DB·로그·증빙을 별도 보관하고, 계정에 남은 Elastic IP는 연결 해제만 하지 말고 release한 뒤 Public IPv4 할당과 Billing을 대조한다. |
 | 프로젝트 종료 전 | NAT Gateway, ALB, RDS, ElastiCache, MSK | 생성된 적이 있다면 서비스별 콘솔과 Billing에서 잔존 리소스가 없는지 대조하고 삭제 증거를 남긴다. |
 
 롤링 배포는 expand→migrate→contract, 이전·신규 버전 혼합 계약, 작업 임대 인계와 롤백을 검증한다. 복구 성공은 원장·객체·캐시·삭제 전파·외부 대사까지 확인한 뒤에만 선언한다.
