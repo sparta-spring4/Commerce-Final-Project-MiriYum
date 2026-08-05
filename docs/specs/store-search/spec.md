@@ -50,7 +50,9 @@
 - `GET /api/v1/stores`, `GET /api/v1/stores/{storeId}`, `GET /api/v1/stores/{storeId}/menus`는 `SCALE-005`의 공개 조회 등급을 공유하며 IP당 60초에 60회로 제한한다.
 - 세 경로는 경로별 한도를 따로 갖지 않고 같은 IP의 공개 매장 조회 합계를 하나의 중앙 카운터로 계산한다. 1차 MVP에서는 기존 MySQL `rate_limit_windows`의 원자적 갱신을 재사용해 여러 애플리케이션 인스턴스의 합계를 판정한다.
 - 한도를 넘은 요청은 컨트롤러와 예약 가용성 조회를 실행하기 전에 `429`, `COMMON_010` 공통 오류 envelope와 다음 허용까지 남은 초를 담은 `Retry-After` 헤더를 반환한다.
-- 1차 MVP의 클라이언트 IP 원본은 servlet remote address다. 신뢰할 수 있는 프록시 구성이 확정되기 전에는 클라이언트가 보낸 `X-Forwarded-For`를 제한 키로 신뢰하지 않는다.
+- 운영 배포에서는 외부에 열린 Nginx만 원본 IP 헤더를 만들 수 있다. Nginx는 클라이언트가 보낸 값과 무관하게 `X-Real-IP`를 `$remote_addr`로 덮어쓰고, backend 포트는 호스트 loopback과 내부 Docker 네트워크에만 둔다.
+- Docker 네트워크에서 Nginx 주소를 고정하고 Spring/Tomcat의 native forwarded-header 처리는 그 주소만 내부 프록시로 신뢰한다. `X-Real-IP`를 remote IP 원본으로 사용하므로 필터의 servlet remote address는 실제 사용자 IP가 되며, 신뢰 프록시 밖에서 직접 보낸 `X-Real-IP`와 `X-Forwarded-For`는 제한 키를 바꾸지 못한다.
+- 회귀 검증은 서로 다른 Nginx 전달 원본 IP가 별도 공개 조회 버킷을 사용하고 같은 원본 IP는 세 경로의 한도를 공유하는지, 신뢰 프록시 밖의 위조 헤더가 무시되는지, Nginx·Compose·Spring 설정이 같은 고정 프록시 주소 계약을 갖는지 확인한다.
 - 같은 `/api/v1/stores/**` namespace라도 위 세 공개 GET 계약에 해당하지 않는 요청은 공개 조회 한도를 소비하는 대신 기존 보안 체인에서 거부한다.
 
 검색 결과의 `reservationAvailability`는 다음 값을 사용한다.
