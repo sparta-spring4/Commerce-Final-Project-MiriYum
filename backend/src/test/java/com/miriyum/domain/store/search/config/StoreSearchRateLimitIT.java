@@ -31,7 +31,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
             "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.rate-limit.public-store-read.max-requests=2",
-            "miriyum.rate-limit.public-store-read.window-seconds=60"
+            "miriyum.rate-limit.public-store-read.window-seconds=60",
+            "miriyum.store.schedule.activation-enabled=false",
+            "miriyum.menu.schedule.enabled=false"
         })
 @AutoConfigureMockMvc
 class StoreSearchRateLimitIT {
@@ -62,15 +64,20 @@ class StoreSearchRateLimitIT {
     }
 
     @Test
-    void ignoresForwardedForHeaderAndUsesRemoteAddressForTheSharedLimit() throws Exception {
+    void directFilterInputIgnoresSpoofedForwardingHeadersAndUsesRemoteAddress() throws Exception {
         RequestPostProcessor ip = withRemoteAddr("10.81.0.2");
 
-        mockMvc.perform(get("/api/v1/stores").header("X-Forwarded-For", "198.51.100.1").with(ip))
+        mockMvc.perform(get("/api/v1/stores")
+                        .header("X-Real-IP", "198.51.100.1")
+                        .header("X-Forwarded-For", "198.51.100.1")
+                        .with(ip))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/stores/999999")
+                        .header("X-Real-IP", "198.51.100.2")
                         .header("X-Forwarded-For", "198.51.100.2").with(ip))
                 .andExpect(status().isNotFound());
         mockMvc.perform(get("/api/v1/stores/999999/menus")
+                        .header("X-Real-IP", "198.51.100.3")
                         .header("X-Forwarded-For", "198.51.100.3").with(ip))
                 .andExpect(status().isTooManyRequests());
     }
