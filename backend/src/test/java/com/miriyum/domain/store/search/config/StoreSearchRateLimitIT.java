@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 공유하는지 검증한다. H2는 MySQL 전용 원자적 upsert를 지원하지 않는다.
  */
 @Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

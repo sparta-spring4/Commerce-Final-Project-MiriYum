@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
