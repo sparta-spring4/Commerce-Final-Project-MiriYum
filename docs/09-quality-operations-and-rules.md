@@ -44,8 +44,8 @@
 
 - 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
-- `integrationTest` task는 `@Tag("integration")` 테스트만 실행하며, `test` task는 이 태그를 제외한다. `build`는 두 task를 모두 포함한다.
-- `Backend CI`는 unit과 integration job을 병렬 실행하고, 둘 다 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA/B` task는 각각 `integration-shard-a/b` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
+- `Backend CI`는 unit job과 두 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
 - 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
 
 ## `1차 MVP` 검증 gate

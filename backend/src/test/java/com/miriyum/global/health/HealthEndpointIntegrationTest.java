@@ -23,6 +23,7 @@ import org.testcontainers.mysql.MySQLContainer;
  * 반환하는지 검증한다.
  */
 @Tag("integration")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

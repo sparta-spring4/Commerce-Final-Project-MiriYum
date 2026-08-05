@@ -49,6 +49,7 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.jwt.issuer=miriyum"
         })
 @Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers(disabledWithoutDocker = true)
 @Import(IdempotencyExecutorIT.TestConfig.class)
 class IdempotencyExecutorIT {

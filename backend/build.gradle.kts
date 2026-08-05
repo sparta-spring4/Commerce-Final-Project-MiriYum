@@ -59,10 +59,13 @@ tasks.withType<Test> {
 }
 
 val integrationTag = "integration"
+val integrationShardATag = "integration-shard-a"
+val integrationShardBTag = "integration-shard-b"
+val integrationShardTags = listOf(integrationShardATag, integrationShardBTag)
 
 val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
     group = "verification"
-    description = "Testcontainers 또는 Spring 통합 테스트에 integration 태그가 있는지 확인합니다."
+    description = "통합 테스트가 integration 태그와 정확히 하나의 CI shard 태그를 갖는지 확인합니다."
 
     doLast {
         val candidates = fileTree("src/test/java") {
@@ -73,12 +76,19 @@ val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
                 || source.contains("MySQLContainer")
                 || source.contains("@SpringBootTest")
         }
-        val missingTags = candidates.filterNot { file ->
+        val missingIntegrationTags = candidates.filterNot { file ->
             file.readText().contains("@Tag(\"$integrationTag\")")
         }
+        val invalidShardTags = candidates.filter { file ->
+            val source = file.readText()
+            integrationShardTags.count { tag -> source.contains("@Tag(\"$tag\")") } != 1
+        }
 
-        check(missingTags.isEmpty()) {
-            "Integration test tag is missing: ${missingTags.joinToString { it.relativeTo(projectDir).path }}"
+        check(missingIntegrationTags.isEmpty()) {
+            "Integration test tag is missing: ${missingIntegrationTags.joinToString { it.relativeTo(projectDir).path }}"
+        }
+        check(invalidShardTags.isEmpty()) {
+            "Integration test must have exactly one shard tag: ${invalidShardTags.joinToString { it.relativeTo(projectDir).path }}"
         }
     }
 }
@@ -100,6 +110,20 @@ val integrationTest = tasks.register<Test>("integrationTest") {
     }
     dependsOn(verifyIntegrationTestTags)
 }
+
+fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.register<Test>(taskName) {
+    group = "verification"
+    description = "${shardTag}에 분류된 Testcontainers 및 Spring 통합 테스트를 실행합니다."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags(shardTag)
+    }
+    dependsOn(verifyIntegrationTestTags)
+}
+
+val integrationTestShardA = registerIntegrationTestShard("integrationTestShardA", integrationShardATag)
+val integrationTestShardB = registerIntegrationTestShard("integrationTestShardB", integrationShardBTag)
 
 tasks.check {
     dependsOn(integrationTest)

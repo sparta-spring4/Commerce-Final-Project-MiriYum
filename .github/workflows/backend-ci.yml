@@ -82,9 +82,19 @@ jobs:
           if-no-files-found: ignore
 
   integration-test:
-    name: integration-test
+    name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            task: integrationTestShardA
+            report_directory: integrationTestShardA
+          - shard: b
+            task: integrationTestShardB
+            report_directory: integrationTestShardB
     defaults:
       run:
         working-directory: backend
@@ -111,17 +121,17 @@ jobs:
             exit 1
           fi
 
-      - name: Run integration tests
-        run: ./gradlew integrationTest
+      - name: Run integration test shard
+        run: ./gradlew ${{ matrix.task }}
 
       - name: Assert no skipped integration tests
         run: |
           python3 - <<'PY'
           import glob, sys, xml.etree.ElementTree as ET
           tests = failures = errors = skipped = 0
-          files = glob.glob('build/test-results/integrationTest/*.xml')
+          files = glob.glob('build/test-results/${{ matrix.report_directory }}/*.xml')
           if not files:
-              print('::error::Integration test result XML was not found.')
+              print('::error::Integration test shard result XML was not found.')
               sys.exit(1)
           for f in files:
               root = ET.parse(f).getroot()
@@ -129,18 +139,18 @@ jobs:
               failures += int(root.get('failures', 0))
               errors += int(root.get('errors', 0))
               skipped += int(root.get('skipped', 0))
-          print(f'classes={len(files)} tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          print(f'shard=${{ matrix.shard }} classes={len(files)} tests={tests} failures={failures} errors={errors} skipped={skipped}')
           if skipped:
               print(f'::error::skipped={skipped} (0 is required)')
               sys.exit(1)
           PY
 
-      - name: Upload integration test reports
+      - name: Upload integration test shard reports
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: backend-integration-test-reports
-          path: backend/build/reports/tests/integrationTest
+          name: backend-integration-test-${{ matrix.shard }}-reports
+          path: backend/build/reports/tests/${{ matrix.report_directory }}
           retention-days: 7
           if-no-files-found: ignore
 
