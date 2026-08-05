@@ -73,6 +73,10 @@ class StoreTransactionEligibilityPublicContractTest {
                 1L, "미리윰", "invalid/time-zone"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("timeZoneId must be a valid IANA identifier");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "미리윰", "+09:00"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("timeZoneId must be a valid IANA identifier");
     }
 
     @Test

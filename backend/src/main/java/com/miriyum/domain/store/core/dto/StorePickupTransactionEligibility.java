@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.core.dto;
 
-import java.time.DateTimeException;
 import java.time.ZoneId;
 
 /**
@@ -20,11 +19,9 @@ public record StorePickupTransactionEligibility(
             throw new IllegalArgumentException(
                     "storeName must be between 1 and 100 characters");
         }
-        try {
-            ZoneId.of(timeZoneId);
-        } catch (DateTimeException | NullPointerException exception) {
+        if (!ZoneId.getAvailableZoneIds().contains(timeZoneId)) {
             throw new IllegalArgumentException(
-                    "timeZoneId must be a valid IANA identifier", exception);
+                    "timeZoneId must be a valid IANA identifier");
         }
     }
 }
