@@ -1,0 +1,179 @@
+# 백엔드 테스트를 단위/통합으로 병렬 실행한다. backend-ci 집계 job의 이름은 Required check 호환성을 위해 유지한다.
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    name: unit-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            backend/**/*.gradle*
+            backend/**/gradle-wrapper.properties
+
+      - name: Gradle wrapper version
+        run: |
+          version_output=$(./gradlew --version)
+          echo "$version_output"
+          if ! echo "$version_output" | grep -q "Gradle 9.6.1"; then
+            echo "::error::Gradle 9.6.1 is required."
+            exit 1
+          fi
+
+      - name: Run unit tests
+        run: ./gradlew test
+
+      - name: Assert no skipped unit tests
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          tests = failures = errors = skipped = 0
+          files = glob.glob('build/test-results/test/*.xml')
+          if not files:
+              print('::error::Unit test result XML was not found.')
+              sys.exit(1)
+          for f in files:
+              root = ET.parse(f).getroot()
+              tests += int(root.get('tests', 0))
+              failures += int(root.get('failures', 0))
+              errors += int(root.get('errors', 0))
+              skipped += int(root.get('skipped', 0))
+          print(f'classes={len(files)} tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          if skipped:
+              print(f'::error::skipped={skipped} (0 is required)')
+              sys.exit(1)
+          PY
+
+      - name: Assemble backend
+        run: ./gradlew assemble
+
+      - name: Upload unit test reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-unit-test-reports
+          path: backend/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
+
+  integration-test:
+    name: integration-test-${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            task: integrationTestShardA
+            report_directory: integrationTestShardA
+          - shard: b
+            task: integrationTestShardB
+            report_directory: integrationTestShardB
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            backend/**/*.gradle*
+            backend/**/gradle-wrapper.properties
+
+      - name: Gradle wrapper version
+        run: |
+          version_output=$(./gradlew --version)
+          echo "$version_output"
+          if ! echo "$version_output" | grep -q "Gradle 9.6.1"; then
+            echo "::error::Gradle 9.6.1 is required."
+            exit 1
+          fi
+
+      - name: Run integration test shard
+        run: ./gradlew ${{ matrix.task }}
+
+      - name: Assert no skipped integration tests
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          tests = failures = errors = skipped = 0
+          files = glob.glob('build/test-results/${{ matrix.report_directory }}/*.xml')
+          if not files:
+              print('::error::Integration test shard result XML was not found.')
+              sys.exit(1)
+          for f in files:
+              root = ET.parse(f).getroot()
+              tests += int(root.get('tests', 0))
+              failures += int(root.get('failures', 0))
+              errors += int(root.get('errors', 0))
+              skipped += int(root.get('skipped', 0))
+          print(f'shard=${{ matrix.shard }} classes={len(files)} tests={tests} failures={failures} errors={errors} skipped={skipped}')
+          if skipped:
+              print(f'::error::skipped={skipped} (0 is required)')
+              sys.exit(1)
+          PY
+
+      - name: Upload integration test shard reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-integration-test-${{ matrix.shard }}-reports
+          path: backend/build/reports/tests/${{ matrix.report_directory }}
+          retention-days: 7
+          if-no-files-found: ignore
+
+  backend-ci:
+    name: backend-ci
+    needs: [unit-test, integration-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every test job to succeed
+        env:
+          UNIT_TEST_RESULT: ${{ needs.unit-test.result }}
+          INTEGRATION_TEST_RESULT: ${{ needs.integration-test.result }}
+        run: |
+          echo "unit-test=$UNIT_TEST_RESULT"
+          echo "integration-test=$INTEGRATION_TEST_RESULT"
+          test "$UNIT_TEST_RESULT" = "success"
+          test "$INTEGRATION_TEST_RESULT" = "success"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify backend CD workflow contract
+        shell: pwsh
+        run: ./scripts/verify-backend-cd-workflow.ps1

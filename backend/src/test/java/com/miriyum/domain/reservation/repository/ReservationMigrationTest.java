@@ -2,25 +2,37 @@ package com.miriyum.domain.reservation.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeResponse;
+import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,18 +45,23 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * 예약 코어 Flyway 스키마와 JPA 매핑이 실제 MySQL 제약에서 같은 계약을 지키는지 검증한다.
  */
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.store.schedule.activation-enabled=false",
+            "miriyum.reservation.time-policy.activation-enabled=false"
         })
 class ReservationMigrationTest {
 
     private static final long CONSUMER_ACCOUNT_ID = 10_001L;
     private static final long STORE_OPERATOR_ACCOUNT_ID = 20_001L;
     private static final long STORE_ID = 30_001L;
+    private static final long SECOND_STORE_ID = 30_002L;
     private static final Instant CREATED_AT = Instant.parse("2026-08-01T01:00:00Z");
     private static final String NOTIFICATION_TARGET_REFERENCE =
             "consumer:10001:channel:primary";
@@ -62,6 +79,12 @@ class ReservationMigrationTest {
 
     @Autowired
     private ReservationRepository reservationRepository;
+
+    @Autowired
+    private ReservationTimePolicyVersionRepository timePolicyRepository;
+
+    @Autowired
+    private ReservationTimePolicyAuditRepository timePolicyAuditRepository;
 
     @Autowired
     private ReservationCapacityBucketRepository capacityBucketRepository;
@@ -83,6 +106,8 @@ class ReservationMigrationTest {
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
+        jdbcTemplate.execute("DELETE FROM reservation_time_policy_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_time_policy_versions");
         jdbcTemplate.execute("DELETE FROM stores");
         jdbcTemplate.execute("DELETE FROM store_operator_accounts");
         jdbcTemplate.execute("DELETE FROM consumer_accounts");
@@ -164,6 +189,178 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("예약 시간 정책과 Instant 스냅샷 확장은 Flyway V20으로 적용된다")
+    void appliesReservationTimePolicyAsFlywayV20() {
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "20".equals(String.valueOf(migration.getVersion()))
+                                && "V20__create_reservation_time_policies.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("활성 시간 정책은 효력 시각 경계부터 매장 목록으로 한 번에 조회된다")
+    void findsEffectiveActiveTimePoliciesAtBoundary() {
+        // given
+        ReservationTimePolicyVersion policy = timePolicy(1L);
+        policy.activate(CREATED_AT, "활성 정책");
+        timePolicyRepository.saveAndFlush(policy);
+
+        // when & then
+        assertThat(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                java.util.Set.of(STORE_ID),
+                ReservationTimePolicyStatus.ACTIVE,
+                ReservationTimePolicyStatus.SCHEDULED,
+                CREATED_AT.minusNanos(1_000)
+        )).isEmpty();
+        assertThat(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                java.util.Set.of(STORE_ID),
+                ReservationTimePolicyStatus.ACTIVE,
+                ReservationTimePolicyStatus.SCHEDULED,
+                CREATED_AT
+        )).singleElement().satisfies(found -> {
+            assertThat(found.getStoreId()).isEqualTo(STORE_ID);
+            assertThat(found.getVersionNumber()).isEqualTo(1L);
+            assertThat(found.getServiceDurationMinutes()).isEqualTo(90);
+            assertThat(found.getTurnoverDurationMinutes()).isEqualTo(15);
+        });
+    }
+
+    @Test
+    @DisplayName("효력 시각에 도달한 SCHEDULED는 기존 ACTIVE와 함께 조회되어 실패 폐쇄 근거가 된다")
+    void returnsDueScheduledAlongsideCurrentActiveForFailClosedResolution() {
+        ReservationTimePolicyVersion active = timePolicy(1L);
+        active.activate(CREATED_AT.minusSeconds(60), "기존 정책");
+        timePolicyRepository.saveAndFlush(active);
+        ReservationTimePolicyVersion scheduled = timePolicy(2L);
+        scheduled.schedule(CREATED_AT, CREATED_AT.minusSeconds(120), "새 정책");
+        timePolicyRepository.saveAndFlush(scheduled);
+
+        assertThat(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                java.util.Set.of(STORE_ID),
+                ReservationTimePolicyStatus.ACTIVE,
+                ReservationTimePolicyStatus.SCHEDULED,
+                CREATED_AT
+        )).extracting(ReservationTimePolicyVersion::getStatus)
+                .containsExactly(
+                        ReservationTimePolicyStatus.ACTIVE,
+                        ReservationTimePolicyStatus.SCHEDULED
+                );
+        assertThat(timePolicyRepository.findDueScheduledIds(
+                ReservationTimePolicyStatus.SCHEDULED,
+                CREATED_AT,
+                PageRequest.of(0, 100)
+        )).containsExactly(scheduled.getId());
+    }
+
+    @Test
+    @DisplayName("게시 사유와 NOT_EVALUATED 감사 근거를 append-only 원장에 보존한다")
+    void persistsPublicationReasonAndAuditWithoutInventingConflictCount() {
+        ReservationTimePolicyVersion policy = timePolicy(1L);
+        policy.schedule(CREATED_AT.plusSeconds(3600), CREATED_AT, "저녁 운영 확대");
+        ReservationTimePolicyVersion saved = timePolicyRepository.saveAndFlush(policy);
+        ReservationTimePolicyAudit audit = ReservationTimePolicyAudit.operatorCommand(
+                STORE_ID,
+                STORE_OPERATOR_ACCOUNT_ID,
+                saved.getVersionNumber(),
+                null,
+                null,
+                ReservationTimePolicyStatus.DRAFT,
+                ReservationTimePolicyStatus.SCHEDULED,
+                CREATED_AT,
+                saved.getEffectiveAt(),
+                CREATED_AT,
+                "저녁 운영 확대",
+                "550e8400-e29b-41d4-a716-446655440000"
+        );
+        ReservationTimePolicyAudit savedAudit =
+                timePolicyAuditRepository.saveAndFlush(audit);
+
+        assertThat(timePolicyRepository.findById(saved.getId()).orElseThrow()
+                .getChangeReason()).isEqualTo("저녁 운영 확대");
+        assertThat(timePolicyAuditRepository.findById(savedAudit.getId()).orElseThrow())
+                .satisfies(found -> {
+                    assertThat(found.getActorType())
+                            .isEqualTo(ReservationTimePolicyAudit.ActorType.STORE_OPERATOR);
+                    assertThat(found.getActorId()).isEqualTo(STORE_OPERATOR_ACCOUNT_ID);
+                    assertThat(found.getConflictCheckStatus())
+                            .isEqualTo(
+                                    ReservationTimePolicyAudit.ConflictCheckStatus.NOT_EVALUATED
+                            );
+                    assertThat(found.getConflictCount()).isNull();
+                    assertThat(found.getChangeReason()).isEqualTo("저녁 운영 확대");
+                });
+    }
+
+    @Test
+    @DisplayName("게시 상태 정책은 DB에서도 비어 있지 않은 changeReason을 요구한다")
+    void rejectsPublishedPolicyWithoutChangeReason() {
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                        INSERT INTO reservation_time_policy_versions (
+                            store_id,
+                            version_number,
+                            slot_interval_minutes,
+                            service_duration_minutes,
+                            turnover_duration_minutes,
+                            status,
+                            effective_at,
+                            activated_at,
+                            publication_requested_at,
+                            change_reason,
+                            created_at,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?, ?, 'SCHEDULED', ?, NULL, ?, NULL, ?, ?)
+                        """,
+                STORE_ID,
+                1L,
+                30,
+                90,
+                15,
+                java.sql.Timestamp.from(CREATED_AT.plusSeconds(3600)),
+                java.sql.Timestamp.from(CREATED_AT),
+                java.sql.Timestamp.from(CREATED_AT),
+                java.sql.Timestamp.from(CREATED_AT)
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_time_policy_lifecycle");
+    }
+
+    @Test
+    @DisplayName("한 매장에 활성 정책 또는 미래 게시 정책이 각각 둘 이상 존재할 수 없다")
+    void preventsOverlappingActiveAndScheduledPolicies() {
+        ReservationTimePolicyVersion firstActive = timePolicy(1L);
+        firstActive.activate(CREATED_AT, "첫 활성 정책");
+        timePolicyRepository.saveAndFlush(firstActive);
+
+        ReservationTimePolicyVersion secondActive = timePolicy(2L);
+        secondActive.activate(CREATED_AT.plusSeconds(1), "두 번째 활성 정책");
+        assertThatThrownBy(() -> timePolicyRepository.saveAndFlush(secondActive))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uk_reservation_time_policy_active_store");
+
+        timePolicyRepository.deleteAll();
+        timePolicyRepository.flush();
+
+        ReservationTimePolicyVersion firstScheduled = timePolicy(3L);
+        firstScheduled.schedule(
+                CREATED_AT.plusSeconds(3600),
+                CREATED_AT,
+                "첫 예약 게시"
+        );
+        timePolicyRepository.saveAndFlush(firstScheduled);
+
+        ReservationTimePolicyVersion secondScheduled = timePolicy(4L);
+        secondScheduled.schedule(
+                CREATED_AT.plusSeconds(7200),
+                CREATED_AT,
+                "두 번째 예약 게시"
+        );
+        assertThatThrownBy(() -> timePolicyRepository.saveAndFlush(secondScheduled))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uk_reservation_time_policy_scheduled_store");
+    }
+
+    @Test
     @DisplayName("Flyway 스키마와 JPA 매핑으로 예약·수용량 버킷·배정 이력을 저장한다")
     void persistsReservationCapacityAndAllocationWithFlywaySchema() {
         // given
@@ -197,6 +394,16 @@ class ReservationMigrationTest {
                 .isEqualTo(NOTIFICATION_TARGET_REFERENCE);
         assertThat(foundReservation.getContactSnapshot().isContactAvailableAtConfirmation())
                 .isTrue();
+        assertThat(foundReservation.getStartAt())
+                .isEqualTo(Instant.parse("2026-08-01T09:00:00Z"));
+        assertThat(foundReservation.getServiceEndAt())
+                .isEqualTo(Instant.parse("2026-08-01T10:30:00Z"));
+        assertThat(foundReservation.getOccupancyEndAt())
+                .isEqualTo(Instant.parse("2026-08-01T10:45:00Z"));
+        assertThat(foundReservation.getTimeZoneId()).isEqualTo("Asia/Seoul");
+        assertThat(foundReservation.getTimeSnapshot().getReservationTimePolicyStoreId())
+                .isEqualTo(STORE_ID);
+        assertThat(foundReservation.getReservationTimePolicyVersion()).isEqualTo(1L);
         assertThat(foundBucket.getPolicyVersion()).isEqualTo(1L);
         assertThat(foundAllocation.getReservationId()).isEqualTo(savedReservation.getId());
         assertThat(foundAllocation.getCapacityBucketId()).isEqualTo(savedBucket.getId());
@@ -325,6 +532,105 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("V15 형식의 기존 현지 시각 행은 임의 Instant나 offset을 만들지 않고 보존한다")
+    void preservesLegacyLocalTimeRowsWithoutGuessingOffsets() {
+        // when
+        insertReservation(CONSUMER_ACCOUNT_ID, STORE_ID, "CONFIRMED", null, null);
+
+        // then
+        java.util.Map<String, Object> row = jdbcTemplate.queryForMap(
+                """
+                        SELECT start_time, end_time, start_at, service_end_at,
+                               occupancy_end_at, time_zone_id_snapshot
+                        FROM reservations
+                        WHERE consumer_account_id = ? AND store_id = ?
+                        """,
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID
+        );
+        assertThat(row.get("start_time")).isNotNull();
+        assertThat(row.get("end_time")).isNotNull();
+        assertThat(row.get("start_at")).isNull();
+        assertThat(row.get("service_end_at")).isNull();
+        assertThat(row.get("occupancy_end_at")).isNull();
+        assertThat(row.get("time_zone_id_snapshot")).isNull();
+
+        Reservation legacyReservation = reservationRepository.findAll().getFirst();
+        CustomerReservationTimeResponse customerTime =
+                CustomerReservationTimeResponse.from(legacyReservation.getTimeSnapshot());
+        assertThat(customerTime.serviceDate()).isEqualTo(LocalDate.of(2026, 8, 1));
+        assertThat(customerTime.timeStatus())
+                .isEqualTo(CustomerReservationTimeStatus.LEGACY_UNRESOLVED);
+        assertThat(customerTime.startAt()).isNull();
+        assertThat(customerTime.serviceEndAt()).isNull();
+        assertThat(customerTime.timeZoneId()).isNull();
+    }
+
+    @Test
+    @DisplayName("신규 Instant 스냅샷은 DB에서도 분 단위 시작 시각만 허용한다")
+    void rejectsSnapshotOutsideMinutePrecisionInDatabase() {
+        Reservation saved = reservationRepository.saveAndFlush(reservation());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET start_at = TIMESTAMPADD(SECOND, 1, start_at),
+                            service_end_at = TIMESTAMPADD(SECOND, 1, service_end_at),
+                            occupancy_end_at = TIMESTAMPADD(SECOND, 1, occupancy_end_at)
+                        WHERE reservation_id = ?
+                        """,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_time_snapshot");
+    }
+
+    @Test
+    @DisplayName("신규 시간 스냅샷의 정책 소유 매장은 예약 매장과 같아야 한다")
+    void rejectsSnapshotPolicyStoreMismatchInDatabase() {
+        Reservation saved = reservationRepository.saveAndFlush(reservation());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET reservation_time_policy_store_id = ?
+                        WHERE reservation_id = ?
+                        """,
+                STORE_ID + 1,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_time_snapshot");
+    }
+
+    @Test
+    @DisplayName("신규 Instant 스냅샷의 계산 근거 열은 DB에서도 모두 필수다")
+    void rejectsIncompleteNewSnapshotInDatabase() {
+        Reservation saved = reservationRepository.saveAndFlush(reservation());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET start_offset_seconds = NULL
+                        WHERE reservation_id = ?
+                        """,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_time_snapshot");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET reservation_time_policy_store_id = NULL
+                        WHERE reservation_id = ?
+                        """,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_time_snapshot");
+    }
+
+    @Test
     @DisplayName("예약과 수용량 버킷의 종료 시각은 DB에서도 시작 시각보다 늦어야 한다")
     void rejectsNonIncreasingServiceTimeInDatabase() {
         // when & then
@@ -333,7 +639,7 @@ class ReservationMigrationTest {
                 LocalTime.of(18, 0)
         ))
                 .isInstanceOf(DataAccessException.class)
-                .hasMessageContaining("ck_reservations_service_time");
+                .hasMessageContaining("ck_reservations_time_snapshot");
         assertThatThrownBy(() -> insertCapacityBucketWithServiceTime(
                 LocalTime.of(18, 0),
                 LocalTime.of(17, 30)
@@ -478,28 +784,128 @@ class ReservationMigrationTest {
         assertThat(capacityAllocationRepository.count()).isZero();
     }
 
+    @Test
+    @DisplayName("가용성 조회는 각 매장·날짜의 최신 정책 버킷만 구간 순서로 반환한다")
+    void findsEachStoresLatestPolicyBucketsInServiceTimeOrder() {
+        insertStore(SECOND_STORE_ID, "1234567891", "두번째 매장");
+        capacityBucketRepository.saveAllAndFlush(List.of(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30)),
+                capacityBucket(2L, LocalTime.of(18, 30), LocalTime.of(19, 0)),
+                capacityBucket(2L, LocalTime.of(18, 0), LocalTime.of(18, 30)),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        4L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                ),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        5L,
+                        LocalTime.of(18, 30),
+                        LocalTime.of(19, 0)
+                ),
+                capacityBucket(
+                        SECOND_STORE_ID,
+                        5L,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(18, 30)
+                )
+        ));
+
+        List<ReservationCapacityBucket> buckets =
+                capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                        List.of(STORE_ID, SECOND_STORE_ID),
+                        LocalDate.of(2026, 8, 1),
+                        LocalTime.of(18, 0),
+                        LocalTime.of(19, 0)
+                );
+
+        assertThat(buckets)
+                .extracting(
+                        ReservationCapacityBucket::getStoreId,
+                        ReservationCapacityBucket::getStartTime,
+                        ReservationCapacityBucket::getEndTime,
+                        ReservationCapacityBucket::getPolicyVersion
+                )
+                .containsExactly(
+                        tuple(
+                                STORE_ID,
+                                LocalTime.of(18, 0),
+                                LocalTime.of(18, 30),
+                                2L
+                        ),
+                        tuple(
+                                STORE_ID,
+                                LocalTime.of(18, 30),
+                                LocalTime.of(19, 0),
+                                2L
+                        ),
+                        tuple(
+                                SECOND_STORE_ID,
+                                LocalTime.of(18, 0),
+                                LocalTime.of(18, 30),
+                                5L
+                        ),
+                        tuple(
+                                SECOND_STORE_ID,
+                                LocalTime.of(18, 30),
+                                LocalTime.of(19, 0),
+                                5L
+                        )
+                );
+    }
+
     private Reservation reservation() {
         return Reservation.confirm(
                 CONSUMER_ACCOUNT_ID,
                 STORE_ID,
                 "미리윰",
-                LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0),
-                LocalTime.of(19, 0),
+                reservationTimeSnapshot(),
                 PartyComposition.of(2, 1, 1),
                 ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE),
-                1L,
                 1L,
                 CREATED_AT
         );
     }
 
+    private ReservationTimeSnapshot reservationTimeSnapshot() {
+        ReservationTimePolicyVersion policy = timePolicy(1L);
+        policy.activate(CREATED_AT.minusSeconds(60), "예약 계산 정책");
+        return ReservationTimeSnapshot.calculate(
+                policy,
+                LocalDateTime.of(2026, 8, 1, 18, 0),
+                ZoneId.of("Asia/Seoul"),
+                null
+        );
+    }
+
     private ReservationCapacityBucket capacityBucket(long policyVersion) {
-        return ReservationCapacityBucket.create(
-                STORE_ID,
-                LocalDate.of(2026, 8, 1),
+        return capacityBucket(
+                policyVersion,
                 LocalTime.of(18, 0),
-                LocalTime.of(18, 30),
+                LocalTime.of(18, 30)
+        );
+    }
+
+    private ReservationCapacityBucket capacityBucket(
+            long policyVersion,
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        return capacityBucket(STORE_ID, policyVersion, startTime, endTime);
+    }
+
+    private ReservationCapacityBucket capacityBucket(
+            long storeId,
+            long policyVersion,
+            LocalTime startTime,
+            LocalTime endTime
+    ) {
+        return ReservationCapacityBucket.create(
+                storeId,
+                LocalDate.of(2026, 8, 1),
+                startTime,
+                endTime,
                 20,
                 5,
                 0,
@@ -508,6 +914,61 @@ class ReservationMigrationTest {
                 8,
                 true,
                 policyVersion
+        );
+    }
+
+    private ReservationTimePolicyVersion timePolicy(long versionNumber) {
+        return ReservationTimePolicyVersion.createDraft(
+                STORE_ID,
+                versionNumber,
+                30,
+                90,
+                15
+        );
+    }
+
+    private void insertStore(
+            long storeId,
+            String businessRegistrationNumber,
+            String name
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO stores (
+                            store_id,
+                            store_operator_account_id,
+                            business_registration_number,
+                            business_type,
+                            name,
+                            description,
+                            region,
+                            address,
+                            time_zone_id,
+                            applicant_self_attested_at,
+                            required_terms_agreed_at,
+                            required_terms_version,
+                            store_category_code,
+                            verification_status,
+                            operation_status,
+                            pickup_eligibility,
+                            reservation_enabled,
+                            menu_hold_enabled,
+                            pickup_enabled,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (
+                            ?, ?, ?, 'CAFE', ?, '', 'SEOUL', '서울시 중구',
+                            'Asia/Seoul', NOW(6), NOW(6),
+                            'STORE_ONBOARDING_REQUIRED_TERMS_V1',
+                            'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
+                            TRUE, TRUE, TRUE, NOW(6), NOW(6)
+                        )
+                        """,
+                storeId,
+                STORE_OPERATOR_ACCOUNT_ID,
+                businessRegistrationNumber,
+                name
         );
     }
 

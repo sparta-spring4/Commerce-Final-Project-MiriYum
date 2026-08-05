@@ -95,6 +95,27 @@ class StoreReservationSearchRequestTest {
                 );
     }
 
+    @Test
+    @DisplayName("공개 serviceDate 정렬은 내부 embedded 시간 스냅샷 경로를 사용한다")
+    void keepsPublicSortWhileUsingEmbeddedServiceDatePath() {
+        // given & when
+        StoreReservationSearchRequest request = StoreReservationSearchRequest.from(
+                null,
+                null,
+                0,
+                20,
+                "serviceDate,asc"
+        );
+
+        // then
+        assertThat(request.order().sortOrders())
+                .extracting(Sort.Order::getProperty, Sort.Order::getDirection)
+                .containsExactly(
+                        tuple("timeSnapshot.serviceDate", Sort.Direction.ASC),
+                        tuple("id", Sort.Direction.ASC)
+                );
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"REQUESTED", "NO_SHOW", ""})
     @DisplayName("허용하지 않은 예약 상태는 COMMON_001로 거절한다")
@@ -138,8 +159,16 @@ class StoreReservationSearchRequestTest {
 
     private static Stream<Arguments> approvedSortOrders() {
         return Stream.of(
-                Arguments.of("serviceDate,asc", "serviceDate", Sort.Direction.ASC),
-                Arguments.of("serviceDate,desc", "serviceDate", Sort.Direction.DESC),
+                Arguments.of(
+                        "serviceDate,asc",
+                        "timeSnapshot.serviceDate",
+                        Sort.Direction.ASC
+                ),
+                Arguments.of(
+                        "serviceDate,desc",
+                        "timeSnapshot.serviceDate",
+                        Sort.Direction.DESC
+                ),
                 Arguments.of("createdAt,asc", "createdAt", Sort.Direction.ASC),
                 Arguments.of("createdAt,desc", "createdAt", Sort.Direction.DESC)
         );

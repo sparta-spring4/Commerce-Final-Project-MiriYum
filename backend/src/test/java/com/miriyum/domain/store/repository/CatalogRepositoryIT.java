@@ -9,6 +9,7 @@ import com.miriyum.domain.store.entity.StoreCategory;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -32,6 +33,8 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.jwt.issuer=miriyum"
         })
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers(disabledWithoutDocker = true)
 @Transactional
 class CatalogRepositoryIT {

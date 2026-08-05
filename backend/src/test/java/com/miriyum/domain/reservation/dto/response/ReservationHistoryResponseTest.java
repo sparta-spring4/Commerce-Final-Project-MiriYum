@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +24,7 @@ class ReservationHistoryResponseTest {
 
     @Test
     @DisplayName("예약 Entity를 공개 문자열 ID와 거래 스냅샷 응답으로 변환한다")
-    void mapsReservationWithoutExposingEntity() {
+    void mapsResolvedHistoryToCanonicalCustomerTime() {
         // given
         Reservation reservation = reservation(
                 33L,
@@ -40,8 +43,12 @@ class ReservationHistoryResponseTest {
         assertThat(response.storeId()).isEqualTo("22");
         assertThat(response.storeName()).isEqualTo("미리윰 식당");
         assertThat(response.serviceDate()).isEqualTo(LocalDate.of(2026, 8, 1));
-        assertThat(response.startTime()).isEqualTo(LocalTime.of(18, 0));
-        assertThat(response.endTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(response.timeStatus()).isEqualTo(CustomerReservationTimeStatus.RESOLVED);
+        assertThat(response.startAt())
+                .isEqualTo(OffsetDateTime.parse("2026-08-01T18:00:00+09:00"));
+        assertThat(response.serviceEndAt())
+                .isEqualTo(OffsetDateTime.parse("2026-08-01T19:00:00+09:00"));
+        assertThat(response.timeZoneId()).isEqualTo("Asia/Seoul");
         assertThat(response.partySize()).isEqualTo(3);
         assertThat(response.status()).isEqualTo("CONFIRMED");
         assertThat(response.createdAt())
@@ -89,7 +96,7 @@ class ReservationHistoryResponseTest {
 
     @Test
     @DisplayName("빈 예약 페이지는 빈 배열과 0개 메타데이터로 변환한다")
-    void mapsEmptyReservationPage() {
+    void mapsHistoryPageMetadataWithoutEntities() {
         // given
         Page<Reservation> reservations = Page.empty(PageRequest.of(0, 20));
 
@@ -113,17 +120,28 @@ class ReservationHistoryResponseTest {
             PartyComposition party,
             Instant createdAt
     ) {
+        ReservationTimePolicyVersion timePolicy = ReservationTimePolicyVersion.createDraft(
+                storeId,
+                4L,
+                30,
+                60,
+                15
+        );
+        timePolicy.activate(Instant.parse("2026-07-30T00:00:00Z"), "test policy");
+        ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                timePolicy,
+                LocalDateTime.of(2026, 8, 1, 18, 0),
+                ZoneId.of("Asia/Seoul"),
+                null
+        );
         Reservation reservation = Reservation.confirm(
                 11L,
                 storeId,
                 storeName,
-                LocalDate.of(2026, 8, 1),
-                LocalTime.of(18, 0),
-                LocalTime.of(19, 0),
+                timeSnapshot,
                 party,
                 ReservationContactSnapshot.contactable("consumer:11:channel:primary"),
                 3L,
-                4L,
                 createdAt
         );
         ReflectionTestUtils.setField(reservation, "id", reservationId);

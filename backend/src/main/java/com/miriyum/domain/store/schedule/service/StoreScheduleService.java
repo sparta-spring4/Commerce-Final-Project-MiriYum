@@ -8,11 +8,13 @@ import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
+import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleEntry;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
 import com.miriyum.domain.store.schedule.entity.ReservationScheduleVersion;
+import com.miriyum.domain.store.schedule.entity.ReservationScheduleEntry;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleAuditEvent;
 import com.miriyum.domain.store.schedule.model.ScheduleAuditAction;
@@ -34,7 +36,14 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -59,6 +68,125 @@ public class StoreScheduleService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+
+    /**
+     * 요청한 매장 현지 시각이 각 매장의 활성 예약 접수 구간에 포함되는지
+     * 입력 순서와 중복을 보존해 반환한다.
+     */
+    @Transactional(readOnly = true)
+    public List<StoreReservationWindowResult> resolveReservationWindows(
+            List<Long> storeIds,
+            LocalDate serviceDate,
+            LocalTime startTime
+    ) {
+        validateReservationWindowRequest(storeIds, serviceDate, startTime);
+        if (storeIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> uniqueStoreIds = List.copyOf(new LinkedHashSet<>(storeIds));
+        Map<Long, StoreScheduleState> statesByStoreId = stateRepository
+                .findAllByStoreIdIn(uniqueStoreIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        StoreScheduleState::getStoreId,
+                        Function.identity()));
+        List<Long> activeVersionIds = statesByStoreId.values().stream()
+                .map(StoreScheduleState::getActiveReservationScheduleVersionId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, ReservationScheduleVersion> versionsById = activeVersionIds.isEmpty()
+                ? Map.of()
+                : reservationRepository.findActiveByIdsWithEntries(
+                                activeVersionIds,
+                                ScheduleVersionStatus.ACTIVE)
+                        .stream()
+                        .collect(Collectors.toMap(
+                                ReservationScheduleVersion::getId,
+                                Function.identity()));
+        LocalDateTime requestedAt = LocalDateTime.of(serviceDate, startTime);
+
+        return storeIds.stream()
+                .map(storeId -> resolveReservationWindow(
+                        storeId,
+                        requestedAt,
+                        statesByStoreId,
+                        versionsById))
+                .toList();
+    }
+
+    private static void validateReservationWindowRequest(
+            List<Long> storeIds,
+            LocalDate serviceDate,
+            LocalTime startTime
+    ) {
+        if (storeIds == null || serviceDate == null || startTime == null) {
+            throw new IllegalArgumentException("reservation window request is required");
+        }
+        if (startTime.getSecond() != 0 || startTime.getNano() != 0) {
+            throw new IllegalArgumentException(
+                    "reservation window start time must use minute precision");
+        }
+        if (storeIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("store IDs must be positive");
+        }
+    }
+
+    private static StoreReservationWindowResult resolveReservationWindow(
+            long storeId,
+            LocalDateTime requestedAt,
+            Map<Long, StoreScheduleState> statesByStoreId,
+            Map<Long, ReservationScheduleVersion> versionsById
+    ) {
+        StoreScheduleState state = statesByStoreId.get(storeId);
+        if (state == null || state.getActiveReservationScheduleVersionId() == null) {
+            return StoreReservationWindowResult.notAccepting(storeId);
+        }
+        ReservationScheduleVersion version = versionsById.get(
+                state.getActiveReservationScheduleVersionId());
+        if (version == null
+                || version.getStatus() != ScheduleVersionStatus.ACTIVE
+                || !version.getStoreId().equals(storeId)) {
+            return StoreReservationWindowResult.notAccepting(storeId);
+        }
+
+        int requestWeekMinute = (requestedAt.getDayOfWeek().getValue() - 1) * 1440
+                + requestedAt.getHour() * 60
+                + requestedAt.getMinute();
+        for (ReservationScheduleEntry entry : version.getEntries()) {
+            Integer matchingMinute = matchingWeekMinute(entry, requestWeekMinute);
+            if (matchingMinute != null) {
+                return StoreReservationWindowResult.accepting(
+                        storeId,
+                        version.getTimeZoneId(),
+                        requestedAt.plusMinutes(
+                                entry.getWeekStartMinute() - matchingMinute),
+                        requestedAt.plusMinutes(
+                                entry.getWeekEndMinute() - matchingMinute));
+            }
+        }
+        return StoreReservationWindowResult.notAccepting(storeId);
+    }
+
+    private static Integer matchingWeekMinute(
+            ReservationScheduleEntry entry,
+            int requestWeekMinute
+    ) {
+        if (contains(entry, requestWeekMinute)) {
+            return requestWeekMinute;
+        }
+        int nextWeekMinute = requestWeekMinute + 7 * 1440;
+        return contains(entry, nextWeekMinute) ? nextWeekMinute : null;
+    }
+
+    private static boolean contains(
+            ReservationScheduleEntry entry,
+            int weekMinute
+    ) {
+        return entry.getWeekStartMinute() <= weekMinute
+                && weekMinute < entry.getWeekEndMinute();
+    }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public ScheduleCommandResult<OperatingHoursResponse> createOperatingDraft(

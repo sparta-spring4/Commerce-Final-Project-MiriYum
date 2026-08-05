@@ -2,7 +2,6 @@ package com.miriyum.domain.reservation.dto.response;
 
 import com.miriyum.domain.reservation.entity.Reservation;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -16,21 +15,27 @@ public record ReservationHistoryItemResponse(
         String storeId,
         String storeName,
         LocalDate serviceDate,
-        LocalTime startTime,
-        LocalTime endTime,
+        CustomerReservationTimeStatus timeStatus,
+        OffsetDateTime startAt,
+        OffsetDateTime serviceEndAt,
+        String timeZoneId,
         int partySize,
         String status,
         OffsetDateTime createdAt
 ) {
 
     public static ReservationHistoryItemResponse from(Reservation reservation) {
+        CustomerReservationTimeResponse time =
+                CustomerReservationTimeResponse.from(reservation.getTimeSnapshot());
         return new ReservationHistoryItemResponse(
                 String.valueOf(reservation.getId()),
                 String.valueOf(reservation.getStoreId()),
                 reservation.getStoreNameSnapshot(),
-                reservation.getServiceDate(),
-                reservation.getStartTime(),
-                reservation.getEndTime(),
+                time.serviceDate(),
+                time.timeStatus(),
+                time.startAt(),
+                time.serviceEndAt(),
+                time.timeZoneId(),
                 reservation.getParty().totalCount(),
                 reservation.getStatus().name(),
                 reservation.getCreatedAt().atOffset(ZoneOffset.UTC)

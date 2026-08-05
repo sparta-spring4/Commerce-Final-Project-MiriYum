@@ -2,16 +2,35 @@ package com.miriyum.domain.reservation.repository;
 
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
- * 일반 예약 aggregate의 영속성과 소유 범위 조회 경계다.
+ * 일반 예약 aggregate의 기본 영속성 경계다.
  */
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select reservation
+            from Reservation reservation
+            where reservation.storeId = :storeId
+              and reservation.timeSnapshot.serviceDate = :serviceDate
+              and reservation.status = :#{T(com.miriyum.domain.reservation.entity.ReservationStatus).CONFIRMED}
+            order by reservation.id asc
+            """)
+    List<Reservation> findConfirmedForCapacityPublication(
+            @Param("storeId") long storeId,
+            @Param("serviceDate") LocalDate serviceDate
+    );
 
     Optional<Reservation> findByIdAndConsumerAccountId(
             Long reservationId,
@@ -39,7 +58,7 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             Pageable pageable
     );
 
-    Page<Reservation> findAllByStoreIdAndServiceDate(
+    Page<Reservation> findAllByStoreIdAndTimeSnapshotServiceDate(
             Long storeId,
             LocalDate serviceDate,
             Pageable pageable
@@ -51,7 +70,7 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             Pageable pageable
     );
 
-    Page<Reservation> findAllByStoreIdAndServiceDateAndStatus(
+    Page<Reservation> findAllByStoreIdAndTimeSnapshotServiceDateAndStatus(
             Long storeId,
             LocalDate serviceDate,
             ReservationStatus status,

@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(9);
+        assertThat(ReservationErrorCode.values()).hasSize(10);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -56,7 +56,10 @@ class ReservationErrorCodeTest {
                 Arguments.of(ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT,
                         HttpStatus.CONFLICT, "RESERVATION_008", "현재 예약 점유와 수용량 설정이 충돌합니다."),
                 Arguments.of(ReservationErrorCode.PARTY_SIZE_OUT_OF_RANGE,
-                        HttpStatus.CONFLICT, "RESERVATION_009", "요청 인원이 매장 최소·최대 정책을 벗어났습니다.")
+                        HttpStatus.CONFLICT, "RESERVATION_009", "요청 인원이 매장 최소·최대 정책을 벗어났습니다."),
+                Arguments.of(ReservationErrorCode.TIME_POLICY_CONFLICT,
+                        HttpStatus.CONFLICT, "RESERVATION_010",
+                        "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다.")
         );
     }
 }

@@ -7,6 +7,7 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -26,6 +27,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014, 이슈 #63) 여기서는 Flyway가
  * 실제로 적용한 스키마를 {@code ddl-auto=validate}로 확인한다.</p>
  */
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -36,7 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class StoreOperatorAccountMigrationTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {

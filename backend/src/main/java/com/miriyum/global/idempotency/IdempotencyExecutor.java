@@ -52,7 +52,7 @@ public class IdempotencyExecutor {
                     result.resourceType(), result.resourceId(), deserialize(payloadJson));
         }
 
-        StoredCommand stored = repository.lockByBusinessKey(command);
+        StoredCommand stored = repository.findByBusinessKeyForShare(command);
         return switch (stored.status()) {
             case SUCCEEDED -> {
                 if (!stored.requestFingerprint().equals(command.requestFingerprint())) {

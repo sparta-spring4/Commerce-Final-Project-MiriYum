@@ -3,15 +3,23 @@ package com.miriyum.domain.reservation.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
+import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
+import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import com.miriyum.domain.reservation.service.ReservationService;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,6 +38,8 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * 예약 조회 Repository가 실제 MySQL에서 계정·매장 소유 범위와 페이지 순서를 지키는지 검증한다.
  */
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -60,6 +70,9 @@ class ReservationQueryRepositoryTest {
 
     @Autowired
     private ReservationRepository reservationRepository;
+
+    @Autowired
+    private ReservationService reservationService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -296,7 +309,7 @@ class ReservationQueryRepositoryTest {
                 CREATED_AT.plusSeconds(4)
         );
         Sort sort = Sort.by(
-                Sort.Order.asc("serviceDate"),
+                Sort.Order.asc("timeSnapshot.serviceDate"),
                 Sort.Order.asc("id")
         );
 
@@ -342,7 +355,7 @@ class ReservationQueryRepositoryTest {
 
         // when
         Page<Reservation> result =
-                reservationRepository.findAllByStoreIdAndServiceDate(
+                reservationRepository.findAllByStoreIdAndTimeSnapshotServiceDate(
                         STORE_ID,
                         serviceDate,
                         PageRequest.of(0, 20, Sort.by("id"))
@@ -432,7 +445,7 @@ class ReservationQueryRepositoryTest {
 
         // when
         Page<Reservation> result =
-                reservationRepository.findAllByStoreIdAndServiceDateAndStatus(
+                reservationRepository.findAllByStoreIdAndTimeSnapshotServiceDateAndStatus(
                         STORE_ID,
                         serviceDate,
                         ReservationStatus.CANCELLED,
@@ -468,7 +481,7 @@ class ReservationQueryRepositoryTest {
                 0,
                 20,
                 Sort.by(
-                        Sort.Order.asc("serviceDate"),
+                        Sort.Order.asc("timeSnapshot.serviceDate"),
                         Sort.Order.asc("id")
                 )
         );
@@ -481,6 +494,204 @@ class ReservationQueryRepositoryTest {
         assertThat(result.getContent()).isEmpty();
         assertThat(result.getTotalElements()).isZero();
         assertThat(result.getTotalPages()).isZero();
+    }
+
+    @Test
+    @DisplayName("운영자 목록은 embedded 서비스 날짜로 필터하고 같은 날짜의 ID를 같은 방향으로 정렬한다")
+    void filtersAndSortsStorePageByEmbeddedServiceDateThenIdThroughService() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        Reservation first = saveReservation(
+                CONSUMER_ACCOUNT_ID, STORE_ID, serviceDate, CREATED_AT);
+        Reservation second = saveReservation(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                CREATED_AT.plusSeconds(1)
+        );
+        saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate.plusDays(1),
+                CREATED_AT.plusSeconds(2)
+        );
+        saveCancelledReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                CREATED_AT.plusSeconds(3)
+        );
+        StoreReservationSearchRequest request = StoreReservationSearchRequest.from(
+                serviceDate,
+                "CONFIRMED",
+                0,
+                20,
+                "serviceDate,asc"
+        );
+
+        // when
+        var result = reservationService.getStoreReservations(
+                STORE_OPERATOR_ACCOUNT_ID,
+                STORE_ID,
+                request
+        );
+
+        // then
+        assertThat(result.items())
+                .extracting(item -> item.reservationId())
+                .containsExactly(
+                        Long.toString(first.getId()),
+                        Long.toString(second.getId())
+                );
+        assertThat(result.page().totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("소비자 내역은 embedded 서비스 날짜와 ID를 같은 방향으로 정렬한다")
+    void sortsConsumerHistoryByEmbeddedServiceDateThenIdThroughService() {
+        // given
+        Reservation first = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        Reservation second = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT.plusSeconds(1)
+        );
+        Reservation third = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                CREATED_AT.plusSeconds(2)
+        );
+        ReservationHistorySearchRequest request = ReservationHistorySearchRequest.from(
+                null,
+                0,
+                20,
+                "serviceDate,asc"
+        );
+
+        // when
+        var result = reservationService.getConsumerReservationHistory(
+                CONSUMER_ACCOUNT_ID,
+                request
+        );
+
+        // then
+        assertThat(result.items())
+                .extracting(item -> item.reservationId())
+                .containsExactly(
+                        Long.toString(first.getId()),
+                        Long.toString(second.getId()),
+                        Long.toString(third.getId())
+                );
+    }
+
+    @Test
+    @DisplayName("폐업 매장의 과거 예약은 소비자 내역과 두 복합 소유 조회에 남는다")
+    void keepsClosedStoreReservationInConsumerHistoryAndBothCompositeQueries() {
+        // given
+        Reservation reservation = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        closeStore();
+
+        // when
+        var history = reservationService.getConsumerReservationHistory(
+                CONSUMER_ACCOUNT_ID,
+                ReservationHistorySearchRequest.from(null, 0, 20, null)
+        );
+
+        // then
+        assertThat(history.items())
+                .extracting(item -> item.reservationId())
+                .containsExactly(Long.toString(reservation.getId()));
+        assertThat(reservationRepository.findByIdAndConsumerAccountId(
+                reservation.getId(),
+                CONSUMER_ACCOUNT_ID
+        )).isPresent();
+        assertThat(reservationRepository.findByIdAndStoreId(
+                reservation.getId(),
+                STORE_ID
+        )).isPresent();
+    }
+
+    @Test
+    @DisplayName("폐업 매장의 과거 예약은 운영자 목록에 남는다")
+    void keepsClosedStoreReservationInStorePage() {
+        // given
+        Reservation reservation = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        closeStore();
+
+        // when
+        var page = reservationService.getStoreReservations(
+                STORE_OPERATOR_ACCOUNT_ID,
+                STORE_ID,
+                StoreReservationSearchRequest.from(null, null, 0, 20, null)
+        );
+
+        // then
+        assertThat(page.items())
+                .extracting(item -> item.reservationId())
+                .containsExactly(Long.toString(reservation.getId()));
+    }
+
+    @Test
+    @DisplayName("소비자 계정 정지 후에도 예약 거래 행과 소유 조회 결과는 보존된다")
+    void keepsReservationRowAfterConsumerAccountSuspension() {
+        // given
+        Reservation reservation = saveReservation(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                LocalDate.of(2026, 8, 1),
+                CREATED_AT
+        );
+        jdbcTemplate.update(
+                "UPDATE consumer_accounts SET status = 'SUSPENDED' "
+                        + "WHERE consumer_account_id = ?",
+                CONSUMER_ACCOUNT_ID
+        );
+
+        // when
+        Integer rowCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservations WHERE reservation_id = ?",
+                Integer.class,
+                reservation.getId()
+        );
+
+        // then
+        assertThat(rowCount).isEqualTo(1);
+        assertThat(reservationRepository.findByIdAndConsumerAccountId(
+                reservation.getId(),
+                CONSUMER_ACCOUNT_ID
+        )).hasValueSatisfying(found -> {
+            assertThat(found.getId()).isEqualTo(reservation.getId());
+            assertThat(found.getConsumerAccountId()).isEqualTo(CONSUMER_ACCOUNT_ID);
+        });
+        assertThat(reservationRepository.findAllByConsumerAccountId(
+                CONSUMER_ACCOUNT_ID,
+                PageRequest.of(0, 20, Sort.by("id"))
+        ).getContent()).extracting(Reservation::getId)
+                .containsExactly(reservation.getId());
+    }
+
+    private void closeStore() {
+        jdbcTemplate.update(
+                "UPDATE stores SET operation_status = 'CLOSED' WHERE store_id = ?",
+                STORE_ID
+        );
     }
 
     private Reservation saveReservation(
@@ -516,18 +727,29 @@ class ReservationQueryRepositoryTest {
             LocalDate serviceDate,
             Instant createdAt
     ) {
+        ReservationTimePolicyVersion timePolicy = ReservationTimePolicyVersion.createDraft(
+                storeId,
+                1L,
+                30,
+                60,
+                15
+        );
+        timePolicy.activate(Instant.parse("2026-07-30T00:00:00Z"), "query fixture");
+        ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                timePolicy,
+                LocalDateTime.of(serviceDate, LocalTime.of(18, 0)),
+                ZoneId.of("Asia/Seoul"),
+                null
+        );
         return Reservation.confirm(
                 consumerAccountId,
                 storeId,
                 storeId == STORE_ID ? "첫 번째 매장" : "두 번째 매장",
-                serviceDate,
-                LocalTime.of(18, 0),
-                LocalTime.of(19, 0),
+                timeSnapshot,
                 PartyComposition.of(2, 0, 0),
                 ReservationContactSnapshot.contactable(
                         "consumer:" + consumerAccountId + ":channel:primary"
                 ),
-                1L,
                 1L,
                 createdAt
         );

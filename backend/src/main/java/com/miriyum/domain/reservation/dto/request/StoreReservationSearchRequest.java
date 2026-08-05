@@ -87,8 +87,16 @@ public record StoreReservationSearchRequest(
      * 운영자 예약 목록 OpenAPI가 허용한 단일 정렬이다.
      */
     public enum Order {
-        SERVICE_DATE_ASC("serviceDate,asc", "serviceDate", Sort.Direction.ASC),
-        SERVICE_DATE_DESC("serviceDate,desc", "serviceDate", Sort.Direction.DESC),
+        SERVICE_DATE_ASC(
+                "serviceDate,asc",
+                "timeSnapshot.serviceDate",
+                Sort.Direction.ASC
+        ),
+        SERVICE_DATE_DESC(
+                "serviceDate,desc",
+                "timeSnapshot.serviceDate",
+                Sort.Direction.DESC
+        ),
         CREATED_AT_ASC("createdAt,asc", "createdAt", Sort.Direction.ASC),
         CREATED_AT_DESC("createdAt,desc", "createdAt", Sort.Direction.DESC);
 

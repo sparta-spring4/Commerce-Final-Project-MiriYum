@@ -12,6 +12,7 @@ import com.miriyum.MiriyumApplication;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -33,6 +34,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * (MySQL 전용 {@code ON DUPLICATE KEY UPDATE})을 지원하지 않아 증거로 쓰지 않는다
  * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014).
  */
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -52,7 +55,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class RateLimitFilterTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {

@@ -26,5 +26,19 @@ class ApplicationYamlTest {
         assertThat(properties.getProperty("spring.datasource.password")).isEqualTo("${MIRIYUM_DB_PASSWORD}");
         assertThat(properties.getProperty("spring.jackson.deserialization.fail-on-unknown-properties"))
                 .isEqualTo(true);
+        assertThat(properties.getProperty("server.forward-headers-strategy"))
+                .isEqualTo("native");
+        assertThat(properties.getProperty("server.tomcat.remoteip.remote-ip-header"))
+                .isEqualTo("x-real-ip");
+        assertThat(properties.getProperty("server.tomcat.remoteip.protocol-header"))
+                .isEqualTo("x-forwarded-proto");
+        assertThat(properties.getProperty("server.tomcat.remoteip.internal-proxies"))
+                .isEqualTo("172\\.29\\.81\\.2");
+        assertThat(properties.getProperty("miriyum.rate-limit.public-store-read.max-requests"))
+                .isEqualTo("${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS:60}");
+        assertThat(properties.getProperty("miriyum.rate-limit.public-store-read.window-seconds"))
+                .isEqualTo("${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS:60}");
+        assertThat(properties.getProperty("miriyum.store-search.available-candidate-limit"))
+                .isEqualTo("${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}");
     }
 }

@@ -48,6 +48,11 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "RESERVATION_009",
             "요청 인원이 매장 최소·최대 정책을 벗어났습니다."
+    ),
+    TIME_POLICY_CONFLICT(
+            HttpStatus.CONFLICT,
+            "RESERVATION_010",
+            "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."
     );
 
     private final HttpStatus httpStatus;

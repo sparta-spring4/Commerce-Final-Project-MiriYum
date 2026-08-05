@@ -13,6 +13,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
+import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationSummaryResponse;
 import com.miriyum.domain.reservation.service.ReservationService;
@@ -22,7 +23,7 @@ import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.PageMetadata;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -199,8 +200,10 @@ class StoreReservationControllerTest {
                 List.of(new StoreReservationSummaryResponse(
                         "77",
                         LocalDate.of(2026, 8, 1),
-                        LocalTime.of(18, 0),
-                        LocalTime.of(19, 0),
+                        CustomerReservationTimeStatus.RESOLVED,
+                        OffsetDateTime.parse("2026-08-01T18:00:00+09:00"),
+                        OffsetDateTime.parse("2026-08-01T19:00:00+09:00"),
+                        "Asia/Seoul",
                         3,
                         "CONFIRMED"
                 )),

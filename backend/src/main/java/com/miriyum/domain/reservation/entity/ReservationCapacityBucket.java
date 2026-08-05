@@ -79,7 +79,7 @@ public class ReservationCapacityBucket {
         this.startTime = requireNonNull(startTime, "startTime");
         this.endTime = requireNonNull(endTime, "endTime");
         requireIncreasingServiceTime(this.startTime, this.endTime);
-        this.maxPeople = requireNonNegative(maxPeople, "maxPeople");
+        this.maxPeople = requirePositive(maxPeople, "maxPeople");
         this.maxTeams = requireNonNegative(maxTeams, "maxTeams");
         this.occupiedPeople = requireNonNegative(occupiedPeople, "occupiedPeople");
         this.occupiedTeams = requireNonNegative(occupiedTeams, "occupiedTeams");
@@ -145,6 +145,24 @@ public class ReservationCapacityBucket {
                 infantsAllowed,
                 policyVersion
         );
+    }
+
+    /**
+     * 현재 점유 스냅샷에서 일행 한 팀을 추가로 수용할 수 있는지 판정한다.
+     *
+     * @param partySize 요청 일행 전체 인원
+     * @param includesInfants 영유아 동반 여부
+     * @return 인원·팀·일행 범위·영유아 정책을 모두 만족하면 {@code true}
+     */
+    public boolean canAccept(int partySize, boolean includesInfants) {
+        if (partySize < minPartySize || partySize > maxPartySize) {
+            return false;
+        }
+        if (includesInfants && !infantsAllowed) {
+            return false;
+        }
+        return occupiedPeople <= maxPeople - partySize
+                && occupiedTeams < maxTeams;
     }
 
     private static Long requirePositive(Long value, String fieldName) {

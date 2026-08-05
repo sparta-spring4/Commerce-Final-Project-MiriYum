@@ -21,6 +21,8 @@ import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.domain.store.schedule.dto.TimeRangeRequest;
+import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
+import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
 import com.miriyum.domain.store.schedule.dto.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.store.schedule.dto.WeeklyReservationTimeSlotsRequest;
 import com.miriyum.domain.store.schedule.entity.OperatingScheduleVersion;
@@ -45,6 +47,8 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -687,6 +691,155 @@ class StoreScheduleServiceTest {
                 .isSameAs(failure);
     }
 
+    @Test
+    void emptyReservationWindowRequestReturnsEmptyWithoutRepositoryCalls() {
+        assertThat(scheduleService.resolveReservationWindows(
+                List.of(),
+                LocalDate.of(2026, 8, 3),
+                LocalTime.NOON)).isEmpty();
+
+        then(stateRepository).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void reservationWindowsPreserveInputOrderAndDuplicatesAndFailClosed() {
+        StoreScheduleState firstState = StoreScheduleState.initialize(7L);
+        firstState.activateReservation(31L);
+        StoreScheduleState secondState = StoreScheduleState.initialize(8L);
+        secondState.activateReservation(32L);
+        StoreScheduleState staleState = StoreScheduleState.initialize(9L);
+        staleState.activateReservation(39L);
+        ReservationScheduleVersion first = activeReservationVersion(
+                7L,
+                31L,
+                "Asia/Seoul",
+                new WeeklyInterval(
+                        DayOfWeek.MONDAY,
+                        LocalTime.of(19, 0),
+                        LocalTime.of(1, 0),
+                        true,
+                        ScheduleIntervalKind.RESERVATION_SLOT,
+                        1140,
+                        1500));
+        ReservationScheduleVersion second = activeReservationVersion(
+                8L,
+                32L,
+                "Asia/Seoul",
+                new WeeklyInterval(
+                        DayOfWeek.SUNDAY,
+                        LocalTime.of(23, 0),
+                        LocalTime.of(1, 0),
+                        true,
+                        ScheduleIntervalKind.RESERVATION_SLOT,
+                        10020,
+                        10140));
+        given(stateRepository.findAllByStoreIdIn(List.of(8L, 7L, 9L)))
+                .willReturn(List.of(firstState, secondState, staleState));
+        given(reservationRepository.findActiveByIdsWithEntries(
+                List.of(31L, 32L, 39L),
+                ScheduleVersionStatus.ACTIVE))
+                .willReturn(List.of(first, second));
+
+        List<StoreReservationWindowResult> results =
+                scheduleService.resolveReservationWindows(
+                        List.of(8L, 7L, 9L, 8L),
+                        LocalDate.of(2026, 8, 3),
+                        LocalTime.of(0, 30));
+
+        assertThat(results).extracting(StoreReservationWindowResult::storeId)
+                .containsExactly(8L, 7L, 9L, 8L);
+        assertThat(results).extracting(StoreReservationWindowResult::status)
+                .containsExactly(
+                        StoreReservationWindowStatus.ACCEPTING,
+                        StoreReservationWindowStatus.NOT_ACCEPTING,
+                        StoreReservationWindowStatus.NOT_ACCEPTING,
+                        StoreReservationWindowStatus.ACCEPTING);
+        assertThat(results.getFirst().windowStartAt())
+                .isEqualTo(LocalDateTime.of(2026, 8, 2, 23, 0));
+        assertThat(results.getFirst().windowEndAt())
+                .isEqualTo(LocalDateTime.of(2026, 8, 3, 1, 0));
+        assertThat(results.getLast()).isEqualTo(results.getFirst());
+        then(stateRepository).should(times(1))
+                .findAllByStoreIdIn(List.of(8L, 7L, 9L));
+        then(reservationRepository).should(times(1))
+                .findActiveByIdsWithEntries(
+                        List.of(31L, 32L, 39L),
+                        ScheduleVersionStatus.ACTIVE);
+    }
+
+    @Test
+    void reservationWindowUsesInclusiveStartAndExclusiveEnd() {
+        StoreScheduleState state = StoreScheduleState.initialize(STORE_ID);
+        state.activateReservation(31L);
+        ReservationScheduleVersion version = activeReservationVersion(
+                STORE_ID,
+                31L,
+                "Asia/Seoul",
+                reservationIntervals().getFirst());
+        given(stateRepository.findAllByStoreIdIn(List.of(STORE_ID)))
+                .willReturn(List.of(state));
+        given(reservationRepository.findActiveByIdsWithEntries(
+                List.of(31L), ScheduleVersionStatus.ACTIVE))
+                .willReturn(List.of(version));
+
+        StoreReservationWindowResult atStart = scheduleService
+                .resolveReservationWindows(
+                        List.of(STORE_ID),
+                        LocalDate.of(2026, 8, 3),
+                        LocalTime.of(19, 0))
+                .getFirst();
+        StoreReservationWindowResult atEnd = scheduleService
+                .resolveReservationWindows(
+                        List.of(STORE_ID),
+                        LocalDate.of(2026, 8, 4),
+                        LocalTime.of(1, 0))
+                .getFirst();
+
+        assertThat(atStart.status()).isEqualTo(StoreReservationWindowStatus.ACCEPTING);
+        assertThat(atStart.windowEndAt())
+                .isEqualTo(LocalDateTime.of(2026, 8, 4, 1, 0));
+        assertThat(atEnd.status())
+                .isEqualTo(StoreReservationWindowStatus.NOT_ACCEPTING);
+    }
+
+    @Test
+    void reservationWindowRequestRejectsInvalidArgumentsBeforeQuerying() {
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                null,
+                LocalDate.of(2026, 8, 3),
+                LocalTime.NOON)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                List.of(0L),
+                LocalDate.of(2026, 8, 3),
+                LocalTime.NOON)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                Arrays.asList(STORE_ID, null),
+                LocalDate.of(2026, 8, 3),
+                LocalTime.NOON)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                List.of(STORE_ID),
+                null,
+                LocalTime.NOON)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                List.of(STORE_ID),
+                LocalDate.of(2026, 8, 3),
+                null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                List.of(STORE_ID),
+                LocalDate.of(2026, 8, 3),
+                LocalTime.of(12, 0, 1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scheduleService.resolveReservationWindows(
+                List.of(STORE_ID),
+                LocalDate.of(2026, 8, 3),
+                LocalTime.NOON.plusNanos(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        then(stateRepository).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
     private void runBusinessWorkOnExecute() {
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
             Supplier<BusinessResult<?>> work = invocation.getArgument(1);
@@ -703,6 +856,23 @@ class StoreScheduleServiceTest {
 
     private StoreScheduleState state() {
         return StoreScheduleState.initialize(STORE_ID);
+    }
+
+    private ReservationScheduleVersion activeReservationVersion(
+            long storeId,
+            long versionId,
+            String timeZoneId,
+            WeeklyInterval interval
+    ) {
+        ReservationScheduleVersion version = ReservationScheduleVersion.createDraft(
+                storeId,
+                1L,
+                21L,
+                timeZoneId,
+                List.of(interval));
+        version.activate(FIXED_CLOCK.instant(), "test active reservation window");
+        ReflectionTestUtils.setField(version, "id", versionId);
+        return version;
     }
 
     private WeeklyOperatingHoursRequest operatingRequest() {

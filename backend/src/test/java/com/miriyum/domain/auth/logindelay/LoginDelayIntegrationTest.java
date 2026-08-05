@@ -30,7 +30,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,6 +52,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * requests must not reach BCrypt and are exposed as the same AUTH_005 response as all other
  * credential failures.</p>
  */
+@Tag("integration")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -67,7 +71,7 @@ class LoginDelayIntegrationTest {
     private static final String WRONG_PASSWORD = "WrongPassword123!";
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -323,6 +327,11 @@ class LoginDelayIntegrationTest {
         List<Future<?>> futures = new ArrayList<>();
         boolean completedInTime;
 
+        willAnswer(invocation -> {
+            Thread.sleep(500);
+            return invocation.callRealMethod();
+        }).given(passwordEncoder).matches(eq(WRONG_PASSWORD), anyString());
+
         try (ExecutorService executor = Executors.newFixedThreadPool(threadCount)) {
             for (int attempt = 0; attempt < threadCount; attempt++) {
                 futures.add(executor.submit(() -> {
@@ -356,6 +365,12 @@ class LoginDelayIntegrationTest {
     }
 
     /** 틀린 비밀번호로 지정한 횟수만큼 실패시킨다. 던져진 오류를 확인할 필요가 없는 준비 단계용이다. */
+    @RepeatedTest(50)
+    void concurrentFailuresRemainStableUnderRepeatedContention()
+            throws InterruptedException, ExecutionException {
+        concurrentFailuresDoNotLoseCount();
+    }
+
     private void failLogin(int times) {
         for (int attempt = 0; attempt < times; attempt++) {
             catchLoginFailure(EMAIL);

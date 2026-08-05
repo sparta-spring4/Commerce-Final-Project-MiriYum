@@ -2,6 +2,8 @@ package com.miriyum.domain.store.schedule.repository;
 
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -11,6 +13,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface StoreScheduleStateRepository
         extends JpaRepository<StoreScheduleState, Long> {
+
+    List<StoreScheduleState> findAllByStoreIdIn(Collection<Long> storeIds);
 
     @Modifying
     @Query(value = """

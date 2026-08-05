@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.store.core.dto.ManagedStoreResponse;
 import com.miriyum.domain.store.core.dto.StoreCreateRequest;
@@ -13,9 +14,20 @@ import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.store.menu.entity.Menu;
+import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.store.menu.enums.MenuVisibility;
+import com.miriyum.domain.store.menu.model.AllergenDisclosure;
+import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.store.menu.model.MenuContent;
+import com.miriyum.domain.store.menu.repository.MenuRepository;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -33,10 +45,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -47,6 +61,7 @@ class StoreServiceTest {
 
     private static final long OPERATOR_ID = 11L;
     private static final long STORE_ID = 7L;
+    private static final long MENU_ID = 21L;
     private static final String IDEMPOTENCY_KEY = "123e4567-e89b-12d3-a456-426614174000";
     private static final Clock FIXED_CLOCK = Clock.fixed(
             Instant.parse("2026-07-31T03:00:00Z"),
@@ -57,6 +72,9 @@ class StoreServiceTest {
 
     @Mock
     private StoreRepository storeRepository;
+
+    @Mock
+    private MenuRepository menuRepository;
 
     @Mock
     private StoreCatalogPolicy catalogPolicy;
@@ -73,6 +91,7 @@ class StoreServiceTest {
         storeService = new StoreService(
                 operatorAccountService,
                 storeRepository,
+                menuRepository,
                 catalogPolicy,
                 idempotencyExecutor,
                 objectMapper,
@@ -198,6 +217,240 @@ class StoreServiceTest {
 
         assertThat(authority)
                 .isEqualTo(new StoreScheduleAuthority(STORE_ID, "Asia/Seoul"));
+    }
+
+    @Test
+    void menuMutationAuthorityReturnsLockedStorePickupEligibility() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+
+        StoreMenuAuthority authority =
+                storeService.requireMenuMutationAuthority(OPERATOR_ID, STORE_ID);
+
+        assertThat(authority)
+                .isEqualTo(new StoreMenuAuthority(
+                        STORE_ID,
+                        com.miriyum.domain.store.core.enums.PickupEligibility.ELIGIBLE));
+    }
+
+    @Test
+    void transactionEligibilityRejectsMissingStoreBeforeLoadingMenu() {
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
+
+        then(menuRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsUnapprovedStoreBeforeLoadingMenu() {
+        Store store = transactionStore();
+        ReflectionTestUtils.setField(store, "verificationStatus", null);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.VERIFICATION_STATE_CONFLICT);
+
+        then(menuRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsTemporarilyClosedStoreBeforeLoadingMenu() {
+        Store store = transactionStore();
+        ReflectionTestUtils.setField(
+                store, "operationStatus", OperationStatus.TEMPORARILY_CLOSED);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+
+        then(menuRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsClosedStoreBeforeLoadingMenu() {
+        Store store = transactionStore();
+        store.close();
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
+
+        then(menuRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsMissingMenu() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(transactionStore()));
+        given(menuRepository.findByIdForUpdate(MENU_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_NOT_FOUND);
+    }
+
+    @Test
+    void transactionEligibilityHidesWrongStoreOwnershipAsMissingMenu() {
+        Menu menu = menu(STORE_ID + 1, true, true);
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        assertThatThrownBy(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_NOT_FOUND);
+    }
+
+    @Test
+    void transactionEligibilityRejectsUnpublishedMenu() {
+        stubTransactionStoreAndMenu(transactionStore(), menu(STORE_ID, true, true));
+
+        assertMenuStateConflict(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID));
+    }
+
+    @Test
+    void transactionEligibilityRejectsHiddenMenu() {
+        Menu menu = publishedMenu(true, true);
+        menu.changeVisibility(MenuVisibility.HIDDEN);
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        assertMenuStateConflict(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID));
+    }
+
+    @Test
+    void transactionEligibilityRejectsPausedMenu() {
+        Menu menu = publishedMenu(true, true);
+        menu.changeSellingStatus(MenuSellingStatus.PAUSED);
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        assertMenuStateConflict(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID));
+    }
+
+    @Test
+    void transactionEligibilityRejectsSoldOutMenu() {
+        Menu menu = publishedMenu(true, true);
+        menu.changeSellingStatus(MenuSellingStatus.SOLD_OUT);
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        assertMenuStateConflict(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID));
+    }
+
+    @Test
+    void transactionEligibilityRejectsRetiredMenu() {
+        Menu menu = publishedMenu(true, true);
+        menu.retire(FIXED_CLOCK.instant().plusSeconds(2));
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        assertMenuStateConflict(() ->
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID));
+    }
+
+    @Test
+    void transactionEligibilityReturnsCurrentPublishedVersionAndCapabilities() {
+        Menu menu = publishedMenu(true, true);
+        menu.appendDraft(menuContent("카페라떼", 6_500, true, true), OPERATOR_ID,
+                FIXED_CLOCK.instant().plusSeconds(2));
+        menu.publish(FIXED_CLOCK.instant().plusSeconds(3));
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result).isEqualTo(new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 2, "카페라떼", 6_500, true, true));
+        InOrder lockOrder = inOrder(storeRepository, menuRepository);
+        lockOrder.verify(storeRepository).findByIdForUpdate(STORE_ID);
+        lockOrder.verify(menuRepository).findByIdForUpdate(MENU_ID);
+        then(operatorAccountService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void transactionEligibilityRejectsBlankMenuName() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, " ", 5_000, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menuName must not be blank");
+    }
+
+    @Test
+    void transactionEligibilityRejectsNegativeUnitPrice() {
+        assertThatThrownBy(() -> new MenuTransactionEligibility(
+                STORE_ID, MENU_ID, 1, "아메리카노", -1, true, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unitPrice must not be negative");
+    }
+
+    @Test
+    void transactionEligibilityCombinesPublishedVersionCapabilities() {
+        Menu menu = publishedMenu(false, false);
+        stubTransactionStoreAndMenu(transactionStore(), menu);
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result.menuHoldEligible()).isFalse();
+        assertThat(result.pickupEligible()).isFalse();
+    }
+
+    @Test
+    void transactionEligibilityCombinesStoreModes() {
+        Store store = storeOwnedBy(OPERATOR_ID, BusinessType.CAFE, false, false);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result.menuHoldEligible()).isFalse();
+        assertThat(result.pickupEligible()).isFalse();
+    }
+
+    @Test
+    void transactionEligibilityDisablesMenuHoldWhenReservationModeIsDisabled() {
+        Store store = transactionStore();
+        ReflectionTestUtils.setField(store, "reservationEnabled", false);
+        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result.menuHoldEligible()).isFalse();
+    }
+
+    @Test
+    void transactionEligibilityCombinesStorePickupEligibility() {
+        Store store = transactionStore();
+        ReflectionTestUtils.setField(
+                store, "pickupEligibility", PickupEligibility.INELIGIBLE);
+        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
+
+        MenuTransactionEligibility result =
+                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
+
+        assertThat(result.menuHoldEligible()).isTrue();
+        assertThat(result.pickupEligible()).isFalse();
     }
 
     @Test
@@ -394,10 +647,19 @@ class StoreServiceTest {
     }
 
     private Store storeOwnedBy(long operatorId) {
+        return storeOwnedBy(operatorId, BusinessType.CAFE, true, true);
+    }
+
+    private Store storeOwnedBy(
+            long operatorId,
+            BusinessType businessType,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled
+    ) {
         return Store.create(
                 operatorId,
                 "1234567890",
-                BusinessType.CAFE,
+                businessType,
                 "미리윰",
                 "",
                 Region.SEOUL,
@@ -405,10 +667,75 @@ class StoreServiceTest {
                 "CAFE_BAKERY",
                 Set.of("DATE"),
                 true,
-                true,
-                true,
+                menuHoldEnabled,
+                pickupEnabled,
                 "Asia/Seoul",
                 LocalDateTime.of(2026, 7, 31, 12, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1");
+    }
+
+    private Store transactionStore() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        return store;
+    }
+
+    private Menu menu(long storeId, boolean holdAllowed, boolean pickupAllowed) {
+        Menu menu = Menu.create(
+                storeId,
+                menuContent(holdAllowed, pickupAllowed),
+                OPERATOR_ID,
+                FIXED_CLOCK.instant());
+        ReflectionTestUtils.setField(menu, "id", MENU_ID);
+        return menu;
+    }
+
+    private Menu publishedMenu(boolean holdAllowed, boolean pickupAllowed) {
+        Menu menu = menu(STORE_ID, holdAllowed, pickupAllowed);
+        menu.publish(FIXED_CLOCK.instant().plusSeconds(1));
+        return menu;
+    }
+
+    private MenuContent menuContent(boolean holdAllowed, boolean pickupAllowed) {
+        return menuContent("아메리카노", 5_000, holdAllowed, pickupAllowed);
+    }
+
+    private MenuContent menuContent(
+            String name,
+            int price,
+            boolean holdAllowed,
+            boolean pickupAllowed
+    ) {
+        return new MenuContent(
+                name,
+                "설명",
+                price,
+                false,
+                "COFFEE",
+                List.of(),
+                List.of(),
+                holdAllowed,
+                pickupAllowed,
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new AllergenDisclosure(
+                        AllergenIngredientCode.MILK,
+                        AllergenDisclosureStatus.CONTAINS)),
+                DisclosureRegistrationStatus.NOT_APPLICABLE,
+                List.of(),
+                false);
+    }
+
+    private void stubTransactionStoreAndMenu(Store store, Menu menu) {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(store));
+        given(menuRepository.findByIdForUpdate(MENU_ID))
+                .willReturn(Optional.of(menu));
+    }
+
+    private void assertMenuStateConflict(ThrowingCallable invocation) {
+        assertThatThrownBy(invocation)
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT);
     }
 }

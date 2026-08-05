@@ -10,6 +10,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -37,6 +38,8 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.issuer=miriyum"
         })
 @AutoConfigureMockMvc
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers(disabledWithoutDocker = true)
 class CatalogSecurityIT {
 

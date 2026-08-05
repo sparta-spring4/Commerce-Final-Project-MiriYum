@@ -40,6 +40,14 @@
 - H2 통과만으로 MySQL 고유 동작이나 동시성을 증명하지 않는다.
 - DB 검증이 인수 조건인데 Testcontainers가 구성되지 않았으면 `NOT CONFIGURED` 또는 `BLOCKED`이며 완료·병합 가능으로 판정하지 않는다.
 
+### CI 테스트 분류
+
+- 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
+- `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
+- `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA/B` task는 각각 `integration-shard-a/b` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
+- `Backend CI`는 unit job과 두 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
+
 ## `1차 MVP` 검증 gate
 
 ### Testcontainers MySQL
@@ -135,5 +143,7 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 ## 배포·복구 gate
 
 배포 자동화나 AWS·Terraform은 핵심 흐름, Flyway, 비밀 분리, 상태 확인, Docker 실행, 백업·복원과 비용 책임이 검증된 뒤 승인한다. S3를 `고도화`에서 사용한다는 결정만으로 전체 AWS 배포·Terraform을 활성화하지 않는다.
+
+[#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)의 ECR·SSM 백엔드 API 사전 배포는 `staging` EC2만 대상으로 하며 프론트엔드 사용자 shell과 최종 same-origin 배포를 대체하지 않는다. 이 경로는 ECR 이미지의 SHA 추적, 비밀의 서버 분리, SSM 배포, Docker 실행과 loopback health 확인만 증명한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 `dev` 배포 실행·ECR push·SSM command·EC2 health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, 프론트엔드 소유자가 `/` 정적 제공과 `/api` 프록시를 포함한 후속 범위를 승인할 때까지 핵심 사용자 흐름 배포 성공으로 선언하지 않는다. 운영 배포는 이 경로와 분리해 `main` 전용 workflow, 별도 EC2·IAM 역할·GitHub Environment 승인으로 구성한다.
 
 롤링 배포는 expand→migrate→contract, 이전·신규 버전 혼합 계약, 작업 임대 인계와 롤백을 검증한다. 복구 성공은 원장·객체·캐시·삭제 전파·외부 대사까지 확인한 뒤에만 선언한다.

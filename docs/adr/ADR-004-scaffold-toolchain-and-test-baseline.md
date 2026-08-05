@@ -67,3 +67,17 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 - 백엔드 게이트는 컴파일·단위 테스트에 더해 실제 MySQL 컨테이너에서 Flyway clean-start, 제약 위반, 트랜잭션 롤백, 동시 조건부 갱신, 중복 멱등 키를 검증한다.
 - 개발 머신에 설치된 임의 MySQL 인스턴스나 공유 DB 상태에 의존하지 않고 테스트마다 재현 가능한 스키마와 데이터를 만든다.
 - 컨테이너 시작 시간과 Docker 실행 환경이라는 비용이 추가된다. 빠른 단위 테스트와 MySQL 통합 테스트를 분리하되, DB 의미에 의존하는 변경은 통합 게이트를 생략할 수 없다.
+
+## 2026-08-05 날짜별 개정
+
+### CI 테스트 분리와 병렬 실행
+
+- Testcontainers MySQL 실행 시간이 CI 대부분을 차지한다는 측정 결과에 따라 JUnit 5의 `@Tag("integration")`으로 빠른 테스트와 통합 테스트를 분리한다.
+- `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스는 `@Tag("integration")`을 선언한다. Gradle 검증 task가 이 marker를 사용하는 클래스의 태그 누락을 실패시킨다.
+- GitHub Actions는 `unit-test`, `integration-test-a`, `integration-test-b`를 병렬 실행한다. `dev` 브랜치 보호와 호환되는 `backend-ci` 집계 job은 세 job과 CD workflow 계약 검증이 모두 성공할 때만 성공한다.
+- `build`는 두 테스트 task를 모두 포함하므로 로컬 전체 검증과 CI의 병합 gate 의미를 유지한다. 병렬화는 테스트를 생략하는 변경이 아니라 wall-clock 시간을 줄이는 변경이다.
+
+### 통합 테스트 shard 분할
+
+- `integration-test`는 `integration-test-a`, `integration-test-b` 두 matrix job으로 다시 분할해 병렬 실행한다. 모든 통합 테스트 클래스는 `integration-shard-a` 또는 `integration-shard-b` 중 정확히 하나를 추가로 선언한다.
+- Gradle 검증 task는 통합 marker와 shard tag의 누락 또는 중복을 실패시킨다. 두 shard가 모두 성공해야 `backend-ci` 집계 job이 성공하므로 기존 Required check 이름과 전체 테스트 게이트는 유지한다.

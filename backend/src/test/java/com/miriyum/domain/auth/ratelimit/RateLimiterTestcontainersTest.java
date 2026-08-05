@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -32,6 +33,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 검증한다. H2는 MySQL 전용 원자적 upsert 문법을 지원하지 않아 이 두 가지의 증거로
  * 쓸 수 없다({@code docs/service-policies/18-scale-reliability.md} SCALE-014, 이슈 #63).
  */
+@Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -50,7 +53,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class RateLimiterTestcontainersTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {

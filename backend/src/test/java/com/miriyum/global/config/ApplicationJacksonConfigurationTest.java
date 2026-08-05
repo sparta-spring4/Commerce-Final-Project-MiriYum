@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -23,6 +24,8 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.jwt.issuer=miriyum"
         })
+@Tag("integration")
+@Tag("integration-shard-a")
 @Testcontainers(disabledWithoutDocker = true)
 class ApplicationJacksonConfigurationTest {
 
