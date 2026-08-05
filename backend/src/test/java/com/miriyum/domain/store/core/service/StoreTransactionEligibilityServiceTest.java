@@ -179,7 +179,8 @@ class StoreTransactionEligibilityServiceTest {
                 eligibilityService.requirePickupTransactionEligibility(STORE_ID);
 
         assertThat(result)
-                .isEqualTo(new StorePickupTransactionEligibility(STORE_ID));
+                .isEqualTo(new StorePickupTransactionEligibility(
+                        STORE_ID, "미리윰", "Asia/Seoul"));
         then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
     }
