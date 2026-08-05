@@ -74,7 +74,7 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 
 - Testcontainers MySQL 실행 시간이 CI 대부분을 차지한다는 측정 결과에 따라 JUnit 5의 `@Tag("integration")`으로 빠른 테스트와 통합 테스트를 분리한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스는 `@Tag("integration")`을 선언한다. Gradle 검증 task가 이 marker를 사용하는 클래스의 태그 누락을 실패시킨다.
-- GitHub Actions는 `unit-test`와 `integration-test`를 병렬 실행한다. `dev` 브랜치 보호와 호환되는 `backend-ci` 집계 job은 두 job과 CD workflow 계약 검증이 모두 성공할 때만 성공한다.
+- GitHub Actions는 `unit-test`, `integration-test-a`, `integration-test-b`를 병렬 실행한다. `dev` 브랜치 보호와 호환되는 `backend-ci` 집계 job은 세 job과 CD workflow 계약 검증이 모두 성공할 때만 성공한다.
 - `build`는 두 테스트 task를 모두 포함하므로 로컬 전체 검증과 CI의 병합 gate 의미를 유지한다. 병렬화는 테스트를 생략하는 변경이 아니라 wall-clock 시간을 줄이는 변경이다.
 
 ### 통합 테스트 shard 분할
