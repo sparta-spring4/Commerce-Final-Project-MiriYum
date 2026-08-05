@@ -9,6 +9,7 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
@@ -40,6 +41,7 @@ import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationS
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
+import jakarta.persistence.EntityManagerFactory;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -53,6 +55,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
@@ -86,6 +90,7 @@ class MenuHoldRuntimeIT {
     }
 
     @Autowired MenuHoldServiceRuntime service;
+    @Autowired MenuHoldSnapshotQueryService snapshotQueryService;
     @Autowired MenuHoldRepository holdRepository;
     @Autowired MenuInventoryBucketRepository bucketRepository;
     @Autowired ReservationRepository reservationRepository;
@@ -95,6 +100,7 @@ class MenuHoldRuntimeIT {
     @Autowired MenuRepository menuRepository;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TransactionTemplate transactions;
+    @Autowired EntityManagerFactory entityManagerFactory;
     @MockitoSpyBean StoreService storeService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
 
@@ -183,6 +189,67 @@ class MenuHoldRuntimeIT {
                 .containsEntry("menu_name_snapshot", "Americano")
                 .containsEntry("unit_price_snapshot", 5_000)
                 .containsEntry("menu_policy_version", 1L);
+    }
+
+    @Test
+    @DisplayName("예약 당시 메뉴 스냅샷을 저장 순서대로 단일 쿼리에 조회한다")
+    void queriesImmutableSnapshotsInStableOrderWithOneStatement() {
+        long secondMenuId = transactions.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(storeId, menuContent("Cafe Latte", 6_500), consumerId,
+                        Instant.parse("2026-08-01T00:00:00Z"))).getId());
+        willReturn(new MenuTransactionEligibility(
+                storeId, secondMenuId, 1, "Cafe Latte", 6_500, true, false))
+                .given(storeService).requireMenuTransactionEligibility(storeId, secondMenuId);
+        transactions.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(bucket(menuId, 2));
+            bucketRepository.saveAndFlush(bucket(secondMenuId, 1));
+        });
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        MenuHoldCreateCommand command = new MenuHoldCreateCommand(
+                reservation.getId(), storeId, consumerId,
+                LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                Instant.parse("2026-08-10T03:00:00Z"),
+                Instant.parse("2026-08-10T04:00:00Z"),
+                "snapshot-query", List.of(
+                        new MenuSelection(secondMenuId, 1),
+                        new MenuSelection(menuId, 2)));
+        transactions.executeWithoutResult(status -> service.create(command));
+
+        transactions.executeWithoutResult(status -> {
+            Menu menu = menuRepository.findById(menuId).orElseThrow();
+            menu.publish(Instant.parse("2026-08-01T00:00:01Z"));
+            menu.appendDraft(menuContent("Changed", 9_000), 1L,
+                    Instant.parse("2026-08-01T00:00:02Z"));
+            menu.publish(Instant.parse("2026-08-01T00:00:03Z"));
+            menuRepository.saveAndFlush(menu);
+        });
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class)
+                .getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+
+        List<MenuHoldItemResult> result =
+                snapshotQueryService.findByReservationId(reservation.getId());
+
+        assertThat(result).containsExactly(
+                new MenuHoldItemResult(menuId, "Americano", 5_000L, 2),
+                new MenuHoldItemResult(secondMenuId, "Cafe Latte", 6_500L, 1));
+        assertThat(statistics.getQueries())
+                .filteredOn(query -> query.contains("MenuHoldItemResult"))
+                .singleElement()
+                .satisfies(query -> assertThat(
+                        statistics.getQueryStatistics(query).getExecutionCount()).isEqualTo(1L));
+    }
+
+    @Test
+    @DisplayName("메뉴 홀드가 없는 예약은 빈 메뉴 스냅샷 목록을 반환한다")
+    void returnsEmptySnapshotsWhenReservationHasNoMenuHold() {
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+
+        assertThat(snapshotQueryService.findByReservationId(reservation.getId())).isEmpty();
     }
 
     @Test
@@ -457,7 +524,12 @@ class MenuHoldRuntimeIT {
     }
 
     private MenuInventoryBucket bucket(int online) {
-        return MenuInventoryBucket.create(menuId, LocalDate.of(2026, 8, 10), LocalTime.NOON,
+        return bucket(menuId, online);
+    }
+
+    private MenuInventoryBucket bucket(long selectedMenuId, int online) {
+        return MenuInventoryBucket.create(selectedMenuId,
+                LocalDate.of(2026, 8, 10), LocalTime.NOON,
                 LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), "Asia/Seoul", 1L,
                 online, online, 0, 0, false);
     }
