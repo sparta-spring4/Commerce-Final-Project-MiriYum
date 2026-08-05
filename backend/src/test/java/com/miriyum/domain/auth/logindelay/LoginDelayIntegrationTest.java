@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -51,6 +52,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * requests must not reach BCrypt and are exposed as the same AUTH_005 response as all other
  * credential failures.</p>
  */
+@Tag("integration")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

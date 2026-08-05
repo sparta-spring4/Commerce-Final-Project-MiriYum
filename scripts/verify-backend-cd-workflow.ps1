@@ -11,7 +11,8 @@ $requiredFragments = @(
     "id: ecr-image",
     "steps.ecr-image.outputs.exists != 'true'",
     "Manual deployment requires an existing immutable ECR image tag",
-    'ref: ${{ inputs.image_tag }}'
+    'ref: ${{ inputs.image_tag }}',
+    "retry-max-attempts: 2"
 )
 
 foreach ($fragment in $requiredFragments) {
@@ -20,4 +21,4 @@ foreach ($fragment in $requiredFragments) {
     }
 }
 
-Write-Output "Backend CD immutable ECR retry safeguard is configured."
+Write-Output "Backend CD immutable ECR and OIDC safeguards are configured."
