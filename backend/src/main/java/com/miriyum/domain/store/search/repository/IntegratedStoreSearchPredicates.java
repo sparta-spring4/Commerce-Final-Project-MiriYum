@@ -6,7 +6,6 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.menu.entity.QMenu;
 import com.miriyum.domain.store.menu.entity.QMenuVersion;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.store.menu.enums.MenuVisibility;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
@@ -58,7 +57,7 @@ final class IntegratedStoreSearchPredicates {
         boolean hasMenuFilter = !query.menuCategoryCodes().isEmpty()
                 || query.priceRange() != null;
         if (hasMenuFilter) {
-            predicate.and(currentSellingMenuExists(store, query, false));
+            predicate.and(currentPublishedVisibleMenuExists(store, query, false));
         }
         if (!query.remainingKeyword().isEmpty()) {
             String pattern = literalContainsPattern(query.remainingKeyword());
@@ -68,11 +67,11 @@ final class IntegratedStoreSearchPredicates {
                     pattern, LIKE_ESCAPE);
             predicate.and(storeNameMatches
                     .or(regionNameMatches)
-                    .or(currentSellingMenuExists(store, query, true)));
+                    .or(currentPublishedVisibleMenuExists(store, query, true)));
         }
     }
 
-    private static BooleanExpression currentSellingMenuExists(
+    private static BooleanExpression currentPublishedVisibleMenuExists(
             QStore store,
             IntegratedStoreSearchQuery query,
             boolean requireKeyword
@@ -84,7 +83,6 @@ final class IntegratedStoreSearchPredicates {
                 .and(menu.storeId.eq(store.id))
                 .and(menu.retired.isFalse())
                 .and(menu.visibility.eq(MenuVisibility.VISIBLE))
-                .and(menu.sellingStatus.eq(MenuSellingStatus.SELLING))
                 .and(menu.publishedVersionNumber.eq(version.versionNumber))
                 .and(version.status.eq(MenuVersionStatus.PUBLISHED));
 

@@ -42,15 +42,16 @@ class IntegratedStoreSearchPredicatesTest {
                 .contains("store.tagCodes")
                 .contains("filteredMenu.retired")
                 .contains("filteredMenu.visibility")
-                .contains("filteredMenu.sellingStatus")
                 .contains("filteredMenuVersion.status")
                 .contains("filteredMenuVersion.primaryCategoryCode")
                 .contains(".secondaryCategoryCodes")
                 .contains("filteredMenuVersion.price >=")
                 .contains("filteredMenuVersion.price <=")
-                .contains("escape '!'");
+                .contains("escape '!'")
+                .doesNotContain(".sellingStatus");
         assertThat(rendered.constants())
-                .contains("APPROVED", "CLOSED", "VISIBLE", "SELLING", "PUBLISHED")
+                .contains("APPROVED", "CLOSED", "VISIBLE", "PUBLISHED")
+                .doesNotContain("SELLING")
                 .contains("%100!%!_특선!!%", "10000", "20000");
     }
 

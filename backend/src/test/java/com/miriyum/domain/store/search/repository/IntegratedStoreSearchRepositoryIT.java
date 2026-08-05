@@ -129,13 +129,15 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void exposesOnlyCurrentPublishedVisibleSellingMenuCandidates() {
+    void exposesCurrentPublishedVisibleMenusRegardlessOfSellingStatus() {
         Store selling = storeWithMenu(
                 "판매 매장", "상태키워드", MenuSellingStatus.SELLING,
                 MenuVisibility.VISIBLE, false);
-        storeWithMenu("품절 매장", "상태키워드", MenuSellingStatus.SOLD_OUT,
+        Store soldOut = storeWithMenu(
+                "품절 매장", "상태키워드", MenuSellingStatus.SOLD_OUT,
                 MenuVisibility.VISIBLE, false);
-        storeWithMenu("중지 매장", "상태키워드", MenuSellingStatus.PAUSED,
+        Store paused = storeWithMenu(
+                "중지 매장", "상태키워드", MenuSellingStatus.PAUSED,
                 MenuVisibility.VISIBLE, false);
         storeWithMenu("숨김 매장", "상태키워드", MenuSellingStatus.SELLING,
                 MenuVisibility.HIDDEN, false);
@@ -152,7 +154,8 @@ class IntegratedStoreSearchRepositoryIT {
                 condition(List.of(), List.of(), List.of(), List.of(), null, "상태키워드"),
                 null, null, 20));
 
-        assertThat(ids(result)).containsExactly(selling.getId());
+        assertThat(ids(result)).containsExactlyInAnyOrder(
+                selling.getId(), soldOut.getId(), paused.getId());
     }
 
     @Test
