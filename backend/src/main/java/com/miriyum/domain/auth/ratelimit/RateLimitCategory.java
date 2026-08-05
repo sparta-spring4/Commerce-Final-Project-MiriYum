@@ -8,5 +8,6 @@ public enum RateLimitCategory {
     SIGN_UP,
     LOGIN,
     TOKEN_REFRESH,
-    CSRF_PREPARATION
+    CSRF_PREPARATION,
+    PUBLIC_STORE_READ
 }
