@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.miriyum.MiriyumApplication;
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 공개 매장 조회 요청이 실제 HTTP 보안 체인과 MySQL 카운터를 거쳐 하나의 IP별 한도를
  * 공유하는지 검증한다. H2는 MySQL 전용 원자적 upsert를 지원하지 않는다.
  */
+@Tag("integration")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
