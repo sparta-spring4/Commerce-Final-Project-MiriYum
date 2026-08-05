@@ -17,6 +17,8 @@
 - `MenuInventoryBucket`, bucket ID, lock version, 실제 풀 배분과 원장 행을 공개 DTO에 노출하지 않는다.
 - 새 HTTP API, Pickup aggregate, 공통 멱등 저장, Flyway migration을 추가하지 않는다.
 - 확보·복구는 `Propagation.MANDATORY`, 조회는 read-only 트랜잭션을 사용한다.
+- Testcontainers 통합 테스트에는 `integration`과 `integration-shard-a/b` 중 정확히 하나를 선언한다.
+- 단위·contract 테스트에는 integration shard 태그를 붙이지 않는다.
 - 모든 production 동작은 실패 테스트를 먼저 실행해 의도한 이유로 실패한 뒤 구현한다.
 - `.idea/`와 허용 경로 밖의 사용자 변경은 stage·commit하지 않는다.
 - 커밋 메시지는 `<type>(<scope>): <한글 요약>` 형식을 사용하고 작업 단위별로 나눈다.
@@ -56,6 +58,7 @@
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/contract/MenuInventoryTransactionServiceConsumerContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryTransactionRuntimeIT.java`
+  - `@Tag("integration")`, `@Tag("integration-shard-a")`를 class-level로 선언한다.
 - Modify: `backend/src/test/java/com/miriyum/domain/menuhold/MenuHoldProductionDependencyTest.java`
 
 ---
@@ -156,6 +159,7 @@
 
   실제 MySQL에 현재·과거 정책 버킷과 `AVAILABLE`·`SOLD_OUT`, shared 허용/비허용 버킷을
   저장한다. 현재 정책만 선택되고 `ONSITE`가 온라인 가용량에 포함되지 않는지 검증한다.
+  테스트 클래스에는 `@Tag("integration")`과 `@Tag("integration-shard-a")`를 선언한다.
 
   Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
 
@@ -185,6 +189,10 @@
   Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
 
   Expected: PASS.
+
+  Run: `.\gradlew.bat verifyIntegrationTestTags --rerun-tasks`
+
+  Expected: 새 통합 테스트가 정확히 한 shard에 배정되고 task가 exit 0으로 성공한다.
 
 - [ ] **Step 8: 허용 파일만 stage하고 조회 커밋**
 
@@ -295,6 +303,10 @@
   Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.*" --rerun-tasks`
 
   Expected: PASS.
+
+  Run: `.\gradlew.bat verifyIntegrationTestTags --rerun-tasks`
+
+  Expected: 모든 통합 테스트가 `integration`과 shard 태그 하나를 가지며 PASS.
 
 - [ ] **Step 5: 허용 파일만 stage하고 정리 커밋**
 

@@ -135,6 +135,10 @@ fixture는 버킷, 원장 또는 실제 풀 배분을 흉내 내지 않는다. �
 4. production source가 Store·Pickup Entity/Repository를 참조하지 않는 구조 검사
 5. 메뉴 홀드 집중 테스트, 전체 backend clean build와 `git diff --check`
 
+새 Testcontainers 통합 테스트 클래스에는 `@Tag("integration")`과 PR #138이 도입한
+`@Tag("integration-shard-a")` 또는 `@Tag("integration-shard-b")` 중 정확히 하나를
+선언한다. 빠른 단위·contract 테스트에는 integration shard 태그를 붙이지 않는다.
+
 ## 커밋 경계
 
 작업은 다음과 같이 독립 검토 가능한 한글 커밋으로 나눈다.
