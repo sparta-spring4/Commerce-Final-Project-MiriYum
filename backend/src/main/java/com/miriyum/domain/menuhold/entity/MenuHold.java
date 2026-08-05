@@ -84,4 +84,38 @@ public class MenuHold extends BaseEntity {
         hold.items = snapshots.stream().map(snapshot -> MenuHoldItem.from(hold, snapshot)).toList();
         return hold;
     }
+
+    /**
+     * 확정 홀드를 해제한다.
+     *
+     * @return 이번 호출이 상태를 전이했으면 {@code true}, 이미 해제 상태면 {@code false}
+     * @throws IllegalStateException 이미 이행 완료된 홀드인 경우
+     */
+    public boolean release() {
+        if (status == MenuHoldStatus.RELEASED) {
+            return false;
+        }
+        if (status == MenuHoldStatus.FULFILLED) {
+            throw new IllegalStateException("fulfilled menu hold cannot be released");
+        }
+        status = MenuHoldStatus.RELEASED;
+        return true;
+    }
+
+    /**
+     * 확정 홀드를 수량 복구 없이 이행 완료한다.
+     *
+     * @return 이번 호출이 상태를 전이했으면 {@code true}, 이미 이행 상태면 {@code false}
+     * @throws IllegalStateException 이미 해제된 홀드인 경우
+     */
+    public boolean fulfill() {
+        if (status == MenuHoldStatus.FULFILLED) {
+            return false;
+        }
+        if (status == MenuHoldStatus.RELEASED) {
+            throw new IllegalStateException("released menu hold cannot be fulfilled");
+        }
+        status = MenuHoldStatus.FULFILLED;
+        return true;
+    }
 }
