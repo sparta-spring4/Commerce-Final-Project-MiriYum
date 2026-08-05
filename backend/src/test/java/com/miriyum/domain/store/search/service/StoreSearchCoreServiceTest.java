@@ -27,6 +27,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -205,8 +206,7 @@ class StoreSearchCoreServiceTest {
                 true, "name,asc", 1, 1);
         List<StoreSearchCandidate> candidates =
                 List.of(candidate(1L), candidate(2L), candidate(3L));
-        given(repository.searchChunk(query, null, StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
-                .willReturn(candidates);
+        given(repository.searchAll(query)).willReturn(candidates);
         given(repository.refreshCurrentlyPublic(candidates)).willReturn(candidates);
         given(reservationService.getAvailabilities(eq(List.of(1L, 2L, 3L)), any()))
                 .willReturn(List.of(
@@ -231,11 +231,9 @@ class StoreSearchCoreServiceTest {
         List<StoreSearchCandidate> first = java.util.stream.LongStream.rangeClosed(1, 200)
                 .mapToObj(this::candidate).toList();
         List<StoreSearchCandidate> second = List.of(candidate(201L));
-        given(repository.searchChunk(query, null, StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
-                .willReturn(first);
-        given(repository.searchChunk(
-                query, first.getLast(), StoreSearchCoreService.AVAILABILITY_BATCH_SIZE))
-                .willReturn(second);
+        List<StoreSearchCandidate> all = new ArrayList<>(first);
+        all.addAll(second);
+        given(repository.searchAll(query)).willReturn(all);
         given(repository.refreshCurrentlyPublic(first)).willReturn(first);
         given(repository.refreshCurrentlyPublic(second)).willReturn(second);
         given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation ->
@@ -257,11 +255,12 @@ class StoreSearchCoreServiceTest {
     }
 
     @Test
-    void reprojectsLatestStoreFieldsAfterReservationBatch() {
+    void reprojectsLatestSafetyStateAfterReservationBatch() {
         StoreSearchQuery query = reservationQuery(false);
         StoreSearchCandidate before = candidate(7L);
         StoreSearchCandidate latest = new StoreSearchCandidate(
-                7L, "최신 이름", Region.SEOUL, "최신 주소", "KOREAN",
+                7L, before.name(), before.region(), before.address(),
+                before.storeCategoryCode(),
                 OperationStatus.TEMPORARILY_CLOSED, false, false, true,
                 before.createdAt());
         given(repository.search(query)).willReturn(new PageImpl<>(
@@ -276,8 +275,8 @@ class StoreSearchCoreServiceTest {
         Page<PublicStoreSummary> result = service.search(query, false);
 
         assertThat(result.getContent()).singleElement().satisfies(summary -> {
-            assertThat(summary.name()).isEqualTo("최신 이름");
-            assertThat(summary.address()).isEqualTo("최신 주소");
+            assertThat(summary.name()).isEqualTo(before.name());
+            assertThat(summary.address()).isEqualTo(before.address());
             assertThat(summary.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
             assertThat(summary.modes().reservationEnabled()).isFalse();
             assertThat(summary.reservationAvailability())

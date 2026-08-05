@@ -108,11 +108,67 @@ class StorePublicQueryServiceTest {
         order.verify(publicReadRepository).findPublicStore(7L);
     }
 
+    @Test
+    void detailReconcilesAvailableWhenFinalStoreIsTemporarilyClosed() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(
+                publicStore(7L, OperationStatus.TEMPORARILY_CLOSED, true)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+        given(stateRepository.findById(7L)).willReturn(Optional.empty());
+        given(reservationService.getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        var result = service.getDetail(
+                7L,
+                new ReservationSearchCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 2),
+                false);
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
+        assertThat(result.modes().reservationEnabled()).isTrue();
+        assertThat(result.reservationAvailability())
+                .isEqualTo(ReservationAvailability.UNAVAILABLE);
+    }
+
+    @Test
+    void detailReconcilesAvailableWhenFinalReservationModeIsDisabled() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(
+                publicStore(7L, OperationStatus.OPEN, false)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+        given(stateRepository.findById(7L)).willReturn(Optional.empty());
+        given(reservationService.getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        var result = service.getDetail(
+                7L,
+                new ReservationSearchCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 2),
+                false);
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.OPEN);
+        assertThat(result.modes().reservationEnabled()).isFalse();
+        assertThat(result.reservationAvailability())
+                .isEqualTo(ReservationAvailability.UNAVAILABLE);
+    }
+
     private static PublicStoreSnapshot publicStore(long id) {
+        return publicStore(id, OperationStatus.OPEN, true);
+    }
+
+    private static PublicStoreSnapshot publicStore(
+            long id,
+            OperationStatus operationStatus,
+            boolean reservationEnabled
+    ) {
         return new PublicStoreSnapshot(
                 id, "미리윰", "", Region.SEOUL, "서울 중구", "Asia/Seoul",
-                "CAFE_BAKERY", List.of("DATE"), OperationStatus.OPEN,
-                PickupEligibility.ELIGIBLE, true, true, true);
+                "CAFE_BAKERY", List.of("DATE"), operationStatus,
+                PickupEligibility.ELIGIBLE, reservationEnabled, true, true);
     }
 
     private static PublicMenu publicMenu(long id) {

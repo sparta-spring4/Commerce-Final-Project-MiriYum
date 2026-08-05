@@ -5,11 +5,11 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.List;
-import java.util.Set;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -129,6 +129,16 @@ public class StoreSearchRepository {
     }
 
     /**
+     * 가용성 필터링에 사용할 후보 필드와 고정 정렬을 한 SQL statement에서 확정한다.
+     */
+    public List<StoreSearchCandidate> searchAll(StoreSearchQuery query) {
+        String sql = SELECT_COLUMNS
+                + PUBLIC_SEARCH_PREDICATE
+                + " ORDER BY " + query.sort().orderByClause();
+        return jdbcTemplate.query(sql, parameters(query), CANDIDATE_ROW_MAPPER);
+    }
+
+    /**
      * 응답 직전에 여전히 공개 가능한 매장만 입력 순서대로 남긴다.
      */
     public List<Long> retainCurrentlyPublic(List<Long> storeIds) {
@@ -149,7 +159,9 @@ public class StoreSearchRepository {
         return storeIds.stream().filter(currentSet::contains).toList();
     }
 
-    /** Re-reads current public fields and preserves the requested candidate order. */
+    /**
+     * 후보 필터·정렬 필드는 보존하고 현재 공개 여부와 모드 상태만 다시 읽는다.
+     */
     public List<StoreSearchCandidate> refreshCurrentlyPublic(
             List<StoreSearchCandidate> candidates
     ) {
@@ -160,17 +172,46 @@ public class StoreSearchRepository {
             return List.of();
         }
         List<Long> storeIds = candidates.stream().map(StoreSearchCandidate::storeId).toList();
-        String sql = SELECT_COLUMNS + """
-                FROM stores s
-                WHERE s.store_id IN (:storeIds)
-                  AND s.verification_status = 'APPROVED'
-                  AND s.operation_status <> 'CLOSED'
-                """;
-        List<StoreSearchCandidate> current = jdbcTemplate.query(
-                sql, new MapSqlParameterSource("storeIds", storeIds), CANDIDATE_ROW_MAPPER);
-        Map<Long, StoreSearchCandidate> byId = new LinkedHashMap<>();
-        current.forEach(candidate -> byId.put(candidate.storeId(), candidate));
-        return storeIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
+        List<CurrentPublicState> current = jdbcTemplate.query("""
+                SELECT store_id, operation_status, reservation_enabled,
+                       menu_hold_enabled, pickup_enabled
+                FROM stores
+                WHERE store_id IN (:storeIds)
+                  AND verification_status = 'APPROVED'
+                  AND operation_status <> 'CLOSED'
+                """, new MapSqlParameterSource("storeIds", storeIds),
+                (resultSet, rowNumber) -> new CurrentPublicState(
+                        resultSet.getLong("store_id"),
+                        OperationStatus.valueOf(resultSet.getString("operation_status")),
+                        resultSet.getBoolean("reservation_enabled"),
+                        resultSet.getBoolean("menu_hold_enabled"),
+                        resultSet.getBoolean("pickup_enabled")));
+        Map<Long, CurrentPublicState> byId = new LinkedHashMap<>();
+        current.forEach(state -> byId.put(state.storeId(), state));
+        return candidates.stream()
+                .map(candidate -> refreshSafetyState(candidate, byId.get(candidate.storeId())))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    private static StoreSearchCandidate refreshSafetyState(
+            StoreSearchCandidate candidate,
+            CurrentPublicState current
+    ) {
+        if (current == null) {
+            return null;
+        }
+        return new StoreSearchCandidate(
+                candidate.storeId(),
+                candidate.name(),
+                candidate.region(),
+                candidate.address(),
+                candidate.storeCategoryCode(),
+                current.operationStatus(),
+                current.reservationEnabled(),
+                current.menuHoldEnabled(),
+                current.pickupEnabled(),
+                candidate.createdAt());
     }
 
     private static MapSqlParameterSource parameters(StoreSearchQuery query) {
@@ -195,5 +236,14 @@ public class StoreSearchRepository {
                 resultSet.getBoolean("menu_hold_enabled"),
                 resultSet.getBoolean("pickup_enabled"),
                 resultSet.getTimestamp("created_at").toLocalDateTime());
+    }
+
+    private record CurrentPublicState(
+            long storeId,
+            OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled
+    ) {
     }
 }

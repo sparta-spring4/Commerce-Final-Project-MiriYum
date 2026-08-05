@@ -87,14 +87,11 @@ public class StoreSearchCoreService {
     ) {
         long requestedOffset = (long) query.page() * query.size();
         long totalAvailable = 0;
-        StoreSearchCandidate cursor = null;
         List<PublicStoreSummary> page = new ArrayList<>(query.size());
-        while (true) {
-            List<StoreSearchCandidate> chunk = repository.searchChunk(
-                    query, cursor, AVAILABILITY_BATCH_SIZE);
-            if (chunk.isEmpty()) {
-                break;
-            }
+        List<StoreSearchCandidate> candidates = repository.searchAll(query);
+        for (int start = 0; start < candidates.size(); start += AVAILABILITY_BATCH_SIZE) {
+            List<StoreSearchCandidate> chunk = candidates.subList(
+                    start, Math.min(start + AVAILABILITY_BATCH_SIZE, candidates.size()));
             List<StoreSearchCandidate> current = repository.refreshCurrentlyPublic(chunk);
             List<ReservationAvailability> availabilities = availabilityFor(
                     current, query, includesInfants);
@@ -112,10 +109,6 @@ public class StoreSearchCoreService {
                     page.add(toSummary(candidate, ReservationAvailability.AVAILABLE));
                 }
                 totalAvailable++;
-            }
-            cursor = chunk.getLast();
-            if (chunk.size() < AVAILABILITY_BATCH_SIZE) {
-                break;
             }
         }
         return new PageImpl<>(

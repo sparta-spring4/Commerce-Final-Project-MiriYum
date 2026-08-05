@@ -1,8 +1,14 @@
 package com.miriyum.domain.store.search.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
@@ -19,11 +25,16 @@ import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
+import com.miriyum.domain.store.search.service.StoreSearchCatalogPolicy;
+import com.miriyum.domain.store.search.service.StoreSearchCoreService;
+import com.miriyum.domain.store.service.CatalogService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -440,7 +451,7 @@ class StoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void refreshCurrentlyPublicReadsLatestFieldsAndDropsClosedStores() {
+    void refreshCurrentlyPublicPreservesCandidateFieldsAndReadsLatestSafetyState() {
         Store changed = createStore("변경 전", Region.SEOUL, "KOREAN", false);
         Store closed = createStore("곧 폐점", Region.SEOUL, "KOREAN", false);
         flushAndClear();
@@ -452,8 +463,11 @@ class StoreSearchRepositoryIT {
                 .filter(candidate -> candidate.storeId() == closed.getId()).findFirst().orElseThrow();
         jdbcTemplate.update("""
                 UPDATE stores
-                SET name = '변경 후', operation_status = 'TEMPORARILY_CLOSED',
-                    reservation_enabled = FALSE
+                SET name = '변경 후', region = 'BUSAN', address = '변경 주소',
+                    store_category_code = 'CAFE_BAKERY',
+                    operation_status = 'TEMPORARILY_CLOSED',
+                    reservation_enabled = FALSE, menu_hold_enabled = FALSE,
+                    pickup_enabled = FALSE
                 WHERE store_id = ?
                 """, changed.getId());
         jdbcTemplate.update("UPDATE stores SET operation_status = 'CLOSED' WHERE store_id = ?",
@@ -464,10 +478,87 @@ class StoreSearchRepositoryIT {
 
         assertThat(refreshed).singleElement().satisfies(current -> {
             assertThat(current.storeId()).isEqualTo(changed.getId());
-            assertThat(current.name()).isEqualTo("변경 후");
+            assertThat(current.name()).isEqualTo("변경 전");
+            assertThat(current.region()).isEqualTo(Region.SEOUL);
+            assertThat(current.address()).isEqualTo("테스트 주소");
+            assertThat(current.storeCategoryCode()).isEqualTo("KOREAN");
             assertThat(current.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
             assertThat(current.reservationEnabled()).isFalse();
+            assertThat(current.menuHoldEnabled()).isFalse();
+            assertThat(current.pickupEnabled()).isFalse();
         });
+    }
+
+    @Test
+    @Transactional
+    void refreshCurrentlyPublicPreservesRegionAfterConcurrentRegionChange() {
+        Store moved = createStore("지역 이동", Region.SEOUL, "KOREAN", false);
+        flushAndClear();
+        StoreSearchCandidate candidate = repository.search(
+                        query(null, Region.SEOUL, null, "name,asc", 0, 20))
+                .getContent()
+                .getFirst();
+        jdbcTemplate.update(
+                "UPDATE stores SET region = 'BUSAN' WHERE store_id = ?",
+                moved.getId());
+
+        List<StoreSearchCandidate> refreshed = repository.refreshCurrentlyPublic(
+                List.of(candidate));
+
+        assertThat(refreshed).singleElement().satisfies(current -> {
+            assertThat(current.storeId()).isEqualTo(moved.getId());
+            assertThat(current.region()).isEqualTo(Region.SEOUL);
+        });
+    }
+
+    @Test
+    @Transactional
+    void availableOnlyKeepsExactIdentityWhenNameChangesBetweenBatches() {
+        List<Store> stores = IntStream.rangeClosed(1, 201)
+                .mapToObj(index -> createStore(
+                        String.format("동시성스냅샷 %03d", index),
+                        Region.SEOUL,
+                        "KOREAN",
+                        false))
+                .toList();
+        flushAndClear();
+        ReservationService reservationService = mock(ReservationService.class);
+        StoreSearchCoreService service = new StoreSearchCoreService(
+                new StoreSearchCatalogPolicy(mock(CatalogService.class)),
+                repository,
+                reservationService);
+        AtomicInteger availabilityCalls = new AtomicInteger();
+        given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation -> {
+            List<Long> storeIds = invocation.getArgument(0);
+            if (availabilityCalls.getAndIncrement() == 0) {
+                jdbcTemplate.update(
+                        "UPDATE stores SET name = ? WHERE store_id = ?",
+                        "동시성스냅샷 999",
+                        stores.getFirst().getId());
+            }
+            return storeIds.stream()
+                    .map(storeId -> new ReservationAvailabilityResult(
+                            storeId, ReservationAvailabilityStatus.AVAILABLE))
+                    .toList();
+        });
+        StoreSearchQuery query = StoreSearchQuery.from(
+                "동시성스냅샷",
+                Region.SEOUL,
+                null,
+                LocalDate.of(2026, 8, 3),
+                LocalTime.of(18, 0),
+                2,
+                true,
+                "name,asc",
+                2,
+                100);
+
+        var result = service.search(query, false);
+
+        assertThat(result.getTotalElements()).isEqualTo(201);
+        assertThat(result.getContent())
+                .extracting(summary -> Long.parseLong(summary.storeId()))
+                .containsExactly(stores.getLast().getId());
     }
 
     @Test

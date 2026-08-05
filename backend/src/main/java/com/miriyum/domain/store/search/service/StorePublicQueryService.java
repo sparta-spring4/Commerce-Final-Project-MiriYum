@@ -72,6 +72,8 @@ public class StorePublicQueryService {
         List<PublicMenu> menus = publicReadRepository.findPublicMenus(storeId);
         StoreSchedules schedules = loadSchedules(storeId);
         PublicStoreSnapshot store = requirePublicStore(storeId);
+        ReservationAvailability finalAvailability = reconcileLatestStoreState(
+                store, availability);
         return new PublicStoreDetail(
                 Long.toString(storeId), store.name(), store.description(),
                 store.region(), store.address(), store.timeZoneId(),
@@ -80,7 +82,7 @@ public class StorePublicQueryService {
                 new PublicStoreModes(store.reservationEnabled(), store.menuHoldEnabled(),
                         store.pickupEnabled()),
                 schedules.operatingHours(), schedules.reservationTimeSlots(),
-                menus.stream().filter(PublicMenu::representative).toList(), availability);
+                menus.stream().filter(PublicMenu::representative).toList(), finalAvailability);
     }
 
     private StoreSchedules loadSchedules(long storeId) {
@@ -170,6 +172,21 @@ public class StorePublicQueryService {
         return results.getFirst().availability() == ReservationAvailabilityStatus.AVAILABLE
                 ? ReservationAvailability.AVAILABLE
                 : ReservationAvailability.UNAVAILABLE;
+    }
+
+    private static ReservationAvailability reconcileLatestStoreState(
+            PublicStoreSnapshot store,
+            ReservationAvailability batchAvailability
+    ) {
+        if (batchAvailability == ReservationAvailability.NOT_REQUESTED) {
+            return batchAvailability;
+        }
+        if (store.operationStatus()
+                != com.miriyum.domain.store.core.enums.OperationStatus.OPEN
+                || !store.reservationEnabled()) {
+            return ReservationAvailability.UNAVAILABLE;
+        }
+        return batchAvailability;
     }
 
     private PublicStoreSnapshot requirePublicStore(long storeId) {
