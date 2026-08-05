@@ -34,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 쓸 수 없다({@code docs/service-policies/18-scale-reliability.md} SCALE-014, 이슈 #63).
  */
 @Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
