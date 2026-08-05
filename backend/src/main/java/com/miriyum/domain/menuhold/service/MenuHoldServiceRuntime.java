@@ -32,7 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** #44-B의 메뉴 홀드 생성 런타임이다. */
+/** 일반 예약의 메뉴 홀드 생성·해제·이행 완료 런타임이다. */
 @Service
 @RequiredArgsConstructor
 public class MenuHoldServiceRuntime implements MenuHoldService {
