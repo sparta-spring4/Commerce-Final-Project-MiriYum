@@ -299,17 +299,35 @@ class ReservationCapacityPublicationIT {
     }
 
     @Test
-    void publicationAndCancellationLockReservationBeforeCapacityBucketWithoutDeadlock()
+    void publicationAndCancellationRacePreservesCapacityConsistency()
             throws Exception {
         // given
         OwnerStore owner = createStore("capacity-cancel-race@example.com", "1234567893");
         long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket originalBucket = seedOriginalCapacityAllocation(
+                owner.storeId(),
+                reservationId
+        );
+        Long originalAllocationId = jdbcTemplate.queryForObject(
+                "SELECT reservation_capacity_allocation_id "
+                        + "FROM reservation_capacity_allocations "
+                        + "WHERE reservation_id = ?",
+                Long.class,
+                reservationId
+        );
         acceptEveryStoreInterval();
         commandFacade.replace(
                 owner.operatorId(),
                 owner.storeId(),
                 SERVICE_DATE,
                 key(5),
+                request(8, 2)
+        );
+        commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(6),
                 request(8, 2)
         );
         Long currentBucketId = jdbcTemplate.queryForObject(
@@ -319,6 +337,37 @@ class ReservationCapacityPublicationIT {
                 Long.class,
                 reservationId
         );
+        assertThat(currentBucketId).isEqualTo(originalBucket.getId());
+        assertThat(capacityAllocationRepository.findAll()).singleElement().satisfies(allocation -> {
+            assertThat(allocation.getId()).isEqualTo(originalAllocationId);
+            assertThat(allocation.getCapacityBucketId()).isEqualTo(originalBucket.getId());
+            assertThat(allocation.getCapacityPolicyVersion()).isEqualTo(1L);
+            assertThat(allocation.getOccupiedPeople()).isEqualTo(5);
+            assertThat(allocation.getOccupiedTeams()).isEqualTo(1);
+        });
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getPolicyVersion() == 2L || bucket.getPolicyVersion() == 3L)
+                .toList())
+                .hasSize(2)
+                .extracting(ReservationCapacityBucket::getPolicyVersion)
+                .containsExactlyInAnyOrder(2L, 3L);
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getPolicyVersion() == 2L || bucket.getPolicyVersion() == 3L)
+                .toList())
+                .allSatisfy(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+                    assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+                });
+        Long latestV3BucketId = jdbcTemplate.queryForObject(
+                "SELECT reservation_capacity_bucket_id "
+                        + "FROM reservation_capacity_buckets "
+                        + "WHERE store_id = ? AND service_date = ? AND policy_version = 3 "
+                        + "ORDER BY reservation_capacity_bucket_id ASC",
+                Long.class,
+                owner.storeId(),
+                SERVICE_DATE
+        );
+        assertThat(latestV3BucketId).isNotEqualTo(originalBucket.getId());
         CountDownLatch cancellationLockedReservation = new CountDownLatch(1);
         CountDownLatch publicationStartedReservationLock = new CountDownLatch(1);
         reservationLockQueryStarted = publicationStartedReservationLock;
@@ -327,55 +376,13 @@ class ReservationCapacityPublicationIT {
         ReservationCapacityCommandResult publication;
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> cancellation = executor.submit(() -> {
-                new TransactionTemplate(transactionManager)
-                        .executeWithoutResult(status -> {
-                            jdbcTemplate.queryForObject(
-                                    "SELECT reservation_id FROM reservations "
-                                            + "WHERE reservation_id = ? FOR UPDATE",
-                                    Long.class,
-                                    reservationId
-                            );
-                            cancellationLockedReservation.countDown();
-                            assertThat(await(
-                                    publicationStartedReservationLock,
-                                    5,
-                                    TimeUnit.SECONDS
-                            )).isTrue();
-                            Long allocationBucketId = jdbcTemplate.queryForObject(
-                                    "SELECT reservation_capacity_bucket_id "
-                                            + "FROM reservation_capacity_allocations "
-                                            + "WHERE reservation_id = ? FOR UPDATE",
-                                    Long.class,
-                                    reservationId
-                            );
-                            assertThat(allocationBucketId).isEqualTo(currentBucketId);
-                            jdbcTemplate.queryForObject(
-                                    "SELECT reservation_capacity_bucket_id "
-                                            + "FROM reservation_capacity_buckets "
-                                            + "WHERE reservation_capacity_bucket_id = ? "
-                                            + "FOR UPDATE",
-                                    Long.class,
-                                    allocationBucketId
-                            );
-                            jdbcTemplate.update(
-                                    "UPDATE reservations "
-                                            + "SET status = 'CANCELLED', cancelled_at = NOW(6) "
-                                            + "WHERE reservation_id = ?",
-                                    reservationId
-                            );
-                            jdbcTemplate.update(
-                                    "UPDATE reservation_capacity_buckets "
-                                            + "SET occupied_people = occupied_people - 5, "
-                                            + "occupied_teams = occupied_teams - 1 "
-                                            + "WHERE reservation_capacity_bucket_id = ?",
-                                    allocationBucketId
-                            );
-                            jdbcTemplate.update(
-                                    "DELETE FROM reservation_capacity_allocations "
-                                            + "WHERE reservation_id = ?",
-                                    reservationId
-                            );
-                        });
+                simulateCancellation(
+                        reservationId,
+                        originalAllocationId,
+                        latestV3BucketId,
+                        cancellationLockedReservation,
+                        publicationStartedReservationLock
+                );
                 return null;
             });
             assertThat(cancellationLockedReservation.await(5, TimeUnit.SECONDS)).isTrue();
@@ -384,7 +391,7 @@ class ReservationCapacityPublicationIT {
                             owner.operatorId(),
                             owner.storeId(),
                             SERVICE_DATE,
-                            key(6),
+                            key(7),
                             request(8, 2)
                     )
             );
@@ -394,12 +401,63 @@ class ReservationCapacityPublicationIT {
 
         // then
         assertThat(RESERVATION_LOCK_QUERY_ATTEMPTS).hasValue(1);
-        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(publication.data().policyVersion()).isEqualTo(4L);
         assertThat(publication.data().buckets()).singleElement().satisfies(bucket -> {
             assertThat(bucket.occupiedPeople()).isZero();
             assertThat(bucket.occupiedTeams()).isZero();
         });
-        assertThat(count("reservation_capacity_allocations")).isZero();
+        assertThat(capacityAllocationRepository.findAll()).singleElement().satisfies(allocation -> {
+            assertThat(allocation.getId()).isEqualTo(originalAllocationId);
+            assertThat(allocation.getCapacityBucketId()).isEqualTo(originalBucket.getId());
+            assertThat(allocation.getCapacityPolicyVersion()).isEqualTo(1L);
+            assertThat(allocation.getOccupiedPeople()).isEqualTo(5);
+            assertThat(allocation.getOccupiedTeams()).isEqualTo(1);
+        });
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getId().equals(originalBucket.getId()))
+                .toList())
+                .singleElement()
+                .satisfies(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getId().equals(latestV3BucketId))
+                .toList())
+                .singleElement()
+                .satisfies(bucket -> {
+                    assertThat(bucket.getPolicyVersion()).isEqualTo(3L);
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getPolicyVersion() == 2L)
+                .toList())
+                .singleElement()
+                .satisfies(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+                    assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+                });
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                reservationId
+        )).isEqualTo("CANCELLED");
+
+        simulateCancellation(reservationId, originalAllocationId, latestV3BucketId, null, null);
+
+        assertThat(capacityAllocationRepository.findAll()).singleElement().satisfies(allocation -> {
+            assertThat(allocation.getId()).isEqualTo(originalAllocationId);
+            assertThat(allocation.getCapacityBucketId()).isEqualTo(originalBucket.getId());
+        });
+        assertThat(capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getId().equals(originalBucket.getId())
+                        || bucket.getId().equals(latestV3BucketId))
+                .toList())
+                .allSatisfy(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
     }
 
     @Test
@@ -425,6 +483,100 @@ class ReservationCapacityPublicationIT {
         )).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(capacityBucketRepository.findAll()).isEmpty();
         assertThat(count("idempotency_commands")).isZero();
+    }
+
+    private void simulateCancellation(
+            long reservationId,
+            long expectedOriginalAllocationId,
+            long expectedLatestV3BucketId,
+            CountDownLatch cancellationLockedReservation,
+            CountDownLatch publicationStartedReservationLock
+    ) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            String reservationStatus = jdbcTemplate.queryForObject(
+                    "SELECT status FROM reservations WHERE reservation_id = ? FOR UPDATE",
+                    String.class,
+                    reservationId
+            );
+            if (cancellationLockedReservation != null) {
+                cancellationLockedReservation.countDown();
+            }
+            if (publicationStartedReservationLock != null) {
+                assertThat(await(publicationStartedReservationLock, 5, TimeUnit.SECONDS)).isTrue();
+            }
+            if (!"CONFIRMED".equals(reservationStatus)) {
+                return;
+            }
+
+            List<CapacityAllocationSnapshot> originalAllocations = jdbcTemplate.query(
+                    "SELECT reservation_capacity_allocation_id, reservation_capacity_bucket_id, "
+                            + "occupied_people, occupied_teams "
+                            + "FROM reservation_capacity_allocations "
+                            + "WHERE reservation_id = ? "
+                            + "ORDER BY reservation_capacity_allocation_id ASC FOR UPDATE",
+                    (resultSet, rowNumber) -> new CapacityAllocationSnapshot(
+                            resultSet.getLong("reservation_capacity_allocation_id"),
+                            resultSet.getLong("reservation_capacity_bucket_id"),
+                            resultSet.getInt("occupied_people"),
+                            resultSet.getInt("occupied_teams")
+                    ),
+                    reservationId
+            );
+            assertThat(originalAllocations).singleElement().satisfies(allocation -> {
+                assertThat(allocation.allocationId()).isEqualTo(expectedOriginalAllocationId);
+            });
+            CapacityAllocationSnapshot originalAllocation = originalAllocations.getFirst();
+            Long originalBucketId = jdbcTemplate.queryForObject(
+                    "SELECT reservation_capacity_bucket_id "
+                            + "FROM reservation_capacity_buckets "
+                            + "WHERE reservation_capacity_bucket_id = ? "
+                            + "ORDER BY reservation_capacity_bucket_id ASC FOR UPDATE",
+                    Long.class,
+                    originalAllocation.capacityBucketId()
+            );
+            Long latestV3BucketId = jdbcTemplate.queryForObject(
+                    "SELECT reservation_capacity_bucket_id "
+                            + "FROM reservation_capacity_buckets "
+                            + "WHERE reservation_capacity_bucket_id = ? "
+                            + "AND reservation_capacity_bucket_id <> ? "
+                            + "AND policy_version = 3 "
+                            + "AND start_time < ? AND end_time > ? "
+                            + "ORDER BY reservation_capacity_bucket_id ASC FOR UPDATE",
+                    Long.class,
+                    expectedLatestV3BucketId,
+                    originalBucketId,
+                    LocalTime.of(19, 0),
+                    LocalTime.of(18, 0)
+            );
+            assertThat(latestV3BucketId).isEqualTo(expectedLatestV3BucketId);
+
+            int cancelled = jdbcTemplate.update(
+                    "UPDATE reservations SET status = 'CANCELLED', cancelled_at = NOW(6) "
+                            + "WHERE reservation_id = ? AND status = 'CONFIRMED'",
+                    reservationId
+            );
+            assertThat(cancelled).isOne();
+            jdbcTemplate.update(
+                    "UPDATE reservation_capacity_buckets "
+                            + "SET occupied_people = occupied_people - ?, "
+                            + "occupied_teams = occupied_teams - ? "
+                            + "WHERE reservation_capacity_bucket_id = ?",
+                    originalAllocation.occupiedPeople(),
+                    originalAllocation.occupiedTeams(),
+                    originalBucketId
+            );
+            if (!originalBucketId.equals(latestV3BucketId)) {
+                jdbcTemplate.update(
+                        "UPDATE reservation_capacity_buckets "
+                                + "SET occupied_people = occupied_people - ?, "
+                                + "occupied_teams = occupied_teams - ? "
+                                + "WHERE reservation_capacity_bucket_id = ?",
+                        originalAllocation.occupiedPeople(),
+                        originalAllocation.occupiedTeams(),
+                        latestV3BucketId
+                );
+            }
+        });
     }
 
     private OwnerStore createStore(String email, String registrationNumber) {
@@ -595,6 +747,14 @@ class ReservationCapacityPublicationIT {
     }
 
     private record OwnerStore(long operatorId, long storeId) {
+    }
+
+    private record CapacityAllocationSnapshot(
+            long allocationId,
+            long capacityBucketId,
+            int occupiedPeople,
+            int occupiedTeams
+    ) {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
