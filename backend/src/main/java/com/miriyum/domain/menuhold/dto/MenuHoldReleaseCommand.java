@@ -2,12 +2,14 @@ package com.miriyum.domain.menuhold.dto;
 
 /** 예약 취소 트랜잭션이 홀드 해제와 원 확보 복구에 전달하는 공개 명령이다. */
 public record MenuHoldReleaseCommand(
-        String reservationId,
+        long reservationId,
         String operationId
 ) {
 
     public MenuHoldReleaseCommand {
-        requireText(reservationId, "reservationId");
+        if (reservationId <= 0) {
+            throw new IllegalArgumentException("reservationId must be positive");
+        }
         requireText(operationId, "operationId");
     }
 

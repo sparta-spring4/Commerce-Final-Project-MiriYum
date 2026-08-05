@@ -1,6 +1,7 @@
 package com.miriyum.domain.menuhold.inventory.repository;
 
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketKey;
+import com.miriyum.domain.menuhold.inventory.dto.CurrentInventoryBucketView;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
@@ -70,6 +71,39 @@ public interface MenuInventoryBucketRepository
             @Param("endTime") LocalTime endTime);
 
     @Query("""
+            select bucket.menuId as menuId,
+                   bucket.id as bucketId,
+                   bucket.inventoryPolicyVersion as inventoryPolicyVersion,
+                   bucket.timeZoneId as timeZoneId,
+                   bucket.serviceDate as serviceDate,
+                   bucket.startTime as startTime,
+                   bucket.endDate as endDate,
+                   bucket.endTime as endTime
+            from MenuInventoryBucket bucket
+            where bucket.menuId in :menuIds
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime = :startTime
+              and bucket.endDate = :endDate
+              and bucket.endTime = :endTime
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = bucket.menuId
+                    and candidate.serviceDate = bucket.serviceDate
+                    and candidate.startTime = bucket.startTime
+                    and candidate.endDate = bucket.endDate
+                    and candidate.endTime = bucket.endTime
+              )
+            order by bucket.id
+            """)
+    List<CurrentInventoryBucketView> findCurrentSelections(
+            @Param("menuIds") Collection<Long> menuIds,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("endDate") LocalDate endDate,
+            @Param("endTime") LocalTime endTime);
+
+    @Query("""
             select bucket
             from MenuInventoryBucket bucket
             where bucket.menuId in :menuIds
@@ -131,7 +165,7 @@ public interface MenuInventoryBucketRepository
     List<MenuInventoryBucket> findRequestedAndCurrentForUpdate(
             @Param("requestedIds") Collection<Long> requestedIds);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query(value = """
             update menu_inventory_buckets
             set online_hold_remaining = online_hold_remaining - :onlineQuantity,
@@ -150,7 +184,7 @@ public interface MenuInventoryBucketRepository
             @Param("onlineQuantity") int onlineQuantity,
             @Param("sharedQuantity") int sharedQuantity);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query(value = """
             update menu_inventory_buckets
             set online_hold_remaining = online_hold_remaining + :onlineQuantity,
