@@ -149,6 +149,14 @@ class ReservationOpenApiContractTest {
                 .containsEntry("minimum", 1);
         assertThat(map(responseProperties.get("maxTeams")))
                 .containsEntry("minimum", 0);
+
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> operation = map(map(paths.get(
+                "/api/v1/store-operator/stores/{storeId}"
+                        + "/reservation-capacities/{serviceDate}"
+        )).get("put"));
+        assertThat(map(map(operation.get("responses")).get("404")))
+                .containsEntry("$ref", "#/components/responses/StoreNotFound");
     }
 
     private static void assertPolicyCommand(
