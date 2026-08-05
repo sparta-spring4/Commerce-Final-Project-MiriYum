@@ -70,6 +70,9 @@ paths:
         - name: availableOnly
           in: query
           required: false
+          description: >-
+            true이면 선택한 고정 정렬에서 먼저 매칭되는 공개 후보 최대 5,000개의
+            예약 가용성을 평가하고 AVAILABLE인 매장만 반환한다.
           schema:
             type: boolean
             default: false
@@ -88,7 +91,9 @@ paths:
             default: "name,asc"
       responses:
         "200":
-          description: 매장 검색 결과 페이지
+          description: >-
+            매장 검색 결과 페이지. availableOnly=true일 때 totalElements는
+            고정 정렬의 공개 후보 최대 5,000개 안에서 AVAILABLE로 판정된 정확한 수다.
           content:
             application/json:
               schema:

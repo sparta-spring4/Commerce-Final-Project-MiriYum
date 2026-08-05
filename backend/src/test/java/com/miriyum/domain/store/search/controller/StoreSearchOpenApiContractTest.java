@@ -36,13 +36,24 @@ class StoreSearchOpenApiContractTest {
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
                         "availableOnly", "sort");
-        Map<String, Object> keyword = listOfMaps(
-                map(map(paths.get("/api/v1/stores")).get("get")).get("parameters"))
+        Map<String, Object> searchOperation = map(map(paths.get("/api/v1/stores")).get("get"));
+        List<Map<String, Object>> searchParameters =
+                listOfMaps(searchOperation.get("parameters"));
+        Map<String, Object> keyword = searchParameters
                 .stream().filter(parameter -> "keyword".equals(parameter.get("name")))
                 .findFirst().orElseThrow();
         assertThat(map(keyword.get("schema")))
                 .containsEntry("minLength", 1)
                 .containsEntry("pattern", ".*\\S.*");
+        Map<String, Object> availableOnly = searchParameters.stream()
+                .filter(parameter -> "availableOnly".equals(parameter.get("name")))
+                .findFirst().orElseThrow();
+        assertThat((String) availableOnly.get("description"))
+                .contains("5,000");
+        Map<String, Object> successResponse = map(
+                map(searchOperation.get("responses")).get("200"));
+        assertThat((String) successResponse.get("description"))
+                .contains("5,000", "totalElements");
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores/{storeId}")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants");
 

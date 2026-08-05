@@ -38,5 +38,7 @@ class ApplicationYamlTest {
                 .isEqualTo("${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS:60}");
         assertThat(properties.getProperty("miriyum.rate-limit.public-store-read.window-seconds"))
                 .isEqualTo("${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS:60}");
+        assertThat(properties.getProperty("miriyum.store-search.available-candidate-limit"))
+                .isEqualTo("${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}");
     }
 }

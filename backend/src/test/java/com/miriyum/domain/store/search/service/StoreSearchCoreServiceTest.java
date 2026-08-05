@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.dto.PublicStoreSummary;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
@@ -57,7 +58,10 @@ class StoreSearchCoreServiceTest {
     @BeforeEach
     void setUp() {
         service = new StoreSearchCoreService(
-                new StoreSearchCatalogPolicy(catalogService), repository, reservationService);
+                new StoreSearchCatalogPolicy(catalogService),
+                repository,
+                reservationService,
+                new StoreSearchCandidateLimit(5_000));
     }
 
     @Test
@@ -206,7 +210,7 @@ class StoreSearchCoreServiceTest {
                 true, "name,asc", 1, 1);
         List<StoreSearchCandidate> candidates =
                 List.of(candidate(1L), candidate(2L), candidate(3L));
-        given(repository.searchAll(query)).willReturn(candidates);
+        given(repository.searchAll(query, 5_000)).willReturn(candidates);
         given(repository.refreshCurrentlyPublic(candidates)).willReturn(candidates);
         given(reservationService.getAvailabilities(eq(List.of(1L, 2L, 3L)), any()))
                 .willReturn(List.of(
@@ -220,6 +224,7 @@ class StoreSearchCoreServiceTest {
                 .containsExactly("3");
         assertThat(result.getTotalElements()).isEqualTo(2);
         assertThat(result.getTotalPages()).isEqualTo(2);
+        then(repository).should().searchAll(query, 5_000);
     }
 
     @Test
@@ -233,7 +238,7 @@ class StoreSearchCoreServiceTest {
         List<StoreSearchCandidate> second = List.of(candidate(201L));
         List<StoreSearchCandidate> all = new ArrayList<>(first);
         all.addAll(second);
-        given(repository.searchAll(query)).willReturn(all);
+        given(repository.searchAll(query, 5_000)).willReturn(all);
         given(repository.refreshCurrentlyPublic(first)).willReturn(first);
         given(repository.refreshCurrentlyPublic(second)).willReturn(second);
         given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation ->

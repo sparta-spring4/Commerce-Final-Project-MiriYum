@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.search.service;
 
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;
 import com.miriyum.domain.store.search.dto.PublicStoreSummary;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
@@ -32,6 +33,7 @@ public class StoreSearchCoreService {
     private final StoreSearchCatalogPolicy catalogPolicy;
     private final StoreSearchRepository repository;
     private final ReservationService reservationService;
+    private final StoreSearchCandidateLimit candidateLimit;
 
     /**
      * 공개 카테고리 정책, 후보 저장소, 예약 공개 서비스를 구성한다.
@@ -39,11 +41,13 @@ public class StoreSearchCoreService {
     public StoreSearchCoreService(
             StoreSearchCatalogPolicy catalogPolicy,
             StoreSearchRepository repository,
-            ReservationService reservationService
+            ReservationService reservationService,
+            StoreSearchCandidateLimit candidateLimit
     ) {
         this.catalogPolicy = catalogPolicy;
         this.repository = repository;
         this.reservationService = reservationService;
+        this.candidateLimit = candidateLimit;
     }
 
     /**
@@ -88,7 +92,8 @@ public class StoreSearchCoreService {
         long requestedOffset = (long) query.page() * query.size();
         long totalAvailable = 0;
         List<PublicStoreSummary> page = new ArrayList<>(query.size());
-        List<StoreSearchCandidate> candidates = repository.searchAll(query);
+        List<StoreSearchCandidate> candidates = repository.searchAll(
+                query, candidateLimit.value());
         for (int start = 0; start < candidates.size(); start += AVAILABILITY_BATCH_SIZE) {
             List<StoreSearchCandidate> chunk = candidates.subList(
                     start, Math.min(start + AVAILABILITY_BATCH_SIZE, candidates.size()));

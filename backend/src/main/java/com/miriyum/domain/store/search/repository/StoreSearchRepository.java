@@ -2,6 +2,7 @@ package com.miriyum.domain.store.search.repository;
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -105,37 +106,23 @@ public class StoreSearchRepository {
     }
 
     /**
-     * 외부 가용성으로 필터링한 뒤 정확한 페이지를 만들 때 전체 후보를 안정 정렬로 조회한다.
+     * 가용성 필터링에 사용할 후보 필드와 고정 정렬을 한 SQL statement에서 확정한다.
      */
-    public List<StoreSearchCandidate> searchChunk(
+    public List<StoreSearchCandidate> searchAll(
             StoreSearchQuery query,
-            StoreSearchCandidate after,
-            int limit
+            int candidateLimit
     ) {
-        if (limit < 1) {
-            throw new IllegalArgumentException("positive limit required");
+        if (candidateLimit < 1 || candidateLimit > StoreSearchCandidateLimit.HARD_MAXIMUM) {
+            throw new IllegalArgumentException(
+                    "candidate limit must be between 1 and 5000");
         }
         String sql = SELECT_COLUMNS
                 + PUBLIC_SEARCH_PREDICATE
-                + " AND " + query.sort().cursorPredicate()
                 + " ORDER BY " + query.sort().orderByClause()
-                + " LIMIT :limit";
+                + " LIMIT :candidateLimit";
         MapSqlParameterSource parameters = parameters(query)
-                .addValue("limit", limit)
-                .addValue("cursorId", after == null ? null : after.storeId())
-                .addValue("cursorName", after == null ? null : after.name())
-                .addValue("cursorCreatedAt", after == null ? null : after.createdAt());
+                .addValue("candidateLimit", candidateLimit);
         return jdbcTemplate.query(sql, parameters, CANDIDATE_ROW_MAPPER);
-    }
-
-    /**
-     * 가용성 필터링에 사용할 후보 필드와 고정 정렬을 한 SQL statement에서 확정한다.
-     */
-    public List<StoreSearchCandidate> searchAll(StoreSearchQuery query) {
-        String sql = SELECT_COLUMNS
-                + PUBLIC_SEARCH_PREDICATE
-                + " ORDER BY " + query.sort().orderByClause();
-        return jdbcTemplate.query(sql, parameters(query), CANDIDATE_ROW_MAPPER);
     }
 
     /**

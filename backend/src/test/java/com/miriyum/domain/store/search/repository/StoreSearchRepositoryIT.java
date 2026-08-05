@@ -24,6 +24,7 @@ import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.model.StoreSearchQuery;
 import com.miriyum.domain.store.search.service.StoreSearchCatalogPolicy;
 import com.miriyum.domain.store.search.service.StoreSearchCoreService;
@@ -404,48 +405,18 @@ class StoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void searchChunkUsesExplicitWindowAndKeepsStableSort() {
-        Store first = createStore("가 매장", Region.SEOUL, "KOREAN", false);
-        Store second = createStore("나 매장", Region.SEOUL, "KOREAN", false);
+    void searchAllStopsAtTheConfiguredCandidateLimitInStableOrder() {
+        Store first = createStore("후보상한 가", Region.SEOUL, "KOREAN", false);
+        Store second = createStore("후보상한 나", Region.SEOUL, "KOREAN", false);
+        createStore("후보상한 다", Region.SEOUL, "KOREAN", false);
         flushAndClear();
 
-        List<Long> result = repository.searchChunk(
-                        query(null, null, null, "name,asc", 1, 1), null, 100).stream()
+        List<Long> result = repository.searchAll(
+                        query("후보상한", null, null, "name,asc", 0, 20), 2).stream()
                 .map(StoreSearchCandidate::storeId)
                 .toList();
 
-        assertThat(result).containsSubsequence(first.getId(), second.getId());
-    }
-
-    @Test
-    @Transactional
-    void keysetChunksMatchPagedOrderForEveryPublicSort() {
-        Store first = createStore("동일", Region.SEOUL, "KOREAN", false);
-        Store second = createStore("동일", Region.SEOUL, "KOREAN", false);
-        Store third = createStore("후순위", Region.SEOUL, "KOREAN", false);
-        setCreatedAt(first, "2026-08-01 09:00:00");
-        setCreatedAt(second, "2026-08-01 09:00:00");
-        setCreatedAt(third, "2026-08-02 09:00:00");
-        flushAndClear();
-
-        for (String sort : List.of(
-                "name,asc", "name,desc", "createdAt,asc", "createdAt,desc")) {
-            StoreSearchQuery searchQuery = query(null, Region.SEOUL, "KOREAN", sort, 0, 20);
-            List<Long> expected = repository.search(searchQuery).getContent().stream()
-                    .map(StoreSearchCandidate::storeId).toList();
-            List<Long> actual = new java.util.ArrayList<>();
-            StoreSearchCandidate cursor = null;
-            while (true) {
-                List<StoreSearchCandidate> chunk = repository.searchChunk(
-                        searchQuery, cursor, 1);
-                if (chunk.isEmpty()) {
-                    break;
-                }
-                actual.add(chunk.getFirst().storeId());
-                cursor = chunk.getLast();
-            }
-            assertThat(actual).as(sort).containsExactlyElementsOf(expected);
-        }
+        assertThat(result).containsExactly(first.getId(), second.getId());
     }
 
     @Test
@@ -469,8 +440,8 @@ class StoreSearchRepositoryIT {
         Store changed = createStore("변경 전", Region.SEOUL, "KOREAN", false);
         Store closed = createStore("곧 폐점", Region.SEOUL, "KOREAN", false);
         flushAndClear();
-        List<StoreSearchCandidate> candidates = repository.searchChunk(
-                query(null, null, null, "name,asc", 0, 20), null, 100);
+        List<StoreSearchCandidate> candidates = repository.searchAll(
+                query(null, null, null, "name,asc", 0, 20), 100);
         StoreSearchCandidate changedBefore = candidates.stream()
                 .filter(candidate -> candidate.storeId() == changed.getId()).findFirst().orElseThrow();
         StoreSearchCandidate closedBefore = candidates.stream()
@@ -540,7 +511,8 @@ class StoreSearchRepositoryIT {
         StoreSearchCoreService service = new StoreSearchCoreService(
                 new StoreSearchCatalogPolicy(mock(CatalogService.class)),
                 repository,
-                reservationService);
+                reservationService,
+                new StoreSearchCandidateLimit(5_000));
         AtomicInteger availabilityCalls = new AtomicInteger();
         given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation -> {
             List<Long> storeIds = invocation.getArgument(0);
