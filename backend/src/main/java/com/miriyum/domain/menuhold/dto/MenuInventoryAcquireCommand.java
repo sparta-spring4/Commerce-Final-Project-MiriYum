@@ -45,6 +45,9 @@ public record MenuInventoryAcquireCommand(
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
+        if (value.length() > 100) {
+            throw new IllegalArgumentException(name + " must not exceed 100 characters");
+        }
     }
 
     private record SelectionKey(

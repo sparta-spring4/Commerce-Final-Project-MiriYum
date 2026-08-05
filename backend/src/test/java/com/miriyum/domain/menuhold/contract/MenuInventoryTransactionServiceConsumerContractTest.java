@@ -123,6 +123,29 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     }
 
     @Test
+    @DisplayName("공개 수량 명령은 원장 컬럼보다 긴 operation ID를 거부한다")
+    void publicCommandsRejectOperationIdsLongerThanLedgerColumns() {
+        String maximumLengthId = "a".repeat(100);
+        String tooLongId = "a".repeat(101);
+
+        assertThat(new MenuInventoryAcquireCommand(
+                maximumLengthId, List.of(selection(1L, 1))).operationId())
+                .isEqualTo(maximumLengthId);
+        assertThatThrownBy(() -> new MenuInventoryAcquireCommand(
+                tooLongId, List.of(selection(1L, 1))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("operationId must not exceed 100 characters");
+        assertThatThrownBy(() -> new MenuInventoryRestoreCommand(
+                tooLongId, maximumLengthId))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("operationId must not exceed 100 characters");
+        assertThatThrownBy(() -> new MenuInventoryRestoreCommand(
+                maximumLengthId, tooLongId))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("sourceAcquireOperationId must not exceed 100 characters");
+    }
+
+    @Test
     @DisplayName("픽업 fixture는 공개 명령을 기록하고 내부 풀 정보 없는 결과를 반환한다")
     void fixtureSupportsPickupConsumerWithoutProductionFake() {
         PickupMenuInventoryContractFixture fixture =
