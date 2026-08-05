@@ -11,11 +11,13 @@ import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
@@ -44,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -103,6 +106,9 @@ class ReservationCapacityPublicationIT {
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
     @Autowired
+    private ReservationCapacityAllocationRepository capacityAllocationRepository;
+
+    @Autowired
     private ReservationRepository reservationRepository;
 
     @Autowired
@@ -138,7 +144,8 @@ class ReservationCapacityPublicationIT {
     void replayKeepsOneVersionAndCarriesConfirmedOccupancy() {
         // given
         OwnerStore owner = createStore("capacity-replay@example.com", "1234567890");
-        seedConsumerAndReservation(owner.storeId());
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        seedOriginalCapacityAllocation(owner.storeId(), reservationId);
         acceptEveryStoreInterval();
         ReservationCapacitiesRequest request = request(4, 0);
 
@@ -170,14 +177,14 @@ class ReservationCapacityPublicationIT {
                 assertThat(exception.getErrorCode()).isEqualTo(
                         CommonErrorCode.IDEMPOTENCY_KEY_REUSED
                 ));
-        assertThat(first.data().policyVersion()).isEqualTo(1L);
+        assertThat(first.data().policyVersion()).isEqualTo(2L);
         assertThat(first.data().buckets()).singleElement().satisfies(bucket -> {
             assertThat(bucket.occupiedPeople()).isEqualTo(5);
             assertThat(bucket.occupiedTeams()).isEqualTo(1);
             assertThat(bucket.availablePeople()).isZero();
             assertThat(bucket.availableTeams()).isZero();
         });
-        assertThat(capacityBucketRepository.findAll()).hasSize(1);
+        assertThat(capacityBucketRepository.findAll()).hasSize(2);
         assertThat(jdbcTemplate.queryForList(
                 """
                         SELECT allocation.occupied_people,
@@ -199,6 +206,51 @@ class ReservationCapacityPublicationIT {
             assertThat(allocation.get("capacity_policy_version")).isEqualTo(1L);
         });
         assertThat(count("idempotency_commands")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("정책을 반복 게시해도 최초 배정 이력을 보존한다")
+    void repeatedPublicationsPreserveOriginalAllocationHistory() {
+        // given
+        OwnerStore owner = createStore("capacity-history@example.com", "1234567894");
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket originalBucket = seedOriginalCapacityAllocation(
+                owner.storeId(),
+                reservationId
+        );
+        acceptEveryStoreInterval();
+
+        // when
+        commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(7),
+                request(10, 2)
+        );
+        commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(8),
+                request(12, 3)
+        );
+
+        // then
+        assertThat(capacityAllocationRepository.findAll()).singleElement().satisfies(allocation -> {
+            assertThat(allocation.getCapacityBucketId()).isEqualTo(originalBucket.getId());
+            assertThat(allocation.getCapacityPolicyVersion()).isEqualTo(1L);
+        });
+        List<ReservationCapacityBucket> publishedBuckets = capacityBucketRepository.findAll().stream()
+                .filter(bucket -> bucket.getPolicyVersion() > 1L)
+                .toList();
+        assertThat(publishedBuckets)
+                .extracting(ReservationCapacityBucket::getPolicyVersion)
+                .containsExactlyInAnyOrder(2L, 3L);
+        assertThat(publishedBuckets).allSatisfy(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+                    assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+                });
     }
 
     @Test
@@ -447,6 +499,35 @@ class ReservationCapacityPublicationIT {
                 1L,
                 Instant.parse("2026-08-01T00:00:00Z")
         )).getId();
+    }
+
+    private ReservationCapacityBucket seedOriginalCapacityAllocation(
+            long storeId,
+            long reservationId
+    ) {
+        ReservationCapacityBucket bucket = capacityBucketRepository.saveAndFlush(
+                ReservationCapacityBucket.create(
+                        storeId,
+                        SERVICE_DATE,
+                        LocalTime.of(18, 0),
+                        LocalTime.of(19, 0),
+                        8,
+                        2,
+                        5,
+                        1,
+                        1,
+                        4,
+                        true,
+                        1L
+                )
+        );
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                reservationId,
+                bucket.getId(),
+                5,
+                1L
+        ));
+        return bucket;
     }
 
     private static ReservationCapacitiesRequest request(int maxPeople, int maxTeams) {

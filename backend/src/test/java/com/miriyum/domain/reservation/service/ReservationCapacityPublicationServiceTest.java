@@ -13,7 +13,6 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
-import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
@@ -58,9 +57,6 @@ class ReservationCapacityPublicationServiceTest {
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
     @Mock
-    private ReservationCapacityAllocationRepository capacityAllocationRepository;
-
-    @Mock
     private ReservationRepository reservationRepository;
 
     @Mock
@@ -77,7 +73,6 @@ class ReservationCapacityPublicationServiceTest {
                 intervalValidationService,
                 new ReservationCapacityPolicy(),
                 capacityBucketRepository,
-                capacityAllocationRepository,
                 reservationRepository,
                 idempotencyExecutor,
                 objectMapper

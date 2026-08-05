@@ -4,10 +4,8 @@ import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationCapacitiesResponse;
 import com.miriyum.domain.reservation.entity.Reservation;
-import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
-import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
@@ -48,7 +46,6 @@ public class ReservationCapacityPublicationService {
     private final StoreServiceIntervalValidationService intervalValidationService;
     private final ReservationCapacityPolicy capacityPolicy;
     private final ReservationCapacityBucketRepository capacityBucketRepository;
-    private final ReservationCapacityAllocationRepository capacityAllocationRepository;
     private final ReservationRepository reservationRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -58,7 +55,6 @@ public class ReservationCapacityPublicationService {
             StoreServiceIntervalValidationService intervalValidationService,
             ReservationCapacityPolicy capacityPolicy,
             ReservationCapacityBucketRepository capacityBucketRepository,
-            ReservationCapacityAllocationRepository capacityAllocationRepository,
             ReservationRepository reservationRepository,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper
@@ -67,7 +63,6 @@ public class ReservationCapacityPublicationService {
         this.intervalValidationService = intervalValidationService;
         this.capacityPolicy = capacityPolicy;
         this.capacityBucketRepository = capacityBucketRepository;
-        this.capacityAllocationRepository = capacityAllocationRepository;
         this.reservationRepository = reservationRepository;
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
@@ -120,12 +115,6 @@ public class ReservationCapacityPublicationService {
             );
             List<ReservationCapacityBucket> saved =
                     capacityBucketRepository.saveAllAndFlush(next);
-            capacityAllocationRepository.saveAllAndFlush(createAllocations(
-                    saved,
-                    resolved,
-                    confirmed,
-                    nextVersion
-            ));
             ReservationCapacitiesResponse response = ReservationCapacitiesResponse.from(
                     serviceDate,
                     nextVersion,
@@ -287,40 +276,6 @@ public class ReservationCapacityPublicationService {
             ));
         }
         return List.copyOf(created);
-    }
-
-    private static List<ReservationCapacityAllocation> createAllocations(
-            List<ReservationCapacityBucket> savedBuckets,
-            List<ResolvedBucket> resolvedBuckets,
-            List<Reservation> confirmed,
-            long policyVersion
-    ) {
-        if (savedBuckets == null
-                || savedBuckets.size() != resolvedBuckets.size()
-                || savedBuckets.stream().anyMatch(bucket -> bucket.getId() == null)) {
-            throw conflict();
-        }
-        List<ReservationCapacityAllocation> allocations = new ArrayList<>();
-        for (int index = 0; index < savedBuckets.size(); index++) {
-            ReservationCapacityBucket bucket = savedBuckets.get(index);
-            ResolvedBucket resolved = resolvedBuckets.get(index);
-            if (!bucket.getStartTime().equals(resolved.request().startTime())
-                    || !bucket.getEndTime().equals(resolved.request().endTime())) {
-                throw conflict();
-            }
-            for (Reservation reservation : confirmed) {
-                if (reservation.getStartAt().isBefore(resolved.endAt())
-                        && reservation.getOccupancyEndAt().isAfter(resolved.startAt())) {
-                    allocations.add(ReservationCapacityAllocation.allocate(
-                            reservation.getId(),
-                            bucket.getId(),
-                            reservation.getParty().totalCount(),
-                            policyVersion
-                    ));
-                }
-            }
-        }
-        return List.copyOf(allocations);
     }
 
     private static String fingerprint(
