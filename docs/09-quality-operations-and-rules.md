@@ -151,13 +151,13 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 현재 staging은 단일 EC2 Docker Compose, Private ECR과 SSM 배포만 사용한다. 이 경계 밖의 NAT Gateway, ALB, RDS, ElastiCache와 managed Kafka는 실제 운영 전환의 가격 계산과 팀 승인을 통과하기 전까지 생성하지 않는다. Budget은 청구 데이터 갱신 지연이 있으므로 자동 차단 장치가 아니라 조기 경보로만 사용하며, 실행 중인 DB를 Budget action으로 자동 종료하지 않는다.
 
 - 모든 신규 AWS 리소스에는 `project=miriyum`, `environment=staging`, `owner`, `expires-at` 태그를 같은 대소문자로 적용한다. 비용 할당 태그 `project`, `environment`은 Billing 화면에 나타난 뒤 활성화하며, 그 전 상태는 `NOT RUN`으로 기록한다.
-- staging EC2를 사용하지 않을 때는 먼저 GitHub Actions의 CD 실행이 없는지 확인한 뒤 인스턴스를 중지한다. 중지는 컴퓨팅 비용만 줄이며 EBS와 EIP 등 연결 리소스 비용을 없애지 않는다는 점을 기록한다.
+- 현재 자동 CD는 EC2를 시작하거나 SSM online 상태를 기다리지 않는다. 따라서 자동 CD가 활성화된 개발 기간에는 staging EC2를 중지하지 않는다. 계획된 휴지·종료로 중지했다면 다음 `dev` 병합 또는 수동 배포 전에 EC2를 시작하고 instance status check와 SSM online 상태를 확인한다. 중지는 컴퓨팅 비용만 줄이며 EBS와 EIP 등 연결 리소스 비용을 없애지 않는다는 점을 기록한다.
 - `miriyum-backend` ECR은 최신 10개 이미지만 보관하는 lifecycle policy를 사용한다. 정책은 현재 실행 중인 컨테이너를 중단하지 않으며, ECR의 오래된 이미지 저장 비용만 정리한다.
 - CloudWatch Logs 보존 기간은 관측 이슈에서 별도 설정하고, S3 수명 주기 정책은 S3를 실제 도입하는 기능 이슈에서 설정한다. 아직 설정하지 않은 항목은 `NOT CONFIGURED`로 기록한다.
 
 | 시점 | 확인 대상 | 해야 할 일 |
 |---|---|---|
-| 실습·검증 직후 | staging EC2, Docker Compose | 필요한 증거와 데이터 보존 여부를 확인한 뒤 EC2를 중지한다. |
+| 계획된 휴지·종료 전 | staging EC2, Docker Compose | 다음 `dev` 병합 또는 수동 배포가 없음을 확인한 뒤 필요한 증거와 데이터 보존 여부를 확인하고 EC2를 중지한다. 재개 시에는 EC2 시작, instance status check, SSM online 확인을 마친 뒤 배포한다. |
 | 주 1회 | Budgets, Cost Explorer | 실제 비용과 예측 비용, 태그별 비용 반영 상태를 확인한다. Budget 알림 미수신은 비용이 임계값에 도달하지 않았으면 `NOT RUN`으로 남긴다. |
 | 리소스 생성 전 | NAT Gateway, ALB, RDS, ElastiCache, MSK | 가격 계산·목적·종료일·소유자를 Issue에 기록하고 팀 승인을 받는다. |
 | 프로젝트 종료 전 | EC2, EBS volume/snapshot, ECR image, CloudWatch Logs, S3 object, IAM role | 더 이상 필요 없는 리소스와 데이터 보존 필요성을 확인한 뒤 삭제한다. EC2 종료 전에는 필요한 DB·로그·증빙을 별도 보관한다. |
