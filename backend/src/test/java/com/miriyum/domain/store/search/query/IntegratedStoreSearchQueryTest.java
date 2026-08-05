@@ -68,7 +68,7 @@ class IntegratedStoreSearchQueryTest {
     }
 
     @Test
-    void cursorIsAcceptedOnlyForTheSameFingerprintAndSort() {
+    void cursorIsAcceptedOnlyForTheSameVersionFingerprintAndSort() {
         IntegratedStoreSearchQuery firstPage = query(condition(), "name,asc", null, 20);
         String cursor = IntegratedSearchCursorCodec.encode(
                 firstPage, "가게.이름|한글", 42L);
@@ -82,6 +82,8 @@ class IntegratedStoreSearchQueryTest {
         assertValidationFailed(() -> query(condition("다른 키워드"),
                 "name,asc", cursor, 20));
         assertValidationFailed(() -> query(condition(), "name,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition(), "name,asc", cursor.replaceFirst("^v1\\.", "v2."), 20));
         assertValidationFailed(() -> query(condition(), "name,asc", cursor + "x", 20));
     }
 
