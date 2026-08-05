@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.inventory.repository;
 
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketKey;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventoryBucketView;
+import com.miriyum.domain.menuhold.inventory.dto.OnlineInventoryAvailabilityView;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
@@ -97,6 +98,42 @@ public interface MenuInventoryBucketRepository
             order by bucket.id
             """)
     List<CurrentInventoryBucketView> findCurrentSelections(
+            @Param("menuIds") Collection<Long> menuIds,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("endDate") LocalDate endDate,
+            @Param("endTime") LocalTime endTime);
+
+    @Query("""
+            select bucket.menuId as menuId,
+                   bucket.inventoryPolicyVersion as inventoryPolicyVersion,
+                   bucket.timeZoneId as timeZoneId,
+                   bucket.serviceDate as serviceDate,
+                   bucket.startTime as startTime,
+                   bucket.endDate as endDate,
+                   bucket.endTime as endTime,
+                   bucket.onlineHoldRemaining as onlineHoldRemaining,
+                   bucket.sharedRemaining as sharedRemaining,
+                   bucket.sharedOnlineAllowed as sharedOnlineAllowed,
+                   bucket.availabilityStatus as availabilityStatus
+            from MenuInventoryBucket bucket
+            where bucket.menuId in :menuIds
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime = :startTime
+              and bucket.endDate = :endDate
+              and bucket.endTime = :endTime
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = bucket.menuId
+                    and candidate.serviceDate = bucket.serviceDate
+                    and candidate.startTime = bucket.startTime
+                    and candidate.endDate = bucket.endDate
+                    and candidate.endTime = bucket.endTime
+              )
+            order by bucket.menuId, bucket.id
+            """)
+    List<OnlineInventoryAvailabilityView> findCurrentOnlineAvailability(
             @Param("menuIds") Collection<Long> menuIds,
             @Param("serviceDate") LocalDate serviceDate,
             @Param("startTime") LocalTime startTime,
