@@ -274,6 +274,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/CapacityConfigurationConflict"
   /api/v1/store-operator/stores/{storeId}/reservation-time-policies:

@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -17,12 +18,24 @@ import java.time.LocalTime;
  * @param infantsAllowed 영유아 동반 허용 여부
  */
 public record CapacityBucketRequest(
-        @NotNull LocalTime startTime,
-        @NotNull LocalTime endTime,
+        @NotNull @JsonFormat(pattern = "HH:mm") LocalTime startTime,
+        @NotNull @JsonFormat(pattern = "HH:mm") LocalTime endTime,
         @NotNull @Min(1) @Max(10_000) Integer maxPeople,
         @NotNull @Min(0) @Max(10_000) Integer maxTeams,
         @Min(1) @Max(100) int minPartySize,
         @Min(1) @Max(100) int maxPartySize,
         @NotNull Boolean infantsAllowed
 ) {
+
+    public CapacityBucketRequest {
+        if (hasSubMinutePrecision(startTime) || hasSubMinutePrecision(endTime)) {
+            throw new IllegalArgumentException(
+                    "capacity bucket times must use minute precision"
+            );
+        }
+    }
+
+    private static boolean hasSubMinutePrecision(LocalTime time) {
+        return time != null && (time.getSecond() != 0 || time.getNano() != 0);
+    }
 }
