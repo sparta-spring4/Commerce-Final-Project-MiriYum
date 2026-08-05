@@ -271,6 +271,20 @@ class StoreSearchQueryTest {
         assertValidationFailed(() -> new ReservationSearchCondition(date, time, 101));
     }
 
+    @Test
+    @DisplayName("단건 조회 예약 파라미터는 전용 팩터리에서 완전성 검증 후 조건으로 변환한다")
+    void createsOptionalReservationConditionWithoutSearchQueryDefaults() {
+        // given
+        LocalDate date = LocalDate.of(2026, 8, 3);
+        LocalTime time = LocalTime.of(18, 30);
+
+        // when & then
+        assertThat(ReservationSearchCondition.fromNullable(null, null, null)).isNull();
+        assertThat(ReservationSearchCondition.fromNullable(date, time, 2))
+                .isEqualTo(new ReservationSearchCondition(date, time, 2));
+        assertValidationFailed(() -> ReservationSearchCondition.fromNullable(date, null, 2));
+    }
+
     private static StoreSearchQuery queryWithSort(String sort) {
         return StoreSearchQuery.from(
                 null, null, null, null, null, null,

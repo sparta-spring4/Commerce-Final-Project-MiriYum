@@ -33,4 +33,24 @@ public record ReservationSearchCondition(
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
     }
+
+    /**
+     * 선택 입력 세 개가 모두 없으면 조건 없음으로, 모두 있으면 완전한 예약 조건으로 변환한다.
+     *
+     * @throws ServiceException 일부 값만 제공되거나 값의 범위가 유효하지 않은 경우
+     */
+    public static ReservationSearchCondition fromNullable(
+            LocalDate serviceDate,
+            LocalTime startTime,
+            Integer partySize
+    ) {
+        boolean anyValue = serviceDate != null || startTime != null || partySize != null;
+        boolean allValues = serviceDate != null && startTime != null && partySize != null;
+        if (anyValue != allValues) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        return allValues
+                ? new ReservationSearchCondition(serviceDate, startTime, partySize)
+                : null;
+    }
 }

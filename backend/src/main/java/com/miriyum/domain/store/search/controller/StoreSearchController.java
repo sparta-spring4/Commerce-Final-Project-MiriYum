@@ -70,9 +70,8 @@ public class StoreSearchController {
             @RequestParam(required = false) Integer partySize,
             @RequestParam(defaultValue = "false") boolean includesInfants
     ) {
-        ReservationSearchCondition condition = StoreSearchQuery.from(
-                null, null, null, serviceDate, startTime, partySize,
-                false, null, 0, 20).reservationCondition();
+        ReservationSearchCondition condition = ReservationSearchCondition.fromNullable(
+                serviceDate, startTime, partySize);
         return ApiResponse.success(
                 "매장을 조회했습니다.",
                 publicQueryService.getDetail(storeId, condition, includesInfants));

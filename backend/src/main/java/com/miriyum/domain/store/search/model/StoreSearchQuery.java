@@ -34,7 +34,6 @@ public record StoreSearchQuery(
 ) {
 
     private static final int MAX_KEYWORD_LENGTH = 100;
-    private static final int MAX_PARTY_SIZE = 100;
     private static final int MAX_PAGE_SIZE = 100;
 
     /**
@@ -67,16 +66,9 @@ public record StoreSearchQuery(
             int page,
             int size
     ) {
-        boolean anyReservationValue = serviceDate != null
-                || startTime != null
-                || partySize != null;
-        boolean allReservationValues = serviceDate != null
-                && startTime != null
-                && partySize != null;
-        if (anyReservationValue != allReservationValues
-                || (availableOnly && !allReservationValues)
-                || (partySize != null
-                && (partySize < 1 || partySize > MAX_PARTY_SIZE))
+        ReservationSearchCondition reservationCondition =
+                ReservationSearchCondition.fromNullable(serviceDate, startTime, partySize);
+        if ((availableOnly && reservationCondition == null)
                 || page < 0
                 || size < 1
                 || size > MAX_PAGE_SIZE) {
@@ -87,9 +79,6 @@ public record StoreSearchQuery(
         if (keyword != null && normalizedKeyword == null) {
             throw validationFailed();
         }
-        ReservationSearchCondition reservationCondition = allReservationValues
-                ? new ReservationSearchCondition(serviceDate, startTime, partySize)
-                : null;
         return new StoreSearchQuery(
                 normalizedKeyword,
                 toLikePattern(normalizedKeyword),

@@ -267,15 +267,27 @@ class StoreSearchRepositoryIT {
     }
 
     @Test
-    @DisplayName("공개 매장 검색 인덱스를 계획된 열 순서로 설치한다")
+    @DisplayName("공개 매장 검색의 모든 정렬 계약에 맞는 방향별 인덱스를 설치한다")
     void installsPublicSearchIndexesInColumnOrder() {
         // when
-        List<String> storeIndexColumns = indexColumns("idx_stores_public_search");
+        List<String> nameAscIndex = indexColumnsWithDirection("idx_stores_public_search");
+        List<String> nameDescIndex = indexColumnsWithDirection(
+                "idx_stores_public_search_name_desc");
+        List<String> createdAtAscIndex = indexColumnsWithDirection(
+                "idx_stores_public_search_created_at_asc");
+        List<String> createdAtDescIndex = indexColumnsWithDirection(
+                "idx_stores_public_search_created_at_desc");
         List<String> menuIndexColumns = indexColumns("idx_menus_public_search");
 
         // then
-        assertThat(storeIndexColumns)
-                .containsExactly("verification_status", "name", "store_id");
+        assertThat(nameAscIndex).containsExactly(
+                "verification_status:ASC", "name:ASC", "store_id:ASC");
+        assertThat(nameDescIndex).containsExactly(
+                "verification_status:ASC", "name:DESC", "store_id:ASC");
+        assertThat(createdAtAscIndex).containsExactly(
+                "verification_status:ASC", "created_at:ASC", "store_id:ASC");
+        assertThat(createdAtDescIndex).containsExactly(
+                "verification_status:ASC", "created_at:DESC", "store_id:ASC");
         assertThat(menuIndexColumns)
                 .containsExactly(
                         "store_id", "retired", "visibility", "published_version_number");
@@ -633,6 +645,18 @@ class StoreSearchRepositoryIT {
                   AND index_name = ?
                 ORDER BY seq_in_index
                 """, (resultSet, rowNumber) -> resultSet.getString("column_name"), indexName);
+    }
+
+    private List<String> indexColumnsWithDirection(String indexName) {
+        return jdbcTemplate.query("""
+                SELECT CONCAT(column_name, ':',
+                    CASE collation WHEN 'D' THEN 'DESC' ELSE 'ASC' END)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'stores'
+                  AND index_name = ?
+                ORDER BY seq_in_index
+                """, (resultSet, rowNumber) -> resultSet.getString(1), indexName);
     }
 
     private void flushAndClear() {
