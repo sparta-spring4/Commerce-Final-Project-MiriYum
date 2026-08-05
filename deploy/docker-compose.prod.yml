@@ -19,6 +19,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    networks:
+      - app
     restart: unless-stopped
 
   backend:
@@ -39,6 +41,8 @@ services:
     ports:
       # EC2 내부 확인만 가능하도록 127.0.0.1에만 backend 포트를 연결한다.
       - "127.0.0.1:8080:8080"
+    networks:
+      - app
     restart: unless-stopped
 
   nginx:
@@ -50,7 +54,17 @@ services:
       - "80:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      app:
+        ipv4_address: 172.29.81.2
     restart: unless-stopped
 
 volumes:
   mysql-data:
+
+networks:
+  app:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.81.0/24

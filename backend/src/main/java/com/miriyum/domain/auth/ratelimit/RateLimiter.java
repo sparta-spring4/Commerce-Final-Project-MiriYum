@@ -34,6 +34,8 @@ public class RateLimiter {
             @Value("${miriyum.rate-limit.token-refresh.window-seconds}") long tokenRefreshWindowSeconds,
             @Value("${miriyum.rate-limit.csrf-preparation.max-requests}") int csrfPreparationMaxRequests,
             @Value("${miriyum.rate-limit.csrf-preparation.window-seconds}") long csrfPreparationWindowSeconds,
+            @Value("${miriyum.rate-limit.public-store-read.max-requests}") int publicStoreReadMaxRequests,
+            @Value("${miriyum.rate-limit.public-store-read.window-seconds}") long publicStoreReadWindowSeconds,
             Clock clock,
             RateLimitWindowRepository rateLimitWindowRepository
     ) {
@@ -43,7 +45,9 @@ public class RateLimiter {
                 RateLimitCategory.TOKEN_REFRESH,
                         new Limit(tokenRefreshMaxRequests, Duration.ofSeconds(tokenRefreshWindowSeconds)),
                 RateLimitCategory.CSRF_PREPARATION,
-                        new Limit(csrfPreparationMaxRequests, Duration.ofSeconds(csrfPreparationWindowSeconds))
+                        new Limit(csrfPreparationMaxRequests, Duration.ofSeconds(csrfPreparationWindowSeconds)),
+                RateLimitCategory.PUBLIC_STORE_READ,
+                        new Limit(publicStoreReadMaxRequests, Duration.ofSeconds(publicStoreReadWindowSeconds))
         );
         this.clock = clock;
         this.rateLimitWindowRepository = rateLimitWindowRepository;

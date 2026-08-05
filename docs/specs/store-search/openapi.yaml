@@ -31,6 +31,8 @@ paths:
             type: string
             minLength: 1
             maxLength: 100
+            pattern: '.*\S.*'
+            description: 공백이 아닌 문자를 하나 이상 포함해야 한다.
         - name: region
           in: query
           required: false
@@ -58,9 +60,19 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+        - name: includesInfants
+          in: query
+          required: false
+          description: 영유아가 한 명 이상 포함되는지 여부. 생략하면 false다.
+          schema:
+            type: boolean
+            default: false
         - name: availableOnly
           in: query
           required: false
+          description: >-
+            true이면 선택한 고정 정렬에서 먼저 매칭되는 공개 후보 최대 5,000개의
+            예약 가용성을 평가하고 AVAILABLE인 매장만 반환한다.
           schema:
             type: boolean
             default: false
@@ -79,13 +91,17 @@ paths:
             default: "name,asc"
       responses:
         "200":
-          description: 매장 검색 결과 페이지
+          description: >-
+            매장 검색 결과 페이지. availableOnly=true일 때 totalElements는
+            고정 정렬의 공개 후보 최대 5,000개 안에서 AVAILABLE로 판정된 정확한 수다.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StorePageSuccessResponse"
         "400":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/stores/{storeId}:
     get:
       tags: [Store Search]
@@ -110,6 +126,13 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+        - name: includesInfants
+          in: query
+          required: false
+          description: 영유아가 한 명 이상 포함되는지 여부. 생략하면 false다.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: 매장 상세
@@ -121,6 +144,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/StoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/stores/{storeId}/menus:
     get:
       tags: [Store Search]
@@ -137,6 +162,8 @@ paths:
                 $ref: "#/components/schemas/MenuListSuccessResponse"
         "404":
           $ref: "#/components/responses/StoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-categories:
     get:
       tags: [Catalog]
