@@ -131,18 +131,27 @@ jobs:
       - name: Check immutable ECR image exists
         id: ecr-image
         env:
+          EVENT_NAME: ${{ github.event_name }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
-          image_count=$(aws ecr batch-get-image \
+          if ! image_count=$(aws ecr batch-get-image \
             --repository-name "$ECR_REPOSITORY" \
             --image-ids "imageTag=$IMAGE_TAG" \
             --query 'length(images)' \
-            --output text)
+            --output text); then
+            echo "::error::ECR image lookup failed. The staging CD role requires ecr:BatchGetImage on $ECR_REPOSITORY."
+            exit 1
+          fi
 
           if [ "$image_count" = "1" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Reusing immutable ECR image tag: $IMAGE_TAG"
           else
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "::error::Manual deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
+              exit 1
+            fi
+
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 

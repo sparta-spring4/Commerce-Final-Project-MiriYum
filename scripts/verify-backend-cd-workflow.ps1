@@ -7,8 +7,10 @@ $workflow = Get-Content -Raw -Path $WorkflowPath
 $requiredFragments = @(
     "- name: Check immutable ECR image exists",
     "aws ecr batch-get-image",
+    "ecr:BatchGetImage",
     "id: ecr-image",
-    "steps.ecr-image.outputs.exists != 'true'"
+    "steps.ecr-image.outputs.exists != 'true'",
+    "Manual deployment requires an existing immutable ECR image tag"
 )
 
 foreach ($fragment in $requiredFragments) {
