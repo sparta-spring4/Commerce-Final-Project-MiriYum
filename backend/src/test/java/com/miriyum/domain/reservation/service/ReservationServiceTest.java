@@ -1290,6 +1290,112 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("매장 관리 권한과 소유 범위 조회 뒤 메뉴 스냅샷으로 운영자 상세를 반환한다")
+    void findsStoreDetailAfterManagementAuthorization() {
+        // given
+        Reservation reservation = reservation(77L, 11L);
+        List<MenuHoldItemResult> snapshots = List.of(
+                new MenuHoldItemResult(91L, "아메리카노", 4_500L, 2),
+                new MenuHoldItemResult(92L, "바스크 치즈케이크", 7_000L, 1)
+        );
+        given(reservationRepository.findByIdAndStoreId(77L, 22L))
+                .willReturn(Optional.of(reservation));
+        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .willReturn(snapshots);
+
+        // when
+        ReservationDetailResponse response =
+                reservationService.getStoreReservation(33L, 22L, 77L);
+
+        // then
+        assertThat(response.reservationId()).isEqualTo("77");
+        assertThat(response.storeId()).isEqualTo("22");
+        assertThat(response.menuSelections())
+                .extracting(selection -> selection.menuId())
+                .containsExactly("91", "92");
+        InOrder order = inOrder(
+                storeService,
+                reservationRepository,
+                menuHoldSnapshotQueryService
+        );
+        order.verify(storeService).requireManagementOwnership(33L, 22L);
+        order.verify(reservationRepository).findByIdAndStoreId(77L, 22L);
+        order.verify(menuHoldSnapshotQueryService).findByReservationId(77L);
+        then(reservationRepository).should(never()).findById(anyLong());
+    }
+
+    @Test
+    @DisplayName("매장 관리 권한이 없으면 예약이나 메뉴 스냅샷을 조회하지 않는다")
+    void doesNotQueryReservationWhenManagementAuthorizationFails() {
+        // given
+        willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED))
+                .given(storeService)
+                .requireManagementOwnership(33L, 22L);
+
+        // when & then
+        assertThatThrownBy(() ->
+                reservationService.getStoreReservation(33L, 22L, 77L))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.ACCESS_DENIED));
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("없는 예약과 다른 매장 예약은 같은 숨김 404를 반환한다")
+    void returnsHiddenNotFoundForReservationOutsideStoreScope() {
+        // given
+        given(reservationRepository.findByIdAndStoreId(77L, 22L))
+                .willReturn(Optional.empty());
+        given(reservationRepository.findByIdAndStoreId(88L, 22L))
+                .willReturn(Optional.empty());
+
+        // when & then
+        assertHiddenReservationNotFound(() ->
+                reservationService.getStoreReservation(33L, 22L, 77L));
+        assertHiddenReservationNotFound(() ->
+                reservationService.getStoreReservation(33L, 22L, 88L));
+        then(reservationRepository).should(never()).findById(anyLong());
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("0 이하 운영자 상세 예약 ID도 복합 조회 뒤 같은 숨김 404를 반환한다")
+    void returnsHiddenNotFoundForNonPositiveStoreReservationId() {
+        // given
+        given(reservationRepository.findByIdAndStoreId(0L, 22L))
+                .willReturn(Optional.empty());
+        given(reservationRepository.findByIdAndStoreId(-1L, 22L))
+                .willReturn(Optional.empty());
+
+        // when & then
+        assertHiddenReservationNotFound(() ->
+                reservationService.getStoreReservation(33L, 22L, 0L));
+        assertHiddenReservationNotFound(() ->
+                reservationService.getStoreReservation(33L, 22L, -1L));
+        then(storeService).should(times(2)).requireManagementOwnership(33L, 22L);
+        then(reservationRepository).should().findByIdAndStoreId(0L, 22L);
+        then(reservationRepository).should().findByIdAndStoreId(-1L, 22L);
+        then(reservationRepository).should(never()).findById(anyLong());
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("매장 범위에서 숨겨진 예약은 메뉴 거래 스냅샷을 조회하지 않는다")
+    void doesNotQueryMenuSnapshotWhenStoreReservationIsHidden() {
+        // given
+        given(reservationRepository.findByIdAndStoreId(77L, 22L))
+                .willReturn(Optional.empty());
+
+        // when & then
+        assertHiddenReservationNotFound(() ->
+                reservationService.getStoreReservation(33L, 22L, 77L));
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(reservationRepository).should(never()).findById(anyLong());
+    }
+
+    @Test
     @DisplayName("운영자 목록은 매장 관리 권한을 확인한 뒤 대상 매장만 조회한다")
     void findsStoreReservationsAfterManagementAuthorization() {
         // given

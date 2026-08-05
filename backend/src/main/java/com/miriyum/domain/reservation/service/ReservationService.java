@@ -700,6 +700,36 @@ public class ReservationService {
     }
 
     /**
+     * 매장 관리 권한을 확인한 운영자에게 대상 매장 범위의 예약 상세를 반환한다.
+     *
+     * @param operatorAccountId 인증된 매장 운영자 계정 식별자
+     * @param storeId 대상 매장 식별자
+     * @param reservationId 대상 예약 식별자
+     * @return 운영자 공개 예약 상세
+     * @throws ServiceException 운영자 계정이 유효하지 않거나 관리 권한 또는 예약이 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public ReservationDetailResponse getStoreReservation(
+            Long operatorAccountId,
+            Long storeId,
+            Long reservationId
+    ) {
+        if (operatorAccountId == null || operatorAccountId <= 0) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        storeService.requireManagementOwnership(operatorAccountId, storeId);
+        Reservation reservation = reservationRepository.findByIdAndStoreId(
+                        reservationId,
+                        storeId
+                )
+                .orElseThrow(() ->
+                        new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
+        List<MenuHoldItemResult> menuSnapshots =
+                menuHoldSnapshotQueryService.findByReservationId(reservation.getId());
+        return ReservationDetailResponse.from(reservation, menuSnapshots);
+    }
+
+    /**
      * 인증된 운영자가 관리하는 매장의 예약 목록을 승인된 조건으로 조회한다.
      *
      * @param operatorAccountId 인증된 매장 운영자 계정 식별자

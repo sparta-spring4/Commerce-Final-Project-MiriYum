@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
+import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.response.ApiResponse;
@@ -61,6 +62,28 @@ public class StoreReservationController {
                 principal.accountId(),
                 storeId,
                 request
+        );
+        return ApiResponse.success("조회되었습니다.", response);
+    }
+
+    /**
+     * 인증된 운영자의 계정 ID와 경로의 매장·예약 ID로 대상 매장 예약 상세를 조회한다.
+     *
+     * @param principal 매장 운영자 Access JWT로 구성한 인증 주체
+     * @param storeId 대상 매장 식별자
+     * @param reservationId 조회할 예약 식별자
+     * @return 공통 성공 봉투로 감싼 예약 상세
+     */
+    @GetMapping("/{reservationId}")
+    public ApiResponse<ReservationDetailResponse> getReservation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long storeId,
+            @PathVariable long reservationId
+    ) {
+        ReservationDetailResponse response = reservationService.getStoreReservation(
+                principal.accountId(),
+                storeId,
+                reservationId
         );
         return ApiResponse.success("조회되었습니다.", response);
     }
