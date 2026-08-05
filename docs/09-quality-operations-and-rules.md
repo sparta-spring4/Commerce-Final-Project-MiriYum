@@ -146,4 +146,21 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터가
 
 [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)의 ECR·SSM 백엔드 API 사전 배포는 `staging` EC2만 대상으로 하며 프론트엔드 사용자 shell과 최종 same-origin 배포를 대체하지 않는다. 이 경로는 ECR 이미지의 SHA 추적, 비밀의 서버 분리, SSM 배포, Docker 실행과 loopback health 확인만 증명한다. `dev`에 통합된 뒤 CI가 성공한 SHA만 staging에 배포한다. 실제 `dev` 배포 실행·ECR push·SSM command·EC2 health의 성공 증거가 없으면 각각 `NOT CONFIGURED` 또는 `NOT RUN`으로 기록하며, 프론트엔드 소유자가 `/` 정적 제공과 `/api` 프록시를 포함한 후속 범위를 승인할 때까지 핵심 사용자 흐름 배포 성공으로 선언하지 않는다. 운영 배포는 이 경로와 분리해 `main` 전용 workflow, 별도 EC2·IAM 역할·GitHub Environment 승인으로 구성한다.
 
+### staging 비용 가드레일과 종료 체크리스트
+
+현재 staging은 단일 EC2 Docker Compose, Private ECR과 SSM 배포만 사용한다. 이 경계 밖의 NAT Gateway, ALB, RDS, ElastiCache와 managed Kafka는 실제 운영 전환의 가격 계산과 팀 승인을 통과하기 전까지 생성하지 않는다. Budget은 청구 데이터 갱신 지연이 있으므로 자동 차단 장치가 아니라 조기 경보로만 사용하며, 실행 중인 DB를 Budget action으로 자동 종료하지 않는다.
+
+- 모든 신규 AWS 리소스에는 `project=miriyum`, `environment=staging`, `owner`, `expires-at` 태그를 같은 대소문자로 적용한다. 비용 할당 태그 `project`, `environment`은 Billing 화면에 나타난 뒤 활성화하며, 그 전 상태는 `NOT RUN`으로 기록한다.
+- staging EC2를 사용하지 않을 때는 먼저 GitHub Actions의 CD 실행이 없는지 확인한 뒤 인스턴스를 중지한다. 중지는 컴퓨팅 비용만 줄이며 EBS와 EIP 등 연결 리소스 비용을 없애지 않는다는 점을 기록한다.
+- `miriyum-backend` ECR은 최신 10개 이미지만 보관하는 lifecycle policy를 사용한다. 정책은 현재 실행 중인 컨테이너를 중단하지 않으며, ECR의 오래된 이미지 저장 비용만 정리한다.
+- CloudWatch Logs 보존 기간은 관측 이슈에서 별도 설정하고, S3 수명 주기 정책은 S3를 실제 도입하는 기능 이슈에서 설정한다. 아직 설정하지 않은 항목은 `NOT CONFIGURED`로 기록한다.
+
+| 시점 | 확인 대상 | 해야 할 일 |
+|---|---|---|
+| 실습·검증 직후 | staging EC2, Docker Compose | 필요한 증거와 데이터 보존 여부를 확인한 뒤 EC2를 중지한다. |
+| 주 1회 | Budgets, Cost Explorer | 실제 비용과 예측 비용, 태그별 비용 반영 상태를 확인한다. Budget 알림 미수신은 비용이 임계값에 도달하지 않았으면 `NOT RUN`으로 남긴다. |
+| 리소스 생성 전 | NAT Gateway, ALB, RDS, ElastiCache, MSK | 가격 계산·목적·종료일·소유자를 Issue에 기록하고 팀 승인을 받는다. |
+| 프로젝트 종료 전 | EC2, EBS volume/snapshot, ECR image, CloudWatch Logs, S3 object, IAM role | 더 이상 필요 없는 리소스와 데이터 보존 필요성을 확인한 뒤 삭제한다. EC2 종료 전에는 필요한 DB·로그·증빙을 별도 보관한다. |
+| 프로젝트 종료 전 | NAT Gateway, ALB, RDS, ElastiCache, MSK | 생성된 적이 있다면 서비스별 콘솔과 Billing에서 잔존 리소스가 없는지 대조하고 삭제 증거를 남긴다. |
+
 롤링 배포는 expand→migrate→contract, 이전·신규 버전 혼합 계약, 작업 임대 인계와 롤백을 검증한다. 복구 성공은 원장·객체·캐시·삭제 전파·외부 대사까지 확인한 뒤에만 선언한다.
