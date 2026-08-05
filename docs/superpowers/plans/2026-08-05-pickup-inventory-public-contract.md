@@ -57,8 +57,8 @@
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/contract/PickupMenuInventoryContractFixture.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/contract/MenuInventoryTransactionServiceConsumerContractTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryTransactionRuntimeIT.java`
-  - `@Tag("integration")`, `@Tag("integration-shard-a")`를 class-level로 선언한다.
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryRuntimeIT.java`
+  - 기존 class-level `@Tag("integration")`, `@Tag("integration-shard-b")`를 유지한다.
 - Modify: `backend/src/test/java/com/miriyum/domain/menuhold/MenuHoldProductionDependencyTest.java`
 
 ---
@@ -136,7 +136,7 @@
 - Create: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceRuntime.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuInventoryService.java`
 - Create: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceTest.java`
-- Create: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryTransactionRuntimeIT.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryRuntimeIT.java`
 
 **Interfaces:**
 - Consumes: Task 1의 `MenuInventoryTransactionService`와 공개 DTO.
@@ -159,9 +159,9 @@
 
   실제 MySQL에 현재·과거 정책 버킷과 `AVAILABLE`·`SOLD_OUT`, shared 허용/비허용 버킷을
   저장한다. 현재 정책만 선택되고 `ONSITE`가 온라인 가용량에 포함되지 않는지 검증한다.
-  테스트 클래스에는 `@Tag("integration")`과 `@Tag("integration-shard-a")`를 선언한다.
+  기존 테스트 클래스의 `@Tag("integration")`과 `@Tag("integration-shard-b")`를 유지한다.
 
-  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
+  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.service.MenuInventoryRuntimeIT.public*"`
 
   Expected: repository/runtime이 없어 test compilation 또는 조회 assertion이 실패한다.
 
@@ -186,7 +186,7 @@
 
 - [ ] **Step 7: 조회 통합 테스트 GREEN 확인**
 
-  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
+  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.service.MenuInventoryRuntimeIT.public*"`
 
   Expected: PASS.
 
@@ -206,7 +206,7 @@
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceRuntime.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/menuhold/service/MenuInventoryService.java`
 - Modify: `backend/src/test/java/com/miriyum/domain/menuhold/service/MenuInventoryTransactionServiceTest.java`
-- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryTransactionRuntimeIT.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/menuhold/inventory/MenuInventoryRuntimeIT.java`
 
 **Interfaces:**
 - Consumes: Task 1의 acquire/restore command.
@@ -237,7 +237,7 @@
 
 - [ ] **Step 4: 통합 RED 확인**
 
-  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
+  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.service.MenuInventoryRuntimeIT.public*"`
 
   Expected: 공개 runtime command가 없어 새 시나리오가 실패한다.
 
@@ -255,7 +255,7 @@
 
 - [ ] **Step 7: 기존 #42 runtime을 통한 통합 GREEN 확인**
 
-  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.inventory.MenuInventoryTransactionRuntimeIT"`
+  Run: `.\gradlew.bat integrationTest --tests "com.miriyum.domain.menuhold.service.MenuInventoryRuntimeIT.public*"`
 
   Expected: PASS.
 
