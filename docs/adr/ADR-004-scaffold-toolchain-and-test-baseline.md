@@ -76,3 +76,8 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스는 `@Tag("integration")`을 선언한다. Gradle 검증 task가 이 marker를 사용하는 클래스의 태그 누락을 실패시킨다.
 - GitHub Actions는 `unit-test`와 `integration-test`를 병렬 실행한다. `dev` 브랜치 보호와 호환되는 `backend-ci` 집계 job은 두 job과 CD workflow 계약 검증이 모두 성공할 때만 성공한다.
 - `build`는 두 테스트 task를 모두 포함하므로 로컬 전체 검증과 CI의 병합 gate 의미를 유지한다. 병렬화는 테스트를 생략하는 변경이 아니라 wall-clock 시간을 줄이는 변경이다.
+
+### 통합 테스트 shard 분할
+
+- `integration-test`는 `integration-test-a`, `integration-test-b` 두 matrix job으로 다시 분할해 병렬 실행한다. 모든 통합 테스트 클래스는 `integration-shard-a` 또는 `integration-shard-b` 중 정확히 하나를 추가로 선언한다.
+- Gradle 검증 task는 통합 marker와 shard tag의 누락 또는 중복을 실패시킨다. 두 shard가 모두 성공해야 `backend-ci` 집계 job이 성공하므로 기존 Required check 이름과 전체 테스트 게이트는 유지한다.
