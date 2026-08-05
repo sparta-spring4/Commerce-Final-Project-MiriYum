@@ -17,7 +17,10 @@ import com.miriyum.global.exception.ServiceException;
 import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Propagation;
@@ -152,6 +155,46 @@ class MenuInventoryTransactionServiceConsumerContractTest {
                 .isSameAs(failure);
     }
 
+    @Test
+    @DisplayName("픽업 소비자는 멱등 재생에서 수량 서비스를 다시 호출하지 않는다")
+    void pickupConsumerSkipsInventoryCallsOnIdempotentReplay() {
+        PickupMenuInventoryContractFixture fixture =
+                PickupMenuInventoryContractFixture.succeeding(List.of());
+        PickupConsumer consumer = new PickupConsumer(fixture);
+
+        MenuInventoryAcquireResult firstAcquire =
+                consumer.acquire("create-key", List.of(selection(1L, 2)));
+        MenuInventoryAcquireResult replayedAcquire =
+                consumer.acquire("create-key", List.of(selection(1L, 2)));
+        MenuInventoryRestoreResult firstRestore =
+                consumer.restore("cancel-key", firstAcquire.operationId());
+        MenuInventoryRestoreResult replayedRestore =
+                consumer.restore("cancel-key", firstAcquire.operationId());
+
+        assertThat(replayedAcquire).isSameAs(firstAcquire);
+        assertThat(replayedRestore).isSameAs(firstRestore);
+        assertThat(fixture.acquireCommands()).hasSize(1);
+        assertThat(fixture.restoreCommands()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("픽업 소비자는 논리 명령마다 서로 다른 operationId를 발급한다")
+    void pickupConsumerIssuesUniqueOperationIdPerLogicalCommand() {
+        PickupMenuInventoryContractFixture fixture =
+                PickupMenuInventoryContractFixture.succeeding(List.of());
+        PickupConsumer consumer = new PickupConsumer(fixture);
+
+        MenuInventoryAcquireResult first =
+                consumer.acquire("create-key-1", List.of(selection(1L, 1)));
+        MenuInventoryAcquireResult second =
+                consumer.acquire("create-key-2", List.of(selection(1L, 1)));
+        MenuInventoryRestoreResult restored =
+                consumer.restore("cancel-key-1", first.operationId());
+
+        assertThat(List.of(first.operationId(), second.operationId(), restored.operationId()))
+                .doesNotHaveDuplicates();
+    }
+
     private static MenuInventoryAcquireSelection selection(long menuId, int quantity) {
         return new MenuInventoryAcquireSelection(
                 menuId,
@@ -161,5 +204,39 @@ class MenuInventoryTransactionServiceConsumerContractTest {
                 END_TIME,
                 1L,
                 quantity);
+    }
+
+    private static final class PickupConsumer {
+
+        private final MenuInventoryTransactionService inventoryService;
+        private final AtomicLong operationSequence = new AtomicLong();
+        private final Map<String, MenuInventoryAcquireResult> acquireOutcomes = new HashMap<>();
+        private final Map<String, MenuInventoryRestoreResult> restoreOutcomes = new HashMap<>();
+
+        private PickupConsumer(MenuInventoryTransactionService inventoryService) {
+            this.inventoryService = inventoryService;
+        }
+
+        private MenuInventoryAcquireResult acquire(
+                String idempotencyKey,
+                List<MenuInventoryAcquireSelection> selections
+        ) {
+            return acquireOutcomes.computeIfAbsent(idempotencyKey, ignored ->
+                    inventoryService.acquire(new MenuInventoryAcquireCommand(
+                            nextOperationId("acquire"), selections)));
+        }
+
+        private MenuInventoryRestoreResult restore(
+                String idempotencyKey,
+                String sourceAcquireOperationId
+        ) {
+            return restoreOutcomes.computeIfAbsent(idempotencyKey, ignored ->
+                    inventoryService.restore(new MenuInventoryRestoreCommand(
+                            nextOperationId("restore"), sourceAcquireOperationId)));
+        }
+
+        private String nextOperationId(String commandType) {
+            return "pickup:" + commandType + ":" + operationSequence.incrementAndGet();
+        }
     }
 }
