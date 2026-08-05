@@ -1,6 +1,7 @@
 package com.miriyum;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.containers.MySQLContainer;
@@ -18,6 +19,7 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.jwt.issuer=miriyum"
         })
+@Tag("integration")
 @Testcontainers(disabledWithoutDocker = true)
 class MiriyumApplicationTests {
 
