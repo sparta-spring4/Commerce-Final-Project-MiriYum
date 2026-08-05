@@ -95,6 +95,8 @@ paths:
                 $ref: "#/components/schemas/StorePageSuccessResponse"
         "400":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/stores/{storeId}:
     get:
       tags: [Store Search]
@@ -137,6 +139,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/StoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/stores/{storeId}/menus:
     get:
       tags: [Store Search]
@@ -153,6 +157,8 @@ paths:
                 $ref: "#/components/schemas/MenuListSuccessResponse"
         "404":
           $ref: "#/components/responses/StoreNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-categories:
     get:
       tags: [Catalog]

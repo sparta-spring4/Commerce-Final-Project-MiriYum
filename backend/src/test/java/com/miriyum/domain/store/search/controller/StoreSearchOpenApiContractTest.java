@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -24,6 +25,9 @@ class StoreSearchOpenApiContractTest {
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
                 "/api/v1/stores/{storeId}/menus");
+        assertThat(responseCodes(paths, "/api/v1/stores")).contains("429");
+        assertThat(responseCodes(paths, "/api/v1/stores/{storeId}")).contains("429");
+        assertThat(responseCodes(paths, "/api/v1/stores/{storeId}/menus")).contains("429");
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
                         "availableOnly", "sort");
@@ -53,6 +57,10 @@ class StoreSearchOpenApiContractTest {
                 .filter(parameter -> parameter.containsKey("name"))
                 .map(parameter -> (String) parameter.get("name"))
                 .toList();
+    }
+
+    private static Set<String> responseCodes(Map<String, Object> paths, String path) {
+        return map(map(map(paths.get(path)).get("get")).get("responses")).keySet();
     }
 
     @SuppressWarnings("unchecked")
