@@ -1,15 +1,11 @@
 package com.miriyum.domain.auth.ratelimit;
 
-import com.miriyum.global.exception.CommonErrorCode;
-import com.miriyum.global.exception.ErrorResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Map;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
@@ -63,11 +59,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         RateLimiter.RateLimitResult result = rateLimiter.tryConsume(category, clientIp(request));
 
         if (!result.allowed()) {
-            response.setStatus(CommonErrorCode.TOO_MANY_REQUESTS.getHttpStatus().value());
-            response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(result.retryAfterSeconds()));
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding("UTF-8");
-            objectMapper.writeValue(response.getWriter(), ErrorResponse.from(CommonErrorCode.TOO_MANY_REQUESTS));
+            RateLimitRejectionWriter.write(response, objectMapper, result);
             return;
         }
 

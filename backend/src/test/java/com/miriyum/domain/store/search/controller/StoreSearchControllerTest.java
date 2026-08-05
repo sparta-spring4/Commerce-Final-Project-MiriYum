@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.store.search.config.StoreSearchSecurityConfig;
 import com.miriyum.domain.store.search.dto.PublicMenu;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;
@@ -20,6 +21,7 @@ import com.miriyum.domain.store.search.service.StorePublicQueryService;
 import com.miriyum.domain.store.search.service.StoreSearchCoreService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -36,6 +38,12 @@ class StoreSearchControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean StoreSearchCoreService searchService;
     @MockitoBean StorePublicQueryService publicQueryService;
+    @MockitoBean RateLimiter rateLimiter;
+
+    @BeforeEach
+    void allowPublicStoreRequestsInControllerSlice() {
+        given(rateLimiter.tryConsume(any(), any())).willReturn(RateLimiter.RateLimitResult.allow());
+    }
 
     @Test
     void anonymousSearchReturnsOpenApiPageEnvelopeAndPassesInfantFlag() throws Exception {
