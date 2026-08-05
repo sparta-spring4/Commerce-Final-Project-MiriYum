@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -73,6 +74,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
+@Tag("integration")
 @Import(ReservationCapacityPublicationIT.LockOrderTestConfiguration.class)
 @SpringBootTest(
         classes = MiriyumApplication.class,
