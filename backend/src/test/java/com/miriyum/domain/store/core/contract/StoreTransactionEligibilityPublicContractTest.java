@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.core.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
@@ -43,9 +44,39 @@ class StoreTransactionEligibilityPublicContractTest {
     }
 
     @Test
-    void purposeSpecificDtosExposeOnlyValidatedStoreId() {
+    void purposeSpecificDtosExposeOnlyApprovedConsumerFields() {
         assertStoreIdOnlyDto(StoreReservationTransactionEligibility.class);
-        assertStoreIdOnlyDto(StorePickupTransactionEligibility.class);
+        assertThat(StorePickupTransactionEligibility.class.getRecordComponents())
+                .extracting(RecordComponent::getName, RecordComponent::getType)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("storeId", long.class),
+                        org.assertj.core.groups.Tuple.tuple("storeName", String.class),
+                        org.assertj.core.groups.Tuple.tuple("timeZoneId", String.class));
+    }
+
+    @Test
+    void pickupEligibilityValidatesSnapshotFieldsAtPublicBoundary() {
+        String maximumLengthName = "가".repeat(100);
+
+        assertThat(new StorePickupTransactionEligibility(
+                1L, maximumLengthName, "Asia/Seoul").storeName())
+                .isEqualTo(maximumLengthName);
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, " ", "Asia/Seoul"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "가".repeat(101), "Asia/Seoul"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "미리윰", "invalid/time-zone"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("timeZoneId must be a valid IANA identifier");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "미리윰", "+09:00"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("timeZoneId must be a valid IANA identifier");
     }
 
     @Test
