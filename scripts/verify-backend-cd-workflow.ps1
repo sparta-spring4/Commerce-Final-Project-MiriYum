@@ -10,7 +10,8 @@ $requiredFragments = @(
     "ecr:BatchGetImage",
     "id: ecr-image",
     "steps.ecr-image.outputs.exists != 'true'",
-    "Manual deployment requires an existing immutable ECR image tag"
+    "Manual deployment requires an existing immutable ECR image tag",
+    'ref: ${{ inputs.image_tag }}'
 )
 
 foreach ($fragment in $requiredFragments) {
