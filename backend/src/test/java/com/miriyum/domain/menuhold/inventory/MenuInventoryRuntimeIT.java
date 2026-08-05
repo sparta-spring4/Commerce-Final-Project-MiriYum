@@ -6,6 +6,11 @@ import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willReturn;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
+import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
@@ -95,6 +100,9 @@ class MenuInventoryRuntimeIT {
     private MenuInventoryService menuHoldService;
 
     @Autowired
+    private MenuInventoryTransactionService transactionService;
+
+    @Autowired
     private MenuInventoryBucketRepository bucketRepository;
 
     @Autowired
@@ -150,6 +158,82 @@ class MenuInventoryRuntimeIT {
                     store.getId(), menuContent(), operatorId,
                     Instant.parse("2026-08-01T00:00:00Z"))).getId();
         });
+    }
+
+    @Test
+    void publicAvailabilityUsesCurrentPolicyAndExcludesOnsiteQuantity() {
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 9, 3, 4, 2, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 2L, 105, 2, 100, 3, true,
+                    com.miriyum.domain.menuhold.inventory.model
+                            .InventoryAvailabilityStatus.SOLD_OUT));
+        });
+
+        List<MenuInventoryAvailability> result =
+                transactionService.findOnlineAvailability(
+                        new MenuInventoryAvailabilityQuery(
+                                List.of(menuId),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0)));
+
+        assertThat(result).singleElement().satisfies(availability -> {
+            assertThat(availability.inventoryPolicyVersion()).isEqualTo(2L);
+            assertThat(availability.availableOnlineQuantity()).isEqualTo(5);
+            assertThat(availability.availabilityStatus())
+                    .isEqualTo(MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT);
+        });
+    }
+
+    @Test
+    void publicAcquireAndRestoreUseOriginalPoolsExactlyOnce() {
+        MenuInventoryBucket bucket = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 3)));
+        String acquireOperation = "pickup-public-acquire-" + SEQUENCE.incrementAndGet();
+
+        transactionTemplate.execute(status -> transactionService.acquire(
+                new MenuInventoryAcquireCommand(
+                        acquireOperation, List.of(publicSelection(menuId, 1L, 4)))));
+
+        MenuInventoryBucket acquired = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(acquired.getOnlineHoldRemaining()).isZero();
+        assertThat(acquired.getSharedRemaining()).isEqualTo(1);
+
+        transactionTemplate.execute(status -> transactionService.restore(
+                new MenuInventoryRestoreCommand(
+                        "pickup-public-restore-" + SEQUENCE.incrementAndGet(),
+                        acquireOperation)));
+        transactionTemplate.execute(status -> transactionService.restore(
+                new MenuInventoryRestoreCommand(
+                        "pickup-public-restore-" + SEQUENCE.incrementAndGet(),
+                        acquireOperation)));
+
+        MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
+        assertThat(restored.getSharedRemaining()).isEqualTo(3);
+    }
+
+    @Test
+    void publicAcquireRollsBackWithCallerTransaction() {
+        MenuInventoryBucket bucket = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+
+        transactionTemplate.executeWithoutResult(status -> {
+            transactionService.acquire(new MenuInventoryAcquireCommand(
+                    "pickup-public-rollback-" + SEQUENCE.incrementAndGet(),
+                    List.of(publicSelection(menuId, 1L, 3))));
+            status.setRollbackOnly();
+        });
+
+        MenuInventoryBucket rolledBack = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(rolledBack.getOnlineHoldRemaining()).isEqualTo(5);
+        assertThat(ledgerRepository.findAll()).noneMatch(event ->
+                event.getOperationId().startsWith("pickup-public-rollback-"));
     }
 
     @Test
@@ -652,6 +736,21 @@ class MenuInventoryRuntimeIT {
             int quantity
     ) {
         return new InventoryAcquireRequest.Selection(
+                selectedMenuId,
+                LocalDate.of(2026, 8, 10),
+                LocalTime.of(12, 0),
+                LocalDate.of(2026, 8, 10),
+                LocalTime.of(13, 0),
+                policyVersion,
+                quantity);
+    }
+
+    private static MenuInventoryAcquireSelection publicSelection(
+            long selectedMenuId,
+            long policyVersion,
+            int quantity
+    ) {
+        return new MenuInventoryAcquireSelection(
                 selectedMenuId,
                 LocalDate.of(2026, 8, 10),
                 LocalTime.of(12, 0),
