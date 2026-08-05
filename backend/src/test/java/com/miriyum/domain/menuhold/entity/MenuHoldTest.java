@@ -67,4 +67,45 @@ class MenuHoldTest {
                 40L, 50L, 2L, "아메리카노", -1, 3L, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void releasesConfirmedHoldAndTreatsRepeatedReleaseAsIdempotent() {
+        MenuHold hold = confirmedHold();
+
+        assertThat(hold.release()).isTrue();
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        assertThat(hold.release()).isFalse();
+    }
+
+    @Test
+    void fulfillsConfirmedHoldAndTreatsRepeatedFulfillAsIdempotent() {
+        MenuHold hold = confirmedHold();
+
+        assertThat(hold.fulfill()).isTrue();
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.FULFILLED);
+        assertThat(hold.fulfill()).isFalse();
+    }
+
+    @Test
+    void rejectsAConflictingTerminalTransition() {
+        MenuHold released = confirmedHold();
+        released.release();
+        MenuHold fulfilled = confirmedHold();
+        fulfilled.fulfill();
+
+        assertThatThrownBy(released::fulfill)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("released menu hold cannot be fulfilled");
+        assertThatThrownBy(fulfilled::release)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("fulfilled menu hold cannot be released");
+    }
+
+    private static MenuHold confirmedHold() {
+        return MenuHold.confirmed(
+                10L, 20L, 30L, LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0), "operation-1",
+                List.of(new MenuHoldItemSnapshot(
+                        40L, 50L, 2L, "아메리카노", 5_000, 3L, 4)));
+    }
 }

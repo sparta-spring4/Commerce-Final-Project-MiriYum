@@ -2,11 +2,14 @@ package com.miriyum.domain.menuhold.service;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -32,7 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** #44-B의 메뉴 홀드 생성 런타임이다. */
 @Service
 @RequiredArgsConstructor
-public class MenuHoldServiceRuntime {
+public class MenuHoldServiceRuntime implements MenuHoldService {
 
     private final StoreService storeService;
     private final StoreServiceIntervalValidationService intervalService;
@@ -40,6 +43,7 @@ public class MenuHoldServiceRuntime {
     private final MenuHoldRepository holdRepository;
 
     @Transactional(propagation = Propagation.MANDATORY)
+    @Override
     public MenuHoldCommandResult create(MenuHoldCreateCommand command) {
         if (command.menuSelections().isEmpty()) {
             return MenuHoldCommandResult.noHold(command.reservationId());
@@ -130,6 +134,48 @@ public class MenuHoldServiceRuntime {
             throw exception;
         }
         return MenuHoldCommandResult.confirmed(command.reservationId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MenuHoldCommandResult release(MenuHoldReleaseCommand command) {
+        MenuHold hold = findLockedHold(command.reservationId());
+        boolean transitioned;
+        try {
+            transitioned = hold.release();
+        } catch (IllegalStateException exception) {
+            throw stateConflict(exception);
+        }
+        if (transitioned) {
+            inventoryService.restoreInventory(new InventoryRestoreRequest(
+                    command.operationId(), hold.getAcquireOperationId()));
+        }
+        return MenuHoldCommandResult.released(command.reservationId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MenuHoldCommandResult fulfill(MenuHoldFulfillCommand command) {
+        MenuHold hold = findLockedHold(command.reservationId());
+        try {
+            hold.fulfill();
+        } catch (IllegalStateException exception) {
+            throw stateConflict(exception);
+        }
+        return MenuHoldCommandResult.fulfilled(command.reservationId());
+    }
+
+    private MenuHold findLockedHold(long reservationId) {
+        return holdRepository.findByReservationIdForUpdate(reservationId)
+                .orElseThrow(() -> new ServiceException(
+                        MenuHoldErrorCode.INVENTORY_STATE_CONFLICT));
+    }
+
+    private static ServiceException stateConflict(IllegalStateException cause) {
+        ServiceException conflict =
+                new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        conflict.initCause(cause);
+        return conflict;
     }
 
     private static boolean matchesResolvedInterval(

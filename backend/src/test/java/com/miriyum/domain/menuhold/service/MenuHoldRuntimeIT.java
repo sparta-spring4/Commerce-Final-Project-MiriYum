@@ -4,13 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willReturn;
+import static org.mockito.Mockito.doThrow;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
+import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
@@ -67,6 +71,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -103,6 +108,7 @@ class MenuHoldRuntimeIT {
     @Autowired EntityManagerFactory entityManagerFactory;
     @MockitoSpyBean StoreService storeService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
+    @MockitoSpyBean MenuInventoryService inventoryService;
 
     private long consumerId;
     private long storeId;
@@ -250,6 +256,201 @@ class MenuHoldRuntimeIT {
                 reservationRepository.saveAndFlush(reservation()));
 
         assertThat(snapshotQueryService.findByReservationId(reservation.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("반복 해제는 최초 확보 수량을 정확히 한 번만 복구한다")
+    void repeatedReleaseRestoresInventoryExactlyOnce() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "release-acquire")));
+
+        transactions.executeWithoutResult(status -> service.release(
+                new MenuHoldReleaseCommand(reservation.getId(), "release-first")));
+        transactions.executeWithoutResult(status -> service.release(
+                new MenuHoldReleaseCommand(reservation.getId(), "release-repeat")));
+
+        assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isEqualTo(1);
+        assertThat(restoreLedgerCount("release-acquire")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("방문 완료는 홀드만 종결하고 메뉴 수량을 복구하지 않는다")
+    void fulfillTerminatesHoldWithoutRestoringInventory() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "fulfill-acquire")));
+
+        transactions.executeWithoutResult(status -> service.fulfill(
+                new MenuHoldFulfillCommand(reservation.getId(), "fulfill-operation")));
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.FULFILLED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("fulfill-acquire")).isZero();
+    }
+
+    @Test
+    void terminalCommandsRequireCallerTransaction() {
+        assertThatThrownBy(() -> service.release(
+                new MenuHoldReleaseCommand(Long.MAX_VALUE, "no-transaction-release")))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> service.fulfill(
+                new MenuHoldFulfillCommand(Long.MAX_VALUE, "no-transaction-fulfill")))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    @DisplayName("해제 뒤 호출자 실패는 홀드 상태와 수량 복구 원장을 모두 롤백한다")
+    void callerFailureRollsBackReleaseStateInventoryAndLedger() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "rollback-release-acquire")));
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            service.release(new MenuHoldReleaseCommand(
+                    reservation.getId(), "rollback-release-operation"));
+            throw new IllegalStateException("caller failure");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("caller failure");
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("rollback-release-acquire")).isZero();
+    }
+
+    @Test
+    void callerFailureRollsBackFulfillState() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "rollback-fulfill-acquire")));
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            service.fulfill(new MenuHoldFulfillCommand(
+                    reservation.getId(), "rollback-fulfill-operation"));
+            throw new IllegalStateException("caller failure");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("caller failure");
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("rollback-fulfill-acquire")).isZero();
+    }
+
+    @Test
+    @DisplayName("수량 복구 오류는 원형 전달되고 홀드 상태도 롤백된다")
+    void inventoryRestoreFailurePropagatesAndRollsBackHoldState() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "restore-failure-acquire")));
+        ServiceException failure = new ServiceException(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+        transactions.executeWithoutResult(status ->
+                doThrow(failure).when(inventoryService).restoreInventory(
+                        org.mockito.ArgumentMatchers.any()));
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status ->
+                service.release(new MenuHoldReleaseCommand(
+                        reservation.getId(), "restore-failure-release"))))
+                .isSameAs(failure);
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("restore-failure-acquire")).isZero();
+    }
+
+    @Test
+    @DisplayName("동시 해제는 둘 다 멱등 성공하고 수량은 한 번만 복구한다")
+    void concurrentReleaseIsIdempotentAndRestoresOnce() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "concurrent-release-acquire")));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> first = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "concurrent-release-1", true, ready, start));
+            Future<Object> second = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "concurrent-release-2", true, ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS),
+                    second.get(20, TimeUnit.SECONDS)))
+                    .containsOnly(com.miriyum.domain.menuhold.dto.MenuHoldCommandResult
+                            .Outcome.RELEASED);
+        }
+        assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isEqualTo(1);
+        assertThat(restoreLedgerCount("concurrent-release-acquire")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("해제와 이행 경합은 하나의 최종 상태만 확정한다")
+    void concurrentReleaseAndFulfillCommitOneTerminalState() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "terminal-race-acquire")));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Object> results;
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> release = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "terminal-race-release", true, ready, start));
+            Future<Object> fulfill = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "terminal-race-fulfill", false, ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            results = List.of(release.get(20, TimeUnit.SECONDS),
+                    fulfill.get(20, TimeUnit.SECONDS));
+        }
+
+        assertThat(results).contains(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        MenuHoldStatus finalStatus = holdFor(reservation.getId()).getStatus();
+        if (finalStatus == MenuHoldStatus.RELEASED) {
+            assertThat(results).contains(
+                    com.miriyum.domain.menuhold.dto.MenuHoldCommandResult.Outcome.RELEASED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isEqualTo(1);
+        } else {
+            assertThat(finalStatus).isEqualTo(MenuHoldStatus.FULFILLED);
+            assertThat(results).contains(
+                    com.miriyum.domain.menuhold.dto.MenuHoldCommandResult.Outcome.FULFILLED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isZero();
+        }
     }
 
     @Test
@@ -525,6 +726,47 @@ class MenuHoldRuntimeIT {
 
     private MenuInventoryBucket bucket(int online) {
         return bucket(menuId, online);
+    }
+
+    private Object terminalConcurrently(
+            long reservationId,
+            String operationId,
+            boolean release,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return AssertionError.class;
+            }
+            return transactions.execute(status -> release
+                    ? service.release(new MenuHoldReleaseCommand(reservationId, operationId))
+                            .outcome()
+                    : service.fulfill(new MenuHoldFulfillCommand(reservationId, operationId))
+                            .outcome());
+        } catch (ServiceException exception) {
+            return exception.getErrorCode();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return InterruptedException.class;
+        }
+    }
+
+    private MenuHold holdFor(long reservationId) {
+        return holdRepository.findAll().stream()
+                .filter(hold -> hold.getReservationId() == reservationId)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private int restoreLedgerCount(String sourceAcquireOperationId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM menu_inventory_ledger
+                 WHERE source_operation_id = ?
+                   AND operation_type = 'RESTORE'
+                """, Integer.class, sourceAcquireOperationId);
     }
 
     private MenuInventoryBucket bucket(long selectedMenuId, int online) {
