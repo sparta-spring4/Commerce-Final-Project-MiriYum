@@ -12,7 +12,7 @@ This workflow is deliberately limited to the `staging` GitHub Environment and de
 
 ## Flow
 
-1. `Backend CI` succeeds on a push to `dev`. CI results from `pull_request` events and forks are not deployment inputs.
+1. `Backend CI` succeeds on a push to `dev`. Its required-check-compatible `backend-ci` aggregate succeeds only after the parallel `unit-test` and `integration-test` jobs, plus the CD workflow contract check, succeed. CI results from `pull_request` events and forks are not deployment inputs.
 2. For automatic deployment, `Backend CD (Staging)` reads the current remote `dev` HEAD before it receives OIDC credentials. If it differs from the successful CI SHA, the run is stale and the deploy job is skipped.
 3. `Backend CD (Staging)` checks out that exact current successful commit and builds `linux/arm64` from `backend/Dockerfile`.
 4. The image is pushed to private ECR with only the full 40-character Git SHA tag.
