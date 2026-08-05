@@ -10,6 +10,7 @@ import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -35,6 +36,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@code RateLimitFilter}에서 429로 막힌다. 두 방어는 중첩 적용되는 게 정상이지만 이 테스트가
  * 확인하려는 건 계정 단위 지연이므로, IP 한도만 넉넉히 올려 계정 지연을 격리해서 검증한다.</p>
  */
+@Tag("integration")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

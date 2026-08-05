@@ -27,6 +27,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
@@ -44,6 +45,7 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * 예약 코어 Flyway 스키마와 JPA 매핑이 실제 MySQL 제약에서 같은 계약을 지키는지 검증한다.
  */
+@Tag("integration")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

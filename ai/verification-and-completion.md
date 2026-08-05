@@ -40,15 +40,15 @@ QA는 사용자가 관찰할 수 있는 인수 동작과 의미 있는 실패 �
 
 CI는 실제 실행의 결과와 로그를 소유한다. workflow는 존재하고 깨끗한 checkout에서 필수 gate를 재현한 후에만 활성 상태다. 저장소 설정도 검증된 후에만 검사가 필수 상태다. 구성 텍스트, 로컬 실행 또는 계획된 workflow는 활성/필수 CI를 주장하기에 충분하지 않다.
 
-CI 상태는 `NOT CONFIGURED`이다. 로컬 엔드포인트 검증과 루트 명령 조합으로는 CI가 활성화되지 않는다. Pull Request는 로그를 영구 작업 로그에 복사하는 대신 CI 증거로 링크한다.
+`Backend CI` workflow와 `dev` 브랜치의 `backend-ci` required check는 `CONFIGURED`다. `backend-ci`는 단위 테스트, Testcontainers 통합 테스트, CD workflow 계약 검증이 모두 성공할 때만 성공한다. 로컬 엔드포인트 검증과 루트 명령 조합만으로 개별 PR의 CI `PASS`를 주장할 수는 없으며, Pull Request는 로그를 영구 작업 로그에 복사하는 대신 해당 commit의 CI 증거로 링크한다.
 
-존재하지 않는 GitHub Actions check를 required check로 설명하거나 문서 체크리스트만으로 CI 통과를 주장하지 않는다.
+존재하지 않는 GitHub Actions check를 required check로 설명하거나 문서 체크리스트만으로 현재 PR의 CI 통과를 주장하지 않는다.
 
 ## 검토자(reviewer)
 
 검토자(reviewer)는 변경 내역(diff)을 Issue 범위 및 각 인수 조건과 대응시키고, 소유권과 의존성 경계를 검사하며, 보안, 데이터, migration 및 rollback 위험을 살피고, 검증이 변경 유형에 맞는지 평가한다. 검토는 근거 없는 결과 레이블(label)에 이의를 제기하고 관련 없는 사용자 변경이 포함되지 않았음을 확인해야 한다.
 
-PR은 작성자를 제외한 두 명 이상의 승인이 필요하다. 리뷰어의 담당 도메인은 제한하지 않지만, 비소유자가 Entity·공개 Service 메서드·DTO·API·에러 코드를 변경할 때 필요한 도메인 소유자의 명시적 확인은 승인 인원 수와 별개다. CI는 실제 workflow와 성공 증거가 검증될 때까지 `NOT CONFIGURED`이며 승인으로 대체되지 않는다.
+PR은 작성자를 제외한 두 명 이상의 승인이 필요하다. 리뷰어의 담당 도메인은 제한하지 않지만, 비소유자가 Entity·공개 Service 메서드·DTO·API·에러 코드를 변경할 때 필요한 도메인 소유자의 명시적 확인은 승인 인원 수와 별개다. `backend-ci` required check의 성공은 승인으로 대체되지 않으며, 승인도 해당 PR의 CI 성공을 대체하지 않는다.
 
 승인은 검토 증거이지 적용 가능한 실행 gate를 대체하지 않는다.
 
@@ -90,9 +90,9 @@ Issue는 인수 조건이 해결되고, 담당자와 위임된 출력이 대조�
 | failure triage artifact | `NOT CONFIGURED` | 반복된 실패가 안정적인 분류와 실행 가능한 다음 소유자 인계(handoff) 형식을 보여 줌 |
 | 별도 QA, CI, reviewer, Issue 완료 및 완료 주장 문서 | `NOT CONFIGURED` | 독립 작업 흐름(workflow) 또는 소유자가 입증되어 이 섹션만으로 충분하지 않음 |
 | `lazycodex-runbook.md` | `NOT CONFIGURED` | 검증 회피 또는 증거 없는 완료 주장이 반복되어 독립적인 수정 절차가 필요함 |
-| Workflow cache 및 cache 정책 | `NOT CONFIGURED` | 반복적인 탐색 비용과 오래된 context 실패가 측정되고 무효화 증거가 있음 |
+| Workflow cache 및 cache 정책 | `CONFIGURED` | `Backend CI`의 Gradle 의존성 캐시는 Wrapper와 Gradle build script 입력을 키로 사용한다. 개별 run의 cache hit/miss와 무효화 여부는 GitHub Actions 출력으로만 주장한다 |
 | Native runtime adapter 및 provenance | `NOT CONFIGURED` | 원격 또는 CI 실행이 호스트 신뢰와 지속적인 provenance 요구사항을 보임 |
-| CI 작업 흐름(workflow) 및 required check | `NOT CONFIGURED` | 로컬 명령과 gate가 깨끗한 checkout에서 재현된 후 저장소 required-check 설정이 검증됨 |
+| CI 작업 흐름(workflow) 및 required check | `CONFIGURED` | `Backend CI`가 깨끗한 GitHub runner에서 실행되고 `dev`의 `backend-ci` required check 설정을 확인했다. 각 변경의 `PASS`는 해당 commit의 run으로 별도 확인한다 |
 | 선택적 로컬 Git hook | `NOT APPLICABLE` | 검증된 공통 script가 있고 반복된 로컬 실수가 관찰됨. 모든 hook은 얇은 선택적 wrapper이며 CI를 대체하지 않음 |
 
 ### 연기된 skill 계약
