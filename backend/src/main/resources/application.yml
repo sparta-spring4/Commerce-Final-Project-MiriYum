@@ -45,6 +45,9 @@ miriyum:
     csrf-preparation:
       max-requests: ${MIRIYUM_RATE_LIMIT_CSRF_PREPARATION_MAX_REQUESTS:60}
       window-seconds: ${MIRIYUM_RATE_LIMIT_CSRF_PREPARATION_WINDOW_SECONDS:60}
+    public-store-read:
+      max-requests: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS:60}
+      window-seconds: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS:60}
   menu:
     schedule:
       enabled: ${MIRIYUM_MENU_SCHEDULE_ENABLED:true}

@@ -30,7 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * {@code RateLimiterTestcontainersTest}에서 진짜 MySQL로 검증한다.
  *
  * <p>{@link #newRateLimiter(Clock)}는 {@code docs/service-policies/18-scale-reliability.md}
- * SCALE-005의 2026-07-30 결정 수치(회원가입·로그인 5/600, 재발급 30/60, CSRF 준비 60/60)를
+ * SCALE-005의 2026-07-30 결정 수치(회원가입·로그인 5/600, 재발급 30/60, CSRF 준비·공개 가게 조회 60/60)를
  * 그대로 쓴다. 실제 기본값과 다른 수치를 쓰면 경계값 테스트가 운영 설정과 어긋난 걸 검증하게 된다.</p>
  */
 @ExtendWith(MockitoExtension.class)
@@ -92,7 +92,7 @@ class RateLimiterTest {
 
     @ParameterizedTest(name = "{0} 등급은 한도({1})까지 허용하고 그 다음 요청은 거부한다")
     @MethodSource("categoryLimits")
-    @DisplayName("네 등급 모두 설정된 한도 경계에서 정확히 허용/거부를 나눈다")
+    @DisplayName("다섯 등급 모두 설정된 한도 경계에서 정확히 허용/거부를 나눈다")
     void enforcesConfiguredLimitBoundaryPerCategory(RateLimitCategory category, int maxRequests) {
         // given: 한도와 정확히 같은 카운트는 허용, 한도보다 하나 많은 카운트는 거부
         given(rateLimitWindowRepository.findById(anyString()))
@@ -113,7 +113,8 @@ class RateLimiterTest {
                 Arguments.of(RateLimitCategory.SIGN_UP, 5),
                 Arguments.of(RateLimitCategory.LOGIN, 5),
                 Arguments.of(RateLimitCategory.TOKEN_REFRESH, 30),
-                Arguments.of(RateLimitCategory.CSRF_PREPARATION, 60)
+                Arguments.of(RateLimitCategory.CSRF_PREPARATION, 60),
+                Arguments.of(RateLimitCategory.PUBLIC_STORE_READ, 60)
         );
     }
 
@@ -153,6 +154,7 @@ class RateLimiterTest {
                 5, 600,
                 5, 600,
                 30, 60,
+                60, 60,
                 60, 60,
                 clock,
                 rateLimitWindowRepository);
