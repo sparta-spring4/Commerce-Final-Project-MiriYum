@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationRequest;
@@ -83,6 +84,9 @@ class ReservationTimePolicyCommandServiceTest {
     @Mock
     private ConsumerAccountService consumerAccountService;
 
+    @Mock
+    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+
     private ObjectMapper objectMapper;
     private ReservationService reservationService;
 
@@ -100,7 +104,8 @@ class ReservationTimePolicyCommandServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 capacityBucketRepository,
                 reservationRepository,
-                consumerAccountService
+                consumerAccountService,
+                menuHoldSnapshotQueryService
         );
         given(idempotencyExecutor.execute(any(), any()))
                 .willAnswer(invocation -> executeWork(invocation.getArgument(1)));

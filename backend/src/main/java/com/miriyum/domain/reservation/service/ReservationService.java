@@ -1,6 +1,8 @@
 package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
+import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
@@ -10,6 +12,7 @@ import com.miriyum.domain.reservation.dto.request.ReservationTimeRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimePolicyResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
@@ -96,6 +99,7 @@ public class ReservationService {
     private final ReservationCapacityBucketRepository capacityBucketRepository;
     private final ReservationRepository reservationRepository;
     private final ConsumerAccountService consumerAccountService;
+    private final MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
 
     public ReservationService(
             StoreScheduleService storeScheduleService,
@@ -108,7 +112,8 @@ public class ReservationService {
             Clock clock,
             ReservationCapacityBucketRepository capacityBucketRepository,
             ReservationRepository reservationRepository,
-            ConsumerAccountService consumerAccountService
+            ConsumerAccountService consumerAccountService,
+            MenuHoldSnapshotQueryService menuHoldSnapshotQueryService
     ) {
         this.storeScheduleService = storeScheduleService;
         this.storeServiceIntervalValidationService = storeServiceIntervalValidationService;
@@ -121,6 +126,7 @@ public class ReservationService {
         this.capacityBucketRepository = capacityBucketRepository;
         this.reservationRepository = reservationRepository;
         this.consumerAccountService = consumerAccountService;
+        this.menuHoldSnapshotQueryService = menuHoldSnapshotQueryService;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -663,6 +669,34 @@ public class ReservationService {
                 );
 
         return ReservationHistoryPageResponse.from(reservations);
+    }
+
+    /**
+     * 활성 소비자 본인의 예약 상세와 예약 당시 메뉴 거래 스냅샷을 조회한다.
+     *
+     * @param consumerAccountId 인증된 소비자 계정 식별자
+     * @param reservationId 대상 예약 식별자
+     * @return 고객 공개 예약 상세
+     * @throws ServiceException 계정이 유효하지 않거나 본인 범위에서 예약을 찾을 수 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public ReservationDetailResponse getConsumerReservation(
+            Long consumerAccountId,
+            Long reservationId
+    ) {
+        if (consumerAccountId == null || consumerAccountId <= 0) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        consumerAccountService.getMe(consumerAccountId);
+        Reservation reservation = reservationRepository.findByIdAndConsumerAccountId(
+                        reservationId,
+                        consumerAccountId
+                )
+                .orElseThrow(() ->
+                        new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
+        List<MenuHoldItemResult> menuSnapshots =
+                menuHoldSnapshotQueryService.findByReservationId(reservation.getId());
+        return ReservationDetailResponse.from(reservation, menuSnapshots);
     }
 
     /**
