@@ -124,6 +124,8 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
+          # IAM/OIDC 설정 오류는 장시간 재시도하지 않고, 일시적 AWS 오류에만 한 번 재시도한다.
+          retry-max-attempts: 2
 
       - name: Log in to Amazon ECR
         id: ecr
