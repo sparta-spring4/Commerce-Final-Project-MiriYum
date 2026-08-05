@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.dto.request;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -118,6 +119,32 @@ class ReservationCapacitiesRequestTest {
         assertThat(paths)
                 .contains("buckets[0].maxPeople")
                 .doesNotContain("buckets[0].maxTeams");
+    }
+
+    @Test
+    @DisplayName("게시 버킷의 시작과 종료 시각은 분 단위여야 한다")
+    void rejectsSecondPrecisionBucketTimes() {
+        // when & then
+        assertThatThrownBy(() -> new CapacityBucketRequest(
+                LocalTime.of(18, 0, 1),
+                LocalTime.of(18, 30),
+                10,
+                4,
+                1,
+                6,
+                true
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("capacity bucket times must use minute precision");
+        assertThatThrownBy(() -> new CapacityBucketRequest(
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30, 1),
+                10,
+                4,
+                1,
+                6,
+                true
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("capacity bucket times must use minute precision");
     }
 
     private static CapacityBucketRequest validBucket() {

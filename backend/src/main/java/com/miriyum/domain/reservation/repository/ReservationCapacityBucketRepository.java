@@ -1,11 +1,13 @@
 package com.miriyum.domain.reservation.repository;
 
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -14,6 +16,25 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ReservationCapacityBucketRepository
         extends JpaRepository<ReservationCapacityBucket, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from ReservationCapacityBucket bucket
+            where bucket.storeId = :storeId
+              and bucket.serviceDate = :serviceDate
+              and bucket.policyVersion = (
+                  select max(latest.policyVersion)
+                  from ReservationCapacityBucket latest
+                  where latest.storeId = bucket.storeId
+                    and latest.serviceDate = bucket.serviceDate
+              )
+            order by bucket.id asc
+            """)
+    List<ReservationCapacityBucket> findLatestPolicyBucketsForUpdate(
+            @Param("storeId") long storeId,
+            @Param("serviceDate") LocalDate serviceDate
+    );
 
     /**
      * 여러 매장의 업무 날짜별 최신 정책에서 요청 구간과 겹치는 버킷을 한 번에 조회한다.
