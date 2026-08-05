@@ -60,9 +60,9 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 - 충돌을 해결한 뒤 적용 가능한 검증을 다시 실행한다.
 - PR 분리는 독립 인수 조건, 도메인 경계, 위험 격리와 rollback 가능성을 기준으로 한다.
 
-CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow나 계획된 검사는 깨끗한 checkout이 통과했거나 저장소 검사가 필수라는 증거가 아니다.
+CI는 자체 실행 출력을 소유한다. 이를 영구 저장소 로그에 옮겨 적지 않는다. 구성된 workflow만으로 현재 PR이 통과했거나 저장소 검사가 필수라는 증거가 되지는 않는다.
 
-현재 CI와 required check는 `NOT CONFIGURED`다. 존재하지 않는 check를 통과했다고 표시하거나 브랜치 보호의 required check로 등록하지 않는다.
+현재 `dev` 브랜치에는 `backend-ci` required check가 구성되어 있다. `Backend CI`의 `backend-ci` 집계 job은 `unit-test`, `integration-test`, CD workflow 계약 검증이 모두 성공할 때만 성공한다. 각 PR은 실제 해당 commit의 CI 실행 링크를 증거로 남기며, 존재하지 않는 check를 통과했다고 표시하지 않는다.
 
 ## 위임과 인계(handoff)
 

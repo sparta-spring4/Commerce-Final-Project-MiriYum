@@ -13,13 +13,13 @@
 
 | 루트 ID | 상태 | 순서가 지정된 delegate ID | 중지 조건 | 증거 경계 |
 |---|---|---|---|---|
-| `root.verify.backend` | `CONFIGURED` | 1. `backend.wrapper.version`<br>2. `backend.test`<br>3. `backend.build` | 첫 번째 `PASS` 이외의 delegate 결과에서 중지한다. 실행하지 않은 나머지는 `NOT RUN`으로 보고한다. | 각 backend 결과는 backend 증거와 함께 보존한다. 루트 결과에는 순서, delegate 결과, 위험 및 증거 참조만 기록한다. |
+| `root.verify.backend` | `CONFIGURED` | 1. `backend.wrapper.version`<br>2. `backend.test`<br>3. `backend.integration-test`<br>4. `backend.build` | 첫 번째 `PASS` 이외의 delegate 결과에서 중지한다. 실행하지 않은 나머지는 `NOT RUN`으로 보고한다. | 각 backend 결과는 backend 증거와 함께 보존한다. 루트 결과에는 순서, delegate 결과, 위험 및 증거 참조만 기록한다. |
 | `root.verify.frontend` | `CONFIGURED` | 1. `frontend.pnpm.version`<br>2. `frontend.install`<br>3. `frontend.typecheck`<br>4. `frontend.test`<br>5. `frontend.build` | 첫 번째 `PASS` 이외의 delegate 결과에서 중지한다. 실행하지 않은 나머지는 `NOT RUN`으로 보고한다. | 각 frontend 결과는 frontend 증거와 함께 보존한다. 루트 결과에는 순서, delegate 결과, 위험 및 증거 참조만 기록한다. |
 | `root.verify.scaffold` | `CONFIGURED` | 1. `root.verify.backend`<br>2. `root.verify.frontend` | 엔드포인트 조합 결과가 `PASS`가 아니면 중지한다. 실행하지 않은 엔드포인트 조합은 `NOT RUN`으로 보고한다. | 두 엔드포인트 증거 세트의 참조를 조합한다. 이는 scaffold 검증이지 cross-end 통합 증거가 아니다. |
 
 ## 활성화 증거
 
-- `root.verify.backend`는 세 delegate가 모두 `CONFIGURED`이고 Task 2가 완성된 backend scaffold에 대해 각 delegate 명령의 성공적인 종료를 관찰했으므로 `CONFIGURED`이다.
+- `root.verify.backend`는 네 delegate가 모두 `CONFIGURED`이고 backend에 대해 각 delegate 명령의 성공적인 종료를 관찰했으므로 `CONFIGURED`이다.
 - `root.verify.frontend`는 다섯 delegate가 모두 `CONFIGURED`이고 Task 3이 완성된 frontend scaffold에 대해 각 delegate 명령의 성공적인 종료를 관찰했으므로 `CONFIGURED`이다.
 - `root.verify.scaffold`는 두 엔드포인트 조합을 결정적인 순서로 사용할 수 있으므로 `CONFIGURED`이다. 이는 API 호환성, 인증 동작, 데이터 handoff 또는 통합 사용자 흐름을 확립하지 않는다.
 

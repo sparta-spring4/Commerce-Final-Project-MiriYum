@@ -54,7 +54,7 @@ API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한
 - `application.properties`는 8단계의 첫 설정 Issue에서 `application.yml`로 전환하고 두 형식을 중복 유지하지 않는다.
 - DB 연결 URL·사용자명·비밀번호는 각각 `MIRIYUM_DB_URL`, `MIRIYUM_DB_USERNAME`, `MIRIYUM_DB_PASSWORD` 환경 변수로 주입하고 저장소 기본값으로 넣지 않는다.
 - H2를 MySQL의 증거로 사용하지 않는다.
-- DB 의존 통합은 `NOT CONFIGURED` 상태를 유지한다. [ADR-002](../../docs/adr/ADR-002-staged-technology-adoption.md) 및 [ADR-004](../../docs/adr/ADR-004-scaffold-toolchain-and-test-baseline.md)의 활성화 조건에 한해서만 Testcontainers를 검토한다.
+- DB 의존 통합은 Testcontainers MySQL로 구성되어 있다. `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언하고 `backend.integration-test`로 실행한다. 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 `backend.test`에 둔다.
 
 ## 서버 보안 및 경계
 
@@ -88,7 +88,7 @@ JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반
 - H2만으로 MySQL 동작을 증명하지 않는다.
 - given/when/then 구조, camelCase test method와 한국어 `@DisplayName`을 사용한다.
 - 시간은 `Clock`, 동시성은 barrier/latch로 제어하고 `sleep`에 의존하지 않는다.
-- DB 검증이 인수 조건인데 Testcontainers가 `NOT CONFIGURED`이면 완료·병합 가능으로 표시하지 않는다.
+- DB 검증이 인수 조건이면 `backend.integration-test` 또는 이를 포함하는 `backend.build`의 성공 증거 없이는 완료·병합 가능으로 표시하지 않는다.
 
 ## 설정·형식·Javadoc
 
@@ -100,4 +100,4 @@ Controller class와 public endpoint, Service class와 public method, cross-domai
 
 ## 연기된 기능
 
-Docker, Compose, CI, 배포, API 스모크, runner, 스키마, skill, cache, hook은 이 스캐폴드에서 구성되지 않았다. 정본 활성화 경로와 별도로 승인된 허용 목록을 통해서만 추가한다.
+Docker Compose, staging CD, `Backend CI`와 Gradle 의존성 cache는 구성되어 있으며, 각각의 runtime 결과는 배포 runbook과 CI 실행 링크로 확인한다. API 스모크, runner, 기계 판독 schema, skill과 선택적 local hook은 아직 구성되지 않았으며 정본 활성화 경로와 별도로 승인된 허용 목록을 통해서만 추가한다.

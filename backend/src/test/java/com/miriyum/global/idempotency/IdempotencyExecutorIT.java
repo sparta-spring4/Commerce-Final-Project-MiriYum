@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -47,6 +48,7 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.jwt.issuer=miriyum"
         })
+@Tag("integration")
 @Testcontainers(disabledWithoutDocker = true)
 @Import(IdempotencyExecutorIT.TestConfig.class)
 class IdempotencyExecutorIT {

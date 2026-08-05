@@ -7,13 +7,14 @@
 | 명령 ID | 상태 | 정확한 명령 | 필수 입력 | 예상 출력 | 증거 | 실패 의미 |
 |---|---|---|---|---|---|---|
 | `backend.wrapper.version` | `CONFIGURED` | `.\gradlew.bat --version` | 커밋된 Wrapper 스크립트, Wrapper JAR, Wrapper 속성, 네트워크 또는 검증된 로컬 배포본 | Gradle `9.6.1` 및 종료 코드 `0` | 현재 변경 증거와 함께 명령 출력, 종료 코드, Wrapper 해시를 보존한다 | 0이 아닌 종료, 잘못된 버전, 다운로드 실패 또는 체크섬 거부는 `FAIL`을 의미한다 |
-| `backend.test` | `CONFIGURED` | `.\gradlew.bat test` | Java 21 toolchain, 해결된 의존성, 애플리케이션 및 테스트 소스 | context test가 성공하고 명령이 `0`으로 종료한다 | 현재 변경 증거와 함께 Gradle 테스트 출력, 종료 코드, 테스트 보고서를 보존한다 | 컴파일, context 시작, assertion, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
-| `backend.build` | `CONFIGURED` | `.\gradlew.bat build` | `backend.test`와 동일한 입력 | 컴파일, 테스트, 패키징이 종료 코드 `0`으로 성공한다 | 현재 변경 증거와 함께 Gradle 빌드 출력, 종료 코드, 생성된 보고서를 보존한다 | 모든 컴파일, 테스트, 패키징, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
+| `backend.test` | `CONFIGURED` | `.\gradlew.bat test` | Java 21 toolchain, 해결된 의존성, 애플리케이션 및 테스트 소스 | `@Tag("integration")`이 없는 빠른 unit·slice 테스트가 성공하고 명령이 `0`으로 종료한다 | 현재 변경 증거와 함께 Gradle 테스트 출력, 종료 코드, 테스트 보고서를 보존한다 | 컴파일, context 시작, assertion, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
+| `backend.integration-test` | `CONFIGURED` | `.\gradlew.bat integrationTest` | Java 21 toolchain, Docker가 실행 가능한 환경, 해결된 의존성, Testcontainers 이미지 pull 권한 | `@Tag("integration")` Testcontainers 또는 Spring 통합 테스트가 성공하고 명령이 `0`으로 종료한다 | 현재 변경 증거와 함께 Gradle 테스트 출력, 종료 코드, `integrationTest` 보고서를 보존한다 | Docker/Testcontainers 시작, Flyway, context 시작, assertion, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
+| `backend.build` | `CONFIGURED` | `.\gradlew.bat build` | `backend.test`, `backend.integration-test`와 동일한 입력 | 컴파일, 빠른 테스트, 통합 테스트, 패키징이 종료 코드 `0`으로 성공한다 | 현재 변경 증거와 함께 Gradle 빌드 출력, 종료 코드, 생성된 보고서를 보존한다 | 모든 컴파일, 테스트, 패키징, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
 
-위 세 명령은 파일이 존재하고 스캐폴드 검증 중 각각 종료 코드 `0`을 반환한 후에만 활성화되었다.
+위 네 명령은 파일이 존재하고 각 명령의 성공적인 종료 코드 `0`이 관찰된 후에만 활성화되었다.
 
 ## 러너 플랫폼별 호출
 
-위 "정확한 명령"은 Windows 로컬 기준 `.\gradlew.bat` 표기다. Linux CI 러너(`ubuntu-24.04`, `.github/workflows/backend-ci.yml`, Issue #92)에서는 같은 명령 ID를 `./gradlew`로 호출한다. 예: `backend.wrapper.version`은 `./gradlew --version`, `backend.test`는 `./gradlew test`, `backend.build`는 `./gradlew build`. 래퍼·버전·검증 대상은 동일하며 호출 표기만 플랫폼에 따라 다르다. GitHub Windows 러너는 Linux 컨테이너를 지원하지 않아 Testcontainers MySQL을 실행할 수 없으므로 CI 러너는 Linux(`./gradlew`)를 사용한다.
+위 "정확한 명령"은 Windows 로컬 기준 `.\gradlew.bat` 표기다. Linux CI 러너(`ubuntu-24.04`, `.github/workflows/backend-ci.yml`, Issue #92)에서는 같은 명령 ID를 `./gradlew`로 호출한다. 예: `backend.wrapper.version`은 `./gradlew --version`, `backend.test`는 `./gradlew test`, `backend.integration-test`는 `./gradlew integrationTest`, `backend.build`는 `./gradlew build`. 래퍼·버전·검증 대상은 동일하며 호출 표기만 플랫폼에 따라 다르다. GitHub Windows 러너는 Linux 컨테이너를 지원하지 않아 Testcontainers MySQL을 실행할 수 없으므로 CI 러너는 Linux(`./gradlew`)를 사용한다.
 
-DB 통합, API 스모크, Docker, 배포 명령은 실행 표면이 `NOT CONFIGURED`이므로 안정적인 명령 ID가 없다. CI 워크플로 자체의 활성/필수 상태는 `ai/verification-and-completion.md`가 소유하며, 실제 성공 실행과 저장소 required-check 설정이 검증되기 전까지 `NOT CONFIGURED`다.
+DB 통합 명령은 `backend.integration-test`로 구성되어 있다. API 스모크와 E2E에는 아직 안정적인 명령 ID가 없다. Docker와 staging 배포는 로컬 명령 레지스트리가 아니라 [배포 runbook](../../docs/deployment/docker-ecr-ssm-cd.md)의 통제된 workflow와 실행 증거로 검증한다. CI 워크플로와 required check의 상태는 `ai/verification-and-completion.md`가 소유한다.
