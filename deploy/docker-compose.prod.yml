@@ -20,7 +20,9 @@ services:
       retries: 12
       start_period: 30s
     networks:
-      - app
+      app:
+        # Nginx의 신뢰 프록시 주소 .2를 다른 서비스가 자동 할당받지 않게 고정한다.
+        ipv4_address: 172.29.81.10
     restart: unless-stopped
 
   backend:
@@ -42,7 +44,9 @@ services:
       # EC2 내부 확인만 가능하도록 127.0.0.1에만 backend 포트를 연결한다.
       - "127.0.0.1:8080:8080"
     networks:
-      - app
+      app:
+        # 기존 자동 할당 주소와 겹치지 않는 고정 주소를 사용한다.
+        ipv4_address: 172.29.81.11
     restart: unless-stopped
 
   nginx:
