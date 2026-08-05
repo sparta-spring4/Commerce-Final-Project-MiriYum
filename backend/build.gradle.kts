@@ -54,5 +54,53 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
     systemProperty("miriyum.menu.schedule.enabled", "false")
+    systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
+}
+
+val integrationTag = "integration"
+
+val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
+    group = "verification"
+    description = "Testcontainers 또는 Spring 통합 테스트에 integration 태그가 있는지 확인합니다."
+
+    doLast {
+        val candidates = fileTree("src/test/java") {
+            include("**/*.java")
+        }.files.filter { file ->
+            val source = file.readText()
+            source.contains("@Testcontainers")
+                || source.contains("MySQLContainer")
+                || source.contains("@SpringBootTest")
+        }
+        val missingTags = candidates.filterNot { file ->
+            file.readText().contains("@Tag(\"$integrationTag\")")
+        }
+
+        check(missingTags.isEmpty()) {
+            "Integration test tag is missing: ${missingTags.joinToString { it.relativeTo(projectDir).path }}"
+        }
+    }
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform {
+        excludeTags(integrationTag)
+    }
+    dependsOn(verifyIntegrationTestTags)
+}
+
+val integrationTest = tasks.register<Test>("integrationTest") {
+    group = "verification"
+    description = "Testcontainers 및 Spring 통합 테스트를 실행합니다."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags(integrationTag)
+    }
+    dependsOn(verifyIntegrationTestTags)
+}
+
+tasks.check {
+    dependsOn(integrationTest)
 }
