@@ -75,6 +75,7 @@ import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 @Tag("integration")
+@Tag("integration-shard-a")
 @Import(ReservationCapacityPublicationIT.LockOrderTestConfiguration.class)
 @SpringBootTest(
         classes = MiriyumApplication.class,

@@ -46,6 +46,7 @@ import org.testcontainers.utility.DockerImageName;
  * 예약 코어 Flyway 스키마와 JPA 매핑이 실제 MySQL 제약에서 같은 계약을 지키는지 검증한다.
  */
 @Tag("integration")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
