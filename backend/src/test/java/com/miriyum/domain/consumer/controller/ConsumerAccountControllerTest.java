@@ -229,6 +229,34 @@ class ConsumerAccountControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
+    @Test
+    @DisplayName("삭제된 계정은 잘못된 조회 조건보다 먼저 401 AUTH_003으로 거절한다")
+    void deletedAccountTakesPrecedenceOverInvalidReservationHistoryQuery() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        consumerAccountRepository.deleteAll();
+        consumerAccountRepository.flush();
+
+        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .queryParam("sort", "status,asc"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"));
+    }
+
+    @Test
+    @DisplayName("정지된 계정은 잘못된 조회 조건보다 먼저 403 AUTH_011로 거절한다")
+    void suspendedAccountTakesPrecedenceOverInvalidReservationHistoryQuery() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        jdbcTemplate.update(
+                "UPDATE consumer_accounts SET status = 'SUSPENDED' WHERE consumer_account_id = ?", accountId);
+
+        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .queryParam("sort", "status,asc"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_011"));
+    }
+
     /**
      * 멱등 재생은 저장된 결과를 그대로 돌려주므로, 계정 확인이 업무 콜백 안에 있으면 계정이 사라진
      * 뒤에도 최초 200이 재생돼 C-013 판정을 우회한다. 인증 경계를 멱등 실행기 앞으로 옮긴 뒤의

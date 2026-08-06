@@ -63,6 +63,8 @@ public class ConsumerAccountController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String sort
     ) {
+        // C-013 계정 상태를 요청 값 오류보다 먼저 판정한다.
+        consumerAccountService.getMe(principal.accountId());
         ReservationHistorySearchRequest request = ReservationHistorySearchRequest.from(
                 status,
                 page,
