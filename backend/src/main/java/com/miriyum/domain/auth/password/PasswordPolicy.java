@@ -1,5 +1,7 @@
 package com.miriyum.domain.auth.password;
 
+import com.ibm.icu.lang.UCharacter;
+import com.ibm.icu.lang.UProperty;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.text.Normalizer;
@@ -63,27 +65,18 @@ public class PasswordPolicy {
     }
 
     private boolean isEmojiCodePoint(int codePoint) {
+        // ICU4J의 Unicode Emoji/Emoji_Presentation 데이터로 수동 범위 누락을 막는다.
+        return isEmojiJoiner(codePoint)
+                || UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_PRESENTATION)
+                || (codePoint > 0x7F
+                        && UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI));
+    }
+
+    private boolean isEmojiJoiner(int codePoint) {
         return codePoint == 0x200D
                 || codePoint == 0xFE0F
                 || codePoint == 0xFE0E
-                || codePoint == 0x20E3
-                || codePoint == 0x00A9
-                || codePoint == 0x00AE
-                || codePoint == 0x203C
-                || codePoint == 0x2049
-                || codePoint == 0x2122
-                || codePoint == 0x2139
-                || codePoint == 0x3030
-                || codePoint == 0x303D
-                || codePoint == 0x3297
-                || codePoint == 0x3299
-                || isBetween(codePoint, 0x2600, 0x27BF)
-                || isBetween(codePoint, 0x2B00, 0x2BFF)
-                || isBetween(codePoint, 0x1F000, 0x1FAFF);
-    }
-
-    private boolean isBetween(int codePoint, int start, int end) {
-        return codePoint >= start && codePoint <= end;
+                || codePoint == 0x20E3;
     }
 
     /**

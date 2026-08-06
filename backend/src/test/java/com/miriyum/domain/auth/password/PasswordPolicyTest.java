@@ -90,6 +90,32 @@ class PasswordPolicyTest {
     }
 
     @Test
+    @DisplayName("Unicode 기본 이모지 U+231A가 포함된 비밀번호를 거부한다")
+    void rejectsPasswordContainingDefaultEmojiOutsideManualRanges() {
+        // given: U+231A WATCH는 기존에 손으로 정한 범위 밖의 기본 이모지다.
+        String password = "Abcdef1\u231A";
+
+        // when & then
+        assertThatThrownBy(() -> passwordPolicy.normalize(password))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    @DisplayName("Unicode 기본 이모지와 조합 제어 문자가 포함된 비밀번호를 거부한다")
+    void rejectsPasswordContainingDefaultEmojiAndJoiner() {
+        // given: U+231A는 기존 수동 범위에 빠져 있던 기본 이모지이며, 뒤의 ZWJ는 조합 제어 문자다.
+        String password = "Abcdef1\u231A\u200D";
+
+        // when & then
+        assertThatThrownBy(() -> passwordPolicy.normalize(password))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
     @DisplayName("저장 전 NFC로 정규화한다")
     void normalizesToNfcBeforeReturning() {
         // given: NFD로 분해된 결합 문자(자음+모음)
