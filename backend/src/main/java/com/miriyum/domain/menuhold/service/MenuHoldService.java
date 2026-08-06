@@ -27,6 +27,8 @@ public interface MenuHoldService {
     /**
      * 예약 취소 조정자가 멱등 결과와 예약 aggregate를 먼저 잠근 뒤, 수용량 처리 전에 연결 메뉴 홀드
      * 루트 행만 잠근다. 홀드 상태를 해석하거나 상태·메뉴 수량·원장을 변경하지 않는다.
+     * {@code NO_HOLD}는 잠글 메뉴 홀드 행이 없다는 뜻이며 동시 생성 배제는 선행 Reservation
+     * aggregate 잠금과 모든 합법적인 생성 경로가 같은 순서를 지키는 데 의존한다.
      *
      * @param reservationId 종결할 예약의 내부 식별자
      * @return 연결 홀드 루트 행의 존재 여부
