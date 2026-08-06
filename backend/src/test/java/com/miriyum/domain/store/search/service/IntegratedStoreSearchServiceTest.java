@@ -12,6 +12,10 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.recommendation.ranking.RankedRecommendation;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationAvailability;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationCandidate;
+import com.miriyum.domain.store.recommendation.ranking.StoreRecommendationService;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.interpreter.InterpretationResult;
@@ -25,7 +29,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +51,10 @@ class IntegratedStoreSearchServiceTest {
     @Mock IntegratedStoreSearchRepository repository;
     @Mock ReservationService reservationService;
     @Mock StoreSearchCandidateLimit candidateLimit;
+    @Mock StoreRecommendationService recommendationService;
+
+    private final Clock clock = Clock.fixed(
+            Instant.parse("2026-08-06T06:00:00Z"), ZoneOffset.UTC);
 
     @BeforeEach
     void useProductionCandidateLimit() {
@@ -167,9 +179,67 @@ class IntegratedStoreSearchServiceTest {
         then(repository).should(times(1)).search(any());
     }
 
+    @Test
+    void recommendationSortRanksTheWholeBoundedCandidateSetAndPagesBySignedRankKey() {
+        given(candidateLimit.value()).willReturn(3);
+        InterpretedSearchCondition condition = condition(null, null, null, "라멘");
+        given(interpreter.interpret("라멘")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate first = candidate(1L, "가게1");
+        IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
+        IntegratedStoreSearchCandidate third = candidate(3L, "가게3");
+        IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
+                condition, "relevance,desc", null, 3, CURSOR_CODEC);
+        String scanCursor = CURSOR_CODEC.encode(
+                scanQuery, second.relevanceTier(), second.name(), second.storeId());
+        given(repository.search(any()))
+                .willReturn(new IntegratedStoreSearchSlice(
+                        List.of(first, second), scanCursor))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(third), null))
+                .willReturn(new IntegratedStoreSearchSlice(
+                        List.of(first, second), scanCursor))
+                .willReturn(new IntegratedStoreSearchSlice(List.of(third), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(recommendationService.rank(
+                org.mockito.ArgumentMatchers.eq(41L),
+                any(),
+                org.mockito.ArgumentMatchers.same(condition),
+                org.mockito.ArgumentMatchers.eq(clock.instant())))
+                .willReturn(List.of(
+                        ranked(third, 50),
+                        ranked(first, 40),
+                        ranked(second, 30)));
+
+        var firstPage = service().search(
+                41L, "라멘", false, false,
+                "recommendation,desc", null, 2);
+        var secondPage = service().search(
+                41L, "라멘", false, false,
+                "recommendation,desc", firstPage.nextCursor(), 2);
+
+        assertThat(firstPage.items()).extracting(item -> item.storeId())
+                .containsExactly("3", "1");
+        assertThat(firstPage.nextCursor()).isNotBlank();
+        assertThat(secondPage.items()).extracting(item -> item.storeId())
+                .containsExactly("2");
+        assertThat(secondPage.nextCursor()).isNull();
+        then(repository).should(times(4)).search(any());
+        then(recommendationService).should(times(2)).rank(
+                org.mockito.ArgumentMatchers.eq(41L),
+                org.mockito.ArgumentMatchers.argThat(values -> values.size() == 3),
+                org.mockito.ArgumentMatchers.same(condition),
+                org.mockito.ArgumentMatchers.eq(clock.instant()));
+    }
+
     private IntegratedStoreSearchService service() {
         return new IntegratedStoreSearchService(
-                interpreter, repository, reservationService, candidateLimit, CURSOR_CODEC);
+                interpreter,
+                repository,
+                reservationService,
+                candidateLimit,
+                CURSOR_CODEC,
+                recommendationService,
+                clock);
     }
 
     private static InterpretationResult result(InterpretedSearchCondition condition) {
@@ -194,5 +264,27 @@ class IntegratedStoreSearchServiceTest {
                 LocalDateTime.of(2026, 8, 6, 9, 0), 0,
                 new BigDecimal("37.500000000000000"),
                 new BigDecimal("127.000000000000000"));
+    }
+
+    private static RankedRecommendation ranked(
+            IntegratedStoreSearchCandidate candidate,
+            int totalScore
+    ) {
+        RecommendationCandidate rankingCandidate = new RecommendationCandidate(
+                candidate.storeId(),
+                candidate.relevanceTier(),
+                false,
+                false,
+                0,
+                0,
+                RecommendationAvailability.NOT_REQUESTED,
+                null,
+                Set.of());
+        return new RankedRecommendation(
+                rankingCandidate,
+                totalScore,
+                0,
+                totalScore,
+                null);
     }
 }

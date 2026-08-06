@@ -7,7 +7,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.stereotype.Component;
 
+@Component
 public final class HistoryRecommendationRanker {
 
     private static final Duration THIRTY_DAYS = Duration.ofDays(30);

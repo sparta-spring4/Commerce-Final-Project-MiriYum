@@ -108,6 +108,7 @@ public final class IntegratedStoreSearchQuery {
     ) {
         if (cursor == null
                 || sort == IntegratedStoreSearchSort.RELEVANCE_DESC
+                || sort == IntegratedStoreSearchSort.RECOMMENDATION_DESC
                 || sort == IntegratedStoreSearchSort.NAME_ASC
                 || sort == IntegratedStoreSearchSort.NAME_DESC) {
             return;

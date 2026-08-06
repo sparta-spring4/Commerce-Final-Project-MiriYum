@@ -144,6 +144,8 @@ public class IntegratedStoreSearchRepository {
         return switch (query.sort()) {
             case RELEVANCE_DESC -> relevanceCursorPredicate(
                     store, relevance(store, query), cursor);
+            case RECOMMENDATION_DESC -> relevanceCursorPredicate(
+                    store, relevance(store, query), cursor);
             case NAME_ASC -> store.name.gt(cursor.sortValue())
                     .or(store.name.eq(cursor.sortValue()).and(store.id.gt(cursor.storeId())));
             case NAME_DESC -> store.name.lt(cursor.sortValue())
@@ -190,7 +192,7 @@ public class IntegratedStoreSearchRepository {
     ) {
         List<OrderSpecifier<?>> order = new ArrayList<>(2);
         switch (sort) {
-            case RELEVANCE_DESC -> {
+            case RELEVANCE_DESC, RECOMMENDATION_DESC -> {
                 order.add(relevance.desc());
                 order.add(store.name.asc());
             }
@@ -208,7 +210,8 @@ public class IntegratedStoreSearchRepository {
             IntegratedStoreSearchCandidate candidate
     ) {
         String sortValue = switch (query.sort()) {
-            case RELEVANCE_DESC, NAME_ASC, NAME_DESC -> candidate.name();
+            case RELEVANCE_DESC, RECOMMENDATION_DESC, NAME_ASC, NAME_DESC ->
+                    candidate.name();
             case CREATED_AT_ASC, CREATED_AT_DESC -> candidate.createdAt().toString();
         };
         return cursorCodec.encode(

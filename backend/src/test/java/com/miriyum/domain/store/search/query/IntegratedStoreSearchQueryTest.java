@@ -119,6 +119,30 @@ class IntegratedStoreSearchQueryTest {
     }
 
     @Test
+    void recommendationCursorIsBoundToRecommendationSortConditionsAndSize() {
+        IntegratedStoreSearchQuery firstPage = query(
+                condition("라멘"), "recommendation,desc", null, 20);
+        String cursor = CURSOR_CODEC.encode(
+                firstPage, "62|false|0|1|~", 42L);
+
+        IntegratedStoreSearchQuery nextPage = query(
+                condition("라멘"), "recommendation,desc", cursor, 20);
+
+        assertThat(nextPage.sort())
+                .isEqualTo(IntegratedStoreSearchSort.RECOMMENDATION_DESC);
+        assertThat(nextPage.cursor()).get().satisfies(decoded -> {
+            assertThat(decoded.sortValue()).isEqualTo("62|false|0|1|~");
+            assertThat(decoded.storeId()).isEqualTo(42L);
+        });
+        assertValidationFailed(() -> query(
+                condition("라멘"), "relevance,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition("다른 검색"), "recommendation,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition("라멘"), "recommendation,desc", cursor, 21));
+    }
+
+    @Test
     void rejectsCursorWhenAnySeekFieldIsTampered() {
         IntegratedStoreSearchQuery firstPage = query(
                 condition("라떼"), "relevance,desc", null, 20);
