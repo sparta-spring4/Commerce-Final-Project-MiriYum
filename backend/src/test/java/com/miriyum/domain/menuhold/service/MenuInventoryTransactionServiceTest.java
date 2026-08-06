@@ -174,6 +174,51 @@ class MenuInventoryTransactionServiceTest {
     }
 
     @Test
+    @DisplayName("확보 결과에 요청하지 않은 버킷 키가 있으면 공개 결과 생성을 거부한다")
+    void rejectsUnexpectedInternalAcquisitionResult() {
+        MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
+                "pickup-acquire-unexpected", List.of(new MenuInventoryAcquireSelection(
+                        1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
+        given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(
+                        acquisitionResult(41L, 1L, 2L, 3),
+                        acquisitionResult(42L, 2L, 2L, 1)));
+
+        assertThatThrownBy(() -> service.acquire(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("acquired inventory results do not match requested selections");
+    }
+
+    @Test
+    @DisplayName("확보 결과에 요청한 버킷 키가 없으면 공개 결과 생성을 거부한다")
+    void rejectsMissingInternalAcquisitionResult() {
+        MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
+                "pickup-acquire-missing", List.of(new MenuInventoryAcquireSelection(
+                        1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
+        given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of());
+
+        assertThatThrownBy(() -> service.acquire(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("acquired inventory results do not match requested selections");
+    }
+
+    @Test
+    @DisplayName("확보 결과에 같은 버킷 키가 중복되면 공개 결과 생성을 거부한다")
+    void rejectsDuplicateInternalAcquisitionResult() {
+        MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
+                "pickup-acquire-duplicate", List.of(new MenuInventoryAcquireSelection(
+                        1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
+        InventoryAcquisitionResult acquired = acquisitionResult(41L, 1L, 2L, 3);
+        given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(acquired, acquired));
+
+        assertThatThrownBy(() -> service.acquire(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("acquired inventory results do not match requested selections");
+    }
+
+    @Test
     @DisplayName("복구는 새 operation과 최초 확보 operation만 내부 런타임에 전달한다")
     void restoresThroughInternalInventoryRuntime() {
         MenuInventoryRestoreCommand command = new MenuInventoryRestoreCommand(
@@ -210,5 +255,18 @@ class MenuInventoryTransactionServiceTest {
         given(view.isSharedOnlineAllowed()).willReturn(sharedOnlineAllowed);
         given(view.getAvailabilityStatus()).willReturn(status);
         return view;
+    }
+
+    private static InventoryAcquisitionResult acquisitionResult(
+            long inventoryBucketId,
+            long menuId,
+            long inventoryPolicyVersion,
+            int quantity
+    ) {
+        return new InventoryAcquisitionResult(
+                new InventoryAcquireRequest.Selection(
+                        menuId, SERVICE_DATE, START_TIME, SERVICE_DATE,
+                        END_TIME, inventoryPolicyVersion, quantity).key(),
+                inventoryBucketId, menuId, inventoryPolicyVersion, quantity, quantity, 0);
     }
 }

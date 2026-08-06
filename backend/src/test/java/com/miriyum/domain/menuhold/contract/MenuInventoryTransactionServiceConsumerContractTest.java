@@ -218,17 +218,20 @@ class MenuInventoryTransactionServiceConsumerContractTest {
         MenuInventoryAcquireSelection first = selection(1L, 2);
         MenuInventoryAcquireSelection second = new MenuInventoryAcquireSelection(
                 1L, SERVICE_DATE, laterStartTime, SERVICE_DATE, laterEndTime, 1L, 3);
+        MenuInventoryAcquireSelection nextPolicy = new MenuInventoryAcquireSelection(
+                1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 4);
         PickupMenuInventoryContractFixture fixture =
                 PickupMenuInventoryContractFixture.succeeding(
-                        List.of(), Map.of(first, 41L, second, 42L));
+                        List.of(), Map.of(first, 41L, second, 42L, nextPolicy, 43L));
 
         MenuInventoryAcquireResult acquired = fixture.acquire(new MenuInventoryAcquireCommand(
-                "pickup-acquire-intervals", List.of(second, first)));
+                "pickup-acquire-intervals", List.of(second, nextPolicy, first)));
 
         assertThat(acquired.items()).extracting(
                         "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
                 .containsExactly(
                         tuple(41L, 1L, 1L, 2),
+                        tuple(43L, 1L, 2L, 4),
                         tuple(42L, 1L, 1L, 3));
     }
 

@@ -18,12 +18,11 @@ import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -81,9 +80,8 @@ public class MenuInventoryTransactionServiceRuntime
                 .toList();
         List<InventoryAcquisitionResult> acquired = inventoryService.acquireInventory(
                 new InventoryAcquireRequest(command.operationId(), selections));
-        Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey = acquired.stream()
-                .collect(Collectors.toMap(
-                        InventoryAcquisitionResult::bucketKey, Function.identity()));
+        Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey =
+                indexAcquiredResults(selections, acquired);
         return new MenuInventoryAcquireResult(
                 command.operationId(),
                 selections.stream()
@@ -92,13 +90,38 @@ public class MenuInventoryTransactionServiceRuntime
                         .toList());
     }
 
+    private static Map<InventoryBucketKey, InventoryAcquisitionResult> indexAcquiredResults(
+            List<InventoryAcquireRequest.Selection> selections,
+            List<InventoryAcquisitionResult> acquired
+    ) {
+        Set<InventoryBucketKey> requestedKeys = new HashSet<>();
+        selections.forEach(selection -> requestedKeys.add(selection.key()));
+        if (acquired == null || acquired.size() != requestedKeys.size()) {
+            throw mismatchedAcquisitionResults();
+        }
+        Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey = new HashMap<>();
+        for (InventoryAcquisitionResult result : acquired) {
+            if (result == null
+                    || !requestedKeys.contains(result.bucketKey())
+                    || acquiredByKey.putIfAbsent(result.bucketKey(), result) != null) {
+                throw mismatchedAcquisitionResults();
+            }
+        }
+        return Map.copyOf(acquiredByKey);
+    }
+
+    private static IllegalStateException mismatchedAcquisitionResults() {
+        return new IllegalStateException(
+                "acquired inventory results do not match requested selections");
+    }
+
     private static MenuInventoryAcquiredItem requireAcquiredResult(
             Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey,
             InventoryBucketKey key
     ) {
         InventoryAcquisitionResult result = acquiredByKey.get(key);
         if (result == null) {
-            throw new IllegalStateException("acquired inventory result is missing");
+            throw mismatchedAcquisitionResults();
         }
         return new MenuInventoryAcquiredItem(
                 result.inventoryBucketId(), result.menuId(),
