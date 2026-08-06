@@ -3,6 +3,7 @@ package com.miriyum.domain.menuhold.service;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
@@ -22,6 +23,16 @@ public interface MenuInventoryTransactionService {
     @Transactional(readOnly = true)
     List<MenuInventoryAvailability> findOnlineAvailability(
             MenuInventoryAvailabilityQuery query);
+
+    /**
+     * 검증된 메뉴들의 픽업 날짜에 게시된 현재 온라인 가용 구간을 조회한다.
+     *
+     * @param query Store 공개 계약으로 검증된 메뉴와 픽업 날짜
+     * @return 제공 구간과 메뉴 순서가 안정적인 현재 가용량 목록
+     */
+    @Transactional(readOnly = true)
+    List<MenuInventoryAvailability> findOnlineAvailabilityByDate(
+            MenuInventoryAvailabilityDateQuery query);
 
     /**
      * 모든 선택 메뉴 수량을 호출자 트랜잭션에서 원자적으로 확보한다.
