@@ -916,14 +916,20 @@ components:
             code: RESERVATION_001
             message: 예약을 찾을 수 없습니다.
     ReservationConflict:
-      description: 시간·수용량·중복·정책 또는 메뉴 수량 충돌
+      description: 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: RESERVATION_003
-            message: 요청한 시간의 예약 수용량이 부족합니다.
+          examples:
+            capacityConflict:
+              value:
+                code: RESERVATION_003
+                message: 요청한 시간의 예약 수용량이 부족합니다.
+            contactMissing:
+              value:
+                code: ACCOUNT_006
+                message: 예약 알림에 사용할 연락처를 먼저 등록해야 합니다.
     ReservationStateConflict:
       description: 현재 상태 또는 취소 정책에서 명령 불가
       content:
