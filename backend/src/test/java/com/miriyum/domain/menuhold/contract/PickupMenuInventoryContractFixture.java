@@ -12,12 +12,14 @@ import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
 import com.miriyum.global.exception.ServiceException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** 픽업 도메인이 production runtime 없이 공개 수량 계약을 검증하는 테스트 fixture다. */
 public final class PickupMenuInventoryContractFixture
         implements MenuInventoryTransactionService {
 
     private final List<MenuInventoryAvailability> availability;
+    private final Map<Long, Long> inventoryBucketIdsByMenuId;
     private final ServiceException failure;
     private final List<MenuInventoryAvailabilityQuery> availabilityQueries = new ArrayList<>();
     private final List<MenuInventoryAvailabilityDateQuery> dateAvailabilityQueries =
@@ -27,26 +29,31 @@ public final class PickupMenuInventoryContractFixture
 
     private PickupMenuInventoryContractFixture(
             List<MenuInventoryAvailability> availability,
+            Map<Long, Long> inventoryBucketIdsByMenuId,
             ServiceException failure
     ) {
         this.availability = List.copyOf(availability);
+        this.inventoryBucketIdsByMenuId = Map.copyOf(inventoryBucketIdsByMenuId);
         this.failure = failure;
     }
 
     public static PickupMenuInventoryContractFixture succeeding(
-            List<MenuInventoryAvailability> availability
+            List<MenuInventoryAvailability> availability,
+            Map<Long, Long> inventoryBucketIdsByMenuId
     ) {
-        if (availability == null) {
-            throw new IllegalArgumentException("availability must not be null");
+        if (availability == null || inventoryBucketIdsByMenuId == null) {
+            throw new IllegalArgumentException(
+                    "availability and inventoryBucketIdsByMenuId must not be null");
         }
-        return new PickupMenuInventoryContractFixture(availability, null);
+        return new PickupMenuInventoryContractFixture(
+                availability, inventoryBucketIdsByMenuId, null);
     }
 
     public static PickupMenuInventoryContractFixture failing(ServiceException failure) {
         if (failure == null) {
             throw new IllegalArgumentException("failure must not be null");
         }
-        return new PickupMenuInventoryContractFixture(List.of(), failure);
+        return new PickupMenuInventoryContractFixture(List.of(), Map.of(), failure);
     }
 
     @Override
@@ -75,6 +82,7 @@ public final class PickupMenuInventoryContractFixture
                 command.operationId(),
                 command.selections().stream()
                         .map(selection -> new MenuInventoryAcquiredItem(
+                                requireInventoryBucketId(selection.menuId()),
                                 selection.menuId(),
                                 selection.inventoryPolicyVersion(),
                                 selection.quantity()))
@@ -109,5 +117,14 @@ public final class PickupMenuInventoryContractFixture
         if (failure != null) {
             throw failure;
         }
+    }
+
+    private long requireInventoryBucketId(long menuId) {
+        Long inventoryBucketId = inventoryBucketIdsByMenuId.get(menuId);
+        if (inventoryBucketId == null || inventoryBucketId <= 0) {
+            throw new IllegalArgumentException(
+                    "positive inventory bucket ID must be configured for menu: " + menuId);
+        }
+        return inventoryBucketId;
     }
 }

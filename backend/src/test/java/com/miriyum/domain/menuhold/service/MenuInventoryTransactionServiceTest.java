@@ -15,6 +15,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.dto.OnlineInventoryAvailabilityView;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
@@ -114,14 +115,15 @@ class MenuInventoryTransactionServiceTest {
     }
 
     @Test
-    @DisplayName("확보는 공개 선택을 내부 요청으로 변환하고 풀 배분 없는 결과를 반환한다")
+    @DisplayName("확보는 공개 선택을 내부 요청으로 변환하고 실제 차감한 버킷을 반환한다")
     void acquiresThroughInternalInventoryRuntime() {
         MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
                 "pickup-acquire-01",
                 List.of(new MenuInventoryAcquireSelection(
                         1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
         given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
-                .willReturn(List.of());
+                .willReturn(List.of(new InventoryAcquisitionResult(
+                        41L, 1L, 2L, 3, 3, 0)));
 
         MenuInventoryAcquireResult result = service.acquire(command);
 
@@ -132,8 +134,9 @@ class MenuInventoryTransactionServiceTest {
         assertThat(captor.getValue().selections()).containsExactly(
                 new InventoryAcquireRequest.Selection(
                         1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3));
-        assertThat(result.items()).extracting("menuId", "inventoryPolicyVersion", "quantity")
-                .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, 2L, 3));
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(41L, 1L, 2L, 3));
     }
 
     @Test

@@ -10,6 +10,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.dto.OnlineInventoryAvailabilityView;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
@@ -68,20 +69,22 @@ public class MenuInventoryTransactionServiceRuntime
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public MenuInventoryAcquireResult acquire(MenuInventoryAcquireCommand command) {
-        inventoryService.acquireInventory(new InventoryAcquireRequest(
-                command.operationId(),
-                command.selections().stream()
-                        .map(selection -> new InventoryAcquireRequest.Selection(
-                                selection.menuId(), selection.serviceDate(),
-                                selection.startTime(), selection.endDate(), selection.endTime(),
-                                selection.inventoryPolicyVersion(), selection.quantity()))
-                        .toList()));
+        List<InventoryAcquisitionResult> acquired = inventoryService.acquireInventory(
+                new InventoryAcquireRequest(
+                        command.operationId(),
+                        command.selections().stream()
+                                .map(selection -> new InventoryAcquireRequest.Selection(
+                                        selection.menuId(), selection.serviceDate(),
+                                        selection.startTime(), selection.endDate(),
+                                        selection.endTime(),
+                                        selection.inventoryPolicyVersion(), selection.quantity()))
+                                .toList()));
         return new MenuInventoryAcquireResult(
                 command.operationId(),
-                command.selections().stream()
-                        .map(selection -> new MenuInventoryAcquiredItem(
-                                selection.menuId(), selection.inventoryPolicyVersion(),
-                                selection.quantity()))
+                acquired.stream()
+                        .map(result -> new MenuInventoryAcquiredItem(
+                                result.inventoryBucketId(), result.menuId(),
+                                result.inventoryPolicyVersion(), result.quantity()))
                         .toList());
     }
 

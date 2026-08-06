@@ -10,10 +10,12 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
@@ -290,11 +292,17 @@ class MenuInventoryRuntimeIT {
                 bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 3)));
         String acquireOperation = "pickup-public-acquire-" + SEQUENCE.incrementAndGet();
 
-        transactionTemplate.execute(status -> transactionService.acquire(
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(
                 new MenuInventoryAcquireCommand(
                         acquireOperation, List.of(publicSelection(menuId, 1L, 4)))));
 
         MenuInventoryBucket acquired = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        bucket.getId(), menuId, 1L, 4));
         assertThat(acquired.getOnlineHoldRemaining()).isZero();
         assertThat(acquired.getSharedRemaining()).isEqualTo(1);
 
@@ -310,6 +318,36 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
+    }
+
+    @Test
+    void publicAcquireKeepsBucketAndMenuMappingWhenLockOrderDiffersFromMenuOrder() {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeId,
+                        menuContent(),
+                        operatorId,
+                        Instant.parse("2026-08-01T00:00:01Z"))).getId());
+        MenuInventoryBucket lowerBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(secondMenuId, 1L, 5, 0)));
+        MenuInventoryBucket higherBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(new MenuInventoryAcquireCommand(
+                        "pickup-public-mapping-" + SEQUENCE.incrementAndGet(),
+                        List.of(
+                                publicSelection(menuId, 1L, 2),
+                                publicSelection(secondMenuId, 1L, 3)))));
+
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(
+                                higherBucketId.getId(), menuId, 1L, 2),
+                        org.assertj.core.groups.Tuple.tuple(
+                                lowerBucketId.getId(), secondMenuId, 1L, 3));
     }
 
     @Test
@@ -393,7 +431,7 @@ class MenuInventoryRuntimeIT {
         InventoryAcquireRequest acquire = new InventoryAcquireRequest(
                 "reservation:77:create", List.of(selection(menuId, 4)));
 
-        List<InventoryAllocationResult> acquired = transactionTemplate.execute(status ->
+        List<InventoryAcquisitionResult> acquired = transactionTemplate.execute(status ->
                 menuHoldService.acquireInventory(acquire));
         transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
                 new InventoryRestoreRequest("reservation:77:cancel:1", acquire.operationId())));
@@ -402,7 +440,8 @@ class MenuInventoryRuntimeIT {
 
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(acquired).containsExactly(
-                new InventoryAllocationResult(bucket.getId(), 2, 2));
+                new InventoryAcquisitionResult(
+                        bucket.getId(), menuId, 1L, 4, 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
         assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 4);
