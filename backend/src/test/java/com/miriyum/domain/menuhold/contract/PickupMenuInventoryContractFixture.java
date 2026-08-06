@@ -4,6 +4,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
@@ -19,6 +20,8 @@ public final class PickupMenuInventoryContractFixture
     private final List<MenuInventoryAvailability> availability;
     private final ServiceException failure;
     private final List<MenuInventoryAvailabilityQuery> availabilityQueries = new ArrayList<>();
+    private final List<MenuInventoryAvailabilityDateQuery> dateAvailabilityQueries =
+            new ArrayList<>();
     private final List<MenuInventoryAcquireCommand> acquireCommands = new ArrayList<>();
     private final List<MenuInventoryRestoreCommand> restoreCommands = new ArrayList<>();
 
@@ -56,6 +59,15 @@ public final class PickupMenuInventoryContractFixture
     }
 
     @Override
+    public List<MenuInventoryAvailability> findOnlineAvailabilityByDate(
+            MenuInventoryAvailabilityDateQuery query
+    ) {
+        dateAvailabilityQueries.add(query);
+        throwIfConfigured();
+        return availability;
+    }
+
+    @Override
     public MenuInventoryAcquireResult acquire(MenuInventoryAcquireCommand command) {
         acquireCommands.add(command);
         throwIfConfigured();
@@ -79,6 +91,10 @@ public final class PickupMenuInventoryContractFixture
 
     public List<MenuInventoryAvailabilityQuery> availabilityQueries() {
         return List.copyOf(availabilityQueries);
+    }
+
+    public List<MenuInventoryAvailabilityDateQuery> dateAvailabilityQueries() {
+        return List.copyOf(dateAvailabilityQueries);
     }
 
     public List<MenuInventoryAcquireCommand> acquireCommands() {

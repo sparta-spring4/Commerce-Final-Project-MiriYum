@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.willReturn;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
@@ -188,6 +189,99 @@ class MenuInventoryRuntimeIT {
             assertThat(availability.availabilityStatus())
                     .isEqualTo(MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT);
         });
+    }
+
+    @Test
+    void dateAvailabilityUsesCurrentPoliciesAndStableServiceIntervalOrder() {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeId,
+                        menuContent(),
+                        operatorId,
+                        Instant.parse("2026-08-01T00:00:01Z"))).getId());
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                    "Asia/Seoul", 1L, 6, 2, 1, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                    "Asia/Seoul", 2L, 105, 2, 100, 3, false,
+                    com.miriyum.domain.menuhold.inventory.model
+                            .InventoryAvailabilityStatus.SOLD_OUT));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    secondMenuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 7, 3, 1, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    secondMenuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                    "Asia/Seoul", 1L, 4, 2, 1, 1, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 9, 4, 2, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                    "Asia/Seoul", 1L, 8, 3, 2, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 11), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 11), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 5, 5, 0, 0, true));
+        });
+
+        List<MenuInventoryAvailability> result =
+                transactionService.findOnlineAvailabilityByDate(
+                        new MenuInventoryAvailabilityDateQuery(
+                                List.of(secondMenuId, Long.MAX_VALUE, menuId),
+                                LocalDate.of(2026, 8, 10)));
+
+        assertThat(result).extracting(
+                        MenuInventoryAvailability::menuId,
+                        MenuInventoryAvailability::startTime,
+                        MenuInventoryAvailability::endDate,
+                        MenuInventoryAvailability::endTime,
+                        MenuInventoryAvailability::inventoryPolicyVersion,
+                        MenuInventoryAvailability::availableOnlineQuantity,
+                        MenuInventoryAvailability::availabilityStatus)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                                1L, 3,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                                1L, 7,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                                1L, 6,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                                1L, 6,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(13, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                                2L, 2,
+                                MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT));
+    }
+
+    @Test
+    void dateAvailabilityReturnsEmptyWhenNoCurrentBucketExists() {
+        List<MenuInventoryAvailability> result =
+                transactionService.findOnlineAvailabilityByDate(
+                        new MenuInventoryAvailabilityDateQuery(
+                                List.of(menuId), LocalDate.of(2026, 8, 30)));
+
+        assertThat(result).isEmpty();
     }
 
     @Test

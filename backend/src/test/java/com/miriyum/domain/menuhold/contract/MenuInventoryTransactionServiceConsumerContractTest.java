@@ -8,6 +8,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
@@ -37,12 +38,16 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     void exposesTransactionBoundariesForPickupConsumer() throws Exception {
         Method availability = MenuInventoryTransactionService.class.getMethod(
                 "findOnlineAvailability", MenuInventoryAvailabilityQuery.class);
+        Method availabilityByDate = MenuInventoryTransactionService.class.getMethod(
+                "findOnlineAvailabilityByDate", MenuInventoryAvailabilityDateQuery.class);
         Method acquire = MenuInventoryTransactionService.class.getMethod(
                 "acquire", MenuInventoryAcquireCommand.class);
         Method restore = MenuInventoryTransactionService.class.getMethod(
                 "restore", MenuInventoryRestoreCommand.class);
 
         Transactional availabilityTx = availability.getAnnotation(Transactional.class);
+        Transactional availabilityByDateTx =
+                availabilityByDate.getAnnotation(Transactional.class);
         Transactional acquireTx = acquire.getAnnotation(Transactional.class);
         Transactional restoreTx = restore.getAnnotation(Transactional.class);
 
@@ -50,12 +55,40 @@ class MenuInventoryTransactionServiceConsumerContractTest {
         assertThat(availabilityTx.readOnly()).isTrue();
         assertThat(availability.getGenericReturnType().getTypeName())
                 .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
+        assertThat(availabilityByDateTx).isNotNull();
+        assertThat(availabilityByDateTx.readOnly()).isTrue();
+        assertThat(availabilityByDate.getGenericReturnType().getTypeName())
+                .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
         assertThat(acquireTx).isNotNull();
         assertThat(acquireTx.propagation()).isEqualTo(Propagation.MANDATORY);
         assertThat(acquire.getReturnType()).isEqualTo(MenuInventoryAcquireResult.class);
         assertThat(restoreTx).isNotNull();
         assertThat(restoreTx.propagation()).isEqualTo(Propagation.MANDATORY);
         assertThat(restore.getReturnType()).isEqualTo(MenuInventoryRestoreResult.class);
+    }
+
+    @Test
+    @DisplayName("날짜별 조회는 중복 메뉴를 제거해 오름차순으로 정규화한다")
+    void dateAvailabilityQueryNormalizesMenuIds() {
+        MenuInventoryAvailabilityDateQuery query =
+                new MenuInventoryAvailabilityDateQuery(
+                        List.of(3L, 1L, 3L, 2L), SERVICE_DATE);
+
+        assertThat(query.menuIds()).containsExactly(1L, 2L, 3L);
+        assertThat(query.pickupDate()).isEqualTo(SERVICE_DATE);
+    }
+
+    @Test
+    @DisplayName("날짜별 조회는 빈 메뉴 목록과 null 날짜를 거부한다")
+    void dateAvailabilityQueryRejectsInvalidScope() {
+        assertThatThrownBy(() -> new MenuInventoryAvailabilityDateQuery(
+                List.of(), SERVICE_DATE))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("menuIds must not be empty");
+        assertThatThrownBy(() -> new MenuInventoryAvailabilityDateQuery(
+                List.of(1L), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("pickupDate must not be null");
     }
 
     @Test
@@ -150,14 +183,18 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     void fixtureSupportsPickupConsumerWithoutProductionFake() {
         PickupMenuInventoryContractFixture fixture =
                 PickupMenuInventoryContractFixture.succeeding(List.of());
+        MenuInventoryAvailabilityDateQuery availability =
+                new MenuInventoryAvailabilityDateQuery(List.of(2L, 1L), SERVICE_DATE);
         MenuInventoryAcquireCommand acquire = new MenuInventoryAcquireCommand(
                 "pickup-acquire-01", List.of(selection(1L, 2)));
         MenuInventoryRestoreCommand restore = new MenuInventoryRestoreCommand(
                 "pickup-restore-01", "pickup-acquire-01");
 
+        fixture.findOnlineAvailabilityByDate(availability);
         MenuInventoryAcquireResult acquired = fixture.acquire(acquire);
         MenuInventoryRestoreResult restored = fixture.restore(restore);
 
+        assertThat(fixture.dateAvailabilityQueries()).containsExactly(availability);
         assertThat(fixture.acquireCommands()).containsExactly(acquire);
         assertThat(fixture.restoreCommands()).containsExactly(restore);
         assertThat(acquired.operationId()).isEqualTo("pickup-acquire-01");
