@@ -43,7 +43,8 @@ public class StoreTransactionEligibilityService {
         if (!store.isReservationEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
-        return new StoreReservationTransactionEligibility(store.getId());
+        return new StoreReservationTransactionEligibility(
+                store.getId(), store.getName());
     }
 
     /**
@@ -65,7 +66,8 @@ public class StoreTransactionEligibilityService {
         if (!store.isPickupEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
-        return new StorePickupTransactionEligibility(store.getId());
+        return new StorePickupTransactionEligibility(
+                store.getId(), store.getName(), store.getTimeZoneId());
     }
 
     private Store loadStore(long storeId) {
