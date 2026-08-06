@@ -4,6 +4,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
@@ -49,6 +50,17 @@ public class MenuInventoryTransactionServiceRuntime
         }
         return views.stream()
                 .sorted(Comparator.comparingLong(OnlineInventoryAvailabilityView::getMenuId))
+                .map(MenuInventoryTransactionServiceRuntime::toAvailability)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MenuInventoryAvailability> findOnlineAvailabilityByDate(
+            MenuInventoryAvailabilityDateQuery query
+    ) {
+        return bucketRepository.findCurrentOnlineAvailabilityByDate(
+                        query.menuIds(), query.pickupDate()).stream()
                 .map(MenuInventoryTransactionServiceRuntime::toAvailability)
                 .toList();
     }
