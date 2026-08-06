@@ -28,6 +28,8 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
                    v.price as unitPrice
             from Store s
             left join Menu m on m.storeId = s.id
+              and s.verificationStatus = com.miriyum.domain.store.core.enums.VerificationStatus.APPROVED
+              and s.operationStatus = com.miriyum.domain.store.core.enums.OperationStatus.OPEN
               and s.reservationEnabled = true
               and s.menuHoldEnabled = true
               and m.retired = false

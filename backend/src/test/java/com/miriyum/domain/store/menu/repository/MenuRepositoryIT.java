@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
+import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.menu.entity.Menu;
@@ -189,6 +190,38 @@ class MenuRepositoryIT {
                 .isNotEmpty()
                 .allSatisfy(row -> assertThat(row.getMenuId()).isNull());
         assertThat(menuRepository.findMenuHoldSelectionRows(Long.MAX_VALUE)).isEmpty();
+    }
+
+    @Test
+    @Transactional
+    void excludesMenusWhenStoreIsTemporarilyClosedOrClosed() {
+        long operatorId = saveOperator("closed-selection-owner@example.com");
+        Store temporarilyClosed = saveStore(
+                operatorId, "1000000021", true, true);
+        Store closed = saveStore(
+                operatorId, "1000000022", true, true);
+        Instant now = Instant.parse("2026-08-06T00:00:00Z");
+        savePublishedMenu(
+                temporarilyClosed.getId(), operatorId,
+                content("Temporarily Closed Menu", 5_000, true), now);
+        savePublishedMenu(
+                closed.getId(), operatorId,
+                content("Closed Menu", 6_000, true), now);
+        temporarilyClosed.update(
+                null, null, null, null, null, null,
+                null, null, null, OperationStatus.TEMPORARILY_CLOSED);
+        closed.close();
+        storeRepository.saveAndFlush(temporarilyClosed);
+        storeRepository.saveAndFlush(closed);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(menuRepository.findMenuHoldSelectionRows(temporarilyClosed.getId()))
+                .isNotEmpty()
+                .allSatisfy(row -> assertThat(row.getMenuId()).isNull());
+        assertThat(menuRepository.findMenuHoldSelectionRows(closed.getId()))
+                .isNotEmpty()
+                .allSatisfy(row -> assertThat(row.getMenuId()).isNull());
     }
 
     private long saveOperator(String email) {
