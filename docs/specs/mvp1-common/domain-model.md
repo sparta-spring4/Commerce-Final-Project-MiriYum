@@ -447,7 +447,7 @@ erDiagram
 - 픽업 예약은 일반 방문 예약의 인원·팀 수 수용량과 분리하되, 일반 예약의 선택 메뉴 홀드와 동일한 날짜·시간대별 메뉴 재고 원장을 공유한다.
 - 따라서 픽업 예약은 `reservation_capacity_buckets`와 `reservation_capacity_allocations`를 만들거나 소비하지 않는다.
 - 픽업 예약 항목은 일반 예약의 메뉴 홀드 항목과 같은 `menu_inventory_buckets`를 차감하고 모든 수량 변화는 같은 `menu_inventory_ledger`에 기록한다.
-- 픽업 시간 약속은 `pickup_time_slots`를 사용하며 일반 방문 예약의 좌석성 수용량과 의미를 합치지 않는다.
+- 픽업 시간 약속은 게시된 현재 `menu_inventory_buckets` 제공 구간을 재사용하며 일반 방문 예약의 좌석성 수용량과 의미를 합치지 않는다. 요청의 `pickupDate + pickupTime`은 버킷의 `serviceDate + startTime`과 정확히 일치해야 하고 종료 시각은 해당 버킷에서 결정한다.
 
 ### 채택하지 않는 구조
 

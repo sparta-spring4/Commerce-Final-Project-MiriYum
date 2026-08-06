@@ -63,6 +63,7 @@ paths:
         - name: pickupDate
           in: query
           required: true
+          description: 게시된 현재 메뉴 재고 버킷의 serviceDate
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
       responses:
@@ -495,6 +496,7 @@ components:
       required: [pickupTime, menus]
       properties:
         pickupTime:
+          description: 게시된 현재 메뉴 재고 버킷 제공 구간의 startTime
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         menus:
           type: array
@@ -532,8 +534,10 @@ components:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         pickupDate:
+          description: 게시된 현재 메뉴 재고 버킷의 serviceDate
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         pickupTime:
+          description: 게시된 현재 메뉴 재고 버킷 제공 구간과 정확히 일치해야 하는 startTime
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         menuSelections:
           type: array
