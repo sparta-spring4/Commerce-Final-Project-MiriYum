@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.service.StoreMenuAuthority;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
@@ -46,7 +45,7 @@ class MenuContentPolicyTest {
 
         MenuContent result = policy.validateAndNormalize(
                 request(List.of("  signature  ", "ＳＩＧＮＡＴＵＲＥ", "night")),
-                store(PickupEligibility.ELIGIBLE));
+                store());
 
         assertThat(result.localTags()).containsExactly("signature", "night");
     }
@@ -77,23 +76,10 @@ class MenuContentPolicyTest {
                                 AllergenIngredientCode.MILK,
                                 AllergenDisclosureStatus.CONTAINS)),
                         DisclosureRegistrationStatus.NOT_APPLICABLE, List.of(), false),
-                store(PickupEligibility.ELIGIBLE)))
+                store()))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.CATALOG_CODE_INVALID);
-    }
-
-    @Test
-    void rejectsPickupForIneligibleStore() {
-        given(catalogService.findUnknownCodes(
-                CatalogKind.MENU_CATEGORY, List.of("COFFEE", "BEVERAGE")))
-                .willReturn(List.of());
-
-        assertThatThrownBy(() -> policy.validateAndNormalize(
-                request(List.of()), store(PickupEligibility.INELIGIBLE)))
-                .isInstanceOf(ServiceException.class)
-                .extracting(error -> ((ServiceException) error).getErrorCode())
-                .isEqualTo(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
     }
 
     @Test
@@ -129,7 +115,7 @@ class MenuContentPolicyTest {
 
     private void assertValidationFailure(MenuContentRequest request) {
         assertThatThrownBy(() -> policy.validateAndNormalize(
-                request, store(PickupEligibility.ELIGIBLE)))
+                request, store()))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
@@ -147,7 +133,7 @@ class MenuContentPolicyTest {
                 false);
     }
 
-    private StoreMenuAuthority store(PickupEligibility eligibility) {
-        return new StoreMenuAuthority(7L, eligibility);
+    private StoreMenuAuthority store() {
+        return new StoreMenuAuthority(7L);
     }
 }

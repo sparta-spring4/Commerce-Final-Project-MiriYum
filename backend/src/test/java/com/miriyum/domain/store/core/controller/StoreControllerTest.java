@@ -17,7 +17,6 @@ import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.core.dto.ManagedStoreResponse;
 import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.service.StoreCommandResult;
@@ -394,7 +393,6 @@ class StoreControllerTest {
                 "CAFE_BAKERY",
                 VerificationStatus.APPROVED,
                 OperationStatus.OPEN,
-                PickupEligibility.ELIGIBLE,
                 new StoreModesRequest(true, true, true));
     }
 }

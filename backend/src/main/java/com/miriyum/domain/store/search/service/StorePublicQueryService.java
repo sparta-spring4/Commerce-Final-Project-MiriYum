@@ -78,7 +78,7 @@ public class StorePublicQueryService {
                 Long.toString(storeId), store.name(), store.description(),
                 store.region(), store.address(), store.timeZoneId(),
                 store.storeCategoryCode(), store.tags(),
-                store.operationStatus(), store.pickupEligibility(),
+                store.operationStatus(),
                 new PublicStoreModes(store.reservationEnabled(), store.menuHoldEnabled(),
                         store.pickupEnabled()),
                 schedules.operatingHours(), schedules.reservationTimeSlots(),

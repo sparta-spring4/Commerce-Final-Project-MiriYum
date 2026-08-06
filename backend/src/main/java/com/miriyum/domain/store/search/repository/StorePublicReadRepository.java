@@ -1,7 +1,6 @@
 package com.miriyum.domain.store.search.repository;
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.search.dto.PublicMenu;
@@ -31,7 +30,7 @@ public class StorePublicReadRepository {
         MapSqlParameterSource parameters = new MapSqlParameterSource("storeId", storeId);
         List<PublicStoreSnapshot> stores = jdbcTemplate.query("""
                 SELECT store_id, name, description, region, address, time_zone_id,
-                       store_category_code, operation_status, pickup_eligibility,
+                       store_category_code, operation_status,
                        reservation_enabled, menu_hold_enabled, pickup_enabled
                 FROM stores
                 WHERE store_id = :storeId
@@ -44,7 +43,6 @@ public class StorePublicReadRepository {
                 resultSet.getString("address"), resultSet.getString("time_zone_id"),
                 resultSet.getString("store_category_code"), List.of(),
                 OperationStatus.valueOf(resultSet.getString("operation_status")),
-                PickupEligibility.valueOf(resultSet.getString("pickup_eligibility")),
                 resultSet.getBoolean("reservation_enabled"),
                 resultSet.getBoolean("menu_hold_enabled"),
                 resultSet.getBoolean("pickup_enabled")));
@@ -61,7 +59,7 @@ public class StorePublicReadRepository {
         return Optional.of(new PublicStoreSnapshot(
                 store.storeId(), store.name(), store.description(), store.region(),
                 store.address(), store.timeZoneId(), store.storeCategoryCode(), tags,
-                store.operationStatus(), store.pickupEligibility(),
+                store.operationStatus(),
                 store.reservationEnabled(), store.menuHoldEnabled(), store.pickupEnabled()));
     }
 

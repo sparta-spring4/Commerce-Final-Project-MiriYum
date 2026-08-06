@@ -87,6 +87,19 @@ class StoreOnboardingEvidenceMigrationTest {
             }
             assertThat(count).isEqualTo(3);
         }
+
+        try (Connection connection = connection();
+             Statement statement = connection.createStatement();
+             ResultSet removed = statement.executeQuery("""
+                     SELECT COUNT(*)
+                     FROM information_schema.columns
+                     WHERE table_schema = DATABASE()
+                       AND table_name = 'stores'
+                       AND column_name = 'pickup_eligibility'
+                     """)) {
+            assertThat(removed.next()).isTrue();
+            assertThat(removed.getInt(1)).isZero();
+        }
     }
 
     private void insertLegacyStore() throws Exception {
