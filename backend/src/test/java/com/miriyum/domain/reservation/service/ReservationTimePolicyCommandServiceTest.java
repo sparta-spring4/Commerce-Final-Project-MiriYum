@@ -7,6 +7,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationRequest;
@@ -17,6 +19,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreService;
@@ -75,6 +78,15 @@ class ReservationTimePolicyCommandServiceTest {
     @Mock
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
+    @Mock
+    private ReservationRepository reservationRepository;
+
+    @Mock
+    private ConsumerAccountService consumerAccountService;
+
+    @Mock
+    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+
     private ObjectMapper objectMapper;
     private ReservationService reservationService;
 
@@ -90,7 +102,10 @@ class ReservationTimePolicyCommandServiceTest {
                 auditRepository,
                 objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                capacityBucketRepository
+                capacityBucketRepository,
+                reservationRepository,
+                consumerAccountService,
+                menuHoldSnapshotQueryService
         );
         given(idempotencyExecutor.execute(any(), any()))
                 .willAnswer(invocation -> executeWork(invocation.getArgument(1)));

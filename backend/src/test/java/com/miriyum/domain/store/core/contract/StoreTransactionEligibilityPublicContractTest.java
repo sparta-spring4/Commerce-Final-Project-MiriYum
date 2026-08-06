@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.core.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
@@ -43,9 +44,64 @@ class StoreTransactionEligibilityPublicContractTest {
     }
 
     @Test
-    void purposeSpecificDtosExposeOnlyValidatedStoreId() {
-        assertStoreIdOnlyDto(StoreReservationTransactionEligibility.class);
-        assertStoreIdOnlyDto(StorePickupTransactionEligibility.class);
+    void purposeSpecificDtosExposeOnlyApprovedConsumerFields() {
+        assertThat(StoreReservationTransactionEligibility.class.getRecordComponents())
+                .extracting(RecordComponent::getName, RecordComponent::getType)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("storeId", long.class),
+                        org.assertj.core.groups.Tuple.tuple("storeName", String.class));
+        assertThat(StorePickupTransactionEligibility.class.getRecordComponents())
+                .extracting(RecordComponent::getName, RecordComponent::getType)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("storeId", long.class),
+                        org.assertj.core.groups.Tuple.tuple("storeName", String.class),
+                        org.assertj.core.groups.Tuple.tuple("timeZoneId", String.class));
+    }
+
+    @Test
+    void reservationEligibilityValidatesSnapshotFieldAtPublicBoundary() {
+        String maximumLengthName = "가".repeat(100);
+
+        assertThat(new StoreReservationTransactionEligibility(
+                1L, maximumLengthName).storeName())
+                .isEqualTo(maximumLengthName);
+        assertThatThrownBy(() -> new StoreReservationTransactionEligibility(
+                1L, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StoreReservationTransactionEligibility(
+                1L, " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StoreReservationTransactionEligibility(
+                1L, "가".repeat(101)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+    }
+
+    @Test
+    void pickupEligibilityValidatesSnapshotFieldsAtPublicBoundary() {
+        String maximumLengthName = "가".repeat(100);
+
+        assertThat(new StorePickupTransactionEligibility(
+                1L, maximumLengthName, "Asia/Seoul").storeName())
+                .isEqualTo(maximumLengthName);
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, " ", "Asia/Seoul"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "가".repeat(101), "Asia/Seoul"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("storeName must be between 1 and 100 characters");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "미리윰", "invalid/time-zone"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("timeZoneId must be a valid IANA identifier");
+        assertThatThrownBy(() -> new StorePickupTransactionEligibility(
+                1L, "미리윰", "+09:00"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("timeZoneId must be a valid IANA identifier");
     }
 
     @Test
@@ -92,14 +148,6 @@ class StoreTransactionEligibilityPublicContractTest {
         assertThat(transactional.timeout())
                 .as("%s must leave timeout to the creation transaction", method.getName())
                 .isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT);
-    }
-
-    private void assertStoreIdOnlyDto(Class<?> dtoType) {
-        assertThat(dtoType.isRecord()).isTrue();
-        assertThat(dtoType.getRecordComponents())
-                .extracting(RecordComponent::getName, RecordComponent::getType)
-                .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("storeId", long.class));
     }
 
     private void assertNotStoreInternalType(Class<?> type) {
