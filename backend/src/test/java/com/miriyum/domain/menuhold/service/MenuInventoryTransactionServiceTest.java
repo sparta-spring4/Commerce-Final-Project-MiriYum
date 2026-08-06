@@ -24,9 +24,13 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 class MenuInventoryTransactionServiceTest {
@@ -218,6 +222,24 @@ class MenuInventoryTransactionServiceTest {
                 .hasMessage("acquired inventory results do not match requested selections");
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("mismatchedAcquisitionResults")
+    @DisplayName("확보 결과 필드가 요청 선택과 다르면 공개 결과 생성을 거부한다")
+    void rejectsInternalAcquisitionResultWhoseFieldsDoNotMatchSelection(
+            String mismatch,
+            InventoryAcquisitionResult acquired
+    ) {
+        MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
+                "pickup-acquire-field-mismatch", List.of(new MenuInventoryAcquireSelection(
+                        1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
+        given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(acquired));
+
+        assertThatThrownBy(() -> service.acquire(command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("acquired inventory results do not match requested selections");
+    }
+
     @Test
     @DisplayName("복구는 새 operation과 최초 확보 operation만 내부 런타임에 전달한다")
     void restoresThroughInternalInventoryRuntime() {
@@ -268,5 +290,19 @@ class MenuInventoryTransactionServiceTest {
                         menuId, SERVICE_DATE, START_TIME, SERVICE_DATE,
                         END_TIME, inventoryPolicyVersion, quantity).key(),
                 inventoryBucketId, menuId, inventoryPolicyVersion, quantity, quantity, 0);
+    }
+
+    private static Stream<Arguments> mismatchedAcquisitionResults() {
+        InventoryAcquireRequest.Selection selection = new InventoryAcquireRequest.Selection(
+                1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3);
+        return Stream.of(
+                Arguments.of("inventoryBucketId invalid", new InventoryAcquisitionResult(
+                        selection.key(), 0L, 1L, 2L, 3, 3, 0)),
+                Arguments.of("menuId mismatch", new InventoryAcquisitionResult(
+                        selection.key(), 41L, 9L, 2L, 3, 3, 0)),
+                Arguments.of("inventoryPolicyVersion mismatch", new InventoryAcquisitionResult(
+                        selection.key(), 41L, 1L, 9L, 3, 3, 0)),
+                Arguments.of("quantity mismatch", new InventoryAcquisitionResult(
+                        selection.key(), 41L, 1L, 2L, 4, 4, 0)));
     }
 }

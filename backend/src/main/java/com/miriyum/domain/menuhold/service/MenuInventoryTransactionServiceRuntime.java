@@ -94,15 +94,23 @@ public class MenuInventoryTransactionServiceRuntime
             List<InventoryAcquireRequest.Selection> selections,
             List<InventoryAcquisitionResult> acquired
     ) {
-        Set<InventoryBucketKey> requestedKeys = new HashSet<>();
-        selections.forEach(selection -> requestedKeys.add(selection.key()));
-        if (acquired == null || acquired.size() != requestedKeys.size()) {
+        Map<InventoryBucketKey, InventoryAcquireRequest.Selection> selectionsByKey =
+                new HashMap<>();
+        selections.forEach(selection -> selectionsByKey.put(selection.key(), selection));
+        if (acquired == null || acquired.size() != selectionsByKey.size()) {
             throw mismatchedAcquisitionResults();
         }
         Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey = new HashMap<>();
         for (InventoryAcquisitionResult result : acquired) {
+            InventoryAcquireRequest.Selection selection = result == null
+                    ? null : selectionsByKey.get(result.bucketKey());
             if (result == null
-                    || !requestedKeys.contains(result.bucketKey())
+                    || selection == null
+                    || result.inventoryBucketId() <= 0
+                    || result.menuId() != result.bucketKey().menuId()
+                    || result.inventoryPolicyVersion()
+                    != result.bucketKey().inventoryPolicyVersion()
+                    || result.quantity() != selection.quantity()
                     || acquiredByKey.putIfAbsent(result.bucketKey(), result) != null) {
                 throw mismatchedAcquisitionResults();
             }
