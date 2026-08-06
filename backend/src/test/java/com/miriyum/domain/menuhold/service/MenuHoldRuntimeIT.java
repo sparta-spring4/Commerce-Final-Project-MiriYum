@@ -48,6 +48,11 @@ import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import jakarta.persistence.EntityManagerFactory;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -61,7 +66,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,6 +95,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class MenuHoldRuntimeIT {
 
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
+    private static final long LOCK_WAIT_OBSERVATION_TIMEOUT_MILLIS = 5_000L;
+    private static final long LOCK_WAIT_OBSERVATION_POLL_MILLIS = 25L;
     @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
@@ -411,8 +417,7 @@ class MenuHoldRuntimeIT {
             });
             assertThat(releaseStarted.await(10, TimeUnit.SECONDS)).isTrue();
             try {
-                assertThatThrownBy(() -> release.get(500, TimeUnit.MILLISECONDS))
-                        .isInstanceOf(TimeoutException.class);
+                awaitMenuHoldLockWait();
             } finally {
                 allowPrelockCommit.countDown();
             }
@@ -424,6 +429,52 @@ class MenuHoldRuntimeIT {
         }
         assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
         assertThat(restoreLedgerCount("prelock-race-acquire")).isEqualTo(1);
+    }
+
+    private void awaitMenuHoldLockWait() {
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(LOCK_WAIT_OBSERVATION_TIMEOUT_MILLIS);
+        try (Connection monitoringConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(),
+                "root",
+                MYSQL.getPassword()
+        )) {
+            while (System.nanoTime() < deadlineNanos) {
+                if (hasMenuHoldLockWait(monitoringConnection)) {
+                    return;
+                }
+                try {
+                    TimeUnit.MILLISECONDS.sleep(LOCK_WAIT_OBSERVATION_POLL_MILLIS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "interrupted while observing menu hold lock wait",
+                            exception
+                    );
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException(
+                    "unable to observe menu hold lock waits with MySQL root connection",
+                    exception
+            );
+        }
+        throw new AssertionError("release never entered a MySQL row-lock wait for menu_holds");
+    }
+
+    private static boolean hasMenuHoldLockWait(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) "
+                        + "FROM performance_schema.data_lock_waits lock_wait "
+                        + "JOIN performance_schema.data_locks requested_lock "
+                        + "ON requested_lock.engine = lock_wait.engine "
+                        + "AND requested_lock.engine_lock_id "
+                        + "= lock_wait.requesting_engine_lock_id "
+                        + "WHERE requested_lock.object_schema = DATABASE() "
+                        + "AND requested_lock.object_name = 'menu_holds'"
+        ); ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getInt(1) > 0;
+        }
     }
 
     @Test
