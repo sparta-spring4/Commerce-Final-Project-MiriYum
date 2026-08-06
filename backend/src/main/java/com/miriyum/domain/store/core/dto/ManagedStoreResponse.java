@@ -2,7 +2,6 @@ package com.miriyum.domain.store.core.dto;
 
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 
@@ -15,7 +14,6 @@ public record ManagedStoreResponse(
         String storeCategoryCode,
         VerificationStatus verificationStatus,
         OperationStatus operationStatus,
-        PickupEligibility pickupEligibility,
         StoreModesRequest modes,
         StoreGeocodingResponse geocoding
 ) {
@@ -36,7 +34,6 @@ public record ManagedStoreResponse(
                 store.getStoreCategoryCode(),
                 store.getVerificationStatus(),
                 store.getOperationStatus(),
-                store.getPickupEligibility(),
                 new StoreModesRequest(
                         store.isReservationEnabled(),
                         store.isMenuHoldEnabled(),

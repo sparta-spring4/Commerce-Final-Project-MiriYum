@@ -990,16 +990,13 @@ components:
     EditableOperationStatus:
       type: string
       enum: [OPEN, TEMPORARILY_CLOSED]
-    PickupEligibility:
-      type: string
-      enum: [ELIGIBLE, INELIGIBLE]
     BusinessType:
       type: string
-      description: 매장 등록 신청에서 선택하는 업종 구분. CAFE와 BAKERY만 픽업 자격을 얻는다.
+      description: 매장 등록 신청에서 선택하는 업종 구분. 픽업 가능 여부에는 사용하지 않는다.
       enum: [CAFE, BAKERY, OTHER]
     StoreModes:
       type: object
-      description: 등록 업종이 OTHER이면 pickupEnabled는 false여야 한다. true 요청은 일반 등록으로 자동 보정하지 않고 STORE_008로 거절한다.
+      description: 등록 업종과 무관하게 거래별 기능 활성화 여부를 선택한다.
       additionalProperties: false
       required: [reservationEnabled, menuHoldEnabled, pickupEnabled]
       properties:
@@ -1238,7 +1235,6 @@ components:
         - storeCategoryCode
         - tags
         - operationStatus
-        - pickupEligibility
         - modes
         - operatingHours
         - reservationTimeSlots
@@ -1271,8 +1267,6 @@ components:
             $ref: "#/components/schemas/CatalogCode"
         operationStatus:
           $ref: "#/components/schemas/OperationStatus"
-        pickupEligibility:
-          $ref: "#/components/schemas/PickupEligibility"
         modes:
           $ref: "#/components/schemas/StoreModes"
         operatingHours:
@@ -1301,7 +1295,6 @@ components:
         - storeCategoryCode
         - verificationStatus
         - operationStatus
-        - pickupEligibility
         - modes
         - geocoding
       properties:
@@ -1325,8 +1318,6 @@ components:
           $ref: "#/components/schemas/VerificationStatus"
         operationStatus:
           $ref: "#/components/schemas/OperationStatus"
-        pickupEligibility:
-          $ref: "#/components/schemas/PickupEligibility"
         modes:
           $ref: "#/components/schemas/StoreModes"
         geocoding:
@@ -1643,7 +1634,7 @@ components:
             $ref: "#/components/schemas/TimeRange"
     StoreCreateRequest:
       type: object
-      description: 1차 MVP는 사업자등록번호 형식과 전체 매장 이력에 대한 영구 유일성을 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. 폐점한 매장의 번호도 재사용할 수 없다. OTHER도 일반 등록·예약을 사용할 수 있지만 modes.pickupEnabled=true 조합은 STORE_008로 거절하며 매장을 생성하지 않는다.
+      description: 1차 MVP는 사업자등록번호 형식과 전체 매장 이력에 대한 영구 유일성을 검증하고 플랫폼 운영자 심사 없이 즉시 등록한다. 폐점한 매장의 번호도 재사용할 수 없다. 모든 등록 업종은 modes.pickupEnabled를 선택할 수 있다.
       additionalProperties: false
       required:
         - businessRegistrationNumber
@@ -1699,7 +1690,7 @@ components:
           description: 필수 입점 약관에 동의한다. 서버가 동의 시각과 STORE_ONBOARDING_REQUIRED_TERMS_V1 버전을 기록한다.
     StoreUpdateRequest:
       type: object
-      description: OTHER 매장에서 modes.pickupEnabled=true를 요청하면 STORE_008로 거절하고 기존 매장 설정을 유지한다.
+      description: 등록 업종과 무관하게 modes.pickupEnabled를 변경할 수 있다.
       additionalProperties: false
       minProperties: 1
       properties:
@@ -2231,7 +2222,7 @@ components:
             code: STORE_001
             message: 매장을 찾을 수 없습니다.
     StoreConflict:
-      description: 현재 또는 폐점 매장 이력에 이미 귀속된 사업자등록번호 또는 등록 업종의 픽업 자격 충돌
+      description: 현재 또는 폐점 매장 이력에 이미 귀속된 사업자등록번호 충돌
       content:
         application/json:
           schema:
@@ -2241,10 +2232,6 @@ components:
               value:
                 code: STORE_002
                 message: 이미 등록된 사업자등록번호입니다.
-            pickupIneligible:
-              value:
-                code: STORE_008
-                message: 등록 업종에 픽업 자격이 없습니다.
     StoreAccessDenied:
       description: 대상 매장 운영 권한 없음
       content:
@@ -2255,7 +2242,7 @@ components:
             code: STORE_003
             message: 대상 매장의 운영 권한이 없습니다.
     StoreStateConflict:
-      description: 현재 매장 상태, 등록 업종의 픽업 자격 또는 주소 선행 검증 이후 동시 변경 때문에 수정 불가
+      description: 현재 매장 상태 또는 주소 선행 검증 이후 동시 변경 때문에 수정 불가
       content:
         application/json:
           schema:
@@ -2265,10 +2252,6 @@ components:
               value:
                 code: STORE_005
                 message: 현재 매장 상태에서 변경할 수 없습니다.
-            pickupIneligible:
-              value:
-                code: STORE_008
-                message: 등록 업종에 픽업 자격이 없습니다.
             concurrentModification:
               value:
                 code: COMMON_008

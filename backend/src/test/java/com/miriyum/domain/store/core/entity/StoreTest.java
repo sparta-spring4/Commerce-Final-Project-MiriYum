@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.GeocodingStatus;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.model.VerifiedStoreGeocoding;
@@ -202,7 +201,6 @@ class StoreTest {
 
         assertThat(store.getVerificationStatus()).isEqualTo(VerificationStatus.APPROVED);
         assertThat(store.getOperationStatus()).isEqualTo(OperationStatus.OPEN);
-        assertThat(store.getPickupEligibility()).isEqualTo(PickupEligibility.ELIGIBLE);
         assertThat(store.getTimeZoneId()).isEqualTo(TIME_ZONE_ID);
     }
 
@@ -251,9 +249,9 @@ class StoreTest {
     }
 
     @Test
-    @DisplayName("OTHER 업종은 픽업 기능을 활성화할 수 없다")
-    void otherCannotEnablePickup() {
-        assertThatThrownBy(() -> Store.create(
+    @DisplayName("OTHER 업종도 픽업 기능을 활성화할 수 있다")
+    void otherCanEnablePickup() {
+        Store store = Store.create(
                 11L,
                 "1234567890",
                 BusinessType.OTHER,
@@ -268,10 +266,9 @@ class StoreTest {
                 true,
                 TIME_ZONE_ID,
                 ONBOARDING_ACCEPTED_AT,
-                REQUIRED_TERMS_VERSION))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
+                REQUIRED_TERMS_VERSION);
+
+        assertThat(store.isPickupEnabled()).isTrue();
     }
 
     @Test
@@ -345,8 +342,8 @@ class StoreTest {
     }
 
     @Test
-    @DisplayName("OTHER 매장의 수정에서 픽업 활성화를 거부하고 기존 설정을 유지한다")
-    void rejectedPickupUpdateKeepsPreviousModes() {
+    @DisplayName("OTHER 매장도 수정으로 픽업 기능을 활성화할 수 있다")
+    void otherStoreCanEnablePickupOnUpdate() {
         Store store = Store.create(
                 11L,
                 "1234567890",
@@ -364,7 +361,7 @@ class StoreTest {
                 ONBOARDING_ACCEPTED_AT,
                 REQUIRED_TERMS_VERSION);
 
-        assertThatThrownBy(() -> store.update(
+        store.update(
                 null,
                 null,
                 null,
@@ -374,14 +371,11 @@ class StoreTest {
                 null,
                 null,
                 true,
-                null))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
+                null);
 
         assertThat(store.isReservationEnabled()).isTrue();
         assertThat(store.isMenuHoldEnabled()).isFalse();
-        assertThat(store.isPickupEnabled()).isFalse();
+        assertThat(store.isPickupEnabled()).isTrue();
     }
 
     @Test
