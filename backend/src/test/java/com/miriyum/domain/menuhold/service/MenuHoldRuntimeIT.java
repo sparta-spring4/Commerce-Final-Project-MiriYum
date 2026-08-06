@@ -22,6 +22,7 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
@@ -715,7 +716,8 @@ class MenuHoldRuntimeIT {
         return Reservation.confirm(consumerId, storeId, "store", timeSnapshot,
                 PartyComposition.of(2, 0, 0),
                 ReservationContactSnapshot.contactable("consumer:" + consumerId),
-                1L, Instant.parse("2026-08-01T00:00:00Z"));
+                1L, new ReservationCancellationPolicyVersion(1L),
+                Instant.parse("2026-08-01T00:00:00Z"));
     }
 
     private MenuHoldCreateCommand command(long reservationId, int quantity, String operationId) {

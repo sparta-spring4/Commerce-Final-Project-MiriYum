@@ -11,6 +11,7 @@ import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
@@ -864,6 +865,7 @@ class ReservationMigrationTest {
                 PartyComposition.of(2, 1, 1),
                 ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE),
                 1L,
+                new ReservationCancellationPolicyVersion(1L),
                 CREATED_AT
         );
     }
