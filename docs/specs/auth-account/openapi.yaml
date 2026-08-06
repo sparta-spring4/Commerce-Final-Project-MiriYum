@@ -909,9 +909,17 @@ components:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: ACCOUNT_001
-            message: 이미 사용 중인 이메일입니다.
+          examples:
+            DuplicateEmail:
+              summary: 같은 계정 유형에서 이미 사용 중인 이메일
+              value:
+                code: ACCOUNT_001
+                message: 이미 사용 중인 이메일입니다.
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 휴대전화
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
     ContactRegistrationConflict:
       description: 연락처 최초 등록 중복 또는 이미 등록한 연락처를 다른 번호로 변경하려는 요청
       content:
