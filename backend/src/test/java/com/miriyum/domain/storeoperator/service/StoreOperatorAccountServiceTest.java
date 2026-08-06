@@ -8,6 +8,9 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.exception.AccountErrorCode;
+import com.miriyum.domain.storeoperator.dto.request.StoreOperatorContactRegistrationRequest;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorAccountUpdateRequest;
 import com.miriyum.domain.storeoperator.dto.response.StoreOperatorAccountResponse;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -18,6 +21,7 @@ import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import jakarta.persistence.EntityManager;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -39,18 +43,27 @@ class StoreOperatorAccountServiceTest {
             "store-operator", ACCOUNT_ID, "STORE_OPERATOR_ACCOUNT_UPDATE",
             "123e4567-e89b-12d3-a456-426614174000", "a".repeat(64));
 
+    private static final IdempotencyCommand CONTACT_COMMAND = new IdempotencyCommand(
+            "store-operator", ACCOUNT_ID, "STORE_OPERATOR_CONTACT_REGISTER",
+            "123e4567-e89b-12d3-a456-426614174001", "b".repeat(64));
+
     @Mock
     private StoreOperatorAccountRepository storeOperatorAccountRepository;
 
     @Mock
     private IdempotencyExecutor idempotencyExecutor;
 
+    @Mock
+    private EntityManager entityManager;
+
     private StoreOperatorAccountService storeOperatorAccountService;
 
     @BeforeEach
     void setUp() {
         storeOperatorAccountService =
-                new StoreOperatorAccountService(storeOperatorAccountRepository, idempotencyExecutor);
+                new StoreOperatorAccountService(
+                        storeOperatorAccountRepository, idempotencyExecutor, new PhoneNumberPolicy());
+        ReflectionTestUtils.setField(storeOperatorAccountService, "entityManager", entityManager);
     }
 
     @Test
@@ -101,6 +114,44 @@ class StoreOperatorAccountServiceTest {
     void separatesMissingAccountFromSuspendedAccount() {
         assertThat(AuthErrorCode.ACCESS_TOKEN_INVALID.getHttpStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(AuthErrorCode.ACCOUNT_RESTRICTED.getHttpStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("전화번호가 없는 기존 운영자는 최초 연락처를 등록할 수 있다")
+    void registersFirstContact() {
+        // given
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(storeOperatorAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
+
+        // when
+        storeOperatorAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new StoreOperatorContactRegistrationRequest("010-1234-5678"));
+
+        // then
+        assertThat(account.getPhone()).isEqualTo("01012345678");
+        assertThat(businessResult.get().data())
+                .isInstanceOfSatisfying(StoreOperatorAccountResponse.class,
+                        response -> assertThat(response.phoneNumber()).isEqualTo("010-****-5678"));
+    }
+
+    @Test
+    @DisplayName("최초 등록 뒤 운영자 연락처를 바꾸면 ACCOUNT_007을 던진다")
+    void rejectsChangingRegisteredContact() {
+        // given
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        account.registerContact("01012345678");
+        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(storeOperatorAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        runBusinessWorkOnExecute();
+
+        // when & then
+        assertThatThrownBy(() -> storeOperatorAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new StoreOperatorContactRegistrationRequest("010-9999-9999")))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED));
     }
 
     @Test

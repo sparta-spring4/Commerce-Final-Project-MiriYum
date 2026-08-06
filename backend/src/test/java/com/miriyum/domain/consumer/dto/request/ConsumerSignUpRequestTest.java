@@ -36,7 +36,7 @@ class ConsumerSignUpRequestTest {
         String password = "Aa1" + "b".repeat(60) + "😀";
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", password, password,
-                "email-ref", "identity-ref", "닉네임");
+                "010-1234-5678", true, "닉네임");
 
         // when
         Set<ConstraintViolation<ConsumerSignUpRequest>> violations = validator.validate(request);
