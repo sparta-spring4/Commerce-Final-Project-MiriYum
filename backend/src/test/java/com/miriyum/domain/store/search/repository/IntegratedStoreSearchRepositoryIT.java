@@ -276,6 +276,35 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     @Test
+    @Transactional
+    void refreshesCurrentModesAndRemovesStoresThatAreNoLongerPublic() {
+        Store modeChanged = createStore(
+                "모드 변경", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store closed = createStore(
+                "폐점 전환", Region.SEOUL, "KOREAN", Set.of(), false);
+        flushAndClear();
+        List<IntegratedStoreSearchCandidate> candidates = repository.search(query(
+                condition(), "name,asc", null, 20)).content();
+
+        Store currentModeChanged = storeRepository.findById(modeChanged.getId()).orElseThrow();
+        currentModeChanged.update(
+                null, null, null, null, null, null,
+                false, null, null, null);
+        Store currentClosed = storeRepository.findById(closed.getId()).orElseThrow();
+        currentClosed.close();
+        storeRepository.saveAllAndFlush(List.of(currentModeChanged, currentClosed));
+        entityManager.clear();
+
+        List<IntegratedStoreSearchCandidate> refreshed =
+                repository.refreshCurrentlyPublic(candidates);
+
+        assertThat(refreshed).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(modeChanged.getId());
+            assertThat(candidate.reservationEnabled()).isFalse();
+        });
+    }
+
+    @Test
     void publicSearchIndexesRemainAvailableForQuerydslPredicates() {
         assertThat(indexColumns("stores", "idx_stores_public_search"))
                 .containsExactly("verification_status", "name", "store_id");

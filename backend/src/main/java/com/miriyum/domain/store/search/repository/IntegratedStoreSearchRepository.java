@@ -21,7 +21,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Repository;
 
 /** 승인 조건만 QueryDSL predicate와 projection으로 조립하는 2차 통합 검색 조회다. */
@@ -77,6 +79,56 @@ public class IntegratedStoreSearchRepository {
                 ? encodeCursor(query, content.getLast())
                 : null;
         return new IntegratedStoreSearchSlice(content, nextCursor);
+    }
+
+    /** 후보 순서를 유지하며 응답 직전 공개·운영·모드·검증 좌표를 다시 읽는다. */
+    public List<IntegratedStoreSearchCandidate> refreshCurrentlyPublic(
+            List<IntegratedStoreSearchCandidate> candidates
+    ) {
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        QStore store = QStore.store;
+        BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
+                .eq(GeocodingStatus.VERIFIED)
+                .and(store.geocodingAddressVersion.eq(store.addressVersion));
+        List<CurrentIntegratedState> states = queryFactory
+                .select(Projections.constructor(
+                        CurrentIntegratedState.class,
+                        store.id,
+                        store.operationStatus,
+                        store.reservationEnabled,
+                        store.menuHoldEnabled,
+                        store.pickupEnabled,
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.latitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class)),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.longitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class))))
+                .from(store)
+                .where(store.id.in(candidates.stream()
+                                .map(IntegratedStoreSearchCandidate::storeId)
+                                .toList())
+                        .and(store.verificationStatus.eq(
+                                com.miriyum.domain.store.core.enums.VerificationStatus.APPROVED))
+                        .and(store.operationStatus.ne(
+                                com.miriyum.domain.store.core.enums.OperationStatus.CLOSED)))
+                .fetch();
+        Map<Long, CurrentIntegratedState> byId = new LinkedHashMap<>();
+        states.forEach(state -> byId.put(state.storeId(), state));
+        return candidates.stream()
+                .map(candidate -> refresh(candidate, byId.get(candidate.storeId())))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    /** 현재 query 정렬에서 처리한 마지막 후보 뒤를 가리키는 cursor를 만든다. */
+    public String cursorAfter(
+            IntegratedStoreSearchQuery query,
+            IntegratedStoreSearchCandidate candidate
+    ) {
+        return encodeCursor(query, candidate);
     }
 
     private static BooleanExpression cursorPredicate(
@@ -182,6 +234,40 @@ public class IntegratedStoreSearchRepository {
                 .when(menuMatches).then(2)
                 .when(regionOrAddressMatches).then(1)
                 .otherwise(0);
+    }
+
+    private static IntegratedStoreSearchCandidate refresh(
+            IntegratedStoreSearchCandidate candidate,
+            CurrentIntegratedState state
+    ) {
+        if (state == null) {
+            return null;
+        }
+        return new IntegratedStoreSearchCandidate(
+                candidate.storeId(),
+                candidate.name(),
+                candidate.region(),
+                candidate.address(),
+                candidate.storeCategoryCode(),
+                state.operationStatus(),
+                state.reservationEnabled(),
+                state.menuHoldEnabled(),
+                state.pickupEnabled(),
+                candidate.createdAt(),
+                candidate.relevanceTier(),
+                state.latitude(),
+                state.longitude());
+    }
+
+    public record CurrentIntegratedState(
+            long storeId,
+            com.miriyum.domain.store.core.enums.OperationStatus operationStatus,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            BigDecimal latitude,
+            BigDecimal longitude
+    ) {
     }
 
 }

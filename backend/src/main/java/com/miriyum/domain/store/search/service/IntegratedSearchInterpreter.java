@@ -35,7 +35,7 @@ public class IntegratedSearchInterpreter {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
         var vocabulary = vocabularyProvider.current();
-        return ruleInterpreter.interpret(
+        return ruleInterpreter.interpretCompleteReservation(
                 new InterpretationRequest(searchInput, vocabulary, SEOUL_ZONE));
     }
 }

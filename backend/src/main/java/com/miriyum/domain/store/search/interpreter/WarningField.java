@@ -6,5 +6,6 @@ public enum WarningField {
     PRICE,
     PARTY_SIZE,
     DATE,
-    TIME
+    TIME,
+    RESERVATION
 }

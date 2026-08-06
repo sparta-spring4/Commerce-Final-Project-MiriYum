@@ -10,6 +10,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -29,11 +30,12 @@ class IntegratedSearchInterpreterTest {
         IntegratedSearchInterpreter interpreter =
                 new IntegratedSearchInterpreter(vocabularyProvider, clock);
 
-        var result = interpreter.interpret("서울 내일 2명 라멘");
+        var result = interpreter.interpret("서울 내일 오후 6시 2명 라멘");
 
         assertThat(result.condition().regionCodes()).containsExactly("SEOUL");
         assertThat(result.condition().reservationDate()).hasToString("2026-08-08");
         assertThat(result.condition().partySize()).isEqualTo(2);
+        assertThat(result.condition().reservationTime()).isEqualTo(LocalTime.of(18, 0));
         assertThat(result.condition().remainingKeyword()).isEqualTo("라멘");
     }
 
@@ -45,6 +47,23 @@ class IntegratedSearchInterpreterTest {
 
         assertValidationFailure(() -> interpreter.interpret("   "));
         assertValidationFailure(() -> interpreter.interpret("가".repeat(101)));
+    }
+
+    @Test
+    void demotesIncompleteReservationConditionToWarningAndGeneralKeyword() {
+        given(vocabularyProvider.current()).willReturn(vocabulary());
+        IntegratedSearchInterpreter interpreter = new IntegratedSearchInterpreter(
+                vocabularyProvider,
+                Clock.fixed(Instant.parse("2026-08-06T00:00:00Z"), ZoneOffset.UTC));
+
+        var result = interpreter.interpret("서울 내일 2명 라멘");
+
+        assertThat(result.condition().regionCodes()).containsExactly("SEOUL");
+        assertThat(result.condition().reservationDate()).isNull();
+        assertThat(result.condition().reservationTime()).isNull();
+        assertThat(result.condition().partySize()).isNull();
+        assertThat(result.condition().remainingKeyword()).contains("내일", "2명", "라멘");
+        assertThat(result.warnings()).isNotEmpty();
     }
 
     private static void assertValidationFailure(Runnable invocation) {
