@@ -43,7 +43,8 @@ public class StoreTransactionEligibilityService {
         if (!store.isReservationEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
-        return new StoreReservationTransactionEligibility(store.getId());
+        return new StoreReservationTransactionEligibility(
+                store.getId(), store.getName());
     }
 
     /**

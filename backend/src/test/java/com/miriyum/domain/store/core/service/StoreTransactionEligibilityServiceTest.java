@@ -165,7 +165,8 @@ class StoreTransactionEligibilityServiceTest {
                 eligibilityService.requireReservationTransactionEligibility(STORE_ID);
 
         assertThat(result)
-                .isEqualTo(new StoreReservationTransactionEligibility(STORE_ID));
+                .isEqualTo(new StoreReservationTransactionEligibility(
+                        STORE_ID, "미리윰"));
         then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
     }
