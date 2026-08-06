@@ -11,6 +11,7 @@ import com.miriyum.domain.store.search.dto.NormalizedSearchCondition;
 import com.miriyum.domain.store.search.dto.PublicStoreCoordinates;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.interpreter.InterpretationResult;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
@@ -33,15 +34,18 @@ public class IntegratedStoreSearchService {
     private final IntegratedSearchInterpreter interpreter;
     private final IntegratedStoreSearchRepository repository;
     private final ReservationService reservationService;
+    private final StoreSearchCandidateLimit candidateLimit;
 
     public IntegratedStoreSearchService(
             IntegratedSearchInterpreter interpreter,
             IntegratedStoreSearchRepository repository,
-            ReservationService reservationService
+            ReservationService reservationService,
+            StoreSearchCandidateLimit candidateLimit
     ) {
         this.interpreter = interpreter;
         this.repository = repository;
         this.reservationService = reservationService;
+        this.candidateLimit = candidateLimit;
     }
 
     /** 검색 원문을 저장하지 않고 현재 MySQL 상태를 재검증한 cursor 결과를 반환한다. */
@@ -66,7 +70,11 @@ public class IntegratedStoreSearchService {
         String scanCursor = cursor;
         String responseCursor = null;
         boolean finished = false;
-        while (!finished && items.size() < requestedSize) {
+        int scannedCandidates = 0;
+        int scanLimit = candidateLimit.value();
+        while (!finished
+                && items.size() < requestedSize
+                && scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
                     condition, sort, scanCursor, requestedSize);
             var slice = repository.search(query);
@@ -82,6 +90,12 @@ public class IntegratedStoreSearchService {
 
             IntegratedStoreSearchCandidate lastProcessed = null;
             for (IntegratedStoreSearchCandidate originalCandidate : original) {
+                if (scannedCandidates >= scanLimit) {
+                    finished = true;
+                    responseCursor = null;
+                    break;
+                }
+                scannedCandidates++;
                 lastProcessed = originalCandidate;
                 IntegratedStoreSearchCandidate current =
                         currentById.get(originalCandidate.storeId());
@@ -101,8 +115,9 @@ public class IntegratedStoreSearchService {
                 }
                 items.add(toItem(current, candidateAvailability));
                 if (items.size() == requestedSize) {
-                    boolean hasMore = !originalCandidate.equals(original.getLast())
-                            || slice.nextCursor() != null;
+                    boolean hasMore = scannedCandidates < scanLimit
+                            && (!originalCandidate.equals(original.getLast())
+                            || slice.nextCursor() != null);
                     responseCursor = hasMore
                             ? repository.cursorAfter(query, originalCandidate)
                             : null;
@@ -111,6 +126,11 @@ public class IntegratedStoreSearchService {
                 }
             }
             if (finished) {
+                break;
+            }
+            if (scannedCandidates >= scanLimit) {
+                responseCursor = null;
+                finished = true;
                 break;
             }
             scanCursor = slice.nextCursor();

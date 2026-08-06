@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
+import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.interpreter.InterpretationResult;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
@@ -25,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -35,6 +38,12 @@ class IntegratedStoreSearchServiceTest {
     @Mock IntegratedSearchInterpreter interpreter;
     @Mock IntegratedStoreSearchRepository repository;
     @Mock ReservationService reservationService;
+    @Mock StoreSearchCandidateLimit candidateLimit;
+
+    @BeforeEach
+    void useProductionCandidateLimit() {
+        given(candidateLimit.value()).willReturn(5_000);
+    }
 
     @Test
     void returnsNotRequestedAndVerifiedCoordinatesWithoutReservationCondition() {
@@ -107,8 +116,37 @@ class IntegratedStoreSearchServiceTest {
         assertThat(data.nextCursor()).isNull();
     }
 
+    @Test
+    void availableOnlyStopsAtConfiguredCandidateLimit() {
+        given(candidateLimit.value()).willReturn(2);
+        InterpretedSearchCondition condition = condition(
+                LocalDate.of(2026, 8, 8), LocalTime.of(18, 0), 2, "");
+        given(interpreter.interpret("내일 18시 2명")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate first = candidate(1L, "가게1");
+        IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
+        IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
+                condition, null, null, 3);
+        String next = IntegratedSearchCursorCodec.encode(
+                firstQuery, second.relevanceTier(), second.name(), second.storeId());
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(first, second), next));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, UNAVAILABLE),
+                new ReservationAvailabilityResult(2L, UNAVAILABLE)));
+
+        var data = service().search(
+                "내일 18시 2명", false, true, null, null, 3);
+
+        assertThat(data.items()).isEmpty();
+        assertThat(data.nextCursor()).isNull();
+        then(repository).should(times(1)).search(any());
+    }
+
     private IntegratedStoreSearchService service() {
-        return new IntegratedStoreSearchService(interpreter, repository, reservationService);
+        return new IntegratedStoreSearchService(
+                interpreter, repository, reservationService, candidateLimit);
     }
 
     private static InterpretationResult result(InterpretedSearchCondition condition) {
