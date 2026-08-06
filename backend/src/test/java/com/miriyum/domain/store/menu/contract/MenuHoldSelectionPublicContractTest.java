@@ -5,10 +5,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.miriyum.domain.store.menu.dto.MenuHoldSelectableMenu;
+import com.miriyum.domain.store.menu.service.MenuHoldSelectionQueryService;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
 
 class MenuHoldSelectionPublicContractTest {
+
+    private static final List<String> FORBIDDEN_PUBLIC_TYPE_FRAGMENTS = List.of(
+            ".entity.",
+            ".repository.",
+            ".enums.",
+            "ManagedMenuResponse");
 
     @Test
     void exposesOnlyMenuHoldSelectionSnapshotFields() {
@@ -32,5 +44,48 @@ class MenuHoldSelectionPublicContractTest {
         assertThatThrownBy(() -> new MenuHoldSelectableMenu(1L, "Americano", -1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("unitPrice must not be negative");
+    }
+
+    @Test
+    void exposesStoreIdOnlyReadOnlySelectionQuery() throws Exception {
+        Method method = MenuHoldSelectionQueryService.class.getDeclaredMethod(
+                "findSelectableMenus", long.class);
+
+        assertThat(method.getGenericReturnType().getTypeName())
+                .isEqualTo("java.util.List<com.miriyum.domain.store.menu.dto."
+                        + "MenuHoldSelectableMenu>");
+        assertThat(method.getParameterTypes()).containsExactly(long.class);
+        Transactional transactional = method.getAnnotation(Transactional.class);
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.readOnly()).isTrue();
+    }
+
+    @Test
+    void publicApiDoesNotExposeStoreInternals() {
+        List<Class<?>> publicMethodTypes = Arrays.stream(
+                        MenuHoldSelectionQueryService.class.getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .flatMap(method -> Arrays.stream(concat(
+                        method.getReturnType(), method.getParameterTypes())))
+                .toList();
+        List<Class<?>> publicConstructorTypes = Arrays.stream(
+                        MenuHoldSelectionQueryService.class.getConstructors())
+                .flatMap(constructor -> Arrays.stream(constructor.getParameterTypes()))
+                .toList();
+
+        assertThat(publicMethodTypes).allSatisfy(this::assertNotStoreInternalType);
+        assertThat(publicConstructorTypes).allSatisfy(this::assertNotStoreInternalType);
+    }
+
+    private void assertNotStoreInternalType(Class<?> type) {
+        assertThat(FORBIDDEN_PUBLIC_TYPE_FRAGMENTS)
+                .allSatisfy(fragment -> assertThat(type.getName()).doesNotContain(fragment));
+    }
+
+    private static Class<?>[] concat(Class<?> first, Class<?>[] rest) {
+        Class<?>[] result = new Class<?>[rest.length + 1];
+        result[0] = first;
+        System.arraycopy(rest, 0, result, 1, rest.length);
+        return result;
     }
 }

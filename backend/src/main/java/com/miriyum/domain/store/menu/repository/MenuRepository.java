@@ -17,6 +17,31 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
     @Query("select m.storeId from Menu m where m.id = :menuId")
     Optional<Long> findStoreIdById(@Param("menuId") long menuId);
 
+    /**
+     * Store를 루트로 현재 메뉴 홀드 선택 후보를 조회한다.
+     * 매장이 존재하면 후보가 없어도 nullable 후보 projection 한 행을 반환한다.
+     */
+    @Query("""
+            select s.id as storeId,
+                   case when v.id is null then null else m.id end as menuId,
+                   v.name as menuName,
+                   v.price as unitPrice
+            from Store s
+            left join Menu m on m.storeId = s.id
+              and s.reservationEnabled = true
+              and s.menuHoldEnabled = true
+              and m.retired = false
+              and m.visibility = com.miriyum.domain.store.menu.enums.MenuVisibility.VISIBLE
+              and m.sellingStatus = com.miriyum.domain.store.menu.enums.MenuSellingStatus.SELLING
+            left join m.versions v on v.versionNumber = m.publishedVersionNumber
+              and v.status = com.miriyum.domain.store.menu.enums.MenuVersionStatus.PUBLISHED
+              and v.holdSelectionAllowed = true
+            where s.id = :storeId
+            order by m.id
+            """)
+    List<MenuHoldSelectionRow> findMenuHoldSelectionRows(
+            @Param("storeId") long storeId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = {"versions", "versions.secondaryCategoryCodes",
             "versions.localTags", "versions.allergenDisclosures",
