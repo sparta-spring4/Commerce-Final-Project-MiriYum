@@ -517,7 +517,7 @@ components:
       format: password
       minLength: 8
       maxLength: 64
-      description: NFC 정규화 뒤 8~64 Unicode code point이며 문자 종류 정책은 기능 명세를 따른다.
+      description: NFC 정규화 뒤 8~64 Unicode code point이며 대문자·소문자·숫자·특수문자 중 3종 이상을 포함해야 한다. 이모지와 이모지 조합에 사용되는 제어 문자는 허용하지 않는다.
     MvpPhoneNumber:
       type: string
       minLength: 11

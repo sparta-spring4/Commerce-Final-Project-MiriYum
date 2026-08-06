@@ -183,6 +183,24 @@ class StoreOperatorAuthServiceTest {
     }
 
     @Test
+    @DisplayName("잘못된 비밀번호 해시 형식으로 운영자 로그인을 거부한다")
+    void rejectsLoginWithMalformedPasswordHash() {
+        StoreOperatorAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed"))
+                .willThrow(new IllegalArgumentException("No PasswordEncoder mapped for id null"));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+        verify(loginDelayGuard).completeAttempt(
+                eq(TokenNamespace.STORE_OPERATOR), eq(ACCOUNT_ID), any(), eq(false));
+    }
+
+    @Test
     void rejectsBusyLoginWithoutPasswordComparison() {
         StoreOperatorAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("owner@example.com", "password123");
