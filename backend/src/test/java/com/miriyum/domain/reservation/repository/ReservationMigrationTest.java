@@ -18,6 +18,10 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,6 +29,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -197,6 +202,60 @@ class ReservationMigrationTest {
                         "20".equals(String.valueOf(migration.getVersion()))
                                 && "V20__create_reservation_time_policies.sql"
                                 .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("예약 취소 정책 스냅샷 확장은 Flyway V24로 적용된다")
+    void appliesReservationCancellationPolicyAsFlywayV24() {
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "24".equals(String.valueOf(migration.getVersion()))
+                                && "V24__add_reservation_cancellation_contract.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("취소 정책 버전 열은 nullable BIGINT이며 기본값 없이 양수만 허용한다")
+    void definesNullablePositiveCancellationPolicyVersionWithoutDefault() {
+        java.util.Map<String, Object> column = jdbcTemplate.queryForMap("""
+                SELECT data_type, column_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'reservations'
+                  AND column_name = 'cancellation_policy_version'
+                """);
+
+        assertThat(column)
+                .containsEntry("data_type", "bigint")
+                .containsEntry("column_type", "bigint")
+                .containsEntry("is_nullable", "YES");
+        assertThat(column.get("column_default")).isNull();
+
+        java.util.Map<String, Object> constraint = jdbcTemplate.queryForMap("""
+                SELECT tc.constraint_name, tc.constraint_type, cc.check_clause
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.check_constraints cc
+                  ON cc.constraint_schema = tc.constraint_schema
+                 AND cc.constraint_name = tc.constraint_name
+                WHERE tc.table_schema = DATABASE()
+                  AND tc.table_name = 'reservations'
+                  AND tc.constraint_name = 'ck_reservations_cancellation_policy_version'
+                """);
+
+        assertThat(constraint)
+                .containsEntry(
+                        "constraint_name",
+                        "ck_reservations_cancellation_policy_version"
+                )
+                .containsEntry("constraint_type", "CHECK");
+        assertThat(String.valueOf(constraint.get("check_clause"))
+                .replace("`", "")
+                .replaceAll("[()\\s]", "")
+                .toLowerCase(java.util.Locale.ROOT))
+                .isEqualTo(
+                        "cancellation_policy_versionisnull"
+                                + "orcancellation_policy_version>0"
+                );
     }
 
     @Test
@@ -405,6 +464,7 @@ class ReservationMigrationTest {
         assertThat(foundReservation.getTimeSnapshot().getReservationTimePolicyStoreId())
                 .isEqualTo(STORE_ID);
         assertThat(foundReservation.getReservationTimePolicyVersion()).isEqualTo(1L);
+        assertThat(foundReservation.getCancellationPolicyVersion()).isEqualTo(1L);
         assertThat(foundBucket.getPolicyVersion()).isEqualTo(1L);
         assertThat(foundAllocation.getReservationId()).isEqualTo(savedReservation.getId());
         assertThat(foundAllocation.getCapacityBucketId()).isEqualTo(savedBucket.getId());
@@ -678,6 +738,104 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("취소 정책 버전 0과 음수는 DB 제약으로 거부한다")
+    void rejectsNonPositiveCancellationPolicyVersion() {
+        Reservation saved = reservationRepository.saveAndFlush(reservation());
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET cancellation_policy_version = 0
+                        WHERE reservation_id = ?
+                        """,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_cancellation_policy_version");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                        UPDATE reservations
+                        SET cancellation_policy_version = -1
+                        WHERE reservation_id = ?
+                        """,
+                saved.getId()
+        ))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservations_cancellation_policy_version");
+    }
+
+    @Test
+    @DisplayName("기존 예약은 취소 정책 버전 NULL을 보존할 수 있다")
+    void allowsNullCancellationPolicyVersionForLegacyReservation() {
+        insertReservation(CONSUMER_ACCOUNT_ID, STORE_ID, "CONFIRMED", null, null);
+
+        Long cancellationPolicyVersion = jdbcTemplate.queryForObject(
+                """
+                        SELECT cancellation_policy_version
+                        FROM reservations
+                        WHERE consumer_account_id = ? AND store_id = ?
+                        """,
+                Long.class,
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID
+        );
+
+        assertThat(cancellationPolicyVersion).isNull();
+    }
+
+    @Test
+    @DisplayName("V22 예약은 최신 업그레이드 뒤 변경이나 정책 버전 backfill 없이 보존된다")
+    void preservesLegacyReservationWhenUpgradingFromV22ToLatest() throws Exception {
+        try (MySQLContainer legacyMysql =
+                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))) {
+            legacyMysql.start();
+            Flyway.configure()
+                    .dataSource(
+                            legacyMysql.getJdbcUrl(),
+                            legacyMysql.getUsername(),
+                            legacyMysql.getPassword()
+                    )
+                    .target(MigrationVersion.fromVersion("22"))
+                    .load()
+                    .migrate();
+
+            String beforeMigration;
+            try (Connection connection = legacyConnection(legacyMysql)) {
+                insertLegacyParentsAndReservation(connection);
+                beforeMigration = readLegacyReservation(connection);
+            }
+
+            Flyway upgradedFlyway = Flyway.configure()
+                    .dataSource(
+                            legacyMysql.getJdbcUrl(),
+                            legacyMysql.getUsername(),
+                            legacyMysql.getPassword()
+                    )
+                    .load();
+            upgradedFlyway.migrate();
+
+            try (Connection connection = legacyConnection(legacyMysql)) {
+                assertThat(readLegacyReservation(connection)).isEqualTo(beforeMigration);
+                try (Statement statement = connection.createStatement();
+                     ResultSet resultSet = statement.executeQuery("""
+                             SELECT cancellation_policy_version
+                             FROM reservations
+                             WHERE reservation_id = 40001
+                             """)) {
+                    assertThat(resultSet.next()).isTrue();
+                    assertThat(resultSet.getObject("cancellation_policy_version")).isNull();
+                    assertThat(resultSet.next()).isFalse();
+                }
+            }
+            assertThat(upgradedFlyway.info().applied())
+                    .anyMatch(migration ->
+                            "24".equals(String.valueOf(migration.getVersion()))
+                                    && "V24__add_reservation_cancellation_contract.sql"
+                                    .equals(migration.getScript()));
+        }
+    }
+
+    @Test
     @DisplayName("예약 당시 알림 대상 참조와 연락 가능 상태가 유효해야 한다")
     void rejectsInvalidContactSnapshot() {
         // when & then
@@ -854,6 +1012,187 @@ class ReservationMigrationTest {
                                 5L
                         )
                 );
+    }
+
+    private Connection legacyConnection(MySQLContainer legacyMysql) throws Exception {
+        return DriverManager.getConnection(
+                legacyMysql.getJdbcUrl(),
+                legacyMysql.getUsername(),
+                legacyMysql.getPassword()
+        );
+    }
+
+    private void insertLegacyParentsAndReservation(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO consumer_accounts (
+                        consumer_account_id,
+                        email,
+                        password_hash,
+                        name,
+                        status,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        10001,
+                        'legacy-reservation@example.com',
+                        'hashed',
+                        '기존 예약자',
+                        'ACTIVE',
+                        '2026-08-01 00:00:00.000000',
+                        '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO store_operator_accounts (
+                        store_operator_account_id,
+                        email,
+                        password_hash,
+                        display_name,
+                        status,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        20001,
+                        'legacy-reservation-owner@example.com',
+                        'hashed',
+                        '기존 운영자',
+                        'ACTIVE',
+                        '2026-08-01 00:00:00.000000',
+                        '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO stores (
+                        store_id,
+                        store_operator_account_id,
+                        business_registration_number,
+                        business_type,
+                        name,
+                        description,
+                        region,
+                        address,
+                        time_zone_id,
+                        applicant_self_attested_at,
+                        required_terms_agreed_at,
+                        required_terms_version,
+                        store_category_code,
+                        verification_status,
+                        operation_status,
+                        pickup_eligibility,
+                        reservation_enabled,
+                        menu_hold_enabled,
+                        pickup_enabled,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        30001,
+                        20001,
+                        '1234567890',
+                        'CAFE',
+                        '기존 매장',
+                        '',
+                        'SEOUL',
+                        '서울시 중구',
+                        'Asia/Seoul',
+                        '2026-08-01 00:00:00.000000',
+                        '2026-08-01 00:00:00.000000',
+                        'STORE_ONBOARDING_REQUIRED_TERMS_V1',
+                        'CAFE_BAKERY',
+                        'APPROVED',
+                        'OPEN',
+                        'ELIGIBLE',
+                        TRUE,
+                        TRUE,
+                        TRUE,
+                        '2026-08-01 00:00:00.000000',
+                        '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO reservations (
+                        reservation_id,
+                        consumer_account_id,
+                        store_id,
+                        store_name_snapshot,
+                        service_date,
+                        start_time,
+                        end_time,
+                        adult_count,
+                        child_count,
+                        infant_count,
+                        notification_target_reference,
+                        contact_available_at_confirmation,
+                        capacity_policy_version,
+                        reservation_policy_version,
+                        status,
+                        created_at
+                    ) VALUES (
+                        40001,
+                        10001,
+                        30001,
+                        '기존 매장',
+                        '2026-08-01',
+                        '18:00:00.000000',
+                        '19:00:00.000000',
+                        2,
+                        1,
+                        1,
+                        'consumer:10001:channel:primary',
+                        TRUE,
+                        7,
+                        9,
+                        'CONFIRMED',
+                        '2026-08-01 01:00:00.000000'
+                    )
+                    """);
+        }
+    }
+
+    private String readLegacyReservation(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("""
+                     SELECT JSON_OBJECT(
+                         'reservation_id', reservation_id,
+                         'consumer_account_id', consumer_account_id,
+                         'store_id', store_id,
+                         'store_name_snapshot', store_name_snapshot,
+                         'service_date', service_date,
+                         'start_at', start_at,
+                         'service_end_at', service_end_at,
+                         'occupancy_end_at', occupancy_end_at,
+                         'time_zone_id_snapshot', time_zone_id_snapshot,
+                         'start_offset_seconds', start_offset_seconds,
+                         'service_end_offset_seconds', service_end_offset_seconds,
+                         'occupancy_end_offset_seconds', occupancy_end_offset_seconds,
+                         'slot_interval_minutes', slot_interval_minutes,
+                         'service_duration_minutes', service_duration_minutes,
+                         'turnover_duration_minutes', turnover_duration_minutes,
+                         'reservation_time_policy_store_id',
+                             reservation_time_policy_store_id,
+                         'start_time', start_time,
+                         'end_time', end_time,
+                         'adult_count', adult_count,
+                         'child_count', child_count,
+                         'infant_count', infant_count,
+                         'notification_target_reference', notification_target_reference,
+                         'contact_available_at_confirmation',
+                             contact_available_at_confirmation,
+                         'capacity_policy_version', capacity_policy_version,
+                         'reservation_policy_version', reservation_policy_version,
+                         'status', status,
+                         'created_at', created_at,
+                         'cancelled_at', cancelled_at,
+                         'fulfilled_at', fulfilled_at
+                     ) AS reservation_snapshot
+                     FROM reservations
+                     WHERE reservation_id = 40001
+                     """)) {
+            assertThat(resultSet.next()).isTrue();
+            String snapshot = resultSet.getString("reservation_snapshot");
+            assertThat(resultSet.next()).isFalse();
+            return snapshot;
+        }
     }
 
     private Reservation reservation() {
