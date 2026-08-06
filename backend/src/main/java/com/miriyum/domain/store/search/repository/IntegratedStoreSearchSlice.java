@@ -4,7 +4,7 @@ import java.util.List;
 
 /** QueryDSL seek 조회 한 페이지와 다음 opaque cursor다. */
 public record IntegratedStoreSearchSlice(
-        List<StoreSearchCandidate> content,
+        List<IntegratedStoreSearchCandidate> content,
         String nextCursor
 ) {
     public IntegratedStoreSearchSlice {

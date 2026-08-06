@@ -6,6 +6,7 @@ import java.util.Arrays;
 
 /** QueryDSL 검색에서 허용하는 안정 정렬 목록이다. */
 public enum IntegratedStoreSearchSort {
+    RELEVANCE_DESC("relevance,desc"),
     NAME_ASC("name,asc"),
     NAME_DESC("name,desc"),
     CREATED_AT_ASC("createdAt,asc"),
@@ -22,7 +23,7 @@ public enum IntegratedStoreSearchSort {
     }
 
     static IntegratedStoreSearchSort parse(String value) {
-        String resolved = value == null ? NAME_ASC.externalValue : value;
+        String resolved = value == null ? RELEVANCE_DESC.externalValue : value;
         return Arrays.stream(values())
                 .filter(candidate -> candidate.externalValue.equals(resolved))
                 .findFirst()

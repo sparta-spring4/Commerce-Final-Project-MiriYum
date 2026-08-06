@@ -65,13 +65,16 @@ final class IntegratedStoreSearchPredicates {
                     pattern, LIKE_ESCAPE);
             BooleanExpression regionNameMatches = localizedRegionName(store).likeIgnoreCase(
                     pattern, LIKE_ESCAPE);
+            BooleanExpression addressMatches = store.address.likeIgnoreCase(
+                    pattern, LIKE_ESCAPE);
             predicate.and(storeNameMatches
                     .or(regionNameMatches)
+                    .or(addressMatches)
                     .or(currentPublishedVisibleMenuExists(store, query, true)));
         }
     }
 
-    private static BooleanExpression currentPublishedVisibleMenuExists(
+    static BooleanExpression currentPublishedVisibleMenuExists(
             QStore store,
             IntegratedStoreSearchQuery query,
             boolean requireKeyword
@@ -125,14 +128,14 @@ final class IntegratedStoreSearchPredicates {
         }
     }
 
-    private static String literalContainsPattern(String value) {
+    static String literalContainsPattern(String value) {
         return "%" + value
                 .replace("!", "!!")
                 .replace("%", "!%")
                 .replace("_", "!_") + "%";
     }
 
-    private static StringExpression localizedRegionName(QStore store) {
+    static StringExpression localizedRegionName(QStore store) {
         return new CaseBuilder()
                 .when(store.region.eq(Region.SEOUL)).then("서울")
                 .when(store.region.eq(Region.BUSAN)).then("부산")

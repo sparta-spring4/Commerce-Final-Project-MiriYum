@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: MiriYum MVP1 Store and Search API
-  version: 1.1.0
-  description: 공개 매장 탐색과 매장 운영자 기본 관리 계약
+  title: MiriYum Store and Search API
+  version: 1.2.0
+  description: 1차 페이지 검색, 2차 통합 검색과 매장 운영자 기본 관리 계약
   license:
     name: All rights reserved
     identifier: LicenseRef-All-Rights-Reserved
@@ -24,6 +24,17 @@ paths:
       summary: 매장 목록 검색
       operationId: searchStores
       parameters:
+        - name: searchInput
+          in: query
+          required: false
+          description: >-
+            2차 MVP 통합 검색 원문. 있으면 cursor 응답 모드를 사용하며 keyword, region,
+            storeCategoryCode, serviceDate, startTime, partySize, page와 혼용할 수 없다.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: '.*\S.*'
         - name: keyword
           in: query
           required: false
@@ -78,6 +89,14 @@ paths:
             default: false
         - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
         - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: cursor
+          in: query
+          required: false
+          description: 통합 검색에서 서버가 발급하고 HMAC 인증한 조건·정렬·크기 결합 불투명 cursor. 변조되었거나 서버 비밀키 회전 전에 발급된 값은 COMMON_001로 거부한다.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
         - name: sort
           in: query
           description: 매장 목록 정렬. 아래 허용값 외에는 400을 반환한다.
@@ -88,7 +107,7 @@ paths:
               - "name,desc"
               - "createdAt,desc"
               - "createdAt,asc"
-            default: "name,asc"
+              - "relevance,desc"
       responses:
         "200":
           description: >-
@@ -97,7 +116,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StorePageSuccessResponse"
+                $ref: "#/components/schemas/StoreSearchSuccessResponse"
         "400":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "429":
@@ -1017,6 +1036,161 @@ components:
           $ref: "#/components/schemas/StoreModes"
         reservationAvailability:
           $ref: "#/components/schemas/ReservationAvailability"
+    PublicStoreCoordinates:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+    InterpretationWarning:
+      type: object
+      additionalProperties: false
+      required: [code, field]
+      properties:
+        code:
+          type: string
+          enum:
+            - AMBIGUOUS_DICTIONARY_TERM
+            - AMBIGUOUS_PRICE
+            - CONFLICTING_PRICE
+            - INVALID_PARTY_SIZE
+            - CONFLICTING_PARTY_SIZE
+            - AMBIGUOUS_DATE
+            - CONFLICTING_DATE
+            - AMBIGUOUS_TIME
+            - CONFLICTING_TIME
+            - INCOMPLETE_RESERVATION_CONDITION
+            - OUT_OF_RANGE_NUMBER
+        field:
+          type: string
+          enum: [DICTIONARY, PRICE, PARTY_SIZE, DATE, TIME, RESERVATION]
+    NormalizedSearchCondition:
+      type: object
+      additionalProperties: false
+      required:
+        - regionCodes
+        - storeCategoryCodes
+        - menuCategoryCodes
+        - tagCodes
+        - minimumPrice
+        - maximumPrice
+        - partySize
+        - reservationDate
+        - reservationTime
+        - remainingKeyword
+      properties:
+        regionCodes:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Region" }
+        storeCategoryCodes:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/CatalogCode" }
+        menuCategoryCodes:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/CatalogCode" }
+        tagCodes:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/CatalogCode" }
+        minimumPrice:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        maximumPrice:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        partySize:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 100
+        reservationDate:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+            - type: "null"
+        reservationTime:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+            - type: "null"
+        remainingKeyword:
+          type: string
+          maxLength: 100
+    IntegratedStoreSearchItem:
+      type: object
+      additionalProperties: false
+      required:
+        - storeId
+        - name
+        - region
+        - address
+        - storeCategoryCode
+        - operationStatus
+        - modes
+        - reservationAvailability
+        - coordinates
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          $ref: "#/components/schemas/Region"
+        address:
+          type: string
+          minLength: 1
+          maxLength: 300
+        storeCategoryCode:
+          $ref: "#/components/schemas/CatalogCode"
+        operationStatus:
+          $ref: "#/components/schemas/OperationStatus"
+        modes:
+          $ref: "#/components/schemas/StoreModes"
+        reservationAvailability:
+          $ref: "#/components/schemas/ReservationAvailability"
+        coordinates:
+          oneOf:
+            - $ref: "#/components/schemas/PublicStoreCoordinates"
+            - type: "null"
+    IntegratedStoreSearchData:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - normalizedCondition
+        - warnings
+        - ruleVersion
+        - vocabularyVersion
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/IntegratedStoreSearchItem" }
+        normalizedCondition:
+          $ref: "#/components/schemas/NormalizedSearchCondition"
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/InterpretationWarning" }
+        ruleVersion:
+          type: string
+          minLength: 1
+        vocabularyVersion:
+          type: string
+          minLength: 1
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
     StoreDetail:
       type: object
       additionalProperties: false
@@ -1829,6 +2003,21 @@ components:
             $ref: "#/components/schemas/StoreSummary"
         page:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
+    StoreSearchSuccessResponse:
+      oneOf:
+        - $ref: "#/components/schemas/StorePageSuccessResponse"
+        - $ref: "#/components/schemas/IntegratedStoreSearchSuccessResponse"
+    IntegratedStoreSearchSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/IntegratedStoreSearchData"
     MenuListData:
       type: object
       additionalProperties: false

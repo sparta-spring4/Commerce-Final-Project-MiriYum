@@ -1,8 +1,13 @@
 package com.miriyum.domain.store.search.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
@@ -17,9 +22,13 @@ import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.store.search.interpreter.InterpretationResult;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
+import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
+import com.miriyum.domain.store.search.service.IntegratedSearchInterpreter;
+import com.miriyum.domain.store.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
 import jakarta.persistence.EntityManager;
@@ -37,7 +46,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -88,6 +101,21 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private IntegratedStoreSearchService integratedStoreSearchService;
+
+    @Autowired
+    private IntegratedSearchCursorCodec cursorCodec;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @MockitoBean
+    private IntegratedSearchInterpreter integratedSearchInterpreter;
+
+    @MockitoBean
+    private ReservationService reservationService;
 
     private Long operatorId;
 
@@ -246,6 +274,95 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     @Test
+    @Transactional
+    void ordersKeywordMatchesByFixedRelevanceAndReturnsOnlyCurrentVerifiedCoordinates() {
+        Store exact = createStore("라떼", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store storeName = createStore(
+                "라떼 전문점", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store menuName = storeWithMenu(
+                "메뉴 매장", "라떼", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store address = createStore(
+                "주소 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        setAddress(address, "라떼 거리");
+        setVerifiedCoordinates(exact, "37.566500000000000", "126.978000000000000");
+        flushAndClear();
+
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, "라떼"),
+                "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .extracting(IntegratedStoreSearchCandidate::name)
+                .containsExactly("라떼", "라떼 전문점", "메뉴 매장", "주소 매장");
+        assertThat(result.content().getFirst().latitude())
+                .isEqualByComparingTo("37.566500000000000");
+        assertThat(result.content().getFirst().longitude())
+                .isEqualByComparingTo("126.978000000000000");
+        assertThat(result.content().get(1).latitude()).isNull();
+        assertThat(result.content().get(1).longitude()).isNull();
+    }
+
+    @Test
+    @Transactional
+    void refreshesCurrentModesAndRemovesStoresThatAreNoLongerPublic() {
+        Store modeChanged = createStore(
+                "모드 변경", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store closed = createStore(
+                "폐점 전환", Region.SEOUL, "KOREAN", Set.of(), false);
+        flushAndClear();
+        List<IntegratedStoreSearchCandidate> candidates = repository.search(query(
+                condition(), "name,asc", null, 20)).content();
+
+        Store currentModeChanged = storeRepository.findById(modeChanged.getId()).orElseThrow();
+        currentModeChanged.update(
+                null, null, null, null, null, null,
+                false, null, null, null);
+        Store currentClosed = storeRepository.findById(closed.getId()).orElseThrow();
+        currentClosed.close();
+        storeRepository.saveAllAndFlush(List.of(currentModeChanged, currentClosed));
+        entityManager.clear();
+
+        List<IntegratedStoreSearchCandidate> refreshed =
+                repository.refreshCurrentlyPublic(candidates);
+
+        assertThat(refreshed).singleElement().satisfies(candidate -> {
+            assertThat(candidate.storeId()).isEqualTo(modeChanged.getId());
+            assertThat(candidate.reservationEnabled()).isFalse();
+        });
+    }
+
+    @Test
+    void finalRefreshSeesAStoreClosedByASeparatelyCommittedTransaction() {
+        Store target = createStore(
+                "동시종료-검색대상", Region.SEOUL, "KOREAN", Set.of(), false);
+        InterpretedSearchCondition interpreted = new InterpretedSearchCondition(
+                List.of(), List.of(), List.of(), List.of(), null,
+                2, java.time.LocalDate.of(2026, 8, 8),
+                java.time.LocalTime.of(18, 0), "동시종료-검색대상");
+        given(integratedSearchInterpreter.interpret("동시 종료 예약"))
+                .willReturn(new InterpretationResult(
+                        "rule-v1", "catalog-v1", interpreted, List.of()));
+        given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation -> {
+            TransactionTemplate separate = new TransactionTemplate(transactionManager);
+            separate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            separate.executeWithoutResult(status -> jdbcTemplate.update(
+                    "UPDATE stores SET operation_status = 'CLOSED' WHERE store_id = ?",
+                    target.getId()));
+            List<Long> requested = invocation.getArgument(0);
+            return requested.stream()
+                    .map(storeId -> new ReservationAvailabilityResult(
+                            storeId, ReservationAvailabilityStatus.AVAILABLE))
+                    .toList();
+        });
+
+        var result = integratedStoreSearchService.search(
+                "동시 종료 예약", false, false, null, null, 20);
+
+        assertThat(result.items()).isEmpty();
+    }
+
+    @Test
     void publicSearchIndexesRemainAvailableForQuerydslPredicates() {
         assertThat(indexColumns("stores", "idx_stores_public_search"))
                 .containsExactly("verification_status", "name", "store_id");
@@ -355,7 +472,8 @@ class IntegratedStoreSearchRepositoryIT {
             String cursor,
             Integer size
     ) {
-        return IntegratedStoreSearchQuery.from(condition, sort, cursor, size);
+        return IntegratedStoreSearchQuery.from(
+                condition, sort, cursor, size, cursorCodec);
     }
 
     private InterpretedSearchCondition condition() {
@@ -376,7 +494,31 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     private List<Long> ids(IntegratedStoreSearchSlice slice) {
-        return slice.content().stream().map(StoreSearchCandidate::storeId).toList();
+        return slice.content().stream()
+                .map(IntegratedStoreSearchCandidate::storeId)
+                .toList();
+    }
+
+    private void setAddress(Store store, String address) {
+        jdbcTemplate.update(
+                "UPDATE stores SET address = ? WHERE store_id = ?", address, store.getId());
+    }
+
+    private void setVerifiedCoordinates(
+            Store store,
+            String latitude,
+            String longitude
+    ) {
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET geocoding_status = 'VERIFIED',
+                    latitude = ?,
+                    longitude = ?,
+                    verified_address = address,
+                    geocoding_verified_at = '2026-08-06 00:00:00',
+                    geocoding_address_version = address_version
+                WHERE store_id = ?
+                """, latitude, longitude, store.getId());
     }
 
     private void setCreatedAt(Store store, String createdAt) {
