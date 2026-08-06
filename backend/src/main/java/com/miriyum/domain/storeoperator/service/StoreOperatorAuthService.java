@@ -96,7 +96,7 @@ public class StoreOperatorAuthService {
 
         boolean completed = false;
         try {
-            boolean passwordMatches = passwordEncoder.matches(
+            boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
                     TokenNamespace.STORE_OPERATOR, account.getId(), attempt, passwordMatches);
@@ -151,5 +151,13 @@ public class StoreOperatorAuthService {
         return new TokenPair(
                 jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId),
                 jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId));
+    }
+
+    private boolean matchesPassword(String rawPassword, String encodedPassword) {
+        try {
+            return passwordEncoder.matches(rawPassword, encodedPassword);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }
