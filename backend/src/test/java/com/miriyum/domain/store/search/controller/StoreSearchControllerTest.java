@@ -14,13 +14,19 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.store.search.config.StoreSearchSecurityConfig;
 import com.miriyum.domain.store.search.dto.PublicMenu;
+import com.miriyum.domain.store.search.dto.IntegratedStoreSearchData;
+import com.miriyum.domain.store.search.dto.IntegratedStoreSearchItem;
+import com.miriyum.domain.store.search.dto.NormalizedSearchCondition;
+import com.miriyum.domain.store.search.dto.PublicStoreCoordinates;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;
 import com.miriyum.domain.store.search.dto.PublicStoreSummary;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.service.StorePublicQueryService;
+import com.miriyum.domain.store.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.store.search.service.StoreSearchCoreService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.util.List;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +43,7 @@ class StoreSearchControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean StoreSearchCoreService searchService;
+    @MockitoBean IntegratedStoreSearchService integratedSearchService;
     @MockitoBean StorePublicQueryService publicQueryService;
     @MockitoBean RateLimiter rateLimiter;
 
@@ -66,6 +73,58 @@ class StoreSearchControllerTest {
                         .value("AVAILABLE"))
                 .andExpect(jsonPath("$.data.page.number").value(0))
                 .andExpect(jsonPath("$.data.page.totalElements").value(1));
+    }
+
+    @Test
+    void integratedSearchReturnsInterpretationCursorAndVerifiedCoordinates() throws Exception {
+        given(integratedSearchService.search(
+                "서울 라멘", false, false, null, null, 20))
+                .willReturn(new IntegratedStoreSearchData(
+                        List.of(new IntegratedStoreSearchItem(
+                                "7", "라멘집", Region.SEOUL, "서울 중구", "KOREAN",
+                                OperationStatus.OPEN,
+                                new PublicStoreModes(true, true, false),
+                                ReservationAvailability.NOT_REQUESTED,
+                                new PublicStoreCoordinates(
+                                        new BigDecimal("37.5665"),
+                                        new BigDecimal("126.9780")))),
+                        new NormalizedSearchCondition(
+                                List.of("SEOUL"), List.of(), List.of(), List.of(),
+                                null, null, null, null, null, "라멘"),
+                        List.of(), "rule-v1", "catalog-v1", "next-cursor"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "서울 라멘")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].storeId").value("7"))
+                .andExpect(jsonPath("$.data.items[0].coordinates.latitude")
+                        .value(37.5665))
+                .andExpect(jsonPath("$.data.normalizedCondition.regionCodes[0]")
+                        .value("SEOUL"))
+                .andExpect(jsonPath("$.data.ruleVersion").value("rule-v1"))
+                .andExpect(jsonPath("$.data.nextCursor").value("next-cursor"));
+        then(searchService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void integratedSearchRejectsLegacyParametersAndInvalidRawInput() throws Exception {
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "서울 라멘")
+                        .queryParam("keyword", "라멘"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "가".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        then(integratedSearchService).shouldHaveNoInteractions();
     }
 
     @Test

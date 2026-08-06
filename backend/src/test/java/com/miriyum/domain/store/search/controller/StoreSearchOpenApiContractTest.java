@@ -35,7 +35,7 @@ class StoreSearchOpenApiContractTest {
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
-                        "availableOnly", "sort");
+                        "availableOnly", "sort", "searchInput", "cursor");
         Map<String, Object> searchOperation = map(map(paths.get("/api/v1/stores")).get("get"));
         List<Map<String, Object>> searchParameters =
                 listOfMaps(searchOperation.get("parameters"));
@@ -44,6 +44,13 @@ class StoreSearchOpenApiContractTest {
                 .findFirst().orElseThrow();
         assertThat(map(keyword.get("schema")))
                 .containsEntry("minLength", 1)
+                .containsEntry("pattern", ".*\\S.*");
+        Map<String, Object> searchInput = searchParameters
+                .stream().filter(parameter -> "searchInput".equals(parameter.get("name")))
+                .findFirst().orElseThrow();
+        assertThat(map(searchInput.get("schema")))
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", 100)
                 .containsEntry("pattern", ".*\\S.*");
         Map<String, Object> availableOnly = searchParameters.stream()
                 .filter(parameter -> "availableOnly".equals(parameter.get("name")))
@@ -66,6 +73,14 @@ class StoreSearchOpenApiContractTest {
                 .contains("menuId", "name", "description", "price", "representative",
                         "primaryCategoryCode", "secondaryCategoryCodes", "localTags",
                         "holdEnabled", "pickupEnabled", "saleStatus");
+        assertThat(list(map(schemas.get("IntegratedStoreSearchData")).get("required")))
+                .containsExactlyInAnyOrder(
+                        "items", "normalizedCondition", "warnings", "ruleVersion",
+                        "vocabularyVersion", "nextCursor");
+        assertThat(list(map(schemas.get("IntegratedStoreSearchItem")).get("required")))
+                .contains("coordinates", "reservationAvailability");
+        assertThat(list(map(schemas.get("InterpretationWarning")).get("required")))
+                .containsExactlyInAnyOrder("code", "field");
     }
 
     private static List<String> parameterNames(Map<String, Object> operation) {
