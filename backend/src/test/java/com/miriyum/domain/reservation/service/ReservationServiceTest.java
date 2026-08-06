@@ -30,6 +30,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStat
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
@@ -1583,6 +1584,7 @@ class ReservationServiceTest {
                 PartyComposition.of(2, 1, 0),
                 ReservationContactSnapshot.contactable("consumer:11:channel:primary"),
                 3L,
+                new ReservationCancellationPolicyVersion(1L),
                 Instant.parse("2026-08-01T09:00:00Z")
         );
         ReflectionTestUtils.setField(reservation, "id", reservationId);
