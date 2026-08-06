@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
+import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
@@ -93,6 +95,28 @@ class StoreTransactionEligibilityServiceIT {
         assertThatThrownBy(() ->
                 eligibilityService.requirePickupTransactionEligibility(storeId))
                 .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void pickupGateReturnsSnapshotFromTheLockedStoreRow() {
+        long storeId = createStore();
+
+        StorePickupTransactionEligibility result = transactionTemplate.execute(ignored ->
+                eligibilityService.requirePickupTransactionEligibility(storeId));
+
+        assertThat(result).isEqualTo(new StorePickupTransactionEligibility(
+                storeId, "거래 자격 매장", "Asia/Seoul"));
+    }
+
+    @Test
+    void reservationGateReturnsSnapshotFromTheLockedStoreRow() {
+        long storeId = createStore();
+
+        StoreReservationTransactionEligibility result = transactionTemplate.execute(ignored ->
+                eligibilityService.requireReservationTransactionEligibility(storeId));
+
+        assertThat(result).isEqualTo(new StoreReservationTransactionEligibility(
+                storeId, "거래 자격 매장"));
     }
 
     @Test
