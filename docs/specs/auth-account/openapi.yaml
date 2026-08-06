@@ -365,7 +365,38 @@ paths:
         "403":
           $ref: "#/components/responses/AccountRestricted"
         "409":
-          $ref: "#/components/responses/ContactChangeConflict"
+          $ref: "#/components/responses/ContactRegistrationConflict"
+  /api/v1/store-operator-accounts/me/contact:
+    put:
+      tags: [Account]
+      summary: 매장 운영자 최초 연락처 등록
+      description: 기존 연락처가 없는 매장 운영자 계정이 1차 MVP 신뢰 연락처를 최초 등록한다. 매장 운영자 연락처는 예약 알림용 opaque reference를 생성하지 않는다.
+      operationId: registerCurrentStoreOperatorContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorContactRegistrationRequest"
+      responses:
+        "200":
+          description: 등록된 매장 운영자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreOperatorAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ContactRegistrationConflict"
   /api/v1/store-operator-accounts/me:
     get:
       tags: [Account]
@@ -492,8 +523,17 @@ components:
       minLength: 11
       maxLength: 11
       pattern: '^010[0-9]{8}$'
-      description: 공백·하이픈을 제거한 010 시작 11자리 숫자. 1차 MVP 신뢰 연락처이며 실제 소유 인증을 의미하지 않는다.
+      description: 공백·하이픈을 제거한 정규화된 010 시작 11자리 숫자. 1차 MVP 신뢰 연락처이며 실제 소유 인증을 의미하지 않는다.
       example: '01012345678'
+    MvpPhoneNumberInput:
+      anyOf:
+        - $ref: "#/components/schemas/MvpPhoneNumber"
+        - type: string
+          pattern: '^ *0 *1 *0(?:[ -]*[0-9]){8} *$'
+      description: 입력 원문. Auth가 공백과 하이픈을 제거한 뒤 MvpPhoneNumber 형식으로 정규화하고 검증한다.
+      examples:
+        - '010-1234-5678'
+        - '010 1234 5678'
     MaskedPhoneNumber:
       type: [string, "null"]
       pattern: '^010-\*{4}-[0-9]{4}$'
@@ -529,7 +569,7 @@ components:
         passwordConfirm:
           $ref: "#/components/schemas/Password"
         phoneNumber:
-          $ref: "#/components/schemas/MvpPhoneNumber"
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
         ageConfirmed:
           type: boolean
           const: true
@@ -556,7 +596,7 @@ components:
         passwordConfirm:
           $ref: "#/components/schemas/Password"
         phoneNumber:
-          $ref: "#/components/schemas/MvpPhoneNumber"
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
         displayName:
           type: string
           minLength: 2
@@ -577,8 +617,16 @@ components:
       required: [phoneNumber]
       properties:
         phoneNumber:
-          $ref: "#/components/schemas/MvpPhoneNumber"
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
       description: 최초 등록 후 다른 번호로 변경할 수 없는 1차 MVP 신뢰 연락처 등록 요청
+    StoreOperatorContactRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+      description: 최초 등록 후 다른 번호로 변경할 수 없는 매장 운영자의 1차 MVP 신뢰 연락처 등록 요청
     StoreOperatorAccountUpdateRequest:
       type: object
       additionalProperties: false
@@ -864,15 +912,23 @@ components:
           example:
             code: ACCOUNT_001
             message: 이미 사용 중인 이메일입니다.
-    ContactChangeConflict:
-      description: 1차 MVP에서 최초 등록한 연락처를 다른 번호로 변경하려는 요청
+    ContactRegistrationConflict:
+      description: 연락처 최초 등록 중복 또는 이미 등록한 연락처를 다른 번호로 변경하려는 요청
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: ACCOUNT_007
-            message: 최초 등록한 연락처는 변경할 수 없습니다.
+          examples:
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 번호
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
+            ContactAlreadyRegistered:
+              summary: 최초 등록 후 다른 번호로 변경하려는 요청
+              value:
+                code: ACCOUNT_007
+                message: 최초 등록한 연락처는 변경할 수 없습니다.
     NicknameChangeConflict:
       description: 닉네임 변경 가능 시각 전 재변경
       content:
