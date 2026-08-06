@@ -35,6 +35,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class IntegratedStoreSearchServiceTest {
 
+    private static final IntegratedSearchCursorCodec CURSOR_CODEC =
+            new IntegratedSearchCursorCodec(
+                    "test-only-secret-key-must-be-at-least-32-bytes");
+
     @Mock IntegratedSearchInterpreter interpreter;
     @Mock IntegratedStoreSearchRepository repository;
     @Mock ReservationService reservationService;
@@ -86,6 +90,25 @@ class IntegratedStoreSearchServiceTest {
     }
 
     @Test
+    void excludesMismatchedReservationBatchEvenWhenUnavailableStoresAreRequested() {
+        InterpretedSearchCondition condition = condition(
+                LocalDate.of(2026, 8, 8), LocalTime.of(18, 0), 2, "");
+        given(interpreter.interpret("내일 18시 2명")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate candidate = candidate(1L, "예약집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
+        given(reservationService.getAvailabilities(any(), any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(999L, AVAILABLE)));
+
+        var data = service().search(
+                "내일 18시 2명", false, false, null, null, 20);
+
+        assertThat(data.items()).isEmpty();
+    }
+
+    @Test
     void availableOnlyContinuesStaticCursorUntilRequestedSizeIsFilled() {
         InterpretedSearchCondition condition = condition(
                 LocalDate.of(2026, 8, 8), LocalTime.of(18, 0), 2, "");
@@ -94,8 +117,8 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
         IntegratedStoreSearchCandidate third = candidate(3L, "가게3");
         IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
-                condition, null, null, 2);
-        String next = IntegratedSearchCursorCodec.encode(
+                condition, null, null, 2, CURSOR_CODEC);
+        String next = CURSOR_CODEC.encode(
                 firstQuery, second.relevanceTier(), second.name(), second.storeId());
         given(repository.search(any()))
                 .willReturn(new IntegratedStoreSearchSlice(List.of(first, second), next))
@@ -125,8 +148,8 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate first = candidate(1L, "가게1");
         IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
         IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
-                condition, null, null, 3);
-        String next = IntegratedSearchCursorCodec.encode(
+                condition, null, null, 3, CURSOR_CODEC);
+        String next = CURSOR_CODEC.encode(
                 firstQuery, second.relevanceTier(), second.name(), second.storeId());
         given(repository.search(any())).willReturn(
                 new IntegratedStoreSearchSlice(List.of(first, second), next));
@@ -146,7 +169,7 @@ class IntegratedStoreSearchServiceTest {
 
     private IntegratedStoreSearchService service() {
         return new IntegratedStoreSearchService(
-                interpreter, repository, reservationService, candidateLimit);
+                interpreter, repository, reservationService, candidateLimit, CURSOR_CODEC);
     }
 
     private static InterpretationResult result(InterpretedSearchCondition condition) {

@@ -31,9 +31,14 @@ import org.springframework.stereotype.Repository;
 public class IntegratedStoreSearchRepository {
 
     private final JPAQueryFactory queryFactory;
+    private final IntegratedSearchCursorCodec cursorCodec;
 
-    public IntegratedStoreSearchRepository(EntityManager entityManager) {
+    public IntegratedStoreSearchRepository(
+            EntityManager entityManager,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
         this.queryFactory = new JPAQueryFactory(entityManager);
+        this.cursorCodec = cursorCodec;
     }
 
     public IntegratedStoreSearchSlice search(IntegratedStoreSearchQuery query) {
@@ -198,7 +203,7 @@ public class IntegratedStoreSearchRepository {
         return order.toArray(OrderSpecifier[]::new);
     }
 
-    private static String encodeCursor(
+    private String encodeCursor(
             IntegratedStoreSearchQuery query,
             IntegratedStoreSearchCandidate candidate
     ) {
@@ -206,7 +211,7 @@ public class IntegratedStoreSearchRepository {
             case RELEVANCE_DESC, NAME_ASC, NAME_DESC -> candidate.name();
             case CREATED_AT_ASC, CREATED_AT_DESC -> candidate.createdAt().toString();
         };
-        return IntegratedSearchCursorCodec.encode(
+        return cursorCodec.encode(
                 query, candidate.relevanceTier(), sortValue, candidate.storeId());
     }
 

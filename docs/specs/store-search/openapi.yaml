@@ -92,7 +92,7 @@ paths:
         - name: cursor
           in: query
           required: false
-          description: 통합 검색에서 서버가 발급한 조건·정렬·크기 결합 불투명 cursor.
+          description: 통합 검색에서 서버가 발급하고 HMAC 인증한 조건·정렬·크기 결합 불투명 cursor. 변조되었거나 서버 비밀키 회전 전에 발급된 값은 COMMON_001로 거부한다.
           schema:
             type: string
             minLength: 1

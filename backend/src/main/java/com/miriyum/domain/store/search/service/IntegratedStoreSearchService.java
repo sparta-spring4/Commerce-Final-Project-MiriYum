@@ -15,6 +15,7 @@ import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.interpreter.InterpretationResult;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
+import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.store.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.store.search.repository.IntegratedStoreSearchRepository;
@@ -25,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 결정적 해석, QueryDSL 후보와 최신 Store·Reservation 상태를 조합한다. */
@@ -35,21 +37,24 @@ public class IntegratedStoreSearchService {
     private final IntegratedStoreSearchRepository repository;
     private final ReservationService reservationService;
     private final StoreSearchCandidateLimit candidateLimit;
+    private final IntegratedSearchCursorCodec cursorCodec;
 
     public IntegratedStoreSearchService(
             IntegratedSearchInterpreter interpreter,
             IntegratedStoreSearchRepository repository,
             ReservationService reservationService,
-            StoreSearchCandidateLimit candidateLimit
+            StoreSearchCandidateLimit candidateLimit,
+            IntegratedSearchCursorCodec cursorCodec
     ) {
         this.interpreter = interpreter;
         this.repository = repository;
         this.reservationService = reservationService;
         this.candidateLimit = candidateLimit;
+        this.cursorCodec = cursorCodec;
     }
 
     /** 검색 원문을 저장하지 않고 현재 MySQL 상태를 재검증한 cursor 결과를 반환한다. */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public IntegratedStoreSearchData search(
             String searchInput,
             boolean includesInfants,
@@ -76,15 +81,16 @@ public class IntegratedStoreSearchService {
                 && items.size() < requestedSize
                 && scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
-                    condition, sort, scanCursor, requestedSize);
+                    condition, sort, scanCursor, requestedSize, cursorCodec);
             var slice = repository.search(query);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
-            Map<Long, ReservationAvailability> availability = availabilityById(
+            AvailabilityBatch availability = availabilityById(
                     before, condition, includesInfants);
-            List<IntegratedStoreSearchCandidate> after =
-                    repository.refreshCurrentlyPublic(before);
+            List<IntegratedStoreSearchCandidate> after = availability.valid()
+                    ? repository.refreshCurrentlyPublic(before)
+                    : List.of();
             Map<Long, IntegratedStoreSearchCandidate> currentById = new LinkedHashMap<>();
             after.forEach(candidate -> currentById.put(candidate.storeId(), candidate));
 
@@ -102,11 +108,12 @@ public class IntegratedStoreSearchService {
                 if (current == null) {
                     continue;
                 }
-                ReservationAvailability candidateAvailability = availability.getOrDefault(
-                        current.storeId(),
-                        completeReservation
-                                ? ReservationAvailability.UNAVAILABLE
-                                : ReservationAvailability.NOT_REQUESTED);
+                ReservationAvailability candidateAvailability =
+                        availability.values().getOrDefault(
+                                current.storeId(),
+                                completeReservation
+                                        ? ReservationAvailability.UNAVAILABLE
+                                        : ReservationAvailability.NOT_REQUESTED);
                 candidateAvailability = reconcileCurrentState(
                         current, candidateAvailability, completeReservation);
                 if (availableOnly
@@ -151,7 +158,7 @@ public class IntegratedStoreSearchService {
                 responseCursor);
     }
 
-    private Map<Long, ReservationAvailability> availabilityById(
+    private AvailabilityBatch availabilityById(
             List<IntegratedStoreSearchCandidate> candidates,
             InterpretedSearchCondition condition,
             boolean includesInfants
@@ -160,13 +167,13 @@ public class IntegratedStoreSearchService {
         if (!hasCompleteReservation(condition)) {
             candidates.forEach(candidate -> byId.put(
                     candidate.storeId(), ReservationAvailability.NOT_REQUESTED));
-            return byId;
+            return new AvailabilityBatch(true, byId);
         }
         List<Long> storeIds = candidates.stream()
                 .map(IntegratedStoreSearchCandidate::storeId)
                 .toList();
         if (storeIds.isEmpty()) {
-            return byId;
+            return new AvailabilityBatch(true, byId);
         }
         List<ReservationAvailabilityResult> results = reservationService.getAvailabilities(
                 storeIds,
@@ -177,16 +184,14 @@ public class IntegratedStoreSearchService {
                         condition.partySize(),
                         includesInfants));
         if (!matches(storeIds, results)) {
-            storeIds.forEach(storeId -> byId.put(
-                    storeId, ReservationAvailability.UNAVAILABLE));
-            return byId;
+            return new AvailabilityBatch(false, Map.of());
         }
         results.forEach(result -> byId.put(
                 result.storeId(),
                 result.availability() == ReservationAvailabilityStatus.AVAILABLE
                         ? ReservationAvailability.AVAILABLE
                         : ReservationAvailability.UNAVAILABLE));
-        return byId;
+        return new AvailabilityBatch(true, byId);
     }
 
     private static boolean matches(
@@ -264,5 +269,11 @@ public class IntegratedStoreSearchService {
                 condition.reservationDate(),
                 condition.reservationTime(),
                 condition.remainingKeyword());
+    }
+
+    private record AvailabilityBatch(
+            boolean valid,
+            Map<Long, ReservationAvailability> values
+    ) {
     }
 }

@@ -36,7 +36,8 @@ public final class IntegratedStoreSearchQuery {
             InterpretedSearchCondition condition,
             IntegratedStoreSearchSort sort,
             String rawCursor,
-            int size
+            int size,
+            IntegratedSearchCursorCodec cursorCodec
     ) {
         this.regionCodes = canonicalCodes(condition.regionCodes());
         this.storeCategoryCodes = canonicalCodes(condition.storeCategoryCodes());
@@ -63,7 +64,7 @@ public final class IntegratedStoreSearchQuery {
                 size);
         IntegratedSearchCursor decodedCursor = rawCursor == null
                 ? null
-                : IntegratedSearchCursorCodec.decode(rawCursor, fingerprint, sort);
+                : cursorCodec.decode(rawCursor, fingerprint, sort);
         validateCursorSortValue(sort, decodedCursor);
         this.cursor = decodedCursor;
     }
@@ -72,9 +73,11 @@ public final class IntegratedStoreSearchQuery {
             InterpretedSearchCondition condition,
             String sort,
             String cursor,
-            Integer size
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
     ) {
         Objects.requireNonNull(condition, "condition must not be null");
+        Objects.requireNonNull(cursorCodec, "cursorCodec must not be null");
         int resolvedSize = size == null ? DEFAULT_SIZE : size;
         if (resolvedSize < 1 || resolvedSize > MAX_SIZE) {
             throw validationFailed();
@@ -83,7 +86,8 @@ public final class IntegratedStoreSearchQuery {
                 condition,
                 IntegratedStoreSearchSort.parse(sort),
                 cursor,
-                resolvedSize);
+                resolvedSize,
+                cursorCodec);
     }
 
     private static List<String> canonicalCodes(List<String> values) {

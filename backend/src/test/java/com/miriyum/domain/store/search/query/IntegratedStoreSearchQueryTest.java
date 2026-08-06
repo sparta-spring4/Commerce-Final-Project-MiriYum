@@ -14,6 +14,10 @@ import org.junit.jupiter.api.Test;
 
 class IntegratedStoreSearchQueryTest {
 
+    private static final IntegratedSearchCursorCodec CURSOR_CODEC =
+            new IntegratedSearchCursorCodec(
+                    "test-only-secret-key-must-be-at-least-32-bytes");
+
     @Test
     void defaultsToTwentyAndRejectsSizesOutsideOneToFifty() {
         IntegratedStoreSearchQuery defaultQuery = query(condition(), null, null, null);
@@ -70,7 +74,7 @@ class IntegratedStoreSearchQueryTest {
     @Test
     void cursorIsAcceptedOnlyForTheSameVersionFingerprintAndSort() {
         IntegratedStoreSearchQuery firstPage = query(condition(), "name,asc", null, 20);
-        String cursor = IntegratedSearchCursorCodec.encode(
+        String cursor = CURSOR_CODEC.encode(
                 firstPage, "가게.이름|한글", 42L);
 
         IntegratedStoreSearchQuery nextPage = query(condition(), "name,asc", cursor, 20);
@@ -91,7 +95,7 @@ class IntegratedStoreSearchQueryTest {
     void createdAtCursorRejectsAValueThatIsNotAnIsoLocalDateTime() {
         IntegratedStoreSearchQuery firstPage = query(
                 condition(), "createdAt,desc", null, 20);
-        String cursor = IntegratedSearchCursorCodec.encode(firstPage, "not-a-date", 42L);
+        String cursor = CURSOR_CODEC.encode(firstPage, "not-a-date", 42L);
 
         assertValidationFailed(() -> query(
                 condition(), "createdAt,desc", cursor, 20));
@@ -101,7 +105,7 @@ class IntegratedStoreSearchQueryTest {
     void relevanceCursorPreservesTierNameAndStoreId() {
         IntegratedStoreSearchQuery firstPage = query(
                 condition("라떼"), "relevance,desc", null, 20);
-        String cursor = IntegratedSearchCursorCodec.encode(
+        String cursor = CURSOR_CODEC.encode(
                 firstPage, 3, "라떼 전문점", 42L);
 
         IntegratedStoreSearchQuery nextPage = query(
@@ -112,6 +116,22 @@ class IntegratedStoreSearchQueryTest {
             assertThat(decoded.sortValue()).isEqualTo("라떼 전문점");
             assertThat(decoded.storeId()).isEqualTo(42L);
         });
+    }
+
+    @Test
+    void rejectsCursorWhenAnySeekFieldIsTampered() {
+        IntegratedStoreSearchQuery firstPage = query(
+                condition("라떼"), "relevance,desc", null, 20);
+        String cursor = CURSOR_CODEC.encode(
+                firstPage, 3, "라떼 전문점", 42L);
+
+        assertValidationFailed(() -> query(
+                condition("라떼"), "relevance,desc", tamper(cursor, 3, "2"), 20));
+        assertValidationFailed(() -> query(
+                condition("라떼"), "relevance,desc",
+                tamper(cursor, 4, "64uk64yAIOuMgOusuOygkA"), 20));
+        assertValidationFailed(() -> query(
+                condition("라떼"), "relevance,desc", tamper(cursor, 5, "43"), 20));
     }
 
     @Test
@@ -129,7 +149,8 @@ class IntegratedStoreSearchQueryTest {
             String cursor,
             Integer size
     ) {
-        return IntegratedStoreSearchQuery.from(condition, sort, cursor, size);
+        return IntegratedStoreSearchQuery.from(
+                condition, sort, cursor, size, CURSOR_CODEC);
     }
 
     private static InterpretedSearchCondition condition() {
@@ -166,5 +187,11 @@ class IntegratedStoreSearchQueryTest {
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.VALIDATION_FAILED));
+    }
+
+    private static String tamper(String cursor, int index, String replacement) {
+        String[] parts = cursor.split("\\.", -1);
+        parts[index] = replacement;
+        return String.join(".", parts);
     }
 }

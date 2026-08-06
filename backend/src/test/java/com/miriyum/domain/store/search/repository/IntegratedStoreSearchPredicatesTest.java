@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.store.core.entity.QStore;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
+import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.jpa.HQLTemplates;
@@ -15,6 +16,10 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 class IntegratedStoreSearchPredicatesTest {
+
+    private static final IntegratedSearchCursorCodec CURSOR_CODEC =
+            new IntegratedSearchCursorCodec(
+                    "test-only-secret-key-must-be-at-least-32-bytes");
 
     @Test
     void assemblesOnlyApprovedPublicStoreAndMenuPredicates() {
@@ -29,7 +34,7 @@ class IntegratedStoreSearchPredicatesTest {
                 null,
                 "100%_특선!");
         IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
-                condition, null, null, 20);
+                condition, null, null, 20, CURSOR_CODEC);
 
         RenderedPredicate rendered = render(
                 IntegratedStoreSearchPredicates.create(QStore.store, query));
@@ -61,7 +66,7 @@ class IntegratedStoreSearchPredicatesTest {
                 List.of("SEOUL"), List.of(), List.of(), List.of(), null,
                 null, null, null, "");
         IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
-                condition, null, null, 20);
+                condition, null, null, 20, CURSOR_CODEC);
 
         RenderedPredicate rendered = render(
                 IntegratedStoreSearchPredicates.create(QStore.store, query));

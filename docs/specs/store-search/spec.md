@@ -86,7 +86,7 @@
 
 - 통합 검색은 `searchInput`, `includesInfants`, `availableOnly`, `sort`, `cursor`, `size`만 허용한다. 1차 MVP의 `keyword`, `region`, `storeCategoryCode`, `serviceDate`, `startTime`, `partySize`, `page`와 혼용하면 `COMMON_001`로 거부한다.
 - `includesInfants=true`와 `availableOnly=true`는 해석 결과에 날짜·시각·인원이 모두 있을 때만 허용한다. 일부 예약 조건은 추측으로 채우지 않고 warning과 남은 일반 키워드로 축소한다.
-- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. cursor는 서버가 발급한 불투명 문자열이며 입력 조건·정렬·크기가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다.
+- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 입력 조건·정렬·크기가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
 - 통합 검색 응답은 기존 페이지 응답과 구분되는 `IntegratedStoreSearchData`를 사용한다. `items`, `normalizedCondition`, `warnings`, `ruleVersion`, `vocabularyVersion`, `nextCursor`를 반환하고 정확한 전체 건수나 페이지 번호를 추측하지 않는다.
 
 ### 결정적 해석과 승인 사전
@@ -102,7 +102,7 @@
 2. 관련도는 남은 키워드의 `매장명 정확 일치 → 매장명 포함 → 게시 메뉴명 포함 → 지역·주소 포함 → 구조화 조건만 일치`의 고정 tier로 계산하고, 같은 tier는 매장명 오름차순과 매장 ID 오름차순으로 정렬한다. 임의 실수 가중치나 개인 이력은 사용하지 않는다.
 3. 후보를 최대 200개씩 Store 공개 상태와 `ReservationService.getAvailabilities`로 일괄 재검증한다. 응답 직전에 Store 공개·운영·예약 모드를 다시 읽고 불일치, 누락 또는 순서 오류는 해당 후보를 실패 폐쇄한다.
 4. `availableOnly=true`는 같은 정적 관련도 순서를 계속 스캔하며 `AVAILABLE` 후보만 응답 크기까지 채운다. 예약 시각은 모든 후보에 동일한 요청 조건이므로 정렬 숫자로 만들지 않는다. 다음 가능 시간 탐색은 Reservation의 별도 공개 계약 없이는 제공하지 않는다.
-5. cursor는 마지막으로 스캔한 정적 후보의 관련도 tier·매장명·매장 ID와 검색 fingerprint를 담는다. 최신 가용성 변경은 표시·제외 여부만 바꾸고 seek 순서를 바꾸지 않는다.
+5. cursor는 마지막으로 스캔한 정적 후보의 관련도 tier·매장명·매장 ID와 검색 fingerprint를 담고 전체 payload를 HMAC-SHA-256으로 인증한다. 최신 가용성 변경은 표시·제외 여부만 바꾸고 seek 순서를 바꾸지 않는다.
 6. 공개 좌표는 현재 주소 버전의 `VERIFIED` latitude·longitude만 반환한다. `UNVERIFIED` 또는 주소 버전 불일치 좌표는 `null`이며 검색 요청 중 Kakao Local API를 호출하지 않는다.
 
 `reservationAvailability`는 조회 시점의 발견 보조 정보이며 수량 확보나 예약 성공을 보장하지 않는다. 실제 예약 생성은 Reservation 도메인의 쓰기 트랜잭션에서 현재 영업·접수 시간·수용량을 다시 검증한다.

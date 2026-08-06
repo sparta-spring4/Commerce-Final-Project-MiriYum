@@ -3,18 +3,35 @@ package com.miriyum.domain.store.search.query;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /** 검색 fingerprint와 정렬을 결합한 versioned opaque cursor codec이다. */
+@Component
 public final class IntegratedSearchCursorCodec {
 
     private static final String VERSION = "v1";
     private static final int MAX_CURSOR_LENGTH = 1_024;
+    private static final String HMAC_ALGORITHM = "HmacSHA256";
+    private static final String SIGNING_CONTEXT = "miriyum-store-search-cursor\0";
+    private final byte[] signingKey;
 
-    private IntegratedSearchCursorCodec() {
+    public IntegratedSearchCursorCodec(
+            @Value("${miriyum.jwt.secret}") String secret
+    ) {
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalArgumentException("cursor signing secret must be at least 32 bytes");
+        }
+        this.signingKey = secret.getBytes(StandardCharsets.UTF_8).clone();
     }
 
-    public static String encode(
+    public String encode(
             IntegratedStoreSearchQuery query,
             String sortValue,
             long storeId
@@ -22,7 +39,7 @@ public final class IntegratedSearchCursorCodec {
         return encode(query, 0, sortValue, storeId);
     }
 
-    public static String encode(
+    public String encode(
             IntegratedStoreSearchQuery query,
             int relevanceTier,
             String sortValue,
@@ -33,7 +50,7 @@ public final class IntegratedSearchCursorCodec {
         }
         String encodedSortValue = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 sortValue.getBytes(StandardCharsets.UTF_8));
-        return String.join(
+        String payload = String.join(
                 ".",
                 VERSION,
                 query.fingerprint(),
@@ -41,9 +58,10 @@ public final class IntegratedSearchCursorCodec {
                 Integer.toString(relevanceTier),
                 encodedSortValue,
                 Long.toString(storeId));
+        return payload + "." + sign(payload);
     }
 
-    static IntegratedSearchCursor decode(
+    IntegratedSearchCursor decode(
             String rawCursor,
             String expectedFingerprint,
             IntegratedStoreSearchSort expectedSort
@@ -55,10 +73,16 @@ public final class IntegratedSearchCursorCodec {
                 throw validationFailed();
             }
             String[] parts = rawCursor.split("\\.", -1);
-            if (parts.length != 6
+            if (parts.length != 7
                     || !VERSION.equals(parts[0])
                     || !expectedFingerprint.equals(parts[1])
                     || !expectedSort.name().equals(parts[2])) {
+                throw validationFailed();
+            }
+            String payload = String.join(".", Arrays.copyOf(parts, 6));
+            byte[] expectedSignature = Base64.getUrlDecoder().decode(sign(payload));
+            byte[] actualSignature = Base64.getUrlDecoder().decode(parts[6]);
+            if (!MessageDigest.isEqual(expectedSignature, actualSignature)) {
                 throw validationFailed();
             }
             int relevanceTier = Integer.parseInt(parts[3]);
@@ -76,5 +100,17 @@ public final class IntegratedSearchCursorCodec {
 
     private static ServiceException validationFailed() {
         return new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    private String sign(String payload) {
+        try {
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(signingKey, HMAC_ALGORITHM));
+            byte[] signature = mac.doFinal(
+                    (SIGNING_CONTEXT + payload).getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("HMAC-SHA256 is unavailable", exception);
+        }
     }
 }

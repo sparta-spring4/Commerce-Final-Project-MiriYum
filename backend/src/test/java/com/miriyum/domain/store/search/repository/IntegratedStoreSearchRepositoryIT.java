@@ -1,8 +1,13 @@
 package com.miriyum.domain.store.search.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.Region;
@@ -17,9 +22,13 @@ import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.model.OriginDisclosure;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.store.search.interpreter.InterpretationResult;
 import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
+import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
+import com.miriyum.domain.store.search.service.IntegratedSearchInterpreter;
+import com.miriyum.domain.store.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
 import jakarta.persistence.EntityManager;
@@ -37,7 +46,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -88,6 +101,21 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private IntegratedStoreSearchService integratedStoreSearchService;
+
+    @Autowired
+    private IntegratedSearchCursorCodec cursorCodec;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @MockitoBean
+    private IntegratedSearchInterpreter integratedSearchInterpreter;
+
+    @MockitoBean
+    private ReservationService reservationService;
 
     private Long operatorId;
 
@@ -305,6 +333,36 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     @Test
+    void finalRefreshSeesAStoreClosedByASeparatelyCommittedTransaction() {
+        Store target = createStore(
+                "동시종료-검색대상", Region.SEOUL, "KOREAN", Set.of(), false);
+        InterpretedSearchCondition interpreted = new InterpretedSearchCondition(
+                List.of(), List.of(), List.of(), List.of(), null,
+                2, java.time.LocalDate.of(2026, 8, 8),
+                java.time.LocalTime.of(18, 0), "동시종료-검색대상");
+        given(integratedSearchInterpreter.interpret("동시 종료 예약"))
+                .willReturn(new InterpretationResult(
+                        "rule-v1", "catalog-v1", interpreted, List.of()));
+        given(reservationService.getAvailabilities(any(), any())).willAnswer(invocation -> {
+            TransactionTemplate separate = new TransactionTemplate(transactionManager);
+            separate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            separate.executeWithoutResult(status -> jdbcTemplate.update(
+                    "UPDATE stores SET operation_status = 'CLOSED' WHERE store_id = ?",
+                    target.getId()));
+            List<Long> requested = invocation.getArgument(0);
+            return requested.stream()
+                    .map(storeId -> new ReservationAvailabilityResult(
+                            storeId, ReservationAvailabilityStatus.AVAILABLE))
+                    .toList();
+        });
+
+        var result = integratedStoreSearchService.search(
+                "동시 종료 예약", false, false, null, null, 20);
+
+        assertThat(result.items()).isEmpty();
+    }
+
+    @Test
     void publicSearchIndexesRemainAvailableForQuerydslPredicates() {
         assertThat(indexColumns("stores", "idx_stores_public_search"))
                 .containsExactly("verification_status", "name", "store_id");
@@ -414,7 +472,8 @@ class IntegratedStoreSearchRepositoryIT {
             String cursor,
             Integer size
     ) {
-        return IntegratedStoreSearchQuery.from(condition, sort, cursor, size);
+        return IntegratedStoreSearchQuery.from(
+                condition, sort, cursor, size, cursorCodec);
     }
 
     private InterpretedSearchCondition condition() {
