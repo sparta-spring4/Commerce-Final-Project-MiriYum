@@ -22,6 +22,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("io.github.openfeign.querydsl:querydsl-jpa:7.5")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     runtimeOnly("org.flywaydb:flyway-mysql")
@@ -36,6 +37,9 @@ dependencies {
     compileOnly("org.projectlombok:lombok")
     annotationProcessor(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     annotationProcessor("org.projectlombok:lombok")
+    annotationProcessor("io.github.openfeign.querydsl:querydsl-apt:7.5:jakarta")
+    annotationProcessor("jakarta.persistence:jakarta.persistence-api")
+    annotationProcessor("jakarta.annotation:jakarta.annotation-api")
 
     testImplementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
