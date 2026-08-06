@@ -53,7 +53,10 @@ import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class StoreServiceTest {
@@ -86,7 +89,9 @@ class StoreServiceTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        objectMapper = JsonMapper.builder()
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .build();
         storeService = new StoreService(
                 operatorAccountService,
                 storeRepository,
@@ -502,6 +507,52 @@ class StoreServiceTest {
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(catalogPolicy).shouldHaveNoInteractions();
         then(storeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void replayedCreateAcceptsLegacyPickupEligibilityPayload() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ObjectNode legacyPayload = objectMapper.valueToTree(ManagedStoreResponse.from(store));
+        legacyPayload.put("pickupEligibility", "ELIGIBLE");
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        true,
+                        201,
+                        "SUCCESS",
+                        "STORE",
+                        Long.toString(STORE_ID),
+                        legacyPayload));
+
+        StoreCommandResult result = storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest());
+
+        assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
+        then(storeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void replayedCreateStillRejectsUnrelatedUnknownPayloadField() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ObjectNode invalidPayload = objectMapper.valueToTree(ManagedStoreResponse.from(store));
+        invalidPayload.put("unexpectedField", true);
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        true,
+                        201,
+                        "SUCCESS",
+                        "STORE",
+                        Long.toString(STORE_ID),
+                        invalidPayload));
+
+        assertThatThrownBy(() -> storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest()))
+                .isInstanceOf(tools.jackson.databind.exc.UnrecognizedPropertyException.class);
     }
 
     @Test

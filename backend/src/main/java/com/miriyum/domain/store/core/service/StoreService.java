@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 @RequiredArgsConstructor
@@ -320,8 +321,10 @@ public class StoreService {
     }
 
     private StoreCommandResult commandResult(IdempotentOutcome outcome) {
+        ObjectNode replayPayload = (ObjectNode) outcome.data().deepCopy();
+        replayPayload.remove("pickupEligibility");
         ManagedStoreResponse response =
-                objectMapper.treeToValue(outcome.data(), ManagedStoreResponse.class);
+                objectMapper.treeToValue(replayPayload, ManagedStoreResponse.class);
         return new StoreCommandResult(outcome.httpStatus(), response);
     }
 }

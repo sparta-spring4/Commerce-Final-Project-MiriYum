@@ -374,7 +374,7 @@ OPEN ◀────────────▶ TEMPORARILY_CLOSED
 
 ### 픽업 기능과 독립성
 
-- 등록 신청의 필수 `businessType`이 `CAFE` 또는 `BAKERY`이면 `ELIGIBLE`, `OTHER`이면 `INELIGIBLE`이다.
+- 등록 업종과 무관하게 모든 매장은 픽업 기능을 활성화할 수 있다.
 - 등록 업종과 검색 카테고리·태그는 픽업 기능을 만들거나 제한하지 않는다. 1차 MVP는 등록 뒤 `businessType` 변경 API를 제공하지 않는다.
 - 입점 확정과 픽업 기능은 독립적이므로 `APPROVED + pickupEnabled=false` 매장도 일반 매장·예약 기능을 사용할 수 있다.
 - 픽업 예약 신규 생성은 등록 업종과 무관하게 `APPROVED + OPEN + pickupEnabled`를 모두 만족하고 영업·픽업 제공 구간과 메뉴 수량 검증까지 통과해야 한다.
