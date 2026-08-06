@@ -44,8 +44,6 @@ paths:
           $ref: "#/components/responses/AccountConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumer-auth/sessions:
     post:
       tags: [Consumer Auth]
@@ -178,8 +176,6 @@ paths:
           $ref: "#/components/responses/AccountConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operator-auth/sessions:
     post:
       tags: [Store Operator Auth]
