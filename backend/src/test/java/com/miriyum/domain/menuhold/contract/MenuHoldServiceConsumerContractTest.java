@@ -235,6 +235,7 @@ class MenuHoldServiceConsumerContractTest {
         consumer.cancel(10L);
 
         assertThat(consumer.events).containsExactly(
+                "idempotency-claimed",
                 "reservation-locked",
                 "menu-hold-prelocked",
                 "capacity-restored",
@@ -253,6 +254,7 @@ class MenuHoldServiceConsumerContractTest {
         consumer.cancel(10L);
 
         assertThat(consumer.events).containsExactly(
+                "idempotency-claimed",
                 "reservation-locked",
                 "menu-hold-prelocked",
                 "capacity-restored");
@@ -386,6 +388,7 @@ class MenuHoldServiceConsumerContractTest {
         }
 
         private void cancel(long reservationId) {
+            events.add("idempotency-claimed");
             events.add("reservation-locked");
             MenuHoldTerminationPresence presence =
                     menuHoldService.lockForTermination(reservationId);
