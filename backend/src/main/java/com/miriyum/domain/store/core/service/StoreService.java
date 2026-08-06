@@ -6,7 +6,6 @@ import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -183,7 +182,7 @@ public class StoreService {
         operatorAccountService.getMe(operatorAccountId);
         Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
         requireScheduleState(store);
-        return new StoreMenuAuthority(store.getId(), store.getPickupEligibility());
+        return new StoreMenuAuthority(store.getId());
     }
 
     /**
@@ -214,7 +213,6 @@ public class StoreService {
                 && store.isMenuHoldEnabled()
                 && published.isHoldSelectionAllowed();
         boolean pickupEligible = store.isPickupEnabled()
-                && store.getPickupEligibility() == PickupEligibility.ELIGIBLE
                 && published.isPickupSelectionAllowed();
         return new MenuTransactionEligibility(
                 storeId,

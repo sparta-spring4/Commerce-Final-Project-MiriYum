@@ -137,16 +137,6 @@ class StoreTransactionEligibilityServiceTest {
     }
 
     @Test
-    void pickupEligibilityRejectsStoreWithoutCentralPickupEligibility() {
-        Store store = ineligiblePickupStore();
-        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
-
-        assertStoreError(
-                () -> eligibilityService.requirePickupTransactionEligibility(STORE_ID),
-                StoreErrorCode.PICKUP_NOT_ELIGIBLE);
-    }
-
-    @Test
     void pickupEligibilityRejectsDisabledPickupMode() {
         Store store = eligibleStore(true, false);
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
@@ -195,10 +185,6 @@ class StoreTransactionEligibilityServiceTest {
 
     private Store eligibleStore(boolean reservationEnabled, boolean pickupEnabled) {
         return store(BusinessType.CAFE, reservationEnabled, pickupEnabled);
-    }
-
-    private Store ineligiblePickupStore() {
-        return store(BusinessType.OTHER, true, false);
     }
 
     private Store store(

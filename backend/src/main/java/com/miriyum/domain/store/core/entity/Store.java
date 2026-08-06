@@ -2,7 +2,6 @@ package com.miriyum.domain.store.core.entity;
 
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -88,10 +87,6 @@ public class Store extends BaseEntity {
     @Column(name = "operation_status", nullable = false, length = 30)
     private OperationStatus operationStatus;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "pickup_eligibility", nullable = false, length = 20)
-    private PickupEligibility pickupEligibility;
-
     @Column(name = "reservation_enabled", nullable = false)
     private boolean reservationEnabled;
 
@@ -162,8 +157,6 @@ public class Store extends BaseEntity {
             LocalDateTime onboardingAcceptedAt,
             String requiredTermsVersion
     ) {
-        PickupEligibility eligibility = pickupEligibilityFor(businessType);
-        requirePickupAllowed(eligibility, pickupEnabled);
         requireOnboardingEvidence(onboardingAcceptedAt, requiredTermsVersion);
         String canonicalTimeZoneId = requireTimeZone(timeZoneId);
 
@@ -185,7 +178,6 @@ public class Store extends BaseEntity {
                 requiredTermsVersion);
         store.verificationStatus = VerificationStatus.APPROVED;
         store.operationStatus = OperationStatus.OPEN;
-        store.pickupEligibility = eligibility;
         return store;
     }
 
@@ -203,7 +195,6 @@ public class Store extends BaseEntity {
     ) {
         requireGeneralUpdateStatus(operationStatus);
         boolean nextPickupEnabled = pickupEnabled == null ? this.pickupEnabled : pickupEnabled;
-        requirePickupAllowed(pickupEligibility, nextPickupEnabled);
 
         this.name = name == null ? this.name : name;
         this.description = description == null ? this.description : description;
@@ -227,18 +218,6 @@ public class Store extends BaseEntity {
     public void requireManagedBy(long operatorAccountId) {
         if (!storeOperatorAccountId.equals(operatorAccountId)) {
             throw new ServiceException(StoreErrorCode.ACCESS_DENIED);
-        }
-    }
-
-    private static PickupEligibility pickupEligibilityFor(BusinessType businessType) {
-        return businessType == BusinessType.OTHER
-                ? PickupEligibility.INELIGIBLE
-                : PickupEligibility.ELIGIBLE;
-    }
-
-    private static void requirePickupAllowed(PickupEligibility eligibility, boolean pickupEnabled) {
-        if (eligibility == PickupEligibility.INELIGIBLE && pickupEnabled) {
-            throw new ServiceException(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
         }
     }
 

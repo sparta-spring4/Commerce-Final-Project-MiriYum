@@ -77,7 +77,7 @@ paths:
         "404":
           $ref: "#/components/responses/StoreNotFound"
         "409":
-          $ref: "#/components/responses/PickupEligibilityConflict"
+          $ref: "#/components/responses/PickupStateConflict"
   /api/v1/pickup-reservations:
     post:
       tags: [Pickup]
@@ -836,8 +836,8 @@ components:
           example:
             code: STORE_009
             message: 메뉴를 찾을 수 없습니다.
-    PickupEligibilityConflict:
-      description: 중앙 픽업 자격이 없음
+    PickupStateConflict:
+      description: 매장의 픽업 기능이 비활성화되었거나 거래 상태가 유효하지 않음
       content:
         application/json:
           schema:
@@ -846,7 +846,7 @@ components:
             code: PICKUP_002
             message: 이 매장은 픽업 예약을 제공할 수 없습니다.
     PickupConflict:
-      description: 픽업 자격·제공 구간·메뉴 수량 충돌
+      description: 픽업 기능·제공 구간·메뉴 수량 충돌
       content:
         application/json:
           schema:

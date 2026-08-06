@@ -14,7 +14,6 @@ import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -220,7 +219,7 @@ class StoreServiceTest {
     }
 
     @Test
-    void menuMutationAuthorityReturnsLockedStorePickupEligibility() {
+    void menuMutationAuthorityReturnsLockedStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
         given(storeRepository.findByIdForUpdate(STORE_ID))
@@ -229,10 +228,7 @@ class StoreServiceTest {
         StoreMenuAuthority authority =
                 storeService.requireMenuMutationAuthority(OPERATOR_ID, STORE_ID);
 
-        assertThat(authority)
-                .isEqualTo(new StoreMenuAuthority(
-                        STORE_ID,
-                        com.miriyum.domain.store.core.enums.PickupEligibility.ELIGIBLE));
+        assertThat(authority).isEqualTo(new StoreMenuAuthority(STORE_ID));
     }
 
     @Test
@@ -437,20 +433,6 @@ class StoreServiceTest {
                 storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result.menuHoldEligible()).isFalse();
-    }
-
-    @Test
-    void transactionEligibilityCombinesStorePickupEligibility() {
-        Store store = transactionStore();
-        ReflectionTestUtils.setField(
-                store, "pickupEligibility", PickupEligibility.INELIGIBLE);
-        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
-
-        MenuTransactionEligibility result =
-                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
-
-        assertThat(result.menuHoldEligible()).isTrue();
-        assertThat(result.pickupEligible()).isFalse();
     }
 
     @Test

@@ -5,16 +5,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import java.time.LocalDateTime;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import java.util.Set;
+import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class ManagedStoreResponseTest {
+
+    @Test
+    void managedResponseDoesNotExposePickupEligibility() {
+        assertThat(Arrays.stream(ManagedStoreResponse.class.getRecordComponents())
+                .map(component -> component.getName()))
+                .doesNotContain("pickupEligibility");
+    }
 
     @Test
     @DisplayName("매장 aggregate를 운영자 응답의 세 상태 축과 모드로 변환한다")
@@ -45,7 +52,6 @@ class ManagedStoreResponseTest {
         assertThat(response.timeZoneId()).isEqualTo("Asia/Seoul");
         assertThat(response.verificationStatus()).isEqualTo(VerificationStatus.APPROVED);
         assertThat(response.operationStatus()).isEqualTo(OperationStatus.OPEN);
-        assertThat(response.pickupEligibility()).isEqualTo(PickupEligibility.ELIGIBLE);
         assertThat(response.modes())
                 .isEqualTo(new StoreModesRequest(true, false, true));
     }
