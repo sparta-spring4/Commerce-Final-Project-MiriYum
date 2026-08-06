@@ -15,17 +15,22 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.core.dto.ManagedStoreResponse;
+import com.miriyum.domain.store.core.dto.StoreGeocodingResponse;
 import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.core.enums.GeocodingStatus;
 import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.service.StoreCommandResult;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -87,7 +92,27 @@ class StoreControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
                 .andExpect(jsonPath("$.data.storeId").value("7"))
-                .andExpect(jsonPath("$.data.operationStatus").value("OPEN"));
+                .andExpect(jsonPath("$.data.operationStatus").value("OPEN"))
+                .andExpect(jsonPath("$.data.geocoding.status").value("VERIFIED"))
+                .andExpect(jsonPath("$.data.geocoding.latitude").value(37.566826))
+                .andExpect(jsonPath("$.data.geocoding.longitude").value(126.9786567))
+                .andExpect(jsonPath("$.data.geocoding.addressVersion").value(1))
+                .andExpect(jsonPath("$.data.geocoding.provider").doesNotExist());
+    }
+
+    @Test
+    void createReturnsBadRequestWhenGeocodingResultDoesNotMatch() throws Exception {
+        authenticateStoreOperator(11L);
+        given(storeService.create(eq(11L), any(IdempotencyKey.class), any()))
+                .willThrow(new ServiceException(CommonErrorCode.VALIDATION_FAILED));
+
+        mockMvc.perform(post("/api/v1/store-operator/stores")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
     @Test
@@ -182,7 +207,8 @@ class StoreControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
-                .andExpect(jsonPath("$.data.storeId").value("7"));
+                .andExpect(jsonPath("$.data.storeId").value("7"))
+                .andExpect(jsonPath("$.data.geocoding.status").value("VERIFIED"));
     }
 
     @ParameterizedTest
@@ -225,7 +251,27 @@ class StoreControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.storeId").isString())
-                .andExpect(jsonPath("$.data.storeId").value("7"));
+                .andExpect(jsonPath("$.data.storeId").value("7"))
+                .andExpect(jsonPath("$.data.geocoding.status").value("VERIFIED"));
+    }
+
+    @Test
+    void patchReturnsServiceUnavailableWhenGeocodingProviderFails() throws Exception {
+        authenticateStoreOperator(11L);
+        given(storeService.update(eq(11L), eq(7L), any(IdempotencyKey.class), any()))
+                .willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", TEST_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "address": "서울 중구 세종대로 110"
+                                }
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COMMON_012"));
     }
 
     @Test
@@ -395,6 +441,13 @@ class StoreControllerTest {
                 VerificationStatus.APPROVED,
                 OperationStatus.OPEN,
                 PickupEligibility.ELIGIBLE,
-                new StoreModesRequest(true, true, true));
+                new StoreModesRequest(true, true, true),
+                new StoreGeocodingResponse(
+                        GeocodingStatus.VERIFIED,
+                        new BigDecimal("37.566826000000000"),
+                        new BigDecimal("126.978656700000000"),
+                        "서울 중구 세종대로 110",
+                        Instant.parse("2026-08-04T09:00:00Z"),
+                        1L));
     }
 }

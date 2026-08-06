@@ -16,8 +16,15 @@ public record ManagedStoreResponse(
         VerificationStatus verificationStatus,
         OperationStatus operationStatus,
         PickupEligibility pickupEligibility,
-        StoreModesRequest modes
+        StoreModesRequest modes,
+        StoreGeocodingResponse geocoding
 ) {
+
+    public ManagedStoreResponse {
+        if (geocoding == null) {
+            geocoding = StoreGeocodingResponse.legacyUnverified();
+        }
+    }
 
     public static ManagedStoreResponse from(Store store) {
         return new ManagedStoreResponse(
@@ -33,6 +40,7 @@ public record ManagedStoreResponse(
                 new StoreModesRequest(
                         store.isReservationEnabled(),
                         store.isMenuHoldEnabled(),
-                        store.isPickupEnabled()));
+                        store.isPickupEnabled()),
+                StoreGeocodingResponse.from(store));
     }
 }

@@ -47,6 +47,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-mysql")
+    testImplementation("org.wiremock:wiremock-standalone:3.13.1")
     testRuntimeOnly("com.h2database:h2")
     testCompileOnly(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
     testCompileOnly("org.projectlombok:lombok")
