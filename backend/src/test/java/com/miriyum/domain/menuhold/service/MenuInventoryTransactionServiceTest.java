@@ -123,6 +123,8 @@ class MenuInventoryTransactionServiceTest {
                         1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3)));
         given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(new InventoryAcquisitionResult(
+                        new InventoryAcquireRequest.Selection(
+                                1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3).key(),
                         41L, 1L, 2L, 3, 3, 0)));
 
         MenuInventoryAcquireResult result = service.acquire(command);
@@ -137,6 +139,38 @@ class MenuInventoryTransactionServiceTest {
         assertThat(result.items()).extracting(
                         "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(41L, 1L, 2L, 3));
+    }
+
+    @Test
+    @DisplayName("확보 결과는 내부 PK 잠금 순서와 무관하게 공개 선택 순서를 유지한다")
+    void preservesPublicSelectionOrderWhenInternalResultsUseBucketOrder() {
+        MenuInventoryAcquireSelection first = new MenuInventoryAcquireSelection(
+                1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 3);
+        MenuInventoryAcquireSelection second = new MenuInventoryAcquireSelection(
+                2L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 4);
+        MenuInventoryAcquireCommand command = new MenuInventoryAcquireCommand(
+                "pickup-acquire-02", List.of(second, first));
+        given(inventoryService.acquireInventory(org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(
+                        new InventoryAcquisitionResult(
+                                new InventoryAcquireRequest.Selection(
+                                        2L, SERVICE_DATE, START_TIME, SERVICE_DATE,
+                                        END_TIME, 2L, 4).key(),
+                                21L, 2L, 2L, 4, 4, 0),
+                        new InventoryAcquisitionResult(
+                                new InventoryAcquireRequest.Selection(
+                                        1L, SERVICE_DATE, START_TIME, SERVICE_DATE,
+                                        END_TIME, 2L, 3).key(),
+                                42L, 1L, 2L, 3, 3, 0)));
+
+        MenuInventoryAcquireResult result = service.acquire(command);
+
+        assertThat(command.selections()).containsExactly(first, second);
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(42L, 1L, 2L, 3),
+                        org.assertj.core.groups.Tuple.tuple(21L, 2L, 2L, 4));
     }
 
     @Test

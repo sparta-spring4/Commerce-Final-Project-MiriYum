@@ -343,7 +343,7 @@ class MenuInventoryRuntimeIT {
         assertThat(result).isNotNull();
         assertThat(result.items()).extracting(
                         "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
-                .containsExactlyInAnyOrder(
+                .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(
                                 higherBucketId.getId(), menuId, 1L, 2),
                         org.assertj.core.groups.Tuple.tuple(
@@ -441,6 +441,7 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(acquired).containsExactly(
                 new InventoryAcquisitionResult(
+                        acquire.selections().getFirst().key(),
                         bucket.getId(), menuId, 1L, 4, 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);

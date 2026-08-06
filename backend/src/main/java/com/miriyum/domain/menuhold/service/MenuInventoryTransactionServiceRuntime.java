@@ -11,6 +11,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketKey;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.dto.OnlineInventoryAvailabilityView;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
@@ -19,7 +20,10 @@ import com.miriyum.global.exception.ServiceException;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -69,23 +73,36 @@ public class MenuInventoryTransactionServiceRuntime
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public MenuInventoryAcquireResult acquire(MenuInventoryAcquireCommand command) {
+        List<InventoryAcquireRequest.Selection> selections = command.selections().stream()
+                .map(selection -> new InventoryAcquireRequest.Selection(
+                        selection.menuId(), selection.serviceDate(),
+                        selection.startTime(), selection.endDate(), selection.endTime(),
+                        selection.inventoryPolicyVersion(), selection.quantity()))
+                .toList();
         List<InventoryAcquisitionResult> acquired = inventoryService.acquireInventory(
-                new InventoryAcquireRequest(
-                        command.operationId(),
-                        command.selections().stream()
-                                .map(selection -> new InventoryAcquireRequest.Selection(
-                                        selection.menuId(), selection.serviceDate(),
-                                        selection.startTime(), selection.endDate(),
-                                        selection.endTime(),
-                                        selection.inventoryPolicyVersion(), selection.quantity()))
-                                .toList()));
+                new InventoryAcquireRequest(command.operationId(), selections));
+        Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey = acquired.stream()
+                .collect(Collectors.toMap(
+                        InventoryAcquisitionResult::bucketKey, Function.identity()));
         return new MenuInventoryAcquireResult(
                 command.operationId(),
-                acquired.stream()
-                        .map(result -> new MenuInventoryAcquiredItem(
-                                result.inventoryBucketId(), result.menuId(),
-                                result.inventoryPolicyVersion(), result.quantity()))
+                selections.stream()
+                        .map(InventoryAcquireRequest.Selection::key)
+                        .map(key -> requireAcquiredResult(acquiredByKey, key))
                         .toList());
+    }
+
+    private static MenuInventoryAcquiredItem requireAcquiredResult(
+            Map<InventoryBucketKey, InventoryAcquisitionResult> acquiredByKey,
+            InventoryBucketKey key
+    ) {
+        InventoryAcquisitionResult result = acquiredByKey.get(key);
+        if (result == null) {
+            throw new IllegalStateException("acquired inventory result is missing");
+        }
+        return new MenuInventoryAcquiredItem(
+                result.inventoryBucketId(), result.menuId(),
+                result.inventoryPolicyVersion(), result.quantity());
     }
 
     @Override

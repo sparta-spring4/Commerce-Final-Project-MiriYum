@@ -4,6 +4,7 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketKey;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventoryBucketView;
@@ -102,6 +103,10 @@ class MenuInventoryService {
                 throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
             }
             results.add(new InventoryAcquisitionResult(
+                    new InventoryBucketKey(
+                            bucket.getMenuId(), bucket.getServiceDate(), bucket.getStartTime(),
+                            bucket.getEndDate(), bucket.getEndTime(),
+                            bucket.getInventoryPolicyVersion()),
                     bucket.getId(),
                     bucket.getMenuId(),
                     bucket.getInventoryPolicyVersion(),
