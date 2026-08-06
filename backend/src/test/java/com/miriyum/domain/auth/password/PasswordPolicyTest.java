@@ -77,6 +77,19 @@ class PasswordPolicyTest {
     }
 
     @Test
+    @DisplayName("이모지가 포함된 비밀번호를 거부한다")
+    void rejectsPasswordContainingEmoji() {
+        // given
+        String password = "Password123!\uD83D\uDE00";
+
+        // when & then
+        assertThatThrownBy(() -> passwordPolicy.normalize(password))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
     @DisplayName("저장 전 NFC로 정규화한다")
     void normalizesToNfcBeforeReturning() {
         // given: NFD로 분해된 결합 문자(자음+모음)

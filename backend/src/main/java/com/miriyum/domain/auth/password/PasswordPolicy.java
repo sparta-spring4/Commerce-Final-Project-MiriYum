@@ -46,9 +46,44 @@ public class PasswordPolicy {
         if (length < MIN_LENGTH || length > MAX_LENGTH) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+        rejectEmoji(password);
         if (countCharacterClasses(password) < MIN_CHARACTER_CLASSES) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+    }
+
+    private void rejectEmoji(String password) {
+        for (int offset = 0; offset < password.length();) {
+            int codePoint = password.codePointAt(offset);
+            if (isEmojiCodePoint(codePoint)) {
+                throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+            }
+            offset += Character.charCount(codePoint);
+        }
+    }
+
+    private boolean isEmojiCodePoint(int codePoint) {
+        return codePoint == 0x200D
+                || codePoint == 0xFE0F
+                || codePoint == 0xFE0E
+                || codePoint == 0x20E3
+                || codePoint == 0x00A9
+                || codePoint == 0x00AE
+                || codePoint == 0x203C
+                || codePoint == 0x2049
+                || codePoint == 0x2122
+                || codePoint == 0x2139
+                || codePoint == 0x3030
+                || codePoint == 0x303D
+                || codePoint == 0x3297
+                || codePoint == 0x3299
+                || isBetween(codePoint, 0x2600, 0x27BF)
+                || isBetween(codePoint, 0x2B00, 0x2BFF)
+                || isBetween(codePoint, 0x1F000, 0x1FAFF);
+    }
+
+    private boolean isBetween(int codePoint, int start, int end) {
+        return codePoint >= start && codePoint <= end;
     }
 
     /**

@@ -100,7 +100,7 @@ public class ConsumerAuthService {
 
         boolean completed = false;
         try {
-            boolean passwordMatches = passwordEncoder.matches(
+            boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
                     TokenNamespace.CONSUMER, account.getId(), attempt, passwordMatches);
@@ -155,5 +155,13 @@ public class ConsumerAuthService {
         return new TokenPair(
                 jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId),
                 jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId));
+    }
+
+    private boolean matchesPassword(String rawPassword, String encodedPassword) {
+        try {
+            return passwordEncoder.matches(rawPassword, encodedPassword);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }
