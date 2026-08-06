@@ -141,6 +141,37 @@ public interface MenuInventoryBucketRepository
             @Param("endTime") LocalTime endTime);
 
     @Query("""
+            select bucket.menuId as menuId,
+                   bucket.inventoryPolicyVersion as inventoryPolicyVersion,
+                   bucket.timeZoneId as timeZoneId,
+                   bucket.serviceDate as serviceDate,
+                   bucket.startTime as startTime,
+                   bucket.endDate as endDate,
+                   bucket.endTime as endTime,
+                   bucket.onlineHoldRemaining as onlineHoldRemaining,
+                   bucket.sharedRemaining as sharedRemaining,
+                   bucket.sharedOnlineAllowed as sharedOnlineAllowed,
+                   bucket.availabilityStatus as availabilityStatus
+            from MenuInventoryBucket bucket
+            where bucket.menuId in :menuIds
+              and bucket.serviceDate = :pickupDate
+              and bucket.inventoryPolicyVersion = (
+                  select max(candidate.inventoryPolicyVersion)
+                  from MenuInventoryBucket candidate
+                  where candidate.menuId = bucket.menuId
+                    and candidate.serviceDate = bucket.serviceDate
+                    and candidate.startTime = bucket.startTime
+                    and candidate.endDate = bucket.endDate
+                    and candidate.endTime = bucket.endTime
+              )
+            order by bucket.startTime, bucket.endDate, bucket.endTime,
+                     bucket.menuId, bucket.id
+            """)
+    List<OnlineInventoryAvailabilityView> findCurrentOnlineAvailabilityByDate(
+            @Param("menuIds") Collection<Long> menuIds,
+            @Param("pickupDate") LocalDate pickupDate);
+
+    @Query("""
             select bucket
             from MenuInventoryBucket bucket
             where bucket.menuId in :menuIds
