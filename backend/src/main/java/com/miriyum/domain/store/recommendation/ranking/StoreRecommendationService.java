@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class StoreRecommendationService {
 
+    public static final String RULE_VERSION = "history-v1";
+
     private final RecommendationHistoryLoader historyLoader;
     private final RecommendationSignalRepository signalRepository;
     private final HistoryRecommendationRanker ranker;

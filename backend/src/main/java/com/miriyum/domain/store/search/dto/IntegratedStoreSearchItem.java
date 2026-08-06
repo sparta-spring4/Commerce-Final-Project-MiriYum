@@ -2,6 +2,7 @@ package com.miriyum.domain.store.search.dto;
 
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationReason;
 import java.util.Objects;
 
 /** 통합 검색이 최신 상태를 재검증한 공개 매장 항목이다. */
@@ -14,7 +15,8 @@ public record IntegratedStoreSearchItem(
         OperationStatus operationStatus,
         PublicStoreModes modes,
         ReservationAvailability reservationAvailability,
-        PublicStoreCoordinates coordinates
+        PublicStoreCoordinates coordinates,
+        RecommendationReason recommendationReason
 ) {
 
     public IntegratedStoreSearchItem {

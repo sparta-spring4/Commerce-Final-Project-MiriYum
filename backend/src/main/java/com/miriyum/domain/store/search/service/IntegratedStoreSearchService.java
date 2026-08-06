@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.enums.OperationStatus;
 import com.miriyum.domain.store.recommendation.ranking.RankedRecommendation;
 import com.miriyum.domain.store.recommendation.ranking.RecommendationCursorKey;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationReason;
 import com.miriyum.domain.store.recommendation.ranking.RecommendationSearchCandidate;
 import com.miriyum.domain.store.recommendation.ranking.StoreRecommendationService;
 import com.miriyum.domain.store.search.dto.IntegratedStoreSearchData;
@@ -199,6 +200,7 @@ public class IntegratedStoreSearchService {
                 interpretation.warnings(),
                 interpretation.ruleVersion(),
                 interpretation.vocabularyVersion(),
+                null,
                 responseCursor);
     }
 
@@ -296,9 +298,14 @@ public class IntegratedStoreSearchService {
         int pageSize = Math.min(requestQuery.size(), remaining.size());
         List<RankedRecommendation> page = remaining.subList(0, pageSize);
         List<IntegratedStoreSearchItem> items = page.stream()
-                .map(result -> stateById.get(result.candidate().storeId()))
-                .filter(java.util.Objects::nonNull)
-                .map(state -> toItem(state.candidate(), state.availability()))
+                .map(result -> new RankedCandidateState(
+                        result,
+                        stateById.get(result.candidate().storeId())))
+                .filter(result -> result.state() != null)
+                .map(result -> toItem(
+                        result.state().candidate(),
+                        result.state().availability(),
+                        result.ranked().reason()))
                 .toList();
         String nextCursor = remaining.size() > pageSize && !page.isEmpty()
                 ? recommendationCursor(requestQuery, page.getLast())
@@ -309,6 +316,7 @@ public class IntegratedStoreSearchService {
                 interpretation.warnings(),
                 interpretation.ruleVersion(),
                 interpretation.vocabularyVersion(),
+                StoreRecommendationService.RULE_VERSION,
                 nextCursor);
     }
 
@@ -411,6 +419,14 @@ public class IntegratedStoreSearchService {
             IntegratedStoreSearchCandidate candidate,
             ReservationAvailability availability
     ) {
+        return toItem(candidate, availability, null);
+    }
+
+    private static IntegratedStoreSearchItem toItem(
+            IntegratedStoreSearchCandidate candidate,
+            ReservationAvailability availability,
+            RecommendationReason reason
+    ) {
         PublicStoreCoordinates coordinates = candidate.latitude() == null
                 || candidate.longitude() == null
                 ? null
@@ -427,7 +443,8 @@ public class IntegratedStoreSearchService {
                         candidate.menuHoldEnabled(),
                         candidate.pickupEnabled()),
                 availability,
-                coordinates);
+                coordinates,
+                reason);
     }
 
     private static NormalizedSearchCondition normalized(
@@ -456,6 +473,12 @@ public class IntegratedStoreSearchService {
     private record CandidateState(
             IntegratedStoreSearchCandidate candidate,
             ReservationAvailability availability
+    ) {
+    }
+
+    private record RankedCandidateState(
+            RankedRecommendation ranked,
+            CandidateState state
     ) {
     }
 }

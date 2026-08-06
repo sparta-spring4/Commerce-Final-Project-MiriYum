@@ -37,6 +37,10 @@ class StoreSearchOpenApiContractTest {
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
                         "availableOnly", "sort", "searchInput", "cursor");
         Map<String, Object> searchOperation = map(map(paths.get("/api/v1/stores")).get("get"));
+        assertThat(listOfMaps(searchOperation.get("security")))
+                .anySatisfy(requirement -> assertThat(requirement).isEmpty())
+                .anySatisfy(requirement -> assertThat(requirement).containsKey("bearerAuth"));
+        assertThat(map(searchOperation.get("responses"))).containsKey("401");
         List<Map<String, Object>> searchParameters =
                 listOfMaps(searchOperation.get("parameters"));
         Map<String, Object> keyword = searchParameters
@@ -57,6 +61,11 @@ class StoreSearchOpenApiContractTest {
                 .findFirst().orElseThrow();
         assertThat((String) availableOnly.get("description"))
                 .contains("5,000");
+        Map<String, Object> sort = searchParameters.stream()
+                .filter(parameter -> "sort".equals(parameter.get("name")))
+                .findFirst().orElseThrow();
+        assertThat(list(map(sort.get("schema")).get("enum")))
+                .contains("recommendation,desc");
         Map<String, Object> successResponse = map(
                 map(searchOperation.get("responses")).get("200"));
         assertThat((String) successResponse.get("description"))
@@ -76,9 +85,11 @@ class StoreSearchOpenApiContractTest {
         assertThat(list(map(schemas.get("IntegratedStoreSearchData")).get("required")))
                 .containsExactlyInAnyOrder(
                         "items", "normalizedCondition", "warnings", "ruleVersion",
-                        "vocabularyVersion", "nextCursor");
+                        "vocabularyVersion", "rankingRuleVersion", "nextCursor");
         assertThat(list(map(schemas.get("IntegratedStoreSearchItem")).get("required")))
-                .contains("coordinates", "reservationAvailability");
+                .contains("coordinates", "reservationAvailability", "recommendationReason");
+        assertThat(list(map(schemas.get("RecommendationReason")).get("required")))
+                .containsExactlyInAnyOrder("code", "message");
         assertThat(list(map(schemas.get("InterpretationWarning")).get("required")))
                 .containsExactlyInAnyOrder("code", "field");
     }

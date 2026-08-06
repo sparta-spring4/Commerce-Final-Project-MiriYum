@@ -15,6 +15,7 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.recommendation.ranking.RankedRecommendation;
 import com.miriyum.domain.store.recommendation.ranking.RecommendationAvailability;
 import com.miriyum.domain.store.recommendation.ranking.RecommendationCandidate;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationReason;
 import com.miriyum.domain.store.recommendation.ranking.StoreRecommendationService;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
@@ -219,6 +220,9 @@ class IntegratedStoreSearchServiceTest {
 
         assertThat(firstPage.items()).extracting(item -> item.storeId())
                 .containsExactly("3", "1");
+        assertThat(firstPage.items()).extracting(item -> item.recommendationReason())
+                .containsExactly(RecommendationReason.KEYWORD, RecommendationReason.KEYWORD);
+        assertThat(firstPage.rankingRuleVersion()).isEqualTo("history-v1");
         assertThat(firstPage.nextCursor()).isNotBlank();
         assertThat(secondPage.items()).extracting(item -> item.storeId())
                 .containsExactly("2");
@@ -285,6 +289,6 @@ class IntegratedStoreSearchServiceTest {
                 totalScore,
                 0,
                 totalScore,
-                null);
+                RecommendationReason.KEYWORD);
     }
 }

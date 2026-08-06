@@ -11,6 +11,7 @@ public record IntegratedStoreSearchData(
         List<InterpretationWarning> warnings,
         String ruleVersion,
         String vocabularyVersion,
+        String rankingRuleVersion,
         String nextCursor
 ) {
 
