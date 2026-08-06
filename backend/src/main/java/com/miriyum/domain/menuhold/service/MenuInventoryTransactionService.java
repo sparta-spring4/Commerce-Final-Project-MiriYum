@@ -38,7 +38,7 @@ public interface MenuInventoryTransactionService {
      * 모든 선택 메뉴 수량을 호출자 트랜잭션에서 원자적으로 확보한다.
      *
      * @param command 전역 고유 operation과 현재 정책 기준 선택
-     * @return 내부 버킷·풀 배분을 제외한 확보 결과
+     * @return 실제 확보 버킷 ID를 포함하고 내부 풀 배분·영속 타입은 제외한 결과
      */
     @Transactional(propagation = Propagation.MANDATORY)
     MenuInventoryAcquireResult acquire(MenuInventoryAcquireCommand command);
