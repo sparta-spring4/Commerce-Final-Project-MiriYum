@@ -23,14 +23,14 @@ public class ReservationCancellationPolicyEvaluator {
             Instant startAt,
             Instant requestedAt
     ) {
-        requireNonNull(actor, "actor");
         ReservationStatus validatedStatus = requireNonNull(status, "status");
-        requireNonNull(startAt, "startAt");
-        requireNonNull(requestedAt, "requestedAt");
-
         if (validatedStatus != ReservationStatus.CONFIRMED) {
             return ReservationCancellationDecision.REJECTED_INVALID_STATE;
         }
+
+        requireNonNull(actor, "actor");
+        requireNonNull(startAt, "startAt");
+        requireNonNull(requestedAt, "requestedAt");
         if (registry.findByStoredVersion(storedVersion).isEmpty()) {
             return ReservationCancellationDecision.REJECTED_BY_POLICY;
         }

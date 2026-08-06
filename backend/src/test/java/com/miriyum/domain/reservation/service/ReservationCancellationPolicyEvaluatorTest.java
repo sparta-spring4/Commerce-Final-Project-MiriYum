@@ -52,6 +52,17 @@ class ReservationCancellationPolicyEvaluatorTest {
     }
 
     @Test
+    void rejectsNonConfirmedStatusBeforeValidatingActor() {
+        assertThat(evaluator.evaluate(
+                1L,
+                null,
+                ReservationStatus.CANCELLED,
+                START_AT,
+                START_AT
+        )).isEqualTo(ReservationCancellationDecision.REJECTED_INVALID_STATE);
+    }
+
+    @Test
     void rejectsNullAndUnknownVersionsByPolicyForConfirmedReservations() {
         Long[] storedVersions = {null, 0L, -1L, 2L};
 
