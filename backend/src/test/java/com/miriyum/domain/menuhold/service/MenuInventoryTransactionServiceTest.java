@@ -10,6 +10,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
@@ -87,6 +88,29 @@ class MenuInventoryTransactionServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(MenuHoldErrorCode.BUCKET_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("날짜별 온라인 가용량은 존재하는 현재 버킷만 안정적인 조회 순서로 반환한다")
+    void findsExistingOnlineAvailabilityByDate() {
+        MenuInventoryAvailabilityDateQuery query =
+                new MenuInventoryAvailabilityDateQuery(
+                        List.of(2L, 1L), SERVICE_DATE);
+        OnlineInventoryAvailabilityView first =
+                view(1L, 2, 3, true, InventoryAvailabilityStatus.AVAILABLE);
+        given(bucketRepository.findCurrentOnlineAvailabilityByDate(
+                query.menuIds(), SERVICE_DATE))
+                .willReturn(List.of(first));
+
+        List<MenuInventoryAvailability> result =
+                service.findOnlineAvailabilityByDate(query);
+
+        assertThat(result).extracting(
+                        MenuInventoryAvailability::menuId,
+                        MenuInventoryAvailability::availableOnlineQuantity,
+                        MenuInventoryAvailability::availabilityStatus)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        1L, 5, MenuInventoryAvailability.AvailabilityStatus.AVAILABLE));
     }
 
     @Test

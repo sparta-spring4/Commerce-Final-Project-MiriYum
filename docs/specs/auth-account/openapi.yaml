@@ -634,8 +634,10 @@ components:
         - storeId
         - storeName
         - serviceDate
-        - startTime
-        - endTime
+        - timeStatus
+        - startAt
+        - serviceEndAt
+        - timeZoneId
         - partySize
         - status
         - createdAt
@@ -649,21 +651,31 @@ components:
           minLength: 1
           maxLength: 100
         serviceDate:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
-        startTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
-        endTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+          $ref: "../reservation/openapi.yaml#/components/schemas/StoreLocalDate"
+        timeStatus:
+          $ref: "../reservation/openapi.yaml#/components/schemas/ReservationTimeStatus"
+        startAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        serviceEndAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        timeZoneId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: 예약 계산에 사용한 매장 IANA 시간대. LEGACY_UNRESOLVED이면 null
+          examples:
+            - Asia/Seoul
         partySize:
           type: integer
           minimum: 1
         status:
           $ref: "#/components/schemas/ReservationHistoryStatus"
-        cancelledBy:
-          type:
-            - string
-            - "null"
-          enum: [CONSUMER, STORE_OPERATOR, null]
         createdAt:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
     ReservationHistoryPageData:
