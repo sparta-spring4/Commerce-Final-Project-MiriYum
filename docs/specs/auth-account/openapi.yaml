@@ -335,6 +335,68 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "#/components/responses/NicknameChangeConflict"
+  /api/v1/consumer-accounts/me/contact:
+    put:
+      tags: [Account]
+      summary: 일반 사용자 최초 연락처 등록
+      description: 기존 연락처가 없는 계정이 1차 MVP 신뢰 연락처를 최초 등록한다.
+      operationId: registerCurrentConsumerContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerContactRegistrationRequest"
+      responses:
+        "200":
+          description: 등록된 일반 사용자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ContactRegistrationConflict"
+  /api/v1/store-operator-accounts/me/contact:
+    put:
+      tags: [Account]
+      summary: 매장 운영자 최초 연락처 등록
+      description: 기존 연락처가 없는 매장 운영자 계정이 1차 MVP 신뢰 연락처를 최초 등록한다. 매장 운영자 연락처는 예약 알림용 opaque reference를 생성하지 않는다.
+      operationId: registerCurrentStoreOperatorContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorContactRegistrationRequest"
+      responses:
+        "200":
+          description: 등록된 매장 운영자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreOperatorAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ContactRegistrationConflict"
   /api/v1/store-operator-accounts/me:
     get:
       tags: [Account]
@@ -455,12 +517,28 @@ components:
       format: password
       minLength: 8
       maxLength: 64
-      description: NFC 정규화 뒤 8~64 Unicode code point이며 문자 종류 정책은 기능 명세를 따른다.
-    VerificationReference:
+      description: NFC 정규화 뒤 8~64 Unicode code point이며 대문자·소문자·숫자·특수문자 중 3종 이상을 포함해야 한다. 이모지와 이모지 조합에 사용되는 제어 문자는 허용하지 않는다.
+    MvpPhoneNumber:
       type: string
-      minLength: 1
-      maxLength: 512
-      description: 서버가 진위·대상·만료·일회성 소비를 확인하는 공급자 중립 참조
+      minLength: 11
+      maxLength: 11
+      pattern: '^010[0-9]{8}$'
+      description: 공백·하이픈을 제거한 정규화된 010 시작 11자리 숫자. 1차 MVP 신뢰 연락처이며 실제 소유 인증을 의미하지 않는다.
+      example: '01012345678'
+    MvpPhoneNumberInput:
+      anyOf:
+        - $ref: "#/components/schemas/MvpPhoneNumber"
+        - type: string
+          pattern: '^ *0 *1 *0(?:[ -]*[0-9]){8} *$'
+      description: 입력 원문. Auth가 공백과 하이픈을 제거한 뒤 MvpPhoneNumber 형식으로 정규화하고 검증한다.
+      examples:
+        - '010-1234-5678'
+        - '010 1234 5678'
+    MaskedPhoneNumber:
+      type: [string, "null"]
+      pattern: '^010-\*{4}-[0-9]{4}$'
+      description: 응답 전용 마스킹 연락처. 기존 연락처 미등록 계정은 null이다.
+      example: '010-****-5678'
     EmptyJsonRequest:
       type: object
       additionalProperties: false
@@ -480,8 +558,8 @@ components:
         - email
         - password
         - passwordConfirm
-        - emailVerificationReference
-        - identityVerificationReference
+        - phoneNumber
+        - ageConfirmed
         - nickname
       properties:
         email:
@@ -490,10 +568,12 @@ components:
           $ref: "#/components/schemas/Password"
         passwordConfirm:
           $ref: "#/components/schemas/Password"
-        emailVerificationReference:
-          $ref: "#/components/schemas/VerificationReference"
-        identityVerificationReference:
-          $ref: "#/components/schemas/VerificationReference"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+        ageConfirmed:
+          type: boolean
+          const: true
+          description: 실제 연령 인증이 아닌 만 14세 이상 자기 확인값
         nickname:
           type: string
           minLength: 2
@@ -506,8 +586,7 @@ components:
         - email
         - password
         - passwordConfirm
-        - emailVerificationReference
-        - identityVerificationReference
+        - phoneNumber
         - displayName
       properties:
         email:
@@ -516,10 +595,8 @@ components:
           $ref: "#/components/schemas/Password"
         passwordConfirm:
           $ref: "#/components/schemas/Password"
-        emailVerificationReference:
-          $ref: "#/components/schemas/VerificationReference"
-        identityVerificationReference:
-          $ref: "#/components/schemas/VerificationReference"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
         displayName:
           type: string
           minLength: 2
@@ -534,6 +611,22 @@ components:
           minLength: 2
           maxLength: 20
           pattern: "^[가-힣A-Za-z0-9 _-]+$"
+    ConsumerContactRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+      description: 최초 등록 후 다른 번호로 변경할 수 없는 1차 MVP 신뢰 연락처 등록 요청
+    StoreOperatorContactRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+      description: 최초 등록 후 다른 번호로 변경할 수 없는 매장 운영자의 1차 MVP 신뢰 연락처 등록 요청
     StoreOperatorAccountUpdateRequest:
       type: object
       additionalProperties: false
@@ -593,9 +686,7 @@ components:
         email:
           $ref: "#/components/schemas/Email"
         phoneNumber:
-          type: [string, "null"]
-          pattern: "^01[016789]-[0-9]{3,4}-[0-9]{4}$"
-          description: 본인확인 제공업체가 선정되어 실제 전화번호를 해석하는 어댑터가 붙기 전까지는 null이다(BLOCKED).
+          $ref: "#/components/schemas/MaskedPhoneNumber"
         nickname:
           type: string
           minLength: 2
@@ -613,9 +704,7 @@ components:
         email:
           $ref: "#/components/schemas/Email"
         phoneNumber:
-          type: [string, "null"]
-          pattern: "^01[016789]-[0-9]{3,4}-[0-9]{4}$"
-          description: 본인확인 제공업체가 선정되어 실제 전화번호를 해석하는 어댑터가 붙기 전까지는 null이다(BLOCKED).
+          $ref: "#/components/schemas/MaskedPhoneNumber"
         displayName:
           type: string
           minLength: 2
@@ -634,8 +723,10 @@ components:
         - storeId
         - storeName
         - serviceDate
-        - startTime
-        - endTime
+        - timeStatus
+        - startAt
+        - serviceEndAt
+        - timeZoneId
         - partySize
         - status
         - createdAt
@@ -649,21 +740,31 @@ components:
           minLength: 1
           maxLength: 100
         serviceDate:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
-        startTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
-        endTime:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
+          $ref: "../reservation/openapi.yaml#/components/schemas/StoreLocalDate"
+        timeStatus:
+          $ref: "../reservation/openapi.yaml#/components/schemas/ReservationTimeStatus"
+        startAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        serviceEndAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        timeZoneId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: 예약 계산에 사용한 매장 IANA 시간대. LEGACY_UNRESOLVED이면 null
+          examples:
+            - Asia/Seoul
         partySize:
           type: integer
           minimum: 1
         status:
           $ref: "#/components/schemas/ReservationHistoryStatus"
-        cancelledBy:
-          type:
-            - string
-            - "null"
-          enum: [CONSUMER, STORE_OPERATOR, null]
         createdAt:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
     ReservationHistoryPageData:
@@ -808,9 +909,34 @@ components:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: ACCOUNT_001
-            message: 이미 사용 중인 이메일입니다.
+          examples:
+            DuplicateEmail:
+              summary: 같은 계정 유형에서 이미 사용 중인 이메일
+              value:
+                code: ACCOUNT_001
+                message: 이미 사용 중인 이메일입니다.
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 휴대전화
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
+    ContactRegistrationConflict:
+      description: 연락처 최초 등록 중복 또는 이미 등록한 연락처를 다른 번호로 변경하려는 요청
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 번호
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
+            ContactAlreadyRegistered:
+              summary: 최초 등록 후 다른 번호로 변경하려는 요청
+              value:
+                code: ACCOUNT_007
+                message: 최초 등록한 연락처는 변경할 수 없습니다.
     NicknameChangeConflict:
       description: 닉네임 변경 가능 시각 전 재변경
       content:

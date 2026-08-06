@@ -4,7 +4,6 @@ import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -43,7 +42,8 @@ public class StoreTransactionEligibilityService {
         if (!store.isReservationEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
-        return new StoreReservationTransactionEligibility(store.getId());
+        return new StoreReservationTransactionEligibility(
+                store.getId(), store.getName());
     }
 
     /**
@@ -59,9 +59,6 @@ public class StoreTransactionEligibilityService {
             requirePickupTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
-        if (store.getPickupEligibility() != PickupEligibility.ELIGIBLE) {
-            throw new ServiceException(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
-        }
         if (!store.isPickupEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }

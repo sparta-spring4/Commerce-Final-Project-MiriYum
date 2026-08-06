@@ -184,6 +184,24 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("잘못된 비밀번호 해시 형식으로 로그인을 거부한다")
+    void rejectsLoginWithMalformedPasswordHash() {
+        ConsumerAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed"))
+                .willThrow(new IllegalArgumentException("No PasswordEncoder mapped for id null"));
+
+        assertThatThrownBy(() -> consumerAuthService.login(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+        verify(loginDelayGuard).completeAttempt(
+                eq(TokenNamespace.CONSUMER), eq(ACCOUNT_ID), any(), eq(false));
+    }
+
+    @Test
     void rejectsBusyLoginWithoutPasswordComparison() {
         ConsumerAccount account = persistedAccount();
         LoginRequest request = new LoginRequest("user@example.com", "password123");

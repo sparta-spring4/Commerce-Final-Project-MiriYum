@@ -7,12 +7,15 @@ import static org.mockito.BDDMockito.willReturn;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
@@ -191,16 +194,115 @@ class MenuInventoryRuntimeIT {
     }
 
     @Test
+    void dateAvailabilityUsesCurrentPoliciesAndStableServiceIntervalOrder() {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeId,
+                        menuContent(),
+                        operatorId,
+                        Instant.parse("2026-08-01T00:00:01Z"))).getId());
+        transactionTemplate.executeWithoutResult(status -> {
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                    "Asia/Seoul", 1L, 6, 2, 1, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                    "Asia/Seoul", 2L, 105, 2, 100, 3, false,
+                    com.miriyum.domain.menuhold.inventory.model
+                            .InventoryAvailabilityStatus.SOLD_OUT));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    secondMenuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 7, 3, 1, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    secondMenuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                    "Asia/Seoul", 1L, 4, 2, 1, 1, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 9, 4, 2, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                    "Asia/Seoul", 1L, 8, 3, 2, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 11), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 11), LocalTime.of(13, 0),
+                    "Asia/Seoul", 1L, 5, 5, 0, 0, true));
+        });
+
+        List<MenuInventoryAvailability> result =
+                transactionService.findOnlineAvailabilityByDate(
+                        new MenuInventoryAvailabilityDateQuery(
+                                List.of(secondMenuId, Long.MAX_VALUE, menuId),
+                                LocalDate.of(2026, 8, 10)));
+
+        assertThat(result).extracting(
+                        MenuInventoryAvailability::menuId,
+                        MenuInventoryAvailability::startTime,
+                        MenuInventoryAvailability::endDate,
+                        MenuInventoryAvailability::endTime,
+                        MenuInventoryAvailability::inventoryPolicyVersion,
+                        MenuInventoryAvailability::availableOnlineQuantity,
+                        MenuInventoryAvailability::availabilityStatus)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                                1L, 3,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                                1L, 7,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
+                                1L, 6,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                                1L, 6,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(13, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
+                                2L, 2,
+                                MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT));
+    }
+
+    @Test
+    void dateAvailabilityReturnsEmptyWhenNoCurrentBucketExists() {
+        List<MenuInventoryAvailability> result =
+                transactionService.findOnlineAvailabilityByDate(
+                        new MenuInventoryAvailabilityDateQuery(
+                                List.of(menuId), LocalDate.of(2026, 8, 30)));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     void publicAcquireAndRestoreUseOriginalPoolsExactlyOnce() {
         MenuInventoryBucket bucket = transactionTemplate.execute(status ->
                 bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 3)));
         String acquireOperation = "pickup-public-acquire-" + SEQUENCE.incrementAndGet();
 
-        transactionTemplate.execute(status -> transactionService.acquire(
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(
                 new MenuInventoryAcquireCommand(
                         acquireOperation, List.of(publicSelection(menuId, 1L, 4)))));
 
         MenuInventoryBucket acquired = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        bucket.getId(), menuId, 1L, 4));
         assertThat(acquired.getOnlineHoldRemaining()).isZero();
         assertThat(acquired.getSharedRemaining()).isEqualTo(1);
 
@@ -216,6 +318,36 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
+    }
+
+    @Test
+    void publicAcquireKeepsBucketAndMenuMappingWhenLockOrderDiffersFromMenuOrder() {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeId,
+                        menuContent(),
+                        operatorId,
+                        Instant.parse("2026-08-01T00:00:01Z"))).getId());
+        MenuInventoryBucket lowerBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(secondMenuId, 1L, 5, 0)));
+        MenuInventoryBucket higherBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(new MenuInventoryAcquireCommand(
+                        "pickup-public-mapping-" + SEQUENCE.incrementAndGet(),
+                        List.of(
+                                publicSelection(menuId, 1L, 2),
+                                publicSelection(secondMenuId, 1L, 3)))));
+
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                higherBucketId.getId(), menuId, 1L, 2),
+                        org.assertj.core.groups.Tuple.tuple(
+                                lowerBucketId.getId(), secondMenuId, 1L, 3));
     }
 
     @Test
@@ -299,7 +431,7 @@ class MenuInventoryRuntimeIT {
         InventoryAcquireRequest acquire = new InventoryAcquireRequest(
                 "reservation:77:create", List.of(selection(menuId, 4)));
 
-        List<InventoryAllocationResult> acquired = transactionTemplate.execute(status ->
+        List<InventoryAcquisitionResult> acquired = transactionTemplate.execute(status ->
                 menuHoldService.acquireInventory(acquire));
         transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
                 new InventoryRestoreRequest("reservation:77:cancel:1", acquire.operationId())));
@@ -308,7 +440,9 @@ class MenuInventoryRuntimeIT {
 
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(acquired).containsExactly(
-                new InventoryAllocationResult(bucket.getId(), 2, 2));
+                new InventoryAcquisitionResult(
+                        acquire.selections().getFirst().key(),
+                        bucket.getId(), menuId, 1L, 4, 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
         assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 4);

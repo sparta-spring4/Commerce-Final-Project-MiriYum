@@ -63,6 +63,7 @@ paths:
         - name: pickupDate
           in: query
           required: true
+          description: 게시된 현재 메뉴 재고 버킷의 serviceDate
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
       responses:
@@ -77,7 +78,7 @@ paths:
         "404":
           $ref: "#/components/responses/StoreNotFound"
         "409":
-          $ref: "#/components/responses/PickupEligibilityConflict"
+          $ref: "#/components/responses/PickupTransactionEligibilityConflict"
   /api/v1/pickup-reservations:
     post:
       tags: [Pickup]
@@ -495,6 +496,7 @@ components:
       required: [pickupTime, menus]
       properties:
         pickupTime:
+          description: 게시된 현재 메뉴 재고 버킷 제공 구간의 startTime
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         menus:
           type: array
@@ -532,8 +534,10 @@ components:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         pickupDate:
+          description: 게시된 현재 메뉴 재고 버킷의 serviceDate
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
         pickupTime:
+          description: 잠금 검증한 Store IANA 시간대와 같은 현재 재고 버킷 제공 구간에 정확히 일치해야 하는 startTime. 구간 부재·시간대 불일치·DST 누락 또는 중복은 PICKUP_003이다.
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalTime"
         menuSelections:
           type: array
@@ -836,8 +840,8 @@ components:
           example:
             code: STORE_009
             message: 메뉴를 찾을 수 없습니다.
-    PickupEligibilityConflict:
-      description: 중앙 픽업 자격이 없음
+    PickupTransactionEligibilityConflict:
+      description: 매장의 픽업 기능이 비활성화되었거나 거래 상태가 유효하지 않음
       content:
         application/json:
           schema:
@@ -846,7 +850,7 @@ components:
             code: PICKUP_002
             message: 이 매장은 픽업 예약을 제공할 수 없습니다.
     PickupConflict:
-      description: 픽업 자격·제공 구간·메뉴 수량 충돌
+      description: 픽업 기능·제공 구간·메뉴 수량 충돌
       content:
         application/json:
           schema:

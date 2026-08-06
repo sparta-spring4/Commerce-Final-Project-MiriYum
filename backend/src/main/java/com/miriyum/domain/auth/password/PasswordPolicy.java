@@ -1,5 +1,7 @@
 package com.miriyum.domain.auth.password;
 
+import com.ibm.icu.lang.UCharacter;
+import com.ibm.icu.lang.UProperty;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.text.Normalizer;
@@ -46,9 +48,35 @@ public class PasswordPolicy {
         if (length < MIN_LENGTH || length > MAX_LENGTH) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+        rejectEmoji(password);
         if (countCharacterClasses(password) < MIN_CHARACTER_CLASSES) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+    }
+
+    private void rejectEmoji(String password) {
+        for (int offset = 0; offset < password.length();) {
+            int codePoint = password.codePointAt(offset);
+            if (isEmojiCodePoint(codePoint)) {
+                throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+            }
+            offset += Character.charCount(codePoint);
+        }
+    }
+
+    private boolean isEmojiCodePoint(int codePoint) {
+        // ICU4J의 Unicode Emoji/Emoji_Presentation 데이터로 수동 범위 누락을 막는다.
+        return isEmojiJoiner(codePoint)
+                || UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI_PRESENTATION)
+                || (codePoint > 0x7F
+                        && UCharacter.hasBinaryProperty(codePoint, UProperty.EMOJI));
+    }
+
+    private boolean isEmojiJoiner(int codePoint) {
+        return codePoint == 0x200D
+                || codePoint == 0xFE0F
+                || codePoint == 0xFE0E
+                || codePoint == 0x20E3;
     }
 
     /**

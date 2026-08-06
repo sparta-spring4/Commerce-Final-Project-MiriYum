@@ -16,7 +16,7 @@
 | `S-004` | 1차 MVP 픽업 예약의 독립 상태 기계 | 승인 | 2026-07-28 |
 | `S-005` | 메뉴 버전·공개·판매 제어·수량 상태 축 분리 | 승인 | 2026-07-28 |
 | `S-006` | 계정 유형별 상태 enum과 namespace 기반 최소 권한 | 승인 | 2026-07-28 |
-| `S-007` | 매장 입점 검증·운영·픽업 자격 상태 축 분리 | 승인 | 2026-07-28 |
+| `S-007` | 매장 입점 검증·운영·거래별 기능 상태 축 분리 | 개정 | 2026-08-06 |
 | `E-001` | 도메인 소유 기준 핵심 논리 ERD와 픽업 자원 경계 | 승인 | 2026-07-28 |
 | `E-002` | 1차 MVP의 매장 대표 운영자 직접 FK와 고도화 마이그레이션 경계 | 승인(기존 관계 테이블안 대체) | 2026-07-28 |
 | `E-003` | 시간 구간별 예약 수용량 버킷과 예약별 배정 이력 | 승인 | 2026-07-28 |
@@ -196,11 +196,11 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
 - 픽업 예약은 `PickupReservation`과 전용 상태 enum을 사용하며 일반 `Reservation`이나 `ReservationStatus`를 생성·재사용하지 않는다.
 - 픽업 예약은 메뉴 수량과 픽업 제공 구간만 소비하고 일반 예약의 인원 수·팀 수를 소비하지 않는다.
 - 픽업 예약의 메뉴 항목과 수량 원장은 4번 팀원의 메뉴 홀드·픽업 도메인이 소유한다.
-- 2번 팀원의 매장 도메인은 중앙 픽업 자격과 매장·메뉴 기본정보를 제공하지만 픽업 예약 상태를 직접 변경하지 않는다.
+- 2번 팀원의 매장 도메인은 픽업 기능 상태와 매장·메뉴 기본정보를 제공하지만 픽업 예약 상태를 직접 변경하지 않는다.
 
 ### 명령과 자원 처리
 
-- 생성은 매장 픽업 자격, 기능 활성 여부, 영업·픽업 구간, 메뉴 게시·홀드 자격과 날짜·시간 구간별 수량을 검증한 뒤 `CONFIRMED`로 즉시 확정한다.
+- 생성은 매장 승인·영업·픽업 기능 상태, 영업·픽업 구간, 메뉴 게시·픽업 선택 가능성과 날짜·시간 구간별 수량을 검증한 뒤 `CONFIRMED`로 즉시 확정한다.
 - 취소는 `CONFIRMED`에서만 허용하고 `CANCELLED` 전이와 메뉴 수량 복구를 하나의 MySQL 트랜잭션에서 커밋한다.
 - 수령 완료는 대상 매장의 대표 운영자 FK와 일치하는 매장 운영자만 `CONFIRMED`에서 `PICKED_UP`으로 전이할 수 있다.
 - `PICKED_UP`과 `CANCELLED`는 종결 상태이며 서로 전환하거나 `CONFIRMED`로 되돌리지 않는다.
@@ -215,7 +215,7 @@ CONFIRMED ── 매장 운영자의 수령 완료 처리 ──▶ PICKED_UP
 ### 인수 조건
 
 - 픽업 예약 생성으로 일반 예약 행이나 인원·팀 수 점유가 생성되지 않는다.
-- 다른 업종이나 중앙 픽업 자격이 유효하지 않은 매장은 픽업 예약을 확정할 수 없지만 일반 매장·예약 기능은 영향을 받지 않는다.
+- 등록 업종은 픽업 판정에 사용하지 않는다. 픽업 기능이 비활성화된 매장은 픽업 예약을 확정할 수 없지만 일반 매장·예약 기능은 영향을 받지 않는다.
 - 동일 취소를 반복·동시 실행해도 상태는 한 번만 `CANCELLED`가 되고 메뉴 수량은 한 번만 복구된다.
 - `PICKED_UP` 뒤 취소·수량 복구가 거부된다.
 - 1차 MVP 픽업 상태 enum과 OpenAPI에 `READY_FOR_PICKUP`, 결제 또는 임시 선점 상태가 없다.
@@ -341,7 +341,7 @@ ROLE_STORE_OPERATOR
 
 ## S-007 1차 MVP 매장 상태 축
 
-입점 검증, 매장의 운영 상태와 픽업 자격을 하나의 `StoreStatus`로 합치지 않는다.
+입점 검증, 매장의 운영 상태와 거래별 기능을 하나의 `StoreStatus`로 합치지 않는다.
 
 ### 확정 상태 축
 
@@ -349,7 +349,7 @@ ROLE_STORE_OPERATOR
 |---|---|---|
 | 입점 검증 | `APPROVED` | 사업자등록번호 형식과 전체 매장 이력의 영구 유일성 검사를 통과한 1차 MVP 등록 결과 |
 | 매장 운영 | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` | 영업, 휴점, 폐점의 중앙 운영 상태 |
-| 픽업 자격 | `ELIGIBLE`, `INELIGIBLE` | 등록 업종 `CAFE`, `BAKERY`는 픽업 가능, `OTHER`는 픽업 불가 |
+| 픽업 기능 | `pickupEnabled=true/false` | 모든 등록 업종이 선택 가능 |
 
 ### 입점 확정
 
@@ -372,20 +372,20 @@ OPEN ◀────────────▶ TEMPORARILY_CLOSED
 - 정규 영업시간 밖, 브레이크타임 또는 개별 휴무라는 사실만으로 중앙 운영 상태를 `TEMPORARILY_CLOSED`로 변경하지 않는다.
 - 사용자에게 표시할 현재 영업 여부는 `OPEN` 여부, 정규 영업시간, 브레이크타임과 적용 중인 휴무·임시 휴점 사건을 중앙 시각으로 조합해 계산한다.
 
-### 픽업 자격 전이와 독립성
+### 픽업 기능과 독립성
 
-- 등록 신청의 필수 `businessType`이 `CAFE` 또는 `BAKERY`이면 `ELIGIBLE`, `OTHER`이면 `INELIGIBLE`이다.
-- 검색 카테고리·태그는 등록 업종과 픽업 자격을 만들거나 변경하지 않는다. 1차 MVP는 등록 뒤 `businessType` 변경 API를 제공하지 않는다.
-- 입점 확정과 픽업 자격은 독립적이므로 `APPROVED + INELIGIBLE` 매장도 일반 매장·예약 기능을 사용할 수 있다.
-- 픽업 예약 신규 생성은 `APPROVED + OPEN + ELIGIBLE`을 모두 만족하고 영업·픽업 제공 구간과 메뉴 수량 검증까지 통과해야 한다.
-- 픽업 자격의 부재·실패가 입점 승인이나 일반 예약 기능 상태를 바꾸지 않는다.
+- 등록 업종과 무관하게 모든 매장은 픽업 기능을 활성화할 수 있다.
+- 등록 업종과 검색 카테고리·태그는 픽업 기능을 만들거나 제한하지 않는다. 1차 MVP는 등록 뒤 `businessType` 변경 API를 제공하지 않는다.
+- 입점 확정과 픽업 기능은 독립적이므로 `APPROVED + pickupEnabled=false` 매장도 일반 매장·예약 기능을 사용할 수 있다.
+- 픽업 예약 신규 생성은 등록 업종과 무관하게 `APPROVED + OPEN + pickupEnabled`를 모두 만족하고 영업·픽업 제공 구간과 메뉴 수량 검증까지 통과해야 한다.
+- 픽업 기능의 비활성화가 입점 승인이나 일반 예약 기능 상태를 바꾸지 않는다.
 
 ### 소유권과 인수 조건
 
-- 세 상태 축은 모두 2번 팀원의 매장 도메인이 소유한다. 4번 팀원의 픽업 도메인은 `StorePickupEligibilityService`로 현재 자격을 검증한다.
+- 입점·운영·거래별 기능 상태는 모두 2번 팀원의 매장 도메인이 소유한다. 4번 팀원의 픽업 도메인은 Store의 공개 거래 자격 서비스로 `APPROVED + OPEN + pickupEnabled`를 검증한다.
 - 하나의 `StoreStatus` enum에 승인·영업·픽업 값을 혼합하지 않는다.
 - `APPROVED`가 아닌 매장은 공개·신규 거래 기능을 사용할 수 없다.
-- `APPROVED + OPEN`이어도 `ELIGIBLE`이 아니면 픽업만 거부되고 일반 예약은 가능하다.
+- `APPROVED + OPEN`이어도 `pickupEnabled=false`이면 픽업만 거부되고 일반 예약 기능에는 영향을 주지 않는다.
 - 영업시간 밖이라는 이유만으로 매장 운영 상태 이력이 변경되지 않는다.
 - 1차 MVP 코드와 OpenAPI에 플랫폼 운영자 수동 심사 상태가 없다.
 
@@ -417,9 +417,7 @@ erDiagram
     MENU_INVENTORY_POOLS ||--o{ MENU_INVENTORY_LEDGER : records
     MENU_INVENTORY_BUCKETS ||--o{ MENU_HOLD_ITEMS : consumed_by
 
-    STORES ||--o{ PICKUP_TIME_SLOTS : offers
     STORES ||--o{ PICKUP_RESERVATIONS : receives
-    PICKUP_TIME_SLOTS ||--o{ PICKUP_RESERVATIONS : scheduled_at
     PICKUP_RESERVATIONS ||--|{ PICKUP_RESERVATION_ITEMS : contains
     MENUS ||--o{ PICKUP_RESERVATION_ITEMS : selected_as
     MENU_INVENTORY_BUCKETS ||--o{ PICKUP_RESERVATION_ITEMS : consumed_by
@@ -447,7 +445,7 @@ erDiagram
 - 픽업 예약은 일반 방문 예약의 인원·팀 수 수용량과 분리하되, 일반 예약의 선택 메뉴 홀드와 동일한 날짜·시간대별 메뉴 재고 원장을 공유한다.
 - 따라서 픽업 예약은 `reservation_capacity_buckets`와 `reservation_capacity_allocations`를 만들거나 소비하지 않는다.
 - 픽업 예약 항목은 일반 예약의 메뉴 홀드 항목과 같은 `menu_inventory_buckets`를 차감하고 모든 수량 변화는 같은 `menu_inventory_ledger`에 기록한다.
-- 픽업 시간 약속은 `pickup_time_slots`를 사용하며 일반 방문 예약의 좌석성 수용량과 의미를 합치지 않는다.
+- 픽업 시간 약속은 게시된 현재 `menu_inventory_buckets` 제공 구간을 재사용하며 일반 방문 예약의 좌석성 수용량과 의미를 합치지 않는다. 요청의 `pickupDate + pickupTime`은 버킷의 `serviceDate + startTime`과 정확히 일치해야 하고 종료 시각은 해당 버킷에서 결정한다.
 
 ### 채택하지 않는 구조
 

@@ -2,7 +2,9 @@ package com.miriyum.domain.menuhold.service;
 
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketKey;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventoryBucketView;
@@ -68,7 +70,7 @@ class MenuInventoryService {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    List<InventoryAllocationResult> acquireInventory(InventoryAcquireRequest request) {
+    List<InventoryAcquisitionResult> acquireInventory(InventoryAcquireRequest request) {
         Map<Long, Integer> quantitiesByBucketId = new HashMap<>();
         for (InventoryAcquireRequest.Selection selection : request.selections()) {
             Long bucketId = bucketRepository.findBucketId(selection.key());
@@ -90,7 +92,7 @@ class MenuInventoryService {
                 .toList();
         requireCurrentPolicies(buckets, lockedBuckets);
 
-        List<InventoryAllocationResult> results = new ArrayList<>();
+        List<InventoryAcquisitionResult> results = new ArrayList<>();
         List<MenuInventoryLedger> events = new ArrayList<>();
         for (MenuInventoryBucket bucket : buckets) {
             InventoryAllocation allocation = bucket.planAcquire(quantitiesByBucketId.get(bucket.getId()));
@@ -100,8 +102,15 @@ class MenuInventoryService {
             if (updated != 1) {
                 throw new ServiceException(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
             }
-            results.add(new InventoryAllocationResult(
+            results.add(new InventoryAcquisitionResult(
+                    new InventoryBucketKey(
+                            bucket.getMenuId(), bucket.getServiceDate(), bucket.getStartTime(),
+                            bucket.getEndDate(), bucket.getEndTime(),
+                            bucket.getInventoryPolicyVersion()),
                     bucket.getId(),
+                    bucket.getMenuId(),
+                    bucket.getInventoryPolicyVersion(),
+                    quantitiesByBucketId.get(bucket.getId()),
                     allocation.onlineHoldQuantity(),
                     allocation.sharedQuantity()));
             appendAcquireEvents(request.operationId(), bucket, allocation, events);
