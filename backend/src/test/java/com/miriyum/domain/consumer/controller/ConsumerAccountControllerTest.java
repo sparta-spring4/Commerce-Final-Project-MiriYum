@@ -1,6 +1,8 @@
 package com.miriyum.domain.consumer.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,7 +13,16 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
+import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
+import com.miriyum.domain.reservation.dto.response.ReservationHistoryItemResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
+import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.global.response.PageMetadata;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +35,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -73,6 +85,9 @@ class ConsumerAccountControllerTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @MockitoBean
+    private ReservationService reservationService;
 
     private Long accountId;
 
@@ -129,6 +144,89 @@ class ConsumerAccountControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_011"));
+    }
+
+    @Test
+    @DisplayName("인증된 소비자는 자신의 예약 내역 페이지를 조회한다")
+    void getReservationHistoryReturnsReservationPage() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        ReservationHistoryPageResponse page = new ReservationHistoryPageResponse(
+                List.of(new ReservationHistoryItemResponse(
+                        "91",
+                        "7",
+                        "미리윰 식당",
+                        LocalDate.of(2026, 8, 10),
+                        CustomerReservationTimeStatus.RESOLVED,
+                        OffsetDateTime.parse("2026-08-10T18:00:00+09:00"),
+                        OffsetDateTime.parse("2026-08-10T19:00:00+09:00"),
+                        "Asia/Seoul",
+                        2,
+                        "CONFIRMED",
+                        OffsetDateTime.parse("2026-08-01T00:00:00Z")
+                )),
+                new PageMetadata(0, 20, 1, 1, false)
+        );
+        given(reservationService.getConsumerReservationHistory(
+                eq(accountId),
+                eq(ReservationHistorySearchRequest.from(
+                        "CONFIRMED",
+                        0,
+                        20,
+                        "serviceDate,asc"
+                ))
+        )).willReturn(page);
+
+        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .queryParam("status", "CONFIRMED")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20")
+                        .queryParam("sort", "serviceDate,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.items[0].reservationId").value("91"))
+                .andExpect(jsonPath("$.data.items[0].storeId").value("7"))
+                .andExpect(jsonPath("$.data.items[0].timeStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.data.items[0].startAt")
+                        .value("2026-08-10T18:00:00+09:00"))
+                .andExpect(jsonPath("$.data.items[0].serviceEndAt")
+                        .value("2026-08-10T19:00:00+09:00"))
+                .andExpect(jsonPath("$.data.items[0].partySize").value(2))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1));
+    }
+
+    @Test
+    @DisplayName("예약이 없으면 빈 목록과 0건 페이지를 200으로 반환한다")
+    void getReservationHistoryReturnsEmptyPage() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        given(reservationService.getConsumerReservationHistory(
+                eq(accountId),
+                eq(ReservationHistorySearchRequest.from(null, null, null, null))
+        )).willReturn(new ReservationHistoryPageResponse(
+                List.of(),
+                new PageMetadata(0, 20, 0, 0, false)
+        ));
+
+        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.page.number").value(0))
+                .andExpect(jsonPath("$.data.page.totalElements").value(0))
+                .andExpect(jsonPath("$.data.page.totalPages").value(0))
+                .andExpect(jsonPath("$.data.page.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("허용하지 않은 예약 내역 정렬은 COMMON_001로 거절한다")
+    void getReservationHistoryRejectsUnknownSort() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+
+        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .queryParam("sort", "status,asc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
     }
 
     /**
