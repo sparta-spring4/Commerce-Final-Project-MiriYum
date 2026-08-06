@@ -215,9 +215,17 @@ class MenuInventoryRuntimeIT {
                     LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                     "Asia/Seoul", 1L, 7, 3, 1, 3, true));
             bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    secondMenuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                    "Asia/Seoul", 1L, 4, 2, 1, 1, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
                     menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
                     LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                     "Asia/Seoul", 1L, 9, 4, 2, 3, true));
+            bucketRepository.saveAndFlush(MenuInventoryBucket.create(
+                    menuId, LocalDate.of(2026, 8, 10), LocalTime.of(12, 0),
+                    LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                    "Asia/Seoul", 1L, 8, 3, 2, 3, true));
             bucketRepository.saveAndFlush(MenuInventoryBucket.create(
                     menuId, LocalDate.of(2026, 8, 11), LocalTime.of(12, 0),
                     LocalDate.of(2026, 8, 11), LocalTime.of(13, 0),
@@ -233,21 +241,35 @@ class MenuInventoryRuntimeIT {
         assertThat(result).extracting(
                         MenuInventoryAvailability::menuId,
                         MenuInventoryAvailability::startTime,
+                        MenuInventoryAvailability::endDate,
                         MenuInventoryAvailability::endTime,
                         MenuInventoryAvailability::inventoryPolicyVersion,
                         MenuInventoryAvailability::availableOnlineQuantity,
                         MenuInventoryAvailability::availabilityStatus)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(
-                                menuId, LocalTime.of(12, 0), LocalTime.of(13, 0),
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(12, 30),
+                                1L, 3,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                                 1L, 7,
                                 MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
                         org.assertj.core.groups.Tuple.tuple(
-                                secondMenuId, LocalTime.of(12, 0), LocalTime.of(13, 0),
+                                secondMenuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(13, 0),
                                 1L, 6,
                                 MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
                         org.assertj.core.groups.Tuple.tuple(
-                                menuId, LocalTime.of(13, 0), LocalTime.of(14, 0),
+                                menuId, LocalTime.of(12, 0),
+                                LocalDate.of(2026, 8, 11), LocalTime.of(0, 30),
+                                1L, 6,
+                                MenuInventoryAvailability.AvailabilityStatus.AVAILABLE),
+                        org.assertj.core.groups.Tuple.tuple(
+                                menuId, LocalTime.of(13, 0),
+                                LocalDate.of(2026, 8, 10), LocalTime.of(14, 0),
                                 2L, 2,
                                 MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT));
     }
