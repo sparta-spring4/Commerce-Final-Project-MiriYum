@@ -16,7 +16,6 @@ import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.BusinessType;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.GeocodingStatus;
 import com.miriyum.domain.store.core.model.StoreGeocodingCandidate;
@@ -59,7 +58,10 @@ import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class StoreServiceTest {
@@ -99,7 +101,9 @@ class StoreServiceTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        objectMapper = JsonMapper.builder()
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .build();
         geocodingValidator = new StoreGeocodingValidator();
         lenient().when(geocodingPort.geocode(any())).thenAnswer(invocation ->
                 geocodingResult(invocation.getArgument(0), "서울"));
@@ -253,7 +257,7 @@ class StoreServiceTest {
     }
 
     @Test
-    void menuMutationAuthorityReturnsLockedStorePickupEligibility() {
+    void menuMutationAuthorityReturnsLockedStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
         given(storeRepository.findByIdForUpdate(STORE_ID))
@@ -262,10 +266,7 @@ class StoreServiceTest {
         StoreMenuAuthority authority =
                 storeService.requireMenuMutationAuthority(OPERATOR_ID, STORE_ID);
 
-        assertThat(authority)
-                .isEqualTo(new StoreMenuAuthority(
-                        STORE_ID,
-                        com.miriyum.domain.store.core.enums.PickupEligibility.ELIGIBLE));
+        assertThat(authority).isEqualTo(new StoreMenuAuthority(STORE_ID));
     }
 
     @Test
@@ -470,20 +471,6 @@ class StoreServiceTest {
                 storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result.menuHoldEligible()).isFalse();
-    }
-
-    @Test
-    void transactionEligibilityCombinesStorePickupEligibility() {
-        Store store = transactionStore();
-        ReflectionTestUtils.setField(
-                store, "pickupEligibility", PickupEligibility.INELIGIBLE);
-        stubTransactionStoreAndMenu(store, publishedMenu(true, true));
-
-        MenuTransactionEligibility result =
-                storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID);
-
-        assertThat(result.menuHoldEligible()).isTrue();
-        assertThat(result.pickupEligible()).isFalse();
     }
 
     @Test
@@ -729,7 +716,12 @@ class StoreServiceTest {
     }
 
     @Test
-    void replayedLegacyCreateDefaultsMissingGeocodingToUnverified() {
+    void replayedCreateAcceptsLegacyPickupEligibilityPayload() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ObjectNode legacyPayload = objectMapper.valueToTree(ManagedStoreResponse.from(store));
+        legacyPayload.remove("geocoding");
+        legacyPayload.put("pickupEligibility", "ELIGIBLE");
         given(idempotencyExecutor.execute(any(), any()))
                 .willReturn(new IdempotentOutcome(
                         true,
@@ -737,34 +729,19 @@ class StoreServiceTest {
                         "SUCCESS",
                         "STORE",
                         Long.toString(STORE_ID),
-                        objectMapper.readTree("""
-                                {
-                                  "storeId": "7",
-                                  "name": "미리윰",
-                                  "region": "SEOUL",
-                                  "address": "서울시 중구",
-                                  "timeZoneId": "Asia/Seoul",
-                                  "storeCategoryCode": "CAFE_BAKERY",
-                                  "verificationStatus": "APPROVED",
-                                  "operationStatus": "OPEN",
-                                  "pickupEligibility": "ELIGIBLE",
-                                  "modes": {
-                                    "reservationEnabled": true,
-                                    "menuHoldEnabled": true,
-                                    "pickupEnabled": true
-                                  }
-                                }
-                                """)));
+                        legacyPayload));
 
         StoreCommandResult result = storeService.create(
                 OPERATOR_ID,
                 IdempotencyKey.parse(IDEMPOTENCY_KEY),
                 validCreateRequest());
 
+        assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
         assertThat(result.data().geocoding().status()).isEqualTo(GeocodingStatus.UNVERIFIED);
         assertThat(result.data().geocoding().addressVersion()).isEqualTo(1L);
         assertThat(result.data().geocoding().latitude()).isNull();
         assertThat(result.data().geocoding().longitude()).isNull();
+        then(storeRepository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -784,6 +761,28 @@ class StoreServiceTest {
         then(catalogPolicy).shouldHaveNoInteractions();
         then(transactionExecutor).should().execute(any());
         then(idempotencyExecutor).should().execute(any(), any());
+    }
+
+    @Test
+    void replayedCreateStillRejectsUnrelatedUnknownPayloadField() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ObjectNode invalidPayload = objectMapper.valueToTree(ManagedStoreResponse.from(store));
+        invalidPayload.put("unexpectedField", true);
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(new IdempotentOutcome(
+                        true,
+                        201,
+                        "SUCCESS",
+                        "STORE",
+                        Long.toString(STORE_ID),
+                        invalidPayload));
+
+        assertThatThrownBy(() -> storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest()))
+                .isInstanceOf(tools.jackson.databind.exc.UnrecognizedPropertyException.class);
     }
 
     @Test

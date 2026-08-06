@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.menu.service;
 
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.service.StoreMenuAuthority;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
@@ -46,10 +45,6 @@ public class MenuContentPolicy {
         categories.addAll(request.secondaryCategoryCodes());
         if (!catalogService.findUnknownCodes(CatalogKind.MENU_CATEGORY, categories).isEmpty()) {
             throw new ServiceException(StoreErrorCode.CATALOG_CODE_INVALID);
-        }
-        if (request.pickupSelectionAllowed()
-                && store.pickupEligibility() != PickupEligibility.ELIGIBLE) {
-            throw new ServiceException(StoreErrorCode.PICKUP_NOT_ELIGIBLE);
         }
         List<String> normalizedTags = normalizeTags(request.localTags());
         return new MenuContent(

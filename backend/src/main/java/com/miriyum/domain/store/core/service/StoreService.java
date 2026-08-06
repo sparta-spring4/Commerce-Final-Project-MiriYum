@@ -6,7 +6,6 @@ import com.miriyum.domain.store.core.dto.StoreModesRequest;
 import com.miriyum.domain.store.core.dto.StoreUpdateRequest;
 import com.miriyum.domain.store.core.entity.Store;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.core.enums.VerificationStatus;
 import com.miriyum.domain.store.core.model.VerifiedStoreGeocoding;
@@ -37,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 @RequiredArgsConstructor
@@ -271,7 +271,7 @@ public class StoreService {
         operatorAccountService.getMe(operatorAccountId);
         Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
         requireScheduleState(store);
-        return new StoreMenuAuthority(store.getId(), store.getPickupEligibility());
+        return new StoreMenuAuthority(store.getId());
     }
 
     /**
@@ -302,7 +302,6 @@ public class StoreService {
                 && store.isMenuHoldEnabled()
                 && published.isHoldSelectionAllowed();
         boolean pickupEligible = store.isPickupEnabled()
-                && store.getPickupEligibility() == PickupEligibility.ELIGIBLE
                 && published.isPickupSelectionAllowed();
         return new MenuTransactionEligibility(
                 storeId,
@@ -410,8 +409,10 @@ public class StoreService {
     }
 
     private StoreCommandResult commandResult(IdempotentOutcome outcome) {
+        ObjectNode replayPayload = (ObjectNode) outcome.data().deepCopy();
+        replayPayload.remove("pickupEligibility");
         ManagedStoreResponse response =
-                objectMapper.treeToValue(outcome.data(), ManagedStoreResponse.class);
+                objectMapper.treeToValue(replayPayload, ManagedStoreResponse.class);
         return new StoreCommandResult(outcome.httpStatus(), response);
     }
 

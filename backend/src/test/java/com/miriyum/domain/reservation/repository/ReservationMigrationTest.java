@@ -160,7 +160,6 @@ class ReservationMigrationTest {
                             store_category_code,
                             verification_status,
                             operation_status,
-                            pickup_eligibility,
                             reservation_enabled,
                             menu_hold_enabled,
                             pickup_enabled,
@@ -170,7 +169,7 @@ class ReservationMigrationTest {
                         VALUES (
                             ?, ?, '1234567890', 'CAFE', '미리윰', '', 'SEOUL', '서울시 중구',
                             'Asia/Seoul', NOW(6), NOW(6), 'STORE_ONBOARDING_REQUIRED_TERMS_V1',
-                            'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
+                            'CAFE_BAKERY', 'APPROVED', 'OPEN',
                             TRUE, TRUE, TRUE, NOW(6), NOW(6)
                         )
                         """,
@@ -950,7 +949,6 @@ class ReservationMigrationTest {
                             store_category_code,
                             verification_status,
                             operation_status,
-                            pickup_eligibility,
                             reservation_enabled,
                             menu_hold_enabled,
                             pickup_enabled,
@@ -961,7 +959,7 @@ class ReservationMigrationTest {
                             ?, ?, ?, 'CAFE', ?, '', 'SEOUL', '서울시 중구',
                             'Asia/Seoul', NOW(6), NOW(6),
                             'STORE_ONBOARDING_REQUIRED_TERMS_V1',
-                            'CAFE_BAKERY', 'APPROVED', 'OPEN', 'ELIGIBLE',
+                            'CAFE_BAKERY', 'APPROVED', 'OPEN',
                             TRUE, TRUE, TRUE, NOW(6), NOW(6)
                         )
                         """,

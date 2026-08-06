@@ -141,17 +141,13 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - 사업자등록증 이미지·파일 URL을 받지 않는다.
 - 신청자는 `applicantSelfAttested=true`와 `requiredTermsAgreed=true`를 함께 제출해야 한다. 서버는 두 동의 시각과 필수 약관 버전 `STORE_ONBOARDING_REQUIRED_TERMS_V1`을 매장에 기록한다.
 
-입점 검증, 운영 상태와 픽업 자격은 각각 다음 축으로 반환한다.
+입점 검증과 운영 상태는 각각 다음 축으로 반환한다. 픽업 사용 여부는 별도 상태 축 없이 `modes.pickupEnabled`로 반환한다.
 
 | 축 | 값 |
 | --- | --- |
 | `verificationStatus` | `APPROVED` |
 | `operationStatus` | `OPEN`, `TEMPORARILY_CLOSED`, `CLOSED` |
-| `pickupEligibility` | `ELIGIBLE`, `INELIGIBLE` |
-
-등록 업종이 `CAFE` 또는 `BAKERY`이면 픽업 자격 `ELIGIBLE`, `OTHER`이면 `INELIGIBLE`로 확정한다. 검색 카테고리·태그는 이 값을 바꾸지 않는다. `OTHER` 매장의 일반 입점·검색·예약 기능은 유지하며 픽업 기능만 실패 폐쇄한다.
-
-등록 요청이 `businessType=OTHER`와 `modes.pickupEnabled=true`를 함께 보내면 서버는 값을 자동 보정하거나 부분 등록하지 않고 `STORE_008`로 전체 요청을 거절한다. 신청자는 `pickupEnabled=false`로 재요청해 일반 매장·예약 기능을 즉시 등록할 수 있다.
+등록 업종과 검색 카테고리·태그는 픽업 사용 여부를 제한하지 않는다. `CAFE`, `BAKERY`, `OTHER` 모두 등록·수정 요청에서 `modes.pickupEnabled=true`를 선택할 수 있다.
 
 ## 2차 MVP 주소 검증과 좌표 저장
 
@@ -250,7 +246,6 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | `STORE_005` | 409 | 현재 매장 상태에서 요청한 관리 작업 불가 |
 | `STORE_006` | 409 | 영업시간·브레이크타임·예약 접수 구간 충돌 |
 | `STORE_007` | 409 | 현재 입점 검증 상태에서 공개·운영 불가 |
-| `STORE_008` | 409 | 픽업 자격이 없어 픽업 기능 활성화 불가 |
 | `STORE_009` | 404 | 메뉴를 찾을 수 없음 |
 | `STORE_010` | 409 | 현재 메뉴 상태에서 요청한 전이 불가 |
 

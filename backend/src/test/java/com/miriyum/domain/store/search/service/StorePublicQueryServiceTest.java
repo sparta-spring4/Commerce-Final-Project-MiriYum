@@ -10,7 +10,6 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.PickupEligibility;
 import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
@@ -168,7 +167,7 @@ class StorePublicQueryServiceTest {
         return new PublicStoreSnapshot(
                 id, "미리윰", "", Region.SEOUL, "서울 중구", "Asia/Seoul",
                 "CAFE_BAKERY", List.of("DATE"), operationStatus,
-                PickupEligibility.ELIGIBLE, reservationEnabled, true, true);
+                reservationEnabled, true, true);
     }
 
     private static PublicMenu publicMenu(long id) {
