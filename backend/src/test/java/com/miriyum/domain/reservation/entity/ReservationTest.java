@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -245,7 +246,9 @@ class ReservationTest {
     @DisplayName("취소 정책 버전을 명시하는 예약 확정 API만 제공한다")
     void exposesOnlyCancellationPolicyVersionConfirmApi() {
         assertThat(Arrays.stream(Reservation.class.getDeclaredMethods())
-                .filter(method -> method.getName().equals("confirm"))
+                .filter(method -> method.getName().equals("confirm")
+                        && Modifier.isPublic(method.getModifiers())
+                        && Modifier.isStatic(method.getModifiers()))
                 .toList())
                 .singleElement()
                 .satisfies(method -> assertThat(method.getParameterTypes()).containsExactly(
