@@ -5,10 +5,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
@@ -56,6 +59,15 @@ class ReservationTimePolicyActivationServiceTest {
     @Mock
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
+    @Mock
+    private ReservationRepository reservationRepository;
+
+    @Mock
+    private ConsumerAccountService consumerAccountService;
+
+    @Mock
+    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+
     private ReservationService reservationService;
 
     @BeforeEach
@@ -69,7 +81,10 @@ class ReservationTimePolicyActivationServiceTest {
                 auditRepository,
                 new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                capacityBucketRepository
+                capacityBucketRepository,
+                reservationRepository,
+                consumerAccountService,
+                menuHoldSnapshotQueryService
         );
     }
 
