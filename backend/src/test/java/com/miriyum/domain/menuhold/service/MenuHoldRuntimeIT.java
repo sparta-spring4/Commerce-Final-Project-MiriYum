@@ -9,10 +9,12 @@ import static org.mockito.Mockito.doThrow;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
@@ -46,6 +48,11 @@ import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import jakarta.persistence.EntityManagerFactory;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -88,6 +95,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class MenuHoldRuntimeIT {
 
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
+    private static final long LOCK_WAIT_OBSERVATION_TIMEOUT_MILLIS = 5_000L;
+    private static final long LOCK_WAIT_OBSERVATION_POLL_MILLIS = 25L;
     @Container static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @DynamicPropertySource
@@ -304,12 +313,168 @@ class MenuHoldRuntimeIT {
 
     @Test
     void terminalCommandsRequireCallerTransaction() {
+        assertThatThrownBy(() -> service.lockForTermination(Long.MAX_VALUE))
+                .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> service.release(
                 new MenuHoldReleaseCommand(Long.MAX_VALUE, "no-transaction-release")))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> service.fulfill(
                 new MenuHoldFulfillCommand(Long.MAX_VALUE, "no-transaction-fulfill")))
                 .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    @DisplayName("종결 선잠금은 연결 홀드 존재만 반환하고 상태·수량·원장을 변경하지 않는다")
+    void prelockReportsPresentHoldWithoutPersistentSideEffects() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "prelock-presence-acquire")));
+        long holdsBefore = holdRepository.count();
+        int itemsBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_items", Integer.class);
+        int ledgersBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_inventory_ledger", Integer.class);
+        int idempotencyBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands", Integer.class);
+
+        MenuHoldTerminationPresence result = transactions.execute(status ->
+                service.lockForTermination(reservation.getId()));
+
+        assertThat(result).isEqualTo(MenuHoldTerminationPresence.HOLD_PRESENT);
+        assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(holdRepository.count()).isEqualTo(holdsBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_items", Integer.class)).isEqualTo(itemsBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_inventory_ledger", Integer.class)).isEqualTo(ledgersBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands", Integer.class))
+                .isEqualTo(idempotencyBefore);
+    }
+
+    @Test
+    @DisplayName("메뉴 홀드가 없는 예약의 종결 선잠금은 행을 만들지 않고 정상 부재를 반환한다")
+    void prelockReportsNoHoldWithoutCreatingPersistentState() {
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        long holdsBefore = holdRepository.count();
+        int itemsBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_items", Integer.class);
+        int ledgersBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_inventory_ledger", Integer.class);
+
+        MenuHoldTerminationPresence result = transactions.execute(status ->
+                service.lockForTermination(reservation.getId()));
+
+        assertThat(result).isEqualTo(MenuHoldTerminationPresence.NO_HOLD);
+        assertThat(holdRepository.count()).isEqualTo(holdsBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_hold_items", Integer.class)).isEqualTo(itemsBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_inventory_ledger", Integer.class)).isEqualTo(ledgersBefore);
+    }
+
+    @Test
+    @DisplayName("종결 선잠금은 caller transaction 종료 전 경합 해제를 직렬화한다")
+    void prelockSerializesCompetingReleaseUntilCallerTransactionCompletes() throws Exception {
+        transactions.execute(status -> bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "prelock-race-acquire")));
+        CountDownLatch prelocked = new CountDownLatch(1);
+        CountDownLatch allowPrelockCommit = new CountDownLatch(1);
+        CountDownLatch releaseStarted = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<MenuHoldTerminationPresence> lock = executor.submit(() ->
+                    transactions.execute(status -> {
+                        MenuHoldTerminationPresence presence =
+                                service.lockForTermination(reservation.getId());
+                        prelocked.countDown();
+                        try {
+                            if (!allowPrelockCommit.await(10, TimeUnit.SECONDS)) {
+                                throw new AssertionError("prelock commit was not allowed");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                        return presence;
+                    }));
+            assertThat(prelocked.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Future<MenuHoldCommandResult.Outcome> release = executor.submit(() -> {
+                releaseStarted.countDown();
+                return transactions.execute(status -> service.release(
+                        new MenuHoldReleaseCommand(
+                                reservation.getId(), "prelock-race-release")).outcome());
+            });
+            assertThat(releaseStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            try {
+                awaitMenuHoldLockWait();
+            } finally {
+                allowPrelockCommit.countDown();
+            }
+
+            assertThat(lock.get(10, TimeUnit.SECONDS))
+                    .isEqualTo(MenuHoldTerminationPresence.HOLD_PRESENT);
+            assertThat(release.get(10, TimeUnit.SECONDS))
+                    .isEqualTo(MenuHoldCommandResult.Outcome.RELEASED);
+        }
+        assertThat(holdFor(reservation.getId()).getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        assertThat(restoreLedgerCount("prelock-race-acquire")).isEqualTo(1);
+    }
+
+    private void awaitMenuHoldLockWait() {
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(LOCK_WAIT_OBSERVATION_TIMEOUT_MILLIS);
+        try (Connection monitoringConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(),
+                "root",
+                MYSQL.getPassword()
+        )) {
+            while (System.nanoTime() < deadlineNanos) {
+                if (hasMenuHoldLockWait(monitoringConnection)) {
+                    return;
+                }
+                try {
+                    TimeUnit.MILLISECONDS.sleep(LOCK_WAIT_OBSERVATION_POLL_MILLIS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "interrupted while observing menu hold lock wait",
+                            exception
+                    );
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException(
+                    "unable to observe menu hold lock waits with MySQL root connection",
+                    exception
+            );
+        }
+        throw new AssertionError("release never entered a MySQL row-lock wait for menu_holds");
+    }
+
+    private static boolean hasMenuHoldLockWait(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) "
+                        + "FROM performance_schema.data_lock_waits lock_wait "
+                        + "JOIN performance_schema.data_locks requested_lock "
+                        + "ON requested_lock.engine = lock_wait.engine "
+                        + "AND requested_lock.engine_lock_id "
+                        + "= lock_wait.requesting_engine_lock_id "
+                        + "WHERE requested_lock.object_schema = DATABASE() "
+                        + "AND requested_lock.object_name = 'menu_holds'"
+        ); ResultSet resultSet = statement.executeQuery()) {
+            return resultSet.next() && resultSet.getInt(1) > 0;
+        }
     }
 
     @Test

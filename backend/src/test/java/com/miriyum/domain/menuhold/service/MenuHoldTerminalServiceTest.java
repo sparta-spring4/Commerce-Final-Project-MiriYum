@@ -5,12 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
+import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
@@ -37,6 +40,32 @@ class MenuHoldTerminalServiceTest {
     @Test
     void runtimeImplementsThePublicMenuHoldService() {
         assertThat(MenuHoldService.class).isAssignableFrom(MenuHoldServiceRuntime.class);
+    }
+
+    @Test
+    void prelocksPresentHoldWithoutInterpretingStateOrCallingInventory() {
+        MenuHold hold = confirmedHold();
+        given(holdRepository.findByReservationIdForUpdate(10L))
+                .willReturn(Optional.of(hold));
+
+        MenuHoldTerminationPresence result = service().lockForTermination(10L);
+
+        assertThat(result).isEqualTo(MenuHoldTerminationPresence.HOLD_PRESENT);
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+        verify(holdRepository).findByReservationIdForUpdate(10L);
+        verifyNoInteractions(storeService, intervalService, inventoryService);
+    }
+
+    @Test
+    void reportsNoHoldWithoutCreatingOneOrCallingInventory() {
+        given(holdRepository.findByReservationIdForUpdate(10L))
+                .willReturn(Optional.empty());
+
+        MenuHoldTerminationPresence result = service().lockForTermination(10L);
+
+        assertThat(result).isEqualTo(MenuHoldTerminationPresence.NO_HOLD);
+        verify(holdRepository).findByReservationIdForUpdate(10L);
+        verifyNoInteractions(storeService, intervalService, inventoryService);
     }
 
     @Test

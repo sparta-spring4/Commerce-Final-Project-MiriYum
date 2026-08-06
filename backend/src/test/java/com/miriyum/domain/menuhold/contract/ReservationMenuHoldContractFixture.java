@@ -4,6 +4,7 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.global.exception.ServiceException;
 import java.util.ArrayList;
@@ -13,23 +14,43 @@ import java.util.List;
 public final class ReservationMenuHoldContractFixture implements MenuHoldService {
 
     private final ServiceException failure;
+    private final MenuHoldTerminationPresence terminationPresence;
     private final List<MenuHoldCreateCommand> createCommands = new ArrayList<>();
     private final List<MenuHoldReleaseCommand> releaseCommands = new ArrayList<>();
     private final List<MenuHoldFulfillCommand> fulfillCommands = new ArrayList<>();
+    private final List<Long> terminationLockReservationIds = new ArrayList<>();
 
-    private ReservationMenuHoldContractFixture(ServiceException failure) {
+    private ReservationMenuHoldContractFixture(
+            ServiceException failure,
+            MenuHoldTerminationPresence terminationPresence
+    ) {
         this.failure = failure;
+        this.terminationPresence = terminationPresence;
     }
 
     public static ReservationMenuHoldContractFixture succeeding() {
-        return new ReservationMenuHoldContractFixture(null);
+        return new ReservationMenuHoldContractFixture(
+                null, MenuHoldTerminationPresence.HOLD_PRESENT);
+    }
+
+    public static ReservationMenuHoldContractFixture succeedingWithNoHold() {
+        return new ReservationMenuHoldContractFixture(
+                null, MenuHoldTerminationPresence.NO_HOLD);
     }
 
     public static ReservationMenuHoldContractFixture failing(ServiceException failure) {
         if (failure == null) {
             throw new IllegalArgumentException("failure must not be null");
         }
-        return new ReservationMenuHoldContractFixture(failure);
+        return new ReservationMenuHoldContractFixture(
+                failure, MenuHoldTerminationPresence.HOLD_PRESENT);
+    }
+
+    @Override
+    public MenuHoldTerminationPresence lockForTermination(long reservationId) {
+        terminationLockReservationIds.add(reservationId);
+        throwIfConfigured();
+        return terminationPresence;
     }
 
     @Override
@@ -66,6 +87,10 @@ public final class ReservationMenuHoldContractFixture implements MenuHoldService
 
     public List<MenuHoldFulfillCommand> fulfillCommands() {
         return List.copyOf(fulfillCommands);
+    }
+
+    public List<Long> terminationLockReservationIds() {
+        return List.copyOf(terminationLockReservationIds);
     }
 
     private void throwIfConfigured() {
