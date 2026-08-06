@@ -5,6 +5,11 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.recommendation.ranking.RankedRecommendation;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationCursorKey;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationReason;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationSearchCandidate;
+import com.miriyum.domain.store.recommendation.ranking.StoreRecommendationService;
 import com.miriyum.domain.store.search.dto.IntegratedStoreSearchData;
 import com.miriyum.domain.store.search.dto.IntegratedStoreSearchItem;
 import com.miriyum.domain.store.search.dto.NormalizedSearchCondition;
@@ -17,10 +22,12 @@ import com.miriyum.domain.store.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.store.search.interpreter.PriceRange;
 import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
+import com.miriyum.domain.store.search.query.IntegratedStoreSearchSort;
 import com.miriyum.domain.store.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.store.search.repository.IntegratedStoreSearchRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,24 +45,51 @@ public class IntegratedStoreSearchService {
     private final ReservationService reservationService;
     private final StoreSearchCandidateLimit candidateLimit;
     private final IntegratedSearchCursorCodec cursorCodec;
+    private final StoreRecommendationService recommendationService;
+    private final Clock clock;
 
     public IntegratedStoreSearchService(
             IntegratedSearchInterpreter interpreter,
             IntegratedStoreSearchRepository repository,
             ReservationService reservationService,
             StoreSearchCandidateLimit candidateLimit,
-            IntegratedSearchCursorCodec cursorCodec
+            IntegratedSearchCursorCodec cursorCodec,
+            StoreRecommendationService recommendationService,
+            Clock clock
     ) {
         this.interpreter = interpreter;
         this.repository = repository;
         this.reservationService = reservationService;
         this.candidateLimit = candidateLimit;
         this.cursorCodec = cursorCodec;
+        this.recommendationService = recommendationService;
+        this.clock = clock;
     }
 
     /** 검색 원문을 저장하지 않고 현재 MySQL 상태를 재검증한 cursor 결과를 반환한다. */
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public IntegratedStoreSearchData search(
+            String searchInput,
+            boolean includesInfants,
+            boolean availableOnly,
+            String sort,
+            String cursor,
+            Integer size
+    ) {
+        return search(
+                null,
+                searchInput,
+                includesInfants,
+                availableOnly,
+                sort,
+                cursor,
+                size);
+    }
+
+    /** 유효한 소비자 principal이 있으면 추천 정렬에만 자기 이력을 가산한다. */
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
+    public IntegratedStoreSearchData search(
+            Long consumerAccountId,
             String searchInput,
             boolean includesInfants,
             boolean availableOnly,
@@ -71,6 +105,17 @@ public class IntegratedStoreSearchService {
         }
 
         int requestedSize = size == null ? 20 : size;
+        IntegratedStoreSearchQuery requestQuery = IntegratedStoreSearchQuery.from(
+                condition, sort, cursor, requestedSize, cursorCodec);
+        if (requestQuery.sort() == IntegratedStoreSearchSort.RECOMMENDATION_DESC) {
+            return searchRecommendations(
+                    consumerAccountId,
+                    interpretation,
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    requestQuery);
+        }
         List<IntegratedStoreSearchItem> items = new ArrayList<>(requestedSize);
         String scanCursor = cursor;
         String responseCursor = null;
@@ -155,7 +200,146 @@ public class IntegratedStoreSearchService {
                 interpretation.warnings(),
                 interpretation.ruleVersion(),
                 interpretation.vocabularyVersion(),
+                null,
                 responseCursor);
+    }
+
+    private IntegratedStoreSearchData searchRecommendations(
+            Long consumerAccountId,
+            InterpretationResult interpretation,
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            IntegratedStoreSearchQuery requestQuery
+    ) {
+        int scanLimit = candidateLimit.value();
+        int scanPageSize = Math.min(50, scanLimit);
+        if (scanPageSize < 1) {
+            throw new IllegalStateException("store search candidate limit must be positive");
+        }
+        int scannedCandidates = 0;
+        String scanCursor = null;
+        List<RecommendationSearchCandidate> rankingCandidates = new ArrayList<>();
+        Map<Long, CandidateState> stateById = new LinkedHashMap<>();
+
+        while (scannedCandidates < scanLimit) {
+            IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
+                    condition,
+                    IntegratedStoreSearchSort.RELEVANCE_DESC.externalValue(),
+                    scanCursor,
+                    scanPageSize,
+                    cursorCodec);
+            var slice = repository.search(scanQuery);
+            List<IntegratedStoreSearchCandidate> original = slice.content();
+            List<IntegratedStoreSearchCandidate> before =
+                    repository.refreshCurrentlyPublic(original);
+            AvailabilityBatch availability = availabilityById(
+                    before, condition, includesInfants);
+            List<IntegratedStoreSearchCandidate> after = availability.valid()
+                    ? repository.refreshCurrentlyPublic(before)
+                    : List.of();
+            Map<Long, IntegratedStoreSearchCandidate> currentById = new LinkedHashMap<>();
+            after.forEach(candidate -> currentById.put(candidate.storeId(), candidate));
+
+            for (IntegratedStoreSearchCandidate originalCandidate : original) {
+                if (scannedCandidates >= scanLimit) {
+                    break;
+                }
+                scannedCandidates++;
+                IntegratedStoreSearchCandidate current =
+                        currentById.get(originalCandidate.storeId());
+                if (current == null) {
+                    continue;
+                }
+                ReservationAvailability candidateAvailability =
+                        availability.values().getOrDefault(
+                                current.storeId(),
+                                hasCompleteReservation(condition)
+                                        ? ReservationAvailability.UNAVAILABLE
+                                        : ReservationAvailability.NOT_REQUESTED);
+                candidateAvailability = reconcileCurrentState(
+                        current,
+                        candidateAvailability,
+                        hasCompleteReservation(condition));
+                if (availableOnly
+                        && candidateAvailability != ReservationAvailability.AVAILABLE) {
+                    continue;
+                }
+                if (stateById.putIfAbsent(
+                        current.storeId(),
+                        new CandidateState(current, candidateAvailability)) != null) {
+                    continue;
+                }
+                rankingCandidates.add(new RecommendationSearchCandidate(
+                        current.storeId(),
+                        current.relevanceTier(),
+                        candidateAvailability,
+                        null));
+            }
+
+            scanCursor = slice.nextCursor();
+            if (scanCursor == null || original.isEmpty()) {
+                break;
+            }
+        }
+
+        List<RankedRecommendation> ranked = recommendationService.rank(
+                consumerAccountId,
+                rankingCandidates,
+                condition,
+                clock.instant());
+        RecommendationCursorKey pageKey = requestQuery.cursor()
+                .map(decoded -> parseRecommendationCursor(
+                        decoded.sortValue(), decoded.storeId()))
+                .orElse(null);
+        List<RankedRecommendation> remaining = ranked.stream()
+                .filter(candidate -> pageKey == null || pageKey.isAfter(candidate))
+                .toList();
+        int pageSize = Math.min(requestQuery.size(), remaining.size());
+        List<RankedRecommendation> page = remaining.subList(0, pageSize);
+        List<IntegratedStoreSearchItem> items = page.stream()
+                .map(result -> new RankedCandidateState(
+                        result,
+                        stateById.get(result.candidate().storeId())))
+                .filter(result -> result.state() != null)
+                .map(result -> toItem(
+                        result.state().candidate(),
+                        result.state().availability(),
+                        result.ranked().reason()))
+                .toList();
+        String nextCursor = remaining.size() > pageSize && !page.isEmpty()
+                ? recommendationCursor(requestQuery, page.getLast())
+                : null;
+        return new IntegratedStoreSearchData(
+                items,
+                normalized(condition),
+                interpretation.warnings(),
+                interpretation.ruleVersion(),
+                interpretation.vocabularyVersion(),
+                StoreRecommendationService.RULE_VERSION,
+                nextCursor);
+    }
+
+    private String recommendationCursor(
+            IntegratedStoreSearchQuery requestQuery,
+            RankedRecommendation last
+    ) {
+        RecommendationCursorKey key = RecommendationCursorKey.from(last);
+        return cursorCodec.encode(
+                requestQuery,
+                key.serialize(),
+                key.storeId());
+    }
+
+    private static RecommendationCursorKey parseRecommendationCursor(
+            String value,
+            long storeId
+    ) {
+        try {
+            return RecommendationCursorKey.parse(value, storeId);
+        } catch (IllegalArgumentException exception) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
     }
 
     private AvailabilityBatch availabilityById(
@@ -235,6 +419,14 @@ public class IntegratedStoreSearchService {
             IntegratedStoreSearchCandidate candidate,
             ReservationAvailability availability
     ) {
+        return toItem(candidate, availability, null);
+    }
+
+    private static IntegratedStoreSearchItem toItem(
+            IntegratedStoreSearchCandidate candidate,
+            ReservationAvailability availability,
+            RecommendationReason reason
+    ) {
         PublicStoreCoordinates coordinates = candidate.latitude() == null
                 || candidate.longitude() == null
                 ? null
@@ -251,7 +443,8 @@ public class IntegratedStoreSearchService {
                         candidate.menuHoldEnabled(),
                         candidate.pickupEnabled()),
                 availability,
-                coordinates);
+                coordinates,
+                reason);
     }
 
     private static NormalizedSearchCondition normalized(
@@ -274,6 +467,18 @@ public class IntegratedStoreSearchService {
     private record AvailabilityBatch(
             boolean valid,
             Map<Long, ReservationAvailability> values
+    ) {
+    }
+
+    private record CandidateState(
+            IntegratedStoreSearchCandidate candidate,
+            ReservationAvailability availability
+    ) {
+    }
+
+    private record RankedCandidateState(
+            RankedRecommendation ranked,
+            CandidateState state
     ) {
     }
 }

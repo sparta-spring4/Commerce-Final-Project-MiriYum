@@ -12,6 +12,7 @@ import com.miriyum.domain.store.search.service.IntegratedStoreSearchService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.ApiResponse;
+import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -19,6 +20,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,6 +48,7 @@ public class StoreSearchController {
 
     @GetMapping
     public ApiResponse<?> search(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @RequestParam(required = false)
             @Size(min = 1, max = 100)
             @Pattern(regexp = ".*\\S.*") String searchInput,
@@ -72,6 +75,7 @@ public class StoreSearchController {
             return ApiResponse.success(
                     "매장을 조회했습니다.",
                     integratedSearchService.search(
+                            principal == null ? null : principal.accountId(),
                             searchInput,
                             includesInfants,
                             availableOnly,

@@ -8,6 +8,7 @@ import com.miriyum.domain.store.core.enums.Region;
 import com.miriyum.domain.store.search.interpreter.InterpretationWarning;
 import com.miriyum.domain.store.search.interpreter.WarningCode;
 import com.miriyum.domain.store.search.interpreter.WarningField;
+import com.miriyum.domain.store.recommendation.ranking.RecommendationReason;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -30,13 +31,14 @@ class IntegratedStoreSearchDataTest {
                 LocalDate.of(2026, 8, 7), LocalTime.of(18, 0), "조용한");
 
         IntegratedStoreSearchData data = new IntegratedStoreSearchData(
-                items, condition, warnings, "rule-v1", "catalog-v1", null);
+                items, condition, warnings, "rule-v1", "catalog-v1", "history-v1", null);
         items.clear();
         warnings.clear();
 
         assertThat(data.items()).hasSize(1);
         assertThat(data.items().getFirst().coordinates()).isNull();
         assertThat(data.warnings()).hasSize(1);
+        assertThat(data.rankingRuleVersion()).isEqualTo("history-v1");
         assertThatThrownBy(() -> data.items().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
@@ -53,6 +55,7 @@ class IntegratedStoreSearchDataTest {
                 OperationStatus.OPEN,
                 new PublicStoreModes(true, true, false),
                 ReservationAvailability.AVAILABLE,
-                coordinates);
+                coordinates,
+                RecommendationReason.ORDERED_MENU);
     }
 }

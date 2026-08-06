@@ -7,6 +7,7 @@ import java.util.Arrays;
 /** QueryDSL 검색에서 허용하는 안정 정렬 목록이다. */
 public enum IntegratedStoreSearchSort {
     RELEVANCE_DESC("relevance,desc"),
+    RECOMMENDATION_DESC("recommendation,desc"),
     NAME_ASC("name,asc"),
     NAME_DESC("name,desc"),
     CREATED_AT_ASC("createdAt,asc"),
