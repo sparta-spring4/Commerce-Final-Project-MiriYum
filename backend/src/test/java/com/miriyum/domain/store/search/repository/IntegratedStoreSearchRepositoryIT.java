@@ -246,6 +246,36 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     @Test
+    @Transactional
+    void ordersKeywordMatchesByFixedRelevanceAndReturnsOnlyCurrentVerifiedCoordinates() {
+        Store exact = createStore("라떼", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store storeName = createStore(
+                "라떼 전문점", Region.SEOUL, "KOREAN", Set.of(), false);
+        Store menuName = storeWithMenu(
+                "메뉴 매장", "라떼", MenuSellingStatus.SELLING,
+                MenuVisibility.VISIBLE, false);
+        Store address = createStore(
+                "주소 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        setAddress(address, "라떼 거리");
+        setVerifiedCoordinates(exact, "37.566500000000000", "126.978000000000000");
+        flushAndClear();
+
+        IntegratedStoreSearchSlice result = repository.search(query(
+                condition(List.of(), List.of(), List.of(), List.of(), null, "라떼"),
+                "relevance,desc", null, 20));
+
+        assertThat(result.content())
+                .extracting(IntegratedStoreSearchCandidate::name)
+                .containsExactly("라떼", "라떼 전문점", "메뉴 매장", "주소 매장");
+        assertThat(result.content().getFirst().latitude())
+                .isEqualByComparingTo("37.566500000000000");
+        assertThat(result.content().getFirst().longitude())
+                .isEqualByComparingTo("126.978000000000000");
+        assertThat(result.content().get(1).latitude()).isNull();
+        assertThat(result.content().get(1).longitude()).isNull();
+    }
+
+    @Test
     void publicSearchIndexesRemainAvailableForQuerydslPredicates() {
         assertThat(indexColumns("stores", "idx_stores_public_search"))
                 .containsExactly("verification_status", "name", "store_id");
@@ -376,7 +406,31 @@ class IntegratedStoreSearchRepositoryIT {
     }
 
     private List<Long> ids(IntegratedStoreSearchSlice slice) {
-        return slice.content().stream().map(StoreSearchCandidate::storeId).toList();
+        return slice.content().stream()
+                .map(IntegratedStoreSearchCandidate::storeId)
+                .toList();
+    }
+
+    private void setAddress(Store store, String address) {
+        jdbcTemplate.update(
+                "UPDATE stores SET address = ? WHERE store_id = ?", address, store.getId());
+    }
+
+    private void setVerifiedCoordinates(
+            Store store,
+            String latitude,
+            String longitude
+    ) {
+        jdbcTemplate.update("""
+                UPDATE stores
+                SET geocoding_status = 'VERIFIED',
+                    latitude = ?,
+                    longitude = ?,
+                    verified_address = address,
+                    geocoding_verified_at = '2026-08-06 00:00:00',
+                    geocoding_address_version = address_version
+                WHERE store_id = ?
+                """, latitude, longitude, store.getId());
     }
 
     private void setCreatedAt(Store store, String createdAt) {

@@ -19,7 +19,7 @@ class IntegratedStoreSearchQueryTest {
         IntegratedStoreSearchQuery defaultQuery = query(condition(), null, null, null);
 
         assertThat(defaultQuery.size()).isEqualTo(20);
-        assertThat(defaultQuery.sort()).isEqualTo(IntegratedStoreSearchSort.NAME_ASC);
+        assertThat(defaultQuery.sort()).isEqualTo(IntegratedStoreSearchSort.RELEVANCE_DESC);
         assertThat(query(condition(), null, null, 1).size()).isEqualTo(1);
         assertThat(query(condition(), null, null, 50).size()).isEqualTo(50);
         assertValidationFailed(() -> query(condition(), null, null, 0));
@@ -95,6 +95,23 @@ class IntegratedStoreSearchQueryTest {
 
         assertValidationFailed(() -> query(
                 condition(), "createdAt,desc", cursor, 20));
+    }
+
+    @Test
+    void relevanceCursorPreservesTierNameAndStoreId() {
+        IntegratedStoreSearchQuery firstPage = query(
+                condition("라떼"), "relevance,desc", null, 20);
+        String cursor = IntegratedSearchCursorCodec.encode(
+                firstPage, 3, "라떼 전문점", 42L);
+
+        IntegratedStoreSearchQuery nextPage = query(
+                condition("라떼"), "relevance,desc", cursor, 20);
+
+        assertThat(nextPage.cursor()).get().satisfies(decoded -> {
+            assertThat(decoded.relevanceTier()).isEqualTo(3);
+            assertThat(decoded.sortValue()).isEqualTo("라떼 전문점");
+            assertThat(decoded.storeId()).isEqualTo(42L);
+        });
     }
 
     @Test

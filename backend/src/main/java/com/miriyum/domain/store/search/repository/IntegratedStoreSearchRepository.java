@@ -1,6 +1,7 @@
 package com.miriyum.domain.store.search.repository;
 
 import com.miriyum.domain.store.core.entity.QStore;
+import com.miriyum.domain.store.core.enums.GeocodingStatus;
 import com.miriyum.domain.store.search.query.IntegratedSearchCursor;
 import com.miriyum.domain.store.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.store.search.query.IntegratedStoreSearchQuery;
@@ -11,8 +12,12 @@ import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.core.types.dsl.CaseBuilder;
+import com.querydsl.core.types.dsl.Expressions;
+import com.querydsl.core.types.dsl.NumberExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -34,9 +39,13 @@ public class IntegratedStoreSearchRepository {
         BooleanBuilder predicate = IntegratedStoreSearchPredicates.create(store, query);
         query.cursor().ifPresent(cursor -> predicate.and(cursorPredicate(store, query, cursor)));
 
-        List<StoreSearchCandidate> fetched = queryFactory
+        NumberExpression<Integer> relevance = relevance(store, query);
+        BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
+                .eq(GeocodingStatus.VERIFIED)
+                .and(store.geocodingAddressVersion.eq(store.addressVersion));
+        List<IntegratedStoreSearchCandidate> fetched = queryFactory
                 .select(Projections.constructor(
-                        StoreSearchCandidate.class,
+                        IntegratedStoreSearchCandidate.class,
                         store.id,
                         store.name,
                         store.region,
@@ -46,15 +55,22 @@ public class IntegratedStoreSearchRepository {
                         store.reservationEnabled,
                         store.menuHoldEnabled,
                         store.pickupEnabled,
-                        store.createdAt))
+                        store.createdAt,
+                        relevance,
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.latitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class)),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.longitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class))))
                 .from(store)
                 .where(predicate)
-                .orderBy(orderBy(store, query.sort()))
+                .orderBy(orderBy(store, relevance, query.sort()))
                 .limit((long) query.size() + 1)
                 .fetch();
 
         boolean hasNext = fetched.size() > query.size();
-        List<StoreSearchCandidate> content = hasNext
+        List<IntegratedStoreSearchCandidate> content = hasNext
                 ? List.copyOf(fetched.subList(0, query.size()))
                 : List.copyOf(fetched);
         String nextCursor = hasNext
@@ -69,6 +85,8 @@ public class IntegratedStoreSearchRepository {
             IntegratedSearchCursor cursor
     ) {
         return switch (query.sort()) {
+            case RELEVANCE_DESC -> relevanceCursorPredicate(
+                    store, relevance(store, query), cursor);
             case NAME_ASC -> store.name.gt(cursor.sortValue())
                     .or(store.name.eq(cursor.sortValue()).and(store.id.gt(cursor.storeId())));
             case NAME_DESC -> store.name.lt(cursor.sortValue())
@@ -76,6 +94,18 @@ public class IntegratedStoreSearchRepository {
             case CREATED_AT_ASC -> dateCursorPredicate(store, cursor, true);
             case CREATED_AT_DESC -> dateCursorPredicate(store, cursor, false);
         };
+    }
+
+    private static BooleanExpression relevanceCursorPredicate(
+            QStore store,
+            NumberExpression<Integer> relevance,
+            IntegratedSearchCursor cursor
+    ) {
+        return relevance.lt(cursor.relevanceTier())
+                .or(relevance.eq(cursor.relevanceTier()).and(
+                        store.name.gt(cursor.sortValue())
+                                .or(store.name.eq(cursor.sortValue())
+                                        .and(store.id.gt(cursor.storeId())))));
     }
 
     private static BooleanExpression dateCursorPredicate(
@@ -98,10 +128,15 @@ public class IntegratedStoreSearchRepository {
     @SuppressWarnings("unchecked")
     private static OrderSpecifier<?>[] orderBy(
             QStore store,
+            NumberExpression<Integer> relevance,
             IntegratedStoreSearchSort sort
     ) {
         List<OrderSpecifier<?>> order = new ArrayList<>(2);
         switch (sort) {
+            case RELEVANCE_DESC -> {
+                order.add(relevance.desc());
+                order.add(store.name.asc());
+            }
             case NAME_ASC -> order.add(store.name.asc());
             case NAME_DESC -> order.add(store.name.desc());
             case CREATED_AT_ASC -> order.add(store.createdAt.asc());
@@ -113,13 +148,40 @@ public class IntegratedStoreSearchRepository {
 
     private static String encodeCursor(
             IntegratedStoreSearchQuery query,
-            StoreSearchCandidate candidate
+            IntegratedStoreSearchCandidate candidate
     ) {
         String sortValue = switch (query.sort()) {
-            case NAME_ASC, NAME_DESC -> candidate.name();
+            case RELEVANCE_DESC, NAME_ASC, NAME_DESC -> candidate.name();
             case CREATED_AT_ASC, CREATED_AT_DESC -> candidate.createdAt().toString();
         };
-        return IntegratedSearchCursorCodec.encode(query, sortValue, candidate.storeId());
+        return IntegratedSearchCursorCodec.encode(
+                query, candidate.relevanceTier(), sortValue, candidate.storeId());
+    }
+
+    private static NumberExpression<Integer> relevance(
+            QStore store,
+            IntegratedStoreSearchQuery query
+    ) {
+        if (query.remainingKeyword().isEmpty()) {
+            return new CaseBuilder()
+                    .when(store.id.isNotNull()).then(0)
+                    .otherwise(-1);
+        }
+        String keyword = query.remainingKeyword();
+        String pattern = IntegratedStoreSearchPredicates.literalContainsPattern(keyword);
+        BooleanExpression menuMatches =
+                IntegratedStoreSearchPredicates.currentPublishedVisibleMenuExists(
+                        store, query, true);
+        BooleanExpression regionOrAddressMatches =
+                IntegratedStoreSearchPredicates.localizedRegionName(store)
+                        .likeIgnoreCase(pattern, '!')
+                        .or(store.address.likeIgnoreCase(pattern, '!'));
+        return new CaseBuilder()
+                .when(store.name.equalsIgnoreCase(keyword)).then(4)
+                .when(store.name.likeIgnoreCase(pattern, '!')).then(3)
+                .when(menuMatches).then(2)
+                .when(regionOrAddressMatches).then(1)
+                .otherwise(0);
     }
 
 }

@@ -19,6 +19,15 @@ public final class IntegratedSearchCursorCodec {
             String sortValue,
             long storeId
     ) {
+        return encode(query, 0, sortValue, storeId);
+    }
+
+    public static String encode(
+            IntegratedStoreSearchQuery query,
+            int relevanceTier,
+            String sortValue,
+            long storeId
+    ) {
         if (query == null || sortValue == null || storeId <= 0) {
             throw new IllegalArgumentException("query and cursor values are required");
         }
@@ -29,6 +38,7 @@ public final class IntegratedSearchCursorCodec {
                 VERSION,
                 query.fingerprint(),
                 query.sort().name(),
+                Integer.toString(relevanceTier),
                 encodedSortValue,
                 Long.toString(storeId));
     }
@@ -45,19 +55,20 @@ public final class IntegratedSearchCursorCodec {
                 throw validationFailed();
             }
             String[] parts = rawCursor.split("\\.", -1);
-            if (parts.length != 5
+            if (parts.length != 6
                     || !VERSION.equals(parts[0])
                     || !expectedFingerprint.equals(parts[1])
                     || !expectedSort.name().equals(parts[2])) {
                 throw validationFailed();
             }
+            int relevanceTier = Integer.parseInt(parts[3]);
             String sortValue = new String(
-                    Base64.getUrlDecoder().decode(parts[3]), StandardCharsets.UTF_8);
-            long storeId = Long.parseLong(parts[4]);
+                    Base64.getUrlDecoder().decode(parts[4]), StandardCharsets.UTF_8);
+            long storeId = Long.parseLong(parts[5]);
             if (sortValue.isEmpty() || storeId <= 0) {
                 throw validationFailed();
             }
-            return new IntegratedSearchCursor(sortValue, storeId);
+            return new IntegratedSearchCursor(relevanceTier, sortValue, storeId);
         } catch (IllegalArgumentException exception) {
             throw validationFailed();
         }
