@@ -4,6 +4,7 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.entity.MenuHold;
 import com.miriyum.domain.menuhold.entity.MenuHoldItemSnapshot;
@@ -41,6 +42,15 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
     private final StoreServiceIntervalValidationService intervalService;
     private final MenuInventoryService inventoryService;
     private final MenuHoldRepository holdRepository;
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MenuHoldTerminationPresence lockForTermination(long reservationId) {
+        if (holdRepository.findByReservationIdForUpdate(reservationId).isPresent()) {
+            return MenuHoldTerminationPresence.HOLD_PRESENT;
+        }
+        return MenuHoldTerminationPresence.NO_HOLD;
+    }
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override

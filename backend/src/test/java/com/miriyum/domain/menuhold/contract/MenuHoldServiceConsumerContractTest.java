@@ -7,6 +7,7 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.dto.MenuSelection;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
@@ -36,6 +37,21 @@ class MenuHoldServiceConsumerContractTest {
         assertMandatory("create", MenuHoldCreateCommand.class);
         assertMandatory("release", MenuHoldReleaseCommand.class);
         assertMandatory("fulfill", MenuHoldFulfillCommand.class);
+        Method terminationLock = MenuHoldService.class.getMethod(
+                "lockForTermination", long.class);
+        Transactional transactional = terminationLock.getAnnotation(Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.MANDATORY);
+        assertThat(terminationLock.getReturnType())
+                .isEqualTo(MenuHoldTerminationPresence.class);
+    }
+
+    @Test
+    void terminationPresenceExposesOnlyPersistentHoldPresence() {
+        assertThat(MenuHoldTerminationPresence.values()).containsExactly(
+                MenuHoldTerminationPresence.HOLD_PRESENT,
+                MenuHoldTerminationPresence.NO_HOLD);
     }
 
     @Test
@@ -211,6 +227,40 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     @Test
+    void reservationConsumerPrelocksHoldBeforeCapacityAndThenReleasesIt() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeeding();
+        ReservationConsumer consumer = new ReservationConsumer(fixture, () -> "cancel-operation");
+
+        consumer.cancel(10L);
+
+        assertThat(consumer.events).containsExactly(
+                "reservation-locked",
+                "menu-hold-prelocked",
+                "capacity-restored",
+                "menu-hold-released");
+        assertThat(fixture.terminationLockReservationIds()).containsExactly(10L);
+        assertThat(fixture.releaseCommands()).containsExactly(
+                new MenuHoldReleaseCommand(10L, "cancel-operation"));
+    }
+
+    @Test
+    void reservationConsumerStillRestoresCapacityButSkipsReleaseWhenNoHoldExists() {
+        ReservationMenuHoldContractFixture fixture =
+                ReservationMenuHoldContractFixture.succeedingWithNoHold();
+        ReservationConsumer consumer = new ReservationConsumer(fixture);
+
+        consumer.cancel(10L);
+
+        assertThat(consumer.events).containsExactly(
+                "reservation-locked",
+                "menu-hold-prelocked",
+                "capacity-restored");
+        assertThat(fixture.terminationLockReservationIds()).containsExactly(10L);
+        assertThat(fixture.releaseCommands()).isEmpty();
+    }
+
+    @Test
     void reservationConsumersUseGloballyUniqueOperationsAcrossInstances() {
         ReservationMenuHoldContractFixture fixture =
                 ReservationMenuHoldContractFixture.succeeding();
@@ -333,6 +383,18 @@ class MenuHoldServiceConsumerContractTest {
         private MenuHoldCommandResult release(long reservationId) {
             return menuHoldService.release(
                     new MenuHoldReleaseCommand(reservationId, nextOperationId()));
+        }
+
+        private void cancel(long reservationId) {
+            events.add("reservation-locked");
+            MenuHoldTerminationPresence presence =
+                    menuHoldService.lockForTermination(reservationId);
+            events.add("menu-hold-prelocked");
+            events.add("capacity-restored");
+            if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
+                release(reservationId);
+                events.add("menu-hold-released");
+            }
         }
 
         private MenuHoldCommandResult fulfill(long reservationId) {
