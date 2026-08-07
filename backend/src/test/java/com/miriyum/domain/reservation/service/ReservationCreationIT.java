@@ -56,6 +56,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,7 +93,9 @@ class ReservationCreationIT {
     private static final LocalTime START_TIME = LocalTime.NOON;
     private static final LocalTime SERVICE_END_TIME = LocalTime.of(13, 0);
     private static final Instant ACTIVATED_AT = Instant.parse("2026-08-01T00:00:00Z");
+    private static final long EXECUTOR_TERMINATION_TIMEOUT_SECONDS = 5L;
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
+    private static final AtomicInteger WORKER_SEQUENCE = new AtomicInteger();
 
     @Container
     static final MySQLContainer MYSQL =
@@ -481,19 +484,92 @@ class ReservationCreationIT {
     ) throws Exception {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<CreationAttempt> firstFuture = executor.submit(
+        ExecutorService executor = Executors.newFixedThreadPool(
+                2, reservationCreationWorkerFactory());
+        Future<CreationAttempt> firstFuture = null;
+        Future<CreationAttempt> secondFuture = null;
+        List<CreationAttempt> attempts = null;
+        Throwable failure = null;
+        try {
+            firstFuture = executor.submit(
                     () -> invokeAfterStart(first, ready, start));
-            Future<CreationAttempt> secondFuture = executor.submit(
+            secondFuture = executor.submit(
                     () -> invokeAfterStart(second, ready, start));
             assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
             start.countDown();
-            return List.of(
+            attempts = List.of(
                     firstFuture.get(30, TimeUnit.SECONDS),
                     secondFuture.get(30, TimeUnit.SECONDS));
+        } catch (Throwable thrown) {
+            failure = thrown;
         } finally {
-            start.countDown();
+            Throwable cleanupFailure = stopWorkers(
+                    start, firstFuture, secondFuture, executor);
+            if (cleanupFailure != null) {
+                if (failure == null) {
+                    failure = cleanupFailure;
+                } else {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
         }
+        rethrow(failure);
+        return attempts;
+    }
+
+    private static ThreadFactory reservationCreationWorkerFactory() {
+        return task -> {
+            Thread worker = new Thread(
+                    task,
+                    "reservation-creation-it-worker-" + WORKER_SEQUENCE.incrementAndGet());
+            worker.setDaemon(true);
+            return worker;
+        };
+    }
+
+    private static Throwable stopWorkers(
+            CountDownLatch start,
+            Future<?> firstFuture,
+            Future<?> secondFuture,
+            ExecutorService executor
+    ) {
+        start.countDown();
+        cancelIfRunning(firstFuture);
+        cancelIfRunning(secondFuture);
+        executor.shutdownNow();
+        try {
+            if (!executor.awaitTermination(
+                    EXECUTOR_TERMINATION_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS)) {
+                return new AssertionError(
+                        "reservation creation workers did not terminate after cancellation");
+            }
+            return null;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return new AssertionError(
+                    "reservation creation worker cleanup was interrupted",
+                    exception);
+        }
+    }
+
+    private static void cancelIfRunning(Future<?> future) {
+        if (future != null && !future.isDone()) {
+            future.cancel(true);
+        }
+    }
+
+    private static void rethrow(Throwable failure) throws Exception {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure instanceof Exception exception) {
+            throw exception;
+        }
+        throw new AssertionError("unexpected concurrent reservation failure", failure);
     }
 
     private CreationAttempt invokeAfterStart(
