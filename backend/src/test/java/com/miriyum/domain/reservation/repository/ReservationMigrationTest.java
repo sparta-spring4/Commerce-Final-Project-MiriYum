@@ -21,9 +21,12 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import jakarta.persistence.EntityManager;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -31,7 +34,14 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
@@ -1231,6 +1241,182 @@ class ReservationMigrationTest {
                                 5L
                         )
                 );
+    }
+
+    @Test
+    @DisplayName("취소 복구용 원본 배정 조회는 버킷 PK 오름차순으로 반환한다")
+    void allocationRepositoryContractReturnsBucketAscending() {
+        // given
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                secondBucket.getId(),
+                4,
+                secondBucket.getPolicyVersion()
+        ));
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                firstBucket.getId(),
+                4,
+                firstBucket.getPolicyVersion()
+        ));
+        Method allocationMethod = requiredRepositoryMethod(
+                capacityAllocationRepository,
+                "findAllByReservationIdOrderByCapacityBucketIdAsc",
+                1
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        List<ReservationCapacityAllocation> allocations = transactionTemplate.execute(status ->
+                (List<ReservationCapacityAllocation>) invokeRepositoryMethod(
+                        allocationMethod,
+                        capacityAllocationRepository,
+                        savedReservation.getId()
+                )
+        );
+
+        // then
+        assertThat(allocations)
+                .extracting(ReservationCapacityAllocation::getCapacityBucketId)
+                .containsExactly(firstBucket.getId(), secondBucket.getId());
+    }
+
+    @Test
+    @DisplayName("취소 복구용 수용량 조회는 최신 버전과 PK 오름차순 쓰기 잠금을 보장한다")
+    void capacityRepositoryContractsReturnSortedRowsAndHoldWriteLocks() throws Exception {
+        // given
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                secondBucket.getId(),
+                4,
+                secondBucket.getPolicyVersion()
+        ));
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                firstBucket.getId(),
+                4,
+                firstBucket.getPolicyVersion()
+        ));
+        Method latestVersionMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findLatestPolicyVersion",
+                2
+        );
+        Method orderedLockMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findAllByIdInForUpdate",
+                1
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        Optional<Long> latestVersion = transactionTemplate.execute(status ->
+                (Optional<Long>) invokeRepositoryMethod(
+                        latestVersionMethod,
+                        capacityBucketRepository,
+                        STORE_ID,
+                        LocalDate.of(2026, 8, 1)
+                )
+        );
+
+        // then
+        assertThat(latestVersion).contains(3L);
+
+        CountDownLatch repositoryLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseRepositoryLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+            @SuppressWarnings("unchecked")
+            List<ReservationCapacityBucket> lockedBuckets =
+                    (List<ReservationCapacityBucket>) invokeRepositoryMethod(
+                            orderedLockMethod,
+                            capacityBucketRepository,
+                            List.of(secondBucket.getId(), firstBucket.getId())
+                    );
+            assertThat(lockedBuckets)
+                    .extracting(ReservationCapacityBucket::getId)
+                    .containsExactly(firstBucket.getId(), secondBucket.getId());
+            repositoryLockHeld.countDown();
+            try {
+                if (!releaseRepositoryLock.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("repository lock release timed out");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("repository lock wait interrupted", exception);
+            }
+        }));
+
+        try (Connection independentConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(),
+                MYSQL.getUsername(),
+                MYSQL.getPassword()
+        )) {
+            assertThat(repositoryLockHeld.await(5, TimeUnit.SECONDS))
+                    .as("repository PESSIMISTIC_WRITE lock must be held before NOWAIT check")
+                    .isTrue();
+            independentConnection.setAutoCommit(false);
+
+            SQLException lockFailure = null;
+            try (PreparedStatement statement = independentConnection.prepareStatement("""
+                    SELECT reservation_capacity_bucket_id
+                    FROM reservation_capacity_buckets
+                    WHERE reservation_capacity_bucket_id = ?
+                    FOR UPDATE NOWAIT
+                    """)) {
+                statement.setLong(1, firstBucket.getId());
+                statement.executeQuery();
+            } catch (SQLException exception) {
+                lockFailure = exception;
+            }
+
+            assertThat((Throwable) lockFailure)
+                    .as("MySQL must reject NOWAIT while the repository write lock is held")
+                    .isNotNull();
+            assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
+        } finally {
+            releaseRepositoryLock.countDown();
+            worker.get(5, TimeUnit.SECONDS);
+            executor.shutdown();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private Method requiredRepositoryMethod(
+            Object repository,
+            String methodName,
+            int parameterCount
+    ) {
+        Optional<Method> method = Arrays.stream(repository.getClass().getMethods())
+                .filter(candidate -> candidate.getName().equals(methodName))
+                .filter(candidate -> candidate.getParameterCount() == parameterCount)
+                .findFirst();
+        assertThat(method)
+                .as("repository method %s must be present before its contract is invoked", methodName)
+                .isPresent();
+        return method.orElseThrow();
+    }
+
+    private Object invokeRepositoryMethod(Method method, Object repository, Object... arguments) {
+        try {
+            return method.invoke(repository, arguments);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("repository contract invocation failed", exception);
+        }
     }
 
     private Connection legacyConnection(MySQLContainer legacyMysql) throws Exception {

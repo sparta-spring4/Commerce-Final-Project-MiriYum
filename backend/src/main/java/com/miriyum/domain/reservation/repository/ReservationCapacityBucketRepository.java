@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -16,6 +17,39 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ReservationCapacityBucketRepository
         extends JpaRepository<ReservationCapacityBucket, Long> {
+
+    /**
+     * Observes the newest materialized capacity policy version for one store business date.
+     *
+     * @param storeId target store ID
+     * @param serviceDate store-local business date
+     * @return the latest version, or empty when no materialized bucket exists
+     */
+    @Query("""
+            select max(bucket.policyVersion)
+            from ReservationCapacityBucket bucket
+            where bucket.storeId = :storeId and bucket.serviceDate = :serviceDate
+            """)
+    Optional<Long> findLatestPolicyVersion(
+            @Param("storeId") long storeId,
+            @Param("serviceDate") LocalDate serviceDate
+    );
+
+    /**
+     * Acquires one pessimistic write lock for the complete requested bucket union in PK order.
+     *
+     * @param bucketIds complete deduplicated union of original and current policy bucket IDs
+     * @return locked bucket rows in ascending primary-key order
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket from ReservationCapacityBucket bucket
+            where bucket.id in :bucketIds
+            order by bucket.id asc
+            """)
+    List<ReservationCapacityBucket> findAllByIdInForUpdate(
+            @Param("bucketIds") Collection<Long> bucketIds
+    );
 
     /**
      * Locks only the newest policy's buckets that overlap the requested half-open occupancy
