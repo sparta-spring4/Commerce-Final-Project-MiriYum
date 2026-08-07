@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { ApiError, NetworkError } from '../api/apiError'
+import { ApiContractError, ApiError, NetworkError } from '../api/apiError'
 import { CommonErrorCode } from '../api/envelope'
 import { isEmptyResult, toAsyncState } from './asyncState'
 
@@ -52,6 +52,40 @@ describe('오류를 화면 상태로 옮긴다', () => {
     expect(
       toAsyncState(apiError(429, CommonErrorCode.TOO_MANY_REQUESTS)),
     ).toEqual({ state: 'retryable', action: 'retry' })
+  })
+
+  test('계약 위반은 복구 대기이며 재시도를 권하지 않는다', () => {
+    expect(toAsyncState(new ApiContractError(200, 'codeNotSuccess'))).toEqual({
+      state: 'awaitingRecovery',
+      action: 'none',
+    })
+  })
+
+  test('계약 위반의 action은 retry도 recheck도 아니다', () => {
+    const { action } = toAsyncState(new ApiContractError(200, 'dataMissing'))
+
+    expect(action).not.toBe('retry')
+    expect(action).not.toBe('recheck')
+    expect(action).toBe('none')
+  })
+
+  test('계약 위반이 네트워크 실패와 다른 상태로 구분된다', () => {
+    const contract = toAsyncState(new ApiContractError(200, 'notAnObject'))
+    const network = toAsyncState(new NetworkError('연결 실패'))
+
+    expect(contract).not.toEqual(network)
+    expect(network).toEqual({ state: 'indeterminate', action: 'recheck' })
+  })
+
+  test('계약 위반과 503 ApiError는 같은 상태라도 다음 행동이 다르다', () => {
+    const contract = toAsyncState(new ApiContractError(200, 'messageNotString'))
+    const unavailable = toAsyncState(
+      apiError(503, CommonErrorCode.SERVICE_UNAVAILABLE),
+    )
+
+    expect(contract.state).toBe('awaitingRecovery')
+    expect(unavailable).toEqual({ state: 'awaitingRecovery', action: 'recheck' })
+    expect(contract.action).not.toBe(unavailable.action)
   })
 
   test('401과 409는 서로 다른 상태로 구분된다', () => {

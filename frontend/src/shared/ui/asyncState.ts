@@ -1,4 +1,9 @@
-import { ApiError, isApiError, isNetworkError } from '../api/apiError'
+import {
+  ApiError,
+  isApiContractError,
+  isApiError,
+  isNetworkError,
+} from '../api/apiError'
 import { CommonErrorCode } from '../api/envelope'
 
 /**
@@ -38,6 +43,12 @@ export function toAsyncState(error: unknown): AsyncStatePresentation {
   // 서버에 닿지 못한 실패는 확정 결과가 아니다.
   if (isNetworkError(error)) {
     return { state: 'indeterminate', action: 'recheck' }
+  }
+  // 계약 위반은 같은 요청을 다시 보내도 복구되지 않는다. 재시도를 권하지 않고
+  // 서버 쪽 복구를 기다린다. isApiError 검사보다 먼저 처리해야 retryable로
+  // 흘러들지 않는다.
+  if (isApiContractError(error)) {
+    return { state: 'awaitingRecovery', action: 'none' }
   }
   if (!isApiError(error)) {
     return { state: 'retryable', action: 'retry' }
