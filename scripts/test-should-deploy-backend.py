@@ -1,6 +1,10 @@
 import subprocess
 import sys
 import unittest
+from pathlib import Path
+
+
+WORKFLOW = Path(".github/workflows/backend-cd.yml").read_text(encoding="utf-8")
 
 
 class ShouldDeployBackendTest(unittest.TestCase):
@@ -34,6 +38,28 @@ class ShouldDeployBackendTest(unittest.TestCase):
 
     def test_empty_changes_skip(self):
         self.assert_decision([], "false")
+
+    def test_backend_marker_uses_selected_image_sha(self):
+        self.assertIn("BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend", WORKFLOW)
+        self.assertIn("deployments: write", WORKFLOW)
+        self.assertIn("Record backend deployment marker", WORKFLOW)
+        self.assertIn('--arg sha "$IMAGE_TAG"', WORKFLOW)
+        self.assertIn(
+            '--field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT"',
+            WORKFLOW,
+        )
+
+    def test_backend_marker_records_success_and_failure(self):
+        self.assertIn("Mark backend deployment successful", WORKFLOW)
+        self.assertIn("--field state=success", WORKFLOW)
+        self.assertIn("Mark backend deployment failed", WORKFLOW)
+        self.assertIn("--field state=failure", WORKFLOW)
+
+    def test_source_lookup_uses_backend_marker_environment(self):
+        self.assertIn(
+            "deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100",
+            WORKFLOW,
+        )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ $requiredFragments = @(
     "scripts/should-deploy-backend.py",
     'deployable=$deployable',
     "Skipping staging CD because the revision has no backend deployment input changes.",
-    "deployments?environment=staging&per_page=100",
+    'deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100',
     "last_deployed_sha",
     'git diff --name-only "$last_deployed_sha" "$WORKFLOW_SHA"',
     "git hash-object -t tree /dev/null",
@@ -21,7 +21,14 @@ $requiredFragments = @(
     "steps.ecr-image.outputs.exists != 'true'",
     "Manual deployment requires an existing immutable ECR image tag",
     'ref: ${{ inputs.image_tag }}',
-    "retry-max-attempts: 2"
+    "retry-max-attempts: 2",
+    "BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend",
+    "deployments: write",
+    "Record backend deployment marker",
+    '--arg sha "$IMAGE_TAG"',
+    '--field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT"',
+    "Mark backend deployment successful",
+    "Mark backend deployment failed"
 )
 
 foreach ($fragment in $requiredFragments) {

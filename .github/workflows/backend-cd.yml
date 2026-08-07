@@ -26,6 +26,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
   EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
+  BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend
 
 jobs:
   verify-source:
@@ -70,7 +71,7 @@ jobs:
             fi
 
             last_deployed_sha=$(gh api \
-              "repos/$GITHUB_REPOSITORY/deployments?environment=staging&per_page=100" \
+              "repos/$GITHUB_REPOSITORY/deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100" \
               --jq 'sort_by(.created_at) | reverse | .[] | [.id, .sha] | @tsv' \
               | while IFS=$'\t' read -r deployment_id deployment_sha; do
                   state=$(gh api \
@@ -111,6 +112,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      deployments: write
     if: needs.verify-source.outputs.deployable == 'true'
 
     steps:
@@ -217,6 +219,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Record backend deployment marker
+        id: backend-deployment
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deployment_id=$(jq -n \
+            --arg sha "$IMAGE_TAG" \
+            --arg environment "$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            '{ref: $sha, sha: $sha, environment: $environment, description: ("Backend image " + $sha), auto_merge: false, required_contexts: []}' \
+            | gh api --method POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq '.id')
+
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
+            --field state=in_progress \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend deployment started for image $IMAGE_TAG" \
+            >/dev/null
+
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+
       - name: Upload deployment files with SSM
         id: ssm
         env:
@@ -286,3 +309,31 @@ jobs:
 
           echo "::error::SSM deployment did not finish within 15 minutes. Command: $COMMAND_ID"
           exit 1
+
+      - name: Mark backend deployment successful
+        if: success()
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=success \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployed successfully" \
+            >/dev/null
+
+      - name: Mark backend deployment failed
+        if: failure() && steps.backend-deployment.outputs.deployment_id != ''
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=failure \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployment failed" \
+            >/dev/null
