@@ -661,7 +661,8 @@ class ReservationCreationIT {
 
     private static IdempotencyKey key(int suffix) {
         return IdempotencyKey.parse(String.format(
-                "00000000-0000-0000-0000-%012d", suffix));
+                java.util.Locale.ROOT,
+                "550e8400-e29b-41d4-a716-%012d", suffix));
     }
 
     private record Scenario(
