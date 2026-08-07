@@ -76,9 +76,10 @@ Facade는 서버 `Clock`에서 `requestedAt`을 한 번 얻는다. 제한 재시
 - operator는 현재 활성 계정과 Store의 공개 read-only 관리 권한 계약을 확인한 뒤 `reservationId + storeId` 조건으로 찾는다. 관리 권한 실패는 Store 공개 오류를 유지하고, 관리 가능한 매장 안의 실제 부재는 `RESERVATION_001`이다.
 - 신규 예약 거래 자격 검사를 기존 예약 관리 권한 대신 사용하지 않는다.
 - 새 명령에서 잠긴 예약이 `CONFIRMED`가 아니면 `RESERVATION_005`다.
-- evaluator에는 잠긴 예약에 저장된 `cancellationPolicyVersion`, actor, 현재 status, `startAt`과 facade에서 만든 최초 `requestedAt`을 실제 API 순서로 전달한다.
+- 잠긴 `CONFIRMED` 예약의 `cancellationPolicyVersion` 또는 legacy `startAt`이 null이면 evaluator를 호출하기 전에 `RESERVATION_006`으로 실패 폐쇄한다.
+- non-null 저장 version과 평가 가능한 입력만 evaluator에 `(storedVersion, actor, status, startAt, requestedAt)` 순서로 전달한다. 알 수 없는 version에 대한 evaluator 결과도 `RESERVATION_006`이다.
 - V1은 `startAt` 전·정각·후만으로 취소를 거절하지 않는다. client timestamp, client policy version, current-version 조회나 fallback을 사용하지 않는다.
-- null 또는 unknown 저장 version은 현재 version이나 V1로 대체하지 않고 실패 폐쇄한다.
+- null 또는 unknown 저장 version과 null `startAt`은 현재 version이나 V1로 대체하지 않고 실패 폐쇄한다.
 - 다른 도메인의 공개 오류를 Reservation 오류로 다시 매핑하지 않는다.
 
 ## 멱등 업무 키·요청 지문·correlation
@@ -142,7 +143,7 @@ Migration 이전 `CANCELLED` 예약은 감사가 없을 수 있다. actor와 사
 3. actor namespace·actor ID·command type·정규화 UUID key의 idempotency row를 claim/replay한다. 이것이 첫 경합 잠금이다.
 4. replay면 저장된 HTTP status·response code·resource type/id·`ReservationDetail` data 의미 payload를 즉시 반환하고 Reservation, 수용량, MenuHold, audit를 읽어 결과를 재구성하지 않는다. message나 성공 envelope 전체 원문을 저장·재생 계약에 포함하지 않는다.
 5. fresh면 consumer는 `reservationId + consumerAccountId`, operator는 `reservationId + storeId` 조건을 포함한 단일 `FOR UPDATE`로 Reservation을 잠근다.
-6. 잠긴 Reservation의 저장 `cancellationPolicyVersion`, actor, 현재 status, `startAt`과 최초 `requestedAt`을 #168 evaluator의 실제 입력으로 전달한다. `REJECTED_INVALID_STATE`는 `RESERVATION_005`, `REJECTED_BY_POLICY`는 `RESERVATION_006`으로 구분한다.
+6. 잠긴 Reservation이 `CONFIRMED`인지 먼저 확인한다. `CONFIRMED`이면서 저장 `cancellationPolicyVersion` 또는 legacy `startAt`이 null이면 evaluator 호출 전에 `RESERVATION_006`으로 실패 폐쇄한다. 그 다음 non-null `(storedVersion, actor, status, startAt, requestedAt)`을 #168 evaluator의 실제 순서로 전달한다. 알 수 없는 version을 포함한 `REJECTED_BY_POLICY`는 `RESERVATION_006`이고, 그 밖의 `REJECTED_INVALID_STATE`는 `RESERVATION_005`다.
 7. #167 MenuHold 공개 provider로 연결 MenuHold root를 선잠금한다. 반환 결과로 `NO_HOLD`와 `HOLD_PRESENT`를 구분한다.
 8. 저장된 원본 allocation bucket ID와 현재 최신 정책에서 이 예약의 점유가 materialize된 bucket ID를 계산해 합집합하고 중복 제거한다.
 9. 합집합의 전체 bucket을 단 한 번의 PK 오름차순 pessimistic locking read로 잠근다. 요청한 모든 ID가 반환됐는지 실패 폐쇄로 확인한다.
@@ -168,7 +169,7 @@ Migration 이전 `CANCELLED` 예약은 감사가 없을 수 있다. actor와 사
 
 두 집합은 bucket ID로 합집합·중복 제거한다. 같은 bucket이 두 경로에서 발견돼도 인원과 팀을 두 번 감소시키지 않는다. 합집합 전체를 한 번의 `WHERE id IN (...) ORDER BY reservation_capacity_bucket_id ASC FOR UPDATE` 성격의 repository 계약으로 잠근 뒤에만 mutation한다.
 
-각 대상 bucket은 예약 전체 party size와 팀 1개를 한 번만 감소시킨다. 원본 allocation의 총 인원은 Reservation party snapshot과 일치하고 bucket별 팀 수는 1이어야 한다. 감소 결과가 음수가 되거나 원본/현재 집합으로 요구한 bucket이 누락되면 데이터 불변식 위반으로 전체 rollback한다. 최신 정책이 원본과 같으면 dedupe 결과는 원본 bucket만 남는다. 최신 정책이 바뀌었으면 원본과 실제 점유가 존재하는 최신 bucket을 모두 복구하되, 단순히 시간 구간이 겹친다는 이유만으로 점유되지 않은 bucket을 감소시키지 않는다. 여러 번 재게시됐다면 중간 퇴역 bucket은 게시 당시 snapshot으로 유지한다.
+각 대상 bucket은 예약 전체 party size와 팀 1개를 한 번만 감소시킨다. 원본 allocation은 각 행별로 `occupiedPeople == Reservation.party.totalCount`, `occupiedTeams == 1`, `capacityPolicyVersion == Reservation.capacityPolicyVersion`이어야 한다. 다중 버킷 예약도 각 allocation 행에 전체 party와 팀 1개가 기록되므로 allocation 행들을 합산하지 않는다. 감소 결과가 음수가 되거나 원본/현재 집합으로 요구한 bucket이 누락되면 데이터 불변식 위반으로 전체 rollback한다. 최신 정책이 원본과 같으면 dedupe 결과는 원본 bucket만 남는다. 최신 정책이 바뀌었으면 원본과 실제 점유가 존재하는 최신 bucket을 모두 복구하되, 단순히 시간 구간이 겹친다는 이유만으로 점유되지 않은 bucket을 감소시키지 않는다. 여러 번 재게시됐다면 중간 퇴역 bucket은 게시 당시 snapshot으로 유지한다.
 
 현재 집합을 계산한 뒤 잠금 전후로 최신 policy version이 달라졌다면 stale 집합으로 복구하지 않고 전체 transaction을 rollback한다. 수용량 게시 역시 `CONFIRMED` Reservation을 bucket보다 먼저 잠가 취소와 같은 Reservation 행에서 직렬화한다.
 
@@ -239,10 +240,12 @@ MenuHold 선잠금, 수용량 bucket, 메뉴 재고 풀의 순서는 기존 종�
 
 - actor별 public entry가 올바른 namespace·actor scope를 private orchestration에 전달
 - `requestedAt`을 한 번 만들고 재시도 전체에서 재사용
-- 저장 정책 version과 requestedAt만 evaluator에 전달; null/unknown fail-closed
+- evaluator 입력은 실제 5개 `(storedVersion, actor, status, startAt, requestedAt)`이며 순서까지 검증
+- `CONFIRMED`의 null 저장 version과 legacy null `startAt`은 evaluator 미호출·`RESERVATION_006`; unknown version은 evaluator 결과를 `RESERVATION_006`으로 유지
 - V1의 startAt 전·정각·후 결과 동일
 - fresh와 replay 분기, 다른 fingerprint `COMMON_007`, 다른 key 종결 상태 `RESERVATION_005`
-- 원본 allocation과 현재 materialized 점유 bucket의 union/dedupe, 전체 PK ASC 단일 lock, bucket별 1회 복구
+- 원본 allocation과 현재 materialized 점유 bucket의 union/dedupe, 전체 PK ASC 단일 lock, 다중 버킷 정상 취소와 각 bucket 정확히 1회 복구
+- 원본 allocation 각 행의 party·team·capacity policy version 불변식과 allocation 합산 금지
 - 누락 bucket과 음수 복구 방어
 - `NO_HOLD` 무부작용과 `HOLD_PRESENT` release
 - audit 필드·시각·상태·정책 version·command correlation 불변식
@@ -256,7 +259,8 @@ MenuHold 선잠금, 수용량 bucket, 메뉴 재고 풀의 순서는 기존 종�
 - migration 이전 audit 없는 `CANCELLED` detail nullable 호환
 - 같은 key 동시 요청은 취소·수용량·메뉴·audit 1회
 - 다른 key 동시 요청은 한 성공과 한 `RESERVATION_005`
-- 정책 재게시 뒤 original+current materialized bucket의 정확한 인원·팀 복구
+- 정책 재게시 뒤 original+current materialized bucket의 정확한 인원·팀 복구와 다중 버킷 정상 취소 시 각 bucket 정확히 1회 복구
+- `CONFIRMED` legacy null `startAt`이 `IllegalArgumentException`/500으로 새지 않고 evaluator 미호출·`RESERVATION_006`으로 종결
 - 메뉴 없는 예약과 메뉴 있는 예약 각각의 종결
 - 수용량, MenuHold, audit 저장, 멱등 finalize 단계별 실패 주입의 전체 rollback
 - replay 시 audit 추가 0건과 자원 변화 0건
