@@ -44,6 +44,9 @@ services:
       MIRIYUM_JWT_ISSUER: ${MIRIYUM_JWT_ISSUER}
       MIRIYUM_ALLOWED_ORIGIN: ${MIRIYUM_ALLOWED_ORIGIN}
       MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED}
+      MIRIYUM_VALKEY_HOST: ${MIRIYUM_VALKEY_HOST}
+      MIRIYUM_VALKEY_PORT: ${MIRIYUM_VALKEY_PORT}
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
     depends_on:
       mysql:
         condition: service_healthy
@@ -61,6 +64,41 @@ services:
       app:
         # 기존 자동 할당 주소와 겹치지 않는 고정 주소를 사용한다.
         ipv4_address: 172.29.81.11
+    restart: unless-stopped
+
+  valkey:
+    # #141은 Valkey 인프라만 구성하고, Refresh Token 기능은 #140에서 연결한다.
+    image: valkey/valkey:8.1-alpine
+    environment:
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        exec valkey-server \
+          --appendonly yes \
+          --appendfsync everysec \
+          --maxmemory 128mb \
+          --maxmemory-policy noeviction \
+          --requirepass "$$MIRIYUM_VALKEY_PASSWORD"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION}
+        awslogs-group: /miriyum/staging/docker
+        awslogs-stream: valkey
+        awslogs-create-group: "true"
+    volumes:
+      - valkey-data:/data
+    networks:
+      app:
+        ipv4_address: 172.29.81.12
     restart: unless-stopped
 
   nginx:
@@ -86,6 +124,7 @@ services:
 
 volumes:
   mysql-data:
+  valkey-data:
 
 networks:
   app:
