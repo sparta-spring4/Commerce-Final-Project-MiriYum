@@ -48,9 +48,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # 생성 타입은 저장소에 커밋한다. OpenAPI를 고치고 다시 만들지 않은 상태를 여기서 잡는다.
+      #
+      # --intent-to-add를 먼저 실행한다. git diff는 untracked 파일을 보지 않아서,
+      # generate:api에 새 문서를 추가하고 생성 결과를 커밋하지 않으면 그냥 통과한다.
       - name: Verify generated API types are up to date
         run: |
           pnpm run generate:api
+          git add --intent-to-add src/shared/api/generated
           git diff --exit-code -- src/shared/api/generated
 
       # 실패 지점이 로그에서 구분되도록 세 검증을 개별 step으로 나눈다.
