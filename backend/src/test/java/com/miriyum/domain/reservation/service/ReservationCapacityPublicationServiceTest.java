@@ -10,6 +10,7 @@ import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
@@ -333,6 +334,7 @@ class ReservationCapacityPublicationServiceTest {
                 PartyComposition.of(3, 1, 1),
                 ReservationContactSnapshot.contactable("notification-target:31"),
                 1L,
+                new ReservationCancellationPolicyVersion(1L),
                 Instant.parse("2026-08-01T00:00:00Z")
         );
         ReflectionTestUtils.setField(reservation, "id", 301L);

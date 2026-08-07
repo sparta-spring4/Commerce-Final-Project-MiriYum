@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchReques
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
@@ -751,6 +752,7 @@ class ReservationQueryRepositoryTest {
                         "consumer:" + consumerAccountId + ":channel:primary"
                 ),
                 1L,
+                new ReservationCancellationPolicyVersion(1L),
                 createdAt
         );
     }

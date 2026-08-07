@@ -47,6 +47,9 @@ public class Reservation {
     @Column(name = "capacity_policy_version", nullable = false)
     private long capacityPolicyVersion;
 
+    @Column(name = "cancellation_policy_version")
+    private Long cancellationPolicyVersion;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ReservationStatus status;
@@ -71,6 +74,7 @@ public class Reservation {
             PartyComposition party,
             ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
+            ReservationCancellationPolicyVersion cancellationPolicyVersion,
             Instant createdAt
     ) {
         this.consumerAccountId = requirePositive(consumerAccountId, "consumerAccountId");
@@ -85,6 +89,10 @@ public class Reservation {
         this.party = requireNonNull(party, "party");
         this.contactSnapshot = requireNonNull(contactSnapshot, "contactSnapshot");
         this.capacityPolicyVersion = requirePositive(capacityPolicyVersion, "capacityPolicyVersion");
+        this.cancellationPolicyVersion = requireNonNull(
+                cancellationPolicyVersion,
+                "cancellationPolicyVersion"
+        ).value();
         this.status = ReservationStatus.CONFIRMED;
         this.createdAt = requireNonNull(createdAt, "createdAt");
     }
@@ -99,6 +107,7 @@ public class Reservation {
      * @param party 예약 당시 인원 구성
      * @param contactSnapshot 예약 당시 불투명 알림 대상과 연락 가능 상태
      * @param capacityPolicyVersion 적용 수용량 정책 버전
+     * @param cancellationPolicyVersion 예약 당시 적용된 취소 정책 버전
      * @param createdAt 예약 확정 시각
      * @return 즉시 확정된 예약
      * @throws IllegalArgumentException 필수 값이 없거나 ID·정책 버전·매장명이 유효하지 않은 경우
@@ -111,6 +120,7 @@ public class Reservation {
             PartyComposition party,
             ReservationContactSnapshot contactSnapshot,
             long capacityPolicyVersion,
+            ReservationCancellationPolicyVersion cancellationPolicyVersion,
             Instant createdAt
     ) {
         return new Reservation(
@@ -121,6 +131,7 @@ public class Reservation {
                 party,
                 contactSnapshot,
                 capacityPolicyVersion,
+                cancellationPolicyVersion,
                 createdAt
         );
     }
@@ -247,6 +258,10 @@ public class Reservation {
 
     public long getCapacityPolicyVersion() {
         return capacityPolicyVersion;
+    }
+
+    public Long getCancellationPolicyVersion() {
+        return cancellationPolicyVersion;
     }
 
     public long getReservationTimePolicyVersion() {
