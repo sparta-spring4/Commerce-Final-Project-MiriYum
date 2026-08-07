@@ -26,6 +26,12 @@ class ShouldDeployBackendTest(unittest.TestCase):
     def test_docs_and_frontend_only_changes_skip(self):
         self.assert_decision(["docs/README.md", "frontend/src/App.tsx"], "false")
 
+    def test_accumulated_backend_change_before_docs_change_still_deploys(self):
+        self.assert_decision(
+            ["backend/src/main/App.java", "docs/README.md"],
+            "true",
+        )
+
     def test_empty_changes_skip(self):
         self.assert_decision([], "false")
 
