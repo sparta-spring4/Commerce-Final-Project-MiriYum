@@ -1,5 +1,7 @@
 package com.miriyum.domain.reservation.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -16,12 +18,17 @@ import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import org.assertj.core.api.Assertions;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +37,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -38,12 +46,17 @@ import org.springframework.test.web.servlet.MockMvc;
 class ReservationControllerTest {
 
     private static final String DETAIL_URL = "/api/v1/reservations/77";
+    private static final String ROOT_URL = "/api/v1/reservations";
+    private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private ReservationService reservationService;
+
+    @MockitoBean
+    private ReservationCreationCommandFacade reservationCreationCommandFacade;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -166,18 +179,138 @@ class ReservationControllerTest {
     }
 
     @Test
-    @DisplayName("소비자 예약 루트 POST는 예약 상세 체인에서 거부한다")
-    void deniesPostReservationRoot() throws Exception {
+    @DisplayName("인증된 소비자는 예약 생성 결과를 성공 envelope로 받는다")
+    void createsReservationWithConsumerPrincipalAndIdempotencyKey() throws Exception {
+        // given
+        authenticateConsumer(11L);
+        given(reservationCreationCommandFacade.create(
+                eq(11L), any(IdempotencyKey.class), any()))
+                .willReturn(new ReservationCreationCommandResult(201, detailResponse()));
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.reservationId").value("77"));
+
+        ArgumentCaptor<com.miriyum.domain.reservation.dto.request.ReservationCreateRequest> requestCaptor =
+                ArgumentCaptor.forClass(com.miriyum.domain.reservation.dto.request.ReservationCreateRequest.class);
+        ArgumentCaptor<IdempotencyKey> keyCaptor = ArgumentCaptor.forClass(IdempotencyKey.class);
+        then(reservationCreationCommandFacade).should().create(
+                eq(11L), keyCaptor.capture(), requestCaptor.capture());
+        Assertions.assertThat(keyCaptor.getValue().value()).isEqualTo(IDEMPOTENCY_KEY);
+        Assertions.assertThat(requestCaptor.getValue().storeId()).isEqualTo("22");
+        Assertions.assertThat(requestCaptor.getValue().party().totalCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("재전송 결과도 저장된 생성 상태를 유지한다")
+    void keepsCreatedStatusForReplayResult() throws Exception {
+        // given
+        authenticateConsumer(11L);
+        given(reservationCreationCommandFacade.create(
+                eq(11L), any(IdempotencyKey.class), any()))
+                .willReturn(new ReservationCreationCommandResult(201, detailResponse()));
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("Idempotency-Key가 없으면 생성 facade를 호출하지 않고 COMMON_003을 반환한다")
+    void rejectsMissingIdempotencyKeyBeforeFacadeInvocation() throws Exception {
         // given
         authenticateConsumer(11L);
 
         // when & then
-        mockMvc.perform(post("/api/v1/reservations")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("AUTH_006"));
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
 
-        then(reservationService).shouldHaveNoInteractions();
+        then(reservationCreationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("형식이 잘못된 Idempotency-Key는 생성 facade를 호출하지 않고 COMMON_004를 반환한다")
+    void rejectsMalformedIdempotencyKeyBeforeFacadeInvocation() throws Exception {
+        // given
+        authenticateConsumer(11L);
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", "bad-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_004"));
+
+        then(reservationCreationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("인증되지 않은 요청은 예약 생성 전에 AUTH_001을 반환한다")
+    void rejectsUnauthenticatedReservationCreation() throws Exception {
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+
+        then(reservationCreationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("매장 운영자 토큰은 예약 생성 전에 AUTH_004를 반환한다")
+    void rejectsStoreOperatorReservationCreation() throws Exception {
+        // given
+        given(jwtTokenProvider.parseAccessToken("store-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+
+        then(reservationCreationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("생성 facade의 ServiceException은 상태와 코드를 그대로 반환한다")
+    void passesThroughReservationServiceException() throws Exception {
+        // given
+        authenticateConsumer(11L);
+        given(reservationCreationCommandFacade.create(
+                eq(11L), any(IdempotencyKey.class), any()))
+                .willThrow(new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY));
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESERVATION_003"));
     }
 
     @Test
@@ -213,6 +346,21 @@ class ReservationControllerTest {
     private void authenticateConsumer(long accountId) {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, accountId));
+    }
+
+    private String validReservationJson() {
+        return """
+                {
+                  "storeId": "22",
+                  "serviceDate": "2026-08-03",
+                  "startTime": "18:00",
+                  "party": {
+                    "adultCount": 2,
+                    "childCount": 1,
+                    "infantCount": 0
+                  }
+                }
+                """;
     }
 
     private ReservationDetailResponse detailResponse() {
