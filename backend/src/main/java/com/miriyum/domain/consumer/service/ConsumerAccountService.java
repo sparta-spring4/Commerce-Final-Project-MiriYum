@@ -58,6 +58,14 @@ public class ConsumerAccountService {
     }
 
     /**
+     * Controller가 업무 입력을 처리하기 전에 C-013 계정 상태 경계를 확인한다.
+     */
+    @Transactional(readOnly = true)
+    public void requireActiveAccount(Long accountId) {
+        getActiveAccount(accountId);
+    }
+
+    /**
      * 기존 계정의 최초 연락처를 등록한다. 연락처 원문은 Reservation으로 전달하지 않고,
      * 소비자 계정에 저장한 불투명 참조만 이후 예약 생성 경계에서 제공한다.
      */
@@ -140,8 +148,14 @@ public class ConsumerAccountService {
     }
 
     private void registerContactIfAllowed(ConsumerAccount account, String normalizedPhone) {
-        if (account.getPhone() != null && !account.getPhone().equals(normalizedPhone)) {
-            throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+        if (account.getPhone() != null) {
+            String existingNormalizedPhone = phoneNumberPolicy.normalize(account.getPhone());
+            if (!existingNormalizedPhone.equals(normalizedPhone)) {
+                throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+            }
+            if (!account.getPhone().equals(normalizedPhone)) {
+                account.registerContact(normalizedPhone, account.getReservationContactReference());
+            }
         }
         if (account.getPhone() == null || account.getReservationContactReference() == null) {
             account.registerContact(normalizedPhone, contactReferenceGenerator.generate());

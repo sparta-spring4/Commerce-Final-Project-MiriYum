@@ -132,6 +132,26 @@ class ConsumerAccountServiceTest {
     }
 
     @Test
+    @DisplayName("기존 연락처의 공백·하이픈 형식이 달라도 같은 번호로 참조를 확정한다")
+    void normalizesExistingContactBeforeComparison() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        account.registerContact("010-1234-5678", null);
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(consumerAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
+
+        // when
+        consumerAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new ConsumerContactRegistrationRequest("01012345678"));
+
+        // then
+        assertThat(account.getPhone()).isEqualTo("01012345678");
+        assertThat(account.getReservationContactReference()).isNotBlank();
+        assertThat(businessResult.get().data()).isInstanceOf(ConsumerAccountResponse.class);
+    }
+
+    @Test
     @DisplayName("최초 등록 뒤 다른 전화번호로 변경하면 ACCOUNT_007을 던진다")
     void rejectsChangingRegisteredContact() {
         // given

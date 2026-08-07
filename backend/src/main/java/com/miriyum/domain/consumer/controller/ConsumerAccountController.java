@@ -60,6 +60,7 @@ public class ConsumerAccountController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ConsumerContactRegistrationRequest request
     ) {
+        consumerAccountService.requireActiveAccount(principal.accountId());
         IdempotencyKey key = IdempotencyKey.parse(idempotencyKey);
         IdempotencyCommand command = new IdempotencyCommand(
                 TokenNamespace.CONSUMER.value(),

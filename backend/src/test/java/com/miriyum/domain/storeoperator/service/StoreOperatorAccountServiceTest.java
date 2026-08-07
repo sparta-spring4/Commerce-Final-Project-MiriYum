@@ -137,6 +137,25 @@ class StoreOperatorAccountServiceTest {
     }
 
     @Test
+    @DisplayName("기존 운영자 연락처의 공백·하이픈 형식이 달라도 같은 번호로 등록을 완료한다")
+    void normalizesExistingContactBeforeComparison() {
+        // given
+        StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
+        account.registerContact("010-1234-5678");
+        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(storeOperatorAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
+
+        // when
+        storeOperatorAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new StoreOperatorContactRegistrationRequest("01012345678"));
+
+        // then
+        assertThat(account.getPhone()).isEqualTo("01012345678");
+        assertThat(businessResult.get().data()).isInstanceOf(StoreOperatorAccountResponse.class);
+    }
+
+    @Test
     @DisplayName("최초 등록 뒤 운영자 연락처를 바꾸면 ACCOUNT_007을 던진다")
     void rejectsChangingRegisteredContact() {
         // given

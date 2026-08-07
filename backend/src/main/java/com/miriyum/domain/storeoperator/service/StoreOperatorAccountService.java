@@ -52,6 +52,14 @@ public class StoreOperatorAccountService {
     }
 
     /**
+     * Controller가 업무 입력을 처리하기 전에 C-013 계정 상태 경계를 확인한다.
+     */
+    @Transactional(readOnly = true)
+    public void requireActiveAccount(Long accountId) {
+        getActiveAccount(accountId);
+    }
+
+    /**
      * 기존 매장 운영자 계정의 최초 연락처를 등록한다. 운영자 연락처는 예약 참조를 만들지 않는다.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -64,8 +72,14 @@ public class StoreOperatorAccountService {
         return idempotencyExecutor.execute(command, () -> {
             StoreOperatorAccount account = getActiveAccountForUpdate(accountId);
             String normalizedPhone = phoneNumberPolicy.normalize(request.phoneNumber());
-            if (account.getPhone() != null && !account.getPhone().equals(normalizedPhone)) {
-                throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+            if (account.getPhone() != null) {
+                String existingNormalizedPhone = phoneNumberPolicy.normalize(account.getPhone());
+                if (!existingNormalizedPhone.equals(normalizedPhone)) {
+                    throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+                }
+                if (!account.getPhone().equals(normalizedPhone)) {
+                    account.registerContact(normalizedPhone);
+                }
             }
             if (account.getPhone() == null && storeOperatorAccountRepository.existsByPhone(normalizedPhone)) {
                 throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);

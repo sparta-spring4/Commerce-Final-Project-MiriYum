@@ -216,6 +216,22 @@ class StoreOperatorAccountControllerTest {
     }
 
     @Test
+    @DisplayName("삭제된 계정은 잘못된 연락처 형식보다 먼저 401 AUTH_003으로 거절한다")
+    void registerContactWithDeletedAccountTakesPrecedenceOverInvalidPhone() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
+        storeOperatorAccountRepository.deleteAll();
+        storeOperatorAccountRepository.flush();
+
+        mockMvc.perform(put("/api/v1/store-operator-accounts/me/contact")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phoneNumber\": \"invalid\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"));
+    }
+
+    @Test
     @DisplayName("정규화된 같은 연락처는 같은 Idempotency-Key로 재요청해도 결과를 재생한다")
     void registerContactReplaysForEquivalentPhoneFormatting() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);

@@ -54,6 +54,7 @@ public class StoreOperatorAccountController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody StoreOperatorContactRegistrationRequest request
     ) {
+        storeOperatorAccountService.requireActiveAccount(principal.accountId());
         IdempotencyKey key = IdempotencyKey.parse(idempotencyKey);
         IdempotencyCommand command = new IdempotencyCommand(
                 TokenNamespace.STORE_OPERATOR.value(),
