@@ -12,7 +12,10 @@ $requiredFragments = @(
     "steps.ecr-image.outputs.exists != 'true'",
     "Manual deployment requires an existing immutable ECR image tag",
     'ref: ${{ inputs.image_tag }}',
-    "retry-max-attempts: 2"
+    "retry-max-attempts: 2",
+    "deploy/monitoring/cloudwatch-agent-config.json",
+    "cloudwatch_base64",
+    "/opt/miriyum/monitoring/cloudwatch-agent.json"
 )
 
 foreach ($fragment in $requiredFragments) {

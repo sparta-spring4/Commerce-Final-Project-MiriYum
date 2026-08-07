@@ -189,6 +189,7 @@ jobs:
           compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
           nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
           script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
           image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
           cat > ssm-command.json <<EOF
@@ -203,6 +204,8 @@ jobs:
                 "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
                 "echo '$nginx_base64' | base64 --decode > /opt/miriyum/nginx/default.conf",
                 "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
+                "install -d -m 0755 /opt/miriyum/monitoring",
+                "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
                 "chmod 700 /opt/miriyum/deploy.sh",
                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
               ]
