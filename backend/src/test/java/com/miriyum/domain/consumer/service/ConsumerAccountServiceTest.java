@@ -9,8 +9,12 @@ import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
 import com.miriyum.domain.consumer.dto.request.ConsumerAccountUpdateRequest;
+import com.miriyum.domain.consumer.dto.request.ConsumerContactRegistrationRequest;
 import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
+import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -19,6 +23,7 @@ import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -44,11 +49,18 @@ class ConsumerAccountServiceTest {
             "consumer", ACCOUNT_ID, "CONSUMER_ACCOUNT_UPDATE",
             "123e4567-e89b-12d3-a456-426614174000", "a".repeat(64));
 
+    private static final IdempotencyCommand CONTACT_COMMAND = new IdempotencyCommand(
+            "consumer", ACCOUNT_ID, "CONSUMER_CONTACT_REGISTER",
+            "123e4567-e89b-12d3-a456-426614174001", "b".repeat(64));
+
     @Mock
     private ConsumerAccountRepository consumerAccountRepository;
 
     @Mock
     private IdempotencyExecutor idempotencyExecutor;
+
+    @Mock
+    private EntityManager entityManager;
 
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-29T00:00:00Z"), ZoneOffset.UTC);
@@ -58,7 +70,9 @@ class ConsumerAccountServiceTest {
     @BeforeEach
     void setUp() {
         consumerAccountService = new ConsumerAccountService(
-                consumerAccountRepository, nicknamePolicy, clock, idempotencyExecutor);
+                consumerAccountRepository, nicknamePolicy, clock, idempotencyExecutor,
+                new PhoneNumberPolicy(), new ReservationContactReferenceGenerator());
+        ReflectionTestUtils.setField(consumerAccountService, "entityManager", entityManager);
     }
 
     @Test
@@ -94,6 +108,110 @@ class ConsumerAccountServiceTest {
     void separatesMissingAccountFromSuspendedAccount() {
         assertThat(AuthErrorCode.ACCESS_TOKEN_INVALID.getHttpStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(AuthErrorCode.ACCOUNT_RESTRICTED.getHttpStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("전화번호가 없는 기존 계정은 최초 연락처 등록 시 예약 참조를 함께 만든다")
+    void registersFirstContactAndReservationReference() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(consumerAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
+
+        // when
+        consumerAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new ConsumerContactRegistrationRequest("010-1234-5678"));
+
+        // then
+        assertThat(account.getPhone()).isEqualTo("01012345678");
+        assertThat(account.getReservationContactReference()).isNotBlank();
+        assertThat(businessResult.get().data())
+                .isInstanceOfSatisfying(ConsumerAccountResponse.class,
+                        response -> assertThat(response.phoneNumber()).isEqualTo("010-****-5678"));
+    }
+
+    @Test
+    @DisplayName("기존 연락처의 공백·하이픈 형식이 달라도 같은 번호로 참조를 확정한다")
+    void normalizesExistingContactBeforeComparison() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        account.registerContact("010-1234-5678", null);
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(consumerAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        AtomicReference<BusinessResult<?>> businessResult = runBusinessWorkOnExecute();
+
+        // when
+        consumerAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new ConsumerContactRegistrationRequest("01012345678"));
+
+        // then
+        assertThat(account.getPhone()).isEqualTo("01012345678");
+        assertThat(account.getReservationContactReference()).isNotBlank();
+        assertThat(businessResult.get().data()).isInstanceOf(ConsumerAccountResponse.class);
+    }
+
+    @Test
+    @DisplayName("최초 등록 뒤 다른 전화번호로 변경하면 ACCOUNT_007을 던진다")
+    void rejectsChangingRegisteredContact() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        account.registerContact("01012345678", "reference-1");
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        given(consumerAccountRepository.findByIdForUpdate(ACCOUNT_ID)).willReturn(Optional.of(account));
+        runBusinessWorkOnExecute();
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.registerContact(
+                CONTACT_COMMAND, ACCOUNT_ID, new ConsumerContactRegistrationRequest("010-9999-9999")))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED));
+    }
+
+    @Test
+    @DisplayName("전화번호가 없는 활성 계정으로 예약 연락처를 요청하면 ACCOUNT_006을 던진다")
+    void rejectsReservationContactWhenPhoneIsMissing() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.getReservationContact(ACCOUNT_ID))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.RESERVATION_CONTACT_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("전화번호는 있지만 예약 참조가 없으면 ACCOUNT_006을 던진다")
+    void rejectsReservationContactWhenReferenceIsMissing() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        account.registerContact("01012345678", null);
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+        // when & then
+        assertThatThrownBy(() -> consumerAccountService.getReservationContact(ACCOUNT_ID))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.RESERVATION_CONTACT_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("예약 연락처 결과는 전화번호 원문 대신 opaque reference를 반환한다")
+    void returnsReservationContactReference() {
+        // given
+        ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
+        account.registerContact("01012345678", "reference-1");
+        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+        // when
+        ReservationContactResult result = consumerAccountService.getReservationContact(ACCOUNT_ID);
+
+        // then
+        assertThat(result.notificationTargetReference()).isEqualTo("reference-1");
+        assertThat(result.contactAvailable()).isTrue();
     }
 
     @Test

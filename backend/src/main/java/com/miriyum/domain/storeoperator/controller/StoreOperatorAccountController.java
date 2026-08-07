@@ -2,7 +2,9 @@ package com.miriyum.domain.storeoperator.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorAccountUpdateRequest;
+import com.miriyum.domain.storeoperator.dto.request.StoreOperatorContactRegistrationRequest;
 import com.miriyum.domain.storeoperator.dto.response.StoreOperatorAccountResponse;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -15,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,12 +34,39 @@ public class StoreOperatorAccountController {
 
     private static final String UPDATE_COMMAND_TYPE = "STORE_OPERATOR_ACCOUNT_UPDATE";
     private static final String UPDATE_ROUTE = "PATCH /api/v1/store-operator-accounts/me";
+    private static final String CONTACT_COMMAND_TYPE = "STORE_OPERATOR_CONTACT_REGISTER";
+    private static final String CONTACT_ROUTE = "PUT /api/v1/store-operator-accounts/me/contact";
 
     private final StoreOperatorAccountService storeOperatorAccountService;
+    private final PhoneNumberPolicy phoneNumberPolicy;
 
     @GetMapping("/me")
     public ApiResponse<StoreOperatorAccountResponse> getMe(@AuthenticationPrincipal AuthenticatedPrincipal principal) {
         return ApiResponse.success("조회했습니다.", storeOperatorAccountService.getMe(principal.accountId()));
+    }
+
+    /**
+     * 기존 계정의 최초 연락처를 등록한다. 실제 전화번호 소유 인증은 수행하지 않는다.
+     */
+    @PutMapping("/me/contact")
+    public ApiResponse<JsonNode> registerContact(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody StoreOperatorContactRegistrationRequest request
+    ) {
+        storeOperatorAccountService.requireActiveAccount(principal.accountId());
+        IdempotencyKey key = IdempotencyKey.parse(idempotencyKey);
+        IdempotencyCommand command = new IdempotencyCommand(
+                TokenNamespace.STORE_OPERATOR.value(),
+                principal.accountId(),
+                CONTACT_COMMAND_TYPE,
+                key.value(),
+                RequestFingerprint.of(CONTACT_ROUTE + "\nphoneNumber="
+                        + phoneNumberPolicy.normalize(request.phoneNumber())));
+
+        IdempotentOutcome outcome = storeOperatorAccountService.registerContact(
+                command, principal.accountId(), request);
+        return ApiResponse.success("연락처를 등록했습니다.", outcome.data());
     }
 
     /**

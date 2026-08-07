@@ -36,7 +36,7 @@ class StoreOperatorSignUpRequestTest {
         String password = "Aa1" + "b".repeat(60) + "😀";
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", password, password,
-                "email-ref", "identity-ref", "미리윰식당");
+                "010-1234-5678", "미리윰식당");
 
         // when
         Set<ConstraintViolation<StoreOperatorSignUpRequest>> violations = validator.validate(request);

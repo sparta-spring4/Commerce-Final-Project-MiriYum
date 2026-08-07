@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -23,6 +24,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -56,8 +61,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.identity-verification.dev-stub-enabled=false"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
         })
 @AutoConfigureMockMvc
 class ConsumerAccountControllerTest {
@@ -227,6 +231,93 @@ class ConsumerAccountControllerTest {
                         .queryParam("sort", "status,asc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
+
+    @Test
+    @DisplayName("인증된 소비자는 최초 연락처를 등록하고 마스킹된 번호를 받는다")
+    void registerContactReturnsMaskedPhoneNumber() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+
+        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phoneNumber\": \"010-1234-5678\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.phoneNumber").value("010-****-5678"));
+    }
+
+    @Test
+    @DisplayName("삭제된 계정은 잘못된 연락처 형식보다 먼저 401 AUTH_003으로 거절한다")
+    void registerContactWithDeletedAccountTakesPrecedenceOverInvalidPhone() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        consumerAccountRepository.deleteAll();
+        consumerAccountRepository.flush();
+
+        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phoneNumber\": \"invalid\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_003"));
+    }
+
+    @Test
+    @DisplayName("정규화된 같은 연락처는 같은 Idempotency-Key로 재요청해도 결과를 재생한다")
+    void registerContactReplaysForEquivalentPhoneFormatting() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+
+        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phoneNumber\": \"010-1234-5678\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phoneNumber\": \"01012345678\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.phoneNumber").value("010-****-5678"));
+    }
+
+    @Test
+    @DisplayName("동시에 최초 연락처를 등록하면 한 요청만 성공하고 다른 요청은 ACCOUNT_007을 반환한다")
+    void registerContactSerializesConcurrentFirstRegistration() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<MvcResult> first = executor.submit(() -> mockMvc.perform(
+                    put("/api/v1/consumer-accounts/me/contact")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                            .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440001")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"phoneNumber\": \"010-1111-1111\"}"))
+                    .andReturn());
+            Future<MvcResult> second = executor.submit(() -> mockMvc.perform(
+                    put("/api/v1/consumer-accounts/me/contact")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                            .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440002")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"phoneNumber\": \"010-2222-2222\"}"))
+                    .andReturn());
+
+            MvcResult firstResult = first.get();
+            MvcResult secondResult = second.get();
+            assertThat(List.of(
+                    firstResult.getResponse().getStatus(),
+                    secondResult.getResponse().getStatus()))
+                    .containsExactlyInAnyOrder(200, 409);
+            String conflictBody = firstResult.getResponse().getStatus() == 409
+                    ? firstResult.getResponse().getContentAsString()
+                    : secondResult.getResponse().getContentAsString();
+            assertThat(conflictBody).contains("ACCOUNT_007");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test

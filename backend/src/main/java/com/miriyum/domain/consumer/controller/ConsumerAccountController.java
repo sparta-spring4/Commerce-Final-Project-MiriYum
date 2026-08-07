@@ -2,7 +2,9 @@ package com.miriyum.domain.consumer.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.consumer.dto.request.ConsumerAccountUpdateRequest;
+import com.miriyum.domain.consumer.dto.request.ConsumerContactRegistrationRequest;
 import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -18,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,13 +39,40 @@ public class ConsumerAccountController {
 
     private static final String UPDATE_COMMAND_TYPE = "CONSUMER_ACCOUNT_UPDATE";
     private static final String UPDATE_ROUTE = "PATCH /api/v1/consumer-accounts/me";
+    private static final String CONTACT_COMMAND_TYPE = "CONSUMER_CONTACT_REGISTER";
+    private static final String CONTACT_ROUTE = "PUT /api/v1/consumer-accounts/me/contact";
 
     private final ConsumerAccountService consumerAccountService;
     private final ReservationService reservationService;
+    private final PhoneNumberPolicy phoneNumberPolicy;
 
     @GetMapping("/me")
     public ApiResponse<ConsumerAccountResponse> getMe(@AuthenticationPrincipal AuthenticatedPrincipal principal) {
         return ApiResponse.success("조회했습니다.", consumerAccountService.getMe(principal.accountId()));
+    }
+
+    /**
+     * 기존 계정의 최초 연락처를 등록한다. 실제 전화번호 소유 인증은 수행하지 않는다.
+     */
+    @PutMapping("/me/contact")
+    public ApiResponse<JsonNode> registerContact(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ConsumerContactRegistrationRequest request
+    ) {
+        consumerAccountService.requireActiveAccount(principal.accountId());
+        IdempotencyKey key = IdempotencyKey.parse(idempotencyKey);
+        IdempotencyCommand command = new IdempotencyCommand(
+                TokenNamespace.CONSUMER.value(),
+                principal.accountId(),
+                CONTACT_COMMAND_TYPE,
+                key.value(),
+                RequestFingerprint.of(CONTACT_ROUTE + "\nphoneNumber="
+                        + phoneNumberPolicy.normalize(request.phoneNumber())));
+
+        IdempotentOutcome outcome = consumerAccountService.registerContact(
+                command, principal.accountId(), request);
+        return ApiResponse.success("연락처를 등록했습니다.", outcome.data());
     }
 
     /**
