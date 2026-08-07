@@ -1,6 +1,7 @@
 package com.miriyum.domain.storeoperator.dto.response;
 
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
+import com.miriyum.domain.auth.contact.PhoneNumberMasker;
 
 /**
  * 매장 운영자 계정 응답이다. 본인 정보 조회·수정 응답에서 쓴다.
@@ -17,7 +18,7 @@ public record StoreOperatorAccountResponse(
         return new StoreOperatorAccountResponse(
                 String.valueOf(account.getId()),
                 account.getEmail(),
-                account.getPhone(),
+                PhoneNumberMasker.mask(account.getPhone()),
                 account.getDisplayName(),
                 account.getStatus().name()
         );

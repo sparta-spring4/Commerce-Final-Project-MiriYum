@@ -1,6 +1,7 @@
 package com.miriyum.domain.consumer.dto.response;
 
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.domain.auth.contact.PhoneNumberMasker;
 
 /**
  * 일반 사용자 계정 응답이다. 본인 정보 조회·수정 응답에서 쓴다.
@@ -17,7 +18,7 @@ public record ConsumerAccountResponse(
         return new ConsumerAccountResponse(
                 String.valueOf(account.getId()),
                 account.getEmail(),
-                account.getPhone(),
+                PhoneNumberMasker.mask(account.getPhone()),
                 account.getName(),
                 account.getStatus().name()
         );

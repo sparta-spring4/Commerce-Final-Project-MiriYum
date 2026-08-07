@@ -20,7 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 회원가입 API가 실제 HTTP 응답 수준에서 본인확인 스텁 경계를 지키는지 확인한다.
+ * 회원가입 API가 1차 MVP의 직접 입력 연락처 계약을 지키는지 확인한다.
  *
  * <p>가입 요청은 {@code RateLimitFilter}를 거치며 MySQL 전용 원자적 upsert 문법을 쓰므로
  * H2가 아니라 Testcontainers MySQL을 사용한다({@code docs/service-policies/18-scale-reliability.md}
@@ -33,8 +33,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.identity-verification.dev-stub-enabled=false"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
         })
 @AutoConfigureMockMvc
 class StoreOperatorAuthControllerTest {
@@ -53,16 +52,15 @@ class StoreOperatorAuthControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    @DisplayName("본인확인 스텁이 꺼져 있으면 회원가입 API는 503과 COMMON_012를 반환한다")
-    void signUpReturnsServiceUnavailableWhenIdentityVerificationStubDisabled() throws Exception {
+    @DisplayName("직접 입력한 MVP 신뢰 연락처로 회원가입하면 201을 반환한다")
+    void signUpSucceedsWithMvpTrustedContact() throws Exception {
         // given
         String requestBody = """
                 {
                   "email": "owner@example.com",
-                  "password": "password123",
-                  "passwordConfirm": "password123",
-                  "emailVerificationReference": "email-ref",
-                  "identityVerificationReference": "identity-ref",
+                  "password": "Password123!",
+                  "passwordConfirm": "Password123!",
+                  "phoneNumber": "010-1234-5678",
                   "displayName": "미리윰식당"
                 }
                 """;
@@ -71,7 +69,7 @@ class StoreOperatorAuthControllerTest {
         mockMvc.perform(post("/api/v1/store-operator-auth/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("COMMON_012"));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.accountType").value("STORE_OPERATOR"));
     }
 }

@@ -19,8 +19,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * 매장 운영자 계정이다. 일반 사용자 계정과 물리적으로 분리된 별도 테이블·기본 키를 사용한다.
  *
- * <p>{@code phone}은 본인확인 제공업체가 선정되어 실제 전화번호를 해석하는 어댑터가 붙기 전까지
- * 채우지 않는다(BLOCKED, null).</p>
+ * <p>1차 MVP에서는 회원가입 시 입력한 휴대전화를 실제 소유 인증이 완료된 것으로 간주해 저장한다.
+ * 외부 본인확인 제공업체 연동은 후속 고도화 범위다.</p>
  */
 @Entity
 @Table(name = "store_operator_accounts")
@@ -57,6 +57,21 @@ public class StoreOperatorAccount extends BaseEntity {
         StoreOperatorAccount account = new StoreOperatorAccount(email, passwordHash, displayName);
         account.status = StoreOperatorAccountStatus.ACTIVE;
         return account;
+    }
+
+    public static StoreOperatorAccount createWithContact(
+            String email,
+            String passwordHash,
+            String displayName,
+            String phone
+    ) {
+        StoreOperatorAccount account = create(email, passwordHash, displayName);
+        account.registerContact(phone);
+        return account;
+    }
+
+    public void registerContact(String normalizedPhone) {
+        this.phone = normalizedPhone;
     }
 
     public void changeDisplayName(String newDisplayName) {

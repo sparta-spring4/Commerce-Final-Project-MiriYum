@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
@@ -63,7 +65,7 @@ class ConsumerAuthServiceTest {
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
                 consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
-                loginDelayGuard, true);
+                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator());
     }
 
     @Test
@@ -72,7 +74,7 @@ class ConsumerAuthServiceTest {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
+                "010-1234-5678", true, "닉네임");
         given(consumerAccountRepository.existsByEmail("user@example.com")).willReturn(true);
 
         // when & then
@@ -83,12 +85,28 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("같은 계정 유형에서 이미 사용 중인 전화번호로 가입하면 ACCOUNT_002를 던진다")
+    void rejectsSignUpWithDuplicatePhone() {
+        // given
+        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
+                "other@example.com", "Password123!", "Password123!",
+                "010-1234-5678", true, "닉네임");
+        given(consumerAccountRepository.existsByPhone("01012345678")).willReturn(true);
+
+        // when & then
+        assertThatThrownBy(() -> consumerAuthService.signUp(request))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.PHONE_ALREADY_EXISTS));
+    }
+
+    @Test
     @DisplayName("가입에 성공하면 닉네임을 정규화해서 저장하고 가입 응답을 반환한다")
     void signUpSucceedsAndNormalizesNickname() {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "Password123!", "Password123!",
-                "email-ref", "identity-ref", "  새 닉네임  ");
+                "010-1234-5678", true, "  새 닉네임  ");
         given(passwordEncoder.encode("Password123!")).willReturn("hashed");
         given(consumerAccountRepository.saveAndFlush(any(ConsumerAccount.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
@@ -100,26 +118,10 @@ class ConsumerAuthServiceTest {
         ArgumentCaptor<ConsumerAccount> captor = ArgumentCaptor.forClass(ConsumerAccount.class);
         verify(consumerAccountRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getName()).isEqualTo("새 닉네임");
+        assertThat(captor.getValue().getPhone()).isEqualTo("01012345678");
+        assertThat(captor.getValue().getReservationContactReference()).isNotBlank();
         assertThat(response.accountType()).isEqualTo(AccountType.CONSUMER);
         assertThat(response.status()).isEqualTo("ACTIVE");
-    }
-
-    @Test
-    @DisplayName("본인확인 스텁이 꺼져 있으면 가입을 차단한다")
-    void rejectsSignUpWhenIdentityVerificationStubDisabled() {
-        // given
-        ConsumerAuthService serviceWithStubDisabled = new ConsumerAuthService(
-                consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
-                loginDelayGuard, false);
-        ConsumerSignUpRequest request = new ConsumerSignUpRequest(
-                "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
-
-        // when & then
-        assertThatThrownBy(() -> serviceWithStubDisabled.signUp(request))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
     }
 
     @Test
@@ -128,7 +130,7 @@ class ConsumerAuthServiceTest {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "different456",
-                "email-ref", "identity-ref", "닉네임");
+                "010-1234-5678", true, "닉네임");
 
         // when & then
         assertThatThrownBy(() -> consumerAuthService.signUp(request))
@@ -143,7 +145,7 @@ class ConsumerAuthServiceTest {
         // given
         ConsumerSignUpRequest request = new ConsumerSignUpRequest(
                 "user@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "닉네임");
+                "010-1234-5678", true, "닉네임");
 
         // when & then
         assertThatThrownBy(() -> consumerAuthService.signUp(request))
