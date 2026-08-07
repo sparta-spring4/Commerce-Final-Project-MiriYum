@@ -28,7 +28,12 @@ $requiredFragments = @(
     '--arg sha "$IMAGE_TAG"',
     '--field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT"',
     "Mark backend deployment successful",
-    "Mark backend deployment failed"
+    "Mark backend deployment failed",
+    "deploy/monitoring/cloudwatch-agent-config.json",
+    "cloudwatch_base64",
+    "/opt/miriyum/monitoring/cloudwatch-agent.json",
+    "amazon-cloudwatch-agent-ctl -a fetch-config",
+    "file:/opt/miriyum/monitoring/cloudwatch-agent.json"
 )
 
 foreach ($fragment in $requiredFragments) {

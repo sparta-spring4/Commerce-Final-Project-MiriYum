@@ -180,3 +180,6 @@ jobs:
       - name: Verify backend CD workflow contract
         shell: pwsh
         run: ./scripts/verify-backend-cd-workflow.ps1
+
+      - name: Verify CloudWatch observability contract
+        run: python3 scripts/test-cloudwatch-observability.py
