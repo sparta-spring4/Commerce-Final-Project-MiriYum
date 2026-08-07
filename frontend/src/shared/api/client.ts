@@ -1,6 +1,15 @@
-import { ApiError, NetworkError } from './apiError'
+import { ApiContractError, ApiError, NetworkError } from './apiError'
 import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
-import { isApiErrorBody, type ApiSuccessBody } from './envelope'
+import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelope'
+import type {
+  ApiPath,
+  IdempotencyOf,
+  MethodOf,
+  OperationOf,
+  PathParamsOf,
+  RequestBodyOf,
+  SuccessBodyOf,
+} from './paths'
 
 /**
  * 인증 이음새. 이 모듈은 토큰을 보관하거나 재발급을 판단하지 않는다.
@@ -18,27 +27,80 @@ export interface ApiClientDependencies {
   onUnauthorized?: (error: ApiError) => Promise<boolean>
 }
 
-export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  /** 생성 타입으로 제한한다. OpenAPI에 없는 필드를 보내면 backend가 400으로 거절한다. */
-  body?: unknown
-  /** 한 작업 시도의 멱등 키. 재시도 동안 같은 값을 넘긴다. */
-  idempotencyKey?: string
-  headers?: Record<string, string>
+/** OpenAPI가 타이핑하지 않는 부수 입력. */
+interface CommonRequestOptions {
+  query?: Record<string, string | number | boolean | undefined>
   signal?: AbortSignal
 }
 
+/**
+ * 호출 옵션은 경로와 method가 정해지면 나머지가 따라온다.
+ * 본문·경로 변수·멱등 키는 해당 operation의 생성 타입에서 나온다.
+ */
+export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
+  method: M
+} & PathParamsOf<P> &
+  RequestBodyOf<OperationOf<P, M>> &
+  IdempotencyOf<OperationOf<P, M>> &
+  CommonRequestOptions
+
+/** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
+export type ApiResult<P extends ApiPath, M extends MethodOf<P>> = ApiSuccess<
+  SuccessBodyOf<OperationOf<P, M>> extends { data: infer D } ? D : never
+>
+
+export type ApiClient = <P extends ApiPath, M extends MethodOf<P>>(
+  path: P,
+  options: RequestOptions<P, M>,
+) => Promise<ApiResult<P, M>>
+
 const JSON_CONTENT_TYPE = 'application/json'
 
-export type ApiClient = <T>(path: string, options?: RequestOptions) => Promise<T>
+/**
+ * 2xx 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
+ * 해석 실패의 의미가 status에 따라 다르므로 호출자가 판정한다.
+ */
+const UNPARSEABLE = Symbol('unparseable')
+
+function buildUrl(
+  path: string,
+  pathParams: Record<string, string | number> | undefined,
+  query: CommonRequestOptions['query'],
+): string {
+  let url = path
+  if (pathParams) {
+    for (const [name, value] of Object.entries(pathParams)) {
+      url = url.replace(`{${name}}`, encodeURIComponent(String(value)))
+    }
+  }
+  if (!query) {
+    return url
+  }
+  const search = new URLSearchParams()
+  for (const [name, value] of Object.entries(query)) {
+    if (value !== undefined) {
+      search.append(name, String(value))
+    }
+  }
+  const serialized = search.toString()
+  return serialized.length > 0 ? `${url}?${serialized}` : url
+}
 
 export function createApiClient(
   dependencies: ApiClientDependencies = {},
 ): ApiClient {
   const { getAccessToken, onUnauthorized } = dependencies
 
-  async function send(path: string, options: RequestOptions): Promise<Response> {
-    const headers: Record<string, string> = { ...options.headers }
+  async function send(
+    url: string,
+    options: {
+      method: string
+      body?: unknown
+      idempotencyKey?: string
+      signal?: AbortSignal
+    },
+  ): Promise<Response> {
+    const headers: Record<string, string> = {}
 
     if (options.body !== undefined) {
       headers['Content-Type'] = JSON_CONTENT_TYPE
@@ -52,10 +114,11 @@ export function createApiClient(
     }
 
     try {
-      return await fetch(path, {
-        method: options.method ?? 'GET',
+      return await fetch(url, {
+        method: options.method.toUpperCase(),
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
         // Refresh·CSRF 쿠키는 same-origin 프록시를 통해서만 오간다.
         credentials: 'same-origin',
@@ -65,20 +128,10 @@ export function createApiClient(
     }
   }
 
-  /**
-   * 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
-   * 해석 실패의 의미가 status에 따라 다르므로 여기서 바로 던지지 않고 호출자가 판정한다.
-   * 성공 status면 계약을 못 읽은 것이라 네트워크 실패, 오류 status면 서버가 확정한 실패다.
-   */
-  const UNPARSEABLE = Symbol('unparseable')
-
-  async function readBody(response: Response): Promise<unknown | typeof UNPARSEABLE> {
-    if (response.status === 204) {
-      return null
-    }
+  async function readBody(response: Response): Promise<unknown> {
     const text = await response.text()
     if (text.length === 0) {
-      return null
+      return UNPARSEABLE
     }
     try {
       return JSON.parse(text)
@@ -104,32 +157,59 @@ export function createApiClient(
     })
   }
 
-  return async function requestApi<T>(
-    path: string,
-    options: RequestOptions = {},
-  ): Promise<T> {
-    let response = await send(path, options)
+  return async function requestApi<P extends ApiPath, M extends MethodOf<P>>(
+    path: P,
+    options: RequestOptions<P, M>,
+  ): Promise<ApiResult<P, M>> {
+    const {
+      method,
+      pathParams,
+      body,
+      idempotencyKey,
+      query,
+      signal,
+    } = options as RequestOptions<P, M> & {
+      pathParams?: Record<string, string | number>
+      body?: unknown
+      idempotencyKey?: string
+    }
+
+    const url = buildUrl(path, pathParams, query)
+    const sendOptions = { method, body, idempotencyKey, signal }
+
+    let response = await send(url, sendOptions)
 
     if (response.status === 401 && onUnauthorized) {
       const error = toApiError(401, await readBody(response))
       if (await onUnauthorized(error)) {
-        response = await send(path, options)
+        response = await send(url, sendOptions)
       } else {
         throw error
       }
     }
 
-    const body = await readBody(response)
+    const payload = await readBody(response)
 
     if (!response.ok) {
-      throw toApiError(response.status, body)
+      throw toApiError(
+        response.status,
+        payload === UNPARSEABLE ? undefined : payload,
+      )
     }
 
-    if (body === UNPARSEABLE) {
-      throw new NetworkError('서버 응답을 해석하지 못했습니다.')
+    // 계약에 204를 선언한 operation이 없다. 본문 없는 2xx는 계약 위반이다.
+    if (payload === UNPARSEABLE) {
+      throw new ApiContractError(response.status, 'notAnObject')
     }
 
-    // 성공 응답의 data는 null일 수 있다. 빈 배열과 마찬가지로 오류가 아니다.
-    return (body as ApiSuccessBody<T>)?.data as T
+    const checked = checkSuccessEnvelope<
+      SuccessBodyOf<OperationOf<P, M>> extends { data: infer D } ? D : never
+    >(payload)
+
+    if (!checked.ok) {
+      throw new ApiContractError(response.status, checked.violation)
+    }
+
+    return checked.value
   }
 }

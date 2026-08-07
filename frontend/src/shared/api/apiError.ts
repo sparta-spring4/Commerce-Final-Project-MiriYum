@@ -38,8 +38,30 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * 서버가 2xx로 응답했지만 본문이 공통 성공 봉투가 아닌 경우다.
+ *
+ * 서버가 준 오류 코드가 없으므로 ApiError로 위장하지 않는다. 서버에 닿지도 못한
+ * NetworkError와도 다르다. 계약 위반을 성공으로 통과시키지 않기 위해 별도로 둔다.
+ */
+export class ApiContractError extends Error {
+  readonly status: number
+  readonly violation: string
+
+  constructor(status: number, violation: string) {
+    super('서버 응답이 API 계약과 다릅니다.')
+    this.name = 'ApiContractError'
+    this.status = status
+    this.violation = violation
+  }
+}
+
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError
+}
+
+export function isApiContractError(error: unknown): error is ApiContractError {
+  return error instanceof ApiContractError
 }
 
 export function isNetworkError(error: unknown): error is NetworkError {
