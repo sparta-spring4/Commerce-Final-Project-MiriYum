@@ -47,6 +47,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 생성 타입은 저장소에 커밋한다. OpenAPI를 고치고 다시 만들지 않은 상태를 여기서 잡는다.
+      - name: Verify generated API types are up to date
+        run: |
+          pnpm run generate:api
+          git diff --exit-code -- src/shared/api/generated
+
       # 실패 지점이 로그에서 구분되도록 세 검증을 개별 step으로 나눈다.
       - name: Type check
         run: pnpm run typecheck
