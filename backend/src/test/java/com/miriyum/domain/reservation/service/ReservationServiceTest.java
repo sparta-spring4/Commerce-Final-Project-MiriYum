@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -80,6 +81,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -181,8 +183,8 @@ class ReservationServiceTest {
     }
 
     @Test
-    @DisplayName("Auth가 불가능한 성공 연락처를 반환하면 replay 확인 전 ACCOUNT_006으로 거절한다")
-    void rejectsUnavailableContactBeforeIdempotencyReplay() {
+    @DisplayName("새 예약 키에서 불가능한 연락처는 ACCOUNT_006으로 거절하고 자원을 변경하지 않는다")
+    void rejectsUnavailableContactForNewKeyWithoutMutatingResources() {
         ReservationCreateRequest request = new ReservationCreateRequest(
                 "22",
                 SERVICE_DATE,
@@ -193,6 +195,10 @@ class ReservationServiceTest {
         );
         given(consumerAccountService.getReservationContact(11L))
                 .willReturn(new ReservationContactResult("", false));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            return work.get();
+        });
 
         assertThatThrownBy(() -> reservationService.createReservation(
                 11L,
@@ -202,8 +208,36 @@ class ReservationServiceTest {
                 assertThat(exception.getErrorCode())
                         .isEqualTo(AccountErrorCode.RESERVATION_CONTACT_REQUIRED));
 
+        then(consumerAccountService).should().requireActiveAccount(11L);
+        then(idempotencyExecutor).should(times(1)).execute(any(), any());
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("inactiveOrDeletedConsumerErrors")
+    @DisplayName("현재 비활성 또는 삭제된 소비자는 replay 확인 전에 거절한다")
+    void rejectsInactiveOrDeletedConsumerBeforeIdempotencyReplay(AuthErrorCode errorCode) {
+        willThrow(new ServiceException(errorCode)).given(consumerAccountService)
+                .requireActiveAccount(11L);
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)
+        )).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(errorCode));
+
         then(idempotencyExecutor).shouldHaveNoInteractions();
-        then(storeService).shouldHaveNoInteractions();
+        then(consumerAccountService).should(never()).getReservationContact(11L);
+    }
+
+    private static Stream<Arguments> inactiveOrDeletedConsumerErrors() {
+        return Stream.of(
+                Arguments.of(AuthErrorCode.ACCOUNT_RESTRICTED),
+                Arguments.of(AuthErrorCode.ACCESS_TOKEN_INVALID));
     }
 
     @Test
@@ -461,8 +495,8 @@ class ReservationServiceTest {
     }
 
     @Test
-    @DisplayName("중복 메뉴 합산과 ID 정렬 지문 replay도 현재 Auth 연락처를 매번 재확인한다")
-    void replaysCanonicalMenuFingerprintAfterRecheckingContact() {
+    @DisplayName("중복 메뉴 합산과 ID 정렬 지문 replay는 연락처가 사라져도 최초 결과를 재생한다")
+    void replaysCanonicalMenuFingerprintWithoutRecheckingContact() {
         ReservationCreateRequest first = new ReservationCreateRequest(
                 "22", SERVICE_DATE, START_TIME, null,
                 new ReservationPartyRequest(2, 0, 0),
@@ -476,15 +510,48 @@ class ReservationServiceTest {
                 List.of(
                         new ReservationMenuSelectionRequest("91", 3),
                         new ReservationMenuSelectionRequest("92", 2)));
-        ReservationDetailResponse response = ReservationDetailResponse.from(
-                reservation(77L, 11L), List.of());
-        IdempotentOutcome replay = new IdempotentOutcome(
-                true, 201, "SUCCESS", "RESERVATION", "77",
-                new ObjectMapper().valueToTree(response));
-        given(consumerAccountService.getReservationContact(11L))
-                .willReturn(new ReservationContactResult(
-                        "consumer:11:channel:primary", true));
-        given(idempotencyExecutor.execute(any(), any())).willReturn(replay);
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+        stubSuccessfulCreation(bucket, activePolicy(22L, 30, 60, 0));
+        given(menuHoldService.create(any(MenuHoldCreateCommand.class)))
+                .willReturn(MenuHoldCommandResult.confirmed(77L));
+        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .willReturn(List.of(
+                        new MenuHoldItemResult(91L, "아메리카노", 4_500L, 3),
+                        new MenuHoldItemResult(92L, "케이크", 7_000L, 2)));
+        AtomicInteger contactLookups = new AtomicInteger();
+        given(consumerAccountService.getReservationContact(11L)).willAnswer(invocation -> {
+            if (contactLookups.getAndIncrement() == 0) {
+                return new ReservationContactResult("consumer:11:channel:primary", true);
+            }
+            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
+        });
+        AtomicReference<IdempotentOutcome> storedOutcome = new AtomicReference<>();
+        willAnswer(invocation -> {
+            IdempotentOutcome stored = storedOutcome.get();
+            if (stored != null) {
+                return new IdempotentOutcome(
+                        true,
+                        stored.httpStatus(),
+                        stored.responseCode(),
+                        stored.resourceType(),
+                        stored.resourceId(),
+                        stored.data());
+            }
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            IdempotentOutcome created = new IdempotentOutcome(
+                    false,
+                    result.httpStatus(),
+                    result.responseCode(),
+                    result.resourceType(),
+                    result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));
+            storedOutcome.set(created);
+            return created;
+        }).given(idempotencyExecutor).execute(any(), any());
         IdempotencyKey key = IdempotencyKey.parse(
                 "550e8400-e29b-41d4-a716-446655440000");
 
@@ -500,10 +567,10 @@ class ReservationServiceTest {
         assertThat(commands.getAllValues())
                 .extracting(IdempotencyCommand::requestFingerprint)
                 .containsOnly(commands.getAllValues().getFirst().requestFingerprint());
-        then(consumerAccountService).should(times(2)).getReservationContact(11L);
-        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
-        then(reservationRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(consumerAccountService).should(times(2)).requireActiveAccount(11L);
+        then(consumerAccountService).should(times(1)).getReservationContact(11L);
+        then(reservationRepository).should(times(1)).saveAndFlush(any(Reservation.class));
+        then(menuHoldService).should(times(1)).create(any(MenuHoldCreateCommand.class));
     }
 
     @Test
@@ -516,9 +583,6 @@ class ReservationServiceTest {
         storedPayload.put("timeZoneId", "America/New_York");
         storedPayload.put("startAt", "2026-11-01T01:30:00-03:00");
         storedPayload.put("serviceEndAt", "2026-11-01T01:45:00-03:00");
-        given(consumerAccountService.getReservationContact(11L))
-                .willReturn(new ReservationContactResult(
-                        "consumer:11:channel:primary", true));
         given(idempotencyExecutor.execute(any(), any())).willReturn(
                 new IdempotentOutcome(
                         true, 201, "SUCCESS", "RESERVATION", "77", storedPayload));
@@ -534,6 +598,7 @@ class ReservationServiceTest {
                 .isEqualTo("2026-11-01T01:30-03:00");
         assertThat(replayed.data().serviceEndAt().toString())
                 .isEqualTo("2026-11-01T01:45-03:00");
+        then(consumerAccountService).should(never()).getReservationContact(11L);
         then(storeTransactionEligibilityService).shouldHaveNoInteractions();
         then(reservationRepository).shouldHaveNoInteractions();
     }
@@ -926,10 +991,10 @@ class ReservationServiceTest {
             ReservationCapacityBucket bucket,
             ReservationTimePolicyVersion policy
     ) {
-        given(consumerAccountService.getReservationContact(11L))
-                .willReturn(new ReservationContactResult(
+        lenient().when(consumerAccountService.getReservationContact(11L))
+                .thenReturn(new ReservationContactResult(
                         "consumer:11:channel:primary", true));
-        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+        lenient().when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<BusinessResult<?>> work = invocation.getArgument(1);
             BusinessResult<?> result = work.get();
             return new IdempotentOutcome(

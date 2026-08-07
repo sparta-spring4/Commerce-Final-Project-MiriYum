@@ -195,7 +195,7 @@ public class ReservationService {
 
     /**
      * 인증된 일반 사용자의 일반 예약을 즉시 확정한다.
-     * 연락처 상태는 멱등 replay에서도 현재 상태를 다시 확인하기 위해 claim보다 먼저 검증한다.
+     * 현재 계정 상태는 replay에도 적용하고, 연락처는 최초 명령 실행에서만 확인한다.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public ReservationCreationCommandResult createReservation(
@@ -205,14 +205,7 @@ public class ReservationService {
     ) {
         NormalizedCreationRequest normalized = normalizeCreationRequest(
                 consumerAccountId, key, request);
-        ReservationContactResult contact =
-                consumerAccountService.getReservationContact(consumerAccountId);
-        if (contact == null
-                || !contact.contactAvailable()
-                || contact.notificationTargetReference() == null
-                || contact.notificationTargetReference().isBlank()) {
-            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
-        }
+        consumerAccountService.requireActiveAccount(consumerAccountId);
         IdempotencyCommand command = new IdempotencyCommand(
                 "consumer",
                 consumerAccountId,
@@ -220,13 +213,22 @@ public class ReservationService {
                 key.value(),
                 fingerprintForCreation(normalized)
         );
-        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
-                createReservationWork(
-                        consumerAccountId,
-                        key,
-                        normalized,
-                        contact
-                ));
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            ReservationContactResult contact =
+                    consumerAccountService.getReservationContact(consumerAccountId);
+            if (contact == null
+                    || !contact.contactAvailable()
+                    || contact.notificationTargetReference() == null
+                    || contact.notificationTargetReference().isBlank()) {
+                throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
+            }
+            return createReservationWork(
+                    consumerAccountId,
+                    key,
+                    normalized,
+                    contact
+            );
+        });
         ReservationDetailResponse response = reservationCreationResponse(outcome.data());
         return new ReservationCreationCommandResult(
                 outcome.httpStatus(), response);

@@ -200,6 +200,11 @@ class ReservationCreationIT {
         // when
         ReservationCreationCommandResult first =
                 commandFacade.create(consumerId, key, request);
+        jdbcTemplate.update(
+                "UPDATE consumer_accounts "
+                        + "SET phone = NULL, reservation_contact_reference = NULL "
+                        + "WHERE consumer_account_id = ?",
+                consumerId);
         ReservationCreationCommandResult replay =
                 commandFacade.create(consumerId, key, request);
 
