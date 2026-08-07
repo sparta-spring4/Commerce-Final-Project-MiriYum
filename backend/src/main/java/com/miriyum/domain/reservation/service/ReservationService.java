@@ -68,6 +68,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -90,6 +91,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -225,35 +227,35 @@ public class ReservationService {
                         normalized,
                         contact
                 ));
-        ReservationDetailResponse response = objectMapper.treeToValue(
-                outcome.data(), ReservationDetailResponse.class);
+        ReservationDetailResponse response = reservationCreationResponse(outcome.data());
         return new ReservationCreationCommandResult(
-                outcome.httpStatus(), restoreReservationOffsets(response));
+                outcome.httpStatus(), response);
     }
 
-    private static ReservationDetailResponse restoreReservationOffsets(
-            ReservationDetailResponse response
-    ) {
-        if (response == null || response.startAt() == null
-                || response.serviceEndAt() == null
-                || response.timeZoneId() == null) {
-            return response;
-        }
-        ZoneId zone = ZoneId.of(response.timeZoneId());
+    private ReservationDetailResponse reservationCreationResponse(JsonNode payload) {
+        ReservationDetailResponse deserialized = objectMapper.treeToValue(
+                payload, ReservationDetailResponse.class);
         return new ReservationDetailResponse(
-                response.reservationId(),
-                response.storeId(),
-                response.storeName(),
-                response.serviceDate(),
-                response.timeStatus(),
-                response.startAt().toInstant().atZone(zone).toOffsetDateTime(),
-                response.serviceEndAt().toInstant().atZone(zone).toOffsetDateTime(),
-                response.timeZoneId(),
-                response.party(),
-                response.status(),
-                response.menuSelections(),
-                response.createdAt()
+                deserialized.reservationId(),
+                deserialized.storeId(),
+                deserialized.storeName(),
+                deserialized.serviceDate(),
+                deserialized.timeStatus(),
+                storedOffsetDateTime(payload, "startAt"),
+                storedOffsetDateTime(payload, "serviceEndAt"),
+                deserialized.timeZoneId(),
+                deserialized.party(),
+                deserialized.status(),
+                deserialized.menuSelections(),
+                storedOffsetDateTime(payload, "createdAt")
         );
+    }
+
+    private static OffsetDateTime storedOffsetDateTime(JsonNode payload, String fieldName) {
+        JsonNode value = payload.get(fieldName);
+        return value == null || value.isNull()
+                ? null
+                : OffsetDateTime.parse(value.asString());
     }
 
     private BusinessResult<ReservationDetailResponse> createReservationWork(
@@ -354,7 +356,9 @@ public class ReservationService {
 
         ReservationDetailResponse response = ReservationDetailResponse.from(
                 saved,
-                menuHoldSnapshotQueryService.findByReservationId(saved.getId())
+                request.menuSelections().isEmpty()
+                        ? List.of()
+                        : menuHoldSnapshotQueryService.findByReservationId(saved.getId())
         );
         return new BusinessResult<>(
                 HttpStatus.CREATED.value(),
@@ -488,10 +492,7 @@ public class ReservationService {
                 .toList();
         LocalTime coveredUntil = request.startTime();
         for (ReservationCapacityBucket bucket : byInterval) {
-            if (bucket.getEndTime().compareTo(coveredUntil) <= 0) {
-                continue;
-            }
-            if (bucket.getStartTime().isAfter(coveredUntil)) {
+            if (!bucket.getStartTime().equals(coveredUntil)) {
                 throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
             }
             coveredUntil = bucket.getEndTime();

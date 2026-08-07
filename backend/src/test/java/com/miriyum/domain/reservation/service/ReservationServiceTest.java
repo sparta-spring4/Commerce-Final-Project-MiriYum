@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -10,6 +11,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
@@ -78,6 +80,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,6 +102,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationServiceTest {
@@ -271,8 +276,8 @@ class ReservationServiceTest {
                     ReflectionTestUtils.setField(saved, "id", 77L);
                     return saved;
                 });
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
-                .willReturn(List.of());
+        lenient().when(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .thenThrow(new IllegalStateException("menu-less creation must not query menu snapshots"));
 
         ReservationCreationCommandResult result = reservationService.createReservation(
                 11L,
@@ -297,6 +302,7 @@ class ReservationServiceTest {
         assertThat(reservationCaptor.getValue().getCapacityPolicyVersion()).isEqualTo(7L);
         then(capacityAllocationRepository).should().saveAll(any());
         then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
     }
 
     @Test
@@ -405,6 +411,38 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("저장 당시 tzdb offset이 현재 규칙과 달라도 replay 응답은 저장 payload를 그대로 반환한다")
+    void replaysStoredReservationOffsetsWithoutCurrentTimezoneRecalculation() {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode storedPayload = mapper.valueToTree(
+                ReservationDetailResponse.from(reservation(77L, 11L), List.of()));
+        storedPayload.put("serviceDate", "2026-11-01");
+        storedPayload.put("timeZoneId", "America/New_York");
+        storedPayload.put("startAt", "2026-11-01T01:30:00-03:00");
+        storedPayload.put("serviceEndAt", "2026-11-01T01:45:00-03:00");
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willReturn(
+                new IdempotentOutcome(
+                        true, 201, "SUCCESS", "RESERVATION", "77", storedPayload));
+
+        ReservationCreationCommandResult replayed = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0));
+
+        JsonNode replayPayload = mapper.valueToTree(replayed.data());
+        assertThat(replayPayload).isEqualTo(storedPayload);
+        assertThat(replayed.data().startAt().toString())
+                .isEqualTo("2026-11-01T01:30-03:00");
+        assertThat(replayed.data().serviceEndAt().toString())
+                .isEqualTo("2026-11-01T01:45-03:00");
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
     @DisplayName("메뉴 예약은 합산·ID 정렬된 실제 create command를 보내고 CONFIRMED 상세을 반환한다")
     void createsMenuHoldWithMergedStableMenuOrder() {
         ReservationCreateRequest request = new ReservationCreateRequest(
@@ -489,6 +527,35 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("겹치는 버킷 coverage는 점유 전에 RESERVATION_003으로 거절한다")
+    void rejectsOverlappingCapacityCoverageBeforeOccupancyMutation() {
+        ReservationCapacityBucket first = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(18, 45),
+                10, 3, 1, 1, 1, 6, true, 7L);
+        ReservationCapacityBucket overlapping = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, LocalTime.of(18, 30), LocalTime.of(19, 0),
+                10, 3, 2, 1, 1, 6, true, 7L);
+        stubCreationUntilCapacity(
+                activePolicy(22L, 30, 60, 0),
+                List.of(),
+                List.of(first, overlapping));
+
+        Throwable failure = catchThrowable(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)));
+
+        assertThat(first.getOccupiedPeople()).isEqualTo(1);
+        assertThat(first.getOccupiedTeams()).isEqualTo(1);
+        assertThat(overlapping.getOccupiedPeople()).isEqualTo(2);
+        assertThat(overlapping.getOccupiedTeams()).isEqualTo(1);
+        assertThat(failure).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY));
+        then(reservationRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
     @DisplayName("버킷의 최소·최대 일행 범위를 벗어나면 점유 전 RESERVATION_009다")
     void rejectsPartyOutsideCapacityPolicyRange() {
         ReservationCapacityBucket restricted = ReservationCapacityBucket.create(
@@ -526,13 +593,21 @@ class ReservationServiceTest {
         given(consumerAccountService.getReservationContact(11L))
                 .willReturn(new ReservationContactResult(
                         "consumer:11:channel:primary", true));
+        AtomicReference<JsonNode> storedPayload = new AtomicReference<>();
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            JsonNode replayPayload = storedPayload.get();
+            if (replayPayload != null) {
+                return new IdempotentOutcome(
+                        true, 201, "SUCCESS", "RESERVATION", "77", replayPayload);
+            }
             Supplier<BusinessResult<?>> work = invocation.getArgument(1);
             BusinessResult<?> result = work.get();
+            JsonNode createdPayload = new ObjectMapper().valueToTree(result.data());
+            storedPayload.set(createdPayload);
             return new IdempotentOutcome(
                     false, result.httpStatus(), result.responseCode(),
                     result.resourceType(), result.resourceId(),
-                    new ObjectMapper().valueToTree(result.data()));
+                    createdPayload);
         });
         given(storeTransactionEligibilityService
                 .requireReservationTransactionEligibility(22L))
@@ -571,17 +646,23 @@ class ReservationServiceTest {
                     ReflectionTestUtils.setField(saved, "id", 77L);
                     return saved;
                 });
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
-                .willReturn(List.of());
-
-        ReservationCreationCommandResult result = reservationService.createReservation(
+        ReservationCreationCommandResult created = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request);
+        ReservationCreationCommandResult replayed = reservationService.createReservation(
                 11L,
                 IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
                 request);
 
-        assertThat(result.httpStatus()).isEqualTo(201);
-        assertThat(result.data().startAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
-        assertThat(result.data().serviceEndAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
+        assertThat(storedPayload.get().get("startAt").asString())
+                .isEqualTo("2026-11-01T01:30:00-04:00");
+        assertThat(storedPayload.get().get("serviceEndAt").asString())
+                .isEqualTo("2026-11-01T01:45:00-04:00");
+        assertThat(created.httpStatus()).isEqualTo(201);
+        assertThat(created.data().startAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
+        assertThat(created.data().serviceEndAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
+        assertThat(replayed).isEqualTo(created);
         assertThat(bucket.getOccupiedPeople()).isEqualTo(2);
     }
 
