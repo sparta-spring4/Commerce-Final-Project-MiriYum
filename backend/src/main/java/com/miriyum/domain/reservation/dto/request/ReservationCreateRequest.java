@@ -1,12 +1,21 @@
 package com.miriyum.domain.reservation.dto.request;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.Constraint;
+import jakarta.validation.ConstraintValidator;
+import jakarta.validation.ConstraintValidatorContext;
+import jakarta.validation.Payload;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
@@ -15,39 +24,117 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import tools.jackson.databind.JsonNode;
 
 /**
  * 일반 사용자의 즉시 확정 예약 생성 요청이다.
- *
- * @param storeId 정밀도 손실 없이 전달되는 매장 문자열 PublicId
- * @param serviceDate 매장 현지 업무 날짜
- * @param startTime 매장 현지 시작 시각
- * @param startOffset DST 중복 시각을 식별하는 선택적 UTC offset
- * @param party 성인·아동·영유아 인원 구성
- * @param menuSelections 선택 메뉴 목록. 없거나 비어 있으면 메뉴 홀드를 만들지 않는다
  */
-public record ReservationCreateRequest(
-        @NotBlank
-        @Pattern(regexp = "^[1-9][0-9]*$")
-        String storeId,
-        @NotNull LocalDate serviceDate,
-        @NotNull @JsonFormat(pattern = "HH:mm") LocalTime startTime,
-        @Pattern(regexp = "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$") String startOffset,
-        @NotNull @Valid ReservationPartyRequest party,
-        @Valid
-        @Size(max = 20)
-        List<@NotNull @Valid ReservationMenuSelectionRequest> menuSelections
-) {
+@ValidReservationParty
+@ValidMenuSelections
+public final class ReservationCreateRequest {
 
-    private static final String PUBLIC_ID_PATTERN = "^[1-9][0-9]*$";
+    private static final Set<String> ALLOWED_FIELDS = Set.of(
+            "storeId", "serviceDate", "startTime", "startOffset", "party", "menuSelections"
+    );
 
-    public ReservationCreateRequest {
+    @NotBlank
+    @PositiveLongPublicId
+    private final String storeId;
+
+    @NotNull
+    private final LocalDate serviceDate;
+
+    @NotNull
+    private final LocalTime startTime;
+
+    @Pattern(regexp = "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$")
+    private final String startOffset;
+
+    @NotNull
+    @Valid
+    private final ReservationPartyRequest party;
+
+    @Valid
+    @Size(max = 20)
+    private final List<@NotNull @Valid ReservationMenuSelectionRequest> menuSelections;
+
+    private final boolean menuSelectionsExplicitlyNull;
+
+    /**
+     * JSON 요청의 허용 필드와 token 유형을 경계에서 검증한다.
+     *
+     * @param input 역직렬화할 JSON 객체
+     */
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public ReservationCreateRequest(JsonNode input) {
+        this(parseStoreId(input), parseServiceDate(input), parseStartTime(input),
+                parseStartOffset(input), parseParty(input), parseMenuSelections(input),
+                hasExplicitNullMenuSelections(input));
+    }
+
+    public ReservationCreateRequest(
+            String storeId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            String startOffset,
+            ReservationPartyRequest party,
+            List<ReservationMenuSelectionRequest> menuSelections
+    ) {
+        this(storeId, serviceDate, startTime, startOffset, party, menuSelections, false);
+    }
+
+    private ReservationCreateRequest(
+            String storeId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            String startOffset,
+            ReservationPartyRequest party,
+            List<ReservationMenuSelectionRequest> menuSelections,
+            boolean menuSelectionsExplicitlyNull
+    ) {
         if (startTime != null && (startTime.getSecond() != 0 || startTime.getNano() != 0)) {
             throw new IllegalArgumentException("startTime must use minute precision");
         }
-        menuSelections = menuSelections == null
+        this.storeId = storeId;
+        this.serviceDate = serviceDate;
+        this.startTime = startTime;
+        this.startOffset = startOffset;
+        this.party = party;
+        this.menuSelections = menuSelections == null
                 ? List.of()
                 : Collections.unmodifiableList(new ArrayList<>(menuSelections));
+        this.menuSelectionsExplicitlyNull = menuSelectionsExplicitlyNull;
+    }
+
+    @JsonProperty
+    public String storeId() {
+        return storeId;
+    }
+
+    @JsonProperty
+    public LocalDate serviceDate() {
+        return serviceDate;
+    }
+
+    @JsonProperty
+    public LocalTime startTime() {
+        return startTime;
+    }
+
+    @JsonProperty
+    public String startOffset() {
+        return startOffset;
+    }
+
+    @JsonProperty
+    public ReservationPartyRequest party() {
+        return party;
+    }
+
+    @JsonProperty
+    public List<ReservationMenuSelectionRequest> menuSelections() {
+        return menuSelections;
     }
 
     /**
@@ -57,7 +144,7 @@ public record ReservationCreateRequest(
      * @throws IllegalArgumentException 문자열 ID가 양의 signed long 10진수가 아닐 때
      */
     public long storeIdAsLong() {
-        if (storeId == null || !storeId.matches(PUBLIC_ID_PATTERN) || !isStoreIdInRange()) {
+        if (!PositiveLongPublicId.Validator.isValidPublicId(storeId)) {
             throw new IllegalArgumentException("storeId must be a positive signed long decimal");
         }
         return Long.parseLong(storeId);
@@ -87,14 +174,140 @@ public record ReservationCreateRequest(
                 .toList();
     }
 
-    @AssertTrue
-    public boolean isStoreIdInRange() {
-        if (storeId == null || !storeId.matches(PUBLIC_ID_PATTERN)) {
-            return true;
+    boolean hasExplicitNullMenuSelections() {
+        return menuSelectionsExplicitlyNull;
+    }
+
+    private static String parseStoreId(JsonNode input) {
+        return nullableString(requiredObject(input).get("storeId"), "storeId");
+    }
+
+    private static LocalDate parseServiceDate(JsonNode input) {
+        String value = nullableString(requiredObject(input).get("serviceDate"), "serviceDate");
+        return value == null ? null : LocalDate.parse(value);
+    }
+
+    private static LocalTime parseStartTime(JsonNode input) {
+        String value = nullableString(requiredObject(input).get("startTime"), "startTime");
+        return value == null ? null : LocalTime.parse(value);
+    }
+
+    private static String parseStartOffset(JsonNode input) {
+        return nullableString(requiredObject(input).get("startOffset"), "startOffset");
+    }
+
+    private static ReservationPartyRequest parseParty(JsonNode input) {
+        JsonNode value = requiredObject(input).get("party");
+        if (value == null || value.isNull()) {
+            return null;
         }
-        try {
-            return Long.parseLong(storeId) > 0;
-        } catch (NumberFormatException exception) {
+        if (!value.isObject()) {
+            throw new IllegalArgumentException("party must be an object");
+        }
+        return new ReservationPartyRequest(value);
+    }
+
+    private static List<ReservationMenuSelectionRequest> parseMenuSelections(JsonNode input) {
+        JsonNode value = requiredObject(input).get("menuSelections");
+        if (value == null || value.isNull()) {
+            return List.of();
+        }
+        if (!value.isArray()) {
+            throw new IllegalArgumentException("menuSelections must be an array");
+        }
+
+        List<ReservationMenuSelectionRequest> selections = new ArrayList<>();
+        for (JsonNode selection : value) {
+            if (selection == null || selection.isNull()) {
+                selections.add(null);
+            } else if (selection.isObject()) {
+                selections.add(new ReservationMenuSelectionRequest(selection));
+            } else {
+                throw new IllegalArgumentException("menu selection must be an object");
+            }
+        }
+        return selections;
+    }
+
+    private static boolean hasExplicitNullMenuSelections(JsonNode input) {
+        JsonNode value = requiredObject(input).get("menuSelections");
+        return value != null && value.isNull();
+    }
+
+    private static JsonNode requiredObject(JsonNode input) {
+        if (input == null || !input.isObject()
+                || !ALLOWED_FIELDS.containsAll(input.propertyNames())) {
+            throw new IllegalArgumentException("invalid reservation request object");
+        }
+        return input;
+    }
+
+    private static String nullableString(JsonNode value, String fieldName) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new IllegalArgumentException(fieldName + " must be a string");
+        }
+        return value.asString();
+    }
+}
+
+@Documented
+@Constraint(validatedBy = PositiveLongPublicId.Validator.class)
+@Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.RECORD_COMPONENT})
+@Retention(RetentionPolicy.RUNTIME)
+@interface PositiveLongPublicId {
+
+    String message() default "유효하지 않은 공개 식별자입니다.";
+
+    Class<?>[] groups() default {};
+
+    Class<? extends Payload>[] payload() default {};
+
+    final class Validator implements ConstraintValidator<PositiveLongPublicId, String> {
+
+        @Override
+        public boolean isValid(String value, ConstraintValidatorContext context) {
+            return value == null || isValidPublicId(value);
+        }
+
+        static boolean isValidPublicId(String value) {
+            if (value == null || !value.matches("^[1-9][0-9]*$")) {
+                return false;
+            }
+            try {
+                return Long.parseLong(value) > 0;
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+        }
+    }
+}
+
+@Documented
+@Constraint(validatedBy = ValidMenuSelections.Validator.class)
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@interface ValidMenuSelections {
+
+    String message() default "메뉴 선택은 null일 수 없습니다.";
+
+    Class<?>[] groups() default {};
+
+    Class<? extends Payload>[] payload() default {};
+
+    final class Validator implements ConstraintValidator<ValidMenuSelections, ReservationCreateRequest> {
+
+        @Override
+        public boolean isValid(ReservationCreateRequest request, ConstraintValidatorContext context) {
+            if (request == null || !request.hasExplicitNullMenuSelections()) {
+                return true;
+            }
+            context.disableDefaultConstraintViolation();
+            context.buildConstraintViolationWithTemplate(context.getDefaultConstraintMessageTemplate())
+                    .addPropertyNode("menuSelections")
+                    .addConstraintViolation();
             return false;
         }
     }

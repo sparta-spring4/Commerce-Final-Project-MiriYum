@@ -2,17 +2,20 @@ package com.miriyum.domain.reservation.dto.request;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 class ReservationMenuSelectionRequestTest {
 
     private static final Validator VALIDATOR =
             Validation.buildDefaultValidatorFactory().getValidator();
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     @Test
     @DisplayName("메뉴 식별자는 정밀도 손실 없는 문자열 PublicId로 받고 long으로 변환한다")
@@ -60,7 +63,7 @@ class ReservationMenuSelectionRequestTest {
         Set<String> paths = propertyPathsOf(selection);
 
         // then
-        assertThat(paths).contains("menuIdInRange");
+        assertThat(paths).contains("menuId");
     }
 
     @Test
@@ -87,6 +90,28 @@ class ReservationMenuSelectionRequestTest {
         assertThat(zeroPaths).contains("quantity");
         assertThat(tooManyPaths).contains("quantity");
         assertThat(missingPaths).contains("quantity");
+    }
+
+    @Test
+    @DisplayName("메뉴 식별자는 JSON 문자열 token만 허용한다")
+    void rejectsNumericMenuIdJsonToken() {
+        String body = """
+                {"menuId":1,"quantity":1}
+                """;
+
+        assertThatThrownBy(() -> JSON_MAPPER.readValue(body, ReservationMenuSelectionRequest.class))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    @DisplayName("메뉴 수량은 JSON 정수 token만 허용한다")
+    void rejectsFractionalQuantityJsonToken() {
+        String body = """
+                {"menuId":"1","quantity":1.5}
+                """;
+
+        assertThatThrownBy(() -> JSON_MAPPER.readValue(body, ReservationMenuSelectionRequest.class))
+                .isInstanceOf(Exception.class);
     }
 
     private static Set<String> propertyPathsOf(ReservationMenuSelectionRequest selection) {

@@ -11,11 +11,13 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 class ReservationCreateRequestTest {
 
     private static final Validator VALIDATOR =
             Validation.buildDefaultValidatorFactory().getValidator();
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     @Test
     @DisplayName("매장 식별자는 문자열 PublicId로 받고 signed long으로 변환한다")
@@ -46,7 +48,7 @@ class ReservationCreateRequestTest {
         assertThat(zeroPaths).contains("storeId");
         assertThat(leadingZeroPaths).contains("storeId");
         assertThat(decimalPaths).contains("storeId");
-        assertThat(tooLargePaths).contains("storeIdInRange");
+        assertThat(tooLargePaths).contains("storeId");
     }
 
     @Test
@@ -88,7 +90,7 @@ class ReservationCreateRequestTest {
         Set<String> paths = propertyPathsOf(request);
 
         // then
-        assertThat(paths).contains("party.totalCountValid");
+        assertThat(paths).contains("$");
     }
 
     @Test
@@ -136,6 +138,83 @@ class ReservationCreateRequestTest {
         assertThat(missing.menuSelections()).isEmpty();
         assertThat(empty.menuSelections()).isEmpty();
         assertThat(missing.normalizedMenuSelections()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("매장 식별자는 JSON 문자열 token만 허용한다")
+    void rejectsNumericStoreIdJsonToken() {
+        String body = """
+                {"storeId":1,"serviceDate":null,"startTime":null,
+                 "party":{"adultCount":1,"childCount":0,"infantCount":0}}
+                """;
+
+        assertThatThrownBy(() -> JSON_MAPPER.readValue(body, ReservationCreateRequest.class))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    @DisplayName("명시적인 menuSelections null은 공개 menuSelections 오류로 거절한다")
+    void rejectsExplicitNullMenuSelectionsAtJsonBoundary() throws Exception {
+        String body = """
+                {"storeId":"1","serviceDate":null,"startTime":null,
+                 "party":{"adultCount":1,"childCount":0,"infantCount":0},
+                 "menuSelections":null}
+                """;
+
+        ReservationCreateRequest request = JSON_MAPPER.readValue(
+                body, ReservationCreateRequest.class
+        );
+
+        assertThat(propertyPathsOf(request)).contains("menuSelections");
+    }
+
+    @Test
+    @DisplayName("menuSelections를 생략하거나 빈 배열로 보내면 메뉴 없는 예약으로 읽는다")
+    void acceptsOmittedOrEmptyMenuSelectionsAtJsonBoundary() throws Exception {
+        String omitted = """
+                {"storeId":"1","serviceDate":null,"startTime":null,
+                 "party":{"adultCount":1,"childCount":0,"infantCount":0}}
+                """;
+        String empty = """
+                {"storeId":"1","serviceDate":null,"startTime":null,
+                 "party":{"adultCount":1,"childCount":0,"infantCount":0},
+                 "menuSelections":[]}
+                """;
+
+        ReservationCreateRequest omittedRequest = JSON_MAPPER.readValue(
+                omitted, ReservationCreateRequest.class
+        );
+        ReservationCreateRequest emptyRequest = JSON_MAPPER.readValue(
+                empty, ReservationCreateRequest.class
+        );
+
+        assertThat(omittedRequest.menuSelections()).isEmpty();
+        assertThat(emptyRequest.menuSelections()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("요청 DTO는 공개 JSON 필드만 직렬화한다")
+    void serializesOnlyPublicJsonFields() throws Exception {
+        String json = JSON_MAPPER.writeValueAsString(validRequest(
+                "1", List.of(new ReservationMenuSelectionRequest("2", 1))
+        ));
+
+        assertThat(json)
+                .contains("\"storeId\":\"1\"", "\"menuSelections\"", "\"menuId\":\"2\"")
+                .doesNotContain("menuSelectionsExplicitlyNull", "storeIdAsLong");
+    }
+
+    @Test
+    @DisplayName("허용하지 않은 client 필드는 JSON 요청에서 거절한다")
+    void rejectsUnknownClientFieldAtJsonBoundary() {
+        String body = """
+                {"storeId":"1","serviceDate":null,"startTime":null,
+                 "party":{"adultCount":1,"childCount":0,"infantCount":0},
+                 "accountId":"99"}
+                """;
+
+        assertThatThrownBy(() -> JSON_MAPPER.readValue(body, ReservationCreateRequest.class))
+                .isInstanceOf(Exception.class);
     }
 
     @Test
@@ -196,7 +275,11 @@ class ReservationCreateRequestTest {
 
     private static Set<String> propertyPathsOf(ReservationCreateRequest request) {
         return VALIDATOR.validate(request).stream()
-                .map(violation -> violation.getPropertyPath().toString())
+                .map(violation -> publicPath(violation.getPropertyPath().toString()))
                 .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static String publicPath(String propertyPath) {
+        return propertyPath.isBlank() ? "$" : propertyPath;
     }
 }
