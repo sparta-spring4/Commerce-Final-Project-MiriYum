@@ -27,7 +27,7 @@
 - Both cancellation endpoints return HTTP 200 in the common success envelope. Keep `cancelledBy` and `cancellationReason` in `ReservationDetail`; do not expose `cancelledAt`.
 - Retry only MySQL deadlock 1213, lock timeout 1205 surfaced as `CannotAcquireLockException`, and `ObjectOptimisticLockingFailureException`, for at most three total attempts with 100-200 ms then 300-500 ms jitter outside the transaction. Map exhaustion/interruption to `COMMON_008`; never retry validation, domain, query timeout, or data-integrity failures.
 - Each production change starts with the specified failing test and observed RED. Keep each commit limited to the paths named in that task. Never use broad `git add .` or `git add -A`.
-- Existing successful #49 creation IT, prior full build, and full integration shards are not repeated unless a newly observed impact demands them. `ReservationServiceTest` is directly impacted and must be rerun fresh.
+- Do not separately repeat the successful #49 creation IT or standalone integration shards. `ReservationServiceTest` is directly impacted and must be rerun fresh, and Task 8 must run a fresh full `build --rerun-tasks` at current HEAD so the complete unit/slice and `integrationTest` surfaces are final evidence.
 
 ---
 
@@ -55,7 +55,7 @@
 - `backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationCancellationAudit.java` — validated success audit snapshot.
 - `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCancellationAuditRepository.java` — save and optional reservation lookup.
 - `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCancellationAuditTest.java` — factory/invariant tests.
-- `backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java` — clean migration, V25 upgrade, DB constraints, and JPA round trip.
+- `backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java` — Task 2 clean migration/V25 upgrade/DB constraints/JPA round trip, then Tasks 3-4 real-MySQL repository ordering, scope, and lock behavior.
 
 ### Task 3 — capacity restoration primitives
 
@@ -371,10 +371,11 @@ Run:
 ```powershell
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.dto.request.*CancellationRequestTest" --tests "com.miriyum.domain.reservation.dto.response.ReservationDetailResponseTest" --tests "com.miriyum.domain.reservation.dto.response.ReservationOpenApiContractTest"
 git diff --check
-git diff --name-only
+git diff --name-only HEAD
+git diff --name-only origin/dev...HEAD | Sort-Object
 ```
 
-Expected: selected tests pass; changed paths are exactly the eight Task 1 paths plus the two already committed design/plan paths visible in the branch range.
+Expected: selected tests pass; `git diff --name-only HEAD` shows exactly the eight uncommitted Task 1 paths. At this pre-commit point the branch-range command shows only the two already committed design/plan paths; after Step 9 it will also show the eight Task 1 paths. Do not conflate working-tree scope with branch scope.
 
 - [ ] **Step 9: Commit Task 1 with exact staging.**
 
@@ -415,6 +416,15 @@ void recordsExactSuccessfulOperatorCancellation() {
     assertThat(audit.getRequestedAt()).isEqualTo(REQUESTED_AT);
     assertThat(audit.getOccurredAt()).isEqualTo(OCCURRED_AT);
 }
+
+@Test
+void acceptsWhitespaceAsAnOperatorReasonWithoutInventingTrimValidation() {
+    ReservationCancellationAudit audit = ReservationCancellationAudit.recordSuccess(
+            77L, STORE_OPERATOR, 33L, " ", REQUESTED_AT, OCCURRED_AT,
+            CONFIRMED, CANCELLED, 1L, 7L,
+            "reservation-cancel:store-operator:33:550e8400-e29b-41d4-a716-446655440000");
+    assertThat(audit.getCancellationReason()).isEqualTo(" ");
+}
 ```
 
 Use `assertThatThrownBy` for nonpositive IDs/versions, missing operator reason, empty/501-character reason, reversed timestamps, transitions other than `CONFIRMED -> CANCELLED`, blank/101-character command. Add a boundary assertion accepting the exact 90-character Long.MAX_VALUE correlation.
@@ -429,25 +439,7 @@ Expected: compilation fails because `ReservationCancellationAudit` is absent.
 
 - [ ] **Step 3: Implement the audit entity and repository.**
 
-Map the table/columns exactly:
-
-```java
-@Entity
-@Table(name = "reservation_cancellation_audits",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_reservation_cancellation_audits_reservation",
-                columnNames = "reservation_id"))
-public class ReservationCancellationAudit {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "reservation_cancellation_audit_id")
-    private Long id;
-    // reservationId, actorType, actorId, cancellationReason, requestedAt,
-    // occurredAt, beforeStatus, afterStatus, cancellationPolicyVersion,
-    // capacityPolicyVersion, commandId using the factory contract above.
-}
-```
-
-Use a protected no-arg constructor, private validated constructor, `@Enumerated(EnumType.STRING)`, and no setter/builder. Create the repository signature exactly as listed.
+Map `ReservationCancellationAudit` to `reservation_cancellation_audits` with the named unique constraint `uk_reservation_cancellation_audits_reservation`. Map the generated `Long id` to `reservation_cancellation_audit_id`; map `reservationId` as non-null; map actor and before/after status with `@Enumerated(EnumType.STRING)` and length 20; map `actorId` non-null; map reason nullable with length 500; map both `Instant` values and both positive policy-version longs non-null; map command ID non-null with length 100. Use a protected no-arg constructor, a private constructor called only by the exact `recordSuccess(...)` factory, getters for every persisted field, and no setter/builder. Create the repository signature exactly as listed.
 
 - [ ] **Step 4: Run the entity test and observe GREEN.**
 
@@ -460,18 +452,26 @@ Update cleanup to delete audits before reservations. Add tests which:
 - assert Flyway applied `V26__create_reservation_cancellation_audits.sql`;
 - persist a Reservation then `recordSuccess(...)`, flush/clear, and read it through `findByReservationId`;
 - use JDBC inserts to reject duplicate reservation audit, missing reservation FK, invalid actor, nonpositive actor/version, operator null reason, empty/501-character reason, occurred-before-requested, wrong statuses, and command over 100;
-- accept nullable consumer reason and a 90-character correlation;
+- accept nullable consumer reason, a STORE_OPERATOR reason equal to the single whitespace character `" "`, and a 90-character correlation in both JDBC and JPA round trips;
 - start a separate `mysql:8.0.40` container, migrate to V25, insert a V25 `CANCELLED` reservation, migrate to latest, and assert the reservation bytes/fields are unchanged and no audit was invented.
 
 The upgrade test must use:
 
 ```java
-Flyway.configure().dataSource(...)
+Flyway.configure().dataSource(
+        legacyMysql.getJdbcUrl(),
+        legacyMysql.getUsername(),
+        legacyMysql.getPassword())
         .target(MigrationVersion.fromVersion("25")).load().migrate();
-// insert legacy parents and CANCELLED reservation
-Flyway upgraded = Flyway.configure().dataSource(...).load();
+insertV25ParentsAndCancelledReservation(legacyMysql);
+Flyway upgraded = Flyway.configure().dataSource(
+        legacyMysql.getJdbcUrl(),
+        legacyMysql.getUsername(),
+        legacyMysql.getPassword()).load();
 upgraded.migrate();
 ```
+
+Define `insertV25ParentsAndCancelledReservation(MySQLContainer legacyMysql)` in `ReservationMigrationTest` using the existing `legacyConnection(...)` JDBC helper and fixed positive consumer/store/reservation IDs; it inserts every non-null V25 reservation column, sets status `CANCELLED` with a valid `cancelled_at`, and does not insert an audit row.
 
 - [ ] **Step 6: Run the class-filtered migration IT and observe RED.**
 
@@ -544,6 +544,7 @@ git commit -m "feat(reservation): persist cancellation success audit"
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityAllocationRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityBucketRepository.java`
 - Modify: `backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucketTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java`
 
 **Interfaces:**
 - Consumes: immutable `ReservationCapacityAllocation` fields and existing latest overlapping-bucket read.
@@ -604,7 +605,25 @@ public void restore(int people, int teams) {
 
 Run the Step 2 command again. Expected: all selected tests pass.
 
-- [ ] **Step 5: Add the exact repository contracts and compile them.**
+- [ ] **Step 5: Write executable MySQL repository contract tests and observe behavioral RED.**
+
+In `ReservationMigrationTest`, add `allocationRepositoryContractReturnsBucketAscending` and `capacityRepositoryContractsReturnSortedRowsAndHoldWriteLocks`. Keep the tests source-compatible before the new methods exist by locating the exact method names on the Spring Data proxy with `Arrays.stream(repository.getClass().getMethods())`; assert with a description that the method is present before invoking it. The tests then:
+
+1. persist one reservation, two capacity buckets, and two allocations in reverse bucket-ID insertion order;
+2. reflectively invoke `findAllByReservationIdOrderByCapacityBucketIdAsc(Long)` inside `TransactionTemplate` and assert returned `capacityBucketId` values are ascending;
+3. reflectively invoke `findLatestPolicyVersion(long, LocalDate)` and assert the maximum persisted version;
+4. reflectively invoke `findAllByIdInForUpdate(Collection)` with reverse IDs in a worker transaction, assert the returned IDs are ascending, call `repositoryLockHeld.countDown()`, then wait on `releaseRepositoryLock` before ending that transaction;
+5. after `repositoryLockHeld.await(5, SECONDS)` succeeds, issue `SELECT reservation_capacity_bucket_id FROM reservation_capacity_buckets WHERE reservation_capacity_bucket_id = ? FOR UPDATE NOWAIT` on an independent JDBC connection/transaction and assert MySQL reports the row is locked; finally count down `releaseRepositoryLock`, join the worker, and close both executor and connection.
+
+Run:
+
+```powershell
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*RepositoryContract*"
+```
+
+Expected RED: the JVM test runs against MySQL and fails an AssertJ assertion that the named allocation/latest/ordered-lock repository method is absent. Compilation and Spring/Flyway startup must succeed; an infrastructure failure is not accepted as RED.
+
+- [ ] **Step 6: Add the exact repository contracts, then observe GREEN.**
 
 Add the allocation derived query and these JPQL queries:
 
@@ -632,15 +651,17 @@ Run:
 
 ```powershell
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.entity.ReservationCapacityBucketTest"
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*RepositoryContract*"
 git diff --check
+git diff --name-only HEAD
 ```
 
-Expected: compilation and bucket tests pass.
+Expected: the entity tests and both real-MySQL repository contract tests pass, including ascending results and the observed write lock; exactly the five Task 3 paths are uncommitted.
 
-- [ ] **Step 6: Commit Task 3 with exact staging.**
+- [ ] **Step 7: Commit Task 3 with exact staging.**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucket.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityAllocationRepository.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityBucketRepository.java backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucketTest.java
+git add backend/src/main/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucket.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityAllocationRepository.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationCapacityBucketRepository.java backend/src/test/java/com/miriyum/domain/reservation/entity/ReservationCapacityBucketTest.java backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java
 git commit -m "feat(reservation): add capacity restoration locks"
 ```
 
@@ -651,6 +672,7 @@ git commit -m "feat(reservation): add capacity restoration locks"
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/service/ReservationCancellationCommandResult.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/service/ReservationService.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java`
 - Modify: `backend/src/test/java/com/miriyum/domain/reservation/service/ReservationServiceTest.java`
 
 **Interfaces:**
@@ -659,50 +681,21 @@ git commit -m "feat(reservation): add capacity restoration locks"
 
 - [ ] **Task 4 gate:** Review this task as one transaction boundary. Its tests must verify call order and absence of side effects on every rejection/replay branch.
 
-- [ ] **Step 1: Extend the service fixture and write RED tests for actor gates, replay, and policy.**
+- [ ] **Step 1: Write real-MySQL actor-scoped Reservation repository tests and observe behavioral RED.**
 
-Add `@Mock ReservationCancellationAuditRepository`, `@Mock ReservationCancellationPolicyEvaluator`, and pass both through the production constructor. Capture the idempotency supplier so tests distinguish replay from fresh. Add concrete tests:
+In `ReservationMigrationTest`, add `reservationRepositoryContractsScopeAndHoldWriteLocks`. As in Task 3, locate the two exact method names on the Spring Data proxy reflectively so the pre-production test compiles. Seed reservations for two consumers and two stores. Assert the consumer method returns only `(reservationId, consumerAccountId)`, the operator method returns only `(reservationId, storeId)`, foreign consumer/store scopes return empty, and neither selector filters away a scoped `CANCELLED` row.
 
-```java
-@Test
-void consumerActiveGateRunsBeforeIdempotencyAndForeignReservationIsHidden() {
-    given(idempotencyExecutor.execute(eq(CONSUMER_COMMAND), any()))
-            .willAnswer(runBusinessSupplier());
-    given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
-            .willReturn(Optional.empty());
-    assertError(() -> cancelConsumer(), ReservationErrorCode.RESERVATION_NOT_FOUND);
-    InOrder order = inOrder(consumerAccountService, idempotencyExecutor, reservationRepository);
-    order.verify(consumerAccountService).requireActiveAccount(11L);
-    order.verify(idempotencyExecutor).execute(eq(CONSUMER_COMMAND), any());
-    order.verify(reservationRepository)
-            .findByIdAndConsumerAccountIdForUpdate(77L, 11L);
-}
+For locking, invoke each reflected repository method inside a worker `TransactionTemplate`; after the method returns, count down `reservationLockHeld` and wait on `releaseReservationLock`. The test waits up to five seconds for `reservationLockHeld`, then on an independent JDBC connection executes `SELECT reservation_id FROM reservations WHERE reservation_id = ? FOR UPDATE NOWAIT` and asserts MySQL reports the row lock. Release the latch and join the worker in `finally`; no sleep is permitted.
 
-@Test
-void replayUsesStoredDetailWithoutReadingDomainState() {
-    given(idempotencyExecutor.execute(eq(CONSUMER_COMMAND), any()))
-            .willReturn(storedCancellationOutcome());
-    ReservationCancellationCommandResult result = cancelConsumer();
-    assertThat(result.httpStatus()).isEqualTo(200);
-    assertThat(result.data().cancelledBy()).isEqualTo("CONSUMER");
-    then(reservationRepository).shouldHaveNoInteractions();
-    then(capacityBucketRepository).shouldHaveNoInteractions();
-    then(menuHoldService).shouldHaveNoInteractions();
-    then(cancellationAuditRepository).shouldHaveNoInteractions();
-}
-```
-
-Add separate tests for operator `requireManagementOwnership` before idempotency, operator scoped lock, non-`CONFIRMED` -> RES005 with evaluator uncalled, null version/null start -> RES006 with evaluator uncalled, actual five-argument evaluator order, unknown version -> RES006, and V1 startAt before/equal/after requestedAt all allowed.
-
-- [ ] **Step 2: Run selected service tests and observe RED.**
+Run:
 
 ```powershell
-backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationServiceTest"
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*ReservationRepositoryContract*"
 ```
 
-Expected: compilation fails because cancellation dependencies, repository locks, result, and service methods are absent.
+Expected RED: the MySQL test executes and fails the described AssertJ method-presence assertion because the actor-scoped `FOR UPDATE` methods do not exist. Compilation, context, Flyway, and container startup must succeed.
 
-- [ ] **Step 3: Register the evaluator and implement scoped Reservation locks.**
+- [ ] **Step 2: Register the evaluator, implement scoped Reservation locks, and observe repository GREEN.**
 
 Add the existing-registry evaluator bean:
 
@@ -714,100 +707,108 @@ public ReservationCancellationPolicyEvaluator reservationCancellationPolicyEvalu
 }
 ```
 
-Add two explicit repository JPQL methods with `@Lock(PESSIMISTIC_WRITE)`. The consumer query must contain both IDs; the operator query must contain reservation/store IDs. Neither query filters status, because the service must distinguish RES005 from 404 after actor scoping.
-
-- [ ] **Step 4: Implement gate/idempotency/policy branches with no resource mutation yet, then rerun the targeted tests.**
-
-Create the result record. In each service entry validate the request object values, run the actor read-only gate, then call:
+Add the two explicit repository methods below. Neither query filters status, because the service must distinguish RES005 from 404 after actor scoping:
 
 ```java
-IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
-        cancelReservationWork(actorType, actorId, scopedStoreId, reservationId,
-                reason, requestedAt, correlationId));
-return cancellationResult(outcome);
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("""
+        select reservation from Reservation reservation
+        where reservation.id = :reservationId
+          and reservation.consumerAccountId = :consumerAccountId
+        """)
+Optional<Reservation> findByIdAndConsumerAccountIdForUpdate(
+        @Param("reservationId") Long reservationId,
+        @Param("consumerAccountId") Long consumerAccountId);
+
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("""
+        select reservation from Reservation reservation
+        where reservation.id = :reservationId
+          and reservation.storeId = :storeId
+        """)
+Optional<Reservation> findByIdAndStoreIdForUpdate(
+        @Param("reservationId") Long reservationId,
+        @Param("storeId") Long storeId);
 ```
 
-In `cancelReservationWork`, lock actor scope, check status, check null version/start, and evaluate in exact order. Use `ServiceException(INVALID_STATE_TRANSITION)` and `ServiceException(CANCELLATION_NOT_ALLOWED)` exactly. At this intermediate point, immediately after ALLOWED, continue implementing Steps 5-7 before claiming GREEN; do not insert a fake return.
 
-- [ ] **Step 5: Write RED tests for MenuHold prelock, original/current union, one lock, and exact restoration.**
+Run the Step 1 command again. Expected: scope, status visibility, and actual write-lock assertions pass.
 
-Build two-bucket fixtures with IDs. The key assertions are:
+- [ ] **Step 3: Write actor, policy, replay, and resource tests without depending on absent production types.**
 
-```java
-InOrder order = inOrder(reservationRepository, menuHoldService,
-        capacityAllocationRepository, capacityBucketRepository,
-        cancellationAuditRepository);
-order.verify(reservationRepository).findByIdAndConsumerAccountIdForUpdate(77L, 11L);
-order.verify(menuHoldService).lockForTermination(77L);
-order.verify(capacityAllocationRepository)
-        .findAllByReservationIdOrderByCapacityBucketIdAsc(77L);
-order.verify(capacityBucketRepository).findAllByIdInForUpdate(List.of(301L, 302L, 401L));
+Extend `ReservationServiceTest` with audit/evaluator mocks. Before the new public result/methods exist, keep this RED test source compilable with a local helper `Object invokeCancellation(String methodName, Class<?>[] parameterTypes, Object[] arguments)`. The helper uses `ReflectionUtils.findMethod`, fails an AssertJ assertion with the missing method name when absent, invokes the method when present, and unwraps `InvocationTargetException` to its runtime cause. After production exists, the same assertions continue through the exact service signature.
+
+Add these named tests so class filters are stable:
+
+- `cancellationGateConsumerRunsBeforeIdempotencyAndHidesForeignReservation` verifies active-account -> idempotency -> scoped Reservation order;
+- `cancellationGateOperatorOwnershipRunsBeforeIdempotency` verifies Store public management ownership and no Reservation access on failure;
+- `cancellationReplayUsesStoredDataWithoutDomainReads` verifies no Reservation/capacity/MenuHold/audit calls;
+- `cancellationPolicyRejectsStateBeforeEvaluator` maps non-CONFIRMED to RES005;
+- `cancellationPolicyRejectsNullVersionAndNullStartBeforeEvaluator` maps each to RES006 with evaluator uncalled;
+- `cancellationPolicyPassesStoredVersionActorStatusStartAndRequestedAtInOrder` covers consumer/operator and V1 before/equal/after requestedAt;
+- `cancellationPolicyMapsUnknownVersionToReservation006` preserves evaluator policy rejection;
+- `cancellationCapacityLocksMenuHoldBeforeOneSortedUnionLock` verifies `Reservation -> MenuHold prelock -> allocations/current candidates -> one [301,302,401] bucket lock`;
+- `cancellationCapacityRestoresEachOriginalAndCurrentBucketExactlyOnce` verifies full party plus one team on two originals and one newer current bucket without allocation deletion;
+- `cancellationCapacityRejectsCorruptAllocationMissingBucketUnderflowAndVersionRace` covers every invariant before Reservation/audit success;
+- `cancellationCapacityReleasesOnlyPresentMenuHoldWithExactCorrelation` verifies NO_HOLD no-op and HOLD_PRESENT exact RELEASED result.
+
+- [ ] **Step 4: Run gate/policy/resource tests and observe behavioral RED before service production.**
+
+```powershell
+backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationGate*" --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationPolicy*" --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationReplay*" --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationCapacity*"
 ```
 
-Cover all of these cases with concrete assertions:
+Expected RED: JUnit executes and the reflective helper fails its explicit AssertJ assertion that `cancelConsumerReservation`/`cancelStoreReservation` is absent. Compilation and existing tests must not fail. This is the observed RED for the resource algorithm; no production cancellation branch is added before it.
 
-- original allocations store full party and one team in every row; do not sum allocation people;
-- current version equals original: current IDs must equal original IDs and dedupe prevents double restore;
-- newer latest version: overlapping current bucket IDs are unioned with originals, sorted/deduped, and each gets one `restore(totalParty, 1)`;
-- missing requested bucket, mismatched original people/team/version, latest-version change before/after union, and underflow all throw before Reservation/audit success;
-- `NO_HOLD` never invokes `release`; `HOLD_PRESENT` invokes exactly one release after capacity restore with the same correlation and validates `reservationId` plus `Outcome.RELEASED`.
+- [ ] **Step 5: Write audit/detail tests and observe a second behavioral RED before production.**
 
-- [ ] **Step 6: Implement the resource algorithm minimally.**
+Add:
 
-After policy ALLOWED:
+- `cancellationAuditUsesOneOccurredAtForReservationAndAudit` captures the saved audit and checks requested/occurred times, actor, reason, statuses, versions, and exact command;
+- `cancellationAuditAcceptsWhitespaceOperatorReason` passes `" "` and requires the same value in audit/result;
+- `cancellationAuditFailurePreventsSucceededOutcome` makes save fail and verifies no success result;
+- `cancellationDetailStoresOnlyStatusCodeResourceAndData` captures `BusinessResult` and verifies 200/SUCCESS/RESERVATION/77/detail, with no envelope/message persistence;
+- `cancellationDetailReplayDoesNotWriteAnotherAudit` uses stored JSON and verifies zero domain writes;
+- `cancellationDetailGetUsesOptionalAuditAndLegacyNulls` verifies audit actor/reason when present and two nulls when absent.
 
-1. Call `lockForTermination` and require a non-null enum.
-2. Read original allocations ordered by bucket ID; require at least one and verify every row is for the reservation's full party, exactly one team, and the stored capacity policy.
-3. Read latest version and existing latest overlapping buckets for `List.of(storeId)`, service date, local start, and local occupancy end. Reject absent/inconsistent versions as `CAPACITY_POLICY_CHANGED`.
-4. If latest version equals the reservation version, require current candidate IDs equal original IDs. If newer, treat the current overlapping candidates as the publication-materialized set. Intermediate retired versions are not added.
-5. Build a `TreeSet<Long>` union, call `findAllByIdInForUpdate` once, and compare returned IDs exactly with the requested sorted IDs.
-6. Re-read latest version and require it unchanged. Restore `reservation.getParty().totalCount()` and one team once per locked union bucket.
-7. For `HOLD_PRESENT`, call `release(new MenuHoldReleaseCommand(reservationId, correlationId))` and validate the exact result; for `NO_HOLD`, skip it.
+Use the same reflective helper, a fixed Clock, and captors. Run:
 
-Use `CAPACITY_POLICY_CHANGED` for current-policy races and `IllegalStateException` for corrupted stored allocation/bucket invariants; both roll back and neither is guessed as success.
-
-- [ ] **Step 7: Write RED tests for occurredAt, audit, data-only result, and future GET.**
-
-Use a mock/fixed Clock sequence so the service's `occurredAt` is known. Capture the saved audit and assert:
-
-```java
-assertThat(reservation.getStatus()).isEqualTo(CANCELLED);
-assertThat(reservation.getCancelledAt()).isEqualTo(OCCURRED_AT);
-assertThat(audit.getOccurredAt()).isEqualTo(OCCURRED_AT);
-assertThat(audit.getRequestedAt()).isEqualTo(REQUESTED_AT);
-assertThat(audit.getCommandId()).isEqualTo(CORRELATION_ID);
-assertThat(result.data().cancelledBy()).isEqualTo("CONSUMER");
+```powershell
+backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationAudit*" --tests "com.miriyum.domain.reservation.service.ReservationServiceTest.cancellationDetail*"
 ```
 
-Also assert `BusinessResult` uses `200`, `SUCCESS`, resource type `RESERVATION`, resource ID `77`, and only `ReservationDetailResponse` data. Add GET tests where `findByReservationId` returns an audit (actor/reason present) or empty (both null, including legacy CANCELLED). Add failure tests proving audit save exception prevents idempotency success and that replay never saves another audit.
+Expected RED: JUnit executes and fails the explicit missing-cancellation-method assertion. Compilation and unrelated service behavior remain green. This is the observed RED for occurredAt/audit/data-only replay/future detail before their production implementation.
 
-- [ ] **Step 8: Complete the success/audit/detail implementation and replay decoding.**
+- [ ] **Step 6: Implement the complete service transaction and result without an intermediate fake branch.**
 
-After resources succeed, call `clock.instant()` once, capture `beforeStatus`, call `reservation.cancel(occurredAt)`, create/save the audit, obtain menu snapshots, and build:
+Create the result record and both exact service entries. Each entry validates arguments, runs only its read-only actor gate, then executes the supplied `IdempotencyCommand`. Replay decodes stored `ReservationDetail` immediately without domain reads. Fresh work locks actor scope, applies status/null/version evaluator rules, then:
 
-```java
-ReservationDetailResponse response = ReservationDetailResponse.from(
-        reservation, menuSnapshots, actorType, reason);
-return new BusinessResult<>(200, "SUCCESS", "RESERVATION",
-        String.valueOf(reservation.getId()), response);
-```
+1. calls `lockForTermination` and requires a non-null presence;
+2. reads ordered original allocations, requires at least one, and verifies every row has the reservation's full party, one team, and stored capacity version;
+3. observes current latest version/candidates for store/date/local `[start, occupancyEnd)` and rejects absent/inconsistent versions as `CAPACITY_POLICY_CHANGED`;
+4. requires current IDs equal originals when versions match; otherwise treats only the newer latest overlapping candidates as publication-materialized, excluding intermediate retired versions;
+5. creates a `TreeSet<Long>` union, calls `findAllByIdInForUpdate` once, compares returned/requested IDs exactly, rechecks latest version, and restores full party plus one team once per bucket;
+6. calls `release(new MenuHoldReleaseCommand(reservationId, correlationId))` only for HOLD_PRESENT and validates reservation ID plus RELEASED outcome;
+7. obtains `occurredAt = clock.instant()` once, calls `reservation.cancel(occurredAt)`, saves exact `recordSuccess(...)`, builds detail from audit values, and returns `BusinessResult<>(200, "SUCCESS", "RESERVATION", id, response)`;
+8. lets any failure roll back status, capacity, MenuHold/inventory, audit, and idempotency finalize.
 
-`cancellationResult(IdempotentOutcome)` deserializes stored data with the existing `ObjectMapper` and reconstructs nullable OffsetDateTime fields the same way creation replay does, including the new actor/reason fields. Update both GET detail methods to query `cancellationAuditRepository.findByReservationId(reservation.getId())` and pass optional actor/reason; do not query audit for replay.
+Update both GET detail methods to query `cancellationAuditRepository.findByReservationId` once and project optional actor/reason; legacy missing audit produces two nulls. `cancellationResult(IdempotentOutcome)` reconstructs nullable OffsetDateTime plus actor/reason from stored data. Preserve the existing 12-argument package-private compatibility constructor unchanged. Expand the existing 16-argument Spring `@Autowired` constructor to receive `ReservationCancellationAuditRepository` and `ReservationCancellationPolicyEvaluator` explicitly and assign both new fields; do not inject cancellation dependencies as null into the Spring path.
 
-- [ ] **Step 9: Run the full impacted service class GREEN and inspect scope.**
+- [ ] **Step 7: Run the full impacted service and repository contracts GREEN, then inspect scope.**
 
 ```powershell
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationServiceTest"
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*ReservationRepositoryContract*"
 git diff --check
 git diff --name-only HEAD
 ```
 
-Expected: the entire impacted service test class passes, preserving creation/query/time-policy tests; only the five Task 4 paths are uncommitted.
+Expected: the entire impacted service test class plus real-MySQL actor scope/lock test passes, preserving creation/query/time-policy tests; only the six Task 4 paths are uncommitted.
 
-- [ ] **Step 10: Commit Task 4 with exact staging.**
+- [ ] **Step 8: Commit Task 4 with exact staging.**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/reservation/config/ReservationCancellationPolicyConfig.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java backend/src/main/java/com/miriyum/domain/reservation/service/ReservationCancellationCommandResult.java backend/src/main/java/com/miriyum/domain/reservation/service/ReservationService.java backend/src/test/java/com/miriyum/domain/reservation/service/ReservationServiceTest.java
+git add backend/src/main/java/com/miriyum/domain/reservation/config/ReservationCancellationPolicyConfig.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java backend/src/main/java/com/miriyum/domain/reservation/service/ReservationCancellationCommandResult.java backend/src/main/java/com/miriyum/domain/reservation/service/ReservationService.java backend/src/test/java/com/miriyum/domain/reservation/repository/ReservationMigrationTest.java backend/src/test/java/com/miriyum/domain/reservation/service/ReservationServiceTest.java
 git commit -m "feat(reservation): orchestrate atomic cancellation"
 ```
 
@@ -823,68 +824,92 @@ git commit -m "feat(reservation): orchestrate atomic cancellation"
 
 - [ ] **Task 5 gate:** Fingerprint/correlation/time semantics and retry classification must be proven without a Spring context.
 
-- [ ] **Step 1: Write failing command construction and requestedAt tests.**
+- [ ] **Step 1: Write source-compatible command and retry tests before the facade exists.**
 
-Capture service arguments for both entries. Assert exact command fields and route-sensitive fingerprints by comparing against `RequestFingerprint.of` of length-prefixed canonical strings. Use null encoding `field=-1:|`; non-null values use `field={length}:{value}|`.
+Keep the RED test source compilable by loading `com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade` with `Class.forName`, asserting the class and exact constructors/methods exist, constructing it reflectively, and invoking public entries reflectively. Mockito still captures the strongly typed `ReservationService` calls from Task 4.
 
-```java
-@Test
-void consumerBuildsScopedCommandAndCorrelation() {
-    facade.cancelByConsumer(11L, 77L, KEY, new ConsumerCancellationRequest(null));
-    then(service).should().cancelConsumerReservation(
-            eq(11L), eq(77L), commandCaptor.capture(), isNull(),
-            eq(REQUESTED_AT),
-            eq("reservation-cancel:consumer:11:" + KEY.value()));
-    assertThat(commandCaptor.getValue().principalNamespace()).isEqualTo("consumer");
-    assertThat(commandCaptor.getValue().commandType()).isEqualTo("RESERVATION_CANCEL");
-}
-```
+Add named tests `commandConsumerBuildsScopedFingerprintAndCorrelation`, `commandOperatorIncludesStoreAndReservationInFingerprint`, `commandDifferentRouteOrReasonChangesFingerprint`, and `commandLongMaxOperatorCorrelationIsExactlyNinetyCharacters`. Assert exact `IdempotencyCommand` fields and compare fingerprints to `RequestFingerprint.of` over length-prefixed canonical values (`field=-1:|` for null, `field={length}:{value}|` otherwise). Assert both public methods use one captured `requestedAt` and never include reservation ID in correlation.
 
-For operator include both `storeId` and `reservationId` in the canonical input. Prove a key reused for a different route ID or reason produces a different fingerprint. Prove the Long.MAX_VALUE operator correlation equals exactly 90 characters and is passed unchanged.
+Add named retry tests for:
 
-- [ ] **Step 2: Run the facade test and observe RED.**
+- `retryDeadlockThenTimeoutUsesThreeAttemptsAndOneRequestedAt`: MySQL 1213 then 1205 then success, delays 100/300, service called three times with the identical `Instant`;
+- `retryThirdTechnicalFailureMapsCommon008WithCause`: exhaustion preserves cause;
+- `retryOptimisticConflictUsesTheSameBoundedPolicy`: `ObjectOptimisticLockingFailureException` retries;
+- `retryDomainValidationQueryTimeoutDataIntegrityAndUnrelatedLockDoNotRetry`: each listed exception calls service once;
+- `retryInterruptionRestoresFlagAndMapsCommon008`: sleeper interruption restores the thread flag.
+
+The reflective helper must fail with an AssertJ assertion such as `ReservationCancellationCommandFacade class is required` when the class is absent; it must not turn `ClassNotFoundException` into a compile or infrastructure error.
+
+- [ ] **Step 2: Run command tests and observe behavioral RED.**
 
 ```powershell
-backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationCancellationCommandFacadeTest"
+backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationCancellationCommandFacadeTest.command*"
 ```
 
-Expected: compilation fails because the facade does not exist.
+Expected RED: JUnit runs and fails the explicit missing-facade assertion. Compilation and existing service tests succeed.
 
-- [ ] **Step 3: Implement public entries and exact canonicalization.**
+- [ ] **Step 3: Run retry classification tests and observe behavioral RED before retry production.**
+
+```powershell
+backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationCancellationCommandFacadeTest.retry*"
+```
+
+Expected RED: JUnit runs and fails the same explicit missing-facade assertion before any retry implementation exists. A compile, context, or dependency failure is not accepted.
+
+- [ ] **Step 4: Implement public entries, exact canonicalization, and bounded retry together.**
 
 Use `@Service`, an `@Autowired` constructor `(ReservationService, Clock)`, and a package-private test constructor `(ReservationService, Clock, IntToLongFunction, RetrySleeper)`. Each public entry validates non-null key/request, obtains `Instant requestedAt = clock.instant()` exactly once, constructs `IdempotencyCommand`, reason, correlation, then passes a supplier to one private retry method. Do not put `reservationId` in correlation.
 
-Canonical prefixes are exact:
+Build canonical fingerprint input with this exact field encoding and order; the two literal route templates must not be replaced with concrete path strings:
 
-```text
-POST|/api/v1/reservations/{reservationId}/cancellations|
-POST|/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations|
+```java
+private static String consumerCanonical(long reservationId, String reason) {
+    StringBuilder canonical = new StringBuilder();
+    appendCanonical(canonical, "method", "POST");
+    appendCanonical(canonical, "route",
+            "/api/v1/reservations/{reservationId}/cancellations");
+    appendCanonical(canonical, "reservationId", String.valueOf(reservationId));
+    appendCanonical(canonical, "reason", reason);
+    return canonical.toString();
+}
+
+private static String operatorCanonical(long storeId, long reservationId, String reason) {
+    StringBuilder canonical = new StringBuilder();
+    appendCanonical(canonical, "method", "POST");
+    appendCanonical(canonical, "route",
+            "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations");
+    appendCanonical(canonical, "storeId", String.valueOf(storeId));
+    appendCanonical(canonical, "reservationId", String.valueOf(reservationId));
+    appendCanonical(canonical, "reason", reason);
+    return canonical.toString();
+}
+
+private static void appendCanonical(StringBuilder target, String field, String value) {
+    target.append(field).append('=');
+    if (value == null) {
+        target.append("-1:");
+    } else {
+        target.append(value.length()).append(':').append(value);
+    }
+    target.append('|');
+}
 ```
 
-Append consumer `reservationId`, `reason`; append operator `storeId`, `reservationId`, `reason`.
-
-- [ ] **Step 4: Write retry classification tests before implementing retry.**
-
-Concrete cases:
-
-- deadlock 1213 then lock timeout 1205 then success -> service called 3 times, delays exactly supplied 100/300, same captured `requestedAt` each call;
-- third retryable failure -> `COMMON_008` with original cause;
-- `ObjectOptimisticLockingFailureException` retries;
-- `ServiceException`, `IllegalArgumentException`, `QueryTimeoutException`, `DataIntegrityViolationException`, and unrelated `CannotAcquireLockException` do not retry;
-- interruption restores thread interrupt flag and returns `COMMON_008`.
-
-- [ ] **Step 5: Implement the bounded retry and run GREEN.**
+Use `RequestFingerprint.of(consumerCanonical(...))` or `RequestFingerprint.of(operatorCanonical(...))` in `new IdempotencyCommand("consumer"|"store-operator", actorId, "RESERVATION_CANCEL", key.value(), fingerprint)`. Build correlation with `"reservation-cancel:" + namespace + ":" + actorId + ":" + key.value()` and pass the unchanged normalized key and reason to the exact Task 4 service entry.
 
 Copy the proven classification shape from `ReservationCreationCommandFacade`, adding optimistic conflicts explicitly. Keep delays `ThreadLocalRandom.current().nextLong(100L, 201L)` and `nextLong(300L, 501L)`, and sleep outside service transactions.
+
+- [ ] **Step 5: Run all facade tests GREEN.**
 
 Run:
 
 ```powershell
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationCancellationCommandFacadeTest"
 git diff --check
+git diff --name-only HEAD
 ```
 
-Expected: all facade tests pass.
+Expected: all facade tests pass; exactly the two Task 5 paths are uncommitted.
 
 - [ ] **Step 6: Commit Task 5 with exact staging.**
 
@@ -930,7 +955,7 @@ mockMvc.perform(post("/api/v1/reservations/77/cancellations")
     .andExpect(jsonPath("$.data.cancelledAt").doesNotExist());
 ```
 
-Also test missing key -> COMMON_003/facade uncalled, malformed key -> COMMON_004, overlong reason/unknown field -> COMMON_001, omitted reason accepted, unauthenticated -> AUTH_001, operator token -> AUTH_004, and a representative `RESERVATION_006` passthrough. Keep create POST, detail GET, and unknown subpath deny tests.
+Also test missing key -> COMMON_003/facade uncalled, malformed key -> COMMON_004, overlong reason/unknown field -> COMMON_001, omitted reason accepted, unauthenticated -> AUTH_001, operator token -> AUTH_004, and `RESERVATION_001/005/006` passthrough with their 404/409 statuses. Add an authenticated nonapproved method on the cancellation path expecting AUTH_006. Keep create POST, detail GET, and unknown subpath deny tests.
 
 - [ ] **Step 2: Write failing operator MockMvc tests.**
 
@@ -942,7 +967,7 @@ Import the Reservation-owned operator reservation security chain alongside the e
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.controller.ReservationControllerTest" --tests "com.miriyum.domain.reservation.controller.StoreReservationControllerTest"
 ```
 
-Expected: cancellation routes are unmapped/forbidden and controller facade beans/methods are missing.
+Expected RED: the consumer cancellation path is rejected by the existing deny-all rule and the operator path is unmapped or not protected by the Reservation-owned fail-closed chain; the already-existing Task 5 facade mock is never called. Compilation succeeds, so the failure demonstrates the missing controller/security behavior rather than a missing dependency.
 
 - [ ] **Step 4: Implement thin controller methods.**
 
@@ -964,7 +989,26 @@ public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
 }
 ```
 
-Operator uses the exact store path controller mapping, `@PathVariable @Positive long storeId`, unannotated reservation ID for hidden-not-found semantics, `StoreCancellationRequest`, and `cancelByStoreOperator`. Do not catch/remap `ServiceException`.
+Operator, under the existing class mapping `/api/v1/store-operator/stores/{storeId}/reservations`, adds:
+
+```java
+@PostMapping("/{reservationId}/cancellations")
+public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
+        @AuthenticationPrincipal AuthenticatedPrincipal principal,
+        @PathVariable @Positive long storeId,
+        @PathVariable long reservationId,
+        @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+        @Valid @RequestBody StoreCancellationRequest request) {
+    ReservationCancellationCommandResult result =
+            reservationCancellationCommandFacade.cancelByStoreOperator(
+                    principal.accountId(), storeId, reservationId,
+                    IdempotencyKey.parse(rawKey), request);
+    return ResponseEntity.status(result.httpStatus())
+            .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
+}
+```
+
+Do not annotate `reservationId` with `@Positive`, because actor-scoped absence must use hidden `RESERVATION_001`; do not catch or remap `ServiceException` in either controller.
 
 - [ ] **Step 5: Add the fail-closed security chains.**
 
@@ -994,7 +1038,7 @@ git add backend/src/main/java/com/miriyum/domain/reservation/config/ReservationS
 git commit -m "feat(reservation): expose cancellation endpoints"
 ```
 
-### Task 7: Prove MySQL atomicity, replay, restoration, and concurrency
+### Task 7: Run fresh MySQL transaction, replay, restoration, and contention verification
 
 **Files:**
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/service/ReservationCancellationIT.java`
@@ -1003,9 +1047,9 @@ git commit -m "feat(reservation): expose cancellation endpoints"
 - Consumes: production facade/service/repositories, real Global idempotency, Store/consumer account gates, real MenuHold release, V26.
 - Produces: class-filtered MySQL evidence tagged `integration` and exactly one shard tag `integration-shard-b`.
 
-- [ ] **Task 7 gate:** Use a real `mysql:8.0.40` container, latches/barriers instead of sleeps, bounded executor shutdown, and database snapshots before/after each injected failure.
+- [ ] **Task 7 gate:** Production behavior already completed RED/GREEN in Tasks 2-6. This task adds fresh black-box MySQL verification whose first run is expected to PASS; any failure is `FAIL`, never acceptable RED. Use `mysql:8.0.40`, test-owned JDBC/`TransactionTemplate` locks, no sleeps, bounded executor shutdown, and database snapshots around failures.
 
-- [ ] **Step 1: Create the tagged IT fixture and first failing no-menu cancellation test.**
+- [ ] **Step 1: Create the tagged IT fixture and no-menu replay verification.**
 
 Use the same Spring/Testcontainers properties and deterministic fixture patterns as `ReservationCreationIT`, but create a confirmed Reservation, original allocation, and occupied capacity directly in transactions. Cleanup order begins with cancellation audit, then MenuHold/inventory, allocation, Reservation, capacity, idempotency, Store/accounts.
 
@@ -1030,60 +1074,92 @@ void noMenuCancellationCommitsStateCapacityAuditAndReplayOnce() {
 }
 ```
 
-- [ ] **Step 2: Run only the new IT and observe RED.**
+- [ ] **Step 2: Add successful store-operator atomic cancellation verification.**
 
-```powershell
-backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.service.ReservationCancellationIT"
+Create a fixture whose authenticated operator currently manages the reservation's Store and whose confirmed reservation has two capacity buckets plus a real CONFIRMED MenuHold/inventory allocation. Call:
+
+```java
+ReservationCancellationCommandResult first = facade.cancelByStoreOperator(
+        scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(2),
+        new StoreCancellationRequest(" "));
+ReservationCancellationCommandResult replay = facade.cancelByStoreOperator(
+        scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(2),
+        new StoreCancellationRequest(" "));
 ```
 
-Expected: the new test fails until its full fixture and production wiring are correct; a context/migration failure is actionable RED, not a reason to run the full shard.
+Assert HTTP 200, equal first/replay detail, `cancelledBy == "STORE_OPERATOR"`, reason remains exactly `" "`, Reservation CANCELLED, both capacity buckets restored once, MenuHold RELEASED, inventory and ledger restored once, and one audit with actor ID/type/reason and command `reservation-cancel:store-operator:{operatorId}:{key}`. Query `idempotency_commands` and assert one SUCCEEDED row with namespace `store-operator`, the operator account ID, type `RESERVATION_CANCEL`, normalized key, and data-only payload; the audit command and MenuHold restore ledger operation ID must equal the same correlation.
 
-- [ ] **Step 3: Add concrete resource and policy scenarios.**
+- [ ] **Step 3: Add concrete resource, policy, and rollback verification.**
 
 Add tests with explicit DB assertions for:
 
-- `HOLD_PRESENT`: hold becomes RELEASED, original menu inventory is restored exactly once, release ledger uses the same facade correlation as audit command ID;
-- `NO_HOLD`: no MenuHold rows/ledger are created or changed;
-- two original buckets: each occupied people decreases by full party size and team by one exactly once; allocations remain unchanged;
-- republished newer capacity: seed old original allocation plus newer overlapping buckets with materialized occupancy, then assert union restores old and current IDs, not an intermediate retired version;
-- legacy `CONFIRMED` null cancellation version and null startAt each return RES006 and leave every snapshot unchanged;
-- different key after successful cancellation returns RES005; same key/different reason returns COMMON_007;
-- consumer foreign reservation returns RES001 and operator ownership failure preserves Store's public 403/404.
+- `HOLD_PRESENT` and `NO_HOLD` branches independently;
+- two original buckets and a republished newer current bucket union, with allocations unchanged and no intermediate retired-bucket decrement;
+- legacy `CONFIRMED` null cancellation version and null startAt -> RES006 with identical before/after snapshot;
+- different key after success -> RES005; same key/different reason -> COMMON_007;
+- consumer foreign reservation -> RES001 and wrong operator management ownership -> Store public 403/404;
+- temporary MySQL trigger failures at MenuHold RELEASED update, audit insert, and idempotency SUCCEEDED update, plus guarded capacity underflow. Every failure leaves Reservation, timestamps, capacity, MenuHold/inventory/ledger, audit count, and idempotency success fields equal to the pre-command snapshot.
 
-- [ ] **Step 4: Add deterministic concurrent cancellation tests.**
+Create/drop each uniquely named trigger inside `try/finally`. A unique/audit conflict is failure, not replay success.
 
-Use a fixed-size executor, `CountDownLatch ready/start`, and two independent calls:
+- [ ] **Step 4: Implement deterministic same-key idempotency lock contention with test-owned JDBC.**
 
-```java
-@Test
-void sameKeyConcurrentCallsProduceOneEffectAndTwoEqualResponses() throws Exception { /* ... */ }
+Add `sameKeyContentionBlocksAtIdempotencyThenProducesOneEffectAndEqualResponses`. Use an autowired `TransactionTemplate`, `JdbcTemplate`, and `DataSource` plus latches `idempotencyLockHeld`, `releaseIdempotencyLock`, `workersReady`, and `startWorkers`.
 
-@Test
-void differentKeysConcurrentCallsProduceOneSuccessAndOneReservation005() throws Exception { /* ... */ }
+The holder executor starts a transaction and uses the transaction-bound `JdbcTemplate` to execute the following insert without committing, then reads `SELECT CONNECTION_ID()`, counts down `idempotencyLockHeld`, waits for release, and marks its transaction rollback-only:
+
+```sql
+INSERT INTO idempotency_commands (
+    principal_namespace, principal_id, command_type, idempotency_key,
+    request_fingerprint, processing_status, created_at, updated_at
+) VALUES (
+    'consumer', ?, 'RESERVATION_CANCEL', ?, ?,
+    'PROCESSING', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+)
 ```
 
-After each test assert one audit, one capacity restoration, one menu restoration, Reservation CANCELLED, and expected idempotency command rows. Put executor shutdown in `finally`, call `shutdownNow()`, and assert `awaitTermination(5, SECONDS)`.
+Bind the fixture's positive consumer account ID, normalized key, and exact facade fingerprint. After the holder latch, start two facade workers with the same key/fingerprint; each counts down `workersReady` immediately before the facade call and waits at `startWorkers`.
 
-- [ ] **Step 5: Add transaction failure injection tests using temporary MySQL triggers.**
+After both workers are released, prove actual DB blocking without sleep by all three observations:
 
-Create/drop uniquely named triggers inside `try/finally`; never leave a trigger for the next test. Test these exact rollback points:
+1. `future.get(250, MILLISECONDS)` for each worker throws `TimeoutException`;
+2. `awaitBlockingWaits(holderConnectionId, "idempotency_commands", "uk_idempotency_commands", 2)` returns before its five-second deadline;
+3. Reservation status/capacity/audit remain unchanged while the holder transaction is open.
 
-- capacity: seed occupancy below the party so guarded restore fails;
-- MenuHold: `BEFORE UPDATE ON menu_holds` signals when `NEW.status='RELEASED'`;
-- audit: `BEFORE INSERT ON reservation_cancellation_audits` signals;
-- idempotency finalize: `BEFORE UPDATE ON idempotency_commands` signals when `NEW.status='SUCCEEDED' AND NEW.command_type='RESERVATION_CANCEL'`.
+Implement the test-only `awaitBlockingWaits(long holderConnectionId, String tableName, String indexName, int expectedWaits)` in `ReservationCancellationIT`. It repeatedly executes the following scalar query with parameters `(holderConnectionId, tableName, indexName)`, compares the returned count with `expectedWaits`, and stops when the threshold is reached or `System.nanoTime()` passes the five-second deadline; each unsuccessful iteration calls `Thread.onSpinWait()` and never sleeps:
 
-For every case capture Reservation status/timestamps, all affected capacity counters, MenuHold/inventory/ledger, audit count, and idempotency success fields before the command. Assert the post-failure snapshot equals the pre-command snapshot and there is no successful audit/result. Do not interpret a unique/audit conflict as replay success.
+```sql
+SELECT COUNT(*)
+FROM performance_schema.data_lock_waits AS wait_edge
+JOIN performance_schema.data_locks AS blocking_lock
+  ON blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
+JOIN performance_schema.threads AS blocking_thread
+  ON blocking_thread.THREAD_ID = blocking_lock.THREAD_ID
+WHERE blocking_thread.PROCESSLIST_ID = ?
+  AND blocking_lock.OBJECT_SCHEMA = DATABASE()
+  AND blocking_lock.OBJECT_NAME = ?
+  AND blocking_lock.INDEX_NAME = ?
+```
 
-- [ ] **Step 6: Run the class-filtered IT fresh and inspect process cleanup.**
+Fail with an AssertJ message containing the holder ID, table, index, and last observed count if the deadline expires. This query observes actual InnoDB wait edges; executor readiness or a latch alone is not accepted as contention evidence.
+
+Count down `releaseIdempotencyLock`; the holder rolls back, one worker claims/executes and the other replays. Assert equal responses, one successful idempotency row, one audit, one Reservation transition, and one capacity/MenuHold restoration. In `finally`, release every latch, call `shutdownNow()`, and require `awaitTermination(5, SECONDS)`.
+
+- [ ] **Step 5: Implement deterministic different-key Reservation-row contention.**
+
+Add `differentKeyContentionBlocksAtReservationThenProducesOneSuccessAndReservation005`. The holder transaction uses JDBC `SELECT reservation_id FROM reservations WHERE reservation_id = ? FOR UPDATE`, records `CONNECTION_ID()`, counts down `reservationLockHeld`, waits for `releaseReservationLock`, then commits without mutation.
+
+Start two facade workers with distinct keys and the same reservation. Both can claim distinct idempotency rows, then must wait on the held Reservation row. Prove both waits with worker `Future.get(250, MILLISECONDS)` timeouts and `awaitBlockingWaits(holderConnectionId, "reservations", "PRIMARY", 2)`. While held, assert both idempotency rows are not externally committed and resources are unchanged. Release the holder; assert exactly one HTTP 200 and one `ServiceException` with RES005, one audit, one transition, and one capacity/MenuHold restoration. Apply the same `finally` cleanup/termination rules.
+
+- [ ] **Step 6: Run the class-filtered IT fresh; first PASS is required.**
 
 ```powershell
 backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.service.ReservationCancellationIT" --rerun-tasks
-backend\gradlew.bat -p backend --stop
-Get-Process java -ErrorAction SilentlyContinue
+git diff --check
+git diff --name-only HEAD
 ```
 
-Expected: the IT class passes; Gradle daemons are stopped. Report any remaining Java process without killing unrelated user processes. Testcontainers/Ryuk must have removed the test container.
+Expected: the entire class passes on its first execution after creation and only `ReservationCancellationIT.java` is uncommitted. A compilation, context, migration, assertion, timeout, or Docker failure is `FAIL`; return to the owning earlier task, add/confirm its behavioral RED, fix minimally, rerun that task, then rerun this verification.
 
 - [ ] **Step 7: Commit Task 7 with exact staging.**
 
@@ -1110,17 +1186,51 @@ git commit -m "test(reservation): verify cancellation transactions"
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequestTest" --tests "com.miriyum.domain.reservation.dto.request.StoreCancellationRequestTest" --tests "com.miriyum.domain.reservation.dto.response.ReservationDetailResponseTest" --tests "com.miriyum.domain.reservation.dto.response.ReservationOpenApiContractTest" --tests "com.miriyum.domain.reservation.entity.ReservationCancellationAuditTest" --tests "com.miriyum.domain.reservation.entity.ReservationCapacityBucketTest" --tests "com.miriyum.domain.reservation.service.ReservationCancellationCommandFacadeTest" --tests "com.miriyum.domain.reservation.service.ReservationServiceTest" --tests "com.miriyum.domain.reservation.controller.ReservationControllerTest" --tests "com.miriyum.domain.reservation.controller.StoreReservationControllerTest" --rerun-tasks
 ```
 
-Expected: all selected tests pass. This intentionally reruns the impacted `ReservationServiceTest`; it does not rerun unrelated #49 creation IT or a full build.
+Expected: all selected tests pass. This intentionally gives fast diagnostics for the impacted `ReservationServiceTest` and cancellation slices before the mandatory full build in Step 3.
 
-- [ ] **Step 2: Run fresh class-filtered MySQL verification only.**
+- [ ] **Step 2: Run fresh class-filtered MySQL verification.**
 
 ```powershell
 backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest" --tests "com.miriyum.domain.reservation.service.ReservationCancellationIT" --rerun-tasks
 ```
 
-Expected: both MySQL classes pass. Do not replace this with `integrationTestShardB`, which would run unrelated classes.
+Expected: both MySQL classes pass. This class-filtered run isolates cancellation failures before the mandatory full build; do not replace it with `integrationTestShardB`.
 
-- [ ] **Step 3: Stop Gradle workers and record any remaining process.**
+- [ ] **Step 3: Run a fresh full build at the current HEAD and record its exit code and test totals.**
+
+Run from the repository root in one PowerShell session:
+
+```powershell
+backend\gradlew.bat -p backend build --rerun-tasks
+$buildExitCode = $LASTEXITCODE
+$resultFiles = Get-ChildItem backend/build/test-results -Recurse -Filter 'TEST-*.xml'
+$testCount = 0
+$failureCount = 0
+$errorCount = 0
+$skippedCount = 0
+foreach ($resultFile in $resultFiles) {
+    [xml]$suiteDocument = Get-Content -Raw $resultFile.FullName
+    $testCount += [int]$suiteDocument.testsuite.tests
+    $failureCount += [int]$suiteDocument.testsuite.failures
+    $errorCount += [int]$suiteDocument.testsuite.errors
+    $skippedCount += [int]$suiteDocument.testsuite.skipped
+}
+[pscustomobject]@{
+    ExitCode = $buildExitCode
+    ResultFiles = $resultFiles.Count
+    Tests = $testCount
+    Failures = $failureCount
+    Errors = $errorCount
+    Skipped = $skippedCount
+}
+if ($buildExitCode -ne 0) {
+    throw "Full build failed with exit code $buildExitCode"
+}
+```
+
+Expected: `ExitCode=0`, `Failures=0`, and `Errors=0`; record the displayed result-file, test, and skipped counts. `build` executes the complete non-integration unit/slice surface and, through this repository's `check` dependency, the full `integrationTest` surface at current HEAD. This is deliberately broader than Steps 1-2 and includes unrelated existing tests; a failure anywhere is a release blocker, not an acceptable RED.
+
+- [ ] **Step 4: Stop Gradle workers and record any remaining process.**
 
 ```powershell
 backend\gradlew.bat -p backend --stop
@@ -1129,7 +1239,7 @@ Get-Process java -ErrorAction SilentlyContinue
 
 Expected: Gradle reports stopped daemons. Do not terminate Java processes that are not proven to belong to these tests.
 
-- [ ] **Step 4: Verify formatting, migration slot, and exact 32-path equality.**
+- [ ] **Step 5: Verify formatting, migration slot, and exact 32-path equality.**
 
 ```powershell
 gh api "repos/sparta-spring4/Commerce-Final-Project-MiriYum/contents/backend/src/main/resources/db/migration?ref=dev" --jq '.[].name'
@@ -1143,23 +1253,24 @@ git diff --cached --name-only
 
 Expected: migration number still matches the Issue; the branch range equals all and only the exact 32 paths; staged is empty; tracked files are clean. `.idea/**` and `.superpowers/**` may remain untracked and untouched.
 
-- [ ] **Step 5: Perform the plan self-review required by `writing-plans`.**
+- [ ] **Step 6: Perform the plan self-review required by `writing-plans`.**
 
 Run:
 
 ```powershell
 rg -n "T[B]D|T[O]DO|implement l[a]ter|fill in d[e]tails|Similar to T[a]sk|add appr[o]priate|Write tests for the ab[o]ve" docs/superpowers/plans/2026-08-07-reservation-cancellation.md
+rg -n "/\*[[:space:]]|omitted f[i]eld|remaining f[i]eld|same as T[a]sk|same as ab[o]ve|implementation om[i]tted|body om[i]tted|placeholder sk[e]leton" docs/superpowers/plans/2026-08-07-reservation-cancellation.md
 rg -n "cancelConsumerReservation|cancelStoreReservation|cancelByConsumer|cancelByStoreOperator|recordSuccess|findAllByIdInForUpdate|findLatestPolicyVersion" docs/superpowers/plans/2026-08-07-reservation-cancellation.md
 ```
 
 Expected: placeholder scan returns no matches; interface scan shows consistent definitions/usages. Manually map every design TDD bullet to Tasks 1-7 and every Issue allowlist path to the File Responsibility Map.
 
-- [ ] **Step 6: Dispatch an independent code reviewer.**
+- [ ] **Step 7: Dispatch an independent code reviewer.**
 
 Give a fresh reviewer Issue #51, the approved design, this plan, and `origin/dev...HEAD`. Require findings only for correctness, authorization, transaction/lock order, idempotency/replay, data integrity, security, migration compatibility, and missing tests. The reviewer must verify no cross-domain Entity/Repository access and no allowlist escape.
 
 Expected: no Important finding. For an Important finding, return to its owning task, write a reproducing RED test, apply the minimum fix, rerun only impacted focused tests plus the relevant MySQL class, commit without amend, and request re-review.
 
-- [ ] **Step 7: Record the final local handoff without publishing.**
+- [ ] **Step 8: Record the final local handoff without publishing.**
 
-Report exact commit range, the fresh commands and exit codes, selected test counts, 32/32 path equality, migration version, reviewer verdict, tracked/staged status, and deliberately skipped full build/shards with the non-duplication reason. Do not push or create/update a PR unless the user separately authorizes publication.
+Report exact commit range; every fresh command and exit code; focused and full-build test counts; 32/32 path equality; migration version; reviewer verdict; and tracked/staged status. State that the full build covered the complete unit/slice and full `integrationTest` surfaces, while standalone shard tasks were not additionally duplicated. Do not push or create/update a PR unless the user separately authorizes publication.
