@@ -225,11 +225,21 @@ jobs:
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          deployment_id=$(jq -n \
-            --arg sha "$IMAGE_TAG" \
+          deployment_response=$(jq -n \
+            --arg ref "$IMAGE_TAG" \
             --arg environment "$BACKEND_DEPLOYMENT_ENVIRONMENT" \
-            '{ref: $sha, sha: $sha, environment: $environment, description: ("Backend image " + $sha), auto_merge: false, required_contexts: []}' \
-            | gh api --method POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq '.id')
+            '{ref: $ref, environment: $environment, description: ("Backend image " + $ref), auto_merge: false, required_contexts: []}' \
+            | gh api --method POST "repos/$GITHUB_REPOSITORY/deployments" --input -)
+
+          deployment_id=$(jq -er --arg image_tag "$IMAGE_TAG" '
+            if .sha != $image_tag then
+              error("Deployment response SHA does not match selected image tag")
+            elif (.id | type) != "number" then
+              error("Deployment response did not include a numeric id")
+            else
+              .id
+            end
+          ' <<< "$deployment_response")
 
           gh api --method POST \
             "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \

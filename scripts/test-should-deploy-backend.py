@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 import unittest
@@ -43,7 +44,25 @@ class ShouldDeployBackendTest(unittest.TestCase):
         self.assertIn("BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend", WORKFLOW)
         self.assertIn("deployments: write", WORKFLOW)
         self.assertIn("Record backend deployment marker", WORKFLOW)
-        self.assertIn('--arg sha "$IMAGE_TAG"', WORKFLOW)
+        marker = WORKFLOW.split("- name: Record backend deployment marker", 1)[1].split(
+            "- name: Upload deployment files with SSM", 1
+        )[0]
+        payload = re.search(
+            r"'\{ref: \$ref, environment: \$environment, description: \(.+?\), "
+            r"auto_merge: false, required_contexts: \[\]\}'",
+            marker,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(payload)
+        payload_keys = re.findall(r"([a-z_]+):", payload.group(0))
+        self.assertEqual(
+            ["ref", "environment", "description", "auto_merge", "required_contexts"],
+            payload_keys,
+        )
+        self.assertNotIn("sha: $sha", payload.group(0))
+        self.assertIn('--arg ref "$IMAGE_TAG"', marker)
+        self.assertIn("if .sha != $image_tag then", marker)
+        self.assertIn("Deployment response SHA does not match selected image tag", marker)
         self.assertIn(
             '--field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT"',
             WORKFLOW,
