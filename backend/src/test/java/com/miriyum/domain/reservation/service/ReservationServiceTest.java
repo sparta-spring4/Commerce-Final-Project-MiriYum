@@ -556,6 +556,35 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("coverage 완료 뒤 반환된 겹침 버킷도 점유 전에 RESERVATION_003으로 거절한다")
+    void rejectsOverlappingCapacityBucketAfterCompleteCoverageBeforeOccupancyMutation() {
+        ReservationCapacityBucket complete = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 1, 1, 1, 6, true, 7L);
+        ReservationCapacityBucket overlapping = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, LocalTime.of(18, 30), LocalTime.of(19, 0),
+                10, 3, 2, 1, 1, 6, true, 7L);
+        stubCreationUntilCapacity(
+                activePolicy(22L, 30, 60, 0),
+                List.of(),
+                List.of(complete, overlapping));
+
+        Throwable failure = catchThrowable(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)));
+
+        assertThat(complete.getOccupiedPeople()).isEqualTo(1);
+        assertThat(complete.getOccupiedTeams()).isEqualTo(1);
+        assertThat(overlapping.getOccupiedPeople()).isEqualTo(2);
+        assertThat(overlapping.getOccupiedTeams()).isEqualTo(1);
+        assertThat(failure).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY));
+        then(reservationRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
     @DisplayName("버킷의 최소·최대 일행 범위를 벗어나면 점유 전 RESERVATION_009다")
     void rejectsPartyOutsideCapacityPolicyRange() {
         ReservationCapacityBucket restricted = ReservationCapacityBucket.create(

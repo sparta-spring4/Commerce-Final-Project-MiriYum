@@ -496,9 +496,9 @@ public class ReservationService {
                 throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
             }
             coveredUntil = bucket.getEndTime();
-            if (!coveredUntil.isBefore(occupancyEndTime)) {
-                return version;
-            }
+        }
+        if (!coveredUntil.isBefore(occupancyEndTime)) {
+            return version;
         }
         throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
     }
