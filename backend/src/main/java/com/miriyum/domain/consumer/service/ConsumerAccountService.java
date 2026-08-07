@@ -105,7 +105,7 @@ public class ConsumerAccountService {
         }
         String reference = account.getReservationContactReference();
         if (reference == null || reference.isBlank()) {
-            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
         }
         return new ReservationContactResult(reference, true);
     }

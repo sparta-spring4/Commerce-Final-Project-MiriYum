@@ -57,8 +57,8 @@
 - 합계는 1명 이상이어야 하고 현재 매장 정책의 최소·최대 일행 인원 안에 있어야 한다.
 - 연락처는 Auth가 제공하는 일반 사용자의 `MVP 신뢰 연락처`(실제 소유 인증은 생략했지만 1차 MVP에서 사용할 수 있다고 간주한 연락처) 결과를 거래 스냅샷으로 사용한다. 요청 본문으로 다른 사람의 연락처·소유자 ID를 받지 않는다.
 - Reservation은 전화번호 원문을 받거나 해석하지 않고 opaque reference(내부 구조나 실제 전화번호를 알 수 없는 무작위 참조값)와 예약 생성 당시 연락 가능 상태만 기존 스냅샷 컬럼에 저장한다.
-- 1차 MVP에서 예약 생성이 성공하면 `contact_available_at_confirmation`은 항상 `true`이다. `ck_reservations_contact_available_at_confirmation` CHECK 제약이 이를 강제하며, 연락처가 없거나 참조를 확인할 수 없으면 `false`를 저장하지 않고 각각 `ACCOUNT_006` 또는 `COMMON_012`로 예약 생성을 실패시킨다.
-- 활성 계정에 등록된 연락처가 없으면 Auth의 `ACCOUNT_006`을 전달하고 예약을 생성하지 않는다. 전화번호는 있지만 내부 참조가 없거나 참조 저장소를 사용할 수 없는 서버 상태는 `COMMON_012`로 구분한다.
+- 1차 MVP에서 예약 생성이 성공하면 `contact_available_at_confirmation`은 항상 `true`이다. `ck_reservations_contact_available_at_confirmation` CHECK 제약이 이를 강제하며, 전화번호 또는 예약 참조가 준비되지 않으면 `false`를 저장하지 않고 `ACCOUNT_006`으로 예약 생성을 실패시킨다. 참조가 준비된 뒤 참조 저장소를 사용할 수 없는 실제 서버 장애만 `COMMON_012`로 구분한다.
+- 활성 계정에 등록된 전화번호 또는 예약 참조가 없으면 Auth의 `ACCOUNT_006`을 전달하고 예약을 생성하지 않는다. 참조가 준비된 뒤 내부 참조 저장소를 사용할 수 없는 서버 상태는 `COMMON_012`로 구분한다.
 - `menuSelections`는 선택 사항이다. 없거나 빈 배열이면 `MenuHold`를 만들지 않는다.
 - 같은 메뉴·제공 구간이 반복되면 요청 경계에서 수량을 합산하고 한 항목으로 정규화한다.
 

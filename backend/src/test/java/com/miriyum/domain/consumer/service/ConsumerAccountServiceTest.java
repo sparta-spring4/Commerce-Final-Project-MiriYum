@@ -184,7 +184,7 @@ class ConsumerAccountServiceTest {
     }
 
     @Test
-    @DisplayName("전화번호가 있지만 예약 참조가 없으면 COMMON_012를 던진다")
+    @DisplayName("전화번호는 있지만 예약 참조가 없으면 ACCOUNT_006을 던진다")
     void rejectsReservationContactWhenReferenceIsMissing() {
         // given
         ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
@@ -194,7 +194,8 @@ class ConsumerAccountServiceTest {
         // when & then
         assertThatThrownBy(() -> consumerAccountService.getReservationContact(ACCOUNT_ID))
                 .isInstanceOfSatisfying(ServiceException.class,
-                        exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("COMMON_012"));
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(AccountErrorCode.RESERVATION_CONTACT_REQUIRED));
     }
 
     @Test
