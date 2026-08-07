@@ -2,7 +2,10 @@ package com.miriyum.domain.reservation.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import org.junit.jupiter.api.DisplayName;
@@ -84,6 +87,67 @@ class ReservationCapacityBucketTest {
 
         // then
         assertThat(available).isTrue();
+    }
+
+    @Test
+    @DisplayName("잠긴 버킷은 인원과 팀 한 건을 함께 점유한다")
+    void occupiesPeopleAndOneTeamTogether() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                4,
+                1,
+                1,
+                6,
+                true
+        );
+
+        // when
+        bucket.occupy(3);
+
+        // then
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(7);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("인원 또는 팀 수용량이 부족하면 버킷 점유를 전혀 변경하지 않고 RESERVATION_003을 반환한다")
+    void keepsOccupancyUnchangedWhenPeopleOrTeamCapacityIsInsufficient() {
+        // given
+        ReservationCapacityBucket peopleFull = capacityBucket(
+                5,
+                3,
+                4,
+                1,
+                1,
+                5,
+                true
+        );
+        ReservationCapacityBucket teamsFull = capacityBucket(
+                10,
+                2,
+                2,
+                2,
+                1,
+                6,
+                true
+        );
+
+        // when & then
+        assertThatThrownBy(() -> peopleFull.occupy(2))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        assertThat(peopleFull.getOccupiedPeople()).isEqualTo(4);
+        assertThat(peopleFull.getOccupiedTeams()).isEqualTo(1);
+
+        assertThatThrownBy(() -> teamsFull.occupy(2))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        assertThat(teamsFull.getOccupiedPeople()).isEqualTo(2);
+        assertThat(teamsFull.getOccupiedTeams()).isEqualTo(2);
     }
 
     @Test

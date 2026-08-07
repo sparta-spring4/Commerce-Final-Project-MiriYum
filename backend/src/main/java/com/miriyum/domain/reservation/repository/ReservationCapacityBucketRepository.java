@@ -17,6 +17,40 @@ import org.springframework.data.repository.query.Param;
 public interface ReservationCapacityBucketRepository
         extends JpaRepository<ReservationCapacityBucket, Long> {
 
+    /**
+     * Locks only the newest policy's buckets that overlap the requested half-open occupancy
+     * interval. Callers retain responsibility for coverage, version consistency, and capacity
+     * acceptance after the ordered lock acquisition.
+     *
+     * @param storeId target store ID
+     * @param serviceDate store-local service date
+     * @param startTime inclusive occupancy start
+     * @param occupancyEndTime exclusive occupancy end
+     * @return newest-policy overlapping buckets in primary-key order
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select bucket
+            from ReservationCapacityBucket bucket
+            where bucket.storeId = :storeId
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime < :occupancyEndTime
+              and bucket.endTime > :startTime
+              and bucket.policyVersion = (
+                  select max(latest.policyVersion)
+                  from ReservationCapacityBucket latest
+                  where latest.storeId = bucket.storeId
+                    and latest.serviceDate = bucket.serviceDate
+              )
+            order by bucket.id asc
+            """)
+    List<ReservationCapacityBucket> findLatestPolicyBucketsOverlappingForUpdate(
+            @Param("storeId") long storeId,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("occupancyEndTime") LocalTime occupancyEndTime
+    );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select bucket

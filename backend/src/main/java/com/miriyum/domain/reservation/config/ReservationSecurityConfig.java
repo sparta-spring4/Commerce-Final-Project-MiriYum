@@ -48,6 +48,7 @@ public class ReservationSecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.POST, RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, RESERVATION_DETAIL).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
