@@ -492,12 +492,14 @@ public class ReservationService {
                 .toList();
         LocalTime coveredUntil = request.startTime();
         for (ReservationCapacityBucket bucket : byInterval) {
-            if (!bucket.getStartTime().equals(coveredUntil)) {
+            LocalTime coveredStart = laterOf(bucket.getStartTime(), request.startTime());
+            LocalTime coveredEnd = earlierOf(bucket.getEndTime(), occupancyEndTime);
+            if (!coveredStart.equals(coveredUntil) || !coveredEnd.isAfter(coveredStart)) {
                 throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
             }
-            coveredUntil = bucket.getEndTime();
+            coveredUntil = coveredEnd;
         }
-        if (!coveredUntil.isBefore(occupancyEndTime)) {
+        if (coveredUntil.equals(occupancyEndTime)) {
             return version;
         }
         throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);

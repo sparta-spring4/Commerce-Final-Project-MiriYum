@@ -527,6 +527,36 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("latest overlapping buckets create a reservation when their clipped coverage is continuous")
+    void createsReservationWhenLatestBucketsCoverClippedOccupancy() {
+        ReservationCapacityBucket leading = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, LocalTime.of(17, 30), LocalTime.of(18, 30),
+                10, 3, 1, 1, 1, 6, true, 7L);
+        ReservationCapacityBucket trailing = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, LocalTime.of(18, 30), LocalTime.of(19, 0),
+                10, 3, 1, 1, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(leading, "id", 301L);
+        ReflectionTestUtils.setField(trailing, "id", 302L);
+        stubSuccessfulCreation(leading, activePolicy(22L, 30, 60, 0));
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0)))
+                .willReturn(List.of(leading, trailing));
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0));
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data().reservationId()).isEqualTo("77");
+        assertThat(leading.getOccupiedPeople()).isEqualTo(3);
+        assertThat(leading.getOccupiedTeams()).isEqualTo(2);
+        assertThat(trailing.getOccupiedPeople()).isEqualTo(3);
+        assertThat(trailing.getOccupiedTeams()).isEqualTo(2);
+        then(capacityAllocationRepository).should().saveAll(any());
+    }
+
+    @Test
     @DisplayName("겹치는 버킷 coverage는 점유 전에 RESERVATION_003으로 거절한다")
     void rejectsOverlappingCapacityCoverageBeforeOccupancyMutation() {
         ReservationCapacityBucket first = ReservationCapacityBucket.create(
