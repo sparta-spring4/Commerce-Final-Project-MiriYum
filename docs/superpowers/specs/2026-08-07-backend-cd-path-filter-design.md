@@ -24,7 +24,7 @@ Backend CI에 `paths` 필터를 바로 추가하면 문서 전용 PR에서 Requi
 
 ### 변경 파일 비교 기준
 
-`workflow_run`의 `head_sha`와 첫 번째 parent를 비교한다. `dev`에 PR merge commit이 push되는 경우에도 첫 번째 parent와 비교하면 해당 merge로 들어온 PR의 변경 경로를 판별할 수 있다.
+`workflow_run`의 `head_sha`와 staging에 기록된 마지막 성공 배포 SHA를 비교한다. 마지막 성공 배포 이후의 누적 변경을 판정하므로, backend 변경 A 뒤에 문서 전용 변경 B가 연속 병합되어 A의 CI가 취소되거나 CD가 stale 처리되어도 B의 CD가 A의 미배포 변경을 발견한다. 아직 성공한 staging 배포가 없으면 빈 Git tree부터 현재 revision까지를 기준으로 최초 배포 입력을 판정한다.
 
 ### 실행 경로
 
@@ -32,7 +32,7 @@ Backend CI에 `paths` 필터를 바로 추가하면 문서 전용 PR에서 Requi
 Backend CI 성공
   -> Backend CD verify-source
   -> stale revision 확인
-  -> 현재 커밋과 첫 번째 parent의 변경 파일 확인
+  -> 마지막 성공 staging 배포 SHA부터 현재 커밋까지 누적 변경 파일 확인
   -> backend/deploy/CD workflow 변경 있음: deployable=true
   -> 문서·프론트 전용 변경: deployable=false, 성공적으로 skip
 ```
@@ -49,7 +49,7 @@ Backend CI 성공
 ## 구현 구조
 
 - 변경 파일 목록에서 배포 대상 여부를 판별하는 작은 Python 스크립트를 둔다.
-- `verify-source` job은 workflow_run에서 성공한 revision을 checkout하고, 첫 번째 parent와의 변경 파일을 스크립트에 전달한다.
+- `verify-source` job은 workflow_run에서 성공한 revision을 checkout하고, GitHub Deployments API에서 마지막 성공 staging 배포 SHA를 찾은 뒤 그 이후의 누적 변경 파일을 스크립트에 전달한다.
 - 수동 실행은 checkout이나 경로 판별 없이 `deployable=true`로 둔다.
 - 기존 `verify-backend-cd-workflow.ps1`에 immutable image와 OIDC 보호 장치뿐 아니라 경로 판별 계약도 검증한다.
 - Python 스크립트는 backend, deploy, Backend CD workflow 변경과 docs/frontend 전용 변경을 각각 테스트한다.
@@ -60,8 +60,9 @@ Backend CI 성공
 2. 문서와 프론트 경로만 입력하면 `deployable=false`인지 확인한다.
 3. 빈 변경 목록을 안전하게 skip하는지 확인한다.
 4. Backend CD workflow 파일 변경은 배포 대상으로 판정하는지 확인한다.
-5. 기존 workflow 정적 계약 검증이 통과하는지 확인한다.
-6. YAML 변경에 대해 `git diff --check`와 가능한 범위의 workflow 계약 검증을 실행한다.
+5. backend 변경 뒤 docs 변경이 이어져도 누적 변경 입력이 `deployable=true`인지 회귀 검증한다.
+6. 기존 workflow 정적 계약 검증이 통과하는지 확인한다.
+7. YAML 변경에 대해 `git diff --check`와 가능한 범위의 workflow 계약 검증을 실행한다.
 
 ## 제외 범위
 

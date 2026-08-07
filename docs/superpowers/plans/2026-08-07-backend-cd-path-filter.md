@@ -4,7 +4,7 @@
 
 **Goal:** Keep Backend CI and its Required check unchanged while skipping automatic staging backend deployment for commits that do not change backend deployment inputs.
 
-**Architecture:** `verify-source` will checkout the successful `workflow_run` revision, compare it with its first parent, and pass changed paths to a small Python classifier. The classifier returns `true` only for `backend/**`, `deploy/**`, or `.github/workflows/backend-cd.yml`; manual SHA deployment remains unconditional.
+**Architecture:** `verify-source` will checkout the successful `workflow_run` revision, find the last successful staging deployment SHA through the GitHub Deployments API, compare the accumulated changes since that SHA, and pass changed paths to a small Python classifier. If no successful deployment exists, it compares from the empty Git tree. The classifier returns `true` only for `backend/**`, `deploy/**`, or `.github/workflows/backend-cd.yml`; manual SHA deployment remains unconditional.
 
 **Tech Stack:** GitHub Actions YAML, Bash, Python 3 standard library, PowerShell workflow contract verifier.
 
@@ -95,15 +95,17 @@ Expected: all classifier cases pass.
 
 Add an `actions/checkout` step with the existing pinned action SHA, `ref: ${{ github.event.workflow_run.head_sha }}`, and `fetch-depth: 2`. Run it only for `workflow_run`; manual dispatch keeps its existing checkout in the deploy job.
 
-- [ ] **Step 2: Compare the merge commit with its first parent**
+- [ ] **Step 2: Compare from the last successful staging deployment**
 
-In the existing source verification step, keep the stale revision check first. For automatic runs, calculate changed files with:
+In the existing source verification step, keep the stale revision check first. Query staging deployments and inspect the newest deployment status until a successful deployment SHA is found. Fetch that SHA when it is not already present locally. For automatic runs, calculate changed files with the last successful deployment as the base:
 
 ```bash
-changed_files=$(git diff --name-only "$WORKFLOW_SHA^1" "$WORKFLOW_SHA")
+changed_files=$(git diff --name-only "$last_deployed_sha" "$WORKFLOW_SHA")
 deployable=$(printf '%s\\n' "$changed_files" | python3 scripts/should-deploy-backend.py)
 echo "deployable=$deployable" >> "$GITHUB_OUTPUT"
 ```
+
+When no successful deployment exists, use `git hash-object -t tree /dev/null` as the base so the first staging deployment still sees all repository inputs. This makes a backend change followed by a docs-only change remain deployable until the backend revision is successfully deployed.
 
 For `workflow_dispatch`, write `deployable=true` without path filtering.
 
@@ -113,7 +115,7 @@ Keep the existing `deploy` job condition `needs.verify-source.outputs.deployable
 
 - [ ] **Step 4: Run the workflow contract verifier**
 
-Update `scripts/verify-backend-cd-workflow.ps1` to require the classifier path, first-parent diff, manual bypass, and output assignment. Run:
+Update `scripts/verify-backend-cd-workflow.ps1` to require the classifier path, deployment-history lookup, accumulated diff, manual bypass, and output assignment. Run:
 
 ```powershell
 pwsh -File scripts/verify-backend-cd-workflow.ps1
