@@ -44,6 +44,13 @@ jobs:
       deployable: ${{ steps.source.outputs.deployable }}
 
     steps:
+      - name: Checkout automatic deployment revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
       - name: Verify automatic deployment uses the current dev revision
         id: source
         env:
@@ -59,6 +66,15 @@ jobs:
               echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current dev is $current_dev_sha."
               exit 0
             fi
+
+            changed_files=$(git diff --name-only "$WORKFLOW_SHA^1" "$WORKFLOW_SHA")
+            deployable=$(printf '%s\n' "$changed_files" | python3 scripts/should-deploy-backend.py)
+            echo "deployable=$deployable" >> "$GITHUB_OUTPUT"
+
+            if [ "$deployable" != "true" ]; then
+              echo "::notice::Skipping staging CD because the revision has no backend deployment input changes."
+            fi
+            exit 0
           fi
 
           echo "deployable=true" >> "$GITHUB_OUTPUT"
