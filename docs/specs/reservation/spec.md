@@ -71,7 +71,7 @@
 - 시작 시각은 자정이 아니라 Store가 반환한 현재 예약 접수 구간의 `windowStartAt`을 기준으로 `slotInterval`에 정렬한다.
 - 계산·저장하는 시작 시각은 초와 나노초가 없는 분 단위여야 한다.
 - `serviceEndAt = startAt + serviceDuration`, `occupancyEndAt = serviceEndAt + turnoverDuration`으로 계산한다.
-- 고객 서비스 종료는 `serviceEndAt`, 수용량·중복 판정의 실제 점유 종료는 `occupancyEndAt`이다. 내부에서 모호한 `endTime`을 두 의미 중 하나로 사용하지 않는다.
+- 고객 서비스 종료와 사용자 중복 예약 판정은 `serviceEndAt`을 사용한다. 수용량의 실제 점유 종료는 `occupancyEndAt`이며, 중복 예약은 서비스 구간 `[startAt, serviceEndAt)`, 수용량은 점유 구간 `[startAt, occupancyEndAt)`를 사용한다. 내부에서 모호한 `endTime`을 두 의미 중 하나로 사용하지 않는다.
 - Store의 `windowEndAt`은 예약 **시작** 접수 상한이다. `serviceEndAt`이나 `occupancyEndAt`으로 사용하지 않는다.
 - 입력 매장 순서·개수·중복을 보존하고 accepting 매장의 시간 정책만 한 번에 조회한다. 같은 시작 시각도 매장별 정책에 따라 서로 다른 점유 종료를 계산한다.
 - 정책·시간대가 없거나 비활성이고, 슬롯이 맞지 않거나 현지 시각이 존재하지 않으며, 중복 현지 시각에 유효 offset이 없으면 해당 매장은 실패 폐쇄한다.

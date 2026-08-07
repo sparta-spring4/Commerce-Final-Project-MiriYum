@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchReques
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
@@ -31,6 +32,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -71,6 +73,9 @@ class ReservationQueryRepositoryTest {
 
     @Autowired
     private ReservationRepository reservationRepository;
+
+    @Autowired
+    private ReservationCapacityBucketRepository reservationCapacityBucketRepository;
 
     @Autowired
     private ReservationService reservationService;
@@ -165,6 +170,128 @@ class ReservationQueryRepositoryTest {
                 saved.getId(),
                 OTHER_STORE_ID
         )).isEmpty();
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("동일 사용자와 매장의 겹치는 확정 서비스 구간만 PK 순서로 잠금 조회한다")
+    void findsOnlyOverlappingConfirmedReservationsForUpdate() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        Reservation overlappingFirst = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 0),
+                CREATED_AT
+        );
+        Reservation overlappingSecond = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 15),
+                CREATED_AT.plusSeconds(1)
+        );
+        Reservation adjacentBefore = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(17, 0),
+                CREATED_AT.plusSeconds(2)
+        );
+        Reservation adjacentAfter = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(19, 30),
+                CREATED_AT.plusSeconds(3)
+        );
+        Reservation cancelled = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 30),
+                CREATED_AT.plusSeconds(4)
+        );
+        cancelled.cancel(CREATED_AT.plusSeconds(5));
+        reservationRepository.saveAndFlush(cancelled);
+        Reservation fulfilled = saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 45),
+                CREATED_AT.plusSeconds(6)
+        );
+        fulfilled.fulfill(CREATED_AT.plusSeconds(7));
+        reservationRepository.saveAndFlush(fulfilled);
+        saveReservationAt(
+                OTHER_CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 30),
+                CREATED_AT.plusSeconds(8)
+        );
+        saveReservationAt(
+                CONSUMER_ACCOUNT_ID,
+                OTHER_STORE_ID,
+                serviceDate,
+                LocalTime.of(18, 30),
+                CREATED_AT.plusSeconds(9)
+        );
+
+        // when
+        var result = reservationRepository.findConfirmedOverlappingForUpdate(
+                CONSUMER_ACCOUNT_ID,
+                STORE_ID,
+                Instant.parse("2026-08-01T09:00:00Z"),
+                Instant.parse("2026-08-01T10:00:00Z")
+        );
+
+        // then
+        assertThat(result)
+                .extracting(Reservation::getId)
+                .containsExactly(overlappingFirst.getId(), overlappingSecond.getId());
+        assertThat(adjacentBefore.getId()).isNotIn(result.stream().map(Reservation::getId).toList());
+        assertThat(adjacentAfter.getId()).isNotIn(result.stream().map(Reservation::getId).toList());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("최신 수용량 정책에서 요청 점유 구간과 겹치는 버킷만 PK 순서로 잠금 조회한다")
+    void findsOnlyLatestPolicyBucketsOverlappingOccupancyForUpdate() {
+        // given
+        LocalDate serviceDate = LocalDate.of(2026, 8, 1);
+        ReservationCapacityBucket oldPolicy = saveCapacityBucket(
+                STORE_ID, serviceDate, LocalTime.of(18, 0), LocalTime.of(19, 0), 1L);
+        ReservationCapacityBucket overlappingFirst = saveCapacityBucket(
+                STORE_ID, serviceDate, LocalTime.of(18, 0), LocalTime.of(19, 0), 2L);
+        ReservationCapacityBucket overlappingSecond = saveCapacityBucket(
+                STORE_ID, serviceDate, LocalTime.of(19, 0), LocalTime.of(20, 0), 2L);
+        ReservationCapacityBucket adjacent = saveCapacityBucket(
+                STORE_ID, serviceDate, LocalTime.of(20, 0), LocalTime.of(20, 30), 2L);
+        saveCapacityBucket(
+                OTHER_STORE_ID, serviceDate, LocalTime.of(18, 0), LocalTime.of(19, 0), 3L);
+
+        // when
+        var result = reservationCapacityBucketRepository
+                .findLatestPolicyBucketsOverlappingForUpdate(
+                        STORE_ID,
+                        serviceDate,
+                        LocalTime.of(18, 30),
+                        LocalTime.of(20, 0)
+                );
+
+        // then
+        assertThat(result)
+                .extracting(ReservationCapacityBucket::getId)
+                .containsExactly(overlappingFirst.getId(), overlappingSecond.getId());
+        assertThat(result)
+                .extracting(ReservationCapacityBucket::getPolicyVersion)
+                .containsOnly(2L);
+        assertThat(oldPolicy.getId()).isNotIn(result.stream()
+                .map(ReservationCapacityBucket::getId).toList());
+        assertThat(adjacent.getId()).isNotIn(result.stream()
+                .map(ReservationCapacityBucket::getId).toList());
     }
 
     @Test
@@ -706,6 +833,41 @@ class ReservationQueryRepositoryTest {
         );
     }
 
+    private Reservation saveReservationAt(
+            long consumerAccountId,
+            long storeId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            Instant createdAt
+    ) {
+        return reservationRepository.saveAndFlush(
+                reservation(consumerAccountId, storeId, serviceDate, startTime, createdAt)
+        );
+    }
+
+    private ReservationCapacityBucket saveCapacityBucket(
+            long storeId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            long policyVersion
+    ) {
+        return reservationCapacityBucketRepository.saveAndFlush(ReservationCapacityBucket.create(
+                storeId,
+                serviceDate,
+                startTime,
+                endTime,
+                20,
+                5,
+                0,
+                0,
+                1,
+                10,
+                true,
+                policyVersion
+        ));
+    }
+
     private Reservation saveCancelledReservation(
             long consumerAccountId,
             long storeId,
@@ -728,6 +890,22 @@ class ReservationQueryRepositoryTest {
             LocalDate serviceDate,
             Instant createdAt
     ) {
+        return reservation(
+                consumerAccountId,
+                storeId,
+                serviceDate,
+                LocalTime.of(18, 0),
+                createdAt
+        );
+    }
+
+    private Reservation reservation(
+            long consumerAccountId,
+            long storeId,
+            LocalDate serviceDate,
+            LocalTime startTime,
+            Instant createdAt
+    ) {
         ReservationTimePolicyVersion timePolicy = ReservationTimePolicyVersion.createDraft(
                 storeId,
                 1L,
@@ -738,7 +916,7 @@ class ReservationQueryRepositoryTest {
         timePolicy.activate(Instant.parse("2026-07-30T00:00:00Z"), "query fixture");
         ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
                 timePolicy,
-                LocalDateTime.of(serviceDate, LocalTime.of(18, 0)),
+                LocalDateTime.of(serviceDate, startTime),
                 ZoneId.of("Asia/Seoul"),
                 null
         );
