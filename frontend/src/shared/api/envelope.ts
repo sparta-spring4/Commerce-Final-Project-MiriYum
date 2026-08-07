@@ -1,3 +1,5 @@
+import type { components as CommonComponents } from './generated/common'
+
 /**
  * backend는 성공과 실패의 본문 모양이 다르다. 실패는 성공 봉투로 감싸지 않는다.
  * 따라서 HTTP status로 두 모양을 먼저 가른 뒤 code를 읽는다.
@@ -18,18 +20,20 @@ export interface ApiSuccess<T> {
   data: T
 }
 
-/** 필드 단위 검증 오류. */
-export interface ValidationErrorDetail {
-  field: string
-  message: string
-}
+/**
+ * 오류 본문 타입은 공통 OpenAPI 문서에서 생성한 것을 단일 소스로 쓴다.
+ *
+ * 손으로 선언하면 계약과 어긋나도 typecheck가 통과한다. 실제로 필드 이름을
+ * `reason`이 아니라 `message`로 잘못 적어 검증 오류 사유가 사라질 수 있었다.
+ * 기능별 생성 파일의 `external[...]` 참조에 결합하지 않고 공통 생성 파일만 본다.
+ */
+
+/** 필드 단위 검증 오류. `field`와 `reason`이 필수다. */
+export type ValidationErrorDetail =
+  CommonComponents['schemas']['ValidationErrorDetail']
 
 /** 모든 API 오류가 따르는 응답 본문. */
-export interface ApiErrorBody {
-  code: string
-  message: string
-  details?: ValidationErrorDetail[]
-}
+export type ApiErrorBody = CommonComponents['schemas']['ErrorResponse']
 
 /**
  * 도메인에 속하지 않는 공통 오류 코드다. backend CommonErrorCode와 1:1로 맞춘다.
@@ -57,12 +61,41 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 응답 본문이 오류 모양인지 판정한다. */
+/**
+ * 검증 오류 항목인지 런타임에서 판정한다.
+ *
+ * 생성 타입은 컴파일 시점 보호만 제공한다. 서버에서 온 값은 unknown이므로
+ * `field`와 `reason`이 실제로 문자열인지 여기서 확인해야 한다.
+ */
+export function isValidationErrorDetail(
+  value: unknown,
+): value is ValidationErrorDetail {
+  if (!isPlainObject(value)) {
+    return false
+  }
+  return typeof value.field === 'string' && typeof value.reason === 'string'
+}
+
+/**
+ * 응답 본문이 오류 모양인지 판정한다.
+ *
+ * `details`는 선택이지만, 있으면 계약을 지켜야 한다. 계약은 `minItems: 1`이므로
+ * 빈 배열은 거절한다. 항목 하나라도 모양이 다르면 전체를 오류 본문으로 보지 않는다.
+ */
 export function isApiErrorBody(value: unknown): value is ApiErrorBody {
   if (!isPlainObject(value)) {
     return false
   }
-  return typeof value.code === 'string' && typeof value.message === 'string'
+  if (typeof value.code !== 'string' || typeof value.message !== 'string') {
+    return false
+  }
+  if (!('details' in value) || value.details === undefined) {
+    return true
+  }
+  if (!Array.isArray(value.details) || value.details.length === 0) {
+    return false
+  }
+  return value.details.every(isValidationErrorDetail)
 }
 
 /** 봉투 검증 실패 사유. 어떤 조건이 깨졌는지 호출자에게 그대로 전달한다. */

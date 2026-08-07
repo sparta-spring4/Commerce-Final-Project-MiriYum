@@ -151,19 +151,38 @@ describe('오류 응답', () => {
     expect((error as ApiError).message).toBe('실패했습니다.')
   })
 
-  test('검증 오류의 필드 details를 보존한다', async () => {
+  // 계약(mvp1-common ValidationErrorDetail)의 필수 필드는 field와 reason이다.
+  test('검증 오류의 field와 reason을 보존한다', async () => {
     server.use(
       http.get(CATEGORIES, () =>
         errorResponse(400, CommonErrorCode.VALIDATION_FAILED, '입력값이 올바르지 않습니다.', [
-          { field: 'nickname', message: '길이를 확인해 주세요.' },
+          { field: 'nickname', reason: '길이를 확인해 주세요.' },
+          { field: 'menuSelections[0].quantity', reason: '1 이상이어야 합니다.' },
         ]),
       ),
     )
 
     const error = (await getCategories().catch((thrown: unknown) => thrown)) as ApiError
 
-    expect(error.details).toHaveLength(1)
-    expect(error.details[0].field).toBe('nickname')
+    expect(error.details).toHaveLength(2)
+    expect(error.details[0]).toEqual({
+      field: 'nickname',
+      reason: '길이를 확인해 주세요.',
+    })
+    expect(error.details[1].field).toBe('menuSelections[0].quantity')
+    expect(error.details[1].reason).toBe('1 이상이어야 합니다.')
+  })
+
+  test('details가 없는 오류는 빈 배열로 노출한다', async () => {
+    server.use(
+      http.get(CATEGORIES, () =>
+        errorResponse(400, CommonErrorCode.VALIDATION_FAILED, '입력값이 올바르지 않습니다.'),
+      ),
+    )
+
+    const error = (await getCategories().catch((thrown: unknown) => thrown)) as ApiError
+
+    expect(error.details).toEqual([])
   })
 
   test('오류 모양이 아닌 응답에도 코드를 지어내지 않는다', async () => {
