@@ -16,21 +16,25 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.lang.reflect.Constructor;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationCreationCommandFacadeTest {
@@ -50,6 +54,16 @@ class ReservationCreationCommandFacadeTest {
 
     @Mock
     private ReservationService reservationService;
+
+    @Test
+    void marksTheProductionInjectionConstructorForSpring() throws Exception {
+        Constructor<ReservationCreationCommandFacade> constructor =
+                ReservationCreationCommandFacade.class.getConstructor(
+                        ReservationService.class
+                );
+
+        assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue();
+    }
 
     @Test
     void returnsTheReservationServiceCreationResult() {
@@ -130,12 +144,91 @@ class ReservationCreationCommandFacadeTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
                         assertThat(exception.getCause()).isSameAs(interrupted);
+                        assertThat(interrupted.getSuppressed()).containsExactly(failure);
                     });
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();
         }
         then(reservationService).should().createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @ParameterizedTest
+    @MethodSource("explicitNonRetryableFailuresWithMysqlLockCause")
+    void doesNotRetryExplicitNonRetryableTopLevelFailuresWithMysqlLockCause(
+            RuntimeException failure
+    ) {
+        given(reservationService.createReservation(ACCOUNT_ID, KEY, REQUEST))
+                .willThrow(failure);
+        List<Long> delays = new ArrayList<>();
+        ReservationCreationCommandFacade facade = new ReservationCreationCommandFacade(
+                reservationService,
+                ignored -> 100L,
+                delays::add
+        );
+
+        assertThatThrownBy(() -> facade.create(ACCOUNT_ID, KEY, REQUEST))
+                .isSameAs(failure);
+        assertThat(delays).isEmpty();
+        then(reservationService).should().createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @Test
+    void terminatesCyclicTechnicalLockCauseChainsWithoutARetryableVendorCode() {
+        GuardedCyclicCauseException first = new GuardedCyclicCauseException();
+        GuardedCyclicCauseException second = new GuardedCyclicCauseException();
+        first.setNext(second);
+        second.setNext(first);
+        CannotAcquireLockException failure = new CannotAcquireLockException(
+                "cyclic cause chain",
+                first
+        );
+        given(reservationService.createReservation(ACCOUNT_ID, KEY, REQUEST))
+                .willThrow(failure);
+        List<Long> delays = new ArrayList<>();
+        ReservationCreationCommandFacade facade = new ReservationCreationCommandFacade(
+                reservationService,
+                ignored -> 100L,
+                delays::add
+        );
+
+        assertThatThrownBy(() -> facade.create(ACCOUNT_ID, KEY, REQUEST))
+                .isSameAs(failure);
+        assertThat(delays).isEmpty();
+        then(reservationService).should().createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @Test
+    void doesNotRetryMysqlLockVendorCodesOnlyPresentAsSuppressedFailures() {
+        CannotAcquireLockException failure = new CannotAcquireLockException(
+                "suppressed database failure"
+        );
+        failure.addSuppressed(new SQLException("deadlock", "40001", 1213));
+        given(reservationService.createReservation(ACCOUNT_ID, KEY, REQUEST))
+                .willThrow(failure);
+        List<Long> delays = new ArrayList<>();
+        ReservationCreationCommandFacade facade = new ReservationCreationCommandFacade(
+                reservationService,
+                ignored -> 100L,
+                delays::add
+        );
+
+        assertThatThrownBy(() -> facade.create(ACCOUNT_ID, KEY, REQUEST))
+                .isSameAs(failure);
+        assertThat(delays).isEmpty();
+        then(reservationService).should().createReservation(ACCOUNT_ID, KEY, REQUEST);
+    }
+
+    @Test
+    void usesTheProductionJitterRangesForBothRetryDelays() {
+        assertThat(IntStream.range(0, 100)
+                .mapToObj(ignored -> ReservationCreationCommandFacade.defaultDelayMillis(1))
+                .toList())
+                .allSatisfy(delay -> assertThat(delay).isBetween(100L, 200L));
+        assertThat(IntStream.range(0, 100)
+                .mapToObj(ignored -> ReservationCreationCommandFacade.defaultDelayMillis(2))
+                .toList())
+                .allSatisfy(delay -> assertThat(delay).isBetween(300L, 500L));
     }
 
     @ParameterizedTest
@@ -176,10 +269,63 @@ class ReservationCreationCommandFacadeTest {
         );
     }
 
-    private static ConcurrencyFailureException mysqlLockFailure(int errorCode) {
-        return new ConcurrencyFailureException(
+    private static Stream<RuntimeException>
+            explicitNonRetryableFailuresWithMysqlLockCause() {
+        return Stream.of(
+                withCause(
+                        new ServiceException(ReservationErrorCode.DUPLICATE_RESERVATION),
+                        new SQLException("deadlock", "40001", 1213)
+                ),
+                withCause(
+                        new IllegalArgumentException("invalid request"),
+                        new SQLException("lock wait timeout", "HY000", 1205)
+                ),
+                withCause(
+                        new QueryTimeoutException("query timeout"),
+                        new SQLException("deadlock", "40001", 1213)
+                ),
+                withCause(
+                        new DataIntegrityViolationException("constraint failure"),
+                        new SQLException("lock wait timeout", "HY000", 1205)
+                ),
+                withCause(
+                        new ConcurrencyFailureException("generic concurrency failure"),
+                        new SQLException("deadlock", "40001", 1213)
+                )
+        );
+    }
+
+    private static <T extends RuntimeException> T withCause(T exception, Throwable cause) {
+        exception.initCause(cause);
+        return exception;
+    }
+
+    private static CannotAcquireLockException mysqlLockFailure(int errorCode) {
+        return new CannotAcquireLockException(
                 "database lock failure",
                 new SQLException("mysql lock failure", "40001", errorCode)
         );
+    }
+
+    private static final class GuardedCyclicCauseException extends RuntimeException {
+
+        private Throwable next;
+        private int remainingCauseReads = 2;
+
+        private GuardedCyclicCauseException() {
+            super("cyclic cause");
+        }
+
+        private void setNext(Throwable next) {
+            this.next = next;
+        }
+
+        @Override
+        public synchronized Throwable getCause() {
+            if (remainingCauseReads-- == 0) {
+                throw new AssertionError("cause traversal did not terminate");
+            }
+            return next;
+        }
     }
 }

@@ -5,9 +5,16 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.sql.SQLException;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntToLongFunction;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -29,6 +36,7 @@ public class ReservationCreationCommandFacade {
         void sleep(long millis) throws InterruptedException;
     }
 
+    @Autowired
     public ReservationCreationCommandFacade(ReservationService reservationService) {
         this(
                 reservationService,
@@ -69,7 +77,7 @@ public class ReservationCreationCommandFacade {
             try {
                 return command.get();
             } catch (RuntimeException exception) {
-                if (!containsRetryableMysqlLockFailure(exception)) {
+                if (!isRetryableTechnicalLockFailure(exception)) {
                     throw exception;
                 }
                 if (attempt == MAX_ATTEMPTS) {
@@ -91,7 +99,7 @@ public class ReservationCreationCommandFacade {
         }
     }
 
-    private static long defaultDelayMillis(int failedAttempt) {
+    static long defaultDelayMillis(int failedAttempt) {
         return switch (failedAttempt) {
             case 1 -> ThreadLocalRandom.current().nextLong(100L, 201L);
             case 2 -> ThreadLocalRandom.current().nextLong(300L, 501L);
@@ -99,9 +107,27 @@ public class ReservationCreationCommandFacade {
         };
     }
 
+    private static boolean isRetryableTechnicalLockFailure(
+            RuntimeException failure
+    ) {
+        if (isExplicitlyNonRetryable(failure)
+                || !(failure instanceof CannotAcquireLockException)) {
+            return false;
+        }
+        return containsRetryableMysqlLockFailure(failure);
+    }
+
+    private static boolean isExplicitlyNonRetryable(RuntimeException failure) {
+        return failure instanceof ServiceException
+                || failure instanceof IllegalArgumentException
+                || failure instanceof QueryTimeoutException
+                || failure instanceof DataIntegrityViolationException;
+    }
+
     private static boolean containsRetryableMysqlLockFailure(Throwable failure) {
         Throwable current = failure;
-        while (current != null) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        while (current != null && visited.add(current)) {
             if (current instanceof SQLException sqlException
                     && (sqlException.getErrorCode() == 1213
                     || sqlException.getErrorCode() == 1205)) {
