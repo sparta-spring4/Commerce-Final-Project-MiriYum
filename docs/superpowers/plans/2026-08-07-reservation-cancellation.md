@@ -1047,7 +1047,7 @@ git commit -m "feat(reservation): expose cancellation endpoints"
 - Consumes: production facade/service/repositories, real Global idempotency, Store/consumer account gates, real MenuHold release, V26.
 - Produces: class-filtered MySQL evidence tagged `integration` and exactly one shard tag `integration-shard-b`.
 
-- [ ] **Task 7 gate:** Production behavior already completed RED/GREEN in Tasks 2-6. This task adds fresh black-box MySQL verification whose first run is expected to PASS; any failure is `FAIL`, never acceptable RED. Use `mysql:8.0.40`, test-owned JDBC/`TransactionTemplate` locks, no sleeps, bounded executor shutdown, and database snapshots around failures.
+- [ ] **Task 7 gate:** Production behavior already completed RED/GREEN in Tasks 2-6. This task adds fresh black-box MySQL verification whose first run is expected to PASS; any failure is `FAIL`, never acceptable RED. Use `mysql:8.0.40`, application `JdbcTemplate`/`TransactionTemplate`/`DataSource` for test actions, a dedicated root JDBC connection only for read-only `performance_schema` wait observation, no sleep-only contention proof, bounded executor shutdown, and database snapshots around failures.
 
 - [ ] **Step 1: Create the tagged IT fixture and no-menu replay verification.**
 
@@ -1126,22 +1126,62 @@ After both workers are released, prove actual DB blocking without sleep by all t
 2. `awaitBlockingWaits(holderConnectionId, "idempotency_commands", "uk_idempotency_commands", 2)` returns before its five-second deadline;
 3. Reservation status/capacity/audit remain unchanged while the holder transaction is open.
 
-Implement the test-only `awaitBlockingWaits(long holderConnectionId, String tableName, String indexName, int expectedWaits)` in `ReservationCancellationIT`. It repeatedly executes the following scalar query with parameters `(holderConnectionId, tableName, indexName)`, compares the returned count with `expectedWaits`, and stops when the threshold is reached or `System.nanoTime()` passes the five-second deadline; each unsuccessful iteration calls `Thread.onSpinWait()` and never sleeps:
+The application Testcontainers user does not have the repository's required `performance_schema.data_lock_waits`, `data_locks`, and `threads` visibility. Keep the autowired application `DataSource` for holder/workers and domain assertions, but implement the test-only monitor with the same root-connection pattern as `ReservationCapacityPublicationIT`. Add imports for `java.sql.Connection`, `DriverManager`, `PreparedStatement`, `ResultSet`, and `SQLException`, then add this complete helper:
 
-```sql
-SELECT COUNT(*)
-FROM performance_schema.data_lock_waits AS wait_edge
-JOIN performance_schema.data_locks AS blocking_lock
-  ON blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
-JOIN performance_schema.threads AS blocking_thread
-  ON blocking_thread.THREAD_ID = blocking_lock.THREAD_ID
-WHERE blocking_thread.PROCESSLIST_ID = ?
-  AND blocking_lock.OBJECT_SCHEMA = DATABASE()
-  AND blocking_lock.OBJECT_NAME = ?
-  AND blocking_lock.INDEX_NAME = ?
+```java
+private void awaitBlockingWaits(
+        long holderConnectionId,
+        String tableName,
+        String indexName,
+        int expectedWaits
+) {
+    long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    int lastObservedCount = 0;
+    try (Connection monitoringConnection = DriverManager.getConnection(
+            MYSQL.getJdbcUrl(), "root", MYSQL.getPassword())) {
+        monitoringConnection.setReadOnly(true);
+        try (PreparedStatement statement = monitoringConnection.prepareStatement("""
+                SELECT COUNT(*)
+                FROM performance_schema.data_lock_waits AS wait_edge
+                JOIN performance_schema.data_locks AS blocking_lock
+                  ON blocking_lock.ENGINE = wait_edge.ENGINE
+                 AND blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
+                JOIN performance_schema.threads AS blocking_thread
+                  ON blocking_thread.THREAD_ID = blocking_lock.THREAD_ID
+                WHERE blocking_thread.PROCESSLIST_ID = ?
+                  AND blocking_lock.OBJECT_SCHEMA = DATABASE()
+                  AND blocking_lock.OBJECT_NAME = ?
+                  AND blocking_lock.INDEX_NAME = ?
+                """)) {
+            statement.setLong(1, holderConnectionId);
+            statement.setString(2, tableName);
+            statement.setString(3, indexName);
+            while (System.nanoTime() < deadlineNanos) {
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    if (!resultSet.next()) {
+                        throw new AssertionError("lock wait count query returned no row");
+                    }
+                    lastObservedCount = resultSet.getInt(1);
+                }
+                if (lastObservedCount >= expectedWaits) {
+                    return;
+                }
+                Thread.onSpinWait();
+            }
+        }
+    } catch (SQLException exception) {
+        throw new IllegalStateException(
+                "unable to observe MySQL lock waits with the root monitoring connection",
+                exception);
+    }
+    throw new AssertionError(
+            "expected " + expectedWaits + " lock waits blocked by connection "
+                    + holderConnectionId + " on " + tableName + "." + indexName
+                    + " but last observed " + lastObservedCount);
+}
 ```
 
-Fail with an AssertJ message containing the holder ID, table, index, and last observed count if the deadline expires. This query observes actual InnoDB wait edges; executor readiness or a latch alone is not accepted as contention evidence.
+The `(ENGINE_LOCK_ID, ENGINE)` pair identifies a performance-schema lock, so both join predicates are mandatory. The root connection is opened only inside this helper, marked read-only, and closed with its `PreparedStatement`/each `ResultSet` through try-with-resources. Do not run holder inserts, Reservation locks, facade calls, or assertions through this monitoring connection. This wait-edge query plus both timed `Future` observations proves contention; executor readiness, latches, or elapsed sleep alone do not.
 
 Count down `releaseIdempotencyLock`; the holder rolls back, one worker claims/executes and the other replays. Assert equal responses, one successful idempotency row, one audit, one Reservation transition, and one capacity/MenuHold restoration. In `finally`, release every latch, call `shutdownNow()`, and require `awaitTermination(5, SECONDS)`.
 
@@ -1149,7 +1189,7 @@ Count down `releaseIdempotencyLock`; the holder rolls back, one worker claims/ex
 
 Add `differentKeyContentionBlocksAtReservationThenProducesOneSuccessAndReservation005`. The holder transaction uses JDBC `SELECT reservation_id FROM reservations WHERE reservation_id = ? FOR UPDATE`, records `CONNECTION_ID()`, counts down `reservationLockHeld`, waits for `releaseReservationLock`, then commits without mutation.
 
-Start two facade workers with distinct keys and the same reservation. Both can claim distinct idempotency rows, then must wait on the held Reservation row. Prove both waits with worker `Future.get(250, MILLISECONDS)` timeouts and `awaitBlockingWaits(holderConnectionId, "reservations", "PRIMARY", 2)`. While held, assert both idempotency rows are not externally committed and resources are unchanged. Release the holder; assert exactly one HTTP 200 and one `ServiceException` with RES005, one audit, one transition, and one capacity/MenuHold restoration. Apply the same `finally` cleanup/termination rules.
+Start two facade workers with distinct keys and the same reservation. Both can claim distinct idempotency rows, then must wait on the held Reservation row. Prove both waits with worker `Future.get(250, MILLISECONDS)` timeouts and the same root-monitoring helper call `awaitBlockingWaits(holderConnectionId, "reservations", "PRIMARY", 2)`. While held, assert both idempotency rows are not externally committed and resources are unchanged. Release the holder; assert exactly one HTTP 200 and one `ServiceException` with RES005, one audit, one transition, and one capacity/MenuHold restoration. Apply the same `finally` cleanup/termination rules.
 
 - [ ] **Step 6: Run the class-filtered IT fresh; first PASS is required.**
 
