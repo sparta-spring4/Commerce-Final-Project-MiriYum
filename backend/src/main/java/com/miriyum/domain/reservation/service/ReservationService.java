@@ -433,6 +433,9 @@ public class ReservationService {
         if (!staysWithinCreationLocalBoundary(snapshot)) {
             throw outsideReservationWindow();
         }
+        if (snapshot.getStartAt().isBefore(evaluatedAt)) {
+            throw outsideReservationWindow();
+        }
 
         StoreServiceIntervalRequest intervalRequest = new StoreServiceIntervalRequest(
                 request.storeId(), snapshot.getStartAt(), snapshot.getServiceEndAt());

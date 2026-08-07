@@ -306,6 +306,102 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("이미 지난 Asia/Seoul 예약 슬롯은 서비스 구간 검증과 자원 변경 전에 RESERVATION_002로 거절된다")
+    void rejectsPastReservationSlotBeforeServiceIntervalAndMutation() {
+        LocalDate pastServiceDate = LocalDate.of(2026, 8, 2);
+        LocalTime pastStartTime = LocalTime.of(18, 0);
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22",
+                pastServiceDate,
+                pastStartTime,
+                null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of(new ReservationMenuSelectionRequest("91", 1))
+        );
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L, pastServiceDate, pastStartTime, LocalTime.of(19, 0),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult("consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            return new IdempotentOutcome(
+                    false,
+                    result.httpStatus(),
+                    result.responseCode(),
+                    result.resourceType(),
+                    result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(22L, "Past-slot Store"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), pastServiceDate, pastStartTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L,
+                        "Asia/Seoul",
+                        LocalDateTime.of(pastServiceDate, LocalTime.of(17, 0)),
+                        LocalDateTime.of(pastServiceDate, LocalTime.of(20, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW)))
+                .willReturn(List.of(activePolicy(22L, 30, 60, 0)));
+        lenient().when(storeServiceIntervalValidationService.validateServiceIntervals(any()))
+                .thenAnswer(invocation -> {
+                    List<StoreServiceIntervalRequest> requests = invocation.getArgument(0);
+                    return requests.stream()
+                            .map(interval -> StoreServiceIntervalResult.of(interval, true))
+                            .toList();
+                });
+        lenient().when(reservationRepository.findConfirmedOverlappingForUpdate(
+                11L,
+                22L,
+                Instant.parse("2026-08-02T09:00:00Z"),
+                Instant.parse("2026-08-02T10:00:00Z")))
+                .thenReturn(List.of());
+        lenient().when(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                22L, pastServiceDate, pastStartTime, LocalTime.of(19, 0)))
+                .thenReturn(List.of(bucket));
+        lenient().when(cancellationPolicySelector.select())
+                .thenReturn(new ReservationCancellationPolicyVersion(1L));
+        lenient().when(reservationRepository.saveAndFlush(any(Reservation.class)))
+                .thenAnswer(invocation -> {
+                    Reservation saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 77L);
+                    return saved;
+                });
+        lenient().when(menuHoldService.create(any(MenuHoldCreateCommand.class)))
+                .thenReturn(MenuHoldCommandResult.confirmed(77L));
+        lenient().when(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .thenReturn(List.of(new MenuHoldItemResult(91L, "Menu", 4_500L, 1)));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request
+        )).isInstanceOfSatisfying(ServiceException.class, exception -> {
+            assertThat(exception.getErrorCode())
+                    .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
+            assertThat(exception.getErrorCode().getCode()).isEqualTo("RESERVATION_002");
+            assertThat(exception.getErrorCode().getHttpStatus())
+                    .isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+        });
+
+        then(storeServiceIntervalValidationService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
     @DisplayName("직접 command 호출의 메뉴 수량 범위 위반도 COMMON_001로 자원 접근 전에 거절한다")
     void rejectsMalformedMenuQuantityBeforeContactLookup() {
         ReservationCreateRequest request = new ReservationCreateRequest(
