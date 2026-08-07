@@ -8,9 +8,27 @@ set -Eeuo pipefail
 
 TOPIC_NAME="${TOPIC_NAME:-miriyum-staging-alerts}"
 DASHBOARD_NAME="${DASHBOARD_NAME:-miriyum-staging}"
+LOG_GROUP_NAME="${LOG_GROUP_NAME:-/miriyum/staging/docker}"
 NAMESPACE="MiriYum/Staging"
 
 command -v aws >/dev/null
+
+log_group_count=$(aws logs describe-log-groups \
+  --region "$AWS_REGION" \
+  --log-group-name-prefix "$LOG_GROUP_NAME" \
+  --query "length(logGroups[?logGroupName=='$LOG_GROUP_NAME'])" \
+  --output text)
+
+if [[ "$log_group_count" == "0" ]]; then
+  aws logs create-log-group \
+    --region "$AWS_REGION" \
+    --log-group-name "$LOG_GROUP_NAME"
+fi
+
+aws logs put-retention-policy \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --retention-in-days 7
 
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
@@ -77,7 +95,7 @@ put_alarm "miriyum-staging-memory-high" \
 
 put_alarm "miriyum-staging-disk-high" \
   --namespace "$NAMESPACE" \
-  --metric-name used_percent \
+  --metric-name disk_used_percent \
   --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
   --statistic Average \
   --period 300 \
@@ -112,14 +130,32 @@ dashboard_body=$(cat <<EOF
         "metrics": [
           ["AWS/EC2", "CPUUtilization", "InstanceId", "$EC2_INSTANCE_ID"],
           ["MiriYum/Staging", "mem_used_percent", "InstanceId", "$EC2_INSTANCE_ID"],
-          ["MiriYum/Staging", "used_percent", "InstanceId", "$EC2_INSTANCE_ID"]
+          ["MiriYum/Staging", "disk_used_percent", "InstanceId", "$EC2_INSTANCE_ID"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum staging network",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"],
+          ["AWS/EC2", "NetworkOut", "InstanceId", "$EC2_INSTANCE_ID"]
         ]
       }
     },
     {
       "type": "metric",
       "x": 12,
-      "y": 0,
+      "y": 12,
       "width": 12,
       "height": 6,
       "properties": {

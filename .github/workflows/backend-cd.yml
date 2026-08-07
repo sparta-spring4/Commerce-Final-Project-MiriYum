@@ -206,6 +206,7 @@ jobs:
                 "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
                 "install -d -m 0755 /opt/miriyum/monitoring",
                 "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
+                "if [ -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/miriyum/monitoring/cloudwatch-agent.json -s; fi",
                 "chmod 700 /opt/miriyum/deploy.sh",
                 "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
               ]

@@ -15,7 +15,9 @@ $requiredFragments = @(
     "retry-max-attempts: 2",
     "deploy/monitoring/cloudwatch-agent-config.json",
     "cloudwatch_base64",
-    "/opt/miriyum/monitoring/cloudwatch-agent.json"
+    "/opt/miriyum/monitoring/cloudwatch-agent.json",
+    "amazon-cloudwatch-agent-ctl -a fetch-config",
+    "file:/opt/miriyum/monitoring/cloudwatch-agent.json"
 )
 
 foreach ($fragment in $requiredFragments) {
