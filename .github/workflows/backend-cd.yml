@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  deployments: read
 
 concurrency:
   # 진행 중인 배포는 취소하지 않는다. 새 이미지는 기존 health 확인이 끝날 때까지 대기한다.
@@ -25,6 +26,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
   EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
+  BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend
 
 jobs:
   verify-source:
@@ -33,6 +35,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      deployments: read
     if: >-
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.event == 'push' &&
@@ -44,6 +47,13 @@ jobs:
       deployable: ${{ steps.source.outputs.deployable }}
 
     steps:
+      - name: Checkout automatic deployment revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
       - name: Verify automatic deployment uses the current dev revision
         id: source
         env:
@@ -59,6 +69,35 @@ jobs:
               echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current dev is $current_dev_sha."
               exit 0
             fi
+
+            last_deployed_sha=$(gh api \
+              "repos/$GITHUB_REPOSITORY/deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100" \
+              --jq 'sort_by(.created_at) | reverse | .[] | [.id, .sha] | @tsv' \
+              | while IFS=$'\t' read -r deployment_id deployment_sha; do
+                  state=$(gh api \
+                    "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses?per_page=1" \
+                    --jq '.[0].state // ""')
+                  if [ "$state" = "success" ]; then
+                    printf '%s' "$deployment_sha"
+                    break
+                  fi
+                done)
+
+            if [ -n "$last_deployed_sha" ]; then
+              git fetch --no-tags --depth=1 origin "$last_deployed_sha"
+              changed_files=$(git diff --name-only "$last_deployed_sha" "$WORKFLOW_SHA")
+            else
+              empty_tree=$(git hash-object -t tree /dev/null)
+              changed_files=$(git diff --name-only "$empty_tree" "$WORKFLOW_SHA")
+            fi
+
+            deployable=$(printf '%s\n' "$changed_files" | python3 scripts/should-deploy-backend.py)
+            echo "deployable=$deployable" >> "$GITHUB_OUTPUT"
+
+            if [ "$deployable" != "true" ]; then
+              echo "::notice::Skipping staging CD because the revision has no backend deployment input changes."
+            fi
+            exit 0
           fi
 
           echo "deployable=true" >> "$GITHUB_OUTPUT"
@@ -73,6 +112,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      deployments: write
     if: needs.verify-source.outputs.deployable == 'true'
 
     steps:
@@ -179,6 +219,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Record backend deployment marker
+        id: backend-deployment
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deployment_response=$(jq -n \
+            --arg ref "$IMAGE_TAG" \
+            --arg environment "$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            '{ref: $ref, environment: $environment, description: ("Backend image " + $ref), auto_merge: false, required_contexts: []}' \
+            | gh api --method POST "repos/$GITHUB_REPOSITORY/deployments" --input -)
+
+          deployment_id=$(jq -er --arg image_tag "$IMAGE_TAG" '
+            if .sha != $image_tag then
+              error("Deployment response SHA does not match selected image tag")
+            elif (.id | type) != "number" then
+              error("Deployment response did not include a numeric id")
+            else
+              .id
+            end
+          ' <<< "$deployment_response")
+
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
+            --field state=in_progress \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend deployment started for image $IMAGE_TAG" \
+            >/dev/null
+
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+
       - name: Upload deployment files with SSM
         id: ssm
         env:
@@ -252,3 +323,31 @@ jobs:
 
           echo "::error::SSM deployment did not finish within 15 minutes. Command: $COMMAND_ID"
           exit 1
+
+      - name: Mark backend deployment successful
+        if: success()
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=success \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployed successfully" \
+            >/dev/null
+
+      - name: Mark backend deployment failed
+        if: failure() && steps.backend-deployment.outputs.deployment_id != ''
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=failure \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployment failed" \
+            >/dev/null
