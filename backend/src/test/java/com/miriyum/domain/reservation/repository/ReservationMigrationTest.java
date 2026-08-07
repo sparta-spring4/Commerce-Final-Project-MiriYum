@@ -1289,37 +1289,40 @@ class ReservationMigrationTest {
     }
 
     @Test
-    @DisplayName("취소 복구용 수용량 조회는 최신 버전과 PK 오름차순 쓰기 잠금을 보장한다")
-    void capacityRepositoryContractsReturnSortedRowsAndHoldWriteLocks() throws Exception {
+    @DisplayName("최신 수용량 정책 버전 조회는 매장과 업무 날짜 범위를 유지한다")
+    void latestPolicyVersionRepositoryContractUsesStoreAndServiceDateScope() {
         // given
-        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
-        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+        capacityBucketRepository.saveAndFlush(
                 capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
         );
-        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+        capacityBucketRepository.saveAndFlush(
                 capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
         );
-        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
-                savedReservation.getId(),
-                secondBucket.getId(),
-                4,
-                secondBucket.getPolicyVersion()
+        insertStore(SECOND_STORE_ID, "1234567891", "두번째 매장");
+        capacityBucketRepository.saveAndFlush(capacityBucket(
+                SECOND_STORE_ID,
+                9L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
         ));
-        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
-                savedReservation.getId(),
-                firstBucket.getId(),
-                4,
-                firstBucket.getPolicyVersion()
+        capacityBucketRepository.saveAndFlush(ReservationCapacityBucket.create(
+                STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30),
+                20,
+                5,
+                0,
+                0,
+                1,
+                8,
+                true,
+                8L
         ));
         Method latestVersionMethod = requiredRepositoryMethod(
                 capacityBucketRepository,
                 "findLatestPolicyVersion",
                 2
-        );
-        Method orderedLockMethod = requiredRepositoryMethod(
-                capacityBucketRepository,
-                "findAllByIdInForUpdate",
-                1
         );
 
         // when
@@ -1335,63 +1338,85 @@ class ReservationMigrationTest {
 
         // then
         assertThat(latestVersion).contains(3L);
+    }
+
+    @Test
+    @DisplayName("취소 복구용 수용량 잠금 조회는 PK 오름차순 행을 반환하고 쓰기 잠금을 유지한다")
+    void orderedLockRepositoryContractReturnsSortedRowsAndHoldsWriteLock() throws Exception {
+        // given
+        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        Method orderedLockMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findAllByIdInForUpdate",
+                1
+        );
 
         CountDownLatch repositoryLockHeld = new CountDownLatch(1);
         CountDownLatch releaseRepositoryLock = new CountDownLatch(1);
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-            @SuppressWarnings("unchecked")
-            List<ReservationCapacityBucket> lockedBuckets =
-                    (List<ReservationCapacityBucket>) invokeRepositoryMethod(
-                            orderedLockMethod,
-                            capacityBucketRepository,
-                            List.of(secondBucket.getId(), firstBucket.getId())
-                    );
-            assertThat(lockedBuckets)
-                    .extracting(ReservationCapacityBucket::getId)
-                    .containsExactly(firstBucket.getId(), secondBucket.getId());
-            repositoryLockHeld.countDown();
-            try {
-                if (!releaseRepositoryLock.await(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("repository lock release timed out");
+        try {
+            Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                @SuppressWarnings("unchecked")
+                List<ReservationCapacityBucket> lockedBuckets =
+                        (List<ReservationCapacityBucket>) invokeRepositoryMethod(
+                                orderedLockMethod,
+                                capacityBucketRepository,
+                                List.of(secondBucket.getId(), firstBucket.getId())
+                        );
+                assertThat(lockedBuckets)
+                        .extracting(ReservationCapacityBucket::getId)
+                        .containsExactly(firstBucket.getId(), secondBucket.getId());
+                repositoryLockHeld.countDown();
+                try {
+                    if (!releaseRepositoryLock.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("repository lock release timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("repository lock wait interrupted", exception);
                 }
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("repository lock wait interrupted", exception);
+            }));
+
+            try {
+                try (Connection independentConnection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(),
+                        MYSQL.getUsername(),
+                        MYSQL.getPassword()
+                )) {
+                    assertThat(repositoryLockHeld.await(5, TimeUnit.SECONDS))
+                            .as("repository PESSIMISTIC_WRITE lock must be held before NOWAIT check")
+                            .isTrue();
+                    independentConnection.setAutoCommit(false);
+
+                    SQLException lockFailure = null;
+                    try (PreparedStatement statement = independentConnection.prepareStatement("""
+                            SELECT reservation_capacity_bucket_id
+                            FROM reservation_capacity_buckets
+                            WHERE reservation_capacity_bucket_id = ?
+                            FOR UPDATE NOWAIT
+                            """)) {
+                        statement.setLong(1, firstBucket.getId());
+                        statement.executeQuery();
+                    } catch (SQLException exception) {
+                        lockFailure = exception;
+                    }
+
+                    assertThat((Throwable) lockFailure)
+                            .as("MySQL must reject NOWAIT while the repository write lock is held")
+                            .isNotNull();
+                    assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
+                }
+            } finally {
+                releaseRepositoryLock.countDown();
+                worker.get(5, TimeUnit.SECONDS);
             }
-        }));
-
-        try (Connection independentConnection = DriverManager.getConnection(
-                MYSQL.getJdbcUrl(),
-                MYSQL.getUsername(),
-                MYSQL.getPassword()
-        )) {
-            assertThat(repositoryLockHeld.await(5, TimeUnit.SECONDS))
-                    .as("repository PESSIMISTIC_WRITE lock must be held before NOWAIT check")
-                    .isTrue();
-            independentConnection.setAutoCommit(false);
-
-            SQLException lockFailure = null;
-            try (PreparedStatement statement = independentConnection.prepareStatement("""
-                    SELECT reservation_capacity_bucket_id
-                    FROM reservation_capacity_buckets
-                    WHERE reservation_capacity_bucket_id = ?
-                    FOR UPDATE NOWAIT
-                    """)) {
-                statement.setLong(1, firstBucket.getId());
-                statement.executeQuery();
-            } catch (SQLException exception) {
-                lockFailure = exception;
-            }
-
-            assertThat((Throwable) lockFailure)
-                    .as("MySQL must reject NOWAIT while the repository write lock is held")
-                    .isNotNull();
-            assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
         } finally {
-            releaseRepositoryLock.countDown();
-            worker.get(5, TimeUnit.SECONDS);
-            executor.shutdown();
+            executor.shutdownNow();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         }
     }
