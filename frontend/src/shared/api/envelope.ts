@@ -57,6 +57,15 @@ export const CommonErrorCode = {
 export type CommonErrorCodeValue =
   (typeof CommonErrorCode)[keyof typeof CommonErrorCode]
 
+/**
+ * 오류 코드 형식이다. 공통 OpenAPI `ErrorResponse.code`의 pattern과 같다.
+ * 생성 타입은 `string`으로만 나와 이 제약을 표현하지 못한다.
+ */
+export const ERROR_CODE_PATTERN = /^[A-Z]+(?:_[A-Z]+)*_[0-9]{3}$/
+
+/** 공통 OpenAPI `ErrorResponse.message`의 minLength. */
+const MESSAGE_MIN_LENGTH = 1
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -79,6 +88,13 @@ export function isValidationErrorDetail(
 /**
  * 응답 본문이 오류 모양인지 판정한다.
  *
+ * `code`는 화면이 분기에 쓰는 값이므로 형식까지 확인한다. `""`나 `"INVALID"`를
+ * 통과시키면 분기가 조용히 빗나간다. `message`는 사용자에게 표시하는 값이라
+ * 비어 있으면 안 된다.
+ *
+ * `message`에 `trim()`을 쓰지 않는다. 계약은 `minLength: 1`만 요구하고 공백 문자열을
+ * 따로 금지하지 않으므로, 클라이언트가 계약보다 엄격하게 굴지 않는다.
+ *
  * `details`는 선택이지만, 있으면 계약을 지켜야 한다. 계약은 `minItems: 1`이므로
  * 빈 배열은 거절한다. 항목 하나라도 모양이 다르면 전체를 오류 본문으로 보지 않는다.
  */
@@ -86,7 +102,13 @@ export function isApiErrorBody(value: unknown): value is ApiErrorBody {
   if (!isPlainObject(value)) {
     return false
   }
-  if (typeof value.code !== 'string' || typeof value.message !== 'string') {
+  if (typeof value.code !== 'string' || !ERROR_CODE_PATTERN.test(value.code)) {
+    return false
+  }
+  if (
+    typeof value.message !== 'string' ||
+    value.message.length < MESSAGE_MIN_LENGTH
+  ) {
     return false
   }
   if (!('details' in value) || value.details === undefined) {

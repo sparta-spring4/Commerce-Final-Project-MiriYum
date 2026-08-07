@@ -49,8 +49,8 @@ describe('isValidationErrorDetail', () => {
   })
 })
 
-describe('isApiErrorBody — code와 message', () => {
-  test('code와 message가 문자열이면 통과한다', () => {
+describe('isApiErrorBody — 기본 모양', () => {
+  test('code와 message가 계약을 만족하면 통과한다', () => {
     expect(isApiErrorBody({ code: 'COMMON_001', message: '입력값이 올바르지 않습니다.' })).toBe(
       true,
     )
@@ -65,6 +65,78 @@ describe('isApiErrorBody — code와 message', () => {
     expect(isApiErrorBody(null)).toBe(false)
     expect(isApiErrorBody('COMMON_001')).toBe(false)
     expect(isApiErrorBody([{ code: 'COMMON_001', message: '오류' }])).toBe(false)
+  })
+})
+
+// code는 화면이 분기에 쓰는 값이라 형식까지 확인한다.
+// 계약: ^[A-Z]+(?:_[A-Z]+)*_[0-9]{3}$
+describe('isApiErrorBody — code 형식', () => {
+  function withCode(code: unknown): boolean {
+    return isApiErrorBody({ code, message: '오류가 발생했습니다.' })
+  }
+
+  test('공통 오류 코드를 허용한다', () => {
+    expect(withCode('COMMON_001')).toBe(true)
+    expect(withCode('COMMON_012')).toBe(true)
+  })
+
+  test('도메인 오류 코드를 허용한다', () => {
+    expect(withCode('AUTH_003')).toBe(true)
+    expect(withCode('STORE_008')).toBe(true)
+    expect(withCode('MENU_HOLD_004')).toBe(true)
+  })
+
+  test('빈 code를 거절한다', () => {
+    expect(withCode('')).toBe(false)
+  })
+
+  test('숫자 suffix가 없는 code를 거절한다', () => {
+    expect(withCode('INVALID')).toBe(false)
+    expect(withCode('COMMON')).toBe(false)
+    expect(withCode('COMMON_')).toBe(false)
+  })
+
+  test('소문자가 포함된 code를 거절한다', () => {
+    expect(withCode('common_001')).toBe(false)
+    expect(withCode('Common_001')).toBe(false)
+    expect(withCode('AUTH_00a')).toBe(false)
+  })
+
+  test('숫자 자릿수가 3이 아닌 code를 거절한다', () => {
+    expect(withCode('COMMON_1')).toBe(false)
+    expect(withCode('COMMON_0001')).toBe(false)
+  })
+
+  test('code가 문자열이 아니면 거절한다', () => {
+    expect(withCode(1)).toBe(false)
+    expect(withCode(null)).toBe(false)
+  })
+})
+
+// message는 사용자에게 표시하는 값이라 비어 있으면 안 된다.
+// 계약은 minLength: 1만 요구하므로 공백 문자열을 따로 금지하지 않는다.
+describe('isApiErrorBody — message 길이', () => {
+  function withMessage(message: unknown): boolean {
+    return isApiErrorBody({ code: 'COMMON_001', message })
+  }
+
+  test('비어 있지 않은 message를 허용한다', () => {
+    expect(withMessage('입력값이 올바르지 않습니다.')).toBe(true)
+    expect(withMessage('x')).toBe(true)
+  })
+
+  test('빈 message를 거절한다', () => {
+    expect(withMessage('')).toBe(false)
+  })
+
+  test('공백만 있는 message는 거절하지 않는다', () => {
+    // 계약이 공백 문자열을 금지하지 않으므로 클라이언트가 더 엄격하게 굴지 않는다.
+    expect(withMessage(' ')).toBe(true)
+  })
+
+  test('message가 문자열이 아니면 거절한다', () => {
+    expect(withMessage(42)).toBe(false)
+    expect(withMessage(null)).toBe(false)
   })
 })
 

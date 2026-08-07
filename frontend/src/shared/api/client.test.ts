@@ -185,6 +185,33 @@ describe('오류 응답', () => {
     expect(error.details).toEqual([])
   })
 
+  // 계약을 어긋난 오류 본문은 일반 ApiErrorBody로 인정하지 않는다.
+  // 화면이 분기에 쓸 수 없는 code를 그대로 넘기지 않고 status만 보존한다.
+  test('code 형식이 계약과 다르면 서버 code를 그대로 쓰지 않는다', async () => {
+    server.use(
+      http.get(CATEGORIES, () =>
+        HttpResponse.json({ code: 'INVALID', message: '실패했습니다.' }, { status: 400 }),
+      ),
+    )
+
+    const error = (await getCategories().catch((thrown: unknown) => thrown)) as ApiError
+
+    expect(error.status).toBe(400)
+    expect(error.code).toBe('HTTP_400')
+  })
+
+  test('message가 비어 있으면 서버 code를 그대로 쓰지 않는다', async () => {
+    server.use(
+      http.get(CATEGORIES, () =>
+        HttpResponse.json({ code: 'COMMON_001', message: '' }, { status: 400 }),
+      ),
+    )
+
+    const error = (await getCategories().catch((thrown: unknown) => thrown)) as ApiError
+
+    expect(error.code).toBe('HTTP_400')
+  })
+
   test('오류 모양이 아닌 응답에도 코드를 지어내지 않는다', async () => {
     server.use(http.get(CATEGORIES, () => new HttpResponse('<html>500</html>', { status: 500 })))
 
