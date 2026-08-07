@@ -1,9 +1,16 @@
 package com.miriyum.domain.reservation.service;
 
+import com.miriyum.domain.auth.exception.AccountErrorCode;
+import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
+import com.miriyum.domain.menuhold.dto.MenuSelection;
+import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationCancellationRequest;
@@ -19,20 +26,27 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResu
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
+import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
+import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
@@ -55,6 +69,8 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -63,6 +79,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -100,8 +118,12 @@ public class ReservationService {
     private final ReservationRepository reservationRepository;
     private final ConsumerAccountService consumerAccountService;
     private final MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private StoreTransactionEligibilityService storeTransactionEligibilityService;
+    private ReservationCapacityAllocationRepository capacityAllocationRepository;
+    private ReservationCancellationPolicySelector cancellationPolicySelector;
+    private MenuHoldService menuHoldService;
 
-    public ReservationService(
+    ReservationService(
             StoreScheduleService storeScheduleService,
             StoreServiceIntervalValidationService storeServiceIntervalValidationService,
             ReservationTimePolicyVersionRepository timePolicyRepository,
@@ -127,6 +149,449 @@ public class ReservationService {
         this.reservationRepository = reservationRepository;
         this.consumerAccountService = consumerAccountService;
         this.menuHoldSnapshotQueryService = menuHoldSnapshotQueryService;
+    }
+
+    /** Spring constructor including the public contracts used only by reservation creation. */
+    @Autowired
+    public ReservationService(
+            StoreScheduleService storeScheduleService,
+            StoreServiceIntervalValidationService storeServiceIntervalValidationService,
+            ReservationTimePolicyVersionRepository timePolicyRepository,
+            StoreService storeService,
+            IdempotencyExecutor idempotencyExecutor,
+            ReservationTimePolicyAuditRepository timePolicyAuditRepository,
+            ObjectMapper objectMapper,
+            Clock clock,
+            ReservationCapacityBucketRepository capacityBucketRepository,
+            ReservationRepository reservationRepository,
+            ConsumerAccountService consumerAccountService,
+            MenuHoldSnapshotQueryService menuHoldSnapshotQueryService,
+            StoreTransactionEligibilityService storeTransactionEligibilityService,
+            ReservationCapacityAllocationRepository capacityAllocationRepository,
+            ReservationCancellationPolicySelector cancellationPolicySelector,
+            MenuHoldService menuHoldService
+    ) {
+        this(
+                storeScheduleService,
+                storeServiceIntervalValidationService,
+                timePolicyRepository,
+                storeService,
+                idempotencyExecutor,
+                timePolicyAuditRepository,
+                objectMapper,
+                clock,
+                capacityBucketRepository,
+                reservationRepository,
+                consumerAccountService,
+                menuHoldSnapshotQueryService
+        );
+        this.storeTransactionEligibilityService = storeTransactionEligibilityService;
+        this.capacityAllocationRepository = capacityAllocationRepository;
+        this.cancellationPolicySelector = cancellationPolicySelector;
+        this.menuHoldService = menuHoldService;
+    }
+
+    /**
+     * 인증된 일반 사용자의 일반 예약을 즉시 확정한다.
+     * 연락처 상태는 멱등 replay에서도 현재 상태를 다시 확인하기 위해 claim보다 먼저 검증한다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationCreationCommandResult createReservation(
+            long consumerAccountId,
+            IdempotencyKey key,
+            ReservationCreateRequest request
+    ) {
+        NormalizedCreationRequest normalized = normalizeCreationRequest(
+                consumerAccountId, key, request);
+        ReservationContactResult contact =
+                consumerAccountService.getReservationContact(consumerAccountId);
+        if (contact == null
+                || !contact.contactAvailable()
+                || contact.notificationTargetReference() == null
+                || contact.notificationTargetReference().isBlank()) {
+            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
+        }
+        IdempotencyCommand command = new IdempotencyCommand(
+                "consumer",
+                consumerAccountId,
+                "RESERVATION_CREATE",
+                key.value(),
+                fingerprintForCreation(normalized)
+        );
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
+                createReservationWork(
+                        consumerAccountId,
+                        key,
+                        normalized,
+                        contact
+                ));
+        ReservationDetailResponse response = objectMapper.treeToValue(
+                outcome.data(), ReservationDetailResponse.class);
+        return new ReservationCreationCommandResult(
+                outcome.httpStatus(), restoreReservationOffsets(response));
+    }
+
+    private static ReservationDetailResponse restoreReservationOffsets(
+            ReservationDetailResponse response
+    ) {
+        if (response == null || response.startAt() == null
+                || response.serviceEndAt() == null
+                || response.timeZoneId() == null) {
+            return response;
+        }
+        ZoneId zone = ZoneId.of(response.timeZoneId());
+        return new ReservationDetailResponse(
+                response.reservationId(),
+                response.storeId(),
+                response.storeName(),
+                response.serviceDate(),
+                response.timeStatus(),
+                response.startAt().toInstant().atZone(zone).toOffsetDateTime(),
+                response.serviceEndAt().toInstant().atZone(zone).toOffsetDateTime(),
+                response.timeZoneId(),
+                response.party(),
+                response.status(),
+                response.menuSelections(),
+                response.createdAt()
+        );
+    }
+
+    private BusinessResult<ReservationDetailResponse> createReservationWork(
+            long consumerAccountId,
+            IdempotencyKey key,
+            NormalizedCreationRequest request,
+            ReservationContactResult contact
+    ) {
+        StoreReservationTransactionEligibility store =
+                requireCreationDependencies().requireReservationTransactionEligibility(
+                        request.storeId());
+        ReservationTimeSnapshot timeSnapshot = resolveCreationTime(request);
+
+        if (!reservationRepository.findConfirmedOverlappingForUpdate(
+                consumerAccountId,
+                request.storeId(),
+                timeSnapshot.getStartAt(),
+                timeSnapshot.getServiceEndAt()).isEmpty()) {
+            throw new ServiceException(ReservationErrorCode.DUPLICATE_RESERVATION);
+        }
+
+        ZoneId timeZone = ZoneId.of(timeSnapshot.getTimeZoneId());
+        LocalTime occupancyEndTime = timeSnapshot.getOccupancyEndAt()
+                .atZone(timeZone)
+                .toLocalTime();
+        List<ReservationCapacityBucket> buckets =
+                capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                        request.storeId(),
+                        request.serviceDate(),
+                        request.startTime(),
+                        occupancyEndTime
+                );
+        long capacityPolicyVersion = validateCreationCapacity(
+                buckets,
+                request,
+                occupancyEndTime
+        );
+        for (ReservationCapacityBucket bucket : buckets) {
+            bucket.occupy(request.partySize());
+        }
+
+        PartyComposition party = PartyComposition.of(
+                request.adultCount(), request.childCount(), request.infantCount());
+        Reservation reservation = Reservation.confirm(
+                consumerAccountId,
+                request.storeId(),
+                store.storeName(),
+                timeSnapshot,
+                party,
+                ReservationContactSnapshot.contactable(
+                        contact.notificationTargetReference()),
+                capacityPolicyVersion,
+                requireCancellationPolicy(),
+                clock.instant()
+        );
+        Reservation saved = reservationRepository.saveAndFlush(reservation);
+        if (saved.getId() == null || saved.getId() <= 0) {
+            throw new IllegalStateException("saved reservation id is required");
+        }
+
+        List<ReservationCapacityAllocation> allocations = buckets.stream()
+                .map(bucket -> {
+                    if (bucket.getId() == null || bucket.getId() <= 0) {
+                        throw new IllegalStateException("capacity bucket id is required");
+                    }
+                    return ReservationCapacityAllocation.allocate(
+                            saved.getId(),
+                            bucket.getId(),
+                            request.partySize(),
+                            capacityPolicyVersion);
+                })
+                .toList();
+        capacityAllocationRepository.saveAll(allocations);
+
+        if (!request.menuSelections().isEmpty()) {
+            ZonedDateTime localStart = timeSnapshot.getStartAt().atZone(timeZone);
+            ZonedDateTime localEnd = timeSnapshot.getServiceEndAt().atZone(timeZone);
+            MenuHoldCommandResult menuResult = menuHoldService.create(
+                    new MenuHoldCreateCommand(
+                            saved.getId(),
+                            request.storeId(),
+                            consumerAccountId,
+                            localStart.toLocalDate(),
+                            localStart.toLocalTime(),
+                            localEnd.toLocalDate(),
+                            localEnd.toLocalTime(),
+                            timeSnapshot.getStartAt(),
+                            timeSnapshot.getServiceEndAt(),
+                            "reservation-create:" + saved.getId() + ":" + key.value(),
+                            request.menuSelections()
+                    ));
+            if (menuResult == null
+                    || menuResult.reservationId() != saved.getId()
+                    || menuResult.outcome() != MenuHoldCommandResult.Outcome.CONFIRMED) {
+                throw new IllegalStateException("menu hold creation result is inconsistent");
+            }
+        }
+
+        ReservationDetailResponse response = ReservationDetailResponse.from(
+                saved,
+                menuHoldSnapshotQueryService.findByReservationId(saved.getId())
+        );
+        return new BusinessResult<>(
+                HttpStatus.CREATED.value(),
+                SUCCESS_RESPONSE_CODE,
+                "RESERVATION",
+                String.valueOf(saved.getId()),
+                response
+        );
+    }
+
+    private StoreTransactionEligibilityService requireCreationDependencies() {
+        if (storeTransactionEligibilityService == null
+                || capacityAllocationRepository == null
+                || cancellationPolicySelector == null
+                || menuHoldService == null) {
+            throw new IllegalStateException("reservation creation dependencies are required");
+        }
+        return storeTransactionEligibilityService;
+    }
+
+    private ReservationCancellationPolicyVersion requireCancellationPolicy() {
+        ReservationCancellationPolicyVersion selected = cancellationPolicySelector.select();
+        if (selected == null) {
+            throw new IllegalStateException("cancellation policy selection is required");
+        }
+        return selected;
+    }
+
+    private ReservationTimeSnapshot resolveCreationTime(NormalizedCreationRequest request) {
+        List<StoreReservationWindowResult> windows =
+                storeScheduleService.resolveReservationWindows(
+                        List.of(request.storeId()),
+                        request.serviceDate(),
+                        request.startTime());
+        if (windows == null || windows.size() != 1) {
+            throw outsideReservationWindow();
+        }
+        StoreReservationWindowResult window = windows.getFirst();
+        if (window == null
+                || window.storeId() != request.storeId()
+                || window.status() != StoreReservationWindowStatus.ACCEPTING) {
+            throw outsideReservationWindow();
+        }
+
+        Instant evaluatedAt = clock.instant();
+        List<ReservationTimePolicyVersion> policies =
+                timePolicyRepository.findResolutionCandidatesByStoreIds(
+                        Set.of(request.storeId()),
+                        ReservationTimePolicyStatus.ACTIVE,
+                        ReservationTimePolicyStatus.SCHEDULED,
+                        evaluatedAt);
+        ReservationTimePolicyVersion policy = singleEffectivePolicy(
+                policies,
+                request.storeId(),
+                evaluatedAt);
+        LocalDateTime requestedAt = LocalDateTime.of(
+                request.serviceDate(), request.startTime());
+        if (policy == null || !isSlotAligned(window.windowStartAt(), requestedAt, policy)) {
+            throw outsideReservationWindow();
+        }
+
+        ReservationTimeSnapshot snapshot;
+        try {
+            snapshot = ReservationTimeSnapshot.calculate(
+                    policy,
+                    requestedAt,
+                    ZoneId.of(window.timeZoneId()),
+                    request.startOffset());
+        } catch (DateTimeException | IllegalArgumentException exception) {
+            throw outsideReservationWindow();
+        }
+        if (!staysWithinCreationLocalBoundary(snapshot)) {
+            throw outsideReservationWindow();
+        }
+
+        StoreServiceIntervalRequest intervalRequest = new StoreServiceIntervalRequest(
+                request.storeId(), snapshot.getStartAt(), snapshot.getServiceEndAt());
+        List<StoreServiceIntervalResult> intervalResults =
+                storeServiceIntervalValidationService.validateServiceIntervals(
+                        List.of(intervalRequest));
+        if (intervalResults == null || intervalResults.size() != 1) {
+            throw outsideReservationWindow();
+        }
+        StoreServiceIntervalResult interval = intervalResults.getFirst();
+        if (interval == null
+                || interval.storeId() != intervalRequest.storeId()
+                || !interval.startAt().equals(intervalRequest.startAt())
+                || !interval.serviceEndAt().equals(intervalRequest.serviceEndAt())
+                || interval.status() != StoreServiceIntervalStatus.ACCEPTING) {
+            throw outsideReservationWindow();
+        }
+        return snapshot;
+    }
+
+    private static boolean staysWithinCreationLocalBoundary(ReservationTimeSnapshot snapshot) {
+        ZoneId zone = ZoneId.of(snapshot.getTimeZoneId());
+        ZonedDateTime start = snapshot.getStartAt().atZone(zone);
+        ZonedDateTime serviceEnd = snapshot.getServiceEndAt().atZone(zone);
+        ZonedDateTime occupancyEnd = snapshot.getOccupancyEndAt().atZone(zone);
+        ZoneOffset requiredOffset = start.getOffset();
+        return start.toLocalDate().equals(snapshot.getServiceDate())
+                && serviceEnd.toLocalDate().equals(snapshot.getServiceDate())
+                && occupancyEnd.toLocalDate().equals(snapshot.getServiceDate())
+                && serviceEnd.getOffset().equals(requiredOffset)
+                && occupancyEnd.getOffset().equals(requiredOffset);
+    }
+
+    private static long validateCreationCapacity(
+            List<ReservationCapacityBucket> buckets,
+            NormalizedCreationRequest request,
+            LocalTime occupancyEndTime
+    ) {
+        if (buckets == null || buckets.isEmpty()) {
+            throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        }
+        long version = buckets.getFirst().getPolicyVersion();
+        for (ReservationCapacityBucket bucket : buckets) {
+            if (bucket.getStoreId() != request.storeId()
+                    || !bucket.getServiceDate().equals(request.serviceDate())
+                    || bucket.getPolicyVersion() != version) {
+                throw new ServiceException(ReservationErrorCode.CAPACITY_POLICY_CHANGED);
+            }
+            if (request.partySize() < bucket.getMinPartySize()
+                    || request.partySize() > bucket.getMaxPartySize()
+                    || (request.infantCount() > 0 && !bucket.isInfantsAllowed())) {
+                throw new ServiceException(ReservationErrorCode.PARTY_SIZE_OUT_OF_RANGE);
+            }
+        }
+        List<ReservationCapacityBucket> byInterval = buckets.stream()
+                .sorted(BUCKET_ORDER)
+                .toList();
+        LocalTime coveredUntil = request.startTime();
+        for (ReservationCapacityBucket bucket : byInterval) {
+            if (bucket.getEndTime().compareTo(coveredUntil) <= 0) {
+                continue;
+            }
+            if (bucket.getStartTime().isAfter(coveredUntil)) {
+                throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+            }
+            coveredUntil = bucket.getEndTime();
+            if (!coveredUntil.isBefore(occupancyEndTime)) {
+                return version;
+            }
+        }
+        throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+    }
+
+    private static NormalizedCreationRequest normalizeCreationRequest(
+            long consumerAccountId,
+            IdempotencyKey key,
+            ReservationCreateRequest request
+    ) {
+        try {
+            if (consumerAccountId <= 0 || key == null || request == null
+                    || request.serviceDate() == null
+                    || request.startTime() == null
+                    || request.party() == null
+                    || request.party().adultCount() == null
+                    || request.party().childCount() == null
+                    || request.party().infantCount() == null
+                    || request.menuSelections() == null
+                    || request.menuSelections().size() > 20) {
+                throw new IllegalArgumentException("reservation creation fields are required");
+            }
+            if (request.startOffset() != null
+                    && !request.startOffset().matches(
+                            "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$")) {
+                throw new IllegalArgumentException("startOffset must use ±HH:MM");
+            }
+            long storeId = request.storeIdAsLong();
+            int adultCount = request.party().adultCount();
+            int childCount = request.party().childCount();
+            int infantCount = request.party().infantCount();
+            PartyComposition party = PartyComposition.of(
+                    adultCount, childCount, infantCount);
+            TreeMap<Long, Integer> quantitiesByMenuId = new TreeMap<>();
+            for (var selection : request.menuSelections()) {
+                if (selection == null || selection.quantity() == null
+                        || selection.quantity() <= 0
+                        || selection.quantity() > 100) {
+                    throw new IllegalArgumentException("valid menu selection is required");
+                }
+                quantitiesByMenuId.merge(
+                        selection.menuIdAsLong(),
+                        selection.quantity(),
+                        Math::addExact);
+            }
+            List<MenuSelection> menuSelections = quantitiesByMenuId.entrySet().stream()
+                    .map(entry -> new MenuSelection(entry.getKey(), entry.getValue()))
+                    .toList();
+            return new NormalizedCreationRequest(
+                    storeId,
+                    request.serviceDate(),
+                    request.startTime(),
+                    request.startOffsetAsZoneOffset(),
+                    adultCount,
+                    childCount,
+                    infantCount,
+                    party.totalCount(),
+                    menuSelections);
+        } catch (ArithmeticException | DateTimeException | IllegalArgumentException exception) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+    }
+
+    private static String fingerprintForCreation(NormalizedCreationRequest request) {
+        StringBuilder canonical = new StringBuilder("POST|/api/v1/reservations|");
+        append(canonical, "storeId", Long.toString(request.storeId()));
+        append(canonical, "serviceDate", request.serviceDate().toString());
+        append(canonical, "startTime", request.startTime().toString());
+        append(canonical, "startOffset", request.startOffset() == null
+                ? "" : request.startOffset().toString());
+        append(canonical, "adultCount", Integer.toString(request.adultCount()));
+        append(canonical, "childCount", Integer.toString(request.childCount()));
+        append(canonical, "infantCount", Integer.toString(request.infantCount()));
+        for (MenuSelection selection : request.menuSelections()) {
+            append(canonical, "menuId", Long.toString(selection.menuId()));
+            append(canonical, "quantity", Integer.toString(selection.quantity()));
+        }
+        return RequestFingerprint.of(canonical.toString());
+    }
+
+    private static ServiceException outsideReservationWindow() {
+        return new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
+    }
+
+    private record NormalizedCreationRequest(
+            long storeId,
+            java.time.LocalDate serviceDate,
+            LocalTime startTime,
+            ZoneOffset startOffset,
+            int adultCount,
+            int childCount,
+            int infantCount,
+            int partySize,
+            List<MenuSelection> menuSelections
+    ) {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)

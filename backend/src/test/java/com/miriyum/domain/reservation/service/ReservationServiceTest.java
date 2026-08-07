@@ -14,11 +14,19 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.exception.AccountErrorCode;
+import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
+import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationMenuSelectionRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationPartyRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimeRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
@@ -39,10 +47,13 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
+import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
@@ -52,6 +63,10 @@ import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationS
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -63,6 +78,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -123,6 +139,18 @@ class ReservationServiceTest {
     @Mock
     private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
 
+    @Mock
+    private StoreTransactionEligibilityService storeTransactionEligibilityService;
+
+    @Mock
+    private ReservationCapacityAllocationRepository capacityAllocationRepository;
+
+    @Mock
+    private ReservationCancellationPolicySelector cancellationPolicySelector;
+
+    @Mock
+    private MenuHoldService menuHoldService;
+
     private ReservationService reservationService;
 
     @BeforeEach
@@ -139,8 +167,578 @@ class ReservationServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService
+                menuHoldSnapshotQueryService,
+                storeTransactionEligibilityService,
+                capacityAllocationRepository,
+                cancellationPolicySelector,
+                menuHoldService
         );
+    }
+
+    @Test
+    @DisplayName("Auth가 불가능한 성공 연락처를 반환하면 replay 확인 전 ACCOUNT_006으로 거절한다")
+    void rejectsUnavailableContactBeforeIdempotencyReplay() {
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22",
+                SERVICE_DATE,
+                START_TIME,
+                null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of()
+        );
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult("", false));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request
+        )).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(AccountErrorCode.RESERVATION_CONTACT_REQUIRED));
+
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+        then(storeService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("메뉴 없는 예약은 CONFIRMED aggregate와 모든 버킷 배정을 저장하고 201 상세를 반환한다")
+    void createsConfirmedReservationWithoutMenuHold() {
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22",
+                SERVICE_DATE,
+                START_TIME,
+                null,
+                new ReservationPartyRequest(2, 1, 0),
+                List.of()
+        );
+        ReservationTimePolicyVersion policy = activePolicy(22L, 30, 60, 0);
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 1, 1, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult("consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            return new IdempotentOutcome(
+                    false,
+                    result.httpStatus(),
+                    result.responseCode(),
+                    result.resourceType(),
+                    result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(22L, "미리윰 식당"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L,
+                        "Asia/Seoul",
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(17, 0)),
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(20, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW)))
+                .willReturn(List.of(policy));
+        given(storeServiceIntervalValidationService.validateServiceIntervals(any()))
+                .willAnswer(invocation -> {
+                    List<StoreServiceIntervalRequest> requests = invocation.getArgument(0);
+                    return requests.stream()
+                            .map(interval -> StoreServiceIntervalResult.of(interval, true))
+                            .toList();
+                });
+        given(reservationRepository.findConfirmedOverlappingForUpdate(
+                11L,
+                22L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z")))
+                .willReturn(List.of());
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0)))
+                .willReturn(List.of(bucket));
+        given(cancellationPolicySelector.select())
+                .willReturn(new ReservationCancellationPolicyVersion(1L));
+        given(reservationRepository.saveAndFlush(any(Reservation.class)))
+                .willAnswer(invocation -> {
+                    Reservation saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 77L);
+                    return saved;
+                });
+        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .willReturn(List.of());
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request
+        );
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data()).satisfies(response -> {
+            assertThat(response.reservationId()).isEqualTo("77");
+            assertThat(response.storeName()).isEqualTo("미리윰 식당");
+            assertThat(response.status()).isEqualTo("CONFIRMED");
+            assertThat(response.menuSelections()).isEmpty();
+        });
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(4);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(2);
+        ArgumentCaptor<Reservation> reservationCaptor = ArgumentCaptor.forClass(Reservation.class);
+        then(reservationRepository).should().saveAndFlush(reservationCaptor.capture());
+        assertThat(reservationCaptor.getValue().getContactSnapshot()
+                .getNotificationTargetReference())
+                .isEqualTo("consumer:11:channel:primary");
+        assertThat(reservationCaptor.getValue().getCapacityPolicyVersion()).isEqualTo(7L);
+        then(capacityAllocationRepository).should().saveAll(any());
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("직접 command 호출의 메뉴 수량 범위 위반도 COMMON_001로 자원 접근 전에 거절한다")
+    void rejectsMalformedMenuQuantityBeforeContactLookup() {
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22",
+                SERVICE_DATE,
+                START_TIME,
+                null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of(new ReservationMenuSelectionRequest("91", 101))
+        );
+
+        assertValidationFailure(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request
+        ));
+
+        then(consumerAccountService).shouldHaveNoInteractions();
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("직접 command 호출의 메뉴 선택 20개 초과도 COMMON_001로 거절한다")
+    void rejectsTooManyMenuSelectionsBeforeContactLookup() {
+        List<ReservationMenuSelectionRequest> selections = java.util.stream.IntStream
+                .rangeClosed(1, 21)
+                .mapToObj(menuId -> new ReservationMenuSelectionRequest(
+                        Integer.toString(menuId), 1))
+                .toList();
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, null,
+                new ReservationPartyRequest(2, 0, 0), selections);
+
+        assertValidationFailure(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request));
+
+        then(consumerAccountService).shouldHaveNoInteractions();
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("관대한 ZoneOffset parser가 받는 비정규 startOffset도 COMMON_001로 거절한다")
+    void rejectsNonCanonicalStartOffsetBeforeContactLookup() {
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, "+1",
+                new ReservationPartyRequest(2, 0, 0), List.of());
+
+        assertValidationFailure(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request));
+
+        then(consumerAccountService).shouldHaveNoInteractions();
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("중복 메뉴 합산과 ID 정렬 지문 replay도 현재 Auth 연락처를 매번 재확인한다")
+    void replaysCanonicalMenuFingerprintAfterRecheckingContact() {
+        ReservationCreateRequest first = new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of(
+                        new ReservationMenuSelectionRequest("92", 2),
+                        new ReservationMenuSelectionRequest("91", 1),
+                        new ReservationMenuSelectionRequest("91", 2)));
+        ReservationCreateRequest reordered = new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of(
+                        new ReservationMenuSelectionRequest("91", 3),
+                        new ReservationMenuSelectionRequest("92", 2)));
+        ReservationDetailResponse response = ReservationDetailResponse.from(
+                reservation(77L, 11L), List.of());
+        IdempotentOutcome replay = new IdempotentOutcome(
+                true, 201, "SUCCESS", "RESERVATION", "77",
+                new ObjectMapper().valueToTree(response));
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willReturn(replay);
+        IdempotencyKey key = IdempotencyKey.parse(
+                "550e8400-e29b-41d4-a716-446655440000");
+
+        ReservationCreationCommandResult firstResult =
+                reservationService.createReservation(11L, key, first);
+        ReservationCreationCommandResult replayResult =
+                reservationService.createReservation(11L, key, reordered);
+
+        assertThat(firstResult).isEqualTo(replayResult);
+        ArgumentCaptor<IdempotencyCommand> commands =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should(times(2)).execute(commands.capture(), any());
+        assertThat(commands.getAllValues())
+                .extracting(IdempotencyCommand::requestFingerprint)
+                .containsOnly(commands.getAllValues().getFirst().requestFingerprint());
+        then(consumerAccountService).should(times(2)).getReservationContact(11L);
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("메뉴 예약은 합산·ID 정렬된 실제 create command를 보내고 CONFIRMED 상세을 반환한다")
+    void createsMenuHoldWithMergedStableMenuOrder() {
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, null,
+                new ReservationPartyRequest(2, 0, 0),
+                List.of(
+                        new ReservationMenuSelectionRequest("92", 2),
+                        new ReservationMenuSelectionRequest("91", 1),
+                        new ReservationMenuSelectionRequest("91", 2)));
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+        stubSuccessfulCreation(bucket, activePolicy(22L, 30, 60, 0));
+        given(menuHoldService.create(any(MenuHoldCreateCommand.class)))
+                .willReturn(MenuHoldCommandResult.confirmed(77L));
+        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .willReturn(List.of(
+                        new MenuHoldItemResult(91L, "아메리카노", 4_500L, 3),
+                        new MenuHoldItemResult(92L, "케이크", 7_000L, 2)));
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request);
+
+        assertThat(result.data().menuSelections())
+                .extracting(selection -> selection.menuId(), selection -> selection.quantity())
+                .containsExactly(tuple("91", 3), tuple("92", 2));
+        ArgumentCaptor<MenuHoldCreateCommand> command =
+                ArgumentCaptor.forClass(MenuHoldCreateCommand.class);
+        then(menuHoldService).should().create(command.capture());
+        assertThat(command.getValue().reservationId()).isEqualTo(77L);
+        assertThat(command.getValue().operationId())
+                .isEqualTo("reservation-create:77:550e8400-e29b-41d4-a716-446655440000");
+        assertThat(command.getValue().menuSelections())
+                .extracting(selection -> selection.menuId(), selection -> selection.quantity())
+                .containsExactly(tuple(91L, 3), tuple(92L, 2));
+    }
+
+    @Test
+    @DisplayName("같은 사용자·매장의 half-open 서비스 구간 중복은 수용량 잠금 전에 RESERVATION_004다")
+    void rejectsConfirmedServiceOverlapBeforeCapacityLock() {
+        ReservationCreateRequest request = creationRequest(2, 0, 0);
+        stubCreationUntilCapacity(
+                activePolicy(22L, 30, 60, 0),
+                List.of(reservation(88L, 11L)),
+                null);
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.DUPLICATE_RESERVATION));
+
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(reservationRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("유효한 시간 window에서 점유 구간 버킷 coverage가 부족하면 RESERVATION_003이다")
+    void rejectsIncompleteCapacityCoverage() {
+        ReservationCapacityBucket partial = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(18, 30),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        stubCreationUntilCapacity(
+                activePolicy(22L, 30, 60, 0), List.of(), List.of(partial));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY));
+
+        assertThat(partial.getOccupiedPeople()).isZero();
+        assertThat(partial.getOccupiedTeams()).isZero();
+        then(reservationRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("버킷의 최소·최대 일행 범위를 벗어나면 점유 전 RESERVATION_009다")
+    void rejectsPartyOutsideCapacityPolicyRange() {
+        ReservationCapacityBucket restricted = ReservationCapacityBucket.create(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 0, 0, 3, 6, true, 7L);
+        stubCreationUntilCapacity(
+                activePolicy(22L, 30, 60, 0), List.of(), List.of(restricted));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.PARTY_SIZE_OUT_OF_RANGE));
+
+        assertThat(restricted.getOccupiedPeople()).isZero();
+        then(reservationRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("명시적 startOffset으로 해소되고 같은 offset에 머무는 DST overlap 예약은 생성한다")
+    void createsReservationInExplicitlyResolvedDstOverlap() {
+        LocalDate serviceDate = LocalDate.of(2026, 11, 1);
+        LocalTime startTime = LocalTime.of(1, 30);
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22", serviceDate, startTime, "-04:00",
+                new ReservationPartyRequest(2, 0, 0), List.of());
+        ReservationTimePolicyVersion policy = activePolicy(22L, 15, 15, 0);
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L, serviceDate, startTime, LocalTime.of(1, 45),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            return new IdempotentOutcome(
+                    false, result.httpStatus(), result.responseCode(),
+                    result.resourceType(), result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        22L, "뉴욕 미리윰"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), serviceDate, startTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L, "America/New_York",
+                        LocalDateTime.of(serviceDate, LocalTime.of(1, 0)),
+                        LocalDateTime.of(serviceDate, LocalTime.of(3, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW))).willReturn(List.of(policy));
+        given(storeServiceIntervalValidationService.validateServiceIntervals(any()))
+                .willAnswer(invocation -> {
+                    List<StoreServiceIntervalRequest> intervals = invocation.getArgument(0);
+                    return List.of(StoreServiceIntervalResult.of(
+                            intervals.getFirst(), true));
+                });
+        given(reservationRepository.findConfirmedOverlappingForUpdate(
+                11L, 22L,
+                Instant.parse("2026-11-01T05:30:00Z"),
+                Instant.parse("2026-11-01T05:45:00Z")))
+                .willReturn(List.of());
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                22L, serviceDate, startTime, LocalTime.of(1, 45)))
+                .willReturn(List.of(bucket));
+        given(cancellationPolicySelector.select())
+                .willReturn(new ReservationCancellationPolicyVersion(1L));
+        given(reservationRepository.saveAndFlush(any(Reservation.class)))
+                .willAnswer(invocation -> {
+                    Reservation saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 77L);
+                    return saved;
+                });
+        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+                .willReturn(List.of());
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request);
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data().startAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
+        assertThat(result.data().serviceEndAt().getOffset()).isEqualTo(ZoneOffset.of("-04:00"));
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("계산된 서비스 종료가 다른 UTC offset으로 넘어가면 수용량 변경 전 RESERVATION_002다")
+    void rejectsCreationCrossingDstOffsetBoundaryBeforeCapacityMutation() {
+        LocalDate serviceDate = LocalDate.of(2026, 11, 1);
+        LocalTime startTime = LocalTime.of(1, 30);
+        ReservationCreateRequest request = new ReservationCreateRequest(
+                "22", serviceDate, startTime, "-04:00",
+                new ReservationPartyRequest(2, 0, 0), List.of());
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            return work.get();
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        22L, "뉴욕 미리윰"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), serviceDate, startTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L, "America/New_York",
+                        LocalDateTime.of(serviceDate, LocalTime.of(1, 0)),
+                        LocalDateTime.of(serviceDate, LocalTime.of(4, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW))).willReturn(List.of(activePolicy(22L, 30, 120, 0)));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        then(storeServiceIntervalValidationService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+    }
+
+    private ReservationCreateRequest creationRequest(
+            int adultCount,
+            int childCount,
+            int infantCount
+    ) {
+        return new ReservationCreateRequest(
+                "22", SERVICE_DATE, START_TIME, null,
+                new ReservationPartyRequest(adultCount, childCount, infantCount),
+                List.of());
+    }
+
+    private void stubCreationUntilCapacity(
+            ReservationTimePolicyVersion policy,
+            List<Reservation> overlaps,
+            List<ReservationCapacityBucket> buckets
+    ) {
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            return work.get();
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        22L, "미리윰 식당"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L, "Asia/Seoul",
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(17, 0)),
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(20, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW))).willReturn(List.of(policy));
+        given(storeServiceIntervalValidationService.validateServiceIntervals(any()))
+                .willAnswer(invocation -> {
+                    List<StoreServiceIntervalRequest> requests = invocation.getArgument(0);
+                    return requests.stream()
+                            .map(interval -> StoreServiceIntervalResult.of(interval, true))
+                            .toList();
+                });
+        given(reservationRepository.findConfirmedOverlappingForUpdate(
+                11L, 22L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z")))
+                .willReturn(overlaps);
+        if (overlaps.isEmpty()) {
+            given(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                    22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0)))
+                    .willReturn(buckets);
+        }
+    }
+
+    private void stubSuccessfulCreation(
+            ReservationCapacityBucket bucket,
+            ReservationTimePolicyVersion policy
+    ) {
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            return new IdempotentOutcome(
+                    false, result.httpStatus(), result.responseCode(),
+                    result.resourceType(), result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(22L))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        22L, "미리윰 식당"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(22L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        22L, "Asia/Seoul",
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(17, 0)),
+                        LocalDateTime.of(SERVICE_DATE, LocalTime.of(20, 0)))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                eq(java.util.Set.of(22L)),
+                eq(ReservationTimePolicyStatus.ACTIVE),
+                eq(ReservationTimePolicyStatus.SCHEDULED),
+                eq(NOW))).willReturn(List.of(policy));
+        given(storeServiceIntervalValidationService.validateServiceIntervals(any()))
+                .willAnswer(invocation -> {
+                    List<StoreServiceIntervalRequest> requests = invocation.getArgument(0);
+                    return requests.stream()
+                            .map(interval -> StoreServiceIntervalResult.of(interval, true))
+                            .toList();
+                });
+        given(reservationRepository.findConfirmedOverlappingForUpdate(
+                11L, 22L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z")))
+                .willReturn(List.of());
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
+                22L, SERVICE_DATE, START_TIME, LocalTime.of(19, 0)))
+                .willReturn(List.of(bucket));
+        given(cancellationPolicySelector.select())
+                .willReturn(new ReservationCancellationPolicyVersion(1L));
+        given(reservationRepository.saveAndFlush(any(Reservation.class)))
+                .willAnswer(invocation -> {
+                    Reservation saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 77L);
+                    return saved;
+                });
     }
 
     @Test
