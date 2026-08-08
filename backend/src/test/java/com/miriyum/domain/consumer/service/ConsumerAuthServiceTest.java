@@ -23,6 +23,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -56,6 +57,9 @@ class ConsumerAuthServiceTest {
     @Mock
     private LoginDelayGuard loginDelayGuard;
 
+    @Mock
+    private RefreshTokenManager refreshTokenManager;
+
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
@@ -65,7 +69,7 @@ class ConsumerAuthServiceTest {
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
                 consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
-                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator());
+                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(), refreshTokenManager);
     }
 
     @Test
@@ -246,10 +250,8 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = consumerAuthService.login(request);
@@ -271,10 +273,8 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = consumerAuthService.login(request);

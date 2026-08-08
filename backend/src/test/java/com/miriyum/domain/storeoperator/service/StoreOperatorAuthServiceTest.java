@@ -22,6 +22,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
@@ -55,6 +56,9 @@ class StoreOperatorAuthServiceTest {
     @Mock
     private LoginDelayGuard loginDelayGuard;
 
+    @Mock
+    private RefreshTokenManager refreshTokenManager;
+
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
     private StoreOperatorAuthService storeOperatorAuthService;
@@ -63,7 +67,7 @@ class StoreOperatorAuthServiceTest {
     void setUp() {
         storeOperatorAuthService = new StoreOperatorAuthService(
                 storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
-                loginDelayGuard, new PhoneNumberPolicy());
+                loginDelayGuard, new PhoneNumberPolicy(), refreshTokenManager);
     }
 
     @Test
@@ -227,10 +231,8 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = storeOperatorAuthService.login(request);
@@ -252,10 +254,8 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = storeOperatorAuthService.login(request);

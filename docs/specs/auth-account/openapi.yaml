@@ -75,6 +75,8 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumer-auth/token-refreshes:
     post:
       tags: [Consumer Auth]
@@ -108,6 +110,8 @@ paths:
           $ref: "#/components/responses/OriginRejected"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumer-auth/csrf-tokens/current:
     get:
       tags: [Consumer Auth]
@@ -152,6 +156,8 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operator-auth/accounts:
     post:
       tags: [Store Operator Auth]
@@ -207,6 +213,8 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operator-auth/token-refreshes:
     post:
       tags: [Store Operator Auth]
@@ -240,6 +248,8 @@ paths:
           $ref: "#/components/responses/OriginRejected"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operator-auth/csrf-tokens/current:
     get:
       tags: [Store Operator Auth]
@@ -284,6 +294,8 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumer-accounts/me:
     get:
       tags: [Account]

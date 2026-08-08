@@ -48,7 +48,7 @@ These are staging Environment variables, not application secrets. Application an
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
 
-The current backend continues to use stateless Access/Refresh JWT validation. #141 only starts and health-checks the password-protected Valkey service. Spring Data Redis/Lettuce, Refresh Token rotation, revocation, reuse detection, and Valkey failure-closed authentication belong to #140.
+After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication require the password-protected Valkey service. Compose waits for both MySQL and Valkey health before starting the backend. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
 
 ## Release and rollback
 

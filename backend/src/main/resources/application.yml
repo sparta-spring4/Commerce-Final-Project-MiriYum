@@ -5,6 +5,12 @@ spring:
     url: ${MIRIYUM_DB_URL}
     username: ${MIRIYUM_DB_USERNAME}
     password: ${MIRIYUM_DB_PASSWORD}
+  data:
+    redis:
+      host: ${MIRIYUM_VALKEY_HOST:localhost}
+      port: ${MIRIYUM_VALKEY_PORT:6379}
+      password: ${MIRIYUM_VALKEY_PASSWORD:}
+      timeout: ${MIRIYUM_VALKEY_TIMEOUT:2s}
   jackson:
     deserialization:
       fail-on-unknown-properties: true

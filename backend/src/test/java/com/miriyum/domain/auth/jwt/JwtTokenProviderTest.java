@@ -53,13 +53,26 @@ class JwtTokenProviderTest {
     void rejectsRefreshTokenUsedAsAccessToken() {
         // given
         JwtTokenProvider provider = new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
-        String refreshToken = provider.generateRefreshToken(TokenNamespace.CONSUMER, 7L);
+        String refreshToken = provider.generateRefreshToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
 
         // when & then
         assertThatThrownBy(() -> provider.parseAccessToken(refreshToken))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("Refresh JWT는 Valkey family와 현재 token 식별자를 보존한다")
+    void parsesRefreshIdentityClaims() {
+        JwtTokenProvider provider = new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+
+        String refreshToken = provider.generateRefreshToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
+        ParsedToken parsed = provider.parseRefreshToken(refreshToken);
+
+        assertThat(parsed.familyId()).isEqualTo("family-1");
+        assertThat(parsed.tokenId()).isEqualTo("token-1");
     }
 
     @Test

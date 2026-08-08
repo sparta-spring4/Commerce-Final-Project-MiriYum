@@ -50,6 +50,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     ports:
       # EC2 내부 확인만 가능하도록 127.0.0.1에만 backend 포트를 연결한다.
       - "127.0.0.1:8080:8080"

@@ -14,6 +14,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
@@ -36,6 +37,7 @@ public class ConsumerAuthService {
     private final LoginDelayGuard loginDelayGuard;
     private final PhoneNumberPolicy phoneNumberPolicy;
     private final ReservationContactReferenceGenerator contactReferenceGenerator;
+    private final RefreshTokenManager refreshTokenManager;
 
     public ConsumerAuthService(
             ConsumerAccountRepository consumerAccountRepository,
@@ -45,7 +47,8 @@ public class ConsumerAuthService {
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
             PhoneNumberPolicy phoneNumberPolicy,
-            ReservationContactReferenceGenerator contactReferenceGenerator
+            ReservationContactReferenceGenerator contactReferenceGenerator,
+            RefreshTokenManager refreshTokenManager
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -55,6 +58,7 @@ public class ConsumerAuthService {
         this.loginDelayGuard = loginDelayGuard;
         this.phoneNumberPolicy = phoneNumberPolicy;
         this.contactReferenceGenerator = contactReferenceGenerator;
+        this.refreshTokenManager = refreshTokenManager;
     }
 
     @Transactional
@@ -152,7 +156,7 @@ public class ConsumerAuthService {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return issueTokenPair(account.getId());
+        return refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsed, refreshToken);
     }
 
     public void logout(String refreshToken) {
@@ -164,12 +168,11 @@ public class ConsumerAuthService {
         if (parsed.namespace() != TokenNamespace.CONSUMER) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
+        refreshTokenManager.revoke(TokenNamespace.CONSUMER, parsed);
     }
 
     private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId));
+        return refreshTokenManager.issue(TokenNamespace.CONSUMER, accountId);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {

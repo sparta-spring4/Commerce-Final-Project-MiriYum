@@ -13,6 +13,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
@@ -33,6 +34,7 @@ public class StoreOperatorAuthService {
     private final PasswordPolicy passwordPolicy;
     private final LoginDelayGuard loginDelayGuard;
     private final PhoneNumberPolicy phoneNumberPolicy;
+    private final RefreshTokenManager refreshTokenManager;
 
     public StoreOperatorAuthService(
             StoreOperatorAccountRepository storeOperatorAccountRepository,
@@ -40,7 +42,8 @@ public class StoreOperatorAuthService {
             JwtTokenProvider jwtTokenProvider,
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
-            PhoneNumberPolicy phoneNumberPolicy
+            PhoneNumberPolicy phoneNumberPolicy,
+            RefreshTokenManager refreshTokenManager
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -48,6 +51,7 @@ public class StoreOperatorAuthService {
         this.passwordPolicy = passwordPolicy;
         this.loginDelayGuard = loginDelayGuard;
         this.phoneNumberPolicy = phoneNumberPolicy;
+        this.refreshTokenManager = refreshTokenManager;
     }
 
     @Transactional
@@ -140,7 +144,7 @@ public class StoreOperatorAuthService {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return issueTokenPair(account.getId());
+        return refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
     }
 
     public void logout(String refreshToken) {
@@ -152,12 +156,11 @@ public class StoreOperatorAuthService {
         if (parsed.namespace() != TokenNamespace.STORE_OPERATOR) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
+        refreshTokenManager.revoke(TokenNamespace.STORE_OPERATOR, parsed);
     }
 
     private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId));
+        return refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, accountId);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {
