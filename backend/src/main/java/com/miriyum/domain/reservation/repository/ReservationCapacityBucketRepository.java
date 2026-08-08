@@ -137,4 +137,36 @@ public interface ReservationCapacityBucketRepository
             @Param("startTime") LocalTime startTime,
             @Param("queryEndTime") LocalTime queryEndTime
     );
+
+    /**
+     * Observes only scalar IDs for the latest materialized cancellation candidates so the
+     * subsequent pessimistic union query is the first operation to hydrate mutable entities.
+     *
+     * @param storeIds target store IDs
+     * @param serviceDate store-local service date
+     * @param startTime inclusive occupancy start
+     * @param queryEndTime exclusive occupancy end
+     * @return matching bucket IDs in ascending primary-key order
+     */
+    @Query("""
+            select bucket.id
+            from ReservationCapacityBucket bucket
+            where bucket.storeId in :storeIds
+              and bucket.serviceDate = :serviceDate
+              and bucket.startTime < :queryEndTime
+              and bucket.endTime > :startTime
+              and bucket.policyVersion = (
+                  select max(latest.policyVersion)
+                  from ReservationCapacityBucket latest
+                  where latest.storeId = bucket.storeId
+                    and latest.serviceDate = bucket.serviceDate
+              )
+            order by bucket.id asc
+            """)
+    List<Long> findLatestPolicyBucketIdsOverlapping(
+            @Param("storeIds") Collection<Long> storeIds,
+            @Param("serviceDate") LocalDate serviceDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("queryEndTime") LocalTime queryEndTime
+    );
 }

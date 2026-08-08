@@ -90,6 +90,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -2214,7 +2215,7 @@ class ReservationServiceTest {
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L);
         order.verify(capacityBucketRepository)
                 .findLatestPolicyVersion(22L, SERVICE_DATE);
-        order.verify(capacityBucketRepository).findLatestPolicyBucketsOverlapping(
+        order.verify(capacityBucketRepository).findLatestPolicyBucketIdsOverlapping(
                 List.of(22L),
                 SERVICE_DATE,
                 START_TIME,
@@ -2227,6 +2228,34 @@ class ReservationServiceTest {
                 .findLatestPolicyVersion(22L, SERVICE_DATE);
         then(capacityBucketRepository).should(times(1))
                 .findAllByIdInForUpdate(List.of(301L, 302L, 401L));
+    }
+
+    @Test
+    @DisplayName("취소의 최신 후보 관찰은 scalar ID만 읽고 mutable 엔티티는 단일 잠금에서 처음 적재한다")
+    void cancellationCapacityObservesScalarIdsBeforeHydratingMutableBuckets() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        assertThat(failure).isNull();
+        then(capacityBucketRepository).should().findLatestPolicyBucketIdsOverlapping(
+                List.of(22L),
+                SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 15)
+        );
+        then(capacityBucketRepository).should(never()).findLatestPolicyBucketsOverlapping(
+                any(),
+                any(LocalDate.class),
+                any(LocalTime.class),
+                any(LocalTime.class)
+        );
     }
 
     @Test
@@ -2334,9 +2363,9 @@ class ReservationServiceTest {
                 given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
                         .willReturn(Optional.of(3L));
             }
-            given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+            given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
                     List.of(22L), SERVICE_DATE, START_TIME, LocalTime.of(19, 15)))
-                    .willReturn(List.of(bucket));
+                    .willReturn(List.of(301L));
             given(capacityBucketRepository.findAllByIdInForUpdate(List.of(301L)))
                     .willReturn(lockedBuckets);
         }
@@ -2356,6 +2385,133 @@ class ReservationServiceTest {
                             .isEqualTo(ReservationErrorCode.CAPACITY_POLICY_CHANGED));
         }
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "latest-absent",
+        "latest-non-positive",
+        "latest-older",
+        "current-empty",
+        "current-wrong-store",
+        "current-wrong-date",
+        "current-wrong-version",
+        "current-coverage-gap",
+        "current-coverage-overlap",
+        "same-version-id-mismatch",
+        "locked-extra",
+        "locked-duplicate",
+        "locked-out-of-order",
+        "locked-original-wrong-store",
+        "locked-original-wrong-date",
+        "locked-original-wrong-version"
+    })
+    @DisplayName("취소는 latest/current/locked fail-closed 위반을 RESERVATION_007로 거절한다")
+    void cancellationCapacityRejectsInvalidLatestCurrentAndLockedContracts(String violation) {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        AtomicReference<BusinessResult<?>> succeeded = new AtomicReference<>();
+        Reservation reservation = stubCancellationThroughAllocation(
+                command,
+                MenuHoldTerminationPresence.HOLD_PRESENT,
+                succeeded
+        );
+        ReservationCapacityBucket original = cancellationBucket(
+                301L, START_TIME, LocalTime.of(19, 15), 6, 2, 3L);
+        ReservationCapacityBucket current = cancellationBucket(
+                401L, START_TIME, LocalTime.of(19, 15), 6, 2, 4L);
+        Optional<Long> latestVersion = Optional.of(4L);
+        List<Long> currentIds = List.of(401L);
+        List<ReservationCapacityBucket> lockedBuckets = List.of(original, current);
+        boolean observesCurrent = true;
+        boolean locksUnion = true;
+
+        switch (violation) {
+            case "latest-absent" -> {
+                latestVersion = Optional.empty();
+                observesCurrent = false;
+                locksUnion = false;
+            }
+            case "latest-non-positive" -> {
+                latestVersion = Optional.of(0L);
+                observesCurrent = false;
+                locksUnion = false;
+            }
+            case "latest-older" -> {
+                latestVersion = Optional.of(2L);
+                observesCurrent = false;
+                locksUnion = false;
+            }
+            case "current-empty" -> {
+                currentIds = List.of();
+                locksUnion = false;
+            }
+            case "current-wrong-store" ->
+                    ReflectionTestUtils.setField(current, "storeId", 23L);
+            case "current-wrong-date" -> ReflectionTestUtils.setField(
+                    current, "serviceDate", SERVICE_DATE.plusDays(1));
+            case "current-wrong-version" ->
+                    ReflectionTestUtils.setField(current, "policyVersion", 5L);
+            case "current-coverage-gap" -> {
+                current = cancellationBucket(
+                        401L, LocalTime.of(18, 15), LocalTime.of(19, 15), 6, 2, 4L);
+                lockedBuckets = List.of(original, current);
+            }
+            case "current-coverage-overlap" -> {
+                ReservationCapacityBucket overlappingFirst = cancellationBucket(
+                        401L, START_TIME, LocalTime.of(18, 45), 6, 2, 4L);
+                ReservationCapacityBucket overlappingSecond = cancellationBucket(
+                        402L, LocalTime.of(18, 30), LocalTime.of(19, 15), 6, 2, 4L);
+                currentIds = List.of(401L, 402L);
+                lockedBuckets = List.of(original, overlappingFirst, overlappingSecond);
+            }
+            case "same-version-id-mismatch" -> {
+                latestVersion = Optional.of(3L);
+                locksUnion = false;
+            }
+            case "locked-extra" -> {
+                ReservationCapacityBucket extra = cancellationBucket(
+                        999L, START_TIME, LocalTime.of(19, 15), 6, 2, 4L);
+                lockedBuckets = List.of(original, current, extra);
+            }
+            case "locked-duplicate" -> lockedBuckets = List.of(original, original);
+            case "locked-out-of-order" -> lockedBuckets = List.of(current, original);
+            case "locked-original-wrong-store" ->
+                    ReflectionTestUtils.setField(original, "storeId", 23L);
+            case "locked-original-wrong-date" -> ReflectionTestUtils.setField(
+                    original, "serviceDate", SERVICE_DATE.plusDays(1));
+            case "locked-original-wrong-version" ->
+                    ReflectionTestUtils.setField(original, "policyVersion", 2L);
+            default -> throw new IllegalArgumentException("unsupported violation: " + violation);
+        }
+
+        given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
+                .willReturn(latestVersion);
+        if (observesCurrent) {
+            given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
+                    List.of(22L), SERVICE_DATE, START_TIME, LocalTime.of(19, 15)))
+                    .willReturn(currentIds);
+        }
+        if (locksUnion) {
+            TreeSet<Long> union = new TreeSet<>(List.of(301L));
+            union.addAll(currentIds);
+            given(capacityBucketRepository.findAllByIdInForUpdate(List.copyOf(union)))
+                    .willReturn(lockedBuckets);
+        }
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        assertThat(failure).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(ReservationErrorCode.CAPACITY_POLICY_CHANGED));
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(succeeded).hasNullValue();
+        then(menuHoldService).should(never()).release(any(MenuHoldReleaseCommand.class));
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
@@ -3181,6 +3337,31 @@ class ReservationServiceTest {
         });
     }
 
+    private Reservation stubCancellationThroughAllocation(
+            IdempotencyCommand command,
+            MenuHoldTerminationPresence presence,
+            AtomicReference<BusinessResult<?>> capturedResult
+    ) {
+        Reservation reservation = reservation(77L, 11L);
+        stubFreshIdempotency(command, capturedResult);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        given(cancellationPolicyEvaluator.evaluate(
+                1L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                NOW.minusSeconds(10)
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        given(menuHoldService.lockForTermination(77L)).willReturn(presence);
+        given(capacityAllocationRepository
+                .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))
+                .willReturn(List.of(
+                        ReservationCapacityAllocation.allocate(77L, 301L, 3, 3L)
+                ));
+        return reservation;
+    }
+
     private CancellationFixture stubSuccessfulCancellation(
             IdempotencyCommand command,
             MenuHoldTerminationPresence presence
@@ -3245,12 +3426,12 @@ class ReservationServiceTest {
                 .willReturn(List.of(firstAllocation, secondAllocation));
         given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
                 .willReturn(Optional.of(4L));
-        given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+        given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
                 List.of(22L),
                 SERVICE_DATE,
                 START_TIME,
                 LocalTime.of(19, 15)
-        )).willReturn(List.of(current));
+        )).willReturn(List.of(401L));
         given(capacityBucketRepository.findAllByIdInForUpdate(
                 List.of(301L, 302L, 401L)))
                 .willReturn(lockedBuckets);

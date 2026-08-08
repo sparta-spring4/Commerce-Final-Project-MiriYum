@@ -530,19 +530,15 @@ public class ReservationService {
         if (latestPolicyVersion < capacityPolicyVersion) {
             throw capacityPolicyChanged();
         }
-        List<ReservationCapacityBucket> currentBuckets =
-                capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+        List<Long> observedCurrentBucketIds =
+                capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
                         List.of(reservation.getStoreId()),
                         window.serviceDate(),
                         window.startTime(),
                         window.occupancyEndTime()
                 );
-        TreeSet<Long> currentBucketIds = validateObservedCurrentBuckets(
-                currentBuckets,
-                reservation.getStoreId(),
-                window,
-                latestPolicyVersion
-        );
+        TreeSet<Long> currentBucketIds =
+                validateObservedCurrentBucketIds(observedCurrentBucketIds);
         if (latestPolicyVersion == capacityPolicyVersion
                 && !currentBucketIds.equals(originalBucketIds)) {
             throw capacityPolicyChanged();
@@ -680,28 +676,17 @@ public class ReservationService {
         }
     }
 
-    private static TreeSet<Long> validateObservedCurrentBuckets(
-            List<ReservationCapacityBucket> buckets,
-            long storeId,
-            CancellationCapacityWindow window,
-            long latestPolicyVersion
-    ) {
-        if (buckets == null || buckets.isEmpty()) {
+    private static TreeSet<Long> validateObservedCurrentBucketIds(List<Long> bucketIds) {
+        if (bucketIds == null || bucketIds.isEmpty()) {
             throw capacityPolicyChanged();
         }
-        TreeSet<Long> bucketIds = new TreeSet<>();
-        for (ReservationCapacityBucket bucket : buckets) {
-            if (!matchesCancellationBucket(
-                    bucket,
-                    storeId,
-                    window.serviceDate(),
-                    latestPolicyVersion
-            ) || !bucketIds.add(bucket.getId())) {
+        TreeSet<Long> uniqueBucketIds = new TreeSet<>();
+        for (Long bucketId : bucketIds) {
+            if (bucketId == null || bucketId <= 0 || !uniqueBucketIds.add(bucketId)) {
                 throw capacityPolicyChanged();
             }
         }
-        validateCancellationCoverage(buckets, window);
-        return bucketIds;
+        return uniqueBucketIds;
     }
 
     private static Map<Long, ReservationCapacityBucket> validateLockedBucketUnion(

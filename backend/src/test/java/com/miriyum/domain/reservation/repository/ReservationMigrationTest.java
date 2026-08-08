@@ -1465,6 +1465,142 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("취소 후보 ID 관찰은 엔티티를 잔류시키지 않아 후속 잠금이 동시 점유를 보존한다")
+    void reservationRepositoryContractScalarObservationPreservesConcurrentOccupancy()
+            throws Exception {
+        ReservationCapacityBucket bucket = capacityBucket(
+                3L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
+        );
+        bucket.occupy(3);
+        ReservationCapacityBucket saved = capacityBucketRepository.saveAndFlush(bucket);
+        Method observationMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findLatestPolicyBucketIdsOverlapping",
+                4
+        );
+
+        CountDownLatch observationCompleted = new CountDownLatch(1);
+        CountDownLatch concurrentCommitCompleted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> cancellationWorker = executor.submit(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    @SuppressWarnings("unchecked")
+                    List<Long> observedIds = (List<Long>) invokeRepositoryMethod(
+                            observationMethod,
+                            capacityBucketRepository,
+                            List.of(STORE_ID),
+                            LocalDate.of(2026, 8, 1),
+                            LocalTime.of(18, 0),
+                            LocalTime.of(18, 30)
+                    );
+                    assertThat(observedIds).containsExactly(saved.getId());
+                    observationCompleted.countDown();
+                    try {
+                        if (!concurrentCommitCompleted.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("concurrent occupancy timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(
+                                "concurrent occupancy wait interrupted", exception);
+                    }
+
+                    List<ReservationCapacityBucket> locked =
+                            capacityBucketRepository.findAllByIdInForUpdate(observedIds);
+                    assertThat(locked).singleElement().satisfies(latest -> {
+                        assertThat(latest.getOccupiedPeople()).isEqualTo(5);
+                        assertThat(latest.getOccupiedTeams()).isEqualTo(2);
+                        latest.restore(3, 1);
+                    });
+                }));
+
+        try {
+            assertThat(observationCompleted.await(5, TimeUnit.SECONDS))
+                    .as("scalar observation must complete before concurrent occupancy")
+                    .isTrue();
+            transactionTemplate.executeWithoutResult(status -> {
+                List<ReservationCapacityBucket> locked =
+                        capacityBucketRepository.findAllByIdInForUpdate(List.of(saved.getId()));
+                assertThat(locked).singleElement().satisfies(current -> current.occupy(2));
+            });
+            concurrentCommitCompleted.countDown();
+        } finally {
+            concurrentCommitCompleted.countDown();
+            try {
+                cancellationWorker.get(5, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+
+        assertThat(jdbcTemplate.queryForMap(
+                """
+                        SELECT occupied_people, occupied_teams
+                        FROM reservation_capacity_buckets
+                        WHERE reservation_capacity_bucket_id = ?
+                        """,
+                saved.getId()
+        ))
+                .containsEntry("occupied_people", 2)
+                .containsEntry("occupied_teams", 1);
+    }
+
+    @Test
+    @DisplayName("앞 버킷 복구가 flush된 뒤 다음 버킷 underflow가 나면 전체 복구가 rollback된다")
+    void reservationRepositoryContractRollsBackFlushedRestoreBeforeLaterUnderflow() {
+        ReservationCapacityBucket first = capacityBucket(
+                3L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
+        );
+        first.occupy(3);
+        ReservationCapacityBucket second = capacityBucket(
+                3L,
+                LocalTime.of(18, 30),
+                LocalTime.of(19, 0)
+        );
+        second.occupy(2);
+        List<ReservationCapacityBucket> saved =
+                capacityBucketRepository.saveAllAndFlush(List.of(first, second));
+        List<Long> bucketIds = saved.stream()
+                .map(ReservationCapacityBucket::getId)
+                .sorted()
+                .toList();
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            List<ReservationCapacityBucket> locked =
+                    capacityBucketRepository.findAllByIdInForUpdate(bucketIds);
+            locked.getFirst().restore(3, 1);
+            entityManager.flush();
+            locked.get(1).restore(3, 1);
+        }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("capacity occupancy cannot be restored below zero");
+
+        assertThat(jdbcTemplate.queryForList(
+                """
+                        SELECT occupied_people, occupied_teams
+                        FROM reservation_capacity_buckets
+                        WHERE reservation_capacity_bucket_id IN (?, ?)
+                        ORDER BY reservation_capacity_bucket_id ASC
+                        """,
+                bucketIds.get(0),
+                bucketIds.get(1)
+        ))
+                .extracting(
+                        row -> row.get("occupied_people"),
+                        row -> row.get("occupied_teams")
+                )
+                .containsExactly(
+                        tuple(3, 1),
+                        tuple(2, 1)
+                );
+    }
+
+    @Test
     @DisplayName("취소 복구용 수용량 잠금 조회는 PK 오름차순 행을 반환하고 쓰기 잠금을 유지한다")
     void orderedLockRepositoryContractReturnsSortedRowsAndHoldsWriteLock() throws Exception {
         // given
