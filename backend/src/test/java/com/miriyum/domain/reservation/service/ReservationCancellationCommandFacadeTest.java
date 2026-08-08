@@ -23,6 +23,7 @@ import com.miriyum.global.idempotency.RequestFingerprint;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -81,7 +82,7 @@ class ReservationCancellationCommandFacadeTest {
                 ReservationService.class, Clock.class);
         assertThat(productionConstructor.isAnnotationPresent(Autowired.class)).isTrue();
         assertThat(facadeType.getMethod(
-                "cancelConsumer",
+                "cancelByConsumer",
                 long.class,
                 long.class,
                 IdempotencyKey.class,
@@ -135,7 +136,7 @@ class ReservationCancellationCommandFacadeTest {
 
         assertThat(actual).isSameAs(RESULT);
         assertThat(facadeClass().getMethod(
-                "cancelStoreOperator",
+                "cancelByStoreOperator",
                 long.class,
                 long.class,
                 long.class,
@@ -247,6 +248,81 @@ class ReservationCancellationCommandFacadeTest {
     }
 
     @Test
+    void commandNullSingleAndBoundaryWhitespaceRemainDistinctWithoutNormalization()
+            throws Exception {
+        RecordingClock clock = new RecordingClock(REQUESTED_AT);
+        given(reservationService.cancelConsumerReservation(
+                anyLong(), anyLong(), any(), nullable(String.class), any(), anyString()))
+                .willReturn(RESULT);
+        Object facade = newFacade(clock, ignored -> 100L, ignored -> { });
+
+        invokeConsumer(
+                facade, CONSUMER_ID, RESERVATION_ID, KEY,
+                new ConsumerCancellationRequest(null));
+        invokeConsumer(
+                facade, CONSUMER_ID, RESERVATION_ID, KEY,
+                new ConsumerCancellationRequest(" "));
+        invokeConsumer(
+                facade, CONSUMER_ID, RESERVATION_ID, KEY,
+                new ConsumerCancellationRequest(" leading"));
+        invokeConsumer(
+                facade, CONSUMER_ID, RESERVATION_ID, KEY,
+                new ConsumerCancellationRequest("trailing "));
+
+        ArgumentCaptor<IdempotencyCommand> commands =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        ArgumentCaptor<String> reasons = ArgumentCaptor.forClass(String.class);
+        then(reservationService).should(times(4)).cancelConsumerReservation(
+                anyLong(), anyLong(), commands.capture(), reasons.capture(), any(), anyString());
+
+        assertThat(reasons.getAllValues())
+                .containsExactly(null, " ", " leading", "trailing ");
+        assertThat(commands.getAllValues())
+                .extracting(IdempotencyCommand::requestFingerprint)
+                .containsExactly(
+                        RequestFingerprint.of(
+                                "method=4:POST|"
+                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "cancellations|"
+                                        + "reservationId=3:321|"
+                                        + "reason=-1:|"
+                        ),
+                        RequestFingerprint.of(
+                                "method=4:POST|"
+                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "cancellations|"
+                                        + "reservationId=3:321|"
+                                        + "reason=1: |"
+                        ),
+                        RequestFingerprint.of(
+                                "method=4:POST|"
+                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "cancellations|"
+                                        + "reservationId=3:321|"
+                                        + "reason=8: leading|"
+                        ),
+                        RequestFingerprint.of(
+                                "method=4:POST|"
+                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "cancellations|"
+                                        + "reservationId=3:321|"
+                                        + "reason=9:trailing |"
+                        )
+                )
+                .doesNotHaveDuplicates();
+        assertThat(clock.instantCalls()).isEqualTo(4);
+    }
+
+    @Test
+    void commandExposesOnlyTheExactActorSpecificPublicEntries() {
+        assertThat(Stream.of(facadeClass().getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .map(Method::getName)
+                .toList())
+                .containsExactlyInAnyOrder("cancelByConsumer", "cancelByStoreOperator");
+    }
+
+    @Test
     void commandLongMaxOperatorCorrelationIsExactlyNinetyCharacters() throws Exception {
         given(reservationService.cancelStoreReservation(
                 anyLong(), anyLong(), anyLong(), any(), anyString(), any(), anyString()))
@@ -306,8 +382,9 @@ class ReservationCancellationCommandFacadeTest {
 
     @Test
     void retryDeadlockThenTimeoutUsesThreeAttemptsAndOneRequestedAt() throws Exception {
+        String exactReason = " retry reason ";
         given(reservationService.cancelConsumerReservation(
-                anyLong(), anyLong(), any(), nullable(String.class), any(), anyString()))
+                anyLong(), anyLong(), any(), anyString(), any(), anyString()))
                 .willThrow(mysqlLockFailure(1213))
                 .willThrow(mysqlLockFailure(1205))
                 .willReturn(RESULT);
@@ -324,22 +401,34 @@ class ReservationCancellationCommandFacadeTest {
                 CONSUMER_ID,
                 RESERVATION_ID,
                 KEY,
-                new ConsumerCancellationRequest(null)
+                new ConsumerCancellationRequest(exactReason)
         );
 
         assertThat(actual).isSameAs(RESULT);
         assertThat(delays).containsExactly(100L, 300L);
         ArgumentCaptor<IdempotencyCommand> commands =
                 ArgumentCaptor.forClass(IdempotencyCommand.class);
+        ArgumentCaptor<String> reasons = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Instant> requestedTimes = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<String> correlations = ArgumentCaptor.forClass(String.class);
         then(reservationService).should(times(3)).cancelConsumerReservation(
-                anyLong(), anyLong(), commands.capture(), nullable(String.class),
-                requestedTimes.capture(), anyString());
+                anyLong(), anyLong(), commands.capture(), reasons.capture(),
+                requestedTimes.capture(), correlations.capture());
         IdempotencyCommand firstCommand = commands.getAllValues().get(0);
         assertThat(commands.getAllValues()).allSatisfy(
                 command -> assertThat(command).isSameAs(firstCommand));
+        assertThat(reasons.getAllValues())
+                .containsExactly(exactReason, exactReason, exactReason)
+                .allSatisfy(reason -> assertThat(reason).isSameAs(exactReason));
         assertThat(requestedTimes.getAllValues()).allSatisfy(
                 requestedAt -> assertThat(requestedAt).isSameAs(REQUESTED_AT));
+        String exactCorrelation =
+                "reservation-cancel:consumer:11:550e8400-e29b-41d4-a716-446655440000";
+        assertThat(correlations.getAllValues())
+                .containsExactly(exactCorrelation, exactCorrelation, exactCorrelation);
+        String firstCorrelation = correlations.getAllValues().get(0);
+        assertThat(correlations.getAllValues()).allSatisfy(
+                correlation -> assertThat(correlation).isSameAs(firstCorrelation));
         assertThat(clock.instantCalls()).isEqualTo(1);
     }
 
@@ -515,7 +604,7 @@ class ReservationCancellationCommandFacadeTest {
     ) throws Exception {
         return invoke(
                 facade,
-                "cancelConsumer",
+                "cancelByConsumer",
                 new Class<?>[]{
                         long.class,
                         long.class,
@@ -539,7 +628,7 @@ class ReservationCancellationCommandFacadeTest {
     ) throws Exception {
         return invoke(
                 facade,
-                "cancelStoreOperator",
+                "cancelByStoreOperator",
                 new Class<?>[]{
                         long.class,
                         long.class,
@@ -561,7 +650,17 @@ class ReservationCancellationCommandFacadeTest {
             Class<?>[] parameterTypes,
             Object... arguments
     ) throws Exception {
-        Method method = facade.getClass().getMethod(methodName, parameterTypes);
+        Method method;
+        try {
+            method = facade.getClass().getMethod(methodName, parameterTypes);
+        } catch (NoSuchMethodException exception) {
+            return fail(
+                    "ReservationCancellationCommandFacade."
+                            + methodName
+                            + " public method is required",
+                    exception
+            );
+        }
         try {
             return method.invoke(facade, arguments);
         } catch (InvocationTargetException exception) {

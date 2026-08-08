@@ -82,7 +82,7 @@ public class ReservationCancellationCommandFacade {
      * @param request consumer cancellation input
      * @return stored or freshly committed cancellation result
      */
-    public ReservationCancellationCommandResult cancelConsumer(
+    public ReservationCancellationCommandResult cancelByConsumer(
             long consumerAccountId,
             long reservationId,
             IdempotencyKey key,
@@ -122,7 +122,7 @@ public class ReservationCancellationCommandFacade {
      * @param request store-operator cancellation input
      * @return stored or freshly committed cancellation result
      */
-    public ReservationCancellationCommandResult cancelStoreOperator(
+    public ReservationCancellationCommandResult cancelByStoreOperator(
             long operatorAccountId,
             long storeId,
             long reservationId,
