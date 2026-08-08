@@ -25,6 +25,8 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
+import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -41,7 +43,10 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStat
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
+import com.miriyum.domain.reservation.entity.ReservationCancellationAudit;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
@@ -51,6 +56,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
+import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
@@ -78,9 +84,12 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -103,6 +112,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.ReflectionUtils;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -115,6 +125,12 @@ class ReservationServiceTest {
     private static final LocalDate CAPACITY_SERVICE_DATE = LocalDate.of(2026, 8, 2);
     private static final LocalTime START_TIME = LocalTime.of(18, 0);
     private static final LocalTime CAPACITY_END_TIME = LocalTime.of(19, 0);
+    private static final String CANCELLATION_KEY =
+            "550e8400-e29b-41d4-a716-446655440000";
+    private static final String CONSUMER_CANCELLATION_CORRELATION =
+            "reservation-cancel:consumer:11:" + CANCELLATION_KEY;
+    private static final String OPERATOR_CANCELLATION_CORRELATION =
+            "reservation-cancel:store-operator:33:" + CANCELLATION_KEY;
 
     @Mock
     private StoreScheduleService storeScheduleService;
@@ -158,6 +174,12 @@ class ReservationServiceTest {
     @Mock
     private MenuHoldService menuHoldService;
 
+    @Mock
+    private ReservationCancellationAuditRepository cancellationAuditRepository;
+
+    @Mock
+    private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
+
     private ReservationService reservationService;
 
     @BeforeEach
@@ -178,7 +200,9 @@ class ReservationServiceTest {
                 storeTransactionEligibilityService,
                 capacityAllocationRepository,
                 cancellationPolicySelector,
-                menuHoldService
+                menuHoldService,
+                cancellationAuditRepository,
+                cancellationPolicyEvaluator
         );
     }
 
@@ -1911,6 +1935,672 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("소비자 활성 gate와 멱등 선점 뒤 actor 범위 잠금으로 타인 예약을 숨긴다")
+    void cancellationGateConsumerRunsBeforeIdempotencyAndHidesForeignReservation() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command, null, NOW.minusSeconds(10), CONSUMER_CANCELLATION_CORRELATION))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+
+        InOrder order = inOrder(
+                consumerAccountService,
+                idempotencyExecutor,
+                reservationRepository
+        );
+        order.verify(consumerAccountService).requireActiveAccount(11L);
+        order.verify(idempotencyExecutor).execute(eq(command), any());
+        order.verify(reservationRepository)
+                .findByIdAndConsumerAccountIdForUpdate(77L, 11L);
+        then(reservationRepository).should(never()).findById(77L);
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("운영자 관리권한 gate 실패는 멱등과 예약 접근보다 먼저 종료한다")
+    void cancellationGateOperatorOwnershipRunsBeforeIdempotency() {
+        IdempotencyCommand command = cancellationCommand("store-operator", 33L);
+        willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED))
+                .given(storeService)
+                .requireManagementOwnership(33L, 22L);
+
+        assertThatThrownBy(() -> invokeStoreCancellation(
+                command,
+                "운영자 취소",
+                NOW.minusSeconds(10),
+                OPERATOR_CANCELLATION_CORRELATION
+        )).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(StoreErrorCode.ACCESS_DENIED));
+
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("취소 replay는 저장 detail만 복원하고 도메인 자원을 다시 읽지 않는다")
+    void cancellationReplayUsesStoredDataWithoutDomainReads() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation cancelled = reservation(77L, 11L);
+        cancelled.cancel(NOW.minusSeconds(1));
+        ReservationDetailResponse stored = ReservationDetailResponse.from(
+                cancelled,
+                List.of(),
+                ReservationCancellationActorType.CONSUMER,
+                "사용자 사유"
+        );
+        given(idempotencyExecutor.execute(eq(command), any())).willReturn(
+                new IdempotentOutcome(
+                        true,
+                        200,
+                        "SUCCESS",
+                        "RESERVATION",
+                        "77",
+                        new ObjectMapper().valueToTree(stored)
+                )
+        );
+
+        Object result = invokeConsumerCancellation(
+                command,
+                "사용자 사유",
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(cancellationHttpStatus(result)).isEqualTo(200);
+        assertThat(cancellationData(result)).isEqualTo(stored);
+        then(consumerAccountService).should().requireActiveAccount(11L);
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+        then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("fresh 취소는 상태를 evaluator보다 먼저 검사하고 RESERVATION_005로 거절한다")
+    void cancellationPolicyRejectsStateBeforeEvaluator() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation cancelled = reservation(77L, 11L);
+        cancelled.cancel(NOW.minusSeconds(1));
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(cancelled));
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command, null, NOW.minusSeconds(10), CONSUMER_CANCELLATION_CORRELATION))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION));
+
+        then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"version", "startAt"})
+    @DisplayName("null 저장 정책 버전과 legacy null startAt은 evaluator 전에 RESERVATION_006이다")
+    void cancellationPolicyRejectsNullVersionAndNullStartBeforeEvaluator(String missingField) {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation reservation = reservation(77L, 11L);
+        if ("version".equals(missingField)) {
+            ReflectionTestUtils.setField(reservation, "cancellationPolicyVersion", null);
+        } else {
+            ReflectionTestUtils.setField(reservation.getTimeSnapshot(), "startAt", null);
+        }
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command, null, NOW.minusSeconds(10), CONSUMER_CANCELLATION_CORRELATION))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.CANCELLATION_NOT_ALLOWED));
+
+        then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("cancellationPolicyArgumentCases")
+    @DisplayName("저장 version·actor·status·startAt·requestedAt을 실제 evaluator 순서로 전달한다")
+    void cancellationPolicyPassesStoredVersionActorStatusStartAndRequestedAtInOrder(
+            boolean storeOperator,
+            Instant requestedAt
+    ) {
+        long actorId = storeOperator ? 33L : 11L;
+        IdempotencyCommand command = cancellationCommand(
+                storeOperator ? "store-operator" : "consumer",
+                actorId
+        );
+        Reservation reservation = reservation(77L, 11L);
+        stubFreshIdempotency(command, null);
+        if (storeOperator) {
+            given(reservationRepository.findByIdAndStoreIdForUpdate(77L, 22L))
+                    .willReturn(Optional.of(reservation));
+        } else {
+            given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                    .willReturn(Optional.of(reservation));
+        }
+        given(cancellationPolicyEvaluator.evaluate(
+                1L,
+                storeOperator
+                        ? ReservationCancellationActorType.STORE_OPERATOR
+                        : ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                requestedAt
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        IllegalStateException afterEvaluator = new IllegalStateException("after evaluator");
+        willThrow(afterEvaluator).given(menuHoldService).lockForTermination(77L);
+
+        assertThatThrownBy(() -> {
+            if (storeOperator) {
+                invokeStoreCancellation(
+                        command,
+                        "운영자 취소",
+                        requestedAt,
+                        OPERATOR_CANCELLATION_CORRELATION
+                );
+            } else {
+                invokeConsumerCancellation(
+                        command,
+                        null,
+                        requestedAt,
+                        CONSUMER_CANCELLATION_CORRELATION
+                );
+            }
+        }).isSameAs(afterEvaluator);
+
+        then(cancellationPolicyEvaluator).should().evaluate(
+                1L,
+                storeOperator
+                        ? ReservationCancellationActorType.STORE_OPERATOR
+                        : ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                requestedAt
+        );
+    }
+
+    static Stream<Arguments> cancellationPolicyArgumentCases() {
+        Instant startAt = Instant.parse("2026-08-03T09:00:00Z");
+        return Stream.of(false, true)
+                .flatMap(storeOperator -> Stream.of(
+                        Arguments.of(storeOperator, startAt.minusSeconds(1)),
+                        Arguments.of(storeOperator, startAt),
+                        Arguments.of(storeOperator, startAt.plusSeconds(1))
+                ));
+    }
+
+    @Test
+    @DisplayName("unknown 저장 취소 정책의 evaluator 거절은 RESERVATION_006을 보존한다")
+    void cancellationPolicyMapsUnknownVersionToReservation006() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation reservation = reservation(77L, 11L);
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        given(cancellationPolicyEvaluator.evaluate(
+                1L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                NOW.minusSeconds(10)
+        )).willReturn(ReservationCancellationDecision.REJECTED_BY_POLICY);
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command, null, NOW.minusSeconds(10), CONSUMER_CANCELLATION_CORRELATION))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.CANCELLATION_NOT_ALLOWED));
+
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("취소는 Reservation과 MenuHold를 먼저 잠근 뒤 정렬 합집합을 한 번 잠근다")
+    void cancellationCapacityLocksMenuHoldBeforeOneSortedUnionLock() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD
+        );
+
+        Object result = invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(cancellationHttpStatus(result)).isEqualTo(200);
+        InOrder order = inOrder(
+                reservationRepository,
+                cancellationPolicyEvaluator,
+                menuHoldService,
+                capacityAllocationRepository,
+                capacityBucketRepository
+        );
+        order.verify(reservationRepository)
+                .findByIdAndConsumerAccountIdForUpdate(77L, 11L);
+        order.verify(cancellationPolicyEvaluator).evaluate(
+                1L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                fixture.reservation().getStartAt(),
+                NOW.minusSeconds(10)
+        );
+        order.verify(menuHoldService).lockForTermination(77L);
+        order.verify(capacityAllocationRepository)
+                .findAllByReservationIdOrderByCapacityBucketIdAsc(77L);
+        order.verify(capacityBucketRepository)
+                .findLatestPolicyVersion(22L, SERVICE_DATE);
+        order.verify(capacityBucketRepository).findLatestPolicyBucketsOverlapping(
+                List.of(22L),
+                SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 15)
+        );
+        order.verify(capacityBucketRepository).findAllByIdInForUpdate(
+                List.of(301L, 302L, 401L)
+        );
+        order.verify(capacityBucketRepository)
+                .findLatestPolicyVersion(22L, SERVICE_DATE);
+        then(capacityBucketRepository).should(times(1))
+                .findAllByIdInForUpdate(List.of(301L, 302L, 401L));
+    }
+
+    @Test
+    @DisplayName("원본 배정과 최신 carry-over 각 버킷에서 전체 인원과 팀 하나를 한 번 복구한다")
+    void cancellationCapacityRestoresEachOriginalAndCurrentBucketExactlyOnce() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD
+        );
+
+        invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(fixture.lockedBuckets())
+                .extracting(
+                        ReservationCapacityBucket::getId,
+                        ReservationCapacityBucket::getOccupiedPeople,
+                        ReservationCapacityBucket::getOccupiedTeams
+                )
+                .containsExactly(
+                        tuple(301L, 3, 1),
+                        tuple(302L, 3, 1),
+                        tuple(401L, 3, 1)
+                );
+        assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        then(capacityAllocationRepository).should(times(1))
+                .findAllByReservationIdOrderByCapacityBucketIdAsc(77L);
+        then(capacityAllocationRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "missing-allocation",
+        "foreign-allocation",
+        "wrong-people",
+        "wrong-teams",
+        "wrong-allocation-version",
+        "missing-bucket",
+        "underflow",
+        "version-race"
+    })
+    @DisplayName("손상 배정·누락 버킷·underflow·정책 version race는 성공 상태와 감사를 만들지 않는다")
+    void cancellationCapacityRejectsCorruptAllocationMissingBucketUnderflowAndVersionRace(
+            String corruption
+    ) {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation reservation = reservation(77L, 11L);
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        given(cancellationPolicyEvaluator.evaluate(
+                1L,
+                ReservationCancellationActorType.CONSUMER,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                NOW.minusSeconds(10)
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        given(menuHoldService.lockForTermination(77L))
+                .willReturn(MenuHoldTerminationPresence.NO_HOLD);
+
+        ReservationCapacityAllocation allocation =
+                ReservationCapacityAllocation.allocate(77L, 301L, 3, 3L);
+        ReservationCapacityBucket bucket = cancellationBucket(
+                301L, START_TIME, LocalTime.of(19, 15), 6, 2, 3L);
+        List<ReservationCapacityAllocation> allocations = List.of(allocation);
+        List<ReservationCapacityBucket> lockedBuckets = List.of(bucket);
+        if ("missing-allocation".equals(corruption)) {
+            allocations = List.of();
+        } else if ("foreign-allocation".equals(corruption)) {
+            ReflectionTestUtils.setField(allocation, "reservationId", 88L);
+        } else if ("wrong-people".equals(corruption)) {
+            ReflectionTestUtils.setField(allocation, "occupiedPeople", 2);
+        } else if ("wrong-teams".equals(corruption)) {
+            ReflectionTestUtils.setField(allocation, "occupiedTeams", 2);
+        } else if ("wrong-allocation-version".equals(corruption)) {
+            ReflectionTestUtils.setField(allocation, "capacityPolicyVersion", 2L);
+        } else if ("missing-bucket".equals(corruption)) {
+            lockedBuckets = List.of();
+        } else if ("underflow".equals(corruption)) {
+            bucket = cancellationBucket(
+                    301L, START_TIME, LocalTime.of(19, 15), 2, 0, 3L);
+            lockedBuckets = List.of(bucket);
+        }
+
+        given(capacityAllocationRepository
+                .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))
+                .willReturn(allocations);
+        boolean corruptAllocation = Set.of(
+                "missing-allocation",
+                "foreign-allocation",
+                "wrong-people",
+                "wrong-teams",
+                "wrong-allocation-version"
+        ).contains(corruption);
+        if (!corruptAllocation) {
+            if ("version-race".equals(corruption)) {
+                given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
+                        .willReturn(Optional.of(3L), Optional.of(4L));
+            } else {
+                given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
+                        .willReturn(Optional.of(3L));
+            }
+            given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                    List.of(22L), SERVICE_DATE, START_TIME, LocalTime.of(19, 15)))
+                    .willReturn(List.of(bucket));
+            given(capacityBucketRepository.findAllByIdInForUpdate(List.of(301L)))
+                    .willReturn(lockedBuckets);
+        }
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        if ("underflow".equals(corruption)) {
+            assertThat(failure).isInstanceOf(IllegalStateException.class);
+        } else {
+            assertThat(failure).isInstanceOfSatisfying(ServiceException.class, exception ->
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(ReservationErrorCode.CAPACITY_POLICY_CHANGED));
+        }
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NO_HOLD", "HOLD_PRESENT", "WRONG_ID", "WRONG_OUTCOME"})
+    @DisplayName("홀드가 있을 때만 exact correlation으로 RELEASED 결과를 검증해 해제한다")
+    void cancellationCapacityReleasesOnlyPresentMenuHoldWithExactCorrelation(String holdCase) {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        boolean holdPresent = !"NO_HOLD".equals(holdCase);
+        boolean expectedToComplete = !"WRONG_ID".equals(holdCase)
+                && !"WRONG_OUTCOME".equals(holdCase);
+        CancellationFixture fixture = stubCancellation(
+                command,
+                holdPresent
+                        ? MenuHoldTerminationPresence.HOLD_PRESENT
+                        : MenuHoldTerminationPresence.NO_HOLD,
+                expectedToComplete
+        );
+        if ("WRONG_ID".equals(holdCase)) {
+            given(menuHoldService.release(any(MenuHoldReleaseCommand.class)))
+                    .willReturn(MenuHoldCommandResult.released(78L));
+        } else if ("WRONG_OUTCOME".equals(holdCase)) {
+            given(menuHoldService.release(any(MenuHoldReleaseCommand.class)))
+                    .willReturn(MenuHoldCommandResult.confirmed(77L));
+        }
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        if ("WRONG_ID".equals(holdCase) || "WRONG_OUTCOME".equals(holdCase)) {
+            assertThat(failure).isInstanceOf(IllegalStateException.class);
+            assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+            then(cancellationAuditRepository).shouldHaveNoInteractions();
+            return;
+        }
+        assertThat(failure).isNull();
+        if (holdPresent) {
+            then(menuHoldService).should().release(new MenuHoldReleaseCommand(
+                    77L,
+                    CONSUMER_CANCELLATION_CORRELATION
+            ));
+        } else {
+            then(menuHoldService).should(never()).release(any(MenuHoldReleaseCommand.class));
+        }
+    }
+
+    @Test
+    @DisplayName("취소 성공 감사와 Reservation cancelledAt은 한 번 얻은 같은 occurredAt을 쓴다")
+    void cancellationAuditUsesOneOccurredAtForReservationAndAudit() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD
+        );
+
+        invokeConsumerCancellation(
+                command,
+                "사용자 취소",
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        ArgumentCaptor<ReservationCancellationAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationCancellationAudit.class);
+        then(cancellationAuditRepository).should().saveAndFlush(auditCaptor.capture());
+        ReservationCancellationAudit audit = auditCaptor.getValue();
+        assertThat(audit.getReservationId()).isEqualTo(77L);
+        assertThat(audit.getActorType()).isEqualTo(ReservationCancellationActorType.CONSUMER);
+        assertThat(audit.getActorId()).isEqualTo(11L);
+        assertThat(audit.getCancellationReason()).isEqualTo("사용자 취소");
+        assertThat(audit.getRequestedAt()).isEqualTo(NOW.minusSeconds(10));
+        assertThat(audit.getOccurredAt()).isEqualTo(NOW);
+        assertThat(audit.getBeforeStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(audit.getAfterStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(audit.getCancellationPolicyVersion()).isEqualTo(1L);
+        assertThat(audit.getCapacityPolicyVersion()).isEqualTo(3L);
+        assertThat(audit.getCommandId()).isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
+        assertThat(fixture.reservation().getCancelledAt()).isSameAs(audit.getOccurredAt());
+    }
+
+    @Test
+    @DisplayName("운영자 공백 사유는 trimming 없이 감사와 결과에 그대로 보존한다")
+    void cancellationAuditAcceptsWhitespaceOperatorReason() {
+        IdempotencyCommand command = cancellationCommand("store-operator", 33L);
+        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+
+        Object result = invokeStoreCancellation(
+                command,
+                " ",
+                NOW.minusSeconds(10),
+                OPERATOR_CANCELLATION_CORRELATION
+        );
+
+        ArgumentCaptor<ReservationCancellationAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationCancellationAudit.class);
+        then(cancellationAuditRepository).should().saveAndFlush(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getActorType())
+                .isEqualTo(ReservationCancellationActorType.STORE_OPERATOR);
+        assertThat(auditCaptor.getValue().getActorId()).isEqualTo(33L);
+        assertThat(auditCaptor.getValue().getCancellationReason()).isEqualTo(" ");
+        assertThat(auditCaptor.getValue().getCommandId())
+                .isEqualTo(OPERATOR_CANCELLATION_CORRELATION);
+        assertThat(cancellationData(result).cancelledBy()).isEqualTo("STORE_OPERATOR");
+        assertThat(cancellationData(result).cancellationReason()).isEqualTo(" ");
+    }
+
+    @Test
+    @DisplayName("감사 저장 실패는 성공 BusinessResult를 만들지 않는다")
+    void cancellationAuditFailurePreventsSucceededOutcome() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        AtomicReference<BusinessResult<?>> succeeded = new AtomicReference<>();
+        CancellationFixture fixture = stubCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD,
+                false,
+                succeeded
+        );
+        IllegalStateException auditFailure = new IllegalStateException("audit write failed");
+        given(cancellationAuditRepository.saveAndFlush(
+                any(ReservationCancellationAudit.class)))
+                .willThrow(auditFailure);
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        )).isSameAs(auditFailure);
+
+        assertThat(succeeded).hasNullValue();
+        assertThat(fixture.reservation().getCancelledAt()).isEqualTo(NOW);
+        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("멱등 저장 결과는 200·SUCCESS·RESERVATION·ID와 detail data만 담는다")
+    void cancellationDetailStoresOnlyStatusCodeResourceAndData() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        AtomicReference<BusinessResult<?>> captured = new AtomicReference<>();
+        stubCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD,
+                true,
+                captured
+        );
+
+        Object result = invokeConsumerCancellation(
+                command,
+                "사용자 취소",
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(captured.get()).isNotNull();
+        assertThat(captured.get().httpStatus()).isEqualTo(200);
+        assertThat(captured.get().responseCode()).isEqualTo("SUCCESS");
+        assertThat(captured.get().resourceType()).isEqualTo("RESERVATION");
+        assertThat(captured.get().resourceId()).isEqualTo("77");
+        assertThat(captured.get().data()).isEqualTo(cancellationData(result));
+        JsonNode storedData = new ObjectMapper().valueToTree(captured.get().data());
+        assertThat(storedData.has("code")).isFalse();
+        assertThat(storedData.has("message")).isFalse();
+        assertThat(storedData.has("data")).isFalse();
+    }
+
+    @Test
+    @DisplayName("detail replay는 저장 JSON을 반환하고 성공 감사를 추가하지 않는다")
+    void cancellationDetailReplayDoesNotWriteAnotherAudit() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation cancelled = reservation(77L, 11L);
+        cancelled.cancel(NOW.minusSeconds(1));
+        ReservationDetailResponse stored = ReservationDetailResponse.from(
+                cancelled,
+                List.of(),
+                ReservationCancellationActorType.CONSUMER,
+                "원래 사유"
+        );
+        given(idempotencyExecutor.execute(eq(command), any())).willReturn(
+                new IdempotentOutcome(
+                        true,
+                        200,
+                        "SUCCESS",
+                        "RESERVATION",
+                        "77",
+                        new ObjectMapper().valueToTree(stored)
+                )
+        );
+
+        Object replay = invokeConsumerCancellation(
+                command,
+                "원래 사유",
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(cancellationData(replay)).isEqualTo(stored);
+        then(cancellationAuditRepository).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("후속 소비자·운영자 detail은 optional 감사를 결합하고 legacy 취소는 null을 반환한다")
+    void cancellationDetailGetUsesOptionalAuditAndLegacyNulls() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command,
+                MenuHoldTerminationPresence.NO_HOLD
+        );
+        invokeConsumerCancellation(
+                command,
+                "사용자 취소",
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+        ArgumentCaptor<ReservationCancellationAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationCancellationAudit.class);
+        then(cancellationAuditRepository).should().saveAndFlush(auditCaptor.capture());
+        ReservationCancellationAudit audit = auditCaptor.getValue();
+        given(reservationRepository.findByIdAndConsumerAccountId(77L, 11L))
+                .willReturn(Optional.of(fixture.reservation()));
+        given(reservationRepository.findByIdAndStoreId(77L, 22L))
+                .willReturn(Optional.of(fixture.reservation()));
+        given(cancellationAuditRepository.findByReservationId(77L))
+                .willReturn(Optional.of(audit), Optional.empty());
+        given(menuHoldSnapshotQueryService.findByReservationId(77L)).willReturn(List.of());
+
+        ReservationDetailResponse consumer =
+                reservationService.getConsumerReservation(11L, 77L);
+        ReservationDetailResponse operator =
+                reservationService.getStoreReservation(33L, 22L, 77L);
+
+        assertThat(consumer.cancelledBy()).isEqualTo("CONSUMER");
+        assertThat(consumer.cancellationReason()).isEqualTo("사용자 취소");
+        assertThat(operator.cancelledBy()).isNull();
+        assertThat(operator.cancellationReason()).isNull();
+        then(cancellationAuditRepository).should(times(2)).findByReservationId(77L);
+    }
+
+    @Test
     @DisplayName("상태 필터가 없으면 계정 범위 전체 조회를 사용한다")
     void findsAllConsumerHistoryWithoutStatusFilter() {
         // given
@@ -2458,6 +3148,239 @@ class ReservationServiceTest {
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+    }
+
+    private IdempotencyCommand cancellationCommand(String namespace, long actorId) {
+        return new IdempotencyCommand(
+                namespace,
+                actorId,
+                "RESERVATION_CANCEL",
+                CANCELLATION_KEY,
+                "a".repeat(64)
+        );
+    }
+
+    private void stubFreshIdempotency(
+            IdempotencyCommand command,
+            AtomicReference<BusinessResult<?>> capturedResult
+    ) {
+        given(idempotencyExecutor.execute(eq(command), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            BusinessResult<?> result = work.get();
+            if (capturedResult != null) {
+                capturedResult.set(result);
+            }
+            return new IdempotentOutcome(
+                    false,
+                    result.httpStatus(),
+                    result.responseCode(),
+                    result.resourceType(),
+                    result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data())
+            );
+        });
+    }
+
+    private CancellationFixture stubSuccessfulCancellation(
+            IdempotencyCommand command,
+            MenuHoldTerminationPresence presence
+    ) {
+        return stubCancellation(command, presence, true);
+    }
+
+    private CancellationFixture stubCancellation(
+            IdempotencyCommand command,
+            MenuHoldTerminationPresence presence,
+            boolean expectedToComplete
+    ) {
+        return stubCancellation(command, presence, expectedToComplete, null);
+    }
+
+    private CancellationFixture stubCancellation(
+            IdempotencyCommand command,
+            MenuHoldTerminationPresence presence,
+            boolean expectedToComplete,
+            AtomicReference<BusinessResult<?>> capturedResult
+    ) {
+        boolean storeOperator = "store-operator".equals(command.principalNamespace());
+        ReservationCancellationActorType actorType = storeOperator
+                ? ReservationCancellationActorType.STORE_OPERATOR
+                : ReservationCancellationActorType.CONSUMER;
+        long actorId = storeOperator ? 33L : 11L;
+        String correlationId = storeOperator
+                ? OPERATOR_CANCELLATION_CORRELATION
+                : CONSUMER_CANCELLATION_CORRELATION;
+        Reservation reservation = reservation(77L, 11L);
+        ReservationCapacityAllocation firstAllocation =
+                ReservationCapacityAllocation.allocate(77L, 301L, 3, 3L);
+        ReservationCapacityAllocation secondAllocation =
+                ReservationCapacityAllocation.allocate(77L, 302L, 3, 3L);
+        ReservationCapacityBucket firstOriginal = cancellationBucket(
+                301L, START_TIME, LocalTime.of(18, 30), 6, 2, 3L);
+        ReservationCapacityBucket secondOriginal = cancellationBucket(
+                302L, LocalTime.of(18, 30), LocalTime.of(19, 15), 6, 2, 3L);
+        ReservationCapacityBucket current = cancellationBucket(
+                401L, START_TIME, LocalTime.of(19, 15), 6, 2, 4L);
+        List<ReservationCapacityBucket> lockedBuckets =
+                List.of(firstOriginal, secondOriginal, current);
+
+        stubFreshIdempotency(command, capturedResult);
+        if (storeOperator) {
+            given(reservationRepository.findByIdAndStoreIdForUpdate(77L, 22L))
+                    .willReturn(Optional.of(reservation));
+        } else {
+            given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                    .willReturn(Optional.of(reservation));
+        }
+        given(cancellationPolicyEvaluator.evaluate(
+                1L,
+                actorType,
+                ReservationStatus.CONFIRMED,
+                reservation.getStartAt(),
+                NOW.minusSeconds(10)
+        )).willReturn(ReservationCancellationDecision.ALLOWED);
+        given(menuHoldService.lockForTermination(77L)).willReturn(presence);
+        given(capacityAllocationRepository
+                .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))
+                .willReturn(List.of(firstAllocation, secondAllocation));
+        given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
+                .willReturn(Optional.of(4L));
+        given(capacityBucketRepository.findLatestPolicyBucketsOverlapping(
+                List.of(22L),
+                SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 15)
+        )).willReturn(List.of(current));
+        given(capacityBucketRepository.findAllByIdInForUpdate(
+                List.of(301L, 302L, 401L)))
+                .willReturn(lockedBuckets);
+        if (expectedToComplete && presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
+            given(menuHoldService.release(new MenuHoldReleaseCommand(
+                    77L,
+                    correlationId
+            ))).willReturn(MenuHoldCommandResult.released(77L));
+        }
+        if (expectedToComplete) {
+            given(cancellationAuditRepository.saveAndFlush(
+                    any(ReservationCancellationAudit.class)))
+                    .willAnswer(invocation -> invocation.getArgument(0));
+            if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
+                given(menuHoldSnapshotQueryService.findByReservationId(77L)).willReturn(List.of());
+            }
+        }
+
+        return new CancellationFixture(reservation, lockedBuckets);
+    }
+
+    private static ReservationCapacityBucket cancellationBucket(
+            long id,
+            LocalTime startTime,
+            LocalTime endTime,
+            int occupiedPeople,
+            int occupiedTeams,
+            long policyVersion
+    ) {
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                22L,
+                SERVICE_DATE,
+                startTime,
+                endTime,
+                12,
+                4,
+                occupiedPeople,
+                occupiedTeams,
+                1,
+                6,
+                true,
+                policyVersion
+        );
+        ReflectionTestUtils.setField(bucket, "id", id);
+        return bucket;
+    }
+
+    private Object invokeConsumerCancellation(
+            IdempotencyCommand command,
+            String reason,
+            Instant requestedAt,
+            String correlationId
+    ) {
+        return invokeCancellation(
+                "cancelConsumerReservation",
+                new Class<?>[] {
+                    long.class,
+                    long.class,
+                    IdempotencyCommand.class,
+                    String.class,
+                    Instant.class,
+                    String.class
+                },
+                new Object[] {11L, 77L, command, reason, requestedAt, correlationId}
+        );
+    }
+
+    private Object invokeStoreCancellation(
+            IdempotencyCommand command,
+            String reason,
+            Instant requestedAt,
+            String correlationId
+    ) {
+        return invokeCancellation(
+                "cancelStoreReservation",
+                new Class<?>[] {
+                    long.class,
+                    long.class,
+                    long.class,
+                    IdempotencyCommand.class,
+                    String.class,
+                    Instant.class,
+                    String.class
+                },
+                new Object[] {33L, 22L, 77L, command, reason, requestedAt, correlationId}
+        );
+    }
+
+    private Object invokeCancellation(
+            String methodName,
+            Class<?>[] parameterTypes,
+            Object[] arguments
+    ) {
+        Method method = ReflectionUtils.findMethod(
+                ReservationService.class,
+                methodName,
+                parameterTypes
+        );
+        assertThat(method)
+                .as("service method %s must be present before cancellation is invoked", methodName)
+                .isNotNull();
+        try {
+            return method.invoke(reservationService, arguments);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new AssertionError("cancellation service invocation failed", cause);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("cancellation service invocation failed", exception);
+        }
+    }
+
+    private int cancellationHttpStatus(Object result) {
+        Number status = ReflectionTestUtils.invokeMethod(result, "httpStatus");
+        return status.intValue();
+    }
+
+    private ReservationDetailResponse cancellationData(Object result) {
+        return ReflectionTestUtils.invokeMethod(result, "data");
+    }
+
+    private record CancellationFixture(
+            Reservation reservation,
+            List<ReservationCapacityBucket> lockedBuckets
+    ) {
     }
 
     private Reservation reservation(Long reservationId, Long consumerAccountId) {

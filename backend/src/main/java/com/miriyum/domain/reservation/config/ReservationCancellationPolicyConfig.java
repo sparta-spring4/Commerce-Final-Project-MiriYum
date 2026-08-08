@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.config;
 
+import com.miriyum.domain.reservation.service.ReservationCancellationPolicyEvaluator;
 import com.miriyum.domain.reservation.service.ReservationCancellationPolicyRegistry;
 import com.miriyum.domain.reservation.service.ReservationCancellationPolicySelector;
 import org.springframework.context.annotation.Bean;
@@ -21,5 +22,12 @@ public class ReservationCancellationPolicyConfig {
             ReservationCancellationPolicyRegistry reservationCancellationPolicyRegistry
     ) {
         return new ReservationCancellationPolicySelector(reservationCancellationPolicyRegistry);
+    }
+
+    @Bean
+    public ReservationCancellationPolicyEvaluator reservationCancellationPolicyEvaluator(
+            ReservationCancellationPolicyRegistry registry
+    ) {
+        return new ReservationCancellationPolicyEvaluator(registry);
     }
 }

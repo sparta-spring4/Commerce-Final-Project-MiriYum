@@ -395,6 +395,130 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("예약 취소 actor 범위 조회는 상태를 숨기지 않고 실제 쓰기 잠금을 유지한다")
+    void reservationRepositoryContractsScopeAndHoldWriteLocks() throws Exception {
+        // given
+        long secondConsumerAccountId = CONSUMER_ACCOUNT_ID + 1;
+        jdbcTemplate.update(
+                """
+                        INSERT INTO consumer_accounts (
+                            consumer_account_id, email, password_hash, name, status,
+                            created_at, updated_at
+                        ) VALUES (?, 'second-reservation-test@example.com', 'hashed',
+                                  '두 번째 예약자', 'ACTIVE', NOW(6), NOW(6))
+                        """,
+                secondConsumerAccountId
+        );
+        insertStore(SECOND_STORE_ID, "1234567891", "두 번째 매장");
+
+        Reservation consumerReservation = reservationRepository.saveAndFlush(
+                reservation(CONSUMER_ACCOUNT_ID, STORE_ID)
+        );
+        Reservation operatorReservation = reservationRepository.saveAndFlush(
+                reservation(secondConsumerAccountId, SECOND_STORE_ID)
+        );
+        Reservation cancelledReservation = reservation(
+                secondConsumerAccountId, SECOND_STORE_ID);
+        cancelledReservation.cancel(CREATED_AT.plusSeconds(1));
+        Reservation savedCancelledReservation =
+                reservationRepository.saveAndFlush(cancelledReservation);
+
+        Method consumerLockMethod = requiredRepositoryMethod(
+                reservationRepository,
+                "findByIdAndConsumerAccountIdForUpdate",
+                2
+        );
+        Method operatorLockMethod = requiredRepositoryMethod(
+                reservationRepository,
+                "findByIdAndStoreIdForUpdate",
+                2
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> consumerScoped = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        consumerReservation.getId(),
+                        CONSUMER_ACCOUNT_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> operatorScoped = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        operatorReservation.getId(),
+                        SECOND_STORE_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> foreignConsumer = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        consumerReservation.getId(),
+                        secondConsumerAccountId
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> foreignStore = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        operatorReservation.getId(),
+                        STORE_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> cancelledForConsumer = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        savedCancelledReservation.getId(),
+                        secondConsumerAccountId
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> cancelledForStore = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        savedCancelledReservation.getId(),
+                        SECOND_STORE_ID
+                )
+        );
+
+        // then
+        assertThat(consumerScoped)
+                .get()
+                .extracting(Reservation::getId, Reservation::getConsumerAccountId)
+                .containsExactly(consumerReservation.getId(), CONSUMER_ACCOUNT_ID);
+        assertThat(operatorScoped)
+                .get()
+                .extracting(Reservation::getId, Reservation::getStoreId)
+                .containsExactly(operatorReservation.getId(), SECOND_STORE_ID);
+        assertThat(foreignConsumer).isEmpty();
+        assertThat(foreignStore).isEmpty();
+        assertThat(cancelledForConsumer).get().extracting(Reservation::getStatus)
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(cancelledForStore).get().extracting(Reservation::getStatus)
+                .isEqualTo(ReservationStatus.CANCELLED);
+
+        assertReservationWriteLock(
+                consumerLockMethod,
+                consumerReservation.getId(),
+                CONSUMER_ACCOUNT_ID
+        );
+        assertReservationWriteLock(
+                operatorLockMethod,
+                operatorReservation.getId(),
+                SECOND_STORE_ID
+        );
+    }
+
+    @Test
     @DisplayName("취소 정책 버전 열은 nullable BIGINT이며 기본값 없이 양수만 허용한다")
     void definesNullablePositiveCancellationPolicyVersionWithoutDefault() {
         java.util.Map<String, Object> column = jdbcTemplate.queryForMap("""
@@ -1421,6 +1545,75 @@ class ReservationMigrationTest {
         }
     }
 
+    private void assertReservationWriteLock(
+            Method repositoryMethod,
+            long reservationId,
+            long actorScopeId
+    ) throws Exception {
+        CountDownLatch reservationLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseReservationLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                @SuppressWarnings("unchecked")
+                Optional<Reservation> lockedReservation =
+                        (Optional<Reservation>) invokeRepositoryMethod(
+                                repositoryMethod,
+                                reservationRepository,
+                                reservationId,
+                                actorScopeId
+                        );
+                assertThat(lockedReservation).isPresent();
+                reservationLockHeld.countDown();
+                try {
+                    if (!releaseReservationLock.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("reservation lock release timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "reservation lock wait interrupted", exception);
+                }
+            }));
+
+            try {
+                assertThat(reservationLockHeld.await(5, TimeUnit.SECONDS))
+                        .as("Reservation write lock must be held before NOWAIT check")
+                        .isTrue();
+                try (Connection independentConnection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(),
+                        MYSQL.getUsername(),
+                        MYSQL.getPassword()
+                )) {
+                    independentConnection.setAutoCommit(false);
+                    SQLException lockFailure = null;
+                    try (PreparedStatement statement = independentConnection.prepareStatement("""
+                            SELECT reservation_id
+                            FROM reservations
+                            WHERE reservation_id = ?
+                            FOR UPDATE NOWAIT
+                            """)) {
+                        statement.setLong(1, reservationId);
+                        statement.executeQuery();
+                    } catch (SQLException exception) {
+                        lockFailure = exception;
+                    }
+
+                    assertThat((Throwable) lockFailure)
+                            .as("MySQL must reject NOWAIT while Reservation write lock is held")
+                            .isNotNull();
+                    assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
+                }
+            } finally {
+                releaseReservationLock.countDown();
+                worker.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
     private Method requiredRepositoryMethod(
             Object repository,
             String methodName,
@@ -1746,11 +1939,15 @@ class ReservationMigrationTest {
     }
 
     private Reservation reservation() {
+        return reservation(CONSUMER_ACCOUNT_ID, STORE_ID);
+    }
+
+    private Reservation reservation(long consumerAccountId, long storeId) {
         return Reservation.confirm(
-                CONSUMER_ACCOUNT_ID,
-                STORE_ID,
+                consumerAccountId,
+                storeId,
                 "미리윰",
-                reservationTimeSnapshot(),
+                reservationTimeSnapshot(storeId),
                 PartyComposition.of(2, 1, 1),
                 ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE),
                 1L,
@@ -1760,7 +1957,11 @@ class ReservationMigrationTest {
     }
 
     private ReservationTimeSnapshot reservationTimeSnapshot() {
-        ReservationTimePolicyVersion policy = timePolicy(1L);
+        return reservationTimeSnapshot(STORE_ID);
+    }
+
+    private ReservationTimeSnapshot reservationTimeSnapshot(long storeId) {
+        ReservationTimePolicyVersion policy = timePolicy(storeId, 1L);
         policy.activate(CREATED_AT.minusSeconds(60), "예약 계산 정책");
         return ReservationTimeSnapshot.calculate(
                 policy,
@@ -1809,8 +2010,12 @@ class ReservationMigrationTest {
     }
 
     private ReservationTimePolicyVersion timePolicy(long versionNumber) {
+        return timePolicy(STORE_ID, versionNumber);
+    }
+
+    private ReservationTimePolicyVersion timePolicy(long storeId, long versionNumber) {
         return ReservationTimePolicyVersion.createDraft(
-                STORE_ID,
+                storeId,
                 versionNumber,
                 30,
                 90,
