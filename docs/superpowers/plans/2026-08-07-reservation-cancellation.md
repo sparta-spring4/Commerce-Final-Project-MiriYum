@@ -690,7 +690,7 @@ For locking, invoke each reflected repository method inside a worker `Transactio
 Run:
 
 ```powershell
-backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*ReservationRepositoryContract*"
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*reservationRepositoryContract*"
 ```
 
 Expected RED: the MySQL test executes and fails the described AssertJ method-presence assertion because the actor-scoped `FOR UPDATE` methods do not exist. Compilation, context, Flyway, and container startup must succeed.
@@ -798,7 +798,7 @@ Update both GET detail methods to query `cancellationAuditRepository.findByReser
 
 ```powershell
 backend\gradlew.bat -p backend test --tests "com.miriyum.domain.reservation.service.ReservationServiceTest"
-backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*ReservationRepositoryContract*"
+backend\gradlew.bat -p backend integrationTest --tests "com.miriyum.domain.reservation.repository.ReservationMigrationTest.*reservationRepositoryContract*"
 git diff --check
 git diff --name-only HEAD
 ```
