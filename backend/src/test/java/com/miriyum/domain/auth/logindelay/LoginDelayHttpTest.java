@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenStore;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.testcontainers.containers.MySQLContainer;
@@ -68,6 +70,10 @@ class LoginDelayHttpTest {
 
     @Autowired
     private ConsumerAccountRepository consumerAccountRepository;
+
+    // HTTP 계약 테스트의 대상은 로그인 지연 응답이므로 Valkey 저장소는 격리한다.
+    @MockitoBean
+    private RefreshTokenStore refreshTokenStore;
 
     @Autowired
     private PasswordEncoder passwordEncoder;

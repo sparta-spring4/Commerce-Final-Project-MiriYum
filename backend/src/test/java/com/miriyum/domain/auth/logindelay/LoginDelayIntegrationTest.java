@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenStore;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
@@ -38,6 +39,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -82,6 +84,10 @@ class LoginDelayIntegrationTest {
 
     @Autowired
     private ConsumerAuthService consumerAuthService;
+
+    // 로그인 지연 테스트는 MySQL 상태 전이만 검증하므로 Valkey 저장소는 격리한다.
+    @MockitoBean
+    private RefreshTokenStore refreshTokenStore;
 
     @Autowired
     private LoginDelayGuard loginDelayGuard;

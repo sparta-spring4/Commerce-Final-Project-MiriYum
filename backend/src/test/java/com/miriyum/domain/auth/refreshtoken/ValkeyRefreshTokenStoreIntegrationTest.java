@@ -126,8 +126,10 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 nextExpiresAt);
 
         assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
-        assertThat(redisTemplate.getExpire(RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId)))
-                .isBetween(1_209_590L, 1_209_600L);
+        long actualTtl = redisTemplate.getExpire(
+                RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId));
+        long expectedTtl = nextExpiresAt.getEpochSecond() - Instant.now().getEpochSecond();
+        assertThat(actualTtl).isBetween(expectedTtl - 2, expectedTtl + 1);
     }
 
     @Test

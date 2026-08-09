@@ -105,6 +105,14 @@ class RefreshTokenManagerTest {
 
         assertThat(pair.accessToken()).isEqualTo("next-access-token");
         assertThat(pair.refreshToken()).isEqualTo("next-refresh-token");
+
+        ArgumentCaptor<Instant> instantCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(refreshTokenStore).rotate(
+                eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), eq("token-1"), any(),
+                eq("token-2"), any(), instantCaptor.capture(), instantCaptor.capture());
+        assertThat(instantCaptor.getAllValues()).containsExactly(
+                Instant.parse("2026-08-08T00:00:00Z"),
+                Instant.parse("2026-08-22T00:00:00Z"));
     }
 
     @Test
