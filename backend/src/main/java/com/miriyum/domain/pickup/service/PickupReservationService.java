@@ -6,15 +6,19 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
+import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
 import com.miriyum.domain.pickup.dto.request.PickupMenuSelectionRequest;
+import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationItemResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupReservationItem;
+import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
@@ -99,6 +103,91 @@ public class PickupReservationService {
         return new PickupCommandResult(outcome.httpStatus(), replayResponse(outcome.data()));
     }
 
+    @Transactional(readOnly = true)
+    public PickupReservationResponse getConsumerPickup(
+            long consumerAccountId,
+            long pickupReservationId
+    ) {
+        if (consumerAccountId <= 0) {
+            throw new IllegalArgumentException("consumerAccountId must be positive");
+        }
+        if (pickupReservationId <= 0) {
+            throw new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND);
+        }
+        PickupReservation pickup = repository.findByIdAndConsumerAccountId(
+                        pickupReservationId, consumerAccountId)
+                .orElseThrow(() -> new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND));
+        return toResponse(pickup);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public PickupCommandResult cancelByConsumer(
+            long consumerAccountId,
+            long pickupReservationId,
+            IdempotencyKey key,
+            PickupCancellationRequest request
+    ) {
+        if (consumerAccountId <= 0 || key == null || request == null) {
+            throw new IllegalArgumentException("pickup cancellation arguments are required");
+        }
+        if (pickupReservationId <= 0) {
+            throw new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND);
+        }
+        String reason = normalizeOptionalReason(request.reason());
+        IdempotencyCommand command = new IdempotencyCommand(
+                "consumer", consumerAccountId, "PICKUP_CANCEL", key.value(),
+                RequestFingerprint.of("POST|/api/v1/pickup-reservations/"
+                        + pickupReservationId + "/cancellations|"
+                        + (reason == null ? "" : reason)));
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
+                cancelByConsumerWork(
+                        consumerAccountId, pickupReservationId, key, reason));
+        return new PickupCommandResult(outcome.httpStatus(), replayResponse(outcome.data()));
+    }
+
+    private BusinessResult<PickupReservationResponse> cancelByConsumerWork(
+            long consumerAccountId,
+            long pickupReservationId,
+            IdempotencyKey key,
+            String reason
+    ) {
+        PickupReservation pickup = repository.findByIdAndConsumerAccountIdForUpdate(
+                        pickupReservationId, consumerAccountId)
+                .orElseThrow(() -> new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND));
+        if (pickup.getStatus() != PickupStatus.CONFIRMED) {
+            throw new ServiceException(PickupErrorCode.INVALID_STATE_TRANSITION);
+        }
+        Instant cancelledAt = clock.instant();
+        if (!cancelledAt.isBefore(pickup.getPickupAt())) {
+            throw new ServiceException(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
+        }
+
+        String restoreOperationId = "pickup-cancel-" + consumerAccountId
+                + "-" + key.value();
+        pickup.cancelByConsumer(reason, cancelledAt);
+        MenuInventoryRestoreResult restored = inventoryService.restore(
+                new MenuInventoryRestoreCommand(
+                        restoreOperationId, pickup.getAcquireOperationId()));
+        if (!restoreOperationId.equals(restored.operationId())
+                || !pickup.getAcquireOperationId().equals(restored.sourceAcquireOperationId())) {
+            throw new IllegalStateException("inventory restore result does not match cancellation");
+        }
+        PickupReservation saved = repository.saveAndFlush(pickup);
+        PickupReservationResponse response = toResponse(saved);
+        return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
+                "pickup-reservation", response.pickupReservationId(), response);
+    }
+
+    private static String normalizeOptionalReason(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        if (reason.isBlank() || reason.length() > 500) {
+            throw new IllegalArgumentException("cancellation reason has invalid length");
+        }
+        return reason;
+    }
+
     private PickupReservationResponse replayResponse(JsonNode payload) {
         PickupReservationResponse value = objectMapper.treeToValue(
                 payload, PickupReservationResponse.class);
@@ -132,8 +221,9 @@ public class PickupReservationService {
                             item.endTime(), item.inventoryPolicyVersion(), selection.quantity());
                 })
                 .toList();
-        MenuInventoryAcquireResult acquired = acquire(
-                new MenuInventoryAcquireCommand("pickup-create-" + key.value(), acquireSelections));
+        MenuInventoryAcquireResult acquired = acquire(new MenuInventoryAcquireCommand(
+                "pickup-create-" + consumerAccountId + "-" + key.value(),
+                acquireSelections));
         Map<Long, MenuInventoryAcquiredItem> acquiredByMenu = acquired.items().stream()
                 .collect(Collectors.toMap(
                         MenuInventoryAcquiredItem::menuId, Function.identity(),

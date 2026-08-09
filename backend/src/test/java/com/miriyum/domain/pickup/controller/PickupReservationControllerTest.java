@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,6 +84,38 @@ class PickupReservationControllerTest {
                                 """))
                 .andExpect(status().isBadRequest());
         then(service).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void returnsAuthenticatedConsumersPickupDetail() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        given(service.getConsumerPickup(11L, 77L)).willReturn(response());
+
+        mockMvc.perform(get(URL + "/77")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pickupReservationId").value("77"));
+        then(service).should().getConsumerPickup(11L, 77L);
+    }
+
+    @Test
+    void cancelsAuthenticatedConsumersPickup() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        given(service.cancelByConsumer(
+                eq(11L), eq(77L), any(IdempotencyKey.class), any()))
+                .willReturn(new PickupCommandResult(200, response()));
+
+        mockMvc.perform(post(URL + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"일정 변경\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+        then(service).should().cancelByConsumer(
+                eq(11L), eq(77L), any(IdempotencyKey.class), any());
     }
 
     private static PickupReservationResponse response() {

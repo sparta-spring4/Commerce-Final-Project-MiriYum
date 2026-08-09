@@ -12,10 +12,14 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability.AvailabilityStatus;
+import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
 import com.miriyum.domain.pickup.dto.request.PickupMenuSelectionRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
+import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
+import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
@@ -36,6 +40,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -119,6 +124,8 @@ class PickupReservationServiceTest {
             assertThat(selection.inventoryPolicyVersion()).isEqualTo(6L);
             assertThat(selection.quantity()).isEqualTo(2);
         });
+        assertThat(acquire.getValue().operationId())
+                .isEqualTo("pickup-create-11-" + KEY.value());
         ArgumentCaptor<PickupReservation> saved = ArgumentCaptor.forClass(PickupReservation.class);
         then(repository).should().saveAndFlush(saved.capture());
         assertThat(saved.getValue().getAcquireOperationId()).isEqualTo("pickup-acquire-result");
@@ -221,6 +228,73 @@ class PickupReservationServiceTest {
         then(repository).shouldHaveNoInteractions();
     }
 
+    @Test
+    void readsPickupOnlyThroughConsumerScopedRepositoryQuery() {
+        given(repository.findByIdAndConsumerAccountId(77L, 11L))
+                .willReturn(Optional.of(confirmedPickup()));
+
+        PickupReservationResponse result = service.getConsumerPickup(11L, 77L);
+
+        assertThat(result.pickupReservationId()).isEqualTo("77");
+        assertThat(result.items()).singleElement()
+                .satisfies(item -> assertThat(item.menuName()).isEqualTo("바질 파스타"));
+        then(repository).should().findByIdAndConsumerAccountId(77L, 11L);
+        then(repository).should(never()).findById(any());
+    }
+
+    @Test
+    void hidesMissingAndForeignConsumerPickupWithPickupNotFound() {
+        given(repository.findByIdAndConsumerAccountId(77L, 11L))
+                .willReturn(Optional.empty());
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.getConsumerPickup(11L, 77L));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.PICKUP_NOT_FOUND);
+    }
+
+    @Test
+    void cancelsOwnedPickupAndRestoresItsStoredAcquireOperationOnce() {
+        PickupReservation pickup = confirmedPickup();
+        given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(pickup));
+        given(inventoryService.restore(any())).willReturn(new MenuInventoryRestoreResult(
+                "pickup-cancel-11-" + KEY.value(), "pickup-acquire-result"));
+        given(repository.saveAndFlush(pickup)).willReturn(pickup);
+
+        PickupCommandResult result = service.cancelByConsumer(
+                11L, 77L, KEY, new PickupCancellationRequest("일정 변경"));
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(result.data().status())
+                .isEqualTo(com.miriyum.domain.pickup.entity.PickupStatus.CANCELLED);
+        assertThat(result.data().cancellationReason()).isEqualTo("일정 변경");
+        ArgumentCaptor<MenuInventoryRestoreCommand> restore =
+                ArgumentCaptor.forClass(MenuInventoryRestoreCommand.class);
+        then(inventoryService).should().restore(restore.capture());
+        assertThat(restore.getValue().sourceAcquireOperationId())
+                .isEqualTo("pickup-acquire-result");
+        assertThat(restore.getValue().operationId())
+                .isEqualTo("pickup-cancel-11-" + KEY.value());
+    }
+
+    @Test
+    void rejectsConsumerCancellationExactlyAtPickupTimeBeforeRestore() {
+        service = new PickupReservationService(
+                storeTransactionEligibilityService, storeService, inventoryService,
+                repository, idempotencyExecutor, new ObjectMapper(),
+                Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC));
+        given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(confirmedPickup()));
+
+        ServiceException exception = catchThrowableOfType(ServiceException.class, () ->
+                service.cancelByConsumer(
+                        11L, 77L, KEY, new PickupCancellationRequest(null)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
+        then(inventoryService).should(never()).restore(any());
+    }
+
     private static PickupReservationCreateRequest request(int quantity) {
         return new PickupReservationCreateRequest(
                 "22", PICKUP_DATE, PICKUP_TIME,
@@ -232,5 +306,18 @@ class PickupReservationServiceTest {
                 33L, 6L, "Asia/Seoul", PICKUP_DATE, PICKUP_TIME,
                 PICKUP_DATE, LocalTime.of(14, 0), availableQuantity,
                 AvailabilityStatus.AVAILABLE);
+    }
+
+    private static PickupReservation confirmedPickup() {
+        PickupReservation pickup = PickupReservation.confirm(
+                11L, 22L, "미리윰 강남점", "Asia/Seoul",
+                PICKUP_DATE, PICKUP_TIME, Instant.parse("2026-08-10T03:00:00Z"),
+                "pickup-acquire-result",
+                List.of(new PickupItemSnapshot(
+                        33L, 44L, 5L, "바질 파스타", 12_000, 6L,
+                        PICKUP_DATE, PICKUP_TIME, PICKUP_DATE,
+                        LocalTime.of(14, 0), 2)), NOW);
+        ReflectionTestUtils.setField(pickup, "id", 77L);
+        return pickup;
     }
 }
