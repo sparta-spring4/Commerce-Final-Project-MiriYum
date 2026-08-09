@@ -7,6 +7,7 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupStatus;
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -64,6 +65,9 @@ class PickupReservationRepositoryTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private EntityManager entityManager;
+
     @BeforeEach
     void resetAndSeedParents() {
         jdbcTemplate.execute("DELETE FROM pickup_reservation_items");
@@ -112,6 +116,23 @@ class PickupReservationRepositoryTest {
                 saved.getId(), STORE_ID)).isPresent();
         assertThat(pickupReservationRepository.findByIdAndStoreId(
                 saved.getId(), OTHER_STORE_ID)).isEmpty();
+    }
+
+    @Test
+    @Transactional
+    void bulkFetchesPagedReservationsWithItemsInOneRepositoryCall() {
+        PickupReservation first = pickupReservationRepository.save(confirmedPickup(
+                CONSUMER_ID, STORE_ID, "pickup-list-1"));
+        PickupReservation second = pickupReservationRepository.save(confirmedPickup(
+                OTHER_CONSUMER_ID, STORE_ID, "pickup-list-2"));
+        pickupReservationRepository.flush();
+        entityManager.clear();
+
+        List<PickupReservation> found = pickupReservationRepository
+                .findAllWithItemsByIdIn(List.of(first.getId(), second.getId()));
+
+        assertThat(found).hasSize(2)
+                .allSatisfy(pickup -> assertThat(pickup.getItems()).hasSize(1));
     }
 
     @Test

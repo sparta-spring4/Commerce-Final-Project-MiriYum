@@ -110,6 +110,24 @@ class PickupStoreManagementControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
     }
 
+    @Test
+    void rejectsBlankStoreCancellationReasonAndNonEmptyFulfillmentBody() throws Exception {
+        mockMvc.perform(post(ROOT + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer operator-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\" \"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post(ROOT + "/77/fulfillments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer operator-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"PICKED_UP\"}"))
+                .andExpect(status().isBadRequest());
+        then(service).shouldHaveNoInteractions();
+    }
+
     private static PickupReservationResponse response() {
         return new PickupReservationResponse(
                 "77", "22", "미리윰 강남점", LocalDate.of(2026, 8, 10),

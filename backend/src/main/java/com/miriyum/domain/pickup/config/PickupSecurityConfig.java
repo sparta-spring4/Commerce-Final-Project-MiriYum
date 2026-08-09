@@ -8,6 +8,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -22,6 +23,24 @@ public class PickupSecurityConfig {
 
     private static final String PICKUP_ROOT = "/api/v1/pickup-reservations";
     private static final String PICKUP_FAMILY = PICKUP_ROOT + "/**";
+    private static final String PUBLIC_AVAILABILITY =
+            "/api/v1/stores/*/pickup-availability";
+
+    @Bean
+    @Order(-11)
+    public SecurityFilterChain pickupAvailabilityFilterChain(
+            HttpSecurity http
+    ) throws Exception {
+        http
+                .securityMatcher(PUBLIC_AVAILABILITY)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, PUBLIC_AVAILABILITY).permitAll()
+                        .anyRequest().denyAll());
+        return http.build();
+    }
 
     @Bean
     @Order(0)

@@ -1,17 +1,18 @@
 package com.miriyum.domain.pickup.repository;
 
 import com.miriyum.domain.pickup.entity.PickupReservation;
+import com.miriyum.domain.pickup.entity.PickupStatus;
 import jakarta.persistence.LockModeType;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import java.time.LocalDate;
-import com.miriyum.domain.pickup.entity.PickupStatus;
 
 public interface PickupReservationRepository
         extends JpaRepository<PickupReservation, Long> {
@@ -43,6 +44,10 @@ public interface PickupReservationRepository
             PickupStatus status,
             Pageable pageable
     );
+
+    @EntityGraph(attributePaths = "items")
+    @Query("select distinct pickup from PickupReservation pickup where pickup.id in :ids")
+    List<PickupReservation> findAllWithItemsByIdIn(@Param("ids") List<Long> ids);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

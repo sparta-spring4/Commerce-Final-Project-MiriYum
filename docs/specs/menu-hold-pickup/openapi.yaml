@@ -107,6 +107,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PickupCreationNotFound"
         "409":
           $ref: "#/components/responses/PickupConflict"
         "503":
@@ -855,9 +857,34 @@ components:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: PICKUP_004
-            message: 요청한 메뉴 수량을 확보할 수 없습니다.
+          examples:
+            transactionNotEligible:
+              value:
+                code: PICKUP_002
+                message: 픽업 거래 상태가 유효하지 않습니다.
+            slotNotAvailable:
+              value:
+                code: PICKUP_003
+                message: 요청한 픽업 제공 구간을 사용할 수 없습니다.
+            insufficientQuantity:
+              value:
+                code: PICKUP_004
+                message: 픽업 메뉴 수량이 부족합니다.
+    PickupCreationNotFound:
+      description: 매장 또는 대상 매장의 메뉴를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            menuNotFound:
+              value:
+                code: STORE_009
+                message: 메뉴를 찾을 수 없습니다.
     PickupNotFound:
       description: 본인 또는 대상 매장 범위에서 픽업 예약을 찾을 수 없음
       content:

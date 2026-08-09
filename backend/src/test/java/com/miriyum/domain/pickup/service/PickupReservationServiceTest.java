@@ -44,6 +44,8 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -200,6 +202,30 @@ class PickupReservationServiceTest {
 
         ServiceException exception = catchThrowableOfType(
                 ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).should(never()).acquire(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2026-03-08,02:30", "2026-11-01,01:30"})
+    void rejectsDstGapAndOverlapLocalPickupTimes(LocalDate date, LocalTime time) {
+        PickupReservationCreateRequest request = new PickupReservationCreateRequest(
+                "22", date, time,
+                List.of(new PickupMenuSelectionRequest("33", 1)));
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "뉴욕 픽업 매장", "America/New_York"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "바질 파스타", 12_000, true, true));
+        given(inventoryService.findOnlineAvailabilityByDate(any()))
+                .willReturn(List.of(new MenuInventoryAvailability(
+                        33L, 6L, "America/New_York", date, time,
+                        date, time.plusHours(1), 5, AvailabilityStatus.AVAILABLE)));
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request));
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
         then(inventoryService).should(never()).acquire(any());

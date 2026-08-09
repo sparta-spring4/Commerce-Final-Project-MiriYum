@@ -83,6 +83,8 @@ class PickupStoreManagementServiceTest {
                 org.mockito.ArgumentMatchers.eq(LocalDate.of(2026, 8, 10)),
                 org.mockito.ArgumentMatchers.eq(PickupStatus.CONFIRMED), any(Pageable.class)))
                 .willReturn(new PageImpl<>(List.of(confirmedPickup())));
+        given(repository.findAllWithItemsByIdIn(List.of(77L)))
+                .willReturn(List.of(confirmedPickup()));
 
         PickupReservationPageResponse result = service.list(31L, 22L, request);
 
@@ -90,6 +92,7 @@ class PickupStoreManagementServiceTest {
                 .satisfies(item -> assertThat(item.pickupReservationId()).isEqualTo("77"));
         assertThat(result.page().totalElements()).isEqualTo(1);
         then(storeService).should().requireManagementOwnership(31L, 22L);
+        then(repository).should().findAllWithItemsByIdIn(List.of(77L));
     }
 
     @Test

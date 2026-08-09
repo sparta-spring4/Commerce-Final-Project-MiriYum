@@ -20,7 +20,12 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -68,8 +73,21 @@ public class PickupStoreManagementService {
         Sort sort = Sort.by(request.order().sortOrders());
         Pageable pageable = PageRequest.of(request.page(), request.size(), sort);
         Page<PickupReservation> pickups = findPickups(storeId, request, pageable);
+        List<Long> pickupIds = pickups.getContent().stream()
+                .map(PickupReservation::getId)
+                .toList();
+        Map<Long, PickupReservation> pickupsWithItems = pickupIds.isEmpty()
+                ? Map.of()
+                : repository.findAllWithItemsByIdIn(pickupIds).stream()
+                        .collect(Collectors.toMap(
+                                PickupReservation::getId,
+                                Function.identity()));
+        List<PickupReservationResponse> responses = pickupIds.stream()
+                .map(id -> requireFetchedPickup(pickupsWithItems, id))
+                .map(PickupReservationService::toResponse)
+                .toList();
         return PickupReservationPageResponse.from(
-                pickups.map(PickupReservationService::toResponse));
+                new PageImpl<>(responses, pageable, pickups.getTotalElements()));
     }
 
     @Transactional(readOnly = true)
@@ -173,6 +191,17 @@ public class PickupStoreManagementService {
                 ? repository.findByIdAndStoreIdForUpdate(pickupReservationId, storeId)
                 : repository.findByIdAndStoreId(pickupReservationId, storeId))
                 .orElseThrow(() -> new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND));
+    }
+
+    private static PickupReservation requireFetchedPickup(
+            Map<Long, PickupReservation> pickups,
+            Long pickupId
+    ) {
+        PickupReservation pickup = pickups.get(pickupId);
+        if (pickup == null) {
+            throw new IllegalStateException("paged pickup could not be fetched with items");
+        }
+        return pickup;
     }
 
     private static IdempotencyCommand command(

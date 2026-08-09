@@ -87,6 +87,24 @@ class PickupReservationControllerTest {
     }
 
     @Test
+    void rejectsSecondPrecisionAndUnknownCreationFields() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"storeId":"22","pickupDate":"2026-08-10",
+                                 "pickupTime":"12:00:01","businessType":"CAFE",
+                                 "menuSelections":[{"menuId":"33","quantity":2}]}
+                                """))
+                .andExpect(status().isBadRequest());
+        then(service).shouldHaveNoInteractions();
+    }
+
+    @Test
     void returnsAuthenticatedConsumersPickupDetail() throws Exception {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
