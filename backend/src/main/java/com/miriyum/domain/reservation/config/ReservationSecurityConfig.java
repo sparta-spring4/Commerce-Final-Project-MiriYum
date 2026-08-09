@@ -25,6 +25,42 @@ public class ReservationSecurityConfig {
     private static final String RESERVATION_ROOT = "/api/v1/reservations";
     private static final String RESERVATION_FAMILY = RESERVATION_ROOT + "/**";
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
+    private static final String RESERVATION_CANCELLATION =
+            RESERVATION_ROOT + "/*/cancellations";
+    private static final String STORE_RESERVATION_ROOT =
+            "/api/v1/store-operator/stores/*/reservations";
+    private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
+    private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
+    private static final String STORE_RESERVATION_CANCELLATION =
+            STORE_RESERVATION_ROOT + "/*/cancellations";
+
+    @Bean
+    @Order(-1)
+    public SecurityFilterChain storeReservationFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) throws Exception {
+        http
+                .securityMatcher(STORE_RESERVATION_ROOT, STORE_RESERVATION_FAMILY)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
+                        .anyRequest().denyAll())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(
+                                jwtTokenProvider,
+                                TokenNamespace.STORE_OPERATOR),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
 
     /**
      * 소비자 namespace의 단일 예약 상세 GET만 인증 후 허용하고 같은 경로군의 나머지는 거부한다.
@@ -50,6 +86,7 @@ public class ReservationSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, RESERVATION_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.POST, RESERVATION_CANCELLATION).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))

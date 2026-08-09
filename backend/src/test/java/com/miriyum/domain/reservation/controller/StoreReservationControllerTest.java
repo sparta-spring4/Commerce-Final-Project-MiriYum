@@ -6,12 +6,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
+import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
@@ -21,10 +24,13 @@ import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationSummaryResponse;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.PageMetadata;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -38,22 +44,28 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(StoreReservationController.class)
-@Import({StoreManagementSecurityConfig.class, GlobalExceptionHandler.class})
+@Import({ReservationSecurityConfig.class, StoreManagementSecurityConfig.class, GlobalExceptionHandler.class})
 class StoreReservationControllerTest {
 
     private static final String BASE_URL =
             "/api/v1/store-operator/stores/22/reservations";
     private static final String DETAIL_URL = BASE_URL + "/77";
+    private static final String CANCELLATION_URL = DETAIL_URL + "/cancellations";
+    private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private ReservationService reservationService;
+
+    @MockitoBean
+    private ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -304,6 +316,154 @@ class StoreReservationControllerTest {
                 .getStoreReservation(33L, 22L, reservationId);
     }
 
+    @Test
+    void cancelsStoreReservationWithAuthenticatedPrincipalAndIdempotencyKey() throws Exception {
+        authenticateStoreOperator(33L);
+        given(reservationCancellationCommandFacade.cancelByStoreOperator(
+                eq(33L), eq(22L), eq(77L), any(IdempotencyKey.class), any(StoreCancellationRequest.class)))
+                .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse()));
+
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.cancelledBy").value("STORE_OPERATOR"))
+                .andExpect(jsonPath("$.data.cancelledAt").doesNotExist());
+
+        ArgumentCaptor<IdempotencyKey> keyCaptor = ArgumentCaptor.forClass(IdempotencyKey.class);
+        ArgumentCaptor<StoreCancellationRequest> requestCaptor =
+                ArgumentCaptor.forClass(StoreCancellationRequest.class);
+        then(reservationCancellationCommandFacade).should().cancelByStoreOperator(
+                eq(33L), eq(22L), eq(77L), keyCaptor.capture(), requestCaptor.capture());
+        assertThat(keyCaptor.getValue().value()).isEqualTo(IDEMPOTENCY_KEY);
+        assertThat(requestCaptor.getValue().reason()).isEqualTo("store closure");
+    }
+
+    @Test
+    void rejectsStoreCancellationKeyFailuresBeforeFacadeInvocation() throws Exception {
+        authenticateStoreOperator(33L);
+
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", "bad-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_004"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsInvalidStoreCancellationBodyBeforeFacadeInvocation() throws Exception {
+        authenticateStoreOperator(33L);
+
+        for (String body : List.of("{}", "{\"reason\":\"\"}",
+                "{\"reason\":\"" + "a".repeat(501) + "\"}")) {
+            mockMvc.perform(post(CANCELLATION_URL)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("COMMON_001"));
+        }
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"unexpected\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void acceptsWhitespaceOnlyStoreCancellationReason() throws Exception {
+        authenticateStoreOperator(33L);
+        given(reservationCancellationCommandFacade.cancelByStoreOperator(
+                eq(33L), eq(22L), eq(77L), any(IdempotencyKey.class), any(StoreCancellationRequest.class)))
+                .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse()));
+
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\" \"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsUnauthenticatedAndConsumerStoreCancellation() throws Exception {
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        mockMvc.perform(post(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void passesThroughStoreCancellationServiceExceptions() throws Exception {
+        authenticateStoreOperator(33L);
+        for (com.miriyum.global.exception.ErrorCode errorCode : List.of(
+                StoreErrorCode.ACCESS_DENIED,
+                ReservationErrorCode.RESERVATION_NOT_FOUND,
+                ReservationErrorCode.INVALID_STATE_TRANSITION,
+                ReservationErrorCode.CANCELLATION_NOT_ALLOWED)) {
+            given(reservationCancellationCommandFacade.cancelByStoreOperator(
+                    eq(33L), eq(22L), eq(77L), any(IdempotencyKey.class), any(StoreCancellationRequest.class)))
+                    .willThrow(new ServiceException(errorCode));
+
+            mockMvc.perform(post(CANCELLATION_URL)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reason\":\"store closure\"}"))
+                    .andExpect(status().is(errorCode == StoreErrorCode.ACCESS_DENIED ? 403
+                            : errorCode == ReservationErrorCode.RESERVATION_NOT_FOUND ? 404 : 409))
+                    .andExpect(jsonPath("$.code").value(errorCode.getCode()));
+        }
+    }
+
+    @Test
+    void deniesUnknownPostAndNonApprovedMethodInStoreReservationFamily() throws Exception {
+        authenticateStoreOperator(33L);
+
+        mockMvc.perform(post(DETAIL_URL + "/unknown")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+        mockMvc.perform(get(CANCELLATION_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
     private void authenticateStoreOperator(long accountId) {
         given(jwtTokenProvider.parseAccessToken("store-token"))
                 .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, accountId));
@@ -352,5 +512,14 @@ class StoreReservationControllerTest {
                 ),
                 OffsetDateTime.parse("2026-08-01T09:00:00Z")
         );
+    }
+
+    private ReservationDetailResponse cancelledDetailResponse() {
+        ReservationDetailResponse detail = detailResponse();
+        return new ReservationDetailResponse(
+                detail.reservationId(), detail.storeId(), detail.storeName(), detail.serviceDate(),
+                detail.timeStatus(), detail.startAt(), detail.serviceEndAt(), detail.timeZoneId(),
+                detail.party(), "CANCELLED", detail.menuSelections(), detail.createdAt(), "STORE_OPERATOR",
+                "store closure");
     }
 }
