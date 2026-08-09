@@ -372,7 +372,7 @@ public class PickupReservationService {
                 + request.pickupTime() + "|" + menuPart);
     }
 
-    private static PickupReservationResponse toResponse(PickupReservation reservation) {
+    static PickupReservationResponse toResponse(PickupReservation reservation) {
         ZoneId zoneId = ZoneId.of(reservation.getTimeZoneIdSnapshot());
         List<PickupReservationItemResponse> items = reservation.getItems().stream()
                 .map(PickupReservationService::toItemResponse)
