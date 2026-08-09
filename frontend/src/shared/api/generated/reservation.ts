@@ -162,8 +162,8 @@ export interface components {
       status: components["schemas"]["ReservationStatus"];
       menuSelections: components["schemas"]["MenuHoldItem"][];
       /** @enum {string|null} */
-      cancelledBy?: "CONSUMER" | "STORE_OPERATOR" | null;
-      cancellationReason?: string | null;
+      cancelledBy: "CONSUMER" | "STORE_OPERATOR" | null;
+      cancellationReason: string | null;
       createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
     };
     ReservationSummary: {
