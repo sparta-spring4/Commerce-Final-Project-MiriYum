@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
@@ -79,6 +80,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
 
 @Testcontainers
 @Tag("integration")
@@ -159,6 +161,9 @@ class ReservationCancellationIT {
     @Autowired
     private DataSource dataSource;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @BeforeEach
     void cleanRowsInForeignKeyOrder() {
         assertThat(jdbcTemplate.getDataSource()).isSameAs(dataSource);
@@ -211,7 +216,7 @@ class ReservationCancellationIT {
         assertThat(first.httpStatus()).isEqualTo(200);
         assertThat(first.data().cancelledBy()).isEqualTo("CONSUMER");
         assertThat(first.data().cancellationReason()).isNull();
-        assertThat(replay.data()).isEqualTo(first.data());
+        assertThat(replay).isEqualTo(first);
         assertThat(snapshot(scenario, "consumer", scenario.consumerId()))
                 .isEqualTo(afterFirst);
         assertThat(reservationStatus(scenario)).isEqualTo("CANCELLED");
@@ -220,6 +225,10 @@ class ReservationCancellationIT {
         assertThat(menuHoldStatus(scenario)).isNull();
         assertThat(successfulCommandCount(
                 "consumer", scenario.consumerId(), key.value())).isOne();
+        assertThat(singleCommand("consumer", scenario.consumerId(), key.value()))
+                .containsEntry(
+                        "request_fingerprint",
+                        consumerFingerprint(scenario.reservationId(), null));
     }
 
     @Test
@@ -243,7 +252,7 @@ class ReservationCancellationIT {
 
         // then
         assertThat(first.httpStatus()).isEqualTo(200);
-        assertThat(replay.data()).isEqualTo(first.data());
+        assertThat(replay).isEqualTo(first);
         assertThat(first.data().cancelledBy()).isEqualTo("STORE_OPERATOR");
         assertThat(first.data().cancellationReason()).isEqualTo(" ");
         assertThat(first.data().menuSelections()).singleElement().satisfies(item -> {
@@ -272,12 +281,15 @@ class ReservationCancellationIT {
                 .containsEntry("principal_id", scenario.operatorId())
                 .containsEntry("command_type", "RESERVATION_CANCEL")
                 .containsEntry("idempotency_key", key.value())
-                .containsEntry("processing_status", "SUCCEEDED");
+                .containsEntry("processing_status", "SUCCEEDED")
+                .containsEntry("result_http_status", 200)
+                .containsEntry("result_response_code", "SUCCESS")
+                .containsEntry("result_resource_type", "RESERVATION")
+                .containsEntry("result_resource_id", String.valueOf(scenario.reservationId()));
         String payload = (String) command.get("result_payload");
-        assertThat(payload)
-                .contains("\"reservationId\"")
-                .doesNotContain("\"message\"")
-                .doesNotContain("\"code\"");
+        assertThat(objectMapper.readTree(payload))
+                .isEqualTo(objectMapper.readTree(
+                        objectMapper.writeValueAsString(first.data())));
         assertThat(reservationStatus(scenario)).isEqualTo("CANCELLED");
     }
 
@@ -414,13 +426,15 @@ class ReservationCancellationIT {
             }
             ResourceSnapshot before = snapshot(
                     scenario, "consumer", scenario.consumerId());
-            createFailureTrigger(failurePoint);
             try {
-                assertThatThrownBy(() -> facade.cancelByConsumer(
-                        scenario.consumerId(), scenario.reservationId(),
-                        key(100 + failurePoint.ordinal()),
-                        new ConsumerCancellationRequest("rollback-" + failurePoint.name())
-                )).isInstanceOf(RuntimeException.class);
+                createFailureTrigger(failurePoint);
+                assertFailurePoint(
+                        failurePoint,
+                        catchThrowable(() -> facade.cancelByConsumer(
+                                scenario.consumerId(), scenario.reservationId(),
+                                key(100 + failurePoint.ordinal()),
+                                new ConsumerCancellationRequest(
+                                        "rollback-" + failurePoint.name()))));
             } finally {
                 dropFailureTrigger(failurePoint);
             }
@@ -908,6 +922,56 @@ class ReservationCancellationIT {
         }
     }
 
+    private static void assertFailurePoint(FailurePoint failurePoint, Throwable failure) {
+        assertThat(failure)
+                .as("failure raised for %s", failurePoint)
+                .isNotNull();
+        switch (failurePoint) {
+            case MENU_HOLD_UPDATE, AUDIT_INSERT, IDEMPOTENCY_SUCCEEDED_UPDATE -> {
+                SQLException sqlException = requireCause(failure, SQLException.class);
+                assertThat(sqlException.getSQLState()).isEqualTo("45000");
+                assertThat(sqlException.getMessage())
+                        .contains(triggerMessage(failurePoint));
+            }
+            case CAPACITY_UNDERFLOW -> assertThat(failure)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("capacity occupancy cannot be restored below zero");
+            case AUDIT_UNIQUE_CONFLICT -> {
+                SQLException sqlException = requireCause(failure, SQLException.class);
+                assertThat(sqlException.getSQLState()).isEqualTo("23000");
+                assertThat(sqlException.getErrorCode()).isEqualTo(1062);
+                assertThat(sqlException.getMessage())
+                        .contains("uk_reservation_cancellation_audits_reservation");
+            }
+        }
+    }
+
+    private static String triggerMessage(FailurePoint failurePoint) {
+        return switch (failurePoint) {
+            case MENU_HOLD_UPDATE -> "task7 menu hold release failure";
+            case AUDIT_INSERT -> "task7 audit insert failure";
+            case IDEMPOTENCY_SUCCEEDED_UPDATE -> "task7 idempotency success failure";
+            case CAPACITY_UNDERFLOW, AUDIT_UNIQUE_CONFLICT ->
+                    throw new IllegalArgumentException("failure point does not use a trigger");
+        };
+    }
+
+    private static <T extends Throwable> T requireCause(
+            Throwable failure,
+            Class<T> causeType
+    ) {
+        Throwable current = failure;
+        while (current != null) {
+            if (causeType.isInstance(current)) {
+                return causeType.cast(current);
+            }
+            current = current.getCause();
+        }
+        throw new AssertionError(
+                "expected cause " + causeType.getName() + " in failure chain",
+                failure);
+    }
+
     private void dropFailureTrigger(FailurePoint failurePoint) {
         switch (failurePoint) {
             case MENU_HOLD_UPDATE -> dropTrigger(MENU_HOLD_FAILURE_TRIGGER);
@@ -1063,7 +1127,9 @@ class ReservationCancellationIT {
     ) {
         return jdbcTemplate.queryForMap("""
                 SELECT principal_namespace, principal_id, command_type,
-                       idempotency_key, processing_status, result_payload
+                       idempotency_key, request_fingerprint, processing_status,
+                       result_http_status, result_response_code,
+                       result_resource_type, result_resource_id, result_payload
                   FROM idempotency_commands
                  WHERE principal_namespace = ?
                    AND principal_id = ?
