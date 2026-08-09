@@ -789,7 +789,6 @@ public class ReservationService {
                 : "reservation-cancel:" + namespace + ":" + actorId + ":"
                         + command.idempotencyKey();
         if (actorId <= 0
-                || reservationId <= 0
                 || command == null
                 || !namespace.equals(command.principalNamespace())
                 || actorId != command.principalId()

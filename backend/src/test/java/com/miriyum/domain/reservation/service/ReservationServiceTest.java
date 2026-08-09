@@ -1964,6 +1964,58 @@ class ReservationServiceTest {
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    @DisplayName("소비자 취소의 0·음수 예약 ID도 actor 범위 조회로 RESERVATION_001을 반환한다")
+    void cancellationConsumerNonPositiveReservationIdUsesActorScopedLookup(
+            long reservationId
+    ) {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(
+                reservationId, 11L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                reservationId,
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        )).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+
+        then(reservationRepository).should()
+                .findByIdAndConsumerAccountIdForUpdate(reservationId, 11L);
+        then(reservationRepository).should(never()).findById(reservationId);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L})
+    @DisplayName("운영자 취소의 0·음수 예약 ID도 actor 범위 조회로 RESERVATION_001을 반환한다")
+    void cancellationStoreNonPositiveReservationIdUsesActorScopedLookup(
+            long reservationId
+    ) {
+        IdempotencyCommand command = cancellationCommand("store-operator", 33L);
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                reservationId, 22L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> invokeStoreCancellation(
+                reservationId,
+                command,
+                "운영자 취소",
+                NOW.minusSeconds(10),
+                OPERATOR_CANCELLATION_CORRELATION
+        )).isInstanceOfSatisfying(ServiceException.class, exception ->
+                assertThat(exception.getErrorCode())
+                        .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+
+        then(reservationRepository).should()
+                .findByIdAndStoreIdForUpdate(reservationId, 22L);
+        then(reservationRepository).should(never()).findById(reservationId);
+    }
+
     @Test
     @DisplayName("운영자 관리권한 gate 실패는 멱등과 예약 접근보다 먼저 종료한다")
     void cancellationGateOperatorOwnershipRunsBeforeIdempotency() {
@@ -3529,6 +3581,17 @@ class ReservationServiceTest {
             Instant requestedAt,
             String correlationId
     ) {
+        return invokeConsumerCancellation(
+                77L, command, reason, requestedAt, correlationId);
+    }
+
+    private Object invokeConsumerCancellation(
+            long reservationId,
+            IdempotencyCommand command,
+            String reason,
+            Instant requestedAt,
+            String correlationId
+    ) {
         return invokeCancellation(
                 "cancelConsumerReservation",
                 new Class<?>[] {
@@ -3539,11 +3602,24 @@ class ReservationServiceTest {
                     Instant.class,
                     String.class
                 },
-                new Object[] {11L, 77L, command, reason, requestedAt, correlationId}
+                new Object[] {
+                    11L, reservationId, command, reason, requestedAt, correlationId
+                }
         );
     }
 
     private Object invokeStoreCancellation(
+            IdempotencyCommand command,
+            String reason,
+            Instant requestedAt,
+            String correlationId
+    ) {
+        return invokeStoreCancellation(
+                77L, command, reason, requestedAt, correlationId);
+    }
+
+    private Object invokeStoreCancellation(
+            long reservationId,
             IdempotencyCommand command,
             String reason,
             Instant requestedAt,
@@ -3560,7 +3636,9 @@ class ReservationServiceTest {
                     Instant.class,
                     String.class
                 },
-                new Object[] {33L, 22L, 77L, command, reason, requestedAt, correlationId}
+                new Object[] {
+                    33L, 22L, reservationId, command, reason, requestedAt, correlationId
+                }
         );
     }
 
