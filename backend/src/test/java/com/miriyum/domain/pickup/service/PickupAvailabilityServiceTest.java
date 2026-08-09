@@ -129,6 +129,34 @@ class PickupAvailabilityServiceTest {
     }
 
     @Test
+    void excludesOnlyMenuWithMultipleCurrentIntervalsAtSamePickupTime() {
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(OperationStatus.OPEN, true));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "Ambiguous menu", true, MenuSellingStatus.SELLING),
+                menu(102L, "Unique menu", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(
+                        availability(101L, "Asia/Seoul", LocalTime.NOON,
+                                LocalTime.of(13, 0), 3, AvailabilityStatus.AVAILABLE),
+                        availability(101L, "Asia/Seoul", LocalTime.NOON,
+                                LocalTime.of(14, 0), 2, AvailabilityStatus.AVAILABLE),
+                        availability(102L, "Asia/Seoul", LocalTime.NOON,
+                                LocalTime.of(13, 0), 4, AvailabilityStatus.AVAILABLE)
+                ));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, PICKUP_DATE);
+
+        assertThat(result.slots()).singleElement().satisfies(slot -> {
+            assertThat(slot.pickupTime()).isEqualTo(LocalTime.NOON);
+            assertThat(slot.menus()).singleElement().satisfies(menu ->
+                    assertThat(menu.menuId()).isEqualTo("102"));
+        });
+    }
+
+    @Test
     @DisplayName("OPEN이 아니거나 픽업 기능이 꺼진 매장은 PICKUP_002로 거절한다")
     void rejectsIneligibleStoreBeforeReadingMenusOrInventory() {
         when(storePublicQueryService.getDetail(STORE_ID, null, false))
@@ -191,9 +219,21 @@ class PickupAvailabilityServiceTest {
             int quantity,
             AvailabilityStatus status
     ) {
+        return availability(
+                menuId, timeZoneId, startTime, startTime.plusHours(1), quantity, status);
+    }
+
+    private static MenuInventoryAvailability availability(
+            long menuId,
+            String timeZoneId,
+            LocalTime startTime,
+            LocalTime endTime,
+            int quantity,
+            AvailabilityStatus status
+    ) {
         return new MenuInventoryAvailability(
                 menuId, 3L, timeZoneId, PICKUP_DATE, startTime,
-                PICKUP_DATE, startTime.plusHours(1), quantity, status
+                PICKUP_DATE, endTime, quantity, status
         );
     }
 }

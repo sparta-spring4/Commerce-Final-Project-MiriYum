@@ -207,6 +207,31 @@ class PickupReservationServiceTest {
         then(inventoryService).should(never()).acquire(any());
     }
 
+    @Test
+    void rejectsMultipleCurrentIntervalsForSameMenuAndPickupTime() {
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "MiriYum Gangnam", "Asia/Seoul"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "Pasta", 12_000, true, true));
+        given(inventoryService.findOnlineAvailabilityByDate(any()))
+                .willReturn(List.of(
+                        availability(5),
+                        new MenuInventoryAvailability(
+                                33L, 7L, "Asia/Seoul", PICKUP_DATE, PICKUP_TIME,
+                                PICKUP_DATE, LocalTime.of(15, 0), 4,
+                                AvailabilityStatus.AVAILABLE)
+                ));
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).should(never()).acquire(any());
+        then(repository).shouldHaveNoInteractions();
+    }
+
     @ParameterizedTest
     @CsvSource({"2026-03-08,02:30", "2026-11-01,01:30"})
     void rejectsDstGapAndOverlapLocalPickupTimes(LocalDate date, LocalTime time) {

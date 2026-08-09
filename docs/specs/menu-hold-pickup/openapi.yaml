@@ -167,7 +167,7 @@ paths:
         "404":
           $ref: "#/components/responses/PickupNotFound"
         "409":
-          $ref: "#/components/responses/PickupStateConflict"
+          $ref: "#/components/responses/PickupCancellationConflict"
   /api/v1/store-operator/stores/{storeId}/pickup-reservations:
     get:
       tags: [Pickup Management]
@@ -212,6 +212,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
   /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}:
     get:
       tags: [Pickup Management]
@@ -234,7 +236,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/PickupNotFound"
+          $ref: "#/components/responses/StorePickupNotFound"
   /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
     post:
       tags: [Pickup Management]
@@ -266,7 +268,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/PickupNotFound"
+          $ref: "#/components/responses/StorePickupNotFound"
         "409":
           $ref: "#/components/responses/PickupStateConflict"
   /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
@@ -300,7 +302,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/PickupNotFound"
+          $ref: "#/components/responses/StorePickupNotFound"
         "409":
           $ref: "#/components/responses/PickupStateConflict"
   /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets:
@@ -852,12 +854,16 @@ components:
             code: PICKUP_002
             message: 이 매장은 픽업 예약을 제공할 수 없습니다.
     PickupConflict:
-      description: 픽업 기능·제공 구간·메뉴 수량 충돌
+      description: 픽업 기능·메뉴 상태·제공 구간·메뉴 수량 충돌
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
           examples:
+            menuStateConflict:
+              value:
+                code: STORE_010
+                message: 현재 메뉴 상태에서는 거래할 수 없습니다.
             transactionNotEligible:
               value:
                 code: PICKUP_002
@@ -894,8 +900,38 @@ components:
           example:
             code: PICKUP_001
             message: 픽업 예약을 찾을 수 없습니다.
+    StorePickupNotFound:
+      description: 매장 또는 대상 매장 범위에서 픽업 예약을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            pickupNotFound:
+              value:
+                code: PICKUP_001
+                message: 픽업 예약을 찾을 수 없습니다.
+    PickupCancellationConflict:
+      description: 현재 픽업 상태 또는 소비자 취소 정책에서 취소 불가
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            stateConflict:
+              value:
+                code: PICKUP_005
+                message: 현재 픽업 상태에서 처리할 수 없습니다.
+            cancellationNotAllowed:
+              value:
+                code: PICKUP_006
+                message: 현재 시각에는 픽업을 취소할 수 없습니다.
     PickupStateConflict:
-      description: 현재 픽업 상태 또는 취소 정책에서 명령 불가
+      description: 현재 픽업 상태에서 명령 불가
       content:
         application/json:
           schema:

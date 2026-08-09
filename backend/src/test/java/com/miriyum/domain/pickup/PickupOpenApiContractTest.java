@@ -57,7 +57,54 @@ class PickupOpenApiContractTest {
         assertThat(responses.get("PickupCreationNotFound").toString())
                 .contains("STORE_001", "STORE_009");
         assertThat(responses.get("PickupConflict").toString())
-                .contains("PICKUP_002", "PICKUP_003", "PICKUP_004");
+                .contains("STORE_010", "PICKUP_002", "PICKUP_003", "PICKUP_004");
+    }
+
+    @Test
+    void cancellationAndOperatorRoutesDocumentAllRuntimeNotFoundAndConflictErrors()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+
+        Map<String, Object> consumerCancellation = map(map(paths.get(
+                "/api/v1/pickup-reservations/{pickupReservationId}/cancellations"))
+                .get("post"));
+        assertThat(map(map(consumerCancellation.get("responses")).get("409")))
+                .containsEntry("$ref", "#/components/responses/PickupCancellationConflict");
+
+        Map<String, Object> operatorList = map(map(paths.get(
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations"))
+                .get("get"));
+        assertThat(map(map(operatorList.get("responses")).get("404")))
+                .containsEntry("$ref", "#/components/responses/StoreNotFound");
+
+        assertOperatorReservationNotFoundResponse(
+                paths,
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}",
+                "get");
+        assertOperatorReservationNotFoundResponse(
+                paths,
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments",
+                "post");
+        assertOperatorStateConflictResponse(
+                paths,
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments");
+        assertOperatorReservationNotFoundResponse(
+                paths,
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations",
+                "post");
+        assertOperatorStateConflictResponse(
+                paths,
+                "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations");
+
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        assertThat(responses.get("PickupCancellationConflict").toString())
+                .contains("PICKUP_005", "PICKUP_006");
+        assertThat(responses.get("PickupStateConflict").toString())
+                .contains("PICKUP_005")
+                .doesNotContain("PICKUP_006");
+        assertThat(responses.get("StorePickupNotFound").toString())
+                .contains("STORE_001", "PICKUP_001");
     }
 
     @Test
@@ -86,5 +133,24 @@ class PickupOpenApiContractTest {
     @SuppressWarnings("unchecked")
     private static List<Object> list(Object value) {
         return (List<Object>) value;
+    }
+
+    private static void assertOperatorReservationNotFoundResponse(
+            Map<String, Object> paths,
+            String path,
+            String method
+    ) {
+        Map<String, Object> operation = map(map(paths.get(path)).get(method));
+        assertThat(map(map(operation.get("responses")).get("404")))
+                .containsEntry("$ref", "#/components/responses/StorePickupNotFound");
+    }
+
+    private static void assertOperatorStateConflictResponse(
+            Map<String, Object> paths,
+            String path
+    ) {
+        Map<String, Object> operation = map(map(paths.get(path)).get("post"));
+        assertThat(map(map(operation.get("responses")).get("409")))
+                .containsEntry("$ref", "#/components/responses/PickupStateConflict");
     }
 }

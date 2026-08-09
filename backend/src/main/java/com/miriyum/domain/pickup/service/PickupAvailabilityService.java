@@ -65,11 +65,23 @@ public class PickupAvailabilityService {
                         pickupDate
                 ));
 
-        TreeMap<LocalTime, List<PickupAvailableMenu>> menusByPickupTime = availability.stream()
+        List<PickupAvailableMenu> unambiguousMenus = availability.stream()
                 .filter(item -> item.serviceDate().equals(pickupDate))
                 .filter(item -> item.timeZoneId().equals(store.timeZoneId()))
                 .filter(item -> eligibleMenus.containsKey(item.menuId()))
+                .collect(Collectors.groupingBy(
+                        item -> new MenuPickupTime(
+                                item.menuId(), item.serviceDate(), item.startTime()),
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ))
+                .values().stream()
+                .filter(items -> items.size() == 1)
+                .map(List::getFirst)
                 .map(item -> toAvailableMenu(item, eligibleMenus.get(item.menuId())))
+                .toList();
+
+        TreeMap<LocalTime, List<PickupAvailableMenu>> menusByPickupTime = unambiguousMenus.stream()
                 .collect(Collectors.groupingBy(
                         PickupAvailableMenu::startTime,
                         TreeMap::new,
@@ -133,5 +145,8 @@ public class PickupAvailabilityService {
                 PickupAvailabilityStatus.valueOf(availability.availabilityStatus().name()),
                 availability.availableOnlineQuantity()
         );
+    }
+
+    private record MenuPickupTime(long menuId, LocalDate serviceDate, LocalTime startTime) {
     }
 }
