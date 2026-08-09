@@ -44,6 +44,10 @@ class PickupReservationTest {
             assertThat(item.getMenuNameSnapshot()).isEqualTo("바질 파스타");
             assertThat(item.getUnitPriceSnapshot()).isEqualTo(12_000);
             assertThat(item.getQuantity()).isEqualTo(2);
+            assertThat(item.getServiceDate()).isEqualTo(LocalDate.of(2026, 8, 10));
+            assertThat(item.getStartTime()).isEqualTo(LocalTime.NOON);
+            assertThat(item.getEndDate()).isEqualTo(LocalDate.of(2026, 8, 10));
+            assertThat(item.getEndTime()).isEqualTo(LocalTime.of(14, 0));
         });
     }
 
@@ -156,7 +160,9 @@ class PickupReservationTest {
 
     private static PickupItemSnapshot itemSnapshot() {
         return new PickupItemSnapshot(
-                33L, 44L, 5L, "바질 파스타", 12_000, 6L, 2
+                33L, 44L, 5L, "바질 파스타", 12_000, 6L,
+                LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                LocalDate.of(2026, 8, 10), LocalTime.of(14, 0), 2
         );
     }
 }

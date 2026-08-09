@@ -89,6 +89,10 @@ CREATE TABLE pickup_reservation_items (
     menu_name_snapshot VARCHAR(100) NOT NULL,
     unit_price_snapshot INT NOT NULL,
     inventory_policy_version BIGINT NOT NULL,
+    service_date DATE NOT NULL,
+    start_time TIME(6) NOT NULL,
+    end_date DATE NOT NULL,
+    end_time TIME(6) NOT NULL,
     quantity INT NOT NULL,
     PRIMARY KEY (pickup_reservation_item_id),
     CONSTRAINT uk_pickup_reservation_items_reservation_bucket
@@ -113,6 +117,8 @@ CREATE TABLE pickup_reservation_items (
         CHECK (unit_price_snapshot >= 0),
     CONSTRAINT ck_pickup_reservation_items_quantity
         CHECK (quantity > 0),
+    CONSTRAINT ck_pickup_reservation_items_interval
+        CHECK (TIMESTAMP(end_date, end_time) > TIMESTAMP(service_date, start_time)),
     INDEX idx_pickup_reservation_items_bucket (
         menu_inventory_bucket_id,
         pickup_reservation_item_id

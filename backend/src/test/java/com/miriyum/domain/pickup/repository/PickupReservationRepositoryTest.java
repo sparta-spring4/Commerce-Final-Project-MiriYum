@@ -156,7 +156,9 @@ class PickupReservationRepositoryTest {
                 Instant.parse("2026-08-10T03:00:00Z"),
                 operationId,
                 List.of(new PickupItemSnapshot(
-                        MENU_ID, BUCKET_ID, 2L, "바질 파스타", 12_000, 3L, 2)),
+                        MENU_ID, BUCKET_ID, 2L, "바질 파스타", 12_000, 3L,
+                        LocalDate.of(2026, 8, 10), LocalTime.NOON,
+                        LocalDate.of(2026, 8, 10), LocalTime.of(14, 0), 2)),
                 CREATED_AT
         );
     }
