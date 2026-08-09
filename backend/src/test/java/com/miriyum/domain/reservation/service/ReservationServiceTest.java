@@ -2563,6 +2563,46 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("HOLD_PRESENT 해제 후 managed Reservation을 재조회해 취소·감사·응답에 사용한다")
+    void cancellationHoldPresentRehydratesManagedReservationAfterReleaseClearsContext() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command,
+                MenuHoldTerminationPresence.HOLD_PRESENT
+        );
+        Reservation original = fixture.reservation();
+        Reservation rehydrated = reservation(77L, 11L);
+        lenient().when(reservationRepository.findById(77L))
+                .thenReturn(Optional.of(rehydrated));
+
+        Object result = invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(original.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        assertThat(original.getCancelledAt()).isNull();
+        assertThat(rehydrated.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(rehydrated.getCancelledAt()).isEqualTo(NOW);
+        assertThat(cancellationData(result).status()).isEqualTo("CANCELLED");
+
+        InOrder order = inOrder(
+                menuHoldService,
+                reservationRepository,
+                cancellationAuditRepository
+        );
+        order.verify(menuHoldService).release(new MenuHoldReleaseCommand(
+                77L,
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+        order.verify(reservationRepository).findById(77L);
+        order.verify(cancellationAuditRepository).saveAndFlush(
+                any(ReservationCancellationAudit.class));
+    }
+
+    @Test
     @DisplayName("취소 성공 감사와 Reservation cancelledAt은 한 번 얻은 같은 occurredAt을 쓴다")
     void cancellationAuditUsesOneOccurredAtForReservationAndAudit() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
@@ -2633,6 +2673,8 @@ class ReservationServiceTest {
                 false,
                 succeeded
         );
+        given(reservationRepository.findById(77L))
+                .willReturn(Optional.of(fixture.reservation()));
         IllegalStateException auditFailure = new IllegalStateException("audit write failed");
         given(cancellationAuditRepository.saveAndFlush(
                 any(ReservationCancellationAudit.class)))
@@ -3442,6 +3484,8 @@ class ReservationServiceTest {
             ))).willReturn(MenuHoldCommandResult.released(77L));
         }
         if (expectedToComplete) {
+            lenient().when(reservationRepository.findById(77L))
+                    .thenReturn(Optional.of(reservation));
             given(cancellationAuditRepository.saveAndFlush(
                     any(ReservationCancellationAudit.class)))
                     .willAnswer(invocation -> invocation.getArgument(0));

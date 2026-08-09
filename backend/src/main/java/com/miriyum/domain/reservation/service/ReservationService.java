@@ -589,23 +589,27 @@ public class ReservationService {
             }
         }
 
+        Reservation managedReservation = reservationRepository.findById(reservation.getId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "managed reservation is required after resource release"));
         Instant occurredAt = clock.instant();
-        reservation.cancel(occurredAt);
+        managedReservation.cancel(occurredAt);
         ReservationCancellationAudit audit = ReservationCancellationAudit.recordSuccess(
-                reservation.getId(), actorType, actorId, reason, requestedAt, occurredAt,
+                managedReservation.getId(), actorType, actorId, reason, requestedAt, occurredAt,
                 ReservationStatus.CONFIRMED, ReservationStatus.CANCELLED,
                 cancellationPolicyVersion, capacityPolicyVersion, correlationId
         );
         cancellationAuditRepository.saveAndFlush(audit);
         List<MenuHoldItemResult> menuSnapshots =
                 menuHoldPresence == MenuHoldTerminationPresence.HOLD_PRESENT
-                        ? menuHoldSnapshotQueryService.findByReservationId(reservation.getId())
+                        ? menuHoldSnapshotQueryService.findByReservationId(
+                                managedReservation.getId())
                         : List.of();
         if (menuSnapshots == null) {
             throw new IllegalStateException("menu hold snapshots are required");
         }
         ReservationDetailResponse response = ReservationDetailResponse.from(
-                reservation,
+                managedReservation,
                 menuSnapshots,
                 audit.getActorType(),
                 audit.getCancellationReason()
@@ -614,7 +618,7 @@ public class ReservationService {
                 HttpStatus.OK.value(),
                 SUCCESS_RESPONSE_CODE,
                 "RESERVATION",
-                String.valueOf(reservation.getId()),
+                String.valueOf(managedReservation.getId()),
                 response
         );
     }
