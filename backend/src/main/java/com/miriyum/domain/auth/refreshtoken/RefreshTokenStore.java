@@ -16,7 +16,8 @@ public interface RefreshTokenStore {
             String expectedTokenHash,
             String nextTokenId,
             String nextTokenHash,
-            Instant now
+            Instant now,
+            Instant nextFamilyExpiresAt
     );
 
     void revoke(TokenNamespace namespace, String familyId, Long accountId, Instant now);

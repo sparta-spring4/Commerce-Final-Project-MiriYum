@@ -50,6 +50,7 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
                 'lastRotatedAt', ARGV[6])
+            redis.call('EXPIREAT', KEYS[1], ARGV[7])
             return 1
             """, Long.class);
 
@@ -98,7 +99,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             String expectedTokenHash,
             String nextTokenId,
             String nextTokenHash,
-            Instant now
+            Instant now,
+            Instant nextFamilyExpiresAt
     ) {
         String key = RefreshTokenKey.forFamily(namespace, familyId);
         Long result = execute(ROTATE_SCRIPT, key,
@@ -107,7 +109,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 expectedTokenHash,
                 nextTokenId,
                 nextTokenHash,
-                epochSeconds(now));
+                epochSeconds(now),
+                epochSeconds(nextFamilyExpiresAt));
         return switch (result == null ? 0 : result.intValue()) {
             case 1 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED);
             case 2 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REVOKED);

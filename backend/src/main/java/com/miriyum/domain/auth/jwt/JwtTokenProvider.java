@@ -18,8 +18,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * 계정 유형별 namespace를 담은 stateless Access/Refresh JWT를 발급·검증한다.
- * 1차 MVP는 서버·Valkey에 토큰 상태를 저장하지 않는다 ({@code ADR-006}).
+ * 계정 유형별 namespace를 담은 Access/Refresh JWT를 발급·검증한다.
+ * Access JWT는 stateless로 검증하고, 고도화 Refresh JWT의 현재 상태는 호출 계층이 Valkey에서 확인한다.
  */
 @Component
 public class JwtTokenProvider {
@@ -77,6 +77,18 @@ public class JwtTokenProvider {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
         return parsedToken;
+    }
+
+    /** 만료·폐기·존재하지 않는 Refresh Token으로도 로그아웃 결과를 멱등하게 만든다. */
+    public ParsedToken parseRefreshTokenForLogout(String token) {
+        try {
+            return parseRefreshToken(token);
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode() == AuthErrorCode.REFRESH_TOKEN_INVALID) {
+                return null;
+            }
+            throw exception;
+        }
     }
 
     private String generateToken(

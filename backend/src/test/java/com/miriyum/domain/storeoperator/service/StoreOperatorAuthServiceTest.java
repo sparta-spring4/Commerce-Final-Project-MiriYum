@@ -1,6 +1,7 @@
 package com.miriyum.domain.storeoperator.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -272,6 +273,17 @@ class StoreOperatorAuthServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token으로 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithExpiredRefreshTokenIsIdempotent() {
+        given(jwtTokenProvider.parseRefreshTokenForLogout("expired-refresh-token")).willReturn(null);
+
+        assertThatCode(() -> storeOperatorAuthService.logout("expired-refresh-token"))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(refreshTokenManager);
     }
 
     /**

@@ -164,9 +164,9 @@ public class ConsumerAuthService {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
         }
 
-        ParsedToken parsed = jwtTokenProvider.parseRefreshToken(refreshToken);
-        if (parsed.namespace() != TokenNamespace.CONSUMER) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        ParsedToken parsed = jwtTokenProvider.parseRefreshTokenForLogout(refreshToken);
+        if (parsed == null || parsed.namespace() != TokenNamespace.CONSUMER) {
+            return;
         }
         refreshTokenManager.revoke(TokenNamespace.CONSUMER, parsed);
     }

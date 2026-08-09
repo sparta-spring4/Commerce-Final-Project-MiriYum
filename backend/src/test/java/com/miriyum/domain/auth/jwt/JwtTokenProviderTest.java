@@ -76,6 +76,19 @@ class JwtTokenProviderTest {
     }
 
     @Test
+    @DisplayName("만료된 Refresh Token은 로그아웃용 파싱에서 없는 상태로 처리한다")
+    void treatsExpiredRefreshTokenAsAbsentForLogout() {
+        JwtTokenProvider issuingProvider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+        String refreshToken = issuingProvider.generateRefreshToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
+        JwtTokenProvider verifyingProvider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-08-13T00:00:00Z"));
+
+        assertThat(verifyingProvider.parseRefreshTokenForLogout(refreshToken)).isNull();
+    }
+
+    @Test
     @DisplayName("변조된 서명의 토큰을 검증하면 유효하지 않은 토큰으로 거부한다")
     void rejectsTamperedToken() {
         // given

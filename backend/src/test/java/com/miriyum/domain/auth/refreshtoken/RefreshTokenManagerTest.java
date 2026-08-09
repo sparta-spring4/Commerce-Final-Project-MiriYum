@@ -73,11 +73,12 @@ class RefreshTokenManagerTest {
         ParsedToken parsed = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
         RefreshTokenIdentity nextIdentity = new RefreshTokenIdentity("new-family-must-not-be-used", "token-2");
         given(identityGenerator.generate()).willReturn(nextIdentity);
+        given(jwtTokenProvider.getRefreshTokenValiditySeconds()).willReturn(1_209_600L);
         given(jwtTokenProvider.generateRefreshToken(any(), eq(7L), eq("family-1"), eq("token-2")))
                 .willReturn("next-refresh-token");
         given(refreshTokenStore.rotate(
                 eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), eq("token-1"), any(),
-                eq("token-2"), any(), any()))
+                eq("token-2"), any(), any(), any()))
                 .willReturn(new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REUSED));
 
         assertThatThrownBy(() -> manager.rotate(TokenNamespace.CONSUMER, parsed, "old-refresh-token"))
@@ -91,12 +92,13 @@ class RefreshTokenManagerTest {
         ParsedToken parsed = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
         RefreshTokenIdentity nextIdentity = new RefreshTokenIdentity("ignored-family", "token-2");
         given(identityGenerator.generate()).willReturn(nextIdentity);
+        given(jwtTokenProvider.getRefreshTokenValiditySeconds()).willReturn(1_209_600L);
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 7L)).willReturn("next-access-token");
         given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-2"))
                 .willReturn("next-refresh-token");
         given(refreshTokenStore.rotate(
                 eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), eq("token-1"), any(),
-                eq("token-2"), any(), any()))
+                eq("token-2"), any(), any(), any()))
                 .willReturn(new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED));
 
         TokenPair pair = manager.rotate(TokenNamespace.CONSUMER, parsed, "current-refresh-token");

@@ -76,7 +76,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 firstTokenHash,
                 "token-2",
                 RefreshTokenHash.sha256("refresh-token-2"),
-                now.plusSeconds(1));
+                now.plusSeconds(1),
+                now.plusSeconds(1).plusSeconds(1_209_600));
         RefreshTokenRotationResult reused = store.rotate(
                 TokenNamespace.CONSUMER,
                 familyId,
@@ -85,7 +86,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 firstTokenHash,
                 "token-3",
                 RefreshTokenHash.sha256("refresh-token-3"),
-                now.plusSeconds(2));
+                now.plusSeconds(2),
+                now.plusSeconds(2).plusSeconds(1_209_600));
 
         assertThat(rotated.status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
         assertThat(reused.status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
@@ -93,6 +95,39 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 .entries(RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId)))
                 .containsEntry("status", "REVOKED")
                 .containsEntry("currentTokenId", "token-2");
+    }
+
+    @Test
+    @DisplayName("Refresh Token 회전 시 family TTL도 새 토큰 만료 시각으로 갱신한다")
+    void refreshesFamilyTtlOnRotation() {
+        Instant now = Instant.now();
+        String familyId = "family-ttl";
+        store.create(new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                "token-1",
+                RefreshTokenHash.sha256("refresh-token-1"),
+                now.plusSeconds(60),
+                now,
+                RefreshTokenState.Status.ACTIVE));
+
+        Instant rotatedAt = now.plusSeconds(10);
+        Instant nextExpiresAt = rotatedAt.plusSeconds(1_209_600);
+        RefreshTokenRotationResult result = store.rotate(
+                TokenNamespace.CONSUMER,
+                familyId,
+                7L,
+                "token-1",
+                RefreshTokenHash.sha256("refresh-token-1"),
+                "token-2",
+                RefreshTokenHash.sha256("refresh-token-2"),
+                rotatedAt,
+                nextExpiresAt);
+
+        assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(redisTemplate.getExpire(RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId)))
+                .isBetween(1_209_590L, 1_209_600L);
     }
 
     @Test
@@ -106,7 +141,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 RefreshTokenHash.sha256("refresh-token-1"),
                 "token-2",
                 RefreshTokenHash.sha256("refresh-token-2"),
-                Instant.now());
+                Instant.now(),
+                Instant.now().plusSeconds(1_209_600));
 
         assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.NOT_FOUND);
     }
