@@ -955,7 +955,7 @@ mockMvc.perform(post("/api/v1/reservations/77/cancellations")
     .andExpect(jsonPath("$.data.cancelledAt").doesNotExist());
 ```
 
-Also test missing key -> COMMON_003/facade uncalled, malformed key -> COMMON_004, overlong reason/unknown field -> COMMON_001, omitted reason accepted, unauthenticated -> AUTH_001, operator token -> AUTH_004, and `RESERVATION_001/005/006` passthrough with their 404/409 statuses. Add an authenticated nonapproved method on the cancellation path expecting AUTH_006. Keep create POST, detail GET, and unknown subpath deny tests.
+Also test missing key -> COMMON_003/facade uncalled, malformed key -> COMMON_004, overlong reason/unknown field -> COMMON_002, omitted reason accepted, unauthenticated -> AUTH_001, operator token -> AUTH_004, and `RESERVATION_001/005/006` passthrough with their 404/409 statuses. Add an authenticated nonapproved method on the cancellation path expecting AUTH_006. Keep create POST, detail GET, and unknown subpath deny tests.
 
 - [ ] **Step 2: Write failing operator MockMvc tests.**
 
