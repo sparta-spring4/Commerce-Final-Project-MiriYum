@@ -79,6 +79,7 @@
 - 매장 입점 `APPROVED`, 운영 `OPEN`, `pickupEnabled=true`를 모두 만족해야 한다.
 - 등록 업종·검색 카테고리·태그·요청 본문의 업종 값은 픽업 가능 판정에 사용하지 않는다.
 - 일반 사용자는 `storeId`, `pickupDate`, `pickupTime`, 하나 이상의 메뉴와 수량을 제출한다.
+- 같은 `menuId`가 반복되면 수량을 합산하며, 합산한 메뉴별 수량도 1 이상 100 이하여야 한다. 이를 벗어나면 `COMMON_001`로 거절한다.
 - 일반 사용자 픽업 생성·상세·취소는 JWT principal만 신뢰하지 않고 공개 `ConsumerAccountService.requireActiveAccount` 계약으로 현재 활성 계정을 먼저 확인한다. 생성·취소의 멱등 replay도 이 게이트를 먼저 통과하며, 실패하면 멱등 기록·Pickup Repository·재고 서비스에 진입하지 않는다.
 - 메뉴는 현재 `PUBLISHED + VISIBLE + SELLING`, 픽업 선택 가능, 제공 구간 가용 상태여야 한다.
 - 픽업 제공 구간과 메뉴 재고만 사용하며 예약 수용량 인원·팀 수를 사용하지 않는다.
@@ -115,6 +116,7 @@
 ### 취소와 수령 완료
 
 - 일반 사용자는 본인의 `CONFIRMED` 픽업을 서버 중앙 시각이 저장된 `pickupAt`보다 이른 동안만 취소할 수 있다. 정확히 같은 시각부터는 `PICKUP_006`이다.
+- 소비자 취소의 기준 시각은 비트랜잭션 명령 조정 계층이 최초 시도 전에 한 번 확보하고, 같은 논리 요청의 모든 기술 재시도에서 취소 가능 판정과 `cancelledAt` 기록에 재사용한다.
 - 취소는 `CANCELLED`와 실제 사용 풀의 수량 복구를 같은 트랜잭션에서 한 번만 확정한다.
 - 사용자·운영자 취소는 취소 작업마다 별도 복구 `operationId`를 발급하고, 저장된 `acquireOperationId`를 `sourceAcquireOperationId`로 전달한다.
 - 매장 운영자는 대상 매장의 `CONFIRMED` 픽업을 사유와 함께 `CANCELLED`로 전이하거나 `PICKED_UP`으로 전이할 수 있다.

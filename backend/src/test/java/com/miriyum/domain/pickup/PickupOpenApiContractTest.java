@@ -38,6 +38,11 @@ class PickupOpenApiContractTest {
         assertThat(map(create.get("properties")))
                 .containsKeys("storeId", "pickupDate", "pickupTime", "menuSelections")
                 .doesNotContainKeys("endTime", "businessType", "partySize");
+        Map<String, Object> menuSelections = map(
+                map(create.get("properties")).get("menuSelections"));
+        assertThat(menuSelections).containsKey("description");
+        assertThat(menuSelections.get("description").toString())
+                .contains("동일 menuId", "합산", "100");
         assertThat(list(map(schemas.get("PickupStatus")).get("enum")))
                 .containsExactly("CONFIRMED", "PICKED_UP", "CANCELLED");
     }

@@ -16,6 +16,8 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -38,6 +40,8 @@ class PickupCommandFacadeTest {
 
     private static final IdempotencyKey KEY = IdempotencyKey.parse(
             "550e8400-e29b-41d4-a716-446655440000");
+    private static final Instant CANCELLATION_REQUESTED_AT =
+            Instant.parse("2026-08-10T02:59:59Z");
     private static final PickupReservationCreateRequest CREATE_REQUEST =
             new PickupReservationCreateRequest(
                     "22", LocalDate.of(2026, 8, 10), LocalTime.NOON,
@@ -45,6 +49,7 @@ class PickupCommandFacadeTest {
 
     @Mock PickupReservationService reservationService;
     @Mock PickupStoreManagementService managementService;
+    @Mock Clock clock;
 
     @Test
     void retriesTwoMysqlDeadlocksInSeparateServiceCallsThenReturnsSuccess() {
@@ -114,7 +119,9 @@ class PickupCommandFacadeTest {
         InterruptedException interrupted = new InterruptedException("interrupted");
         given(reservationService.create(11L, KEY, CREATE_REQUEST)).willThrow(failure);
         PickupCommandFacade facade = new PickupCommandFacade(
-                reservationService, managementService, ignored -> 100L,
+                reservationService, managementService,
+                Clock.fixed(CANCELLATION_REQUESTED_AT, java.time.ZoneOffset.UTC),
+                ignored -> 100L,
                 ignored -> { throw interrupted; });
 
         try {
@@ -137,7 +144,8 @@ class PickupCommandFacadeTest {
         PickupCancellationRequest consumerRequest = new PickupCancellationRequest("일정 변경");
         StorePickupCancellationRequest operatorRequest =
                 new StorePickupCancellationRequest("재료 소진");
-        given(reservationService.cancelByConsumer(11L, 77L, KEY, consumerRequest))
+        given(reservationService.cancelByConsumer(
+                11L, 77L, KEY, consumerRequest, CANCELLATION_REQUESTED_AT))
                 .willReturn(expected);
         given(managementService.cancel(31L, 22L, 77L, KEY, operatorRequest))
                 .willReturn(expected);
@@ -149,6 +157,30 @@ class PickupCommandFacadeTest {
         assertThat(facade.cancelByOperator(31L, 22L, 77L, KEY, operatorRequest))
                 .isSameAs(expected);
         assertThat(facade.fulfill(31L, 22L, 77L, KEY)).isSameAs(expected);
+    }
+
+    @Test
+    void reusesConsumerCancellationRequestedAtAcrossTechnicalRetry() {
+        Instant requestedAt = Instant.parse("2026-08-10T02:59:59Z");
+        Instant afterPickupAt = Instant.parse("2026-08-10T03:00:01Z");
+        PickupCancellationRequest request = new PickupCancellationRequest("일정 변경");
+        PickupCommandResult expected = new PickupCommandResult(200, null);
+        given(clock.instant()).willReturn(requestedAt, afterPickupAt);
+        given(reservationService.cancelByConsumer(11L, 77L, KEY, request, requestedAt))
+                .willThrow(mysqlLockFailure(1213))
+                .willReturn(expected);
+        List<Long> delays = new ArrayList<>();
+        PickupCommandFacade facade = new PickupCommandFacade(
+                reservationService, managementService, clock,
+                ignored -> 100L, delays::add);
+
+        PickupCommandResult result = facade.cancelByConsumer(11L, 77L, KEY, request);
+
+        assertThat(result).isSameAs(expected);
+        assertThat(delays).containsExactly(100L);
+        then(clock).should().instant();
+        then(reservationService).should(times(2))
+                .cancelByConsumer(11L, 77L, KEY, request, requestedAt);
     }
 
     @Test
@@ -164,6 +196,7 @@ class PickupCommandFacadeTest {
     private PickupCommandFacade facade(List<Long> delays) {
         return new PickupCommandFacade(
                 reservationService, managementService,
+                Clock.fixed(CANCELLATION_REQUESTED_AT, java.time.ZoneOffset.UTC),
                 attempt -> attempt == 1 ? 100L : 300L, delays::add);
     }
 

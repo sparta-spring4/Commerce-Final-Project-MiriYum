@@ -27,6 +27,7 @@ import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -101,7 +102,7 @@ public class PickupReservationService {
         }
         consumerAccountService.requireActiveAccount(consumerAccountId);
         long storeId = request.storeIdAsLong();
-        List<PickupMenuSelectionRequest> selections = request.normalizedMenuSelections();
+        List<PickupMenuSelectionRequest> selections = normalizeMenuSelections(request);
         IdempotencyCommand command = new IdempotencyCommand(
                 "consumer", consumerAccountId, COMMAND_TYPE, key.value(),
                 fingerprint(storeId, request, selections));
@@ -109,6 +110,19 @@ public class PickupReservationService {
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
                 createWork(consumerAccountId, storeId, key, request, selections));
         return new PickupCommandResult(outcome.httpStatus(), replayResponse(outcome.data()));
+    }
+
+    private static List<PickupMenuSelectionRequest> normalizeMenuSelections(
+            PickupReservationCreateRequest request
+    ) {
+        try {
+            return request.normalizedMenuSelections();
+        } catch (IllegalArgumentException exception) {
+            ServiceException validationFailure = new ServiceException(
+                    CommonErrorCode.VALIDATION_FAILED);
+            validationFailure.initCause(exception);
+            throw validationFailure;
+        }
     }
 
     @Transactional(readOnly = true)
@@ -134,9 +148,10 @@ public class PickupReservationService {
             long consumerAccountId,
             long pickupReservationId,
             IdempotencyKey key,
-            PickupCancellationRequest request
+            PickupCancellationRequest request,
+            Instant requestedAt
     ) {
-        if (consumerAccountId <= 0 || key == null || request == null) {
+        if (consumerAccountId <= 0 || key == null || request == null || requestedAt == null) {
             throw new IllegalArgumentException("pickup cancellation arguments are required");
         }
         consumerAccountService.requireActiveAccount(consumerAccountId);
@@ -151,7 +166,7 @@ public class PickupReservationService {
                         + (reason == null ? "" : reason)));
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
                 cancelByConsumerWork(
-                        consumerAccountId, pickupReservationId, key, reason));
+                        consumerAccountId, pickupReservationId, key, reason, requestedAt));
         return new PickupCommandResult(outcome.httpStatus(), replayResponse(outcome.data()));
     }
 
@@ -159,7 +174,8 @@ public class PickupReservationService {
             long consumerAccountId,
             long pickupReservationId,
             IdempotencyKey key,
-            String reason
+            String reason,
+            Instant requestedAt
     ) {
         PickupReservation pickup = repository.findByIdAndConsumerAccountIdForUpdate(
                         pickupReservationId, consumerAccountId)
@@ -167,14 +183,13 @@ public class PickupReservationService {
         if (pickup.getStatus() != PickupStatus.CONFIRMED) {
             throw new ServiceException(PickupErrorCode.INVALID_STATE_TRANSITION);
         }
-        Instant cancelledAt = clock.instant();
-        if (!cancelledAt.isBefore(pickup.getPickupAt())) {
+        if (!requestedAt.isBefore(pickup.getPickupAt())) {
             throw new ServiceException(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
         }
 
         String restoreOperationId = "pickup-cancel-" + consumerAccountId
                 + "-" + key.value();
-        pickup.cancelByConsumer(reason, cancelledAt);
+        pickup.cancelByConsumer(reason, requestedAt);
         MenuInventoryRestoreResult restored = inventoryService.restore(
                 new MenuInventoryRestoreCommand(
                         restoreOperationId, pickup.getAcquireOperationId()));

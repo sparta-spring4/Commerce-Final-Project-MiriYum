@@ -109,6 +109,28 @@ class PickupReservationControllerTest {
     }
 
     @Test
+    void rejectsDuplicateMenuQuantityTotalOverOneHundred() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"storeId":"22","pickupDate":"2026-08-10",
+                                 "pickupTime":"12:00","menuSelections":[
+                                   {"menuId":"33","quantity":60},
+                                   {"menuId":"33","quantity":60}
+                                 ]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("menuSelections"));
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
     void returnsAuthenticatedConsumersPickupDetail() throws Exception {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));

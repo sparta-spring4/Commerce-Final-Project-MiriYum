@@ -31,6 +31,7 @@ import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -155,6 +156,23 @@ class PickupReservationServiceTest {
     }
 
     @Test
+    void mapsDuplicateMenuQuantityTotalOverOneHundredToValidationFailure() {
+        PickupReservationCreateRequest request = new PickupReservationCreateRequest(
+                "22", PICKUP_DATE, PICKUP_TIME,
+                List.of(
+                        new PickupMenuSelectionRequest("33", 60),
+                        new PickupMenuSelectionRequest("33", 60)));
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request));
+
+        assertThat(exception.getErrorCode()).isEqualTo(CommonErrorCode.VALIDATION_FAILED);
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+        then(inventoryService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void rejectsRestrictedConsumerBeforeDetailRepositoryAccess() {
         org.mockito.BDDMockito.willThrow(
                         new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED))
@@ -175,7 +193,7 @@ class PickupReservationServiceTest {
 
         ServiceException exception = catchThrowableOfType(ServiceException.class, () ->
                 service.cancelByConsumer(
-                        11L, 77L, KEY, new PickupCancellationRequest("일정 변경")));
+                        11L, 77L, KEY, new PickupCancellationRequest("일정 변경"), NOW));
 
         assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
         then(idempotencyExecutor).shouldHaveNoInteractions();
@@ -439,7 +457,7 @@ class PickupReservationServiceTest {
         given(repository.saveAndFlush(pickup)).willReturn(pickup);
 
         PickupCommandResult result = service.cancelByConsumer(
-                11L, 77L, KEY, new PickupCancellationRequest("일정 변경"));
+                11L, 77L, KEY, new PickupCancellationRequest("일정 변경"), NOW);
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().status())
@@ -455,6 +473,29 @@ class PickupReservationServiceTest {
     }
 
     @Test
+    void usesStableRequestedAtEvenWhenServiceClockHasReachedPickupTime() {
+        Instant requestedAt = Instant.parse("2026-08-10T02:59:59Z");
+        service = new PickupReservationService(
+                storeTransactionEligibilityService, storeService, inventoryService,
+                repository, idempotencyExecutor, consumerAccountService,
+                intervalTimePolicy, new ObjectMapper(),
+                Clock.fixed(Instant.parse("2026-08-10T03:00:01Z"), ZoneOffset.UTC));
+        PickupReservation pickup = confirmedPickup();
+        given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(pickup));
+        given(inventoryService.restore(any())).willReturn(new MenuInventoryRestoreResult(
+                "pickup-cancel-11-" + KEY.value(), "pickup-acquire-result"));
+        given(repository.saveAndFlush(pickup)).willReturn(pickup);
+
+        PickupCommandResult result = service.cancelByConsumer(
+                11L, 77L, KEY, new PickupCancellationRequest(null), requestedAt);
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(result.data().status())
+                .isEqualTo(com.miriyum.domain.pickup.entity.PickupStatus.CANCELLED);
+    }
+
+    @Test
     void rejectsConsumerCancellationExactlyAtPickupTimeBeforeRestore() {
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
@@ -466,7 +507,8 @@ class PickupReservationServiceTest {
 
         ServiceException exception = catchThrowableOfType(ServiceException.class, () ->
                 service.cancelByConsumer(
-                        11L, 77L, KEY, new PickupCancellationRequest(null)));
+                        11L, 77L, KEY, new PickupCancellationRequest(null),
+                        Instant.parse("2026-08-10T03:00:00Z")));
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
         then(inventoryService).should(never()).restore(any());
@@ -483,7 +525,7 @@ class PickupReservationServiceTest {
         given(repository.saveAndFlush(pickup)).willReturn(pickup);
 
         PickupCommandResult result = service.cancelByConsumer(
-                11L, 77L, KEY, new PickupCancellationRequest(reason));
+                11L, 77L, KEY, new PickupCancellationRequest(reason), NOW);
 
         assertThat(result.data().cancellationReason()).isEqualTo(reason);
     }

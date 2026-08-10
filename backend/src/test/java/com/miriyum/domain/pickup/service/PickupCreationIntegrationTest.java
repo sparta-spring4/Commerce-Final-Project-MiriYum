@@ -220,10 +220,12 @@ class PickupCreationIntegrationTest {
 
         PickupCommandResult cancelled = service.cancelByConsumer(
                 CONSUMER_1, pickupId, cancellationKey,
-                new PickupCancellationRequest("일정 변경"));
+                new PickupCancellationRequest("일정 변경"),
+                Instant.parse("2026-08-09T01:00:00Z"));
         PickupCommandResult replay = service.cancelByConsumer(
                 CONSUMER_1, pickupId, cancellationKey,
-                new PickupCancellationRequest("일정 변경"));
+                new PickupCancellationRequest("일정 변경"),
+                Instant.parse("2026-08-09T01:00:00Z"));
 
         assertThat(cancelled.data().status().name()).isEqualTo("CANCELLED");
         assertThat(replay.data()).isEqualTo(cancelled.data());

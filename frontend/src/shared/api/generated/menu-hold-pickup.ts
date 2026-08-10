@@ -98,6 +98,7 @@ export interface components {
       pickupDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
       /** @description 잠금 검증한 Store IANA 시간대와 같은 현재 재고 버킷 제공 구간에 정확히 일치해야 하는 startTime. 구간 부재·시간대 불일치·DST 누락 또는 중복은 PICKUP_003이다. */
       pickupTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
+      /** @description 동일 menuId가 반복되면 수량을 합산하며, 합산한 메뉴별 수량도 1 이상 100 이하여야 한다. */
       menuSelections: components["schemas"]["MenuSelectionRequest"][];
     };
     PickupCancellationRequest: {

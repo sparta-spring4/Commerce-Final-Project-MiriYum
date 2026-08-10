@@ -7,6 +7,8 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -28,6 +30,7 @@ public class PickupCommandFacade {
 
     private final PickupReservationService reservationService;
     private final PickupStoreManagementService managementService;
+    private final Clock clock;
     private final IntToLongFunction retryDelayMillis;
     private final RetrySleeper retrySleeper;
 
@@ -39,20 +42,23 @@ public class PickupCommandFacade {
     @Autowired
     public PickupCommandFacade(
             PickupReservationService reservationService,
-            PickupStoreManagementService managementService
+            PickupStoreManagementService managementService,
+            Clock clock
     ) {
-        this(reservationService, managementService,
+        this(reservationService, managementService, clock,
                 PickupCommandFacade::defaultDelayMillis, Thread::sleep);
     }
 
     PickupCommandFacade(
             PickupReservationService reservationService,
             PickupStoreManagementService managementService,
+            Clock clock,
             IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper
     ) {
         this.reservationService = reservationService;
         this.managementService = managementService;
+        this.clock = clock;
         this.retryDelayMillis = retryDelayMillis;
         this.retrySleeper = retrySleeper;
     }
@@ -72,8 +78,9 @@ public class PickupCommandFacade {
             IdempotencyKey key,
             PickupCancellationRequest request
     ) {
+        Instant requestedAt = clock.instant();
         return executeWithRetry(() -> reservationService.cancelByConsumer(
-                consumerAccountId, pickupReservationId, key, request));
+                consumerAccountId, pickupReservationId, key, request, requestedAt));
     }
 
     public PickupCommandResult cancelByOperator(
