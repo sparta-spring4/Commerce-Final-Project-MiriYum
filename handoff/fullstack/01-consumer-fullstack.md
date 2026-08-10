@@ -1,119 +1,158 @@
-# MiriYum 일반 사용자 풀스택 연결 인계서
+# MiriYum 일반 사용자 풀스택 화면 구현 상세 지시서
 
-## 1. 목적과 판단 순서
+## 작업 원칙
 
-이 문서는 일반 사용자 프론트를 현재 계약과 실제 구현에 안전하게 연결하는 기준이다. 디자인에 있는 모든 기능을 활성 기능으로 간주하지 않는다.
+적용 단계는 1차 MVP, 2차 MVP, 고도화이며 현재 계약이 있는 단계만 실제 서비스에 노출한다.
 
-다음 정본을 이 순서로 확인한다.
+디자인 문서 `01-consumer-design.md`의 화면 번호와 이 문서의 번호를 대응한다. 현재 브랜치의 `AGENTS.md`, `docs/specs/mvp1-common/ownership.md`, 도메인별 `spec.md`·`openapi.yaml`, 실제 코드 순으로 확인한다. 아래 경로보다 현재 승인된 OpenAPI가 바뀌었다면 OpenAPI에 맞추되 임의 endpoint를 만들지 않는다.
 
-1. 현재 Issue와 허용 변경 범위
-2. 저장소 및 프론트엔드 지침
-3. 활성 기능 명세와 소유권 문서
-4. OpenAPI 계약
-5. 실제 Controller·Service 구현
-6. 통합 테스트 또는 같은 수준의 호출 가능 증거
-7. 현재 발표·배포 승인 범위
+Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIRIYUM_CONSUMER_REFRESH` HttpOnly 쿠키, CSRF는 `MIRIYUM_CONSUMER_XSRF_TOKEN`과 `X-CSRF-TOKEN`을 사용한다. Web Storage에 토큰을 저장하지 않는다.
 
-활성화 공식은 다음과 같다.
+## 공통 프론트 구조
 
-`활성 기능 = 승인된 계약 ∩ 실제 구현 ∩ 호출 가능 증거 ∩ 현재 배포 승인`
+- 공개 셸: 매장 검색·상세·catalog
+- 인증 셸: 예약·픽업·마이페이지
+- 라우트 가드: 미인증은 로그인으로 보내고 원래 목적지를 보존
+- API 모듈: consumer-auth, stores, reservations, pickup-reservations, consumer-account
+- 조회 상태·폼 상태·서버 업무 상태를 분리
+- 쓰기마다 같은 사용자 의도 재시도에는 안정적인 `Idempotency-Key` 사용
+- 오류 메시지 문자열이 아니라 HTTP와 `code`로 분기
 
-단계명은 기능 플래그가 아니다. 어느 한 요소라도 없으면 내비게이션, 라우트 등록, 메뉴, 탭, 카드, 버튼, 데이터 요청, 액션을 만들거나 프로덕션 번들에 포함하지 않는다. CSS만으로 숨기거나 준비 중 화면·비활성 버튼·가짜 성공·프로덕션 mock으로 대체하지 않는다.
+## 화면별 구현
 
-## 2. 일반 사용자 인증 경계
+### 1. 회원가입
 
-- 일반 사용자와 매장 운영자는 가입, 로그인, principal, Access Token, Refresh 쿠키의 namespace를 분리한다. 일반 사용자 셸에서 매장 운영자 namespace를 재사용하거나 혼합하지 않는다.
-- 일반 사용자 Access JWT는 일반 사용자 셸 메모리에만 보관하고 보호된 데이터 요청에 Bearer 인증으로 사용한다. Refresh JWT 원문은 애플리케이션 상태, Web Storage, 로그에 저장하지 않는다.
-- 일반 사용자 Refresh 쿠키 `MIRIYUM_CONSUMER_REFRESH`와 CSRF 쿠키 `MIRIYUM_CONSUMER_XSRF_TOKEN`는 일반 사용자 인증 경계에서만 다룬다. 매장 운영자 Refresh 쿠키 `MIRIYUM_STORE_OPERATOR_REFRESH`는 일반 사용자 셸에서 읽거나 갱신하지 않는다. 새로고침 인증 복구, CSRF 준비, 로그아웃도 일반 사용자 namespace와 쿠키 경계로 한정한다.
-- 로그인·재발급·로그아웃의 쿠키와 헤더 요구사항, 동일 출처 및 CSRF 검증은 현재 계약과 실제 구현을 함께 확인한다. 다른 역할의 쿠키로 일반 사용자 세션을 복구하지 않는다.
+- 권장 라우트: `/signup`
+- API: `POST /api/v1/consumer-auth/accounts`
+- 요청: 이메일·비밀번호·닉네임과 실제 OpenAPI의 `emailVerificationReference`, `identityVerificationReference`
+- 검증: 이메일, 닉네임 2~20자, 비밀번호 확인, 확인 참조 존재
+- 오류: `ACCOUNT_001` 이메일 중복, `ACCOUNT_002` 휴대전화 중복, `ACCOUNT_003/004` 확인 실패
+- 성공: 로그인으로 이동하며 자동 로그인하지 않는다.
 
-## 3. 현재 확인된 일반 사용자 기능
+### 2. 로그인·세션 복구
 
-작업 시점의 Controller 검증에서 다음 기능은 계약과 연결 후보가 일치한다. 연결 전에는 각 요청·응답 스키마, 보안 요구사항, HTTP 상태, 오류 코드를 해당 OpenAPI와 실제 구현으로 다시 대조한다.
+- 라우트: `/login`
+- 로그인: `POST /api/v1/consumer-auth/sessions`
+- CSRF 준비: `GET /api/v1/consumer-auth/csrf-tokens/current`
+- 재발급: `POST /api/v1/consumer-auth/token-refreshes`
+- 로그아웃: `DELETE /api/v1/consumer-auth/sessions/current`
+- `AUTH_005`는 계정 존재 여부를 나누지 않고 통합 실패 문구 사용
+- `COMMON_010`은 `Retry-After`로 남은 시간 표시
+- `AUTH_002`는 한 번의 namespace 재발급 후 원 요청 재시도, 실패하면 세션 만료 사유와 로그인 이동
+- 일반 사용자 요청에 store-operator 쿠키·토큰을 사용하지 않는다.
 
-| 영역 | 현재 확인된 범위 |
-| --- | --- |
-| 인증 | 일반 사용자 가입, 로그인, Access Token 재발급, CSRF 준비, 현재 일반 사용자 세션 로그아웃 |
-| 내 계정 | 본인 정보 조회, 신뢰 연락처 등록, 닉네임 수정. 연락처 등록은 실제 이메일·휴대전화 소유 인증이 아니다. |
-| 내 예약 내역 | 일반 사용자 본인의 예약 내역 조회, 상태·페이지·정렬 조건 확인 후 연결 |
-| 매장 탐색 | 다섯 지역, 키워드, 매장 카테고리, 서비스 날짜, 시작 시간, 일행 수, 영유아 포함, 완전 조건 가용성 입력을 가진 매장 검색; 매장 상세와 공개 메뉴 조회; 카테고리·태그 목록 |
-| 일반 예약 | 생성, 본인 상세 조회, 소비자 취소. 생성과 취소에는 계약상 Idempotency-Key 요구를 확인한다. |
+### 3. 매장 찾기
 
-현재 연결 후보인 라우트는 다음과 같다. 이 표는 기능 노출 승인표가 아니라 Controller 검증 결과이며, 요청·응답과 보안 규칙은 작업 시점마다 다시 대조한다.
+- 라우트: `/stores`
+- API: `GET /api/v1/stores`, `GET /api/v1/store-categories`, `GET /api/v1/store-tags`
+- query: keyword, region, storeCategoryCode, serviceDate·startTime·partySize, availableOnly, 페이지 계약
+- 지역은 `SEOUL/BUSAN/DAEGU/DAEJEON/GWANGJU`만 제출
+- 예약 조건 세 개가 모두 있을 때만 availableOnly를 허용하고 `NOT_REQUESTED/AVAILABLE/UNAVAILABLE`를 표시
+- URL search params를 필터 원본으로 사용해 뒤로가기와 공유를 유지한다.
 
-| 영역 | 확인된 라우트 |
-| --- | --- |
-| 일반 사용자 인증 | `POST /api/v1/consumer-auth/accounts`, `POST /api/v1/consumer-auth/sessions`, `POST /api/v1/consumer-auth/token-refreshes`, `GET /api/v1/consumer-auth/csrf-tokens/current`, `DELETE /api/v1/consumer-auth/sessions/current` |
-| 내 계정·내역 | `GET /api/v1/consumer-accounts/me`, `PUT /api/v1/consumer-accounts/me/contact`, `PATCH /api/v1/consumer-accounts/me`, `GET /api/v1/consumer-accounts/me/reservations` |
-| 공개 탐색 | `GET /api/v1/stores`, `GET /api/v1/stores/{storeId}`, `GET /api/v1/stores/{storeId}/menus`, 카테고리·태그 catalog 조회 |
-| 일반 예약 | `POST /api/v1/reservations`, `GET /api/v1/reservations/{reservationId}`, `POST /api/v1/reservations/{reservationId}/cancellations` |
-| 픽업 | `GET /api/v1/stores/{storeId}/pickup-availability`, `POST /api/v1/pickup-reservations`, `GET /api/v1/pickup-reservations/{pickupReservationId}`, `POST /api/v1/pickup-reservations/{pickupReservationId}/cancellations` |
+### 4. 매장 상세
 
-공개 매장 상세에 운영 정보가 보인다고 해서 일반 사용자가 선택 가능한 예약 시간대가 구성됐다고 판단하지 않는다. 공개 예약 가능 시간대 또는 bookable slot 구성은 별도 Controller·계약·호출 증거가 확인될 때까지 독립 게이트로 둔다.
+- 라우트: `/stores/:storeId`
+- API: `GET /api/v1/stores/{storeId}`, `GET /api/v1/stores/{storeId}/menus`, 필요 시 가용성 조회
+- `STORE_001`은 찾을 수 없음, 운영·게시 상태에 따라 예약·픽업 진입을 숨김
+- catalog 코드 대신 서버 표시명을 렌더링하고 내부 운영자 FK를 요구하지 않는다.
 
-## 4. 기능별 독립 활성화 게이트
+### 5. 예약 날짜·시간·인원
 
-### 4.1 일반 예약 생성
+- 라우트: `/stores/:storeId/reserve`, `/reservations/:reservationId`
+- 예약 작성 상태: 날짜·시간·성인·아동·영유아·menuSelections를 한 흐름의 draft로 관리
+- 가용성은 공개 조회로 미리 보여도 최종 성공을 보장하지 않는다.
 
-일반 예약 화면은 일반 예약 생성, 본인 상세·취소, 요청 유효성, 수용량 충돌, 멱등 재시도까지 각각 계약과 실제 구현을 확인한다. 날짜·시작 시간·성인·아동·영유아 입력과 응답 상태를 추측하지 않고, HTTP 상태와 오류 `code`로 분기한다.
+### 6. 대표 메뉴 사전 선택
 
-동일 사용자 의도의 재전송은 계약이 요구하는 Idempotency-Key를 유지한다. 성공 후에도 상세 조회의 소유권, 취소 가능 상태, 취소 결과와 최신 서버 상태를 재검증한다.
+- 메뉴 가용성: `GET /api/v1/stores/{storeId}/menu-hold-availability`
+- 선택 수량은 서버 잔여를 넘지 않게 안내하되 최종 쓰기에서 다시 검증한다.
+- 메뉴 없음은 menuSelections 생략 또는 빈 배열. 별도 skip API 금지
 
-### 4.2 메뉴 홀드 가용성·선택
+### 7. 예약 최종 확인·생성
 
-일반 예약 생성이 `menuSelections`를 받는다는 사실만으로 선택 가능한 메뉴 홀드 수량을 공개할 수 있다는 증거가 되지 않는다. 다음을 모두 독립적으로 확인해야 한다.
+- 생성: `POST /api/v1/reservations`; endTime·연락처·사용자 ID를 보내지 않는다.
+- 프론트가 예약 생성 후 메뉴 홀드 쓰기를 별도로 호출하지 않는다.
+- 성공은 `CONFIRMED`만 허용하고 상세 `GET /api/v1/reservations/{reservationId}`로 이동
 
-1. 일반 사용자가 읽을 수 있는 공개 메뉴 홀드 가용성 계약
-2. 그 계약을 제공하는 실제 Controller와 호출 가능 증거
-3. 선택 대상 메뉴, 날짜·시간, 수량과 일반 예약 조건의 일관성
-4. 전체 성공 또는 전체 실패, 품절·경합·취소 복구 오류 코드의 실제 의미
+### 8. 예약 상세·취소
 
-현재 공개 메뉴 홀드 가용성 Controller는 없으므로, 위 네 항목이 충족될 때까지 메뉴 사전 선택 모듈을 활성화하지 않는다. 일반 예약 생성에서 `menuSelections`를 전달할 수 있는 경우에도, 공개 가용 수량을 추측해 표시하거나 예약과 별도 홀드 쓰기를 연속 호출하지 않는다. 메뉴 선택이 안전하게 노출되지 않으면 메뉴 없이 일반 예약하는 흐름만 독립적으로 검토한다.
+- 취소: `POST /api/v1/reservations/{reservationId}/cancellations`
+- 오류: `RESERVATION_002` 시간 불가, `_003` 수용량, `_004` 중복, `_006` 취소 불가, `_007` 버전 변경, `_009` 인원; `MENU_HOLD_001/002`는 메뉴 재선택 또는 메뉴 없이 진행
+- 성공 후 매장 검색 가용성, 내 예약 목록, 해당 상세 캐시를 무효화한다.
 
-### 4.3 픽업 가용성과 픽업 거래
+### 9. 내 예약 목록
 
-픽업은 모든 업종에서 기능 활성화 여부로 판단하며 카페·베이커리 제한은 금지한다. 다만 다음은 서로 별개로 검증한다.
+- 라우트: `/mypage/reservations`
+- API: `GET /api/v1/consumer-accounts/me/reservations`
+- query: 상태 `CONFIRMED/CANCELLED/FULFILLED`, 날짜, 0 기반 페이지
+- 빈 결과는 오류가 아닌 200·빈 목록으로 렌더링
+- 결제·노쇼·체크인 필드를 추측해 DTO에 추가하지 않는다.
 
-1. 공개 픽업 가용성: 매장, 픽업 날짜·시간, 메뉴·수량을 일반 사용자가 읽을 수 있는 계약과 Controller
-2. 픽업 거래: 일반 사용자 생성, 본인 상세, 취소의 계약·Controller·보안·멱등성. 본인 목록·이력은 별도 Controller·계약·검증으로 확인한다.
-3. 일반 예약과 분리된 픽업 상태 전이와 취소·수령 완료 처리
+### 10. 픽업 선택·생성
 
-현재 공개 픽업 가용성 Controller와 일반 사용자 픽업 생성·본인 상세·취소 Controller, 이를 따르는 Service와 focused test가 구현되어 있다. 메뉴 재고의 `ONLINE_HOLD`와 정책상 허용된 `SHARED`를 함께 읽고 확보·복구하는 동작은 활성 정본의 정상 계약이며 픽업 비노출 사유가 아니다. 실제 연결 시점에는 OpenAPI·Controller·Service·호출 증거·현재 릴리스 범위를 다시 대조하되, 공유 온라인 풀을 별도 픽업 재고 미구현으로 오판해 이 네 라우트를 차단하지 않는다.
+- 라우트: `/stores/:storeId/pickup`, `/pickup-reservations/:pickupReservationId`, `/mypage/pickups`
+- 가용성: `GET /api/v1/stores/{storeId}/pickup-availability`
+- 생성: `POST /api/v1/pickup-reservations`; pickupDate·pickupTime·메뉴와 수량, endTime·partySize 제외
 
-일반 예약 메뉴 홀드와 픽업은 같은 메뉴·제공 구간의 `ONLINE_HOLD`를 함께 우선 사용하고, 매장 정책이 허용할 때만 정해진 순서로 `SHARED`를 사용할 수 있다. 온라인 거래는 `ONSITE`를 사용하지 않는다. 공개 가용량은 남은 `ONLINE_HOLD`와 온라인 사용이 허용된 `SHARED`의 합이며, 취소는 해당 거래가 실제로 차감한 각 풀로 한 번만 복구한다. 오래된 가용량과 동시성 충돌은 최신 공개 가용성을 다시 조회해 처리한다.
+### 11. 픽업 목록·상세·취소
 
-일반 사용자 본인 픽업 목록·이력 Controller는 현재 없으므로 픽업 목록 내비게이션, 목록 라우트와 목록 데이터 요청은 숨긴다. 생성 응답 또는 이미 알고 있는 본인 픽업 식별자로 상세·취소에 진입할 수는 있지만, 브라우저 저장소의 식별자를 서버 목록처럼 조합하지 않는다. 픽업은 업종으로 제한하지 않으며, 별도 예약 전용·픽업 전용 재고나 서비스 간 재고 이전 버튼·라우트·상태·API를 만들지 않는다.
+- 상세: `GET /api/v1/pickup-reservations/{pickupReservationId}`
+- 취소: `POST /api/v1/pickup-reservations/{pickupReservationId}/cancellations`
+- 상태: `CONFIRMED/CANCELLED/PICKED_UP`만 사용
+- `PICKUP_002` 자격 없음, `_003` 구간, `_004` 수량, `_005` 전이, `_006` 취소 불가
+- 일반 예약 캐시·수용량을 픽업 성공으로 수정하지 않는다.
 
-## 5. 2차 MVP와 고도화의 연결 원칙
+### 12. 마이페이지·프로필
 
-자연어 탐색, 선호 기반 추천, 대체 메뉴, 3km 주변 매장, 가용성 기반 순위, 카카오맵은 2차 MVP라는 이름만으로 노출하지 않는다. 각각의 계약, 실제 구현, 호출 증거, 배포 승인을 확인한 독립 모듈만 연결한다. 증거가 부족하면 해당 내비게이션, 라우트 등록, 탭, 버튼, 데이터 요청, 액션을 만들거나 프로덕션 번들에 포함하지 않으며 프로덕션 mock을 두지 않는다. 추천 또는 지도 모듈이 없을 때도 1차 키워드·필터 검색은 정상이어야 한다.
+- 라우트: `/mypage`, `/mypage/profile`
+- 조회·수정: `GET/PATCH /api/v1/consumer-accounts/me`
+- PATCH는 닉네임만 보내고 Idempotency-Key 사용
+- `ACCOUNT_005`는 서버가 제공하는 다음 변경 가능 시각을 기준으로 안내
+- 이메일·휴대전화·비밀번호 변경 폼을 1차에 만들지 않는다.
 
-### 5.1 대표·추천 메뉴 3–5개 우선 노출
+## 2차 MVP 화면
 
-매장이 관리하는 대표·추천 메뉴 3–5개를 일반 사용자 화면에서 우선 노출하는 기능은 고도화의 독립 capability다. 승인된 계약과 OpenAPI, 이를 따르는 실제 Controller·Service 구현, 호출 가능 증거, 현재 릴리스 승인이 모두 있을 때만 연결한다. 하나라도 없으면 이 기능의 내비게이션, 라우트 등록, 탭, 카드, 데이터 요청, 액션, production bundle과 production mock을 함께 제거한다. 개수는 3–5개 경계를 넘겨 추측하지 않으며, 별도 순위나 정렬 규칙을 만들지 않는다.
+### 13. 자연어 검색·추천
+승인된 자연어·개인화 API가 확인될 때 별도 route chunk로 등록한다. 일반 검색 API를 임의 프롬프트 endpoint로 감싸지 않는다.
 
-### 5.2 Redis 기반 Refresh Token 관리
+### 14. 품절 대체·주변 매장 추천
+대체 API의 추천 이유·원 매장·대체 storeId를 구분한다. 다른 매장 선택 시 기존 가용성·메뉴 draft를 폐기하고 새 매장 기준으로 재검증한다.
 
-Redis 기반 Refresh Token 관리는 일반 사용자 인증 namespace의 고도화 독립 capability다. 승인된 일반 사용자 인증 계약, 실제 Redis 설정과 Refresh Token 관리 구현, 호출 가능한 보안 성공·실패 증거, 해당할 경우 운영·마이그레이션 증거, 현재 릴리스 승인이 모두 있을 때만 연결한다. 기존 Refresh 쿠키와 로그인·재발급·로그아웃 endpoint만으로는 이 capability의 증거가 아니다. 하나라도 없으면 이 관리 capability에 의존하는 내비게이션, 라우트 등록, 탭, 카드, 데이터 요청, 액션, production bundle과 production mock을 함께 제거한다.
+### 15. 지도·목록
+카카오맵 계약과 키 관리가 확인될 때 lazy load한다. 위치 거부·SDK 실패에도 `/stores` 목록은 유지한다.
 
-### 5.3 웨이팅 SSE 실시간 전달
+## 고도화 화면
 
-웨이팅의 실시간 전달은 SSE의 승인된 계약, 인증·인가와 재연결 의미, 실제 Controller·Service 또는 stream 구현, 호출 가능한 성공·실패·재연결 증거, 현재 릴리스 승인이 모두 있을 때만 연결하는 독립 capability다. 하나라도 없으면 웨이팅 실시간 전달의 내비게이션, 라우트 등록, 탭, 카드, 데이터 요청, 액션, production bundle과 production mock을 함께 제거한다.
+### 16. 소셜 로그인
+승인된 provider callback·계정 연결 계약이 있을 때 consumer-auth 모듈에 추가한다.
 
-결제·환불과 결제 제공자·Webhook 동기화, 알림, 취소 자리 자동 승계·빈자리 알림, 웨이팅 기반 지도 추천, 체크인·노쇼, 카카오 소셜 로그인·세션, 관련 이력 모듈도 고도화라는 이름이 아니라 같은 활성화 공식으로 판단한다. 각 기능은 서로 독립된 계약, Controller·Service 실제 구현, 호출 가능 증거, 현재 배포 승인을 확인한다.
+### 17. 예약금 결제
+결제 요청·결과 조회·웹훅 반영 상태 API를 분리하고 결과 불명을 성공으로 표시하지 않는다.
 
-취소 자리 자동 승계와 빈자리 알림의 유일한 시작 사건은 확정된 일반 예약의 유효한 일반 취소다. 노쇼 후보·확정·정정은 취소가 아니며 자동 승계, 예약 수용량 반환 원장, 일반 예약 가용성 재게시를 절대로 만들지 않는다. 체크인·노쇼 계약과 라우트·요청·상태는 자동 승계와 독립적으로 게이트하고, 승계 제한 시간·우선순위·상태를 클라이언트에서 발명하지 않는다.
+### 18. 결제·환불 내역
+본인 결제 read API만 사용하며 예약 상태와 결제 상태를 별도 모델로 유지한다.
 
-웨이팅 기반 지도 추천은 `1km~5km` 거리 경계를 가진 독립 capability로 게이트한다. 기본 반경, 순위, 추가 거리 정책을 추측하지 않고 2차 MVP 대체 메뉴의 3km 규칙을 합치거나 재사용하지 않는다. 승인된 계약, Controller·Service 실제 구현, 호출 가능 증거, 현재 배포 승인 중 하나라도 없으면 이 모듈의 내비게이션, 라우트 등록, 탭, 버튼, 데이터 요청, 액션과 프로덕션 번들·mock을 모두 제거한다.
+### 19. 웨이팅 등록
+등록·예약 충돌과 위치 검증 계약이 있을 때만 route와 mutation을 활성화한다.
 
-그 밖의 고도화 기능도 증거가 부족하면 해당 내비게이션, 라우트 등록, 탭, 버튼, 데이터 요청, 액션을 만들거나 프로덕션 번들에 포함하지 않으며 준비 중 화면, 비활성 버튼, 가짜 성공, 프로덕션 mock으로 대체하지 않는다.
+### 20. 현재 웨이팅
+snapshot 조회와 SSE 상태를 분리하고 마지막 event cursor 이후 재연결한다.
 
-## 6. 연결 검증 체크리스트
+### 21. 체크인·노쇼
+QR·확인번호 명령과 노쇼 후보·확정 상태를 예약 enum에 섞지 않는다.
 
-- 각 라우트가 현재 OpenAPI 경로, HTTP 메서드, 요청 스키마, 응답 스키마와 일치하는지 확인한다.
-- 생성·수정·취소 요청마다 Idempotency-Key의 필수 여부, 재전송 결과, 키 재사용 충돌을 검증한다.
-- 성공 문구가 아니라 HTTP 상태와 오류 `code`로 검증·인증·권한·소유권 없음·수용량 충돌·메뉴 홀드 충돌을 구분한다.
-- 검색 조건 변경, 상세 진입·이탈, 예약·취소 직후에는 오래된 쿼리 응답이 최신 화면을 덮어쓰지 않는지 확인하고 필요한 재조회 규칙을 둔다.
-- 일반 사용자 Access Token과 Refresh/CSRF 쿠키가 매장 운영자 namespace와 섞이지 않는지, 일반 사용자 토큰이 운영자 API 권한을 얻지 않는지 확인한다.
-- 개인 자원의 404, 네트워크 실패, 시간 초과, 중복 제출을 임의의 성공이나 소유권 추측 메시지로 바꾸지 않는다.
-- 메뉴 홀드, 픽업, 예약 가능 시간대, 2차 MVP, 고도화는 각각의 계약·Controller·실제 구현·호출 증거·승인 여부를 다시 검증한다.
+### 22. 알림
+목록·읽음 API와 관련 화면 deep link를 허용 목록으로 연결한다.
+
+기능별 OpenAPI·권한·상태 기계가 없으면 CSS 비표시가 아니라 route·menu·query·mutation을 모두 제외한다.
+
+## 검증 체크리스트
+
+- 일반·대표자 namespace 토큰과 쿠키가 교차 사용되지 않는다.
+- 비회원 검색·상세, 인증 후 원래 예약 화면 복귀가 동작한다.
+- 불완전한 예약 조건으로 availableOnly 요청을 보내지 않는다.
+- 예약과 메뉴 홀드를 두 번의 쓰기로 분리하지 않는다.
+- 마지막 수용량·메뉴 수량 충돌을 성공으로 낙관 표시하지 않는다.
+- 개인 예약·픽업의 부재와 타인 소유 404를 구분 노출하지 않는다.
+- 고도화 API가 없을 때 관련 라우트·메뉴·요청이 없다.

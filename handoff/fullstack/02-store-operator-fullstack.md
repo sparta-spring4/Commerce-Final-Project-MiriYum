@@ -1,113 +1,146 @@
-# MiriYum 매장 운영자 풀스택 연결 인계서
+# MiriYum 식당 대표자 풀스택 화면 구현 상세 지시서
 
-## 1. 목적과 활성화 원칙
+## 작업 원칙
 
-이 문서는 매장 운영자 디자인을 현재 저장소에 안전하게 연결하는 방법을 정한다. 1차 MVP·2차 MVP·고도화는 제품 로드맵 분류일 뿐 runtime 기능 플래그가 아니다.
+적용 단계는 1차 MVP, 2차 MVP, 고도화이며 현재 계약이 있는 단계만 실제 서비스에 노출한다.
 
-각 기능은 다음 교집합이 모두 확인될 때만 활성화한다.
+`02-store-operator-design.md`와 화면 번호를 맞춘다. Access JWT는 대표자 셸 메모리, Refresh는 `MIRIYUM_STORE_OPERATOR_REFRESH`, CSRF는 `MIRIYUM_STORE_OPERATOR_XSRF_TOKEN`과 `X-CSRF-TOKEN`을 사용한다. 일반 사용자 namespace와 공유하지 않는다. 모든 storeId 명령은 서버의 대표 운영자 권한 결과를 따른다.
 
-> 승인된 계약 ∩ 실제 Controller와 Service 구현 ∩ 호출 가능한 검증 증거 ∩ 현재 릴리스 승인 범위
+권장 route prefix는 `/partner`다. 인증 route와 보호 셸을 분리하고, 현재 매장 ID가 바뀌면 이전 매장의 query·mutation·폼 draft를 취소·격리한다.
 
-OpenAPI만 있거나 Controller만 있는 경우, 또는 단계 이름만으로는 활성화하지 않는다. 지원되지 않는 기능은 내비게이션, 라우트 등록, 탭, 버튼과 기타 제어, 데이터 요청, 액션, production bundle과 production mock에서 함께 제거한다. 비활성 버튼, 준비 중 화면, 가짜 성공으로 대체하지 않는다.
+## 화면별 구현
 
-## 2. 매 작업의 확인 순서
+### 1. 대표자 회원가입
+- route: `/partner/signup`
+- API: `POST /api/v1/store-operator-auth/accounts`
+- 이메일·비밀번호·표시 이름과 OpenAPI 확인 참조를 사용한다.
+- 계정 생성과 매장 등록을 한 요청으로 합치지 않는다. 성공 후 로그인.
 
-현재 Issue의 허용 경로와 인수 조건을 먼저 확인한 뒤, 라우팅 규칙, 활성 기능 명세, OpenAPI, Controller, Service, focused test 또는 동등한 호출 증거, 릴리스 범위를 차례로 대조한다. 이 문서는 현재 확인 결과를 영구 지원표로 고정하지 않는다. 실제 작업 시점에 다시 확인하고, 계약과 구현이 충돌하면 임의로 보정하지 말고 기능을 숨긴 채 소유자에게 보고한다.
+### 2. 대표자 로그인
+- route: `/partner/login`
+- 로그인 `POST /api/v1/store-operator-auth/sessions`
+- CSRF `GET /api/v1/store-operator-auth/csrf-tokens/current`
+- 재발급 `POST /api/v1/store-operator-auth/token-refreshes`
+- 로그아웃 `DELETE /api/v1/store-operator-auth/sessions/current`
+- 실패는 `AUTH_005`, 제한은 `COMMON_010`, 만료 재발급 실패 시 사유를 보존해 로그인 이동
+- 성공 후 관리 매장 조회 결과가 없으면 등록, 있으면 홈으로 자동 분기한다.
 
-모든 쓰기 요청은 계약상 필요한 Idempotency-Key를 사용자 의도 단위로 재사용하며, 인증·권한·검증·충돌 응답은 OpenAPI의 HTTP 상태와 공통 오류 코드를 함께 처리한다. 오류 `message` 문자열로 분기하지 않는다.
+### 3. 매장 등록
+- route: `/partner/stores/new`
+- catalog: `GET /api/v1/store-categories`, `/api/v1/store-tags`
+- 생성: `POST /api/v1/store-operator/stores` + Idempotency-Key
+- 요청: 사업자등록번호, `CAFE/BAKERY/OTHER`, 이름·설명·지역·주소·category code·tag code·운영 모드
+- 운영자 ID·승인 필드·파일·이미지를 보내지 않는다.
+- 1차 성공 응답은 즉시 `verificationStatus=APPROVED`; 승인 대기 route를 만들지 않는다.
+- `STORE_002` 중복, `_004` catalog, `_008` OTHER+pickup 오류를 필드에 연결
 
-## 3. 운영자 인증과 자기 계정
+### 4. 관리 홈
+- route: `/partner`
+- 관리 매장 조회 결과로 기본정보·설정 page link를 구성한다.
+- 1차에는 통계 API를 추측하지 않고 설정 완성도와 운영 상태만 표현한다.
 
-현재 OpenAPI와 StoreOperatorAuthController/StoreOperatorAccountController는 운영자 전용 가입, 로그인, 토큰 재발급, 로그아웃, CSRF 준비, 신뢰 연락처 최초 등록, 본인 정보 조회, 표시 이름 수정 Controller를 제공한다. 일반 사용자 namespace와 토큰을 재사용하지 않는다.
+### 5. 매장 정보
+- route: `/partner/stores/:storeId/settings`
+- API: `GET/PATCH /api/v1/store-operator/stores/{storeId}`
+- 변경 가능한 필드만 PATCH하고 Idempotency-Key 사용
+- `STORE_003`은 권한 없음, `_005/_007` 상태 충돌, `_008` 픽업 자격
 
-- Access Token은 운영자 셸 메모리에만 두고 보호 요청에 Bearer로 전달한다.
-- Refresh Cookie와 CSRF 경계는 운영자 전용 계약을 그대로 사용한다.
-- 본인 정보는 `me` 범위만 연결한다. 직원·공동 관리자·역할 변경·플랫폼 운영자 계정으로 확장하지 않는다.
-- 신뢰 연락처는 이메일·휴대전화 소유 인증 성공으로 표시하지 않는다.
+### 6. 운영시간
+- route: `/partner/stores/:storeId/operating-hours`
+- `GET/PUT /api/v1/store-operator/stores/{storeId}/operating-hours`
+- PUT은 월~일 전체 설정을 게시한다. 일부 요일 로컬 병합 금지
+- 구간 `[startTime,endTime)`, 브레이크타임을 분리하고 `STORE_006`을 구간별 표시
+- 저장 성공 후 해당 매장 상세·공개 검색 관련 query를 갱신하되 기존 예약을 수정하지 않는다.
 
-## 4. 매장 bootstrap과 기본 정보
+### 7. 예약 접수 시간대
+- route: `/partner/stores/:storeId/reservation-time-slots`
+- `GET/PUT /api/v1/store-operator/stores/{storeId}/reservation-time-slots`
+- 전체 주간 게시, 영업시간 밖·브레이크 충돌 표시
+- 수용량 필드를 이 요청에 섞지 않는다.
 
-### 4.1 bootstrap guard
+### 8. 메뉴 목록·등록·수정
+- routes: `/partner/stores/:storeId/menus`, `/menus/new`, `/menus/:menuId/edit`
+- `GET/POST /api/v1/store-operator/stores/{storeId}/menus`
+- `GET/PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}`
+- menu category catalog는 `/api/v1/menu-categories`
+- 버전 `DRAFT/SCHEDULED/PUBLISHED/RETIRED`, 노출 `VISIBLE/HIDDEN`, 판매 `SELLING/PAUSED`를 독립 필드로 유지
+- `AVAILABLE/SOLD_OUT`은 이 폼에 저장하지 않는다.
 
-현재 StoreController는 생성, 이미 알고 있는 매장 식별자의 조회·수정만 제공한다. 로그인한 운영자가 관리하는 매장을 서버가 발견·열거하는 Controller는 없다. 따라서 관리 라우트는 추측한 식별자, URL에 남은 값, Web Storage, 이전 계정의 캐시를 storeId로 신뢰해 시작해서는 안 된다.
+### 9. 예약 수용량
+- route: `/partner/stores/:storeId/capacities/:serviceDate`
+- `GET/PUT /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}`
+- 날짜별 전체 버킷, maxPeople·maxTeams·minPartySize·maxPartySize·infantsAllowed
+- 현재 점유와 잔여를 서버 응답으로 표시; 클라이언트가 재계산해 원장처럼 저장하지 않는다.
+- `RESERVATION_008/009`, `COMMON_008` 처리
 
-등록 직후에는 생성 응답의 매장 식별자로 즉시 관리 흐름에 진입할 수 있다. 새로고침·새 세션 등 서버 소유 발견 경로가 없는 상태에서는 관리 셸과 매장별 라우트·요청을 등록 화면 또는 안전한 비매장 상태로 되돌린다. 발견 계약과 Controller·Service·검증이 추가되기 전에는 매장 전환 UI를 만들지 않는다.
+### 10. 메뉴 수량·품절
+- route: `/partner/stores/:storeId/inventory`
+- 목록 `GET /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`
+- 생성 `POST /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`
+- 수정 `PATCH /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}`
+- 전체 totalSupply·ONLINE_HOLD·ONSITE·SHARED·availabilityStatus를 함께 제출
+- `MENU_HOLD_004` 합계, `_005` 사용량 이하 축소, `_006` 전이 오류
+- 성공 후 해당 버킷·공개 가용성·픽업 가용성 query 무효화
 
-### 4.2 현재 생성·수정 계약
+### 11. 예약 목록
+- routes: `/partner/stores/:storeId/reservations`, `/reservations/:reservationId`
+- 목록·상세: `GET /api/v1/store-operator/stores/{storeId}/reservations[/{reservationId}]`
+- 날짜·상태·0 기반 page; `CONFIRMED/CANCELLED/FULFILLED`
 
-StoreController와 OpenAPI가 확인되면 매장 생성은 다음 필드를 정확히 사용한다.
+### 12. 예약 상세·처리
 
-- `businessRegistrationNumber`, `businessType`, `name`, `description`, `region`, `address`, `timeZoneId`
-- `storeCategoryCode`, `tagCodes`
-- `modes.reservationEnabled`, `modes.menuHoldEnabled`, `modes.pickupEnabled`
-- `applicantSelfAttested`, `requiredTermsAgreed`
+- 상세 조회 뒤 현재 상태에 허용되는 명령만 렌더링한다.
+- 취소 `POST .../{reservationId}/cancellations`, 사유와 Idempotency-Key
+- 방문 완료 `POST .../{reservationId}/fulfillments`
+- 범용 status PATCH 금지. 취소는 수량 복구 API를 별도로 호출하지 않고 방문 완료는 복구하지 않는다.
 
-생성 성공은 즉시 관리 진입을 뜻하며, 별도 입점 신청·승인 대기·자동 승인 API를 만들지 않는다. 일반 수정은 이름, 설명, 지역, 주소, 분류, 태그, 운영 모드, 영업 상태만 현재 계약을 따라 보낸다. 사업자등록번호·사업 유형·시간대는 일반 수정 요청에 억지로 포함하지 않는다.
+### 13. 픽업 목록·상세·처리
+- routes: `/partner/stores/:storeId/pickups`, `/pickups/:pickupReservationId`
+- 목록·상세 `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations[/{pickupReservationId}]`
+- 취소 `POST .../{pickupReservationId}/cancellations`
+- 수령 완료 `POST .../{pickupReservationId}/fulfillments`
+- 상태 `CONFIRMED/CANCELLED/PICKED_UP`; CAFE·BAKERY와 pickupEnabled 조건이 아니면 route·menu 미등록
 
-## 5. 현재 연결 가능한 운영 모듈
+### 14. 대표자 내 정보
+- route: `/partner/profile`
+- `GET/PATCH /api/v1/store-operator-accounts/me`
+- 표시 이름만 수정. 이메일·휴대전화·비밀번호 범용 PATCH 금지
 
-아래 모듈은 해당 OpenAPI, Controller, Service와 focused test가 현재 함께 존재하는 범위에서만 연결한다. 모든 매장별 요청은 서버의 관리 권한 판단을 신뢰하고, 다른 매장 데이터가 캐시·폼·요청에 섞이지 않게 한다.
+## 2차 MVP
 
-### 5.1 운영시간·예약 접수 시간대
+고객용 자연어 검색·추천·지도 때문에 대표자 관리 API나 화면을 발명하지 않는다. 운영자 계약이 생기지 않는 한 1차 구조를 유지한다.
 
-StoreScheduleController는 운영시간과 예약 접수 시간대 각각에 대해 주간 초안 저장, 즉시·예약 게시, 예약 게시 취소 Controller를 제공한다. 화면은 두 정책을 별도 데이터와 버전으로 유지한다. 초안, 예약 게시, 활성, 실패와 구간 충돌은 응답 상태·오류 코드에 맞춰 표현하며, 클라이언트에서 일부 요일을 서버 원장처럼 병합하지 않는다.
+## 고도화 화면 15~21
 
-### 5.2 정기·임시 휴무
+### 15. 운영 대시보드
+통계 OpenAPI가 생길 때 기준 시각을 포함한 read-only module로 추가한다.
 
-StoreClosureController는 정기 휴무 초안, 정기 휴무 게시·예약 게시 취소, 임시 휴무 등록, 임시 휴무 종료 변경, 임시 휴무 취소 Controller를 제공한다. 휴무 설정과 예약의 자동 이동·자동 취소를 프런트에서 합성하지 않는다.
+### 16. 웨이팅 설정
+사용 여부·접수 조건의 versioned 설정 API와 영향 확인 명령을 사용한다.
 
-### 5.3 예약 시간 정책과 수용량
+### 17. 실시간 웨이팅
+목록 snapshot과 SSE를 분리하고 호출·입장은 허용된 명령 endpoint로만 처리한다.
 
-ReservationTimePolicyController는 슬롯 간격·서비스 시간·회전 시간 정책의 초안, 게시, 예약 게시 취소를 제공한다. ReservationCapacityController는 날짜별 시간 구간 수용량 전체 교체를 제공한다. 사람 수, 팀 수, 최소·최대 일행, 영유아 허용, 현재 사용량·가용량을 계약 응답대로 표시하며, 기존 확정 예약을 클라이언트가 바꾸지 않는다.
+### 18. 체크인·노쇼
+체크인과 노쇼 후보·확정 계약을 예약 기존 상태 enum과 분리한다.
 
-### 5.4 메뉴
+### 19. 결제·환불
+예약 상세에 별도 query model로 결합하며 프론트에서 환불 성공을 추측하지 않는다.
 
-MenuController는 목록·상세 조회, 메뉴 초안 생성·수정, 게시·예약 게시 취소, 노출 상태 변경, 판매 상태 변경, 운영 종료 Controller를 제공한다. 메뉴 내용, 대표 표시, 분류, 태그, 예약 메뉴 홀드·픽업 허용 여부와 계약상 구조화된 알레르기·원산지·주류 정보는 독립 상태 축을 보존해 연결한다. 응답에 없는 이미지·옵션 또는 별도 대표·추천 메뉴 3~5개 관리는 연결하지 않는다.
+### 20. 이미지 관리
+presigned upload·완료 확인 계약이 생길 때 추가하고 사업자등록증 저장 경계와 분리한다.
 
-### 5.5 예약 조회·매장 취소·방문 완료
+### 21. 추천 메뉴 관리
+3~5개 제한과 순서를 서버가 재검증하는 독립 API가 있을 때 대표 여부와 별도 모듈로 추가한다.
 
-StoreReservationController는 매장 예약 목록·상세 조회와 매장 사유 취소 Controller를 제공한다. 날짜·상태·페이지·정렬은 OpenAPI가 허용한 값만 전송하고, 취소는 하나의 계약 명령으로 처리한다. 재고 복구를 별도 요청으로 흉내 내지 않는다.
+capability 또는 build flag는 내비게이션·route registration·query·mutation을 함께 제어한다. 예약·픽업 기존 enum에 고도화 상태를 합치지 않는다.
 
-일반 예약 방문 완료는 목록·상세·취소와 분리된 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments` 후보다. OpenAPI 계약, field 없는 `ReservationFulfillmentRequest`, StoreReservationController, ReservationFulfillmentCommandFacade와 ReservationService, Controller·통합 focused test가 현재 함께 존재한다. 서버는 운영자의 대상 매장 관리 권한, `Idempotency-Key`, 확정(`CONFIRMED`) 예약만의 상태 전이를 검증하며, 입력·인증·권한·대상 없음·상태/멱등 충돌은 현재 계약의 400/401/403/404/409 응답으로 처리한다. 이 현 병합 구현은 연결 자격을 만들지만, 실제 프런트 활성화는 작업 시점의 Issue·릴리스 승인과 live 계약 검증을 다시 통과한 경우에만 한다. 배포되었거나 화면 상태가 정해졌다고 간주하지 않는다.
+## 검증 체크리스트
 
-### 5.6 현재 메뉴 재고 계약
-
-MenuInventoryAdminController는 메뉴별 기간·시간 구간 재고 버킷의 목록, 생성, 수정 Controller를 제공한다. 각 버킷은 `totalSupply`, `ONLINE_HOLD`, `ONSITE`, `SHARED`, `sharedOnlineAllowed`, 구간별 가용 상태와 사용·가용 수량을 다룬다. 일반 예약 메뉴 홀드와 픽업은 같은 구간의 `ONLINE_HOLD`와 온라인 사용이 허용된 `SHARED`를 함께 사용하고 `ONSITE`는 사용하지 않는다. 풀 배분 합계, 이미 사용된 수량 이하 축소 금지와 구간별 수동 품절 계약을 그대로 연결하며 예약 전용·픽업 전용 재고로 분리하지 않는다.
-
-## 6. 독립 capability gate
-
-다음은 서로 의존시키지 말고 각각의 계약·Controller·Service·검증·릴리스 승인을 다시 확인하는 capability다.
-
-| capability | 현재 결론과 연결 규칙 |
-| --- | --- |
-| 방문 완료 | 일반 예약의 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments`는 목록·상세·취소와 별도 Controller·Facade·Service·focused test가 있는 연결 후보다. 운영자 매장 소유권, `Idempotency-Key`, field 없는 body, `CONFIRMED` 상태와 현재 400/401/403/404/409 오류 계약을 그대로 검증한다. 현 병합 구현은 자격을 충족하지만, 현재 Issue·릴리스 승인과 live 계약 검증 전에는 프런트 활성화로 바꾸지 않는다. |
-| 공개 픽업 | `GET /api/v1/stores/{storeId}/pickup-availability` Controller와 Service·focused test가 존재한다. 모든 사업 유형에서 픽업 기능 활성화 여부로 판단하며, 공개 온라인 가용량은 `ONLINE_HOLD`와 온라인 사용이 허용된 `SHARED`의 잔여 합계라는 계약을 그대로 사용한다. |
-| 운영자 픽업 | `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations`, 상세 조회, 매장 취소, 수령 완료 Controller와 Service·focused test가 존재한다. 작업 시점의 OpenAPI·권한·멱등성·오류·릴리스 범위를 다시 통과하면 목록, 상세, 취소, 수령 완료를 각각 연결한다. 공유 온라인 풀은 정상 계약이므로 비노출 사유가 아니다. |
-| 재고 풀 | MenuInventoryAdminController의 버킷 목록·생성·수정을 `ONLINE_HOLD`, `ONSITE`, `SHARED`와 `sharedOnlineAllowed` 계약대로 연결한다. 일반 예약 메뉴 홀드와 픽업을 별도 재고로 만들거나 두 온라인 거래가 `ONSITE`를 사용하게 하지 않는다. |
-
-일반 예약 메뉴 홀드와 픽업의 취소는 해당 거래의 원장에 기록된 실제 `ONLINE_HOLD`·`SHARED` 차감량을 각 풀로 한 번만 복구한다. 수량 복구를 별도 프런트 요청으로 분리하거나 `ONSITE`로 옮기지 않는다. 독립 서비스 재고나 별도 재고 이전 명령은 현재 계약에 없으므로 이전 버튼·제어, 라우트, 상태, 요청·API, 감사 이력, placeholder 흐름을 만들지 않는다.
-
-## 7. 단계별 비노출 경계
-
-2차 MVP 추천은 소비자 탐색 중심이다. 운영자 추천 관리, 대체 추천 조정, 지도 관리 화면은 별도 승인 계약이 있기 전까지 추가하지 않는다.
-
-### 7.1 Redis 기반 Refresh Token 관리
-
-Redis 기반 Refresh Token 관리는 매장 운영자 인증 namespace의 고도화 독립 capability다. 승인된 운영자 인증 계약, 실제 Redis 설정과 Refresh Token 관리 구현, 호출 가능한 보안 성공·실패 증거, 해당할 경우 운영·마이그레이션 증거, 현재 릴리스 승인이 모두 있을 때만 연결한다. 기존 Refresh Cookie와 가입·로그인·토큰 재발급·로그아웃 endpoint만으로는 이 capability의 증거가 아니다. 하나라도 없으면 이 관리 capability에 의존하는 내비게이션, 라우트 등록, 탭, 카드, 데이터 요청, 액션, production bundle과 production mock을 함께 제거한다.
-
-### 7.2 웨이팅 SSE 실시간 전달
-
-웨이팅의 실시간 전달은 SSE의 승인된 계약, 인증·인가와 재연결 의미, 실제 Controller·Service 또는 stream 구현, 호출 가능한 성공·실패·재연결 증거, 현재 릴리스 승인이 모두 있을 때만 연결하는 독립 capability다. 하나라도 없으면 웨이팅 실시간 전달의 내비게이션, 라우트 등록, 탭, 카드, 데이터 요청, 액션, production bundle과 production mock을 함께 제거한다.
-
-운영 대시보드, 결제·예약금·환불, 알림, 사업자등록증·매장·메뉴 이미지 업로드와 파일 메타데이터, 분석, 체크인·노쇼, 대표·추천 메뉴 3~5개 관리는 고도화 디자인 모듈일 뿐이다. 각 기능은 독립적으로 활성화 조건을 충족하기 전까지 관련 메뉴, 라우트, 탭, 버튼과 기타 제어, 데이터 요청, 액션, production bundle과 production mock에서 제거한다. 업로드는 승인된 파일 계약, 저장소 연동, Controller·Service와 호출 증거가 모두 확인될 때만 연결하며 1차 MVP 매장 등록에 승인 대기 상태를 합성하지 않는다. 플랫폼 운영자 기능은 1차·2차 MVP 운영자 셸에 노출하지 않는다.
-
-## 8. 연결 검증 체크리스트
-
-- 운영자 가입·로그인·재발급·로그아웃, 일반 사용자 토큰 거부, 본인 정보 조회·수정·연락처 최초 등록
-- 매장 생성 필수 필드, 중복 의도 재시도, 즉시 관리 진입, 서버 발견 경로 부재 상태에서 관리 라우트 비생성
-- 운영시간·예약 접수 시간대·정기 휴무·예약 시간 정책의 초안, 즉시·예약 게시, 게시 취소, 충돌·실패
-- 임시 휴무 등록·종료 변경·취소, 메뉴 전 수명주기와 독립 상태 축, 날짜별 수용량 충돌
-- 예약 목록·상세·매장 취소의 권한·페이지·상태·재시도 처리
-- 일반 예약 방문 완료 후보 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments`의 운영자 매장 소유권, `Idempotency-Key`, field 없는 body, `CONFIRMED` 상태 전이와 현재 400/401/403/404/409 오류 계약 확인; 현 병합 구현만으로 활성화하지 않고 현재 Issue·릴리스 승인과 live 계약 검증을 다시 통과한 경우에만 연결
-- 현재 메뉴 재고 버킷의 풀 배분 합계·사용량 이하 축소 금지·구간별 품절 오류를 계약대로 처리하고, `ONLINE_HOLD`·`ONSITE`·`SHARED`와 `sharedOnlineAllowed`를 별도 픽업 재고로 오표시하지 않음
-- 공개 픽업과 운영자 픽업의 OpenAPI·Controller·Service·focused test·권한·멱등성·현재 릴리스 범위를 독립 검증하고, 정상적인 `ONLINE_HOLD`·허용된 `SHARED` 공유를 비노출 사유로 사용하지 않음
+- 가입 실패와 매장 등록 실패가 서로의 데이터를 롤백·삭제하지 않는다.
+- 매장 등록 성공이 승인 대기로 이동하지 않는다.
+- 다른 매장 ID로 모든 조회·명령이 거부된다.
+- 운영시간·접수시간은 전체 주간, 수용량은 날짜 전체, 재고 수정은 풀 전체 계약을 지킨다.
+- 예약·픽업 취소 후 자원 복구를 프론트에서 별도 호출하지 않는다.
+- 일반 사용자 토큰으로 대표자 API를 호출하지 않는다.
+- 고도화 API가 없으면 관련 route·요청이 없다.
