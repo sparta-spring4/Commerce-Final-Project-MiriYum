@@ -92,6 +92,35 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertTrue(self.compose_config["networks"]["backend-valkey"]["internal"])
         self.assertNotIn("ports", services["valkey"])
 
+    def test_valkey_preserves_auth_state_with_aof_and_noeviction(self):
+        valkey = self.compose_config["services"]["valkey"]
+        self.assertEqual(
+            [
+                "/bin/sh",
+                "-ec",
+                "exec valkey-server \\\n"
+                "  --appendonly yes \\\n"
+                "  --appendfsync everysec \\\n"
+                "  --maxmemory 128mb \\\n"
+                "  --maxmemory-policy noeviction \\\n"
+                '  --requirepass "$$MIRIYUM_VALKEY_PASSWORD"\n',
+            ],
+            valkey["command"],
+        )
+        self.assertEqual(
+            [("volume", "valkey-data", "/data", False)],
+            [
+                (
+                    volume["type"],
+                    volume["source"],
+                    volume["target"],
+                    volume.get("read_only", False),
+                )
+                for volume in valkey["volumes"]
+            ],
+        )
+        self.assertIn("valkey-data", self.compose_config["volumes"])
+
     def test_valkey_password_is_required_during_compose_config(self):
         env_lines = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines()
         without_password = "\n".join(
@@ -130,11 +159,17 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("MIRIYUM_VALKEY_PASSWORD is required", result.stderr)
 
     def test_valkey_healthcheck_rejects_unauthenticated_ping_and_accepts_authenticated_ping(self):
-        healthcheck = " ".join(self.compose_config["services"]["valkey"]["healthcheck"]["test"])
+        healthcheck = self.compose_config["services"]["valkey"]["healthcheck"]["test"]
 
-        self.assertIn("NOAUTH", healthcheck)
-        self.assertIn("REDISCLI_AUTH", healthcheck)
-        self.assertIn("PONG", healthcheck)
+        self.assertEqual(
+            [
+                "CMD-SHELL",
+                'valkey-cli ping 2>&1 | grep -q NOAUTH && '
+                'REDISCLI_AUTH="$$MIRIYUM_VALKEY_PASSWORD" '
+                "valkey-cli ping | grep -qx PONG",
+            ],
+            healthcheck,
+        )
 
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
