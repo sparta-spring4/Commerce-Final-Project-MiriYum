@@ -43,7 +43,7 @@ paths:
           description: DST 중복 시각을 구분할 선택 offset
           schema:
             type: string
-            pattern: "^[+-](0[0-9]|1[0-8]):[0-5][0-9]$"
+            pattern: "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$"
       responses:
         "200":
           description: 메뉴별 온라인 홀드 가용량
@@ -55,6 +55,10 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/ReservationUnavailable"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/stores/{storeId}/pickup-availability:
     get:
       tags: [Pickup]
@@ -869,6 +873,15 @@ components:
         data:
           $ref: "#/components/schemas/MenuInventoryPageData"
   responses:
+    ReservationUnavailable:
+      description: 요청한 시작 시각에 예약 서비스를 제공할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: RESERVATION_002
+            message: 요청 시간은 영업·예약 접수 구간에 없습니다.
     StoreNotFound:
       description: 매장을 찾을 수 없음
       content:

@@ -26,6 +26,20 @@ class MenuInventoryOpenApiContractTest {
         assertThat(parameters.stream().map(parameter -> parameter.get("name")))
                 .contains("serviceDate", "startTime", "startOffset")
                 .doesNotContain("endTime");
+        Map<String, Object> startOffset = parameters.stream()
+                .filter(parameter -> "startOffset".equals(parameter.get("name")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(map(startOffset.get("schema")))
+                .containsEntry("pattern",
+                        "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$");
+
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(map(responses.get("409")))
+                .containsEntry("$ref", "#/components/responses/ReservationUnavailable");
+        assertThat(map(responses.get("503")))
+                .containsEntry("$ref",
+                        "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> data = map(schemas.get("MenuHoldAvailabilityData"));
