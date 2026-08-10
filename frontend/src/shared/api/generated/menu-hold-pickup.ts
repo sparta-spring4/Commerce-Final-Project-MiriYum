@@ -59,6 +59,25 @@ export interface components {
   schemas: {
     /** @enum {string} */
     InventoryAvailabilityStatus: "AVAILABLE" | "SOLD_OUT";
+    MenuHoldAvailabilityItem: {
+      menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      menuName: string;
+      unitPrice: number;
+      availableOnlineQuantity: number;
+      availabilityStatus: components["schemas"]["InventoryAvailabilityStatus"];
+    };
+    MenuHoldAvailabilityData: {
+      serviceDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
+      startAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      serviceEndAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      timeZoneId: string;
+      items: components["schemas"]["MenuHoldAvailabilityItem"][];
+    };
+    MenuHoldAvailabilitySuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["MenuHoldAvailabilityData"];
+    };
     InventoryPools: {
       onlineHold: number;
       onsite: number;
@@ -202,6 +221,12 @@ export interface components {
     };
   };
   responses: {
+    /** @description 요청한 시작 시각에 예약 서비스를 제공할 수 없음 */
+    ReservationUnavailable: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 매장을 찾을 수 없음 */
     StoreNotFound: {
       content: {
@@ -424,7 +449,8 @@ export interface operations {
       query: {
         serviceDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
         startTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
-        endTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
+        /** @description DST 중복 시각을 구분할 선택 offset */
+        startOffset?: string;
       };
       path: {
         storeId: components["parameters"]["StoreId"];
@@ -434,11 +460,13 @@ export interface operations {
       /** @description 메뉴별 온라인 홀드 가용량 */
       200: {
         content: {
-          "application/json": components["schemas"]["MenuAvailabilityListSuccessResponse"];
+          "application/json": components["schemas"]["MenuHoldAvailabilitySuccessResponse"];
         };
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["ReservationUnavailable"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 픽업 가능 시간과 메뉴 수량 조회 */

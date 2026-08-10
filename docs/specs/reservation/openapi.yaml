@@ -48,6 +48,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ReservationCreationNotFound"
         "409":
           $ref: "#/components/responses/ReservationConflict"
         "503":
@@ -153,6 +155,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}:
     get:
       tags: [Reservation Management]
@@ -170,12 +174,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReservationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/ReservationNotFound"
+          $ref: "#/components/responses/StoreReservationNotFound"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations:
     post:
       tags: [Reservation Management]
@@ -207,7 +213,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/ReservationNotFound"
+          $ref: "#/components/responses/StoreReservationNotFound"
         "409":
           $ref: "#/components/responses/ReservationStateConflict"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments:
@@ -241,7 +247,7 @@ paths:
         "403":
           $ref: "#/components/responses/ReservationFulfillmentForbidden"
         "404":
-          $ref: "#/components/responses/ReservationFulfillmentNotFound"
+          $ref: "#/components/responses/StoreReservationNotFound"
         "409":
           $ref: "#/components/responses/ReservationFulfillmentConflict"
   /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
@@ -917,6 +923,40 @@ components:
           example:
             code: RESERVATION_001
             message: 예약을 찾을 수 없습니다.
+    ReservationCreationNotFound:
+      description: 매장, 선택 메뉴 또는 해당 시간대 메뉴 수량 버킷을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            menuNotFound:
+              value:
+                code: STORE_009
+                message: 메뉴를 찾을 수 없습니다.
+            menuInventoryBucketNotFound:
+              value:
+                code: MENU_HOLD_003
+                message: 메뉴 수량 버킷을 찾을 수 없습니다.
+    StoreReservationNotFound:
+      description: 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            reservationNotFound:
+              value:
+                code: RESERVATION_001
+                message: 예약을 찾을 수 없습니다.
     ReservationConflict:
       description: 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
       content:
@@ -932,6 +972,14 @@ components:
               value:
                 code: ACCOUNT_006
                 message: 예약 알림에 사용할 연락처를 먼저 등록해야 합니다.
+            ineligibleMenu:
+              value:
+                code: MENU_HOLD_001
+                message: 현재 메뉴 상태 또는 자격에서 홀드할 수 없습니다.
+            insufficientMenuQuantity:
+              value:
+                code: MENU_HOLD_002
+                message: 요청한 구간의 온라인 메뉴 수량이 부족합니다.
     ReservationStateConflict:
       description: 현재 상태 또는 취소 정책에서 명령 불가
       content:
@@ -962,21 +1010,6 @@ components:
               value:
                 code: STORE_003
                 message: 대상 매장의 대표 운영자가 아닙니다.
-    ReservationFulfillmentNotFound:
-      description: 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음
-      content:
-        application/json:
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          examples:
-            storeNotFound:
-              value:
-                code: STORE_001
-                message: 매장을 찾을 수 없습니다.
-            reservationNotFound:
-              value:
-                code: RESERVATION_001
-                message: 예약을 찾을 수 없습니다.
     ReservationFulfillmentConflict:
       description: 방문 완료 상태·MenuHold·멱등·동시 요청 충돌
       content:

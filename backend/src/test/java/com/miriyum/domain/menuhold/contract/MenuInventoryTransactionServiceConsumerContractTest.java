@@ -39,6 +39,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     void exposesTransactionBoundariesForPickupConsumer() throws Exception {
         Method availability = MenuInventoryTransactionService.class.getMethod(
                 "findOnlineAvailability", MenuInventoryAvailabilityQuery.class);
+        Method existingAvailability = MenuInventoryTransactionService.class.getMethod(
+                "findExistingOnlineAvailability", MenuInventoryAvailabilityQuery.class);
         Method availabilityByDate = MenuInventoryTransactionService.class.getMethod(
                 "findOnlineAvailabilityByDate", MenuInventoryAvailabilityDateQuery.class);
         Method acquire = MenuInventoryTransactionService.class.getMethod(
@@ -47,6 +49,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
                 "restore", MenuInventoryRestoreCommand.class);
 
         Transactional availabilityTx = availability.getAnnotation(Transactional.class);
+        Transactional existingAvailabilityTx =
+                existingAvailability.getAnnotation(Transactional.class);
         Transactional availabilityByDateTx =
                 availabilityByDate.getAnnotation(Transactional.class);
         Transactional acquireTx = acquire.getAnnotation(Transactional.class);
@@ -55,6 +59,10 @@ class MenuInventoryTransactionServiceConsumerContractTest {
         assertThat(availabilityTx).isNotNull();
         assertThat(availabilityTx.readOnly()).isTrue();
         assertThat(availability.getGenericReturnType().getTypeName())
+                .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
+        assertThat(existingAvailabilityTx).isNotNull();
+        assertThat(existingAvailabilityTx.readOnly()).isTrue();
+        assertThat(existingAvailability.getGenericReturnType().getTypeName())
                 .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
         assertThat(availabilityByDateTx).isNotNull();
         assertThat(availabilityByDateTx.readOnly()).isTrue();
@@ -192,16 +200,21 @@ class MenuInventoryTransactionServiceConsumerContractTest {
                         List.of(), Map.of(selection(1L, 1), 41L));
         MenuInventoryAvailabilityDateQuery availability =
                 new MenuInventoryAvailabilityDateQuery(List.of(2L, 1L), SERVICE_DATE);
+        MenuInventoryAvailabilityQuery existingAvailability =
+                new MenuInventoryAvailabilityQuery(
+                        List.of(2L, 1L), SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME);
         MenuInventoryAcquireCommand acquire = new MenuInventoryAcquireCommand(
                 "pickup-acquire-01", List.of(selection(1L, 2)));
         MenuInventoryRestoreCommand restore = new MenuInventoryRestoreCommand(
                 "pickup-restore-01", "pickup-acquire-01");
 
         fixture.findOnlineAvailabilityByDate(availability);
+        fixture.findExistingOnlineAvailability(existingAvailability);
         MenuInventoryAcquireResult acquired = fixture.acquire(acquire);
         MenuInventoryRestoreResult restored = fixture.restore(restore);
 
         assertThat(fixture.dateAvailabilityQueries()).containsExactly(availability);
+        assertThat(fixture.availabilityQueries()).containsExactly(existingAvailability);
         assertThat(fixture.acquireCommands()).containsExactly(acquire);
         assertThat(fixture.restoreCommands()).containsExactly(restore);
         assertThat(acquired.operationId()).isEqualTo("pickup-acquire-01");
