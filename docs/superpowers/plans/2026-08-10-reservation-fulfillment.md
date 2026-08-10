@@ -250,7 +250,7 @@ diff --git a/docs/specs/reservation/openapi.yaml b/docs/specs/reservation/openap
          "409":
 -          $ref: "#/components/responses/ReservationStateConflict"
 +          $ref: "#/components/responses/ReservationFulfillmentConflict"
-@@ -935,16 +935,40 @@ components:
+@@ -935,16 +935,39 @@ components:
      ReservationStateConflict:
        description: 현재 상태 또는 취소 정책에서 명령 불가
        content:
