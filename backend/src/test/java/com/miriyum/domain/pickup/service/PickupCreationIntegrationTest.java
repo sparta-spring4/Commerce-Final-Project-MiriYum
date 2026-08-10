@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
@@ -16,6 +18,7 @@ import com.miriyum.domain.pickup.dto.request.PickupMenuSelectionRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
+import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.core.dto.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
@@ -51,6 +54,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -97,6 +101,7 @@ class PickupCreationIntegrationTest {
     @MockitoBean StoreTransactionEligibilityService storeEligibilityService;
     @MockitoBean StoreService storeService;
     @MockitoBean StoreServiceIntervalValidationService intervalValidationService;
+    @MockitoSpyBean PickupReservationRepository pickupReservationRepository;
 
     @BeforeEach
     void resetAndSeed() {
@@ -137,10 +142,15 @@ class PickupCreationIntegrationTest {
     @Test
     void persistenceFailureRollsBackInventoryLedgerAndIdempotencyClaim() {
         insertBucket(5);
+        DataIntegrityViolationException forcedFailure =
+                new DataIntegrityViolationException("forced pickup persistence failure");
+        willThrow(forcedFailure)
+                .given(pickupReservationRepository).saveAndFlush(any());
 
-        assertThatThrownBy(() -> service.create(99_999L, key(), request(2)))
-                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> service.create(CONSUMER_1, key(), request(2)))
+                .isSameAs(forcedFailure);
 
+        then(pickupReservationRepository).should().saveAndFlush(any());
         assertThat(count("pickup_reservations")).isZero();
         assertThat(count("menu_inventory_ledger")).isZero();
         assertThat(onlineRemaining()).isEqualTo(5);
