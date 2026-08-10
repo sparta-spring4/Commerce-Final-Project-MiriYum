@@ -1,0 +1,173 @@
+package com.miriyum.global.storage.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.miriyum.MiriyumApplication;
+import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStoragePort;
+import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.FileStorageRequest;
+import com.miriyum.global.storage.FileStorageStatus;
+import com.miriyum.global.storage.FileStorageVisibility;
+import com.miriyum.global.storage.entity.FileMetadata;
+import com.miriyum.global.storage.repository.FileMetadataRepository;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
+
+/** 파일 저장 파사드가 파일 저장 결과와 메타데이터 상태를 맞추는지 검증한다. */
+@Tag("integration")
+@Tag("integration-shard-a")
+@Testcontainers
+@SpringBootTest(
+        classes = MiriyumApplication.class,
+        properties = {
+            "spring.jpa.hibernate.ddl-auto=validate",
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+        })
+class FileStorageFacadeIntegrationTest {
+
+    @Container
+    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    @Autowired
+    private FileMetadataTransactionExecutor transactionExecutor;
+
+    @Autowired
+    private FileMetadataRepository fileMetadataRepository;
+
+    @Test
+    @DisplayName("파일 저장에 성공하면 메타데이터를 저장 완료 상태로 확정한다")
+    void confirmsMetadataWhenFileStorageSucceeds() {
+        // given
+        String fileId = UUID.randomUUID().toString();
+        String objectKey = "public/store/11/store-image/object-7";
+        FileMetadata metadata = FileMetadata.createPending(
+                fileId,
+                "STORE",
+                11L,
+                FileStoragePurpose.STORE_IMAGE,
+                objectKey,
+                "image/jpeg",
+                4L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "STORE_IMAGE_DEFAULT",
+                LocalDateTime.of(2026, 8, 10, 15, 0));
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        // when
+        facade.store(metadata, request);
+
+        // then
+        assertThat(fileStoragePort.savedObjectKeys()).containsExactly(objectKey);
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getStorageStatus)
+                .isEqualTo(FileStorageStatus.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("파일 저장에 실패하면 메타데이터를 실패 상태로 기록하고 예외를 다시 던진다")
+    void marksMetadataFailedWhenFileStorageFails() {
+        // given
+        String fileId = UUID.randomUUID().toString();
+        String objectKey = "public/store/11/store-image/object-8";
+        FileMetadata metadata = FileMetadata.createPending(
+                fileId,
+                "STORE",
+                11L,
+                FileStoragePurpose.STORE_IMAGE,
+                objectKey,
+                "image/jpeg",
+                4L,
+                "b".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "STORE_IMAGE_DEFAULT",
+                LocalDateTime.of(2026, 8, 10, 15, 30));
+        IllegalStateException storageFailure = new IllegalStateException("파일 저장소에 연결할 수 없습니다.");
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingFileStoragePort(storageFailure), transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        // when & then
+        assertThatThrownBy(() -> facade.store(metadata, request)).isSameAs(storageFailure);
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getStorageStatus)
+                .isEqualTo(FileStorageStatus.FAILED);
+    }
+
+    private static final class RecordingFileStoragePort implements FileStoragePort {
+
+        private final List<String> savedObjectKeys = new ArrayList<>();
+
+        @Override
+        public void save(FileStorageRequest request) {
+            savedObjectKeys.add(request.objectKey());
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+        }
+
+        private List<String> savedObjectKeys() {
+            return savedObjectKeys;
+        }
+    }
+
+    private record FailingFileStoragePort(RuntimeException failure) implements FileStoragePort {
+
+        @Override
+        public void save(FileStorageRequest request) {
+            throw failure;
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+        }
+    }
+}
