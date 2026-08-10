@@ -1,8 +1,9 @@
 package com.miriyum.domain.reservation.dto.request;
 
-import jakarta.validation.constraints.Size;
+import org.hibernate.validator.constraints.CodePointLength;
 
 public record ConsumerCancellationRequest(
-        @Size(min = 1, max = 500) String reason
+        @CodePointLength(min = 1, max = 500, message = "{jakarta.validation.constraints.Size.message}")
+        String reason
 ) {
 }

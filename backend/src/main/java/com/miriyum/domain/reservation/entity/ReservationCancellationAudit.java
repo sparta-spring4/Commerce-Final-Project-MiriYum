@@ -160,10 +160,15 @@ public class ReservationCancellationAudit {
             throw new IllegalArgumentException("store operator cancellation requires a reason");
         }
         if (cancellationReason != null
-                && (cancellationReason.isEmpty() || cancellationReason.length() > 500)) {
+                && !hasValidReasonLength(cancellationReason)) {
             throw new IllegalArgumentException("cancellationReason must be 1 to 500 characters");
         }
         return cancellationReason;
+    }
+
+    private static boolean hasValidReasonLength(String reason) {
+        int length = reason.codePointCount(0, reason.length());
+        return length >= 1 && length <= 500;
     }
 
     private static String requireCommandId(String commandId) {

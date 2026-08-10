@@ -798,9 +798,14 @@ public class ReservationService {
                 || correlationId.length() > 90
                 || !correlationId.equals(expectedCorrelation)
                 || (reasonRequired && reason == null)
-                || (reason != null && (reason.isEmpty() || reason.length() > 500))) {
+                || (reason != null && !hasValidCancellationReasonLength(reason))) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+    }
+
+    private static boolean hasValidCancellationReasonLength(String reason) {
+        int length = reason.codePointCount(0, reason.length());
+        return length >= 1 && length <= 500;
     }
 
     private ReservationCancellationCommandResult cancellationResult(

@@ -93,6 +93,18 @@ class ReservationCancellationAuditTest {
     }
 
     @Test
+    @DisplayName("취소 감사 사유 길이는 supplementary 문자를 Unicode code point로 계산한다")
+    void countsSupplementaryAuditReasonByUnicodeCodePoint() {
+        String fiveHundredCodePoints = "😀".repeat(500);
+        String fiveHundredOneCodePoints = "😀".repeat(501);
+
+        assertThat(validOperatorAudit(fiveHundredCodePoints).getCancellationReason())
+                .isEqualTo(fiveHundredCodePoints);
+        assertThatThrownBy(() -> validOperatorAudit(fiveHundredOneCodePoints))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("성공 시각은 요청 시각보다 이를 수 없다")
     void rejectsReversedTimestamps() {
         assertThatThrownBy(() -> ReservationCancellationAudit.recordSuccess(

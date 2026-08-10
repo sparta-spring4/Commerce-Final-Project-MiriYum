@@ -2715,6 +2715,59 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("소비자 취소는 supplementary 문자 500 code point 사유를 허용한다")
+    void cancellationAcceptsFiveHundredCodePointConsumerReason() {
+        String reason = "😀".repeat(500);
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+
+        Object result = invokeConsumerCancellation(
+                command,
+                reason,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        );
+
+        assertThat(cancellationData(result).cancellationReason()).isEqualTo(reason);
+    }
+
+    @Test
+    @DisplayName("운영자 취소는 supplementary 문자 500 code point 사유를 허용한다")
+    void cancellationAcceptsFiveHundredCodePointOperatorReason() {
+        String reason = "😀".repeat(500);
+        IdempotencyCommand command = cancellationCommand("store-operator", 33L);
+        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+
+        Object result = invokeStoreCancellation(
+                command,
+                reason,
+                NOW.minusSeconds(10),
+                OPERATOR_CANCELLATION_CORRELATION
+        );
+
+        assertThat(cancellationData(result).cancellationReason()).isEqualTo(reason);
+    }
+
+    @Test
+    @DisplayName("취소 서비스는 supplementary 문자 501 code point 사유를 거절한다")
+    void cancellationRejectsFiveHundredOneCodePointReason() {
+        String reason = "😀".repeat(501);
+
+        assertValidationFailure(() -> invokeConsumerCancellation(
+                cancellationCommand("consumer", 11L),
+                reason,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+        assertValidationFailure(() -> invokeStoreCancellation(
+                cancellationCommand("store-operator", 33L),
+                reason,
+                NOW.minusSeconds(10),
+                OPERATOR_CANCELLATION_CORRELATION
+        ));
+    }
+
+    @Test
     @DisplayName("감사 저장 실패는 성공 BusinessResult를 만들지 않는다")
     void cancellationAuditFailurePreventsSucceededOutcome() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
