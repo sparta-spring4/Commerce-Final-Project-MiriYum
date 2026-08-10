@@ -46,7 +46,7 @@ services:
       MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED}
       MIRIYUM_VALKEY_HOST: ${MIRIYUM_VALKEY_HOST}
       MIRIYUM_VALKEY_PORT: ${MIRIYUM_VALKEY_PORT}
-      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
+      MIRIYUM_VALKEY_PASSWORD: "${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}"
     depends_on:
       mysql:
         condition: service_healthy
@@ -72,7 +72,7 @@ services:
     # #141은 Valkey 인프라만 구성하고, Refresh Token 기능은 #140에서 연결한다.
     image: valkey/valkey:8.1-alpine
     environment:
-      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
+      MIRIYUM_VALKEY_PASSWORD: "${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}"
     command:
       - /bin/sh
       - -ec
@@ -84,7 +84,7 @@ services:
           --maxmemory-policy noeviction \
           --requirepass "$$MIRIYUM_VALKEY_PASSWORD"
     healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -q PONG"]
+      test: ["CMD-SHELL", "valkey-cli ping 2>&1 | grep -q NOAUTH && REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -qx PONG"]
       interval: 10s
       timeout: 5s
       retries: 12

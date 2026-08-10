@@ -55,11 +55,12 @@ After the first staging deployment that includes Valkey, verify the service from
 ```bash
 cd /opt/miriyum
 sudo docker compose --env-file .env -f docker-compose.prod.yml ps valkey
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey valkey-cli ping
 sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping'
 sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
 ```
 
-The expected result is `healthy`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
+The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
 ## Release and rollback
 

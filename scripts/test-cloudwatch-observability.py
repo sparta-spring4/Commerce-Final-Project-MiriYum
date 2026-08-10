@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +11,7 @@ CONFIG_PATH = ROOT / "deploy" / "monitoring" / "cloudwatch-agent-config.json"
 RESOURCE_SCRIPT_PATH = ROOT / "deploy" / "monitoring" / "create-cloudwatch-resources.sh"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
+ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 
 
 class CloudWatchObservabilityConfigTest(unittest.TestCase):
@@ -17,6 +21,28 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
+        cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
+
+    @staticmethod
+    def load_compose_config(env_file):
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                str(env_file),
+                "-f",
+                str(COMPOSE_PATH),
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        return json.loads(result.stdout)
 
     def test_disk_metric_has_instance_only_aggregation(self):
         metrics = self.config["metrics"]
@@ -57,18 +83,58 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
 
     def test_valkey_uses_a_backend_only_internal_network(self):
-        self.assertIn("backend-valkey:", self.compose)
-        self.assertIn("internal: true", self.compose)
+        services = self.compose_config["services"]
 
-        backend_start = self.compose.index("  backend:")
-        valkey_start = self.compose.index("  valkey:")
-        nginx_start = self.compose.index("  nginx:")
-        backend = self.compose[backend_start:valkey_start]
-        valkey = self.compose[valkey_start:nginx_start]
+        self.assertEqual({"app", "backend-valkey"}, set(services["backend"]["networks"]))
+        self.assertEqual({"backend-valkey"}, set(services["valkey"]["networks"]))
+        self.assertEqual({"app"}, set(services["mysql"]["networks"]))
+        self.assertEqual({"app"}, set(services["nginx"]["networks"]))
+        self.assertTrue(self.compose_config["networks"]["backend-valkey"]["internal"])
+        self.assertNotIn("ports", services["valkey"])
 
-        self.assertIn("backend-valkey:", backend)
-        self.assertIn("backend-valkey:", valkey)
-        self.assertNotIn("app:\n        ipv4_address: 172.29.81.12", valkey)
+    def test_valkey_password_is_required_during_compose_config(self):
+        env_lines = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines()
+        without_password = "\n".join(
+            line for line in env_lines if not line.startswith("MIRIYUM_VALKEY_PASSWORD=")
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".env", delete=False
+        ) as env_file:
+            env_file.write(without_password)
+            env_path = Path(env_file.name)
+
+        environment = os.environ.copy()
+        environment.pop("MIRIYUM_VALKEY_PASSWORD", None)
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "compose",
+                    "--env-file",
+                    str(env_path),
+                    "-f",
+                    str(COMPOSE_PATH),
+                    "config",
+                    "--quiet",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                env=environment,
+                text=True,
+            )
+        finally:
+            env_path.unlink(missing_ok=True)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("MIRIYUM_VALKEY_PASSWORD is required", result.stderr)
+
+    def test_valkey_healthcheck_rejects_unauthenticated_ping_and_accepts_authenticated_ping(self):
+        healthcheck = " ".join(self.compose_config["services"]["valkey"]["healthcheck"]["test"])
+
+        self.assertIn("NOAUTH", healthcheck)
+        self.assertIn("REDISCLI_AUTH", healthcheck)
+        self.assertIn("PONG", healthcheck)
 
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
