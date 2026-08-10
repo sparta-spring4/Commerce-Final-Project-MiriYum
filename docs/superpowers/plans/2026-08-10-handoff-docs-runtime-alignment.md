@@ -320,8 +320,6 @@ Tasks 1–4 above record the completed six-handoff work. The following tasks imp
 **Files:**
 - Create from read-only input and correct: `docs/service-definition.md`
 - Create from read-only input and correct: `docs/technical-architecture.md`
-- Modify: `docs/00-index.md`
-- Modify: `ai/document-routing.md`
 
 **Read-only inputs:**
 - `C:/Users/lbw01/GitHub/Commerce-Final-Project-MiriYum/docs/service-definition.md`
@@ -329,7 +327,7 @@ Tasks 1–4 above record the completed six-handoff work. The following tasks imp
 
 **Interfaces:**
 - Consumes: the user's line-specific review and approved design section 9.
-- Produces: self-describing whole-service reference documents and routing/index rules used by Task 6.
+- Produces: two self-describing whole-service reference documents used by Task 6's scope check.
 
 - [ ] **Step 1: Import the two user-owned source documents without losing unrelated content**
 
@@ -343,17 +341,13 @@ Add a prominent scope banner stating that this is the whole-service/long-term ta
 
 Add a prominent target-architecture banner. State that waiting, payment/refund, statistics, platform operation, business-certificate review, notification, Kakao Map, and S3 sections describe target modules and do not prove current API implementation or first-MVP UI scope. Add the current-activation read order: ownership → linked spec/OpenAPI → Controller/Service/test evidence → release approval.
 
-- [ ] **Step 4: Route and index both documents**
-
-In `docs/00-index.md` and `ai/document-routing.md`, register the two documents as whole-service/target-architecture references and explicitly give current MVP1 ownership/spec/OpenAPI priority for frontend/API activation decisions.
-
-- [ ] **Step 5: Verify and commit Task 5**
+- [ ] **Step 4: Verify and commit Task 5**
 
 Run:
 
 ```powershell
 git diff --check
-rg -n "전체 서비스|장기 목표|현재 1차 MVP|ownership.md|spec|OpenAPI|Controller|Service|릴리스" docs/service-definition.md docs/technical-architecture.md docs/00-index.md ai/document-routing.md
+rg -n "전체 서비스|장기 목표|현재 1차 MVP|ownership.md|spec|OpenAPI|Controller|Service|릴리스" docs/service-definition.md docs/technical-architecture.md
 rg -n "1차 MVP|2차 MVP|고도화|웨이팅|결제|환불|체크인|노쇼|운영 통계|플랫폼 운영자|승인 대기|자동 승인 API" docs/service-definition.md docs/technical-architecture.md
 ```
 
@@ -367,14 +361,10 @@ Commit only Task 5 files with message `docs: distinguish target service document
 - Modify: `docs/service-policies/README.md`
 - Modify: `docs/service-policies/02-store-onboarding.md`
 - Modify: `docs/specs/mvp1-common/ownership.md`
-- Modify: `docs/specs/README.md`
-- Modify: `handoff/fullstack/01-consumer-fullstack.md`
-- Modify: `handoff/fullstack/02-store-operator-fullstack.md`
-- Modify if needed for the same read-order boundary: `handoff/fullstack/03-platform-operator-fullstack.md`
 
 **Interfaces:**
 - Consumes: Task 5 document roles, current domain specs/OpenAPI, and the verified first-MVP registration flow.
-- Produces: one unambiguous MVP1 precedence rule and no accidental platform-approval frontend scope.
+- Produces: policy-status and O-007 interpretation notes that prevent accidental platform-approval frontend scope.
 
 - [ ] **Step 1: Clarify policy status without changing policy decisions**
 
@@ -388,18 +378,14 @@ Preserve STORE-005 and STORE-007 policy content. Add a first-MVP frontend/runtim
 
 In `ownership.md`, explain that approval/operating-state validation refers to the current server contract and does not authorize a platform-operator review screen. Keep operator account signup and store registration as separate steps but state that current MVP1 has no approval-wait step.
 
-- [ ] **Step 4: Put the same priority in specs and fullstack handoffs**
-
-Add the read order `ownership.md` → linked domain spec/OpenAPI → actual Controller/Service/test → release approval. State that service definition/policies/technical architecture inform whole-service design but are not current API activation evidence. Unsupported capabilities remain absent from navigation, routes, tabs, controls, requests, actions, production bundles, and production mocks.
-
-- [ ] **Step 5: Verify and commit Task 6**
+- [ ] **Step 4: Verify and commit Task 6**
 
 Run:
 
 ```powershell
 git diff --check
 rg -n "확정|필수|개발 단계|1차 MVP|고도화|입점 승인|플랫폼 운영자" docs/service-policies/README.md docs/service-policies/02-store-onboarding.md
-rg -n "O-007|승인|가입|로그인|매장 등록|바로 관리|승인 대기|ownership.md|OpenAPI|Controller" docs/specs/mvp1-common/ownership.md docs/specs/README.md handoff/fullstack/01-consumer-fullstack.md handoff/fullstack/02-store-operator-fullstack.md handoff/fullstack/03-platform-operator-fullstack.md
+rg -n "O-007|승인|가입|로그인|매장 등록|바로 관리|승인 대기|OpenAPI|Controller" docs/specs/mvp1-common/ownership.md
 ```
 
 Expected: the policy content remains valid, but current MVP1 scope and runtime activation cannot be inferred from policy status or target architecture.
@@ -409,10 +395,10 @@ Commit only Task 6 files with message `docs: clarify MVP1 scope precedence and o
 ### Task 7: Final Cross-Document Audit and PR Update
 
 **Files:**
-- Modify if required: the six handoff files and Task 5–6 files, limited to review findings.
+- Modify if required: the five Task 5–6 files only, limited to review findings.
 
 **Interfaces:**
-- Consumes: all role handoffs, whole-service references, policy notes, ownership/spec/OpenAPI, and actual runtime evidence.
+- Consumes: the five amended documents, six role handoffs, ownership-linked spec/OpenAPI, and actual runtime evidence.
 - Produces: the final file-by-file review report and Korean Draft PR description.
 
 - [ ] **Step 1: Audit the eight user criteria file by file**
@@ -421,7 +407,7 @@ For every handoff and scope-boundary document, record role fit, required screens
 
 - [ ] **Step 2: Correct review findings**
 
-Use only scoped document edits. Do not rewrite long-term service policy decisions. Preserve all-business-type pickup, the target service-specific inventory split and current shared-inventory runtime block, undecided cross-service inventory transfer, general-cancellation-only vacancy succession, and platform-admin enhancement-only boundaries.
+Use only the five scoped document edits. Do not rewrite long-term service policy decisions or reopen the reviewed handoff files. Confirm that the existing handoffs still preserve all-business-type pickup, the target service-specific inventory split and current shared-inventory runtime block, undecided cross-service inventory transfer, general-cancellation-only vacancy succession, and platform-admin enhancement-only boundaries.
 
 - [ ] **Step 3: Run fresh final verification**
 
