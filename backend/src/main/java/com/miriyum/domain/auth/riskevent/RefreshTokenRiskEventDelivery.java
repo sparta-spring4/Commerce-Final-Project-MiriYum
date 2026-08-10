@@ -49,22 +49,31 @@ public class RefreshTokenRiskEventDelivery {
         }
 
         int delivered = 0;
-        boolean deliveryFailed = false;
+        String failureStage = null;
         for (PendingRefreshTokenRiskEvent event : events) {
             try {
                 authRiskEventStore.record(event);
+            } catch (DataAccessException | ServiceException exception) {
+                failureStage = firstFailureStage(failureStage, "mysql_write");
+                continue;
+            }
+            try {
                 markerStore.delete(event.eventKey());
                 delivered++;
             } catch (DataAccessException | ServiceException exception) {
-                deliveryFailed = true;
+                failureStage = firstFailureStage(failureStage, "valkey_delete");
             }
         }
-        if (deliveryFailed) {
-            recordFailure("mysql_delivery");
+        if (failureStage != null) {
+            recordFailure(failureStage);
         } else {
             consecutiveFailures.set(0);
         }
         return delivered;
+    }
+
+    private String firstFailureStage(String currentStage, String newStage) {
+        return currentStage == null ? newStage : currentStage;
     }
 
     private void recordFailure(String failureStage) {

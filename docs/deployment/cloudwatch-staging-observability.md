@@ -81,7 +81,7 @@ CloudWatch 전송 실패가 배포 자체를 실패시키지는 않는다. 배�
 Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
 
 ```text
-event=refresh_token_risk_event_delivery_stalled consecutive_failures=10 failure_stage=mysql_delivery
+event=refresh_token_risk_event_delivery_stalled consecutive_failures=10 failure_stage=mysql_write
 ```
 
 로그에는 계정 ID, family ID, token ID, token hash와 원문 토큰을 넣지 않는다. CloudWatch Logs metric filter는 이 이벤트 이름만 `RefreshTokenRiskEventDeliveryStalled=1`로 변환하고, 5분 합계가 0보다 크면 SNS 알람을 보낸다. 정상 전달이 한 번 완료되면 애플리케이션의 연속 실패 횟수는 0으로 초기화된다.

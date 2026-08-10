@@ -88,7 +88,7 @@ class RefreshTokenRiskEventDeliveryTest {
                 .toList();
         assertThat(messages).containsExactly(
                 "event=refresh_token_risk_event_delivery_stalled "
-                        + "consecutive_failures=3 failure_stage=mysql_delivery");
+                        + "consecutive_failures=3 failure_stage=mysql_write");
         assertThat(messages.getFirst())
                 .doesNotContain(event.eventKey(), event.familyId(), event.tokenHash());
     }
@@ -109,6 +109,27 @@ class RefreshTokenRiskEventDeliveryTest {
                 .containsExactly(
                         "event=refresh_token_risk_event_delivery_stalled "
                                 + "consecutive_failures=3 failure_stage=valkey_read");
+    }
+
+    @Test
+    @DisplayName("MySQL 저장 후 Valkey marker 삭제가 반복 실패하면 삭제 단계 경보를 남긴다")
+    void logsOperationalSignalAfterRepeatedValkeyDeleteFailures() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        willDoNothing().given(authRiskEventStore).record(event);
+        willThrow(new com.miriyum.global.exception.ServiceException(
+                com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE))
+                .given(markerStore).delete(event.eventKey());
+
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly(
+                        "event=refresh_token_risk_event_delivery_stalled "
+                                + "consecutive_failures=3 failure_stage=valkey_delete");
     }
 
     @Test
