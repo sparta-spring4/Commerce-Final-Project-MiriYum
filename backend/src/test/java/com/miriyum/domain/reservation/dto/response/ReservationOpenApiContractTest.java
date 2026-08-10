@@ -81,6 +81,10 @@ class ReservationOpenApiContractTest {
         assertThat(paths.keySet())
                 .containsExactlyInAnyOrderElementsOf(
                         contracts.stream().map(OperationContract::path).toList());
+        Map<String, Object> aggregate = load(
+                Path.of("..", "docs", "specs", "mvp1-openapi.yaml")
+        );
+        Map<String, Object> aggregatePaths = map(aggregate.get("paths"));
         assertThat(contracts).hasSize(11).allSatisfy(contract -> {
             Map<String, Object> pathItem = map(paths.get(contract.path()));
             assertThat(pathItem).containsOnlyKeys(contract.method());
@@ -113,6 +117,14 @@ class ReservationOpenApiContractTest {
                                 "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
                         ));
             }
+
+            assertThat(map(aggregatePaths.get(contract.path())))
+                    .containsOnlyKeys("$ref")
+                    .containsEntry(
+                            "$ref",
+                            "./reservation/openapi.yaml#/paths/"
+                                    + escapeJsonPointer(contract.path())
+                    );
         });
     }
 
@@ -511,6 +523,10 @@ class ReservationOpenApiContractTest {
         assertThat(list(map(properties.get("serviceEndAt")).get("oneOf"))).hasSize(2);
         assertThat(list(map(properties.get("timeZoneId")).get("type")))
                 .containsExactly("string", "null");
+    }
+
+    private static String escapeJsonPointer(String value) {
+        return value.replace("~", "~0").replace("/", "~1");
     }
 
     @SuppressWarnings("unchecked")

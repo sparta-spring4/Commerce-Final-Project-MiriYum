@@ -44,6 +44,10 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.DayOfWeek;
@@ -61,7 +65,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -325,11 +331,82 @@ class ReservationCreationIT {
         long consumerId = createConsumer();
         IdempotencyKey key = key(7);
         ReservationCreateRequest request = request(scenario.storeId(), 2, List.of());
+        CountDownLatch idempotencyLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseIdempotencyLock = new CountDownLatch(1);
+        CountDownLatch workersReady = new CountDownLatch(2);
+        CountDownLatch startWorkers = new CountDownLatch(1);
+        AtomicLong holderConnectionId = new AtomicLong();
+        ExecutorService executor = Executors.newFixedThreadPool(
+                3, reservationCreationWorkerFactory());
+        Future<Long> holder = null;
+        Future<CreationAttempt> firstWorker = null;
+        Future<CreationAttempt> secondWorker = null;
+        List<CreationAttempt> attempts;
 
         // when
-        List<CreationAttempt> attempts = invokeConcurrently(
-                new CreationInvocation(consumerId, key, request),
-                new CreationInvocation(consumerId, key, request));
+        try {
+            holder = executor.submit(() -> transactions.execute(status -> {
+                jdbcTemplate.update("""
+                        INSERT INTO idempotency_commands (
+                            principal_namespace, principal_id, command_type, idempotency_key,
+                            request_fingerprint, processing_status, created_at, updated_at
+                        ) VALUES (
+                            'consumer', ?, 'RESERVATION_CREATE', ?, ?,
+                            'PROCESSING', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+                        )
+                        """, consumerId, key.value(), "0".repeat(64));
+                long connectionId = jdbcTemplate.queryForObject(
+                        "SELECT CONNECTION_ID()", Long.class);
+                holderConnectionId.set(connectionId);
+                idempotencyLockHeld.countDown();
+                awaitLatch(releaseIdempotencyLock, "idempotency holder release");
+                status.setRollbackOnly();
+                return connectionId;
+            }));
+            assertThat(idempotencyLockHeld.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(holderConnectionId.get()).isPositive();
+
+            CreationInvocation invocation = new CreationInvocation(
+                    consumerId, key, request);
+            firstWorker = executor.submit(() -> invokeAfterStart(
+                    invocation, workersReady, startWorkers));
+            secondWorker = executor.submit(() -> invokeAfterStart(
+                    invocation, workersReady, startWorkers));
+            assertThat(workersReady.await(5, TimeUnit.SECONDS)).isTrue();
+            startWorkers.countDown();
+
+            assertFutureBlocked(firstWorker);
+            assertFutureBlocked(secondWorker);
+            awaitBlockingWaits(
+                    holderConnectionId.get(),
+                    "idempotency_commands",
+                    "uk_idempotency_commands",
+                    2);
+            assertThat(count("reservations")).isZero();
+            assertReservationCreateCommands(0);
+
+            releaseIdempotencyLock.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            attempts = List.of(
+                    firstWorker.get(30, TimeUnit.SECONDS),
+                    secondWorker.get(30, TimeUnit.SECONDS));
+        } finally {
+            idempotencyLockHeld.countDown();
+            releaseIdempotencyLock.countDown();
+            workersReady.countDown();
+            workersReady.countDown();
+            startWorkers.countDown();
+            cancelIfRunning(holder);
+            cancelIfRunning(firstWorker);
+            cancelIfRunning(secondWorker);
+            executor.shutdownNow();
+            if (!executor.awaitTermination(
+                    EXECUTOR_TERMINATION_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS)) {
+                throw new AssertionError(
+                        "same-key reservation creation workers did not terminate");
+            }
+        }
 
         // then
         assertThat(attempts).allSatisfy(attempt -> {
@@ -859,6 +936,71 @@ class ReservationCreationIT {
 
         private static CreationAttempt failed(ErrorCode errorCode) {
             return new CreationAttempt(null, errorCode);
+        }
+    }
+
+    private void awaitBlockingWaits(
+            long holderConnectionId,
+            String tableName,
+            String indexName,
+            int expectedWaits
+    ) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        int lastObservedCount = 0;
+        try (Connection monitoringConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), "root", MYSQL.getPassword())) {
+            monitoringConnection.setReadOnly(true);
+            try (PreparedStatement statement = monitoringConnection.prepareStatement("""
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits AS wait_edge
+                    JOIN performance_schema.data_locks AS blocking_lock
+                      ON blocking_lock.ENGINE = wait_edge.ENGINE
+                     AND blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
+                    JOIN information_schema.INNODB_TRX AS blocking_transaction
+                      ON blocking_transaction.TRX_ID = blocking_lock.ENGINE_TRANSACTION_ID
+                    WHERE blocking_transaction.TRX_MYSQL_THREAD_ID = ?
+                      AND blocking_lock.OBJECT_SCHEMA = DATABASE()
+                      AND blocking_lock.OBJECT_NAME = ?
+                      AND blocking_lock.INDEX_NAME = ?
+                    """)) {
+                statement.setLong(1, holderConnectionId);
+                statement.setString(2, tableName);
+                statement.setString(3, indexName);
+                while (System.nanoTime() < deadlineNanos) {
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        if (!resultSet.next()) {
+                            throw new AssertionError("lock wait count query returned no row");
+                        }
+                        lastObservedCount = resultSet.getInt(1);
+                    }
+                    if (lastObservedCount >= expectedWaits) {
+                        return;
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException(
+                    "unable to observe reservation creation lock waits", exception);
+        }
+        throw new AssertionError(
+                "expected %d lock waits on %s.%s but observed %d"
+                        .formatted(expectedWaits, tableName, indexName, lastObservedCount));
+    }
+
+    private static void assertFutureBlocked(Future<?> future) {
+        assertThatThrownBy(() -> future.get(250, TimeUnit.MILLISECONDS))
+                .isInstanceOf(TimeoutException.class);
+    }
+
+    private static void awaitLatch(CountDownLatch latch, String name) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(name + " timed out");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(name + " interrupted", exception);
         }
     }
 
