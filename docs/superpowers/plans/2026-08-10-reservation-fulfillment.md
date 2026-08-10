@@ -244,12 +244,13 @@ $probePatch = @'
 diff --git a/docs/specs/reservation/openapi.yaml b/docs/specs/reservation/openapi.yaml
 --- a/docs/specs/reservation/openapi.yaml
 +++ b/docs/specs/reservation/openapi.yaml
-@@ -243,4 +243,4 @@ paths:
+@@ -243,5 +243,5 @@ paths:
          "404":
            $ref: "#/components/responses/ReservationNotFound"
          "409":
 -          $ref: "#/components/responses/ReservationStateConflict"
 +          $ref: "#/components/responses/ReservationFulfillmentConflict"
+   /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
 @@ -935,16 +935,39 @@ components:
      ReservationStateConflict:
        description: 현재 상태 또는 취소 정책에서 명령 불가
@@ -293,7 +294,7 @@ diff --git a/docs/specs/reservation/openapi.yaml b/docs/specs/reservation/openap
 '@
 [System.IO.File]::WriteAllText(
   $probePatchPath,
-  $probePatch,
+  $probePatch + "`n",
   [System.Text.UTF8Encoding]::new($false)
 )
 try {
