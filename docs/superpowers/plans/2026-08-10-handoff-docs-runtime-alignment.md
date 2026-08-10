@@ -1,10 +1,10 @@
-# MiriYum Frontend Handoff Documents Alignment Implementation Plan
+# MiriYum Frontend Handoff and Scope-Boundary Documents Alignment Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rewrite and cross-review six MiriYum frontend handoff documents so product phases, role boundaries, service-specific inventory, and runtime API activation rules are complete and mutually consistent.
+**Goal:** Rewrite and cross-review six MiriYum frontend handoff documents and make the boundary between whole-service policy/architecture and the current MVP1 ownership/spec/OpenAPI sources unambiguous.
 
-**Architecture:** Each user role owns one design document and one fullstack connection document. Design documents contain the complete approved roadmap without repository dependencies; fullstack documents re-check the current repository and activate only the contract-and-runtime intersection. Role pairs are implemented and reviewed independently, followed by a branch-wide policy and terminology audit.
+**Architecture:** Each user role owns one design document and one fullstack connection document. Design documents contain the complete approved roadmap without repository dependencies; fullstack documents use `mvp1-common/ownership.md`, linked domain specs/OpenAPI, actual Controller/Service evidence, and release approval for current activation. Whole-service definition, service policies, and technical architecture remain valid long-term references but are labeled so they cannot be mistaken for the current MVP1 screen/API scope.
 
 **Tech Stack:** Markdown, Git, ripgrep, PowerShell, repository OpenAPI and Spring Controller inspection.
 
@@ -25,7 +25,12 @@
 - Regions are exactly Seoul, Busan, Daegu, Daejeon, and Gwangju in user-facing Korean; fullstack documents use current server codes only after reading OpenAPI.
 - Platform operator functionality is enhancement-only and absent from first and second MVP runtime shells.
 - Second MVP recommendation features are consumer-centered; do not invent store-operator recommendation administration.
-- Do not modify frontend code, backend code, OpenAPI, active product specs, migrations, or tests in this PR.
+- Whole-service policy decisions are not being broadly rewritten. Policy status `확정` or importance `필수` never means `1차 MVP`.
+- Current MVP1 scope priority is `docs/specs/mvp1-common/ownership.md` → linked domain spec/OpenAPI → actual Controller/Service and verification → release approval.
+- `docs/service-definition.md` and `docs/service-policies/` describe whole-service policy/long-term goals; `docs/technical-architecture.md` describes target architecture. Their existence is not runtime evidence.
+- First-MVP store UI flow is operator signup → login → store registration → immediate management of the returned store. Do not create onboarding application, approval-wait, supplement/rejection, or platform-review UI, and do not invent an auto-approval API.
+- Current OpenAPI fields such as `APPROVED` remain implementation truth; their existence does not authorize a platform-approval screen.
+- Do not modify frontend code, backend code, OpenAPI behavior, migrations, or tests in this PR.
 - Use `apply_patch` for document creation and edits. Preserve unrelated files and stage only paths listed by the active task.
 - Every task must run `git diff --check` and its task-specific `rg` checks before committing.
 
@@ -303,3 +308,125 @@ git commit -m "docs: reconcile frontend handoff policies"
 ```
 
 If no correction was required, record that fact with the complete gate output in the task report and do not create an empty commit.
+
+---
+
+## Expanded scope-boundary remediation
+
+Tasks 1–4 above record the completed six-handoff work. The following tasks implement the user's correction that whole-service documents and current MVP1 sources were being consumed at the same priority.
+
+### Task 5: Whole-Service Definition and Target Architecture Labels
+
+**Files:**
+- Create from read-only input and correct: `docs/service-definition.md`
+- Create from read-only input and correct: `docs/technical-architecture.md`
+- Modify: `docs/00-index.md`
+- Modify: `ai/document-routing.md`
+
+**Read-only inputs:**
+- `C:/Users/lbw01/GitHub/Commerce-Final-Project-MiriYum/docs/service-definition.md`
+- `C:/Users/lbw01/GitHub/Commerce-Final-Project-MiriYum/docs/technical-architecture.md`
+
+**Interfaces:**
+- Consumes: the user's line-specific review and approved design section 9.
+- Produces: self-describing whole-service reference documents and routing/index rules used by Task 6.
+
+- [ ] **Step 1: Import the two user-owned source documents without losing unrelated content**
+
+Read each source completely. Create the worktree copies with the original content preserved except for the scoped corrections below. Do not edit or stage the originals in the main checkout.
+
+- [ ] **Step 2: Correct `service-definition.md` scope and phase presentation**
+
+Add a prominent scope banner stating that this is the whole-service/long-term target and not the current MVP1 screen/API source. Correct the cited consumer line so waiting is enhancement. Split the combined inclusion list into first MVP, second MVP, and enhancement. Limit image review, platform approval, and pre-approval access blocking to the enhancement flow. State that current MVP1 uses operator signup → login → store registration → immediate management with no approval-wait or platform-review UI and no invented auto-approval API. Mark Free operating statistics/waiting/no-show dashboard as enhancement.
+
+- [ ] **Step 3: Correct `technical-architecture.md` interpretation**
+
+Add a prominent target-architecture banner. State that waiting, payment/refund, statistics, platform operation, business-certificate review, notification, Kakao Map, and S3 sections describe target modules and do not prove current API implementation or first-MVP UI scope. Add the current-activation read order: ownership → linked spec/OpenAPI → Controller/Service/test evidence → release approval.
+
+- [ ] **Step 4: Route and index both documents**
+
+In `docs/00-index.md` and `ai/document-routing.md`, register the two documents as whole-service/target-architecture references and explicitly give current MVP1 ownership/spec/OpenAPI priority for frontend/API activation decisions.
+
+- [ ] **Step 5: Verify and commit Task 5**
+
+Run:
+
+```powershell
+git diff --check
+rg -n "전체 서비스|장기 목표|현재 1차 MVP|ownership.md|spec|OpenAPI|Controller|Service|릴리스" docs/service-definition.md docs/technical-architecture.md docs/00-index.md ai/document-routing.md
+rg -n "1차 MVP|2차 MVP|고도화|웨이팅|결제|환불|체크인|노쇼|운영 통계|플랫폼 운영자|승인 대기|자동 승인 API" docs/service-definition.md docs/technical-architecture.md
+```
+
+Expected: both documents identify their reference scope; phase-sensitive functions are not presented as one current-MVP inclusion list; approval terminology cannot create a first-MVP platform workflow.
+
+Commit only Task 5 files with message `docs: distinguish target service documents from MVP1 scope`.
+
+### Task 6: Policy Status, Ownership, and Fullstack Read Order
+
+**Files:**
+- Modify: `docs/service-policies/README.md`
+- Modify: `docs/service-policies/02-store-onboarding.md`
+- Modify: `docs/specs/mvp1-common/ownership.md`
+- Modify: `docs/specs/README.md`
+- Modify: `handoff/fullstack/01-consumer-fullstack.md`
+- Modify: `handoff/fullstack/02-store-operator-fullstack.md`
+- Modify if needed for the same read-order boundary: `handoff/fullstack/03-platform-operator-fullstack.md`
+
+**Interfaces:**
+- Consumes: Task 5 document roles, current domain specs/OpenAPI, and the verified first-MVP registration flow.
+- Produces: one unambiguous MVP1 precedence rule and no accidental platform-approval frontend scope.
+
+- [ ] **Step 1: Clarify policy status without changing policy decisions**
+
+In the policy master, prominently state that `확정` and `필수` describe decision status/importance, not the current development stage. Link waiting, payment/refund/settlement, check-in/no-show, onboarding approval/rejection, and platform operation to enhancement for screen/API scope.
+
+- [ ] **Step 2: Add the Store policy interpretation boundary**
+
+Preserve STORE-005 and STORE-007 policy content. Add a first-MVP frontend/runtime note: no onboarding application, approval wait, supplement/rejection result, or platform-review UI. Explain that STORE-007 is the post-approval general-feature activation policy for the whole service, not an automatic store-approval API. State the current screen flow as signup → login → store registration → immediate management of the returned store.
+
+- [ ] **Step 3: Correct O-007 and current MVP1 ownership guidance**
+
+In `ownership.md`, explain that approval/operating-state validation refers to the current server contract and does not authorize a platform-operator review screen. Keep operator account signup and store registration as separate steps but state that current MVP1 has no approval-wait step.
+
+- [ ] **Step 4: Put the same priority in specs and fullstack handoffs**
+
+Add the read order `ownership.md` → linked domain spec/OpenAPI → actual Controller/Service/test → release approval. State that service definition/policies/technical architecture inform whole-service design but are not current API activation evidence. Unsupported capabilities remain absent from navigation, routes, tabs, controls, requests, actions, production bundles, and production mocks.
+
+- [ ] **Step 5: Verify and commit Task 6**
+
+Run:
+
+```powershell
+git diff --check
+rg -n "확정|필수|개발 단계|1차 MVP|고도화|입점 승인|플랫폼 운영자" docs/service-policies/README.md docs/service-policies/02-store-onboarding.md
+rg -n "O-007|승인|가입|로그인|매장 등록|바로 관리|승인 대기|ownership.md|OpenAPI|Controller" docs/specs/mvp1-common/ownership.md docs/specs/README.md handoff/fullstack/01-consumer-fullstack.md handoff/fullstack/02-store-operator-fullstack.md handoff/fullstack/03-platform-operator-fullstack.md
+```
+
+Expected: the policy content remains valid, but current MVP1 scope and runtime activation cannot be inferred from policy status or target architecture.
+
+Commit only Task 6 files with message `docs: clarify MVP1 scope precedence and onboarding flow`.
+
+### Task 7: Final Cross-Document Audit and PR Update
+
+**Files:**
+- Modify if required: the six handoff files and Task 5–6 files, limited to review findings.
+
+**Interfaces:**
+- Consumes: all role handoffs, whole-service references, policy notes, ownership/spec/OpenAPI, and actual runtime evidence.
+- Produces: the final file-by-file review report and Korean Draft PR description.
+
+- [ ] **Step 1: Audit the eight user criteria file by file**
+
+For every handoff and scope-boundary document, record role fit, required screens/states, stage classification, design/fullstack responsibility, design-versus-runtime distinction, terminology conflicts, invented features/states, and standalone sufficiency. Report passes with evidence, not only `통과`.
+
+- [ ] **Step 2: Correct review findings**
+
+Use only scoped document edits. Do not rewrite long-term service policy decisions. Preserve all-business-type pickup, the target service-specific inventory split and current shared-inventory runtime block, undecided cross-service inventory transfer, general-cancellation-only vacancy succession, and platform-admin enhancement-only boundaries.
+
+- [ ] **Step 3: Run fresh final verification**
+
+Run backend tests, frontend tests/build, repository document and link searches, exact changed-file review, and `git diff --check origin/dev...HEAD`. Verify the branch still contains no product-code or source-OpenAPI behavior changes.
+
+- [ ] **Step 4: Push and update the existing Draft PR in Korean**
+
+Update the title/body to describe the handoff corrections and the scope-precedence fix. Include exact changed documents, review result, verification evidence, and remaining runtime blockers without presenting whole-service policy as current MVP1 implementation.
