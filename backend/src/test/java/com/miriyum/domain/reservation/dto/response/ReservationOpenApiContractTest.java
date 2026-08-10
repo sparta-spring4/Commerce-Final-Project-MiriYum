@@ -8,10 +8,113 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 class ReservationOpenApiContractTest {
+
+    @Test
+    void publicReservationApiMatrixKeepsAllElevenOperationsExplicit() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+        List<OperationContract> contracts = List.of(
+                new OperationContract(
+                        "/api/v1/reservations", "post", "createReservation",
+                        "#/components/schemas/ReservationCreateRequest",
+                        Set.of("201", "400", "401", "403", "409", "503")),
+                new OperationContract(
+                        "/api/v1/reservations/{reservationId}", "get", "getReservation",
+                        null, Set.of("200", "401", "403", "404")),
+                new OperationContract(
+                        "/api/v1/reservations/{reservationId}/cancellations", "post",
+                        "cancelReservationByConsumer",
+                        "#/components/schemas/ConsumerCancellationRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservations", "get",
+                        "getStoreReservations", null,
+                        Set.of("200", "400", "401", "403")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}",
+                        "get", "getStoreReservation", null,
+                        Set.of("200", "401", "403", "404")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                                + "/cancellations",
+                        "post", "cancelReservationByStoreOperator",
+                        "#/components/schemas/StoreCancellationRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                                + "/fulfillments",
+                        "post", "fulfillReservation",
+                        "#/components/schemas/EmptyCommandRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}"
+                                + "/reservation-capacities/{serviceDate}",
+                        "put", "replaceReservationCapacities",
+                        "#/components/schemas/ReservationCapacitiesRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies",
+                        "put", "createReservationTimePolicyDraft",
+                        "#/components/schemas/ReservationTimePolicyDraftRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies"
+                                + "/{version}/publication",
+                        "post", "publishReservationTimePolicyDraft",
+                        "#/components/schemas/ReservationTimePolicyPublicationRequest",
+                        Set.of("200", "400", "401", "403", "404", "409")),
+                new OperationContract(
+                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies"
+                                + "/{version}/publication-cancellation",
+                        "post", "cancelReservationTimePolicyPublication",
+                        "#/components/schemas/ReservationTimePolicyPublicationCancellationRequest",
+                        Set.of("200", "400", "401", "403", "404", "409"))
+        );
+
+        assertThat(paths.keySet())
+                .containsExactlyInAnyOrderElementsOf(
+                        contracts.stream().map(OperationContract::path).toList());
+        assertThat(contracts).hasSize(11).allSatisfy(contract -> {
+            Map<String, Object> pathItem = map(paths.get(contract.path()));
+            assertThat(pathItem).containsOnlyKeys(contract.method());
+            Map<String, Object> operation = map(pathItem.get(contract.method()));
+
+            assertThat(operation).containsEntry("operationId", contract.operationId());
+            assertThat(list(operation.get("security"))).anySatisfy(requirement ->
+                    assertThat(map(requirement)).containsKey("bearerAuth"));
+            assertThat(map(operation.get("responses")).keySet())
+                    .containsExactlyInAnyOrderElementsOf(contract.responseStatuses());
+
+            if (contract.requestSchemaRef() == null) {
+                assertThat(operation).doesNotContainKey("requestBody");
+                assertThat(list(operation.get("parameters"))).allSatisfy(parameter ->
+                        assertThat(map(parameter)).doesNotContainEntry(
+                                "$ref",
+                                "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                        ));
+            } else {
+                Map<String, Object> requestBody = map(operation.get("requestBody"));
+                assertThat(requestBody).containsEntry("required", true);
+                Map<String, Object> json = map(
+                        map(requestBody.get("content")).get("application/json")
+                );
+                assertThat(map(json.get("schema")))
+                        .containsEntry("$ref", contract.requestSchemaRef());
+                assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                        assertThat(map(parameter)).containsEntry(
+                                "$ref",
+                                "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                        ));
+            }
+        });
+    }
 
     @Test
     void consumerHistoryKeepsAuthOwnedSchemaNamesAndCanonicalTimeShape() throws IOException {
@@ -418,5 +521,14 @@ class ReservationOpenApiContractTest {
     @SuppressWarnings("unchecked")
     private static List<Object> list(Object value) {
         return (List<Object>) value;
+    }
+
+    private record OperationContract(
+            String path,
+            String method,
+            String operationId,
+            String requestSchemaRef,
+            Set<String> responseStatuses
+    ) {
     }
 }

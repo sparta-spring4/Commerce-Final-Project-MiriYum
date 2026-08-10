@@ -44,6 +44,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -65,6 +66,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -106,7 +109,8 @@ class ReservationCreationIT {
 
     @Container
     static final MySQLContainer MYSQL =
-            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
+            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))
+                    .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -159,6 +163,9 @@ class ReservationCreationIT {
 
     @BeforeEach
     void cleanRowsInForeignKeyOrder() {
+        for (CreationFailurePoint point : CreationFailurePoint.values()) {
+            dropFailureTrigger(point);
+        }
         jdbcTemplate.execute("DELETE FROM menu_hold_items");
         jdbcTemplate.execute("DELETE FROM menu_holds");
         jdbcTemplate.execute("DELETE FROM menu_inventory_ledger");
@@ -308,6 +315,123 @@ class ReservationCreationIT {
         assertReservationCreateCommands(0);
         assertBucketOccupancy(scenario.capacityBucketId(), 0, 0);
         assertThat(inventorySnapshot(menu.inventoryBucketId())).isEqualTo(inventoryBefore);
+    }
+
+    @Test
+    @DisplayName("같은 멱등 키의 동시 생성은 하나의 예약 결과를 재생한다")
+    void concurrentSameKeyCreationReturnsOneCommittedResult() throws Exception {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        IdempotencyKey key = key(7);
+        ReservationCreateRequest request = request(scenario.storeId(), 2, List.of());
+
+        // when
+        List<CreationAttempt> attempts = invokeConcurrently(
+                new CreationInvocation(consumerId, key, request),
+                new CreationInvocation(consumerId, key, request));
+
+        // then
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(attempt.errorCode()).isNull();
+            assertThat(attempt.result()).isNotNull();
+            assertThat(attempt.result().httpStatus()).isEqualTo(201);
+        });
+        assertThat(attempts)
+                .extracting(attempt -> attempt.result().data())
+                .containsOnly(attempts.getFirst().result().data());
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+    }
+
+    @Test
+    @DisplayName("중복 메뉴 선택은 합산되어 예약·수용량·홀드·재고에 한 번만 반영된다")
+    void duplicateMenuSelectionsCommitAsOneAtomicReservation() {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        MenuInventoryFixture menu = createMenuInventory(scenario, 5);
+        ReservationCreateRequest request = request(
+                scenario.storeId(),
+                2,
+                List.of(
+                        new ReservationMenuSelectionRequest(
+                                String.valueOf(menu.menuId()), 1),
+                        new ReservationMenuSelectionRequest(
+                                String.valueOf(menu.menuId()), 2)));
+
+        // when
+        ReservationCreationCommandResult result =
+                commandFacade.create(consumerId, key(8), request);
+
+        // then
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data().menuSelections()).singleElement().satisfies(selection -> {
+            assertThat(selection.menuId()).isEqualTo(String.valueOf(menu.menuId()));
+            assertThat(selection.quantity()).isEqualTo(3);
+        });
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertThat(count("menu_holds")).isEqualTo(1);
+        assertThat(count("menu_hold_items")).isEqualTo(1);
+        assertThat(count("menu_inventory_ledger")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+        assertThat(inventorySnapshot(menu.inventoryBucketId()))
+                .containsEntry("online_hold_remaining", 2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CreationFailurePoint.class)
+    @DisplayName("생성 단계의 DB 실패는 모든 효과를 롤백하고 같은 키 재시도를 허용한다")
+    void persistenceFailureRollsBackAllEffectsAndSameKeyCanRetry(
+            CreationFailurePoint point
+    ) {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        MenuInventoryFixture menu = createMenuInventory(scenario, 5);
+        Map<String, Object> inventoryBefore = inventorySnapshot(menu.inventoryBucketId());
+        IdempotencyKey key = key(20 + point.ordinal());
+        ReservationCreateRequest request = request(
+                scenario.storeId(),
+                2,
+                List.of(new ReservationMenuSelectionRequest(
+                        String.valueOf(menu.menuId()), 2)));
+
+        // when
+        try {
+            createFailureTrigger(point);
+            assertThatThrownBy(() -> commandFacade.create(consumerId, key, request))
+                    .hasRootCauseInstanceOf(SQLException.class);
+        } finally {
+            dropFailureTrigger(point);
+        }
+
+        // then
+        assertThat(count("reservations")).isZero();
+        assertThat(count("reservation_capacity_allocations")).isZero();
+        assertThat(count("menu_holds")).isZero();
+        assertThat(count("menu_hold_items")).isZero();
+        assertThat(count("menu_inventory_ledger")).isZero();
+        assertReservationCreateCommands(0);
+        assertBucketOccupancy(scenario.capacityBucketId(), 0, 0);
+        assertThat(inventorySnapshot(menu.inventoryBucketId())).isEqualTo(inventoryBefore);
+
+        ReservationCreationCommandResult retry =
+                commandFacade.create(consumerId, key, request);
+        assertThat(retry.httpStatus()).isEqualTo(201);
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertThat(count("menu_holds")).isEqualTo(1);
+        assertThat(count("menu_hold_items")).isEqualTo(1);
+        assertThat(count("menu_inventory_ledger")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+        assertThat(inventorySnapshot(menu.inventoryBucketId()))
+                .containsEntry("online_hold_remaining", 3);
     }
 
     private Scenario createScenario(int maxPeople, int maxTeams) {
@@ -671,6 +795,34 @@ class ReservationCreationIT {
                 Integer.class);
     }
 
+    private void createFailureTrigger(CreationFailurePoint point) {
+        String ddl = switch (point) {
+            case RESERVATION_INSERT -> "CREATE TRIGGER trg_create_reservation_failure "
+                    + "BEFORE INSERT ON reservations FOR EACH ROW SIGNAL SQLSTATE '45000' "
+                    + "SET MESSAGE_TEXT = 'reservation create failure'";
+            case MENU_INVENTORY_LEDGER_INSERT ->
+                    "CREATE TRIGGER trg_create_menu_ledger_failure "
+                            + "BEFORE INSERT ON menu_inventory_ledger FOR EACH ROW "
+                            + "SIGNAL SQLSTATE '45000' "
+                            + "SET MESSAGE_TEXT = 'reservation menu ledger failure'";
+            case IDEMPOTENCY_SUCCEEDED_UPDATE ->
+                    "CREATE TRIGGER trg_create_idempotency_failure "
+                            + "BEFORE UPDATE ON idempotency_commands FOR EACH ROW "
+                            + "SIGNAL SQLSTATE '45000' "
+                            + "SET MESSAGE_TEXT = 'reservation idempotency failure'";
+        };
+        jdbcTemplate.execute(ddl);
+    }
+
+    private void dropFailureTrigger(CreationFailurePoint point) {
+        String name = switch (point) {
+            case RESERVATION_INSERT -> "trg_create_reservation_failure";
+            case MENU_INVENTORY_LEDGER_INSERT -> "trg_create_menu_ledger_failure";
+            case IDEMPOTENCY_SUCCEEDED_UPDATE -> "trg_create_idempotency_failure";
+        };
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + name);
+    }
+
     private static IdempotencyKey key(int suffix) {
         return IdempotencyKey.parse(String.format(
                 java.util.Locale.ROOT,
@@ -708,6 +860,12 @@ class ReservationCreationIT {
         private static CreationAttempt failed(ErrorCode errorCode) {
             return new CreationAttempt(null, errorCode);
         }
+    }
+
+    private enum CreationFailurePoint {
+        RESERVATION_INSERT,
+        MENU_INVENTORY_LEDGER_INSERT,
+        IDEMPOTENCY_SUCCEEDED_UPDATE
     }
 
     @TestConfiguration
