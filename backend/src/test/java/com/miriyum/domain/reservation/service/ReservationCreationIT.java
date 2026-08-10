@@ -44,6 +44,11 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -60,11 +65,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -106,7 +115,8 @@ class ReservationCreationIT {
 
     @Container
     static final MySQLContainer MYSQL =
-            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
+            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))
+                    .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -159,6 +169,9 @@ class ReservationCreationIT {
 
     @BeforeEach
     void cleanRowsInForeignKeyOrder() {
+        for (CreationFailurePoint point : CreationFailurePoint.values()) {
+            dropFailureTrigger(point);
+        }
         jdbcTemplate.execute("DELETE FROM menu_hold_items");
         jdbcTemplate.execute("DELETE FROM menu_holds");
         jdbcTemplate.execute("DELETE FROM menu_inventory_ledger");
@@ -308,6 +321,194 @@ class ReservationCreationIT {
         assertReservationCreateCommands(0);
         assertBucketOccupancy(scenario.capacityBucketId(), 0, 0);
         assertThat(inventorySnapshot(menu.inventoryBucketId())).isEqualTo(inventoryBefore);
+    }
+
+    @Test
+    @DisplayName("같은 멱등 키의 동시 생성은 하나의 예약 결과를 재생한다")
+    void concurrentSameKeyCreationReturnsOneCommittedResult() throws Exception {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        IdempotencyKey key = key(7);
+        ReservationCreateRequest request = request(scenario.storeId(), 2, List.of());
+        CountDownLatch idempotencyLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseIdempotencyLock = new CountDownLatch(1);
+        CountDownLatch workersReady = new CountDownLatch(2);
+        CountDownLatch startWorkers = new CountDownLatch(1);
+        AtomicLong holderConnectionId = new AtomicLong();
+        ExecutorService executor = Executors.newFixedThreadPool(
+                3, reservationCreationWorkerFactory());
+        Future<Long> holder = null;
+        Future<CreationAttempt> firstWorker = null;
+        Future<CreationAttempt> secondWorker = null;
+        List<CreationAttempt> attempts;
+
+        // when
+        try {
+            holder = executor.submit(() -> transactions.execute(status -> {
+                jdbcTemplate.update("""
+                        INSERT INTO idempotency_commands (
+                            principal_namespace, principal_id, command_type, idempotency_key,
+                            request_fingerprint, processing_status, created_at, updated_at
+                        ) VALUES (
+                            'consumer', ?, 'RESERVATION_CREATE', ?, ?,
+                            'PROCESSING', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+                        )
+                        """, consumerId, key.value(), "0".repeat(64));
+                long connectionId = jdbcTemplate.queryForObject(
+                        "SELECT CONNECTION_ID()", Long.class);
+                holderConnectionId.set(connectionId);
+                idempotencyLockHeld.countDown();
+                awaitLatch(releaseIdempotencyLock, "idempotency holder release");
+                status.setRollbackOnly();
+                return connectionId;
+            }));
+            assertThat(idempotencyLockHeld.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(holderConnectionId.get()).isPositive();
+
+            CreationInvocation invocation = new CreationInvocation(
+                    consumerId, key, request);
+            firstWorker = executor.submit(() -> invokeAfterStart(
+                    invocation, workersReady, startWorkers));
+            secondWorker = executor.submit(() -> invokeAfterStart(
+                    invocation, workersReady, startWorkers));
+            assertThat(workersReady.await(5, TimeUnit.SECONDS)).isTrue();
+            startWorkers.countDown();
+
+            assertFutureBlocked(firstWorker);
+            assertFutureBlocked(secondWorker);
+            awaitBlockingWaits(
+                    holderConnectionId.get(),
+                    "idempotency_commands",
+                    "uk_idempotency_commands",
+                    2);
+            assertThat(count("reservations")).isZero();
+            assertReservationCreateCommands(0);
+
+            releaseIdempotencyLock.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            attempts = List.of(
+                    firstWorker.get(30, TimeUnit.SECONDS),
+                    secondWorker.get(30, TimeUnit.SECONDS));
+        } finally {
+            idempotencyLockHeld.countDown();
+            releaseIdempotencyLock.countDown();
+            workersReady.countDown();
+            workersReady.countDown();
+            startWorkers.countDown();
+            cancelIfRunning(holder);
+            cancelIfRunning(firstWorker);
+            cancelIfRunning(secondWorker);
+            executor.shutdownNow();
+            if (!executor.awaitTermination(
+                    EXECUTOR_TERMINATION_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS)) {
+                throw new AssertionError(
+                        "same-key reservation creation workers did not terminate");
+            }
+        }
+
+        // then
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(attempt.errorCode()).isNull();
+            assertThat(attempt.result()).isNotNull();
+            assertThat(attempt.result().httpStatus()).isEqualTo(201);
+        });
+        assertThat(attempts)
+                .extracting(attempt -> attempt.result().data())
+                .containsOnly(attempts.getFirst().result().data());
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+    }
+
+    @Test
+    @DisplayName("중복 메뉴 선택은 합산되어 예약·수용량·홀드·재고에 한 번만 반영된다")
+    void duplicateMenuSelectionsCommitAsOneAtomicReservation() {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        MenuInventoryFixture menu = createMenuInventory(scenario, 5);
+        ReservationCreateRequest request = request(
+                scenario.storeId(),
+                2,
+                List.of(
+                        new ReservationMenuSelectionRequest(
+                                String.valueOf(menu.menuId()), 1),
+                        new ReservationMenuSelectionRequest(
+                                String.valueOf(menu.menuId()), 2)));
+
+        // when
+        ReservationCreationCommandResult result =
+                commandFacade.create(consumerId, key(8), request);
+
+        // then
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data().menuSelections()).singleElement().satisfies(selection -> {
+            assertThat(selection.menuId()).isEqualTo(String.valueOf(menu.menuId()));
+            assertThat(selection.quantity()).isEqualTo(3);
+        });
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertThat(count("menu_holds")).isEqualTo(1);
+        assertThat(count("menu_hold_items")).isEqualTo(1);
+        assertThat(count("menu_inventory_ledger")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+        assertThat(inventorySnapshot(menu.inventoryBucketId()))
+                .containsEntry("online_hold_remaining", 2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CreationFailurePoint.class)
+    @DisplayName("생성 단계의 DB 실패는 모든 효과를 롤백하고 같은 키 재시도를 허용한다")
+    void persistenceFailureRollsBackAllEffectsAndSameKeyCanRetry(
+            CreationFailurePoint point
+    ) {
+        // given
+        Scenario scenario = createScenario(10, 10);
+        long consumerId = createConsumer();
+        MenuInventoryFixture menu = createMenuInventory(scenario, 5);
+        Map<String, Object> inventoryBefore = inventorySnapshot(menu.inventoryBucketId());
+        IdempotencyKey key = key(20 + point.ordinal());
+        ReservationCreateRequest request = request(
+                scenario.storeId(),
+                2,
+                List.of(new ReservationMenuSelectionRequest(
+                        String.valueOf(menu.menuId()), 2)));
+
+        // when
+        try {
+            createFailureTrigger(point);
+            assertThatThrownBy(() -> commandFacade.create(consumerId, key, request))
+                    .hasRootCauseInstanceOf(SQLException.class);
+        } finally {
+            dropFailureTrigger(point);
+        }
+
+        // then
+        assertThat(count("reservations")).isZero();
+        assertThat(count("reservation_capacity_allocations")).isZero();
+        assertThat(count("menu_holds")).isZero();
+        assertThat(count("menu_hold_items")).isZero();
+        assertThat(count("menu_inventory_ledger")).isZero();
+        assertReservationCreateCommands(0);
+        assertBucketOccupancy(scenario.capacityBucketId(), 0, 0);
+        assertThat(inventorySnapshot(menu.inventoryBucketId())).isEqualTo(inventoryBefore);
+
+        ReservationCreationCommandResult retry =
+                commandFacade.create(consumerId, key, request);
+        assertThat(retry.httpStatus()).isEqualTo(201);
+        assertThat(count("reservations")).isEqualTo(1);
+        assertThat(count("reservation_capacity_allocations")).isEqualTo(1);
+        assertThat(count("menu_holds")).isEqualTo(1);
+        assertThat(count("menu_hold_items")).isEqualTo(1);
+        assertThat(count("menu_inventory_ledger")).isEqualTo(1);
+        assertReservationCreateCommands(1);
+        assertBucketOccupancy(scenario.capacityBucketId(), 2, 1);
+        assertThat(inventorySnapshot(menu.inventoryBucketId()))
+                .containsEntry("online_hold_remaining", 3);
     }
 
     private Scenario createScenario(int maxPeople, int maxTeams) {
@@ -671,6 +872,34 @@ class ReservationCreationIT {
                 Integer.class);
     }
 
+    private void createFailureTrigger(CreationFailurePoint point) {
+        String ddl = switch (point) {
+            case RESERVATION_INSERT -> "CREATE TRIGGER trg_create_reservation_failure "
+                    + "BEFORE INSERT ON reservations FOR EACH ROW SIGNAL SQLSTATE '45000' "
+                    + "SET MESSAGE_TEXT = 'reservation create failure'";
+            case MENU_INVENTORY_LEDGER_INSERT ->
+                    "CREATE TRIGGER trg_create_menu_ledger_failure "
+                            + "BEFORE INSERT ON menu_inventory_ledger FOR EACH ROW "
+                            + "SIGNAL SQLSTATE '45000' "
+                            + "SET MESSAGE_TEXT = 'reservation menu ledger failure'";
+            case IDEMPOTENCY_SUCCEEDED_UPDATE ->
+                    "CREATE TRIGGER trg_create_idempotency_failure "
+                            + "BEFORE UPDATE ON idempotency_commands FOR EACH ROW "
+                            + "SIGNAL SQLSTATE '45000' "
+                            + "SET MESSAGE_TEXT = 'reservation idempotency failure'";
+        };
+        jdbcTemplate.execute(ddl);
+    }
+
+    private void dropFailureTrigger(CreationFailurePoint point) {
+        String name = switch (point) {
+            case RESERVATION_INSERT -> "trg_create_reservation_failure";
+            case MENU_INVENTORY_LEDGER_INSERT -> "trg_create_menu_ledger_failure";
+            case IDEMPOTENCY_SUCCEEDED_UPDATE -> "trg_create_idempotency_failure";
+        };
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + name);
+    }
+
     private static IdempotencyKey key(int suffix) {
         return IdempotencyKey.parse(String.format(
                 java.util.Locale.ROOT,
@@ -708,6 +937,77 @@ class ReservationCreationIT {
         private static CreationAttempt failed(ErrorCode errorCode) {
             return new CreationAttempt(null, errorCode);
         }
+    }
+
+    private void awaitBlockingWaits(
+            long holderConnectionId,
+            String tableName,
+            String indexName,
+            int expectedWaits
+    ) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        int lastObservedCount = 0;
+        try (Connection monitoringConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), "root", MYSQL.getPassword())) {
+            monitoringConnection.setReadOnly(true);
+            try (PreparedStatement statement = monitoringConnection.prepareStatement("""
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits AS wait_edge
+                    JOIN performance_schema.data_locks AS blocking_lock
+                      ON blocking_lock.ENGINE = wait_edge.ENGINE
+                     AND blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
+                    JOIN information_schema.INNODB_TRX AS blocking_transaction
+                      ON blocking_transaction.TRX_ID = blocking_lock.ENGINE_TRANSACTION_ID
+                    WHERE blocking_transaction.TRX_MYSQL_THREAD_ID = ?
+                      AND blocking_lock.OBJECT_SCHEMA = DATABASE()
+                      AND blocking_lock.OBJECT_NAME = ?
+                      AND blocking_lock.INDEX_NAME = ?
+                    """)) {
+                statement.setLong(1, holderConnectionId);
+                statement.setString(2, tableName);
+                statement.setString(3, indexName);
+                while (System.nanoTime() < deadlineNanos) {
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        if (!resultSet.next()) {
+                            throw new AssertionError("lock wait count query returned no row");
+                        }
+                        lastObservedCount = resultSet.getInt(1);
+                    }
+                    if (lastObservedCount >= expectedWaits) {
+                        return;
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException(
+                    "unable to observe reservation creation lock waits", exception);
+        }
+        throw new AssertionError(
+                "expected %d lock waits on %s.%s but observed %d"
+                        .formatted(expectedWaits, tableName, indexName, lastObservedCount));
+    }
+
+    private static void assertFutureBlocked(Future<?> future) {
+        assertThatThrownBy(() -> future.get(250, TimeUnit.MILLISECONDS))
+                .isInstanceOf(TimeoutException.class);
+    }
+
+    private static void awaitLatch(CountDownLatch latch, String name) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(name + " timed out");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(name + " interrupted", exception);
+        }
+    }
+
+    private enum CreationFailurePoint {
+        RESERVATION_INSERT,
+        MENU_INVENTORY_LEDGER_INSERT,
+        IDEMPOTENCY_SUCCEEDED_UPDATE
     }
 
     @TestConfiguration

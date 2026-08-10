@@ -14,6 +14,40 @@ import org.yaml.snakeyaml.Yaml;
 class MenuInventoryOpenApiContractTest {
 
     @Test
+    void menuHoldAvailabilityUsesServerResolvedIntervalContract() throws IOException {
+        Path contract = Path.of("..", "docs", "specs", "menu-hold-pickup", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+        Map<String, Object> operation = map(map(map(document.get("paths")).get(
+                "/api/v1/stores/{storeId}/menu-hold-availability")).get("get"));
+        List<Map<String, Object>> parameters = (List<Map<String, Object>>) operation.get("parameters");
+        assertThat(parameters.stream().map(parameter -> parameter.get("name")))
+                .contains("serviceDate", "startTime", "startOffset")
+                .doesNotContain("endTime");
+        Map<String, Object> startOffset = parameters.stream()
+                .filter(parameter -> "startOffset".equals(parameter.get("name")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(map(startOffset.get("schema")))
+                .containsEntry("pattern",
+                        "^[+-](?:(?:0[0-9]|1[0-7]):[0-5][0-9]|18:00)$");
+
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(map(responses.get("409")))
+                .containsEntry("$ref", "#/components/responses/ReservationUnavailable");
+        assertThat(map(responses.get("503")))
+                .containsEntry("$ref",
+                        "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> data = map(schemas.get("MenuHoldAvailabilityData"));
+        assertThat(map(data.get("properties")))
+                .containsKeys("serviceDate", "startAt", "serviceEndAt", "timeZoneId", "items");
+    }
+
+    @Test
     void operatorRoutesAndOvernightDatesMatchTheHttpContract() throws IOException {
         Path contract = Path.of("..", "docs", "specs",
                 "menu-hold-pickup", "openapi.yaml");

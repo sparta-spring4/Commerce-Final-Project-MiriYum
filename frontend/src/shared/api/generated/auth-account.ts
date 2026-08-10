@@ -659,6 +659,18 @@ export interface external {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
         };
+        /** @description 매장, 선택 메뉴 또는 해당 시간대 메뉴 수량 버킷을 찾을 수 없음 */
+        ReservationCreationNotFound: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+        /** @description 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음 */
+        StoreReservationNotFound: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
         /** @description 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록 */
         ReservationConflict: {
           content: {
@@ -673,12 +685,6 @@ export interface external {
         };
         /** @description 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음 */
         ReservationFulfillmentForbidden: {
-          content: {
-            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
-          };
-        };
-        /** @description 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음 */
-        ReservationFulfillmentNotFound: {
           content: {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
@@ -1117,6 +1123,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationCreationNotFound"];
       409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
@@ -1194,6 +1201,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreAccessDenied"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreNotFound"];
     };
   };
   /** 매장 예약 상세 조회 */
@@ -1211,9 +1219,10 @@ export interface operations {
           "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationSuccessResponse"];
         };
       };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreAccessDenied"];
-      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationNotFound"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreReservationNotFound"];
     };
   };
   /** 매장 사유 예약 취소 */
@@ -1242,7 +1251,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreAccessDenied"];
-      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationNotFound"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreReservationNotFound"];
       409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationStateConflict"];
     };
   };
@@ -1272,7 +1281,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationFulfillmentForbidden"];
-      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationFulfillmentNotFound"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreReservationNotFound"];
       409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationFulfillmentConflict"];
     };
   };

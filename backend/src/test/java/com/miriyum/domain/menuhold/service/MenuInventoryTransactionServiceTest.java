@@ -96,6 +96,27 @@ class MenuInventoryTransactionServiceTest {
     }
 
     @Test
+    @DisplayName("누락 허용 조회는 현재 버킷이 존재하는 메뉴만 반환한다")
+    void findsOnlyExistingOnlineAvailability() {
+        MenuInventoryAvailabilityQuery query = query(1L, 2L);
+        OnlineInventoryAvailabilityView first =
+                view(1L, 2, 3, true, InventoryAvailabilityStatus.AVAILABLE);
+        given(bucketRepository.findCurrentOnlineAvailability(
+                query.menuIds(), SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME))
+                .willReturn(List.of(first));
+
+        List<MenuInventoryAvailability> result =
+                service.findExistingOnlineAvailability(query);
+
+        assertThat(result).extracting(
+                        MenuInventoryAvailability::menuId,
+                        MenuInventoryAvailability::availableOnlineQuantity,
+                        MenuInventoryAvailability::availabilityStatus)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        1L, 5, MenuInventoryAvailability.AvailabilityStatus.AVAILABLE));
+    }
+
+    @Test
     @DisplayName("날짜별 온라인 가용량은 존재하는 현재 버킷만 안정적인 조회 순서로 반환한다")
     void findsExistingOnlineAvailabilityByDate() {
         MenuInventoryAvailabilityDateQuery query =
