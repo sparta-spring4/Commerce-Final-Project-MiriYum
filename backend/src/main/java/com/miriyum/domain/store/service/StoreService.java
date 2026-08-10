@@ -4,6 +4,7 @@ import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.VerificationStatus;
@@ -24,7 +25,10 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -154,6 +158,24 @@ public class StoreService {
     ) {
         operatorAccountService.getMe(operatorAccountId);
         requireStoreOwnership(operatorAccountId, storeId);
+    }
+
+    /**
+     * 일정 도메인의 일괄 판정을 위해 매장 상태를 공개 계약으로 투영한다.
+     *
+     * @param storeIds 조회할 매장 식별자 집합
+     * @return 존재하는 매장만 포함한 식별자별 서비스 프로필
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, StoreServiceProfile> getServiceProfiles(Set<Long> storeIds) {
+        if (storeIds == null || storeIds.isEmpty()) {
+            return Map.of();
+        }
+        return storeRepository.findAllById(storeIds).stream()
+                .map(StoreService::serviceProfile)
+                .collect(Collectors.toUnmodifiableMap(
+                        StoreServiceProfile::storeId,
+                        Function.identity()));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -306,6 +328,17 @@ public class StoreService {
             current = current.getCause();
         }
         return false;
+    }
+
+    private static StoreServiceProfile serviceProfile(Store store) {
+        boolean reservationAccepting =
+                store.getVerificationStatus() == VerificationStatus.APPROVED
+                && store.getOperationStatus() == OperationStatus.OPEN
+                && store.isReservationEnabled();
+        return new StoreServiceProfile(
+                store.getId(),
+                store.getTimeZoneId(),
+                reservationAccepting);
     }
 
     private static BusinessResult<ManagedStoreResponse> success(

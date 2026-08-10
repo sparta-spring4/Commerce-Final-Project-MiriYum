@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.closure.controller;
+package com.miriyum.domain.schedule.controller.storeoperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import java.io.InputStream;

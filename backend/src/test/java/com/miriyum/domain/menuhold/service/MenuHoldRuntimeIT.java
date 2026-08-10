@@ -42,9 +42,9 @@ import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.store.menu.model.MenuContent;
 import com.miriyum.domain.store.menu.repository.MenuRepository;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -147,7 +147,7 @@ class MenuHoldRuntimeIT {
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
                 .given(storeService).requireMenuTransactionEligibility(storeId, menuId);
-        willAnswer(invocation -> invocation.<List<com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest>>getArgument(0)
+        willAnswer(invocation -> invocation.<List<com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest>>getArgument(0)
                 .stream().map(request -> new StoreServiceIntervalResult(
                         request.storeId(), request.startAt(), request.serviceEndAt(),
                         StoreServiceIntervalStatus.ACCEPTING)).toList())

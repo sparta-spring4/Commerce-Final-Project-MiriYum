@@ -18,7 +18,7 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;

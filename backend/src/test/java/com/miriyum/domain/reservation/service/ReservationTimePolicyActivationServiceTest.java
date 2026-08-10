@@ -16,8 +16,8 @@ import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepos
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import java.time.Clock;
 import java.time.Instant;

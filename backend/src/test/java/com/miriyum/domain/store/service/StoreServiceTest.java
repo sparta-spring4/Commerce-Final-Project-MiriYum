@@ -11,6 +11,7 @@ import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
+import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.OperationStatus;
@@ -40,6 +41,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -175,6 +177,29 @@ class StoreServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(StoreErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    void returnsServiceProfilesWithoutExposingStoreEntities() {
+        Store accepting = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(accepting, "id", STORE_ID);
+        Store paused = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(paused, "id", 8L);
+        ReflectionTestUtils.setField(
+                paused,
+                "operationStatus",
+                OperationStatus.TEMPORARILY_CLOSED);
+        given(storeRepository.findAllById(Set.of(STORE_ID, 8L)))
+                .willReturn(List.of(accepting, paused));
+
+        Map<Long, StoreServiceProfile> profiles =
+                storeService.getServiceProfiles(Set.of(STORE_ID, 8L));
+
+        assertThat(profiles).containsExactlyInAnyOrderEntriesOf(Map.of(
+                STORE_ID,
+                new StoreServiceProfile(STORE_ID, "Asia/Seoul", true),
+                8L,
+                new StoreServiceProfile(8L, "Asia/Seoul", false)));
     }
 
     @Test

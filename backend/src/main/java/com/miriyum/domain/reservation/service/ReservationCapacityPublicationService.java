@@ -10,10 +10,10 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
