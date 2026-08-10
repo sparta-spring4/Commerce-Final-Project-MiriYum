@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -58,6 +59,27 @@ class PickupOpenApiContractTest {
                 .contains("STORE_001", "STORE_009");
         assertThat(responses.get("PickupConflict").toString())
                 .contains("STORE_010", "PICKUP_002", "PICKUP_003", "PICKUP_004");
+    }
+
+    @Test
+    void cancellationReasonsRejectWhitespaceOnlyAndAllowNonBlankMultilineText()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+
+        assertCancellationReasonPattern(schemas, "PickupCancellationRequest");
+        assertCancellationReasonPattern(schemas, "StorePickupCancellationRequest");
+    }
+
+    @Test
+    void pickupMutationConflictsDocumentRetryExhaustion() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+
+        assertThat(responses.get("PickupConflict").toString()).contains("COMMON_008");
+        assertThat(responses.get("PickupCancellationConflict").toString())
+                .contains("COMMON_008");
+        assertThat(responses.get("PickupStateConflict").toString()).contains("COMMON_008");
     }
 
     @Test
@@ -152,5 +174,19 @@ class PickupOpenApiContractTest {
         Map<String, Object> operation = map(map(paths.get(path)).get("post"));
         assertThat(map(map(operation.get("responses")).get("409")))
                 .containsEntry("$ref", "#/components/responses/PickupStateConflict");
+    }
+
+    private static void assertCancellationReasonPattern(
+            Map<String, Object> schemas,
+            String schemaName
+    ) {
+        Map<String, Object> schema = map(schemas.get(schemaName));
+        Map<String, Object> reason = map(map(schema.get("properties")).get("reason"));
+        assertThat(reason).containsKey("pattern");
+
+        Pattern pattern = Pattern.compile(reason.get("pattern").toString());
+        assertThat(pattern.matcher(" ").matches()).isFalse();
+        assertThat(pattern.matcher("재료 소진").matches()).isTrue();
+        assertThat(pattern.matcher("내용\n추가").matches()).isTrue();
     }
 }

@@ -140,6 +140,21 @@ class PickupReservationControllerTest {
                 eq(11L), eq(77L), any(IdempotencyKey.class), any());
     }
 
+    @Test
+    void rejectsWhitespaceOnlyConsumerCancellationReason() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+
+        mockMvc.perform(post(URL + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\" \"}"))
+                .andExpect(status().isBadRequest());
+        then(service).shouldHaveNoInteractions();
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
     private static PickupReservationResponse response() {
         return new PickupReservationResponse(
                 "77", "22", "미리윰 강남점", LocalDate.of(2026, 8, 10),
