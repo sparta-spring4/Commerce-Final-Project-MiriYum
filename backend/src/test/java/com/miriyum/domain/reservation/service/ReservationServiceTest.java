@@ -19,7 +19,7 @@ import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
-import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
+import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;

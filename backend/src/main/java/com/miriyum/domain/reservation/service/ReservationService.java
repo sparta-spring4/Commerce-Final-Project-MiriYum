@@ -1,7 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
-import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
+import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
