@@ -89,6 +89,19 @@ class PickupReservationTest {
     }
 
     @Test
+    void cancellationReasonLengthUsesUnicodeCodePoints() {
+        PickupReservation accepted = confirmedPickup();
+        PickupReservation rejected = confirmedPickup();
+        String fiveHundredCodePoints = "😀".repeat(500);
+
+        accepted.cancelByConsumer(fiveHundredCodePoints, TERMINATED_AT);
+
+        assertThat(accepted.getCancellationReason()).isEqualTo(fiveHundredCodePoints);
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                rejected.cancelByConsumer("😀".repeat(501), TERMINATED_AT));
+    }
+
+    @Test
     @DisplayName("수령 완료는 PICKED_UP으로 종결한다")
     void marksPickupAsPickedUp() {
         PickupReservation reservation = confirmedPickup();

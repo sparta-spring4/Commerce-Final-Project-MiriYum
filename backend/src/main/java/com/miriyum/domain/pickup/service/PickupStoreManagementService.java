@@ -246,7 +246,9 @@ public class PickupStoreManagementService {
     }
 
     private static String requireReason(String reason) {
-        if (reason == null || reason.isBlank() || reason.length() > 500) {
+        if (reason == null
+                || reason.isBlank()
+                || reason.codePointCount(0, reason.length()) > 500) {
             throw new IllegalArgumentException("store cancellation reason is required");
         }
         return reason;

@@ -209,6 +209,32 @@ class PickupAvailabilityServiceTest {
     }
 
     @Test
+    void excludesDuplicateIntervalsWhenOnlyOneHasEnded() {
+        pickupAvailabilityService = new PickupAvailabilityService(
+                storePublicQueryService,
+                menuInventoryTransactionService,
+                policyAt("2026-08-10T04:30:00Z")
+        );
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(OperationStatus.OPEN, true));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "Ambiguous menu", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(
+                        availability(101L, "Asia/Seoul", LocalTime.NOON,
+                                LocalTime.of(13, 0), 3, AvailabilityStatus.AVAILABLE),
+                        availability(101L, "Asia/Seoul", LocalTime.NOON,
+                                LocalTime.of(14, 0), 2, AvailabilityStatus.AVAILABLE)
+                ));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, PICKUP_DATE);
+
+        assertThat(result.slots()).isEmpty();
+    }
+
+    @Test
     @DisplayName("OPEN이 아니거나 픽업 기능이 꺼진 매장은 PICKUP_002로 거절한다")
     void rejectsIneligibleStoreBeforeReadingMenusOrInventory() {
         when(storePublicQueryService.getDetail(STORE_ID, null, false))

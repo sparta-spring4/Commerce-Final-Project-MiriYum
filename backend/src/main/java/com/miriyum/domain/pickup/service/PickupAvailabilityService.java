@@ -71,8 +71,6 @@ public class PickupAvailabilityService {
         List<PickupAvailableMenu> unambiguousMenus = availability.stream()
                 .filter(item -> item.serviceDate().equals(pickupDate))
                 .filter(item -> item.timeZoneId().equals(store.timeZoneId()))
-                .filter(item -> intervalTimePolicy.isOpen(
-                        store.timeZoneId(), item.endDate(), item.endTime()))
                 .filter(item -> eligibleMenus.containsKey(item.menuId()))
                 .collect(Collectors.groupingBy(
                         item -> new MenuPickupTime(
@@ -83,6 +81,8 @@ public class PickupAvailabilityService {
                 .values().stream()
                 .filter(items -> items.size() == 1)
                 .map(List::getFirst)
+                .filter(item -> intervalTimePolicy.isOpen(
+                        store.timeZoneId(), item.endDate(), item.endTime()))
                 .map(item -> toAvailableMenu(item, eligibleMenus.get(item.menuId())))
                 .toList();
 

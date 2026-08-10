@@ -155,6 +155,38 @@ class PickupReservationControllerTest {
         then(commandFacade).shouldHaveNoInteractions();
     }
 
+    @Test
+    void acceptsConsumerCancellationReasonWithFiveHundredUnicodeCodePoints()
+            throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+        given(commandFacade.cancelByConsumer(
+                eq(11L), eq(77L), any(IdempotencyKey.class), any()))
+                .willReturn(new PickupCommandResult(200, response()));
+
+        mockMvc.perform(post(URL + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + "😀".repeat(500) + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsConsumerCancellationReasonOverFiveHundredUnicodeCodePoints()
+            throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+
+        mockMvc.perform(post(URL + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + "😀".repeat(501) + "\"}"))
+                .andExpect(status().isBadRequest());
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
     private static PickupReservationResponse response() {
         return new PickupReservationResponse(
                 "77", "22", "미리윰 강남점", LocalDate.of(2026, 8, 10),

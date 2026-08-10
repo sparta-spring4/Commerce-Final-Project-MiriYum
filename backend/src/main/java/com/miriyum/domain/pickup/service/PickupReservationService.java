@@ -192,7 +192,7 @@ public class PickupReservationService {
         if (reason == null) {
             return null;
         }
-        if (reason.isBlank() || reason.length() > 500) {
+        if (reason.isBlank() || reason.codePointCount(0, reason.length()) > 500) {
             throw new IllegalArgumentException("cancellation reason has invalid length");
         }
         return reason;
@@ -310,13 +310,15 @@ public class PickupReservationService {
                     .filter(item -> item.serviceDate().equals(request.pickupDate()))
                     .filter(item -> item.startTime().equals(request.pickupTime()))
                     .filter(item -> item.timeZoneId().equals(store.timeZoneId()))
-                    .filter(item -> intervalTimePolicy.isOpen(
-                            store.timeZoneId(), item.endDate(), item.endTime()))
                     .toList();
             if (matches.size() != 1) {
                 throw new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE);
             }
             MenuInventoryAvailability match = matches.getFirst();
+            if (!intervalTimePolicy.isOpen(
+                    store.timeZoneId(), match.endDate(), match.endTime())) {
+                throw new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE);
+            }
             if (match.availabilityStatus()
                     != MenuInventoryAvailability.AvailabilityStatus.AVAILABLE
                     || match.availableOnlineQuantity() < selection.quantity()) {

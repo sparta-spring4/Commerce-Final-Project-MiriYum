@@ -145,6 +145,22 @@ class PickupStoreManagementServiceTest {
     }
 
     @Test
+    void acceptsStoreCancellationReasonWithFiveHundredUnicodeCodePoints() {
+        String reason = "😀".repeat(500);
+        PickupReservation pickup = confirmedPickup();
+        given(repository.findByIdAndStoreIdForUpdate(77L, 22L))
+                .willReturn(Optional.of(pickup));
+        given(inventoryService.restore(any())).willReturn(new MenuInventoryRestoreResult(
+                "pickup-store-cancel-31-" + KEY.value(), "pickup-acquire-result"));
+        given(repository.saveAndFlush(pickup)).willReturn(pickup);
+
+        PickupCommandResult result = service.cancel(
+                31L, 22L, 77L, KEY, new StorePickupCancellationRequest(reason));
+
+        assertThat(result.data().cancellationReason()).isEqualTo(reason);
+    }
+
+    @Test
     void stopsBeforeRepositoryWhenOperatorDoesNotOwnStore() {
         org.mockito.BDDMockito.willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED))
                 .given(storeService).requireManagementOwnership(31L, 22L);

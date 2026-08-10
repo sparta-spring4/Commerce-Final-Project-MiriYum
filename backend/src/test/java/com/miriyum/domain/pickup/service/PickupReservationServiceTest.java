@@ -329,6 +329,33 @@ class PickupReservationServiceTest {
         then(repository).shouldHaveNoInteractions();
     }
 
+    @Test
+    void rejectsDuplicateIntervalsWhenOnlyOneHasEnded() {
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "MiriYum Gangnam", "Asia/Seoul"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "Pasta", 12_000, true, true));
+        given(inventoryService.findOnlineAvailabilityByDate(any()))
+                .willReturn(List.of(
+                        new MenuInventoryAvailability(
+                                33L, 6L, "Asia/Seoul", PICKUP_DATE, PICKUP_TIME,
+                                PICKUP_DATE, LocalTime.of(13, 0), 5,
+                                AvailabilityStatus.AVAILABLE),
+                        availability(5)
+                ));
+        org.mockito.Mockito.lenient().when(intervalTimePolicy.isOpen(
+                "Asia/Seoul", PICKUP_DATE, LocalTime.of(13, 0)))
+                .thenReturn(false);
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).should(never()).acquire(any());
+        then(repository).shouldHaveNoInteractions();
+    }
+
     @ParameterizedTest
     @CsvSource({"2026-03-08,02:30", "2026-11-01,01:30"})
     void rejectsDstGapAndOverlapLocalPickupTimes(LocalDate date, LocalTime time) {
@@ -443,6 +470,22 @@ class PickupReservationServiceTest {
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
         then(inventoryService).should(never()).restore(any());
+    }
+
+    @Test
+    void acceptsConsumerCancellationReasonWithFiveHundredUnicodeCodePoints() {
+        String reason = "😀".repeat(500);
+        PickupReservation pickup = confirmedPickup();
+        given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(pickup));
+        given(inventoryService.restore(any())).willReturn(new MenuInventoryRestoreResult(
+                "pickup-cancel-11-" + KEY.value(), "pickup-acquire-result"));
+        given(repository.saveAndFlush(pickup)).willReturn(pickup);
+
+        PickupCommandResult result = service.cancelByConsumer(
+                11L, 77L, KEY, new PickupCancellationRequest(reason));
+
+        assertThat(result.data().cancellationReason()).isEqualTo(reason);
     }
 
     private static PickupReservationCreateRequest request(int quantity) {

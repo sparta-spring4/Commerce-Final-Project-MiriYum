@@ -191,7 +191,7 @@ public class PickupReservation {
             }
             return null;
         }
-        if (value.isBlank() || value.length() > maxLength) {
+        if (value.isBlank() || value.codePointCount(0, value.length()) > maxLength) {
             throw new IllegalArgumentException(fieldName + " has invalid length");
         }
         return value;

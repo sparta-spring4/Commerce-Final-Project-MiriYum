@@ -132,6 +132,33 @@ class PickupStoreManagementControllerTest {
         then(commandFacade).shouldHaveNoInteractions();
     }
 
+    @Test
+    void acceptsStoreCancellationReasonWithFiveHundredUnicodeCodePoints()
+            throws Exception {
+        given(commandFacade.cancelByOperator(eq(31L), eq(22L), eq(77L),
+                any(IdempotencyKey.class), any()))
+                .willReturn(new PickupCommandResult(200, response()));
+
+        mockMvc.perform(post(ROOT + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer operator-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + "😀".repeat(500) + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsStoreCancellationReasonOverFiveHundredUnicodeCodePoints()
+            throws Exception {
+        mockMvc.perform(post(ROOT + "/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer operator-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + "😀".repeat(501) + "\"}"))
+                .andExpect(status().isBadRequest());
+        then(commandFacade).shouldHaveNoInteractions();
+    }
+
     private static PickupReservationResponse response() {
         return new PickupReservationResponse(
                 "77", "22", "미리윰 강남점", LocalDate.of(2026, 8, 10),
