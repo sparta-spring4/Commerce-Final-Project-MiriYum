@@ -141,6 +141,7 @@ public class StoreOperatorAuthService {
         StoreOperatorAccount account = storeOperatorAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 

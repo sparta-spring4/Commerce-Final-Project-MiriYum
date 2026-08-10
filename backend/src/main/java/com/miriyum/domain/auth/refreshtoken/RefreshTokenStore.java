@@ -21,4 +21,6 @@ public interface RefreshTokenStore {
     );
 
     void revoke(TokenNamespace namespace, String familyId, Long accountId, Instant now);
+
+    void revokeAll(TokenNamespace namespace, Long accountId, Instant now);
 }

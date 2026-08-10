@@ -33,6 +33,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     private LettuceConnectionFactory connectionFactory;
     private StringRedisTemplate redisTemplate;
     private ValkeyRefreshTokenStore store;
+    private ValkeyRefreshTokenRiskEventMarkerStore markerStore;
 
     @BeforeEach
     void setUp() {
@@ -44,6 +45,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
         store = new ValkeyRefreshTokenStore(redisTemplate);
+        markerStore = new ValkeyRefreshTokenRiskEventMarkerStore(redisTemplate);
     }
 
     @AfterEach
@@ -147,5 +149,74 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 Instant.now().plusSeconds(1_209_600));
 
         assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("계정 전체 폐기는 같은 계정의 모든 Refresh Token family를 폐기한다")
+    void revokesAllFamiliesForAccount() {
+        Instant now = Instant.now();
+        RefreshTokenState first = state("family-first", "token-first", now);
+        RefreshTokenState second = state("family-second", "token-second", now);
+        store.create(first);
+        store.create(second);
+
+        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(1));
+
+        assertThat(rotate(first, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+        assertThat(rotate(second, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+    }
+
+    @Test
+    @DisplayName("같은 교체 Refresh Token 재사용은 하나의 pending 위험 사건만 남긴다")
+    void createsOnePendingRiskEventForRepeatedReuse() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk", "token-first", now);
+        store.create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.namespace()).isEqualTo(TokenNamespace.CONSUMER);
+                    assertThat(event.accountId()).isEqualTo(7L);
+                    assertThat(event.familyId()).isEqualTo("family-risk");
+                    assertThat(event.tokenHash()).isEqualTo(state.currentTokenHash());
+                    assertThat(event.sourceEvent()).isEqualTo("REUSED_ROTATED_TOKEN");
+                    assertThat(event.originEvent()).isEqualTo("ROTATION");
+                    assertThat(event.policyVersion()).isEqualTo("AUTH-012-v1");
+                });
+    }
+
+    private RefreshTokenState state(String familyId, String tokenId, Instant now) {
+        return new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                tokenId,
+                RefreshTokenHash.sha256(tokenId),
+                now.plusSeconds(1_209_600),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+    }
+
+    private RefreshTokenRotationResult rotate(RefreshTokenState state, Instant now) {
+        return store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                state.currentTokenId() + "-next",
+                RefreshTokenHash.sha256(state.currentTokenId() + "-next"),
+                now,
+                now.plusSeconds(1_209_600));
     }
 }

@@ -124,4 +124,12 @@ class RefreshTokenManagerTest {
 
         verify(refreshTokenStore).revoke(eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), any());
     }
+
+    @Test
+    @DisplayName("계정 전체 로그인 종료는 모든 Refresh Token family 폐기를 저장소에 위임한다")
+    void revokesAllRefreshTokenFamiliesForAccount() {
+        manager.revokeAll(TokenNamespace.CONSUMER, 7L);
+
+        verify(refreshTokenStore).revokeAll(eq(TokenNamespace.CONSUMER), eq(7L), any());
+    }
 }

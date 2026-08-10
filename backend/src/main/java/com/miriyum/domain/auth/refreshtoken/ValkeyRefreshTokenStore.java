@@ -28,6 +28,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'status', 'ACTIVE',
                 'lastRotatedAt', ARGV[6])
             redis.call('EXPIREAT', KEYS[1], ARGV[7])
+            redis.call('SADD', KEYS[2], KEYS[1])
+            redis.call('EXPIREAT', KEYS[2], ARGV[7])
             return 1
             """, Long.class);
 
@@ -38,12 +40,26 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             if redis.call('HGET', KEYS[1], 'accountId') ~= ARGV[1] then
                 return 0
             end
+            redis.call('SADD', KEYS[2], KEYS[1])
+            redis.call('EXPIREAT', KEYS[2], ARGV[7])
             if redis.call('HGET', KEYS[1], 'status') ~= 'ACTIVE' then
                 return 2
             end
             if redis.call('HGET', KEYS[1], 'currentTokenId') ~= ARGV[2]
                     or redis.call('HGET', KEYS[1], 'currentTokenHash') ~= ARGV[3] then
                 redis.call('HSET', KEYS[1], 'status', 'REVOKED', 'lastRotatedAt', ARGV[6])
+                if redis.call('EXISTS', KEYS[3]) == 0 then
+                    redis.call('HSET', KEYS[3],
+                        'namespace', ARGV[8],
+                        'accountId', ARGV[1],
+                        'familyId', ARGV[9],
+                        'tokenHash', ARGV[3],
+                        'sourceEvent', 'REUSED_ROTATED_TOKEN',
+                        'originEvent', 'ROTATION',
+                        'policyVersion', 'AUTH-012-v1',
+                        'occurredAt', ARGV[6])
+                    redis.call('EXPIREAT', KEYS[3], ARGV[7])
+                end
                 return 3
             end
             redis.call('HSET', KEYS[1],
@@ -51,18 +67,36 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'currentTokenHash', ARGV[5],
                 'lastRotatedAt', ARGV[6])
             redis.call('EXPIREAT', KEYS[1], ARGV[7])
+            redis.call('EXPIREAT', KEYS[2], ARGV[7])
             return 1
             """, Long.class);
 
     private static final RedisScript<Long> REVOKE_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 0 then
+                redis.call('SREM', KEYS[2], KEYS[1])
                 return 0
             end
             if redis.call('HGET', KEYS[1], 'accountId') ~= ARGV[1] then
                 return 0
             end
             redis.call('HSET', KEYS[1], 'status', 'REVOKED', 'lastRotatedAt', ARGV[2])
+            redis.call('SREM', KEYS[2], KEYS[1])
             return 1
+            """, Long.class);
+
+    private static final RedisScript<Long> REVOKE_ALL_SCRIPT = new DefaultRedisScript<>("""
+            local familyKeys = redis.call('SMEMBERS', KEYS[1])
+            local revoked = 0
+            for _, familyKey in ipairs(familyKeys) do
+                if redis.call('EXISTS', familyKey) == 1
+                        and redis.call('HGET', familyKey, 'accountId') == ARGV[1]
+                        and redis.call('HGET', familyKey, 'status') == 'ACTIVE' then
+                    redis.call('HSET', familyKey, 'status', 'REVOKED', 'lastRotatedAt', ARGV[2])
+                    revoked = revoked + 1
+                end
+            end
+            redis.call('DEL', KEYS[1])
+            return revoked
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -76,8 +110,9 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
         if (state.status() != RefreshTokenState.Status.ACTIVE) {
             throw new IllegalArgumentException("new Refresh Token family must be active");
         }
-        String key = RefreshTokenKey.forFamily(state.namespace(), state.familyId());
-        Long result = execute(CREATE_SCRIPT, key,
+        String familyKey = RefreshTokenKey.forFamily(state.namespace(), state.familyId());
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(state.namespace(), state.accountId());
+        Long result = execute(CREATE_SCRIPT, List.of(familyKey, accountFamiliesKey),
                 state.namespace().value(),
                 state.accountId().toString(),
                 state.familyId(),
@@ -102,15 +137,19 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             Instant now,
             Instant nextFamilyExpiresAt
     ) {
-        String key = RefreshTokenKey.forFamily(namespace, familyId);
-        Long result = execute(ROTATE_SCRIPT, key,
+        String familyKey = RefreshTokenKey.forFamily(namespace, familyId);
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
+        String riskEventKey = RefreshTokenRiskEventKey.forReuse(namespace, familyId, expectedTokenHash);
+        Long result = execute(ROTATE_SCRIPT, List.of(familyKey, accountFamiliesKey, riskEventKey),
                 accountId.toString(),
                 expectedTokenId,
                 expectedTokenHash,
                 nextTokenId,
                 nextTokenHash,
                 epochSeconds(now),
-                epochSeconds(nextFamilyExpiresAt));
+                epochSeconds(nextFamilyExpiresAt),
+                namespace.value(),
+                familyId);
         return switch (result == null ? 0 : result.intValue()) {
             case 1 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED);
             case 2 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REVOKED);
@@ -121,13 +160,20 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     @Override
     public void revoke(TokenNamespace namespace, String familyId, Long accountId, Instant now) {
-        String key = RefreshTokenKey.forFamily(namespace, familyId);
-        execute(REVOKE_SCRIPT, key, accountId.toString(), epochSeconds(now));
+        String familyKey = RefreshTokenKey.forFamily(namespace, familyId);
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
+        execute(REVOKE_SCRIPT, List.of(familyKey, accountFamiliesKey), accountId.toString(), epochSeconds(now));
     }
 
-    private Long execute(RedisScript<Long> script, String key, String... args) {
+    @Override
+    public void revokeAll(TokenNamespace namespace, Long accountId, Instant now) {
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
+        execute(REVOKE_ALL_SCRIPT, List.of(accountFamiliesKey), accountId.toString(), epochSeconds(now));
+    }
+
+    private Long execute(RedisScript<Long> script, List<String> keys, String... args) {
         try {
-            return redisTemplate.execute(script, List.of(key), (Object[]) args);
+            return redisTemplate.execute(script, keys, (Object[]) args);
         } catch (DataAccessException exception) {
             throw unavailable();
         }

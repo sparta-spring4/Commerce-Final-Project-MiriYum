@@ -75,4 +75,9 @@ public class RefreshTokenManager {
     public void revoke(TokenNamespace namespace, ParsedToken parsedToken) {
         refreshTokenStore.revoke(namespace, parsedToken.familyId(), parsedToken.accountId(), clock.instant());
     }
+
+    /** 계정 정지·권한 회수·전체 로그인 종료 흐름에서 모든 family를 폐기한다. */
+    public void revokeAll(TokenNamespace namespace, Long accountId) {
+        refreshTokenStore.revokeAll(namespace, accountId, clock.instant());
+    }
 }
