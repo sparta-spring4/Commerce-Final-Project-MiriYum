@@ -368,7 +368,7 @@
 | 팀원 | 소유 도메인·주요 데이터 | 공개 API 최종 관리 | 예약 패키지 경로 | 기능 명세·OpenAPI |
 |---|---|---|---|---|
 | 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth`(JWT·쿠키·CSRF·공통 에러코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) | `docs/specs/auth-account/` |
-| 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 기능 상태, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store` | `docs/specs/store-search/` |
+| 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 기능 상태, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store`, `com.miriyum.domain.schedule`, `com.miriyum.domain.menu`, `com.miriyum.domain.search` | `docs/specs/store-search/` |
 | 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
 | 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.domain.menuhold`, `com.miriyum.domain.pickup` | `docs/specs/menu-hold-pickup/` |
 
@@ -412,6 +412,12 @@ O-009의 데이터·API·파일 소유자와 공동 검토 책임은 변경하�
 ### 2026-07-29 코드 구조 보정
 
 O-009의 1번 팀원 담당 범위와 소유권은 변경하지 않는다. 1번 팀원의 예약 패키지 경로를 `com.miriyum.domain.auth` 하나에서 `com.miriyum.domain.auth`(JWT 발급·검증, 쿠키·CSRF 처리, 공통 에러 코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) 세 개의 최상위 패키지로 정정했다. 계정 물리 분리 원칙(`docs/02-users-and-permissions.md`)이 폴더 구조에서도 바로 드러나도록 팀 협의로 정했으며, 4번 팀원이 이미 `menuhold`·`pickup` 두 최상위 패키지를 갖는 것과 같은 전례를 따른다. 이 보정은 3계층 구조(ADR-001)와 O-009의 담당자·소유권 배정을 바꾸지 않으며, 새 도메인이나 담당자 재배정을 의미하지 않는다.
+
+### 2026-08-11 도메인·HTTP 경계 구조 보정
+
+Issue #82 결정에 따라 2번 팀원의 기존 `store` 집중 패키지를 `store`, `schedule`, `menu`, `search` 최상위 도메인 패키지로 분리한다. 담당자, 데이터, API와 마이그레이션 소유권은 바뀌지 않는다. 세 도메인은 다른 도메인의 Entity·Repository를 직접 사용하지 않고 공개 Service·DTO로 협력한다.
+
+HTTP 호출자 구분은 Controller와 HTTP DTO에만 둔다. `publicapi`는 인증 principal이 필요 없는 공개 조회 경계이며, `consumer`와 `storeoperator`는 해당 principal 전용 경계다. `consumer`·`storeoperator` 계정 도메인은 중복 사용자 이름 대신 `auth`·`account` 목적을 사용한다. Service·Repository·Entity는 사용자 유형별로 복제하지 않는다. 이 보정은 HTTP URL을 변경하지 않으며 URL namespace 전환은 Issue #82의 후속 PR에서 별도로 수행한다.
 
 ## 2단계 마감
 
