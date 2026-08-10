@@ -1,6 +1,7 @@
 package com.miriyum.global.storage.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.global.storage.FileStoragePurpose;
@@ -9,12 +10,20 @@ import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -114,5 +123,122 @@ class FileMetadataTransactionExecutorIntegrationTest {
                 .get()
                 .extracting(FileMetadata::getStorageStatus)
                 .isEqualTo(FileStorageStatus.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("이미 종료된 파일 식별자로 대기 메타데이터를 다시 저장하지 않는다")
+    void doesNotOverwriteTerminalMetadataWithDuplicateFileId() {
+        // given
+        String fileId = UUID.randomUUID().toString();
+        transactionExecutor.savePending(createMetadata(fileId, 11L, "object-original"));
+        transactionExecutor.confirm(fileId);
+
+        FileMetadata duplicate = createMetadata(fileId, 99L, "object-duplicate");
+
+        // when & then
+        assertThatThrownBy(() -> transactionExecutor.savePending(duplicate))
+                .isInstanceOf(FileMetadataConflictException.class)
+                .hasMessageContaining("이미 존재");
+
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .satisfies(metadata -> {
+                    assertThat(metadata.getOwnerId()).isEqualTo(11L);
+                    assertThat(metadata.getObjectKey()).endsWith("object-original");
+                    assertThat(metadata.getStorageStatus()).isEqualTo(FileStorageStatus.CONFIRMED);
+                });
+    }
+
+    @Test
+    @DisplayName("동시에 완료와 실패를 기록해도 하나의 종료 상태만 반영한다")
+    void allowsOnlyOneTerminalTransitionUnderConcurrency() throws Exception {
+        // given
+        String fileId = UUID.randomUUID().toString();
+        transactionExecutor.savePending(createMetadata(fileId, 11L, "object-race"));
+        CountDownLatch loaded = new CountDownLatch(2);
+        CountDownLatch transition = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            // when
+            List<Future<FileStorageStatus>> futures = List.of(
+                    executorService.submit(() -> transitionInTransaction(
+                            fileId, FileStorageStatus.CONFIRMED, loaded, transition)),
+                    executorService.submit(() -> transitionInTransaction(
+                            fileId, FileStorageStatus.FAILED, loaded, transition)));
+
+            assertThat(loaded.await(10, TimeUnit.SECONDS)).isTrue();
+            transition.countDown();
+
+            int successCount = 0;
+            int conflictCount = 0;
+            for (Future<FileStorageStatus> future : futures) {
+                try {
+                    future.get(10, TimeUnit.SECONDS);
+                    successCount++;
+                } catch (ExecutionException exception) {
+                    assertThat(exception.getCause())
+                            .isInstanceOf(OptimisticLockingFailureException.class);
+                    conflictCount++;
+                }
+            }
+
+            // then
+            assertThat(successCount).isEqualTo(1);
+            assertThat(conflictCount).isEqualTo(1);
+            assertThat(fileMetadataRepository.findById(fileId))
+                    .isPresent()
+                    .get()
+                    .extracting(FileMetadata::getStorageStatus)
+                    .isIn(FileStorageStatus.CONFIRMED, FileStorageStatus.FAILED);
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    private FileStorageStatus transitionInTransaction(
+            String fileId,
+            FileStorageStatus nextStatus,
+            CountDownLatch loaded,
+            CountDownLatch transition) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        return transaction.execute(status -> {
+            FileMetadata metadata = fileMetadataRepository.findById(fileId).orElseThrow();
+            loaded.countDown();
+            await(transition);
+            if (nextStatus == FileStorageStatus.CONFIRMED) {
+                metadata.confirm();
+            } else {
+                metadata.fail();
+            }
+            return fileMetadataRepository.saveAndFlush(metadata).getStorageStatus();
+        });
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("동시성 테스트 대기 시간이 초과되었습니다.");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("동시성 테스트 대기가 중단되었습니다.", exception);
+        }
+    }
+
+    private FileMetadata createMetadata(String fileId, long ownerId, String objectName) {
+        return FileMetadata.createPending(
+                fileId,
+                "STORE",
+                ownerId,
+                FileStoragePurpose.STORE_IMAGE,
+                "public/store/" + ownerId + "/store-image/" + objectName,
+                "image/jpeg",
+                512L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "STORE_IMAGE_DEFAULT",
+                LocalDateTime.of(2026, 8, 10, 15, 0));
     }
 }

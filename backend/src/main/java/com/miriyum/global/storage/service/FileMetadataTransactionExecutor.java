@@ -3,6 +3,8 @@ package com.miriyum.global.storage.service;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,7 +19,14 @@ public class FileMetadataTransactionExecutor {
     /** 파일 저장을 시도하기 전에 대기 상태를 별도로 확정한다. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public FileMetadata savePending(FileMetadata metadata) {
-        return fileMetadataRepository.saveAndFlush(metadata);
+        if (fileMetadataRepository.existsById(metadata.getFileId())) {
+            throw new FileMetadataConflictException("이미 존재하는 파일 메타데이터 식별자입니다.");
+        }
+        try {
+            return fileMetadataRepository.saveAndFlush(metadata);
+        } catch (DataIntegrityViolationException exception) {
+            throw new FileMetadataConflictException("파일 메타데이터 식별자 또는 객체 키가 이미 존재합니다.", exception);
+        }
     }
 
     /** 파일 저장 성공 후 대기 상태의 메타데이터를 완료 상태로 확정한다. */
@@ -25,7 +34,7 @@ public class FileMetadataTransactionExecutor {
     public FileMetadata confirm(String fileId) {
         FileMetadata metadata = findMetadata(fileId);
         metadata.confirm();
-        return fileMetadataRepository.saveAndFlush(metadata);
+        return saveTerminalState(metadata);
     }
 
     /** 파일 저장 실패 후 대기 상태의 메타데이터를 실패 상태로 확정한다. */
@@ -33,7 +42,15 @@ public class FileMetadataTransactionExecutor {
     public FileMetadata fail(String fileId) {
         FileMetadata metadata = findMetadata(fileId);
         metadata.fail();
-        return fileMetadataRepository.saveAndFlush(metadata);
+        return saveTerminalState(metadata);
+    }
+
+    private FileMetadata saveTerminalState(FileMetadata metadata) {
+        try {
+            return fileMetadataRepository.saveAndFlush(metadata);
+        } catch (OptimisticLockingFailureException exception) {
+            throw new FileMetadataConflictException("파일 메타데이터 상태가 이미 변경되었습니다.", exception);
+        }
     }
 
     private FileMetadata findMetadata(String fileId) {

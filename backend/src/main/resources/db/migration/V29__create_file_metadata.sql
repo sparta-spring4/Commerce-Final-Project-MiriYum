@@ -13,6 +13,7 @@ CREATE TABLE file_metadata (
     retention_policy VARCHAR(64)  COLLATE utf8mb4_0900_as_cs NOT NULL,
     created_at       DATETIME(6)  NOT NULL,
     deleted_at       DATETIME(6)  NULL,
+    version          BIGINT       NOT NULL DEFAULT 0,
     PRIMARY KEY (file_id),
     CONSTRAINT uk_file_metadata_object_key UNIQUE (object_key),
     CONSTRAINT ck_file_metadata_owner_id CHECK (owner_id > 0),
