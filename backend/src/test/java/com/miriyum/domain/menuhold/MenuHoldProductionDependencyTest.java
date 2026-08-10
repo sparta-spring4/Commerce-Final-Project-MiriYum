@@ -19,8 +19,8 @@ class MenuHoldProductionDependencyTest {
     private static final List<String> FORBIDDEN_IMPORTS = List.of(
             "com.miriyum.domain.reservation.entity",
             "com.miriyum.domain.reservation.repository",
-            "com.miriyum.domain.store.core.entity",
-            "com.miriyum.domain.store.core.repository",
+            "com.miriyum.domain.store.entity",
+            "com.miriyum.domain.store.repository",
             "com.miriyum.domain.store.menu.entity",
             "com.miriyum.domain.store.menu.repository",
             "com.miriyum.domain.store.schedule.entity",

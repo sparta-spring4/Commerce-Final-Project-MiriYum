@@ -14,7 +14,7 @@ import com.miriyum.domain.store.closure.model.StoreClosureActorType;
 import com.miriyum.domain.store.closure.model.TemporaryClosureReason;
 import com.miriyum.domain.store.closure.model.TemporaryClosureStatus;
 import com.miriyum.domain.store.closure.repository.*;
-import com.miriyum.domain.store.core.service.*;
+import com.miriyum.domain.store.service.*;
 import com.miriyum.domain.store.schedule.entity.StoreScheduleState;
 import com.miriyum.domain.store.schedule.model.ConflictCheckStatus;
 import com.miriyum.domain.store.schedule.model.ScheduleAuditOutcome;

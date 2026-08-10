@@ -1,6 +1,6 @@
 package com.miriyum.domain.store.search.controller;
 
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.search.dto.PublicMenuList;
 import com.miriyum.domain.store.search.dto.PublicStoreDetail;
 import com.miriyum.domain.store.search.dto.PublicStorePage;

@@ -16,7 +16,7 @@ import com.miriyum.domain.store.closure.dto.TemporaryClosureResponse;
 import com.miriyum.domain.store.closure.model.TemporaryClosureReason;
 import com.miriyum.domain.store.closure.model.TemporaryClosureStatus;
 import com.miriyum.domain.store.closure.service.StoreClosureCommandFacade;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.schedule.model.ScheduleVersionStatus;
 import com.miriyum.domain.store.schedule.service.ScheduleCommandResult;
 import com.miriyum.global.exception.GlobalExceptionHandler;

@@ -19,7 +19,7 @@ import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
 import com.miriyum.domain.pickup.service.PickupCommandFacade;
 import com.miriyum.domain.pickup.service.PickupStoreManagementService;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.PageMetadata;

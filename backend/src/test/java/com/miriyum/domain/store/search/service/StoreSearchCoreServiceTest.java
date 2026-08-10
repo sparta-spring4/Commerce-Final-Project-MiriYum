@@ -9,8 +9,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.search.config.StoreSearchCandidateLimit;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;

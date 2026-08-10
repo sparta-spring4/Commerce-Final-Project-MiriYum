@@ -1,6 +1,6 @@
 package com.miriyum.domain.store.menu.service;
 
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
 import com.miriyum.domain.store.menu.entity.Menu;

@@ -3,11 +3,11 @@ package com.miriyum.domain.store.menu.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.menu.entity.Menu;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.menu.enums.MenuVersionStatus;

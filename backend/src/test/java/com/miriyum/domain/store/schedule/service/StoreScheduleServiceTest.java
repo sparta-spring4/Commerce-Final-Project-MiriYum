@@ -10,9 +10,9 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.DailyReservationSlotsRequest;

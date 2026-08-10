@@ -1,7 +1,7 @@
 package com.miriyum.domain.store.search.dto;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
 
 /**
  * 가용성 판정 상태를 포함한 공개 매장 검색 요약이다.

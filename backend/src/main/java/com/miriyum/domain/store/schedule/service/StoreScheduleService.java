@@ -1,8 +1,8 @@
 package com.miriyum.domain.store.schedule.service;
 
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.OperatingHoursResponse;
 import com.miriyum.domain.store.schedule.dto.ReservationTimeSlotsResponse;

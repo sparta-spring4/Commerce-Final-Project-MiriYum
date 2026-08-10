@@ -8,7 +8,7 @@ import com.miriyum.domain.pickup.dto.response.PickupAvailabilitySlot;
 import com.miriyum.domain.pickup.dto.response.PickupAvailabilityStatus;
 import com.miriyum.domain.pickup.dto.response.PickupAvailableMenu;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
-import com.miriyum.domain.store.core.enums.OperationStatus;
+import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.search.dto.PublicMenu;
 import com.miriyum.domain.store.search.dto.PublicStoreDetail;

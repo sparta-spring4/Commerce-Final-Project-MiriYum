@@ -4,11 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.menu.dto.AllergenDisclosureRequest;
 import com.miriyum.domain.store.menu.dto.MenuContentRequest;
 import com.miriyum.domain.store.menu.dto.MenuPublicationRequest;

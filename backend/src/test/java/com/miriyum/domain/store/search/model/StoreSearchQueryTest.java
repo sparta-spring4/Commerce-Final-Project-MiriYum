@@ -3,7 +3,7 @@ package com.miriyum.domain.store.search.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.Region;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;

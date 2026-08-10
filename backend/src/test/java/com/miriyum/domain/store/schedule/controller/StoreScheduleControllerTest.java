@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.DailyOperatingScheduleRequest;
 import com.miriyum.domain.store.schedule.dto.DailyReservationSlotsRequest;

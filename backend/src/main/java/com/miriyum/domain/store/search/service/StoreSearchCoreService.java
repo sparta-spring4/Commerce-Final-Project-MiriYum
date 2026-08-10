@@ -189,7 +189,7 @@ public class StoreSearchCoreService {
             return batchAvailability;
         }
         if (candidate.operationStatus()
-                != com.miriyum.domain.store.core.enums.OperationStatus.OPEN
+                != com.miriyum.domain.store.enums.OperationStatus.OPEN
                 || !candidate.reservationEnabled()) {
             return ReservationAvailability.UNAVAILABLE;
         }

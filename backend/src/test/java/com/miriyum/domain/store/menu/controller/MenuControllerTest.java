@@ -14,7 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
 import com.miriyum.domain.store.menu.dto.MenuVersionResponse;
 import com.miriyum.domain.store.menu.enums.MenuSellingStatus;

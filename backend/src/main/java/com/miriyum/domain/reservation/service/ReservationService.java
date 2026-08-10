@@ -52,10 +52,10 @@ import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepo
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
+import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
 import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
 import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;

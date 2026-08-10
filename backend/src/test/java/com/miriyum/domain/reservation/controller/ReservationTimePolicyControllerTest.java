@@ -17,7 +17,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationTimePolicyCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationTimePolicyCommandResult;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;

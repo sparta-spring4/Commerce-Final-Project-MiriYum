@@ -1,7 +1,7 @@
 package com.miriyum.domain.store.menu.service;
 
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.menu.entity.Menu;
 import com.miriyum.domain.store.menu.entity.MenuPublicationEvent;
 import com.miriyum.domain.store.menu.entity.MenuVersion;

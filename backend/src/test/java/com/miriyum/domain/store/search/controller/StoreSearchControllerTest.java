@@ -9,8 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.store.search.config.StoreSearchSecurityConfig;
 import com.miriyum.domain.store.search.dto.PublicMenu;

@@ -8,8 +8,8 @@ import com.miriyum.domain.store.closure.repository.RegularClosureVersionReposito
 import com.miriyum.domain.store.closure.repository.StoreClosureAuditEventRepository;
 import com.miriyum.domain.store.closure.repository.TemporaryClosureRepository;
 import com.miriyum.domain.store.closure.model.StoreClosureActorType;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationCancellationRequest;
 import com.miriyum.domain.store.schedule.dto.SchedulePublicationRequest;

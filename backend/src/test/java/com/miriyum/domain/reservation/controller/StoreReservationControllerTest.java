@@ -32,7 +32,7 @@ import com.miriyum.domain.reservation.service.ReservationCancellationCommandResu
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;

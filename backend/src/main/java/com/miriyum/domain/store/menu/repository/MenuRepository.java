@@ -28,8 +28,8 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
                    v.price as unitPrice
             from Store s
             left join Menu m on m.storeId = s.id
-              and s.verificationStatus = com.miriyum.domain.store.core.enums.VerificationStatus.APPROVED
-              and s.operationStatus = com.miriyum.domain.store.core.enums.OperationStatus.OPEN
+              and s.verificationStatus = com.miriyum.domain.store.enums.VerificationStatus.APPROVED
+              and s.operationStatus = com.miriyum.domain.store.enums.OperationStatus.OPEN
               and s.reservationEnabled = true
               and s.menuHoldEnabled = true
               and m.retired = false
@@ -72,8 +72,8 @@ public interface MenuRepository extends JpaRepository<Menu, Long> {
               and exists (
                   select s.id from Store s
                   where s.id = m.storeId
-                    and s.verificationStatus = com.miriyum.domain.store.core.enums.VerificationStatus.APPROVED
-                    and s.operationStatus <> com.miriyum.domain.store.core.enums.OperationStatus.CLOSED
+                    and s.verificationStatus = com.miriyum.domain.store.enums.VerificationStatus.APPROVED
+                    and s.operationStatus <> com.miriyum.domain.store.enums.OperationStatus.CLOSED
               )
             order by v.effectiveAt, m.id
             """)

@@ -19,10 +19,10 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.store.closure.repository.RegularClosureVersionRepository;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.menu.entity.Menu;
 import com.miriyum.domain.store.menu.model.AllergenDisclosure;
 import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;

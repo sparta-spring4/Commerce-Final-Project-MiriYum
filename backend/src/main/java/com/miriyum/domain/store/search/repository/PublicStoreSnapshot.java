@@ -1,7 +1,7 @@
 package com.miriyum.domain.store.search.repository;
 
-import com.miriyum.domain.store.core.enums.OperationStatus;
-import com.miriyum.domain.store.core.enums.Region;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
 import java.util.List;
 
 public record PublicStoreSnapshot(

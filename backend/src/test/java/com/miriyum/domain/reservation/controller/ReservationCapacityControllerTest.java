@@ -15,7 +15,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationCapacitiesResponse
 import com.miriyum.domain.reservation.dto.response.ReservationCapacityBucketResponse;
 import com.miriyum.domain.reservation.service.ReservationCapacityCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCapacityCommandResult;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;

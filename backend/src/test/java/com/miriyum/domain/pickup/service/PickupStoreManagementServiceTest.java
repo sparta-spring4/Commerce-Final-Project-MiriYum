@@ -18,7 +18,7 @@ import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;

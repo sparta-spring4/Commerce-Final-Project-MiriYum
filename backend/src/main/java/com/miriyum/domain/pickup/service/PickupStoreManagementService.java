@@ -10,7 +10,7 @@ import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;

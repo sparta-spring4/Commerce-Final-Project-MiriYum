@@ -21,7 +21,7 @@ import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
 import com.miriyum.domain.menuhold.service.MenuInventoryAdminCommandService;
 import com.miriyum.domain.menuhold.service.MenuInventoryAdminService;
 import com.miriyum.domain.menuhold.service.MenuInventoryCommandResult;
-import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.time.LocalDate;
 import java.time.LocalTime;
