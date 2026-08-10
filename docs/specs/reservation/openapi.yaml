@@ -48,6 +48,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/ReservationConflict"
         "503":
@@ -153,6 +155,8 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}:
     get:
       tags: [Reservation Management]
@@ -175,7 +179,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/ReservationNotFound"
+          $ref: "#/components/responses/StoreReservationNotFound"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations:
     post:
       tags: [Reservation Management]
@@ -207,7 +211,7 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/ReservationNotFound"
+          $ref: "#/components/responses/StoreReservationNotFound"
         "409":
           $ref: "#/components/responses/ReservationStateConflict"
   /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments:
@@ -917,6 +921,21 @@ components:
           example:
             code: RESERVATION_001
             message: 예약을 찾을 수 없습니다.
+    StoreReservationNotFound:
+      description: 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            reservationNotFound:
+              value:
+                code: RESERVATION_001
+                message: 예약을 찾을 수 없습니다.
     ReservationConflict:
       description: 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
       content:

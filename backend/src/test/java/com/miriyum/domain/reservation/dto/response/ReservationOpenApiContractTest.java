@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -24,7 +25,7 @@ class ReservationOpenApiContractTest {
                 new OperationContract(
                         "/api/v1/reservations", "post", "createReservation",
                         "#/components/schemas/ReservationCreateRequest",
-                        Set.of("201", "400", "401", "403", "409", "503")),
+                        Set.of("201", "400", "401", "403", "404", "409", "503")),
                 new OperationContract(
                         "/api/v1/reservations/{reservationId}", "get", "getReservation",
                         null, Set.of("200", "401", "403", "404")),
@@ -36,7 +37,7 @@ class ReservationOpenApiContractTest {
                 new OperationContract(
                         "/api/v1/store-operator/stores/{storeId}/reservations", "get",
                         "getStoreReservations", null,
-                        Set.of("200", "400", "401", "403")),
+                        Set.of("200", "400", "401", "403", "404")),
                 new OperationContract(
                         "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}",
                         "get", "getStoreReservation", null,
@@ -126,6 +127,46 @@ class ReservationOpenApiContractTest {
                                     + escapeJsonPointer(contract.path())
                     );
         });
+    }
+
+    @Test
+    void missingStoreResponsesMatchRuntimeErrors() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+
+        assertNotFoundResponse(
+                document,
+                map(map(paths.get("/api/v1/reservations")).get("post")),
+                "#/components/responses/StoreNotFound",
+                Set.of("STORE_001")
+        );
+        assertNotFoundResponse(
+                document,
+                map(map(paths.get(
+                        "/api/v1/store-operator/stores/{storeId}/reservations"
+                )).get("get")),
+                "#/components/responses/StoreNotFound",
+                Set.of("STORE_001")
+        );
+        assertNotFoundResponse(
+                document,
+                map(map(paths.get(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                )).get("get")),
+                "#/components/responses/StoreReservationNotFound",
+                Set.of("STORE_001", "RESERVATION_001")
+        );
+        assertNotFoundResponse(
+                document,
+                map(map(paths.get(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                                + "/cancellations"
+                )).get("post")),
+                "#/components/responses/StoreReservationNotFound",
+                Set.of("STORE_001", "RESERVATION_001")
+        );
     }
 
     @Test
@@ -486,6 +527,26 @@ class ReservationOpenApiContractTest {
         Map<String, Object> successJson = map(map(success.get("content")).get("application/json"));
         assertThat(map(successJson.get("schema")))
                 .containsEntry("$ref", "#/components/schemas/ReservationSuccessResponse");
+    }
+
+    private static void assertNotFoundResponse(
+            Map<String, Object> document,
+            Map<String, Object> operation,
+            String expectedReference,
+            Set<String> expectedCodes
+    ) {
+        assertThat(map(map(operation.get("responses")).get("404")))
+                .containsEntry("$ref", expectedReference);
+
+        Map<String, Object> response = resolveLocalResponse(document, operation, "404");
+        Map<String, Object> json = map(map(response.get("content")).get("application/json"));
+        Set<String> actualCodes = json.containsKey("examples")
+                ? map(json.get("examples")).values().stream()
+                        .map(ReservationOpenApiContractTest::map)
+                        .map(example -> String.valueOf(map(example.get("value")).get("code")))
+                        .collect(Collectors.toSet())
+                : Set.of(String.valueOf(map(json.get("example")).get("code")));
+        assertThat(actualCodes).containsExactlyInAnyOrderElementsOf(expectedCodes);
     }
 
     private static Map<String, Object> load(Path contract) throws IOException {

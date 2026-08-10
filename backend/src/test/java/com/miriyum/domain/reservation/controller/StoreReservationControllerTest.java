@@ -229,6 +229,22 @@ class StoreReservationControllerTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 매장의 예약 목록은 STORE_001을 반환한다")
+    void returnsStoreNotFoundForReservationList() throws Exception {
+        // given
+        authenticateStoreOperator(33L);
+        given(reservationService.getStoreReservations(
+                eq(33L), eq(22L), any(StoreReservationSearchRequest.class)))
+                .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(get(BASE_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("STORE_001"));
+    }
+
+    @Test
     @DisplayName("운영자 예약 상세를 공통 성공 봉투와 거래 스냅샷으로 반환한다")
     void returnsStoreReservationDetailEnvelope() throws Exception {
         // given
@@ -313,6 +329,21 @@ class StoreReservationControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESERVATION_001"));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 매장의 예약 상세는 STORE_001을 반환한다")
+    void returnsStoreNotFoundForReservationDetail() throws Exception {
+        // given
+        authenticateStoreOperator(33L);
+        given(reservationService.getStoreReservation(33L, 22L, 77L))
+                .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(get(DETAIL_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("STORE_001"));
     }
 
     @ParameterizedTest
@@ -478,6 +509,7 @@ class StoreReservationControllerTest {
         authenticateStoreOperator(33L);
         for (com.miriyum.global.exception.ErrorCode errorCode : List.of(
                 StoreErrorCode.ACCESS_DENIED,
+                StoreErrorCode.STORE_NOT_FOUND,
                 ReservationErrorCode.RESERVATION_NOT_FOUND,
                 ReservationErrorCode.INVALID_STATE_TRANSITION,
                 ReservationErrorCode.CANCELLATION_NOT_ALLOWED)) {
@@ -491,7 +523,9 @@ class StoreReservationControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"reason\":\"store closure\"}"))
                     .andExpect(status().is(errorCode == StoreErrorCode.ACCESS_DENIED ? 403
-                            : errorCode == ReservationErrorCode.RESERVATION_NOT_FOUND ? 404 : 409))
+                            : errorCode == StoreErrorCode.STORE_NOT_FOUND
+                                    || errorCode == ReservationErrorCode.RESERVATION_NOT_FOUND
+                                    ? 404 : 409))
                     .andExpect(jsonPath("$.code").value(errorCode.getCode()));
         }
     }
