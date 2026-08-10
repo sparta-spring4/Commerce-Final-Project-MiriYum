@@ -64,6 +64,7 @@ public class PickupReservationService {
     private final PickupReservationRepository repository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ConsumerAccountService consumerAccountService;
+    private final PickupIntervalTimePolicy intervalTimePolicy;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -74,6 +75,7 @@ public class PickupReservationService {
             PickupReservationRepository repository,
             IdempotencyExecutor idempotencyExecutor,
             ConsumerAccountService consumerAccountService,
+            PickupIntervalTimePolicy intervalTimePolicy,
             ObjectMapper objectMapper,
             Clock clock
     ) {
@@ -83,6 +85,7 @@ public class PickupReservationService {
         this.repository = repository;
         this.idempotencyExecutor = idempotencyExecutor;
         this.consumerAccountService = consumerAccountService;
+        this.intervalTimePolicy = intervalTimePolicy;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -228,6 +231,10 @@ public class PickupReservationService {
                             item.endTime(), item.inventoryPolicyVersion(), selection.quantity());
                 })
                 .toList();
+        availability.values().stream()
+                .map(SelectedAvailability::value)
+                .forEach(item -> intervalTimePolicy.requireOpen(
+                        store.timeZoneId(), item.endDate(), item.endTime()));
         MenuInventoryAcquireResult acquired = acquire(new MenuInventoryAcquireCommand(
                 "pickup-create-" + consumerAccountId + "-" + key.value(),
                 acquireSelections));
@@ -303,6 +310,8 @@ public class PickupReservationService {
                     .filter(item -> item.serviceDate().equals(request.pickupDate()))
                     .filter(item -> item.startTime().equals(request.pickupTime()))
                     .filter(item -> item.timeZoneId().equals(store.timeZoneId()))
+                    .filter(item -> intervalTimePolicy.isOpen(
+                            store.timeZoneId(), item.endDate(), item.endTime()))
                     .toList();
             if (matches.size() != 1) {
                 throw new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE);

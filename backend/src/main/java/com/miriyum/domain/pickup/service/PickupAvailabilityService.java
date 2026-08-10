@@ -32,13 +32,16 @@ public class PickupAvailabilityService {
 
     private final StorePublicQueryService storePublicQueryService;
     private final MenuInventoryTransactionService menuInventoryTransactionService;
+    private final PickupIntervalTimePolicy intervalTimePolicy;
 
     public PickupAvailabilityService(
             StorePublicQueryService storePublicQueryService,
-            MenuInventoryTransactionService menuInventoryTransactionService
+            MenuInventoryTransactionService menuInventoryTransactionService,
+            PickupIntervalTimePolicy intervalTimePolicy
     ) {
         this.storePublicQueryService = storePublicQueryService;
         this.menuInventoryTransactionService = menuInventoryTransactionService;
+        this.intervalTimePolicy = intervalTimePolicy;
     }
 
     @Transactional(readOnly = true)
@@ -68,6 +71,8 @@ public class PickupAvailabilityService {
         List<PickupAvailableMenu> unambiguousMenus = availability.stream()
                 .filter(item -> item.serviceDate().equals(pickupDate))
                 .filter(item -> item.timeZoneId().equals(store.timeZoneId()))
+                .filter(item -> intervalTimePolicy.isOpen(
+                        store.timeZoneId(), item.endDate(), item.endTime()))
                 .filter(item -> eligibleMenus.containsKey(item.menuId()))
                 .collect(Collectors.groupingBy(
                         item -> new MenuPickupTime(

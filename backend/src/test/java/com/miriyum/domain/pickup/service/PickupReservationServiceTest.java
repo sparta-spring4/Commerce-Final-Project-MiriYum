@@ -70,6 +70,7 @@ class PickupReservationServiceTest {
     @Mock PickupReservationRepository repository;
     @Mock IdempotencyExecutor idempotencyExecutor;
     @Mock ConsumerAccountService consumerAccountService;
+    @Mock PickupIntervalTimePolicy intervalTimePolicy;
 
     private PickupReservationService service;
 
@@ -77,8 +78,11 @@ class PickupReservationServiceTest {
     void setUp() {
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
-                repository, idempotencyExecutor, consumerAccountService, new ObjectMapper(),
+                repository, idempotencyExecutor, consumerAccountService,
+                intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
+        org.mockito.Mockito.lenient().when(intervalTimePolicy.isOpen(
+                any(), any(), any())).thenReturn(true);
         org.mockito.Mockito.lenient()
                 .when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<BusinessResult<?>> work = invocation.getArgument(1);
@@ -87,6 +91,51 @@ class PickupReservationServiceTest {
                     result.resourceType(), result.resourceId(),
                     new ObjectMapper().valueToTree(result.data()));
                 });
+    }
+
+    @Test
+    void rejectsEndedAvailabilityBeforeInventoryAcquire() {
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "미리윰 강남점", "Asia/Seoul"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "바질 파스타", 12_000, true, true));
+        given(inventoryService.findOnlineAvailabilityByDate(any()))
+                .willReturn(List.of(availability(5)));
+        given(intervalTimePolicy.isOpen(
+                "Asia/Seoul", PICKUP_DATE, LocalTime.of(14, 0)))
+                .willReturn(false);
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).should(never()).acquire(any());
+        then(repository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rechecksIntervalImmediatelyBeforeInventoryAcquire() {
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "미리윰 강남점", "Asia/Seoul"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "바질 파스타", 12_000, true, true));
+        given(inventoryService.findOnlineAvailabilityByDate(any()))
+                .willReturn(List.of(availability(5)));
+        org.mockito.BDDMockito.willThrow(
+                        new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE))
+                .given(intervalTimePolicy).requireOpen(
+                        "Asia/Seoul", PICKUP_DATE, LocalTime.of(14, 0));
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).should(never()).acquire(any());
+        then(repository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -382,7 +431,8 @@ class PickupReservationServiceTest {
     void rejectsConsumerCancellationExactlyAtPickupTimeBeforeRestore() {
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
-                repository, idempotencyExecutor, consumerAccountService, new ObjectMapper(),
+                repository, idempotencyExecutor, consumerAccountService,
+                intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC));
         given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                 .willReturn(Optional.of(confirmedPickup()));

@@ -23,8 +23,11 @@ import com.miriyum.domain.store.search.dto.PublicStoreModes;
 import com.miriyum.domain.store.search.dto.ReservationAvailability;
 import com.miriyum.domain.store.search.service.StorePublicQueryService;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,8 +55,57 @@ class PickupAvailabilityServiceTest {
     void setUp() {
         pickupAvailabilityService = new PickupAvailabilityService(
                 storePublicQueryService,
-                menuInventoryTransactionService
+                menuInventoryTransactionService,
+                policyAt("2026-08-09T01:00:00Z")
         );
+    }
+
+    @Test
+    void excludesIntervalExactlyAtItsEndEvenWhenQuantityRemains() {
+        pickupAvailabilityService = new PickupAvailabilityService(
+                storePublicQueryService,
+                menuInventoryTransactionService,
+                policyAt("2026-08-10T04:00:00Z")
+        );
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(OperationStatus.OPEN, true));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "바질 파스타", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(availability(
+                        101L, "Asia/Seoul", LocalTime.NOON,
+                        LocalTime.of(13, 0), 3, AvailabilityStatus.AVAILABLE)));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, PICKUP_DATE);
+
+        assertThat(result.slots()).isEmpty();
+    }
+
+    @Test
+    void excludesPastDateIntervalEvenWhenQuantityRemains() {
+        LocalDate pastDate = PICKUP_DATE.minusDays(1);
+        pickupAvailabilityService = new PickupAvailabilityService(
+                storePublicQueryService,
+                menuInventoryTransactionService,
+                policyAt("2026-08-10T04:00:00Z")
+        );
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(OperationStatus.OPEN, true));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "바질 파스타", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(new MenuInventoryAvailability(
+                        101L, 3L, "Asia/Seoul", pastDate, LocalTime.NOON,
+                        pastDate, LocalTime.of(13, 0), 3,
+                        AvailabilityStatus.AVAILABLE)));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, pastDate);
+
+        assertThat(result.slots()).isEmpty();
     }
 
     @Test
@@ -235,5 +287,10 @@ class PickupAvailabilityServiceTest {
                 menuId, 3L, timeZoneId, PICKUP_DATE, startTime,
                 PICKUP_DATE, endTime, quantity, status
         );
+    }
+
+    private static PickupIntervalTimePolicy policyAt(String instant) {
+        return new PickupIntervalTimePolicy(Clock.fixed(
+                Instant.parse(instant), ZoneOffset.UTC));
     }
 }
