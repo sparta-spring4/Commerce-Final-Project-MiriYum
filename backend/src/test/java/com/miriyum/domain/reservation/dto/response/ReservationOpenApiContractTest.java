@@ -41,7 +41,7 @@ class ReservationOpenApiContractTest {
                 new OperationContract(
                         "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}",
                         "get", "getStoreReservation", null,
-                        Set.of("200", "401", "403", "404")),
+                        Set.of("200", "400", "401", "403", "404")),
                 new OperationContract(
                         "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
                                 + "/cancellations",
@@ -130,6 +130,36 @@ class ReservationOpenApiContractTest {
     }
 
     @Test
+    void storeReservationDetailDocumentsPositivePathIdsAndBadRequest() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> operation = map(map(map(document.get("paths")).get(
+                "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+        )).get("get"));
+
+        assertThat(list(operation.get("parameters")).stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(parameter -> parameter.get("$ref")))
+                .containsExactlyInAnyOrder(
+                        "#/components/parameters/StoreId",
+                        "#/components/parameters/ReservationId"
+                );
+        assertThat(map(map(operation.get("responses")).get("400")))
+                .containsEntry(
+                        "$ref",
+                        "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+                );
+
+        Map<String, Object> common = load(
+                Path.of("..", "docs", "specs", "mvp1-common", "openapi.yaml")
+        );
+        assertThat(map(map(map(common.get("components")).get("schemas")).get("PublicId")))
+                .containsEntry("type", "string")
+                .containsEntry("pattern", "^[1-9][0-9]*$");
+    }
+
+    @Test
     void missingStoreResponsesMatchRuntimeErrors() throws IOException {
         Map<String, Object> document = load(
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
@@ -139,8 +169,8 @@ class ReservationOpenApiContractTest {
         assertNotFoundResponse(
                 document,
                 map(map(paths.get("/api/v1/reservations")).get("post")),
-                "#/components/responses/StoreNotFound",
-                Set.of("STORE_001")
+                "#/components/responses/ReservationCreationNotFound",
+                Set.of("STORE_001", "STORE_009", "MENU_HOLD_003")
         );
         assertNotFoundResponse(
                 document,
@@ -167,6 +197,44 @@ class ReservationOpenApiContractTest {
                 "#/components/responses/StoreReservationNotFound",
                 Set.of("STORE_001", "RESERVATION_001")
         );
+        assertNotFoundResponse(
+                document,
+                map(map(paths.get(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                                + "/fulfillments"
+                )).get("post")),
+                "#/components/responses/StoreReservationNotFound",
+                Set.of("STORE_001", "RESERVATION_001")
+        );
+
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        assertThat(responses)
+                .containsKey("StoreReservationNotFound")
+                .doesNotContainKey("ReservationFulfillmentNotFound");
+    }
+
+    @Test
+    void reservationCreationConflictDocumentsMenuHoldRuntimeErrors() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> operation = map(map(map(document.get("paths")).get(
+                "/api/v1/reservations"
+        )).get("post"));
+        Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
+        Map<String, Object> examples = map(
+                map(map(conflict.get("content")).get("application/json")).get("examples")
+        );
+
+        assertThat(examples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder(
+                        "RESERVATION_003",
+                        "ACCOUNT_006",
+                        "MENU_HOLD_001",
+                        "MENU_HOLD_002"
+                );
     }
 
     @Test
@@ -445,7 +513,7 @@ class ReservationOpenApiContractTest {
         assertThat(map(responses.get("404")))
                 .containsEntry(
                         "$ref",
-                        "#/components/responses/ReservationFulfillmentNotFound"
+                        "#/components/responses/StoreReservationNotFound"
                 );
         assertThat(map(responses.get("409")))
                 .containsEntry("$ref", "#/components/responses/ReservationFulfillmentConflict");
