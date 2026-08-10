@@ -239,9 +239,9 @@ paths:
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/StoreAccessDenied"
+          $ref: "#/components/responses/ReservationFulfillmentForbidden"
         "404":
-          $ref: "#/components/responses/ReservationNotFound"
+          $ref: "#/components/responses/ReservationFulfillmentNotFound"
         "409":
           $ref: "#/components/responses/ReservationFulfillmentConflict"
   /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
@@ -947,6 +947,36 @@ components:
               value:
                 code: RESERVATION_006
                 message: 현재 취소 정책에서 처리할 수 없습니다.
+    ReservationFulfillmentForbidden:
+      description: 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            restrictedOperatorAccount:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태로는 이용할 수 없습니다.
+            storeAccessDenied:
+              value:
+                code: STORE_003
+                message: 대상 매장의 대표 운영자가 아닙니다.
+    ReservationFulfillmentNotFound:
+      description: 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            reservationNotFound:
+              value:
+                code: RESERVATION_001
+                message: 예약을 찾을 수 없습니다.
     ReservationFulfillmentConflict:
       description: 방문 완료 상태·MenuHold·멱등·동시 요청 충돌
       content:

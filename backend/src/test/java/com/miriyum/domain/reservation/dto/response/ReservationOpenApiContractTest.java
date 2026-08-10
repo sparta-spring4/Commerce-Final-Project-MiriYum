@@ -279,10 +279,38 @@ class ReservationOpenApiContractTest {
 
         assertThat(map(json.get("schema")))
                 .containsEntry("$ref", "#/components/schemas/EmptyCommandRequest");
-        assertThat(map(operation.get("responses")))
-                .containsKeys("200", "400", "401", "403", "404", "409");
-        assertThat(map(map(operation.get("responses")).get("409")))
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(responses).containsKeys("200", "400", "401", "403", "404", "409");
+        assertThat(map(responses.get("403")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/ReservationFulfillmentForbidden"
+                );
+        assertThat(map(responses.get("404")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/ReservationFulfillmentNotFound"
+                );
+        assertThat(map(responses.get("409")))
                 .containsEntry("$ref", "#/components/responses/ReservationFulfillmentConflict");
+
+        Map<String, Object> forbidden = resolveLocalResponse(document, operation, "403");
+        Map<String, Object> forbiddenExamples = map(
+                map(map(forbidden.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(forbiddenExamples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder("AUTH_011", "STORE_003");
+
+        Map<String, Object> notFound = resolveLocalResponse(document, operation, "404");
+        Map<String, Object> notFoundExamples = map(
+                map(map(notFound.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(notFoundExamples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder("STORE_001", "RESERVATION_001");
 
         Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
         Map<String, Object> examples = map(

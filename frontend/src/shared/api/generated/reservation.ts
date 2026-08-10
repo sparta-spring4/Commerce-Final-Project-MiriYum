@@ -252,6 +252,18 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
+    /** @description 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음 */
+    ReservationFulfillmentForbidden: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음 */
+    ReservationFulfillmentNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 방문 완료 상태·MenuHold·멱등·동시 요청 충돌 */
     ReservationFulfillmentConflict: {
       content: {
@@ -603,8 +615,8 @@ export interface operations {
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["ReservationNotFound"];
+      403: components["responses"]["ReservationFulfillmentForbidden"];
+      404: components["responses"]["ReservationFulfillmentNotFound"];
       409: components["responses"]["ReservationFulfillmentConflict"];
     };
   };
