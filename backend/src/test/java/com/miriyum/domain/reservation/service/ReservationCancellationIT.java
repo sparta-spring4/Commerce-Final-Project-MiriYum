@@ -396,6 +396,33 @@ class ReservationCancellationIT {
     }
 
     @Test
+    @DisplayName("부분 겹침 최신 버킷 underflow는 취소의 모든 자원을 롤백한다")
+    void partialCurrentBucketUnderflowRollsBackEveryCancellationEffect() {
+        Scenario scenario = confirmedScenario(true, false, 2);
+        seedPublishedCapacityVersion(
+                scenario.storeId(),
+                2L,
+                List.of(new PublishedBucket(
+                        START_TIME.plusMinutes(15),
+                        START_TIME.plusMinutes(45),
+                        true)),
+                PARTY_SIZE,
+                0
+        );
+        ResourceSnapshot before = snapshot(
+                scenario, "consumer", scenario.consumerId());
+
+        Throwable failure = catchThrowable(() -> facade.cancelByConsumer(
+                scenario.consumerId(), scenario.reservationId(), key(43),
+                new ConsumerCancellationRequest("current underflow")));
+
+        assertThat(failure)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("capacity occupancy cannot be restored below zero");
+        assertThat(snapshot(scenario, "consumer", scenario.consumerId())).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("legacy 취소 정책 버전·해석 시각 누락은 RES006이며 자원을 바꾸지 않는다")
     void legacyCancellationInputsReturnReservation006WithoutMutation() {
         // given

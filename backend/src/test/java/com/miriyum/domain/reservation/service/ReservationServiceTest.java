@@ -2513,6 +2513,7 @@ class ReservationServiceTest {
         "current-wrong-date",
         "current-wrong-version",
         "current-non-overlap",
+        "same-version-empty",
         "same-version-id-mismatch",
         "locked-extra",
         "locked-duplicate",
@@ -2566,6 +2567,11 @@ class ReservationServiceTest {
                 current = cancellationBucket(
                         401L, LocalTime.of(10, 0), LocalTime.of(11, 0), 6, 2, 4L);
                 lockedBuckets = List.of(original, current);
+            }
+            case "same-version-empty" -> {
+                latestVersion = Optional.of(3L);
+                currentIds = List.of();
+                locksUnion = false;
             }
             case "same-version-id-mismatch" -> {
                 latestVersion = Optional.of(3L);
