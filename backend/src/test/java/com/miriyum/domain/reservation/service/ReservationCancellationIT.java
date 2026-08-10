@@ -316,6 +316,113 @@ class ReservationCancellationIT {
     }
 
     @Test
+    @DisplayName("완전 비겹침 재게시 뒤 소비자 취소는 원본과 MenuHold만 복구한다")
+    void consumerCancellationAfterDisjointPublicationRestoresCommittedResources() {
+        Scenario scenario = confirmedScenario(true, false, 2);
+        List<Long> disjointLatestIds = seedPublishedCapacityVersion(
+                scenario.storeId(),
+                2L,
+                List.of(new PublishedBucket(
+                        LocalTime.of(9, 0), LocalTime.of(10, 0), false)),
+                PARTY_SIZE,
+                1
+        );
+
+        ReservationCancellationCommandResult result = facade.cancelByConsumer(
+                scenario.consumerId(), scenario.reservationId(), key(40),
+                new ConsumerCancellationRequest("disjoint publication"));
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertCommittedResourceEffect(scenario);
+        disjointLatestIds.forEach(bucketId -> assertCapacity(bucketId, 0, 0));
+    }
+
+    @Test
+    @DisplayName("완전 비겹침 재게시 뒤 운영자 취소도 원본 점유만 복구한다")
+    void storeOperatorCancellationAfterDisjointPublicationRestoresOriginalOccupancy() {
+        Scenario scenario = confirmedScenario(false, false, 2);
+        List<Long> disjointLatestIds = seedPublishedCapacityVersion(
+                scenario.storeId(),
+                2L,
+                List.of(new PublishedBucket(
+                        LocalTime.of(9, 0), LocalTime.of(10, 0), false)),
+                PARTY_SIZE,
+                1
+        );
+
+        ReservationCancellationCommandResult result = facade.cancelByStoreOperator(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(42),
+                new StoreCancellationRequest("disjoint publication"));
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(reservationStatus(scenario)).isEqualTo("CANCELLED");
+        assertThat(auditCount(scenario)).isOne();
+        scenario.originalBucketIds().forEach(bucketId -> assertCapacity(bucketId, 0, 0));
+        disjointLatestIds.forEach(bucketId -> assertCapacity(bucketId, 0, 0));
+        assertThat(menuHoldStatus(scenario)).isNull();
+    }
+
+    @Test
+    @DisplayName("부분 겹침 재게시 뒤 운영자 취소는 원본과 실제 겹친 최신 점유만 복구한다")
+    void storeOperatorCancellationAfterPartialPublicationRestoresOverlappingOccupancy() {
+        Scenario scenario = confirmedScenario(false, false, 2);
+        List<Long> latestBucketIds = seedPublishedCapacityVersion(
+                scenario.storeId(),
+                2L,
+                List.of(
+                        new PublishedBucket(
+                                START_TIME.plusMinutes(15),
+                                START_TIME.plusMinutes(45),
+                                true),
+                        new PublishedBucket(
+                                LocalTime.of(9, 0),
+                                LocalTime.of(10, 0),
+                                false)
+                ),
+                PARTY_SIZE,
+                1
+        );
+
+        ReservationCancellationCommandResult result = facade.cancelByStoreOperator(
+                scenario.operatorId(), scenario.storeId(), scenario.reservationId(), key(41),
+                new StoreCancellationRequest("partial publication"));
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(reservationStatus(scenario)).isEqualTo("CANCELLED");
+        assertThat(auditCount(scenario)).isOne();
+        scenario.originalBucketIds().forEach(bucketId -> assertCapacity(bucketId, 0, 0));
+        latestBucketIds.forEach(bucketId -> assertCapacity(bucketId, 0, 0));
+        assertThat(menuHoldStatus(scenario)).isNull();
+    }
+
+    @Test
+    @DisplayName("부분 겹침 최신 버킷 underflow는 취소의 모든 자원을 롤백한다")
+    void partialCurrentBucketUnderflowRollsBackEveryCancellationEffect() {
+        Scenario scenario = confirmedScenario(true, false, 2);
+        seedPublishedCapacityVersion(
+                scenario.storeId(),
+                2L,
+                List.of(new PublishedBucket(
+                        START_TIME.plusMinutes(15),
+                        START_TIME.plusMinutes(45),
+                        true)),
+                PARTY_SIZE,
+                0
+        );
+        ResourceSnapshot before = snapshot(
+                scenario, "consumer", scenario.consumerId());
+
+        Throwable failure = catchThrowable(() -> facade.cancelByConsumer(
+                scenario.consumerId(), scenario.reservationId(), key(43),
+                new ConsumerCancellationRequest("current underflow")));
+
+        assertThat(failure)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("capacity occupancy cannot be restored below zero");
+        assertThat(snapshot(scenario, "consumer", scenario.consumerId())).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("legacy 취소 정책 버전·해석 시각 누락은 RES006이며 자원을 바꾸지 않는다")
     void legacyCancellationInputsReturnReservation006WithoutMutation() {
         // given
@@ -721,6 +828,32 @@ class ReservationCancellationIT {
                             reservationId, bucket.getId(), PARTY_SIZE, policyVersion)));
         }
         return buckets.stream().map(ReservationCapacityBucket::getId).toList();
+    }
+
+    private List<Long> seedPublishedCapacityVersion(
+            long storeId,
+            long policyVersion,
+            List<PublishedBucket> intervals,
+            int occupiedPeople,
+            int occupiedTeams
+    ) {
+        return intervals.stream()
+                .map(interval -> capacityBucketRepository.saveAndFlush(
+                        ReservationCapacityBucket.create(
+                                storeId,
+                                SERVICE_DATE,
+                                interval.startTime(),
+                                interval.endTime(),
+                                10,
+                                5,
+                                interval.overlapsReservation() ? occupiedPeople : 0,
+                                interval.overlapsReservation() ? occupiedTeams : 0,
+                                1,
+                                10,
+                                true,
+                                policyVersion)))
+                .map(ReservationCapacityBucket::getId)
+                .toList();
     }
 
     private static ReservationCapacityBucket capacityBucket(
@@ -1374,6 +1507,13 @@ class ReservationCancellationIT {
             List<Long> intermediateBucketIds,
             List<Long> latestBucketIds,
             MenuFixture menu
+    ) {
+    }
+
+    private record PublishedBucket(
+            LocalTime startTime,
+            LocalTime endTime,
+            boolean overlapsReservation
     ) {
     }
 

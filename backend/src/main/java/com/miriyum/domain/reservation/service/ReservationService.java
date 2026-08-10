@@ -559,7 +559,7 @@ public class ReservationService {
         if (recheckedLatestVersion != latestPolicyVersion) {
             throw capacityPolicyChanged();
         }
-        validateLockedBucketSet(
+        validateLockedOriginalBucketSet(
                 lockedById,
                 originalBucketIds,
                 reservation.getStoreId(),
@@ -567,7 +567,7 @@ public class ReservationService {
                 capacityPolicyVersion
         );
         if (latestPolicyVersion > capacityPolicyVersion) {
-            validateLockedBucketSet(
+            validateLockedCurrentBucketSet(
                     lockedById,
                     currentBucketIds,
                     reservation.getStoreId(),
@@ -681,7 +681,7 @@ public class ReservationService {
     }
 
     private static TreeSet<Long> validateObservedCurrentBucketIds(List<Long> bucketIds) {
-        if (bucketIds == null || bucketIds.isEmpty()) {
+        if (bucketIds == null) {
             throw capacityPolicyChanged();
         }
         TreeSet<Long> uniqueBucketIds = new TreeSet<>();
@@ -715,7 +715,7 @@ public class ReservationService {
         return lockedById;
     }
 
-    private static void validateLockedBucketSet(
+    private static List<ReservationCapacityBucket> validateLockedBucketMetadata(
             Map<Long, ReservationCapacityBucket> lockedById,
             Set<Long> expectedIds,
             long storeId,
@@ -735,7 +735,38 @@ public class ReservationService {
                 throw capacityPolicyChanged();
             }
         }
+        return buckets;
+    }
+
+    private static void validateLockedOriginalBucketSet(
+            Map<Long, ReservationCapacityBucket> lockedById,
+            Set<Long> expectedIds,
+            long storeId,
+            CancellationCapacityWindow window,
+            long expectedVersion
+    ) {
+        List<ReservationCapacityBucket> buckets = validateLockedBucketMetadata(
+                lockedById, expectedIds, storeId, window, expectedVersion);
         validateCancellationCoverage(buckets, window);
+    }
+
+    private static void validateLockedCurrentBucketSet(
+            Map<Long, ReservationCapacityBucket> lockedById,
+            Set<Long> expectedIds,
+            long storeId,
+            CancellationCapacityWindow window,
+            long expectedVersion
+    ) {
+        List<ReservationCapacityBucket> buckets = validateLockedBucketMetadata(
+                lockedById, expectedIds, storeId, window, expectedVersion);
+        for (ReservationCapacityBucket bucket : buckets) {
+            if (bucket.getStartTime() == null
+                    || bucket.getEndTime() == null
+                    || !bucket.getStartTime().isBefore(window.occupancyEndTime())
+                    || !bucket.getEndTime().isAfter(window.startTime())) {
+                throw capacityPolicyChanged();
+            }
+        }
     }
 
     private static boolean matchesCancellationBucket(
