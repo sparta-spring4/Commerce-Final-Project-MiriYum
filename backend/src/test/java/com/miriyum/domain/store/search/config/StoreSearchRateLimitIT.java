@@ -55,12 +55,14 @@ class StoreSearchRateLimitIT {
     private MockMvc mockMvc;
 
     @Test
-    void sharesOneLimitAcrossListDetailAndMenusRoutes() throws Exception {
+    void sharesOneLimitAcrossListDetailAndMenuHoldAvailabilityRoutes() throws Exception {
         RequestPostProcessor ip = withRemoteAddr("10.81.0.1");
 
         mockMvc.perform(get("/api/v1/stores").with(ip)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/stores/999999").with(ip)).andExpect(status().isNotFound());
-        mockMvc.perform(get("/api/v1/stores/999999/menus").with(ip))
+        mockMvc.perform(get("/api/v1/stores/999999/menu-hold-availability")
+                        .queryParam("serviceDate", "2026-08-10")
+                        .queryParam("startTime", "18:00").with(ip))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("COMMON_010"))
                 .andExpect(header().string("Retry-After", Matchers.matchesPattern("[1-9][0-9]*")));

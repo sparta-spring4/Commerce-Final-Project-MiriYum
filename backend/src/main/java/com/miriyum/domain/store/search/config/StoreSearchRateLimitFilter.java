@@ -26,6 +26,8 @@ public class StoreSearchRateLimitFilter extends OncePerRequestFilter {
     private static final Pattern STORE_LIST = Pattern.compile("^/api/v1/stores$");
     private static final Pattern STORE_DETAIL = Pattern.compile("^/api/v1/stores/[^/]+$");
     private static final Pattern STORE_MENUS = Pattern.compile("^/api/v1/stores/[^/]+/menus$");
+    private static final Pattern MENU_HOLD_AVAILABILITY =
+            Pattern.compile("^/api/v1/stores/[^/]+/menu-hold-availability$");
 
     private final RateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
@@ -43,7 +45,8 @@ public class StoreSearchRateLimitFilter extends OncePerRequestFilter {
         String requestUri = request.getRequestURI();
         return !STORE_LIST.matcher(requestUri).matches()
                 && !STORE_DETAIL.matcher(requestUri).matches()
-                && !STORE_MENUS.matcher(requestUri).matches();
+                && !STORE_MENUS.matcher(requestUri).matches()
+                && !MENU_HOLD_AVAILABILITY.matcher(requestUri).matches();
     }
 
     @Override
