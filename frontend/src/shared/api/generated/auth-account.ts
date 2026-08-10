@@ -581,8 +581,8 @@ export interface external {
           status: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationStatus"];
           menuSelections: external["../reservation/openapi.yaml"]["components"]["schemas"]["MenuHoldItem"][];
           /** @enum {string|null} */
-          cancelledBy?: "CONSUMER" | "STORE_OPERATOR" | null;
-          cancellationReason?: string | null;
+          cancelledBy: "CONSUMER" | "STORE_OPERATOR" | null;
+          cancellationReason: string | null;
           createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
         };
         ReservationSummary: {

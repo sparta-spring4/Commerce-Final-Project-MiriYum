@@ -661,6 +661,8 @@ components:
         - status
         - menuSelections
         - createdAt
+        - cancelledBy
+        - cancellationReason
       properties:
         reservationId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -936,9 +938,15 @@ components:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: RESERVATION_005
-            message: 현재 예약 상태에서 처리할 수 없습니다.
+          examples:
+            invalidState:
+              value:
+                code: RESERVATION_005
+                message: 현재 예약 상태에서 처리할 수 없습니다.
+            cancellationPolicyRejected:
+              value:
+                code: RESERVATION_006
+                message: 현재 취소 정책에서 처리할 수 없습니다.
     CapacityConfigurationConflict:
       description: 시간대·현재 점유와 수용량 설정 충돌
       content:

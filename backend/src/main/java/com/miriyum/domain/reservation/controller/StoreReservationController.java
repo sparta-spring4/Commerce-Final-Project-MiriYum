@@ -1,18 +1,27 @@
 package com.miriyum.domain.reservation.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
+import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class StoreReservationController {
 
     private final ReservationService reservationService;
+    private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     /**
      * 대상 매장의 예약 목록을 날짜·상태·페이지·단일 정렬 조건으로 조회한다.
@@ -86,5 +96,21 @@ public class StoreReservationController {
                 reservationId
         );
         return ApiResponse.success("조회되었습니다.", response);
+    }
+
+    /** Cancels one reservation for the authenticated operator's managed store. */
+    @PostMapping("/{reservationId}/cancellations")
+    public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @PathVariable long reservationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody StoreCancellationRequest request
+    ) {
+        ReservationCancellationCommandResult result =
+                reservationCancellationCommandFacade.cancelByStoreOperator(
+                        principal.accountId(), storeId, reservationId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
     }
 }

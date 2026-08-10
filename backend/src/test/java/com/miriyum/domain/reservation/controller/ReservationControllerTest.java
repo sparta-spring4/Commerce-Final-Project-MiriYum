@@ -13,6 +13,7 @@ import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
+import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionResponse;
@@ -20,6 +21,8 @@ import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
@@ -57,6 +60,9 @@ class ReservationControllerTest {
 
     @MockitoBean
     private ReservationCreationCommandFacade reservationCreationCommandFacade;
+
+    @MockitoBean
+    private ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -314,18 +320,31 @@ class ReservationControllerTest {
     }
 
     @Test
-    @DisplayName("아직 구현하지 않은 소비자 취소 경로는 예약 상세 체인에서 거부한다")
-    void deniesUnimplementedCancellationPath() throws Exception {
-        // given
+    @DisplayName("소비자 취소는 principal과 멱등 키를 facade에 전달한다")
+    void cancelsConsumerReservationWithAuthenticatedPrincipalAndIdempotencyKey() throws Exception {
         authenticateConsumer(11L);
+        given(reservationCancellationCommandFacade.cancelByConsumer(
+                eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
+                .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse("CONSUMER")));
 
-        // when & then
         mockMvc.perform(post("/api/v1/reservations/77/cancellations")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("AUTH_006"));
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"schedule change\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.data.cancelledBy").value("CONSUMER"))
+                .andExpect(jsonPath("$.data.cancelledAt").doesNotExist());
 
-        then(reservationService).shouldHaveNoInteractions();
+        ArgumentCaptor<IdempotencyKey> keyCaptor = ArgumentCaptor.forClass(IdempotencyKey.class);
+        ArgumentCaptor<ConsumerCancellationRequest> requestCaptor =
+                ArgumentCaptor.forClass(ConsumerCancellationRequest.class);
+        then(reservationCancellationCommandFacade).should().cancelByConsumer(
+                eq(11L), eq(77L), keyCaptor.capture(), requestCaptor.capture());
+        Assertions.assertThat(keyCaptor.getValue().value()).isEqualTo(IDEMPOTENCY_KEY);
+        Assertions.assertThat(requestCaptor.getValue().reason()).isEqualTo("schedule change");
     }
 
     @Test
@@ -341,6 +360,118 @@ class ReservationControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_006"));
 
         then(reservationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void acceptsOmittedConsumerCancellationReason() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationCancellationCommandFacade.cancelByConsumer(
+                eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
+                .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse("CONSUMER")));
+
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsCancellationKeyFailuresBeforeFacadeInvocation() throws Exception {
+        authenticateConsumer(11L);
+
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", "bad-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_004"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsInvalidConsumerCancellationBodyBeforeFacadeInvocation() throws Exception {
+        authenticateConsumer(11L);
+
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + "a".repeat(501) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"unexpected\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsUnauthenticatedOrOperatorConsumerCancellation() throws Exception {
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+        given(jwtTokenProvider.parseAccessToken("store-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
+        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void passesThroughConsumerCancellationServiceExceptions() throws Exception {
+        authenticateConsumer(11L);
+        for (ReservationErrorCode errorCode : List.of(
+                ReservationErrorCode.RESERVATION_NOT_FOUND,
+                ReservationErrorCode.INVALID_STATE_TRANSITION,
+                ReservationErrorCode.CANCELLATION_NOT_ALLOWED)) {
+            given(reservationCancellationCommandFacade.cancelByConsumer(
+                    eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
+                    .willThrow(new ServiceException(errorCode));
+
+            mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().is(errorCode == ReservationErrorCode.RESERVATION_NOT_FOUND ? 404 : 409))
+                    .andExpect(jsonPath("$.code").value(errorCode.getCode()));
+        }
+    }
+
+    @Test
+    void deniesNonApprovedMethodOnCancellationPath() throws Exception {
+        authenticateConsumer(11L);
+
+        mockMvc.perform(get("/api/v1/reservations/77/cancellations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
     }
 
     private void authenticateConsumer(long accountId) {
@@ -383,5 +514,14 @@ class ReservationControllerTest {
                 ),
                 OffsetDateTime.parse("2026-08-01T09:00:00Z")
         );
+    }
+
+    private ReservationDetailResponse cancelledDetailResponse(String cancelledBy) {
+        ReservationDetailResponse detail = detailResponse();
+        return new ReservationDetailResponse(
+                detail.reservationId(), detail.storeId(), detail.storeName(), detail.serviceDate(),
+                detail.timeStatus(), detail.startAt(), detail.serviceEndAt(), detail.timeZoneId(),
+                detail.party(), "CANCELLED", detail.menuSelections(), detail.createdAt(), cancelledBy,
+                "schedule change");
     }
 }
