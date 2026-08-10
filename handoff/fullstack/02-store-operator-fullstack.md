@@ -64,9 +64,11 @@ ReservationTimePolicyController는 슬롯 간격·서비스 시간·회전 시�
 
 MenuController는 목록·상세 조회, 메뉴 초안 생성·수정, 게시·예약 게시 취소, 노출 상태 변경, 판매 상태 변경, 운영 종료 Controller를 제공한다. 메뉴 내용, 대표 표시, 분류, 태그, 예약 메뉴 홀드·픽업 허용 여부와 계약상 구조화된 알레르기·원산지·주류 정보는 독립 상태 축을 보존해 연결한다. 응답에 없는 이미지·옵션 또는 별도 대표·추천 메뉴 3~5개 관리는 연결하지 않는다.
 
-### 5.5 예약 조회와 매장 취소
+### 5.5 예약 조회·매장 취소·방문 완료
 
 StoreReservationController는 매장 예약 목록·상세 조회와 매장 사유 취소 Controller를 제공한다. 날짜·상태·페이지·정렬은 OpenAPI가 허용한 값만 전송하고, 취소는 하나의 계약 명령으로 처리한다. 재고 복구를 별도 요청으로 흉내 내지 않는다.
+
+일반 예약 방문 완료는 목록·상세·취소와 분리된 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments` 후보다. OpenAPI 계약, field 없는 `ReservationFulfillmentRequest`, StoreReservationController, ReservationFulfillmentCommandFacade와 ReservationService, Controller·통합 focused test가 현재 함께 존재한다. 서버는 운영자의 대상 매장 관리 권한, `Idempotency-Key`, 확정(`CONFIRMED`) 예약만의 상태 전이를 검증하며, 입력·인증·권한·대상 없음·상태/멱등 충돌은 현재 계약의 400/401/403/404/409 응답으로 처리한다. 이 현 병합 구현은 연결 자격을 만들지만, 실제 프런트 활성화는 작업 시점의 Issue·릴리스 승인과 live 계약 검증을 다시 통과한 경우에만 한다. 배포되었거나 화면 상태가 정해졌다고 간주하지 않는다.
 
 ### 5.6 현재 메뉴 재고 계약
 
@@ -78,7 +80,7 @@ MenuInventoryAdminController는 메뉴별 기간·시간 구간 재고 버킷의
 
 | capability | 현재 결론과 연결 규칙 |
 | --- | --- |
-| 방문 완료 | 예약 조회·상세·취소 Controller와 별개다. 방문 완료 Controller가 없으므로 관련 탭, 제어, 요청과 액션을 모두 숨긴다. |
+| 방문 완료 | 일반 예약의 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments`는 목록·상세·취소와 별도 Controller·Facade·Service·focused test가 있는 연결 후보다. 운영자 매장 소유권, `Idempotency-Key`, field 없는 body, `CONFIRMED` 상태와 현재 400/401/403/404/409 오류 계약을 그대로 검증한다. 현 병합 구현은 자격을 충족하지만, 현재 Issue·릴리스 승인과 live 계약 검증 전에는 프런트 활성화로 바꾸지 않는다. |
 | 공개 픽업 | `GET /api/v1/stores/{storeId}/pickup-availability` Controller는 존재한다. 제품 정책은 픽업을 활성화한 모든 사업 유형에 적용되지만, 이 Controller만으로는 서비스별 독립 재고와 end-to-end 활성화 증거가 되지 않는다. |
 | 운영자 픽업 | `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations`, 상세 조회, 매장 취소, 수령 완료 Controller는 존재한다. 그러나 현재 이 Controller와 Service도 공유 온라인 재고를 사용하므로, 독립 픽업 재고 계약·구현·테스트·릴리스 증거가 생길 때까지 픽업 내비게이션, 매장 라우트, 데이터 요청, 취소·수령 완료 액션과 production bundle·production mock에서 모두 숨긴다. 이는 일반 예약 방문 완료를 활성화하는 근거가 아니다. |
 | 독립 재고 | 일반 예약 메뉴 홀드 재고와 픽업 재고 각각에 전용 계약·Controller·Service·검증이 생길 때만 각 영역을 연결한다. 현 공유 온라인 풀은 독립 재고 증거가 아니다. |
@@ -106,6 +108,6 @@ Redis 기반 Refresh Token 관리는 매장 운영자 인증 namespace의 고도
 - 운영시간·예약 접수 시간대·정기 휴무·예약 시간 정책의 초안, 즉시·예약 게시, 게시 취소, 충돌·실패
 - 임시 휴무 등록·종료 변경·취소, 메뉴 전 수명주기와 독립 상태 축, 날짜별 수용량 충돌
 - 예약 목록·상세·매장 취소의 권한·페이지·상태·재시도 처리
+- 일반 예약 방문 완료 후보 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments`의 운영자 매장 소유권, `Idempotency-Key`, field 없는 body, `CONFIRMED` 상태 전이와 현재 400/401/403/404/409 오류 계약 확인; 현 병합 구현만으로 활성화하지 않고 현재 Issue·릴리스 승인과 live 계약 검증을 다시 통과한 경우에만 연결
 - 현재 메뉴 재고 버킷의 합계·축소·품절 오류를 계약대로 처리하되 독립 픽업 재고로 오표시하지 않음
-- 방문 완료는 별도 Controller가 없을 때 관련 화면·라우트·요청·액션·production bundle·production mock이 생성되지 않음
 - 공개 픽업과 운영자 픽업 Controller가 있어도, `ONLINE_HOLD`·`SHARED` 공유 재고가 서비스별 독립 재고 정책과 충돌하는 동안 관련 화면·라우트·요청·액션·production bundle·production mock이 생성되지 않음
