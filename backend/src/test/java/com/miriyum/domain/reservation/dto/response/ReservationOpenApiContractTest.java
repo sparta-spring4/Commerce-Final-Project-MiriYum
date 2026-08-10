@@ -264,6 +264,69 @@ class ReservationOpenApiContractTest {
                 .doesNotContainKey("cancelledAt");
     }
 
+    @Test
+    void fulfillmentOperationResolvesStrictBodyAndAllConflictExamples() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> operation = map(map(map(document.get("paths")).get(
+                "/api/v1/store-operator/stores/{storeId}"
+                        + "/reservations/{reservationId}/fulfillments"
+        )).get("post"));
+        Map<String, Object> json = map(
+                map(map(operation.get("requestBody")).get("content")).get("application/json")
+        );
+
+        assertThat(map(json.get("schema")))
+                .containsEntry("$ref", "#/components/schemas/EmptyCommandRequest");
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(responses).containsKeys("200", "400", "401", "403", "404", "409");
+        assertThat(map(responses.get("403")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/ReservationFulfillmentForbidden"
+                );
+        assertThat(map(responses.get("404")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/ReservationFulfillmentNotFound"
+                );
+        assertThat(map(responses.get("409")))
+                .containsEntry("$ref", "#/components/responses/ReservationFulfillmentConflict");
+
+        Map<String, Object> forbidden = resolveLocalResponse(document, operation, "403");
+        Map<String, Object> forbiddenExamples = map(
+                map(map(forbidden.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(forbiddenExamples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder("AUTH_011", "STORE_003");
+
+        Map<String, Object> notFound = resolveLocalResponse(document, operation, "404");
+        Map<String, Object> notFoundExamples = map(
+                map(map(notFound.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(notFoundExamples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder("STORE_001", "RESERVATION_001");
+
+        Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
+        Map<String, Object> examples = map(
+                map(map(conflict.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(examples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder(
+                        "RESERVATION_005",
+                        "MENU_HOLD_006",
+                        "COMMON_007",
+                        "COMMON_008"
+                );
+    }
+
     private static void assertPolicyCommand(
             Map<String, Object> operation,
             String requestSchemaRef
@@ -314,6 +377,20 @@ class ReservationOpenApiContractTest {
         try (InputStream input = Files.newInputStream(contract)) {
             return new Yaml().load(input);
         }
+    }
+
+    private static Map<String, Object> resolveLocalResponse(
+            Map<String, Object> document,
+            Map<String, Object> operation,
+            String status
+    ) {
+        String reference = String.valueOf(
+                map(map(operation.get("responses")).get(status)).get("$ref")
+        );
+        String prefix = "#/components/responses/";
+        assertThat(reference).startsWith(prefix);
+        String responseName = reference.substring(prefix.length());
+        return map(map(map(document.get("components")).get("responses")).get(responseName));
     }
 
     private static void assertCustomerTimeShape(
