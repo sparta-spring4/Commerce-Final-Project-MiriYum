@@ -262,6 +262,16 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("성공 방문 완료 감사 스키마는 Flyway V28로 적용된다")
+    void appliesFulfillmentAuditAsFlywayV28() {
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "28".equals(String.valueOf(migration.getVersion()))
+                                && "V28__create_reservation_fulfillment_audits.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
     void cleanInstallAppliesFulfillmentAuditMigrationAndJpaRoundTrips() {
         assertThat(appliedScripts()).contains(migrationScriptName());
         long reservationId = reservationRepository.saveAndFlush(reservation()).getId();
