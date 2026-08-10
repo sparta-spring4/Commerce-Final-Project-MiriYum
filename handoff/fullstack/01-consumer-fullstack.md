@@ -47,7 +47,7 @@
 | 내 계정·내역 | `GET /api/v1/consumer-accounts/me`, `PUT /api/v1/consumer-accounts/me/contact`, `PATCH /api/v1/consumer-accounts/me`, `GET /api/v1/consumer-accounts/me/reservations` |
 | 공개 탐색 | `GET /api/v1/stores`, `GET /api/v1/stores/{storeId}`, `GET /api/v1/stores/{storeId}/menus`, 카테고리·태그 catalog 조회 |
 | 일반 예약 | `POST /api/v1/reservations`, `GET /api/v1/reservations/{reservationId}`, `POST /api/v1/reservations/{reservationId}/cancellations` |
-| 픽업 후보 | `GET /api/v1/stores/{storeId}/pickup-availability`, `POST /api/v1/pickup-reservations`, `GET /api/v1/pickup-reservations/{pickupReservationId}`, `POST /api/v1/pickup-reservations/{pickupReservationId}/cancellations` |
+| 픽업 | `GET /api/v1/stores/{storeId}/pickup-availability`, `POST /api/v1/pickup-reservations`, `GET /api/v1/pickup-reservations/{pickupReservationId}`, `POST /api/v1/pickup-reservations/{pickupReservationId}/cancellations` |
 
 공개 매장 상세에 운영 정보가 보인다고 해서 일반 사용자가 선택 가능한 예약 시간대가 구성됐다고 판단하지 않는다. 공개 예약 가능 시간대 또는 bookable slot 구성은 별도 Controller·계약·호출 증거가 확인될 때까지 독립 게이트로 둔다.
 
@@ -78,13 +78,11 @@
 2. 픽업 거래: 일반 사용자 생성, 본인 상세, 취소의 계약·Controller·보안·멱등성. 본인 목록·이력은 별도 Controller·계약·검증으로 확인한다.
 3. 일반 예약과 분리된 픽업 상태 전이와 취소·수령 완료 처리
 
-현재 공개 픽업 가용성 Controller와 일반 사용자 픽업 생성·본인 상세·취소 Controller는 위 후보 라우트로 구현되어 있다. 그러나 이는 활성화 승인이 아니다. 현재 가용성·생성·취소 Service는 메뉴 재고의 `ONLINE_HOLD`와 허용된 `SHARED` 풀을 함께 읽고 확보·복구한다. 이는 일반 예약 메뉴 홀드와 픽업이 각각 전용 재고만 소비하고 같은 서비스 재고로만 취소 복구하며 서로 영향을 주거나 합산하지 않는 현재 제품 정책과 충돌한다.
+현재 공개 픽업 가용성 Controller와 일반 사용자 픽업 생성·본인 상세·취소 Controller, 이를 따르는 Service와 focused test가 구현되어 있다. 메뉴 재고의 `ONLINE_HOLD`와 정책상 허용된 `SHARED`를 함께 읽고 확보·복구하는 동작은 활성 정본의 정상 계약이며 픽업 비노출 사유가 아니다. 실제 연결 시점에는 OpenAPI·Controller·Service·호출 증거·현재 릴리스 범위를 다시 대조하되, 공유 온라인 풀을 별도 픽업 재고 미구현으로 오판해 이 네 라우트를 차단하지 않는다.
 
-따라서 별도 모델의 픽업 재고 계약·구현·테스트·릴리스 증거가 생길 때까지 픽업은 end-to-end 제품 모듈로 차단한다. 현재 구현된 후보 라우트도 픽업 내비게이션, 라우트 등록, 탭, 버튼, 데이터 요청, 생성·상세·취소 액션과 production bundle·production mock에 포함하지 않는다. 준비 중 화면, 비활성 버튼, 가짜 성공으로 대체하지 않는다. 일반 사용자 본인 픽업 목록·이력 Controller는 여전히 없으므로, 독립 재고 정렬 뒤에도 그 목록·이력 모듈은 별도로 숨긴다. 이후에도 전 업종 제품 정책을 유지한 상태로 각 게이트를 독립 통과한 모듈만 활성화한다.
+일반 예약 메뉴 홀드와 픽업은 같은 메뉴·제공 구간의 `ONLINE_HOLD`를 함께 우선 사용하고, 매장 정책이 허용할 때만 정해진 순서로 `SHARED`를 사용할 수 있다. 온라인 거래는 `ONSITE`를 사용하지 않는다. 공개 가용량은 남은 `ONLINE_HOLD`와 온라인 사용이 허용된 `SHARED`의 합이며, 취소는 해당 거래가 실제로 차감한 각 풀로 한 번만 복구한다. 오래된 가용량과 동시성 충돌은 최신 공개 가용성을 다시 조회해 처리한다.
 
-일반 예약 메뉴 홀드와 픽업은 독립 재고 계약이 필요하다. 일반 예약 메뉴 홀드는 예약 전용 재고만 소비하며 취소 시 같은 예약 전용 재고로 복구한다. 픽업은 픽업 전용 재고만 소비하며 취소 시 같은 픽업 전용 재고로 복구한다. 한 서비스의 가용량·품절·소비·복구는 다른 서비스 재고를 변경하거나 합산하지 않는다.
-
-서비스 간 재고 이전은 향후 결정할 사항이다. 이전 정책이 확정되기 전에는 이전 버튼, 이전 라우트, 이전 상태, 수량 한도, 감사 이력, API, placeholder 흐름을 만들지 않는다. 현재의 공유 풀 계약은 이 독립 경계와 충돌하는 증거이므로, 일반 예약 메뉴 홀드와 분리된 픽업 재고 지원 또는 재고 이전을 활성화하는 근거로 인정하지 않는다.
+일반 사용자 본인 픽업 목록·이력 Controller는 현재 없으므로 픽업 목록 내비게이션, 목록 라우트와 목록 데이터 요청은 숨긴다. 생성 응답 또는 이미 알고 있는 본인 픽업 식별자로 상세·취소에 진입할 수는 있지만, 브라우저 저장소의 식별자를 서버 목록처럼 조합하지 않는다. 픽업은 업종으로 제한하지 않으며, 별도 예약 전용·픽업 전용 재고나 서비스 간 재고 이전 버튼·라우트·상태·API를 만들지 않는다.
 
 ## 5. 2차 MVP와 고도화의 연결 원칙
 
