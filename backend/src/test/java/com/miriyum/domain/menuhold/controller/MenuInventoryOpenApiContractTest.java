@@ -14,6 +14,26 @@ import org.yaml.snakeyaml.Yaml;
 class MenuInventoryOpenApiContractTest {
 
     @Test
+    void menuHoldAvailabilityUsesServerResolvedIntervalContract() throws IOException {
+        Path contract = Path.of("..", "docs", "specs", "menu-hold-pickup", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+        Map<String, Object> operation = map(map(map(document.get("paths")).get(
+                "/api/v1/stores/{storeId}/menu-hold-availability")).get("get"));
+        List<Map<String, Object>> parameters = (List<Map<String, Object>>) operation.get("parameters");
+        assertThat(parameters.stream().map(parameter -> parameter.get("name")))
+                .contains("serviceDate", "startTime", "startOffset")
+                .doesNotContain("endTime");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> data = map(schemas.get("MenuHoldAvailabilityData"));
+        assertThat(map(data.get("properties")))
+                .containsKeys("serviceDate", "startAt", "serviceEndAt", "timeZoneId", "items");
+    }
+
+    @Test
     void operatorRoutesAndOvernightDatesMatchTheHttpContract() throws IOException {
         Path contract = Path.of("..", "docs", "specs",
                 "menu-hold-pickup", "openapi.yaml");

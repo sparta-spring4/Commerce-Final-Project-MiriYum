@@ -49,6 +49,14 @@
 
 재고는 메뉴 전체 전역 수량이 아니라 `menuId + serviceDate + [startTime, endTime) + policyVersion` 구간별 버킷이다.
 
+### 예약 메뉴 가용 수량 공개 조회
+
+`GET /api/v1/stores/{storeId}/menu-hold-availability`는 `serviceDate`, `startTime`, 선택적인
+`startOffset`만 입력받는다. 종료 시각은 클라이언트가 정하지 않으며 Reservation 시간 정책이 계산한
+`[startAt, serviceEndAt)` 구간을 사용한다. 응답은 계산된 offset 포함 시작·종료 시각과 IANA 시간대,
+현재 Store 메뉴 후보 중 동일 구간의 온라인 재고 버킷이 존재하는 메뉴만 `menuId` 오름차순으로 반환한다.
+현재 버킷이 없는 메뉴는 0으로 합성하지 않고 제외하며 `SOLD_OUT`은 수량 0을 유지한다.
+
 | 필드 | 의미 |
 | --- | --- |
 | `totalSupply` | 해당 메뉴·구간의 확인된 전체 공급 |
