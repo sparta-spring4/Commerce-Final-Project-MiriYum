@@ -1,5 +1,6 @@
 package com.miriyum.domain.pickup.service;
 
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
@@ -62,6 +63,7 @@ public class PickupReservationService {
     private final MenuInventoryTransactionService inventoryService;
     private final PickupReservationRepository repository;
     private final IdempotencyExecutor idempotencyExecutor;
+    private final ConsumerAccountService consumerAccountService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -71,6 +73,7 @@ public class PickupReservationService {
             MenuInventoryTransactionService inventoryService,
             PickupReservationRepository repository,
             IdempotencyExecutor idempotencyExecutor,
+            ConsumerAccountService consumerAccountService,
             ObjectMapper objectMapper,
             Clock clock
     ) {
@@ -79,6 +82,7 @@ public class PickupReservationService {
         this.inventoryService = inventoryService;
         this.repository = repository;
         this.idempotencyExecutor = idempotencyExecutor;
+        this.consumerAccountService = consumerAccountService;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -92,6 +96,7 @@ public class PickupReservationService {
         if (consumerAccountId <= 0 || key == null || request == null) {
             throw new IllegalArgumentException("pickup creation arguments are required");
         }
+        consumerAccountService.requireActiveAccount(consumerAccountId);
         long storeId = request.storeIdAsLong();
         List<PickupMenuSelectionRequest> selections = request.normalizedMenuSelections();
         IdempotencyCommand command = new IdempotencyCommand(
@@ -111,6 +116,7 @@ public class PickupReservationService {
         if (consumerAccountId <= 0) {
             throw new IllegalArgumentException("consumerAccountId must be positive");
         }
+        consumerAccountService.requireActiveAccount(consumerAccountId);
         if (pickupReservationId <= 0) {
             throw new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND);
         }
@@ -130,6 +136,7 @@ public class PickupReservationService {
         if (consumerAccountId <= 0 || key == null || request == null) {
             throw new IllegalArgumentException("pickup cancellation arguments are required");
         }
+        consumerAccountService.requireActiveAccount(consumerAccountId);
         if (pickupReservationId <= 0) {
             throw new ServiceException(PickupErrorCode.PICKUP_NOT_FOUND);
         }

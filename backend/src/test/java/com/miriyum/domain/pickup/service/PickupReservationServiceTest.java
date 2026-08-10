@@ -7,6 +7,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
@@ -67,6 +69,7 @@ class PickupReservationServiceTest {
     @Mock MenuInventoryTransactionService inventoryService;
     @Mock PickupReservationRepository repository;
     @Mock IdempotencyExecutor idempotencyExecutor;
+    @Mock ConsumerAccountService consumerAccountService;
 
     private PickupReservationService service;
 
@@ -74,7 +77,7 @@ class PickupReservationServiceTest {
     void setUp() {
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
-                repository, idempotencyExecutor, new ObjectMapper(),
+                repository, idempotencyExecutor, consumerAccountService, new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         org.mockito.Mockito.lenient()
                 .when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation -> {
@@ -84,6 +87,51 @@ class PickupReservationServiceTest {
                     result.resourceType(), result.resourceId(),
                     new ObjectMapper().valueToTree(result.data()));
                 });
+    }
+
+    @Test
+    void rejectsRestrictedConsumerBeforeCreationSideEffects() {
+        org.mockito.BDDMockito.willThrow(
+                        new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED))
+                .given(consumerAccountService).requireActiveAccount(11L);
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request(1)));
+
+        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+        then(repository).shouldHaveNoInteractions();
+        then(inventoryService).shouldHaveNoInteractions();
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsRestrictedConsumerBeforeDetailRepositoryAccess() {
+        org.mockito.BDDMockito.willThrow(
+                        new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED))
+                .given(consumerAccountService).requireActiveAccount(11L);
+
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.getConsumerPickup(11L, 77L));
+
+        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+        then(repository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsRestrictedConsumerBeforeCancellationSideEffects() {
+        org.mockito.BDDMockito.willThrow(
+                        new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED))
+                .given(consumerAccountService).requireActiveAccount(11L);
+
+        ServiceException exception = catchThrowableOfType(ServiceException.class, () ->
+                service.cancelByConsumer(
+                        11L, 77L, KEY, new PickupCancellationRequest("일정 변경")));
+
+        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+        then(repository).shouldHaveNoInteractions();
+        then(inventoryService).shouldHaveNoInteractions();
     }
 
     @Test
@@ -273,6 +321,7 @@ class PickupReservationServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(201);
         assertThat(result.data()).isEqualTo(stored);
+        then(consumerAccountService).should().requireActiveAccount(11L);
         then(storeTransactionEligibilityService).shouldHaveNoInteractions();
         then(storeService).shouldHaveNoInteractions();
         then(inventoryService).shouldHaveNoInteractions();
@@ -333,7 +382,7 @@ class PickupReservationServiceTest {
     void rejectsConsumerCancellationExactlyAtPickupTimeBeforeRestore() {
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
-                repository, idempotencyExecutor, new ObjectMapper(),
+                repository, idempotencyExecutor, consumerAccountService, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC));
         given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                 .willReturn(Optional.of(confirmedPickup()));
