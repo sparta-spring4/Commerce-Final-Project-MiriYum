@@ -184,6 +184,27 @@ public class ReservationCapacityBucket {
         occupiedTeams++;
     }
 
+    /**
+     * Restores one reservation party from this already-pessimistically-locked bucket.
+     * Both people and exactly one team are released together, or neither changes.
+     *
+     * @param people positive number of people to restore
+     * @param teams exactly one team to restore
+     * @throws IllegalArgumentException if people is not positive or teams is not exactly one
+     * @throws IllegalStateException if either occupancy would fall below zero
+     */
+    public void restore(int people, int teams) {
+        int validatedPeople = requirePositive(people, "people");
+        if (teams != 1) {
+            throw new IllegalArgumentException("teams must be exactly one");
+        }
+        if (occupiedPeople < validatedPeople || occupiedTeams < teams) {
+            throw new IllegalStateException("capacity occupancy cannot be restored below zero");
+        }
+        occupiedPeople -= validatedPeople;
+        occupiedTeams -= teams;
+    }
+
     private static Long requirePositive(Long value, String fieldName) {
         if (value == null || value <= 0) {
             throw new IllegalArgumentException(fieldName + " must be positive");
