@@ -236,10 +236,8 @@ $probeId = [guid]::NewGuid().ToString('N')
 $probeRoot = Join-Path $env:TEMP "miriyum-issue52-openapi-probe-$probeId"
 $probePatchPath = Join-Path $env:TEMP "miriyum-issue52-openapi-$probeId.patch"
 $probeResultPath = Join-Path $env:TEMP 'miriyum-issue52-generator-probe.json'
-$sourceModules = (Resolve-Path 'frontend/node_modules').Path
-$probeModules = Join-Path $probeRoot 'frontend/node_modules'
+$generator = (Resolve-Path 'frontend/node_modules/.bin/openapi-typescript.CMD').Path
 $probeAdded = $false
-$moduleJunctionAdded = $false
 $probePatch = @'
 diff --git a/docs/specs/reservation/openapi.yaml b/docs/specs/reservation/openapi.yaml
 --- a/docs/specs/reservation/openapi.yaml
@@ -301,14 +299,26 @@ try {
   git worktree add --detach $probeRoot HEAD
   if ($LASTEXITCODE -ne 0) { throw 'probe worktree add failed' }
   $probeAdded = $true
-  New-Item -ItemType Junction -Path $probeModules -Target $sourceModules | Out-Null
-  $moduleJunctionAdded = $true
   git -C $probeRoot apply --check $probePatchPath
   if ($LASTEXITCODE -ne 0) { throw 'exact OpenAPI probe patch no longer applies' }
   git -C $probeRoot apply $probePatchPath
   if ($LASTEXITCODE -ne 0) { throw 'OpenAPI probe patch failed' }
-  pnpm --dir (Join-Path $probeRoot 'frontend') generate:api
-  if ($LASTEXITCODE -ne 0) { throw 'probe generation failed' }
+  Push-Location (Join-Path $probeRoot 'frontend')
+  try {
+    $generationJobs = @(
+      @('../docs/specs/mvp1-common/openapi.yaml', 'src/shared/api/generated/common.ts'),
+      @('../docs/specs/auth-account/openapi.yaml', 'src/shared/api/generated/auth-account.ts'),
+      @('../docs/specs/store-search/openapi.yaml', 'src/shared/api/generated/store-search.ts'),
+      @('../docs/specs/reservation/openapi.yaml', 'src/shared/api/generated/reservation.ts'),
+      @('../docs/specs/menu-hold-pickup/openapi.yaml', 'src/shared/api/generated/menu-hold-pickup.ts')
+    )
+    foreach ($job in $generationJobs) {
+      & $generator $job[0] -o $job[1]
+      if ($LASTEXITCODE -ne 0) { throw "probe generation failed for $($job[0])" }
+    }
+  } finally {
+    Pop-Location
+  }
   $changed = @(git -C $probeRoot diff --name-only)
   $generated = @($changed | Where-Object {
     $_ -like 'frontend/src/shared/api/generated/*.ts'
@@ -329,9 +339,6 @@ try {
   } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $probeResultPath
 } finally {
   if ($probeAdded) {
-    if ($moduleJunctionAdded -and (Test-Path -LiteralPath $probeModules)) {
-      Remove-Item -LiteralPath $probeModules -Force
-    }
     git -C $probeRoot restore --source=HEAD --staged --worktree -- .
     $dirty = @(git -C $probeRoot status --porcelain --untracked-files=all)
     if ($dirty.Count -eq 0) {
