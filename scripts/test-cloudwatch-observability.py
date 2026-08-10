@@ -175,6 +175,21 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
         self.assertIn('["AWS/EC2", "NetworkOut", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
 
+    def test_refresh_risk_delivery_stall_log_becomes_a_cloudwatch_metric(self):
+        self.assertIn("aws logs put-metric-filter", self.resource_script)
+        self.assertIn('event=refresh_token_risk_event_delivery_stalled', self.resource_script)
+        self.assertIn('metricName=RefreshTokenRiskEventDeliveryStalled', self.resource_script)
+
+    def test_refresh_risk_delivery_stall_metric_has_an_alarm(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name RefreshTokenRiskEventDeliveryStalled", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
 
 if __name__ == "__main__":
     unittest.main()
