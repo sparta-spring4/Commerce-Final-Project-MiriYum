@@ -15,6 +15,8 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationFulfillmentActorType;
+import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
@@ -42,7 +44,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.sql.DataSource;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -54,6 +61,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -83,12 +91,17 @@ class ReservationMigrationTest {
     private static final long STORE_ID = 30_001L;
     private static final long SECOND_STORE_ID = 30_002L;
     private static final Instant CREATED_AT = Instant.parse("2026-08-01T01:00:00Z");
+    private static final Instant REQUESTED_AT = Instant.parse("2026-08-10T01:00:00Z");
+    private static final Instant OCCURRED_AT = REQUESTED_AT.plusSeconds(1);
+    private static final String COMMAND_ID =
+            "reservation-fulfill:store-operator:33:550e8400-e29b-41d4-a716-446655440000";
+    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.0.40");
     private static final String NOTIFICATION_TARGET_REFERENCE =
             "consumer:10001:channel:primary";
 
     @Container
     static final MySQLContainer MYSQL =
-            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
+            new MySQLContainer(MYSQL_IMAGE);
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -102,6 +115,9 @@ class ReservationMigrationTest {
 
     @Autowired
     private ReservationCancellationAuditRepository cancellationAuditRepository;
+
+    @Autowired
+    private ReservationFulfillmentAuditRepository auditRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -130,6 +146,7 @@ class ReservationMigrationTest {
     @BeforeEach
     void resetRowsAndSeedParents() {
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
+        jdbcTemplate.execute("DELETE FROM reservation_fulfillment_audits");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
@@ -242,6 +259,152 @@ class ReservationMigrationTest {
                         "26".equals(String.valueOf(migration.getVersion()))
                                 && "V26__create_reservation_cancellation_audits.sql"
                                 .equals(migration.getScript()));
+    }
+
+    @Test
+    void cleanInstallAppliesFulfillmentAuditMigrationAndJpaRoundTrips() {
+        assertThat(appliedScripts()).contains(migrationScriptName());
+        long reservationId = reservationRepository.saveAndFlush(reservation()).getId();
+        ReservationFulfillmentAudit saved = auditRepository.saveAndFlush(
+                ReservationFulfillmentAudit.recordSuccess(
+                        reservationId, ReservationFulfillmentActorType.STORE_OPERATOR, 33L,
+                        REQUESTED_AT, OCCURRED_AT,
+                        ReservationStatus.CONFIRMED, ReservationStatus.FULFILLED,
+                        9L, 12L, COMMAND_ID
+                )
+        );
+
+        entityManager.clear();
+
+        assertThat(auditRepository.findByReservationId(reservationId))
+                .get()
+                .satisfies(audit -> {
+                    assertThat(audit.getId()).isEqualTo(saved.getId());
+                    assertThat(audit.getReservationId()).isEqualTo(reservationId);
+                    assertThat(audit.getActorType())
+                            .isEqualTo(ReservationFulfillmentActorType.STORE_OPERATOR);
+                    assertThat(audit.getActorId()).isEqualTo(33L);
+                    assertThat(audit.getRequestedAt()).isEqualTo(REQUESTED_AT);
+                    assertThat(audit.getOccurredAt()).isEqualTo(OCCURRED_AT);
+                    assertThat(audit.getBeforeStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+                    assertThat(audit.getAfterStatus()).isEqualTo(ReservationStatus.FULFILLED);
+                    assertThat(audit.getReservationTimePolicyVersion()).isEqualTo(9L);
+                    assertThat(audit.getCapacityPolicyVersion()).isEqualTo(12L);
+                    assertThat(audit.getCommandId()).isEqualTo(COMMAND_ID);
+                });
+    }
+
+    @Test
+    void upgradeFromImmediatelyPreviousVersionPreservesReservationWithoutAuditBackfill()
+            throws Exception {
+        try (MySQLContainer legacy = new MySQLContainer(MYSQL_IMAGE)) {
+            legacy.start();
+            Flyway.configure()
+                    .dataSource(legacy.getJdbcUrl(), legacy.getUsername(), legacy.getPassword())
+                    .target(MigrationVersion.fromVersion(String.valueOf(previousVersion())))
+                    .load()
+                    .migrate();
+            insertV25ParentsAndCancelledReservation(legacy);
+            long reservationId = 40_001L;
+
+            Flyway upgraded = Flyway.configure()
+                    .dataSource(legacy.getJdbcUrl(), legacy.getUsername(), legacy.getPassword())
+                    .load();
+            upgraded.migrate();
+            JdbcTemplate upgradedJdbc = new JdbcTemplate(dataSource(legacy));
+
+            assertThat(statusOf(upgradedJdbc, reservationId)).isEqualTo("CANCELLED");
+            assertThat(countAudits(upgradedJdbc, reservationId)).isZero();
+            assertThat(Arrays.stream(upgraded.info().applied()).map(MigrationInfo::getScript))
+                    .contains(migrationScriptName());
+        }
+    }
+
+    @Test
+    void databaseRejectsDuplicateReservationMissingParentAndParentDelete() {
+        long reservationId = newReservationId();
+        insertAudit(jdbcTemplate, reservationId, "STORE_OPERATOR", 33L,
+                REQUESTED_AT, OCCURRED_AT, "CONFIRMED", "FULFILLED",
+                9L, 12L, COMMAND_ID);
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, reservationId,
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, COMMAND_ID + "-2"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, Long.MAX_VALUE,
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "fk"));
+        assertDatabaseRejects(() -> jdbcTemplate.update(
+                "DELETE FROM reservations WHERE reservation_id = ?",
+                reservationId
+        ));
+    }
+
+    @Test
+    void databaseRejectsEveryRequiredNullColumn() {
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, null, "STORE_OPERATOR", 33L,
+                REQUESTED_AT, OCCURRED_AT, "CONFIRMED", "FULFILLED",
+                9L, 12L, "null-reservation"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(), null, 33L,
+                REQUESTED_AT, OCCURRED_AT, "CONFIRMED", "FULFILLED",
+                9L, 12L, "null-actor-type"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", null, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "null-actor-id"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, null, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "null-requested"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, null,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "null-occurred"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                null, "FULFILLED", 9L, 12L, "null-before"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", null, 9L, 12L, "null-after"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", null, 12L, "null-time-version"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, null, "null-capacity-version"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, null));
+    }
+
+    @Test
+    void databaseRejectsInvalidActorTransitionTimeAndVersions() {
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(), "CONSUMER", 33L,
+                REQUESTED_AT, OCCURRED_AT, "CONFIRMED", "FULFILLED",
+                9L, 12L, "actor"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 0L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "actor-id"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, OCCURRED_AT, REQUESTED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "time"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CANCELLED", "FULFILLED", 9L, 12L, "before"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "CONFIRMED", 9L, 12L, "after"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 0L, 12L, "time-version"));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 0L, "capacity-version"));
+    }
+
+    @Test
+    void databaseRejectsBlankTrimmedAndOversizedCommandIds() {
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "   "));
+        assertDatabaseRejects(() -> insertAudit(jdbcTemplate, newReservationId(),
+                "STORE_OPERATOR", 33L, REQUESTED_AT, OCCURRED_AT,
+                "CONFIRMED", "FULFILLED", 9L, 12L, "a".repeat(101)));
     }
 
     @Test
@@ -2017,6 +2180,111 @@ class ReservationMigrationTest {
             assertThat(resultSet.next()).isFalse();
             return value;
         }
+    }
+
+    private static void assertDatabaseRejects(ThrowingCallable statement) {
+        assertThatThrownBy(statement).isInstanceOf(DataAccessException.class);
+    }
+
+    private static void insertAudit(
+            JdbcTemplate jdbc,
+            Long reservationId,
+            String actorType,
+            Long actorId,
+            Instant requestedAt,
+            Instant occurredAt,
+            String beforeStatus,
+            String afterStatus,
+            Long timeVersion,
+            Long capacityVersion,
+            String commandId
+    ) {
+        jdbc.update(
+                """
+                        INSERT INTO reservation_fulfillment_audits (
+                            reservation_id, actor_type, actor_id, requested_at, occurred_at,
+                            before_status, after_status, reservation_time_policy_version,
+                            capacity_policy_version, command_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                reservationId,
+                actorType,
+                actorId,
+                timestampOrNull(requestedAt),
+                timestampOrNull(occurredAt),
+                beforeStatus,
+                afterStatus,
+                timeVersion,
+                capacityVersion,
+                commandId
+        );
+    }
+
+    private long newReservationId() {
+        return reservationRepository.saveAndFlush(reservation()).getId();
+    }
+
+    private static Timestamp timestampOrNull(Instant value) {
+        return value == null ? null : Timestamp.from(value);
+    }
+
+    private static DataSource dataSource(MySQLContainer mysql) {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+        dataSource.setDriverClassName(mysql.getDriverClassName());
+        dataSource.setUrl(mysql.getJdbcUrl());
+        dataSource.setUsername(mysql.getUsername());
+        dataSource.setPassword(mysql.getPassword());
+        return dataSource;
+    }
+
+    private List<String> appliedScripts() {
+        return Arrays.stream(flyway.info().applied())
+                .map(MigrationInfo::getScript)
+                .toList();
+    }
+
+    private String migrationScriptName() {
+        List<String> matches = appliedScripts().stream()
+                .filter(script -> script.matches(
+                        "V[0-9]+__create_reservation_fulfillment_audits\\.sql"
+                ))
+                .toList();
+        assertThat(matches).hasSize(1);
+        return matches.getFirst();
+    }
+
+    private int latestVersion() {
+        Matcher matcher = Pattern.compile("^V([0-9]+)__")
+                .matcher(migrationScriptName());
+        assertThat(matcher.find()).isTrue();
+        return Integer.parseInt(matcher.group(1));
+    }
+
+    private int previousVersion() {
+        int fulfillmentVersion = latestVersion();
+        return Arrays.stream(flyway.info().applied())
+                .map(MigrationInfo::getVersion)
+                .filter(version -> version != null)
+                .mapToInt(version -> Integer.parseInt(version.toString()))
+                .filter(version -> version < fulfillmentVersion)
+                .max()
+                .orElseThrow();
+    }
+
+    private static String statusOf(JdbcTemplate jdbc, long reservationId) {
+        return jdbc.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                reservationId
+        );
+    }
+
+    private static int countAudits(JdbcTemplate jdbc, long reservationId) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM reservation_fulfillment_audits WHERE reservation_id = ?",
+                Integer.class,
+                reservationId
+        );
     }
 
     private ReservationCancellationAudit cancellationAudit(long reservationId, String reason) {
