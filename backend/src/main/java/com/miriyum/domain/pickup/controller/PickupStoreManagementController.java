@@ -7,6 +7,7 @@ import com.miriyum.domain.pickup.dto.request.StorePickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
+import com.miriyum.domain.pickup.service.PickupCommandFacade;
 import com.miriyum.domain.pickup.service.PickupStoreManagementService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
@@ -29,9 +30,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class PickupStoreManagementController {
 
     private final PickupStoreManagementService service;
+    private final PickupCommandFacade commandFacade;
 
-    public PickupStoreManagementController(PickupStoreManagementService service) {
+    public PickupStoreManagementController(
+            PickupStoreManagementService service,
+            PickupCommandFacade commandFacade
+    ) {
         this.service = service;
+        this.commandFacade = commandFacade;
     }
 
     @GetMapping
@@ -69,7 +75,7 @@ public class PickupStoreManagementController {
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @Valid @RequestBody StorePickupCancellationRequest request
     ) {
-        PickupCommandResult result = service.cancel(
+        PickupCommandResult result = commandFacade.cancelByOperator(
                 principal.accountId(), storeId, pickupReservationId,
                 IdempotencyKey.parse(rawKey), request);
         return ResponseEntity.status(result.httpStatus())
@@ -84,7 +90,7 @@ public class PickupStoreManagementController {
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @RequestBody EmptyPickupCommandRequest request
     ) {
-        PickupCommandResult result = service.fulfill(
+        PickupCommandResult result = commandFacade.fulfill(
                 principal.accountId(), storeId, pickupReservationId,
                 IdempotencyKey.parse(rawKey));
         return ResponseEntity.status(result.httpStatus())

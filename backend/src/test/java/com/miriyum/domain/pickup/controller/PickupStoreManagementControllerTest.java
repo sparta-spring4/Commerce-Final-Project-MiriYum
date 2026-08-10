@@ -17,6 +17,7 @@ import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
+import com.miriyum.domain.pickup.service.PickupCommandFacade;
 import com.miriyum.domain.pickup.service.PickupStoreManagementService;
 import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
 import com.miriyum.global.exception.GlobalExceptionHandler;
@@ -46,6 +47,7 @@ class PickupStoreManagementControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PickupStoreManagementService service;
+    @MockitoBean PickupCommandFacade commandFacade;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @BeforeEach
@@ -83,7 +85,7 @@ class PickupStoreManagementControllerTest {
 
     @Test
     void cancelsManagedStoresPickupWithRequiredReason() throws Exception {
-        given(service.cancel(eq(31L), eq(22L), eq(77L),
+        given(commandFacade.cancelByOperator(eq(31L), eq(22L), eq(77L),
                 any(IdempotencyKey.class), any()))
                 .willReturn(new PickupCommandResult(200, response()));
 
@@ -98,7 +100,8 @@ class PickupStoreManagementControllerTest {
 
     @Test
     void fulfillsManagedStoresPickup() throws Exception {
-        given(service.fulfill(eq(31L), eq(22L), eq(77L), any(IdempotencyKey.class)))
+        given(commandFacade.fulfill(
+                eq(31L), eq(22L), eq(77L), any(IdempotencyKey.class)))
                 .willReturn(new PickupCommandResult(200, response()));
 
         mockMvc.perform(post(ROOT + "/77/fulfillments")
@@ -126,6 +129,7 @@ class PickupStoreManagementControllerTest {
                         .content("{\"status\":\"PICKED_UP\"}"))
                 .andExpect(status().isBadRequest());
         then(service).shouldHaveNoInteractions();
+        then(commandFacade).shouldHaveNoInteractions();
     }
 
     private static PickupReservationResponse response() {

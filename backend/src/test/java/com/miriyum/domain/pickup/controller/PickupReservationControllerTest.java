@@ -17,6 +17,7 @@ import com.miriyum.domain.pickup.dto.response.PickupReservationItemResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.service.PickupCommandResult;
+import com.miriyum.domain.pickup.service.PickupCommandFacade;
 import com.miriyum.domain.pickup.service.PickupReservationService;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -42,13 +43,14 @@ class PickupReservationControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PickupReservationService service;
+    @MockitoBean PickupCommandFacade commandFacade;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
     void createsPickupForAuthenticatedConsumer() throws Exception {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
-        given(service.create(eq(11L), any(IdempotencyKey.class), any()))
+        given(commandFacade.create(eq(11L), any(IdempotencyKey.class), any()))
                 .willReturn(new PickupCommandResult(201, response()));
 
         mockMvc.perform(post(URL)
@@ -67,7 +69,7 @@ class PickupReservationControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.pickupReservationId").value("77"))
                 .andExpect(jsonPath("$.data.items[0].menuId").value("33"));
-        then(service).should().create(eq(11L), any(IdempotencyKey.class), any());
+        then(commandFacade).should().create(eq(11L), any(IdempotencyKey.class), any());
     }
 
     @Test
@@ -84,6 +86,7 @@ class PickupReservationControllerTest {
                                 """))
                 .andExpect(status().isBadRequest());
         then(service).shouldHaveNoInteractions();
+        then(commandFacade).shouldHaveNoInteractions();
     }
 
     @Test
@@ -102,6 +105,7 @@ class PickupReservationControllerTest {
                                 """))
                 .andExpect(status().isBadRequest());
         then(service).shouldHaveNoInteractions();
+        then(commandFacade).shouldHaveNoInteractions();
     }
 
     @Test
@@ -121,7 +125,7 @@ class PickupReservationControllerTest {
     void cancelsAuthenticatedConsumersPickup() throws Exception {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
-        given(service.cancelByConsumer(
+        given(commandFacade.cancelByConsumer(
                 eq(11L), eq(77L), any(IdempotencyKey.class), any()))
                 .willReturn(new PickupCommandResult(200, response()));
 
@@ -132,7 +136,7 @@ class PickupReservationControllerTest {
                         .content("{\"reason\":\"일정 변경\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
-        then(service).should().cancelByConsumer(
+        then(commandFacade).should().cancelByConsumer(
                 eq(11L), eq(77L), any(IdempotencyKey.class), any());
     }
 
