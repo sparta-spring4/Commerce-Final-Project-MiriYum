@@ -14,6 +14,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -1964,6 +1965,69 @@ class ReservationServiceTest {
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
+    @Test
+    @DisplayName("최신 정책에 겹치는 버킷이 없으면 원본 점유만 복구해 취소한다")
+    void cancellationAllowsEmptyCurrentBucketsForNewerPolicy() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command, MenuHoldTerminationPresence.NO_HOLD);
+        ReservationCapacityBucket firstOriginal = fixture.lockedBuckets().get(0);
+        ReservationCapacityBucket secondOriginal = fixture.lockedBuckets().get(1);
+
+        reset(capacityBucketRepository);
+        given(capacityBucketRepository.findLatestPolicyVersion(22L, SERVICE_DATE))
+                .willReturn(Optional.of(4L));
+        given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
+                List.of(22L), SERVICE_DATE, START_TIME, LocalTime.of(19, 15)))
+                .willReturn(List.of());
+        given(capacityBucketRepository.findAllByIdInForUpdate(List.of(301L, 302L)))
+                .willReturn(List.of(firstOriginal, secondOriginal));
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        assertThat(failure).isNull();
+        assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(List.of(firstOriginal, secondOriginal)).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(3);
+            assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+        });
+    }
+
+    @Test
+    @DisplayName("최신 정책이 예약 구간 일부만 덮으면 실제 겹치는 점유도 함께 복구한다")
+    void cancellationAllowsPartialCurrentCoverageForNewerPolicy() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        CancellationFixture fixture = stubSuccessfulCancellation(
+                command, MenuHoldTerminationPresence.NO_HOLD);
+        ReservationCapacityBucket firstOriginal = fixture.lockedBuckets().get(0);
+        ReservationCapacityBucket secondOriginal = fixture.lockedBuckets().get(1);
+        ReservationCapacityBucket current = cancellationBucket(
+                401L, LocalTime.of(18, 15), LocalTime.of(18, 45), 6, 2, 4L);
+
+        given(capacityBucketRepository.findAllByIdInForUpdate(
+                List.of(301L, 302L, 401L)))
+                .willReturn(List.of(firstOriginal, secondOriginal, current));
+
+        Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ));
+
+        assertThat(failure).isNull();
+        assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(List.of(firstOriginal, secondOriginal, current)).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(3);
+            assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {0L, -1L})
     @DisplayName("소비자 취소의 0·음수 예약 ID도 actor 범위 조회로 RESERVATION_001을 반환한다")
@@ -2445,12 +2509,11 @@ class ReservationServiceTest {
         "latest-absent",
         "latest-non-positive",
         "latest-older",
-        "current-empty",
         "current-wrong-store",
         "current-wrong-date",
         "current-wrong-version",
-        "current-coverage-gap",
-        "current-coverage-overlap",
+        "current-non-overlap",
+        "same-version-empty",
         "same-version-id-mismatch",
         "locked-extra",
         "locked-duplicate",
@@ -2494,28 +2557,21 @@ class ReservationServiceTest {
                 observesCurrent = false;
                 locksUnion = false;
             }
-            case "current-empty" -> {
-                currentIds = List.of();
-                locksUnion = false;
-            }
             case "current-wrong-store" ->
                     ReflectionTestUtils.setField(current, "storeId", 23L);
             case "current-wrong-date" -> ReflectionTestUtils.setField(
                     current, "serviceDate", SERVICE_DATE.plusDays(1));
             case "current-wrong-version" ->
                     ReflectionTestUtils.setField(current, "policyVersion", 5L);
-            case "current-coverage-gap" -> {
+            case "current-non-overlap" -> {
                 current = cancellationBucket(
-                        401L, LocalTime.of(18, 15), LocalTime.of(19, 15), 6, 2, 4L);
+                        401L, LocalTime.of(10, 0), LocalTime.of(11, 0), 6, 2, 4L);
                 lockedBuckets = List.of(original, current);
             }
-            case "current-coverage-overlap" -> {
-                ReservationCapacityBucket overlappingFirst = cancellationBucket(
-                        401L, START_TIME, LocalTime.of(18, 45), 6, 2, 4L);
-                ReservationCapacityBucket overlappingSecond = cancellationBucket(
-                        402L, LocalTime.of(18, 30), LocalTime.of(19, 15), 6, 2, 4L);
-                currentIds = List.of(401L, 402L);
-                lockedBuckets = List.of(original, overlappingFirst, overlappingSecond);
+            case "same-version-empty" -> {
+                latestVersion = Optional.of(3L);
+                currentIds = List.of();
+                locksUnion = false;
             }
             case "same-version-id-mismatch" -> {
                 latestVersion = Optional.of(3L);
