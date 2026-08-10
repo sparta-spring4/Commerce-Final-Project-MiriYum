@@ -1,10 +1,13 @@
 package com.miriyum.domain.reservation.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
+import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
@@ -28,6 +31,7 @@ public class ReservationController {
 
     private final ReservationService reservationService;
     private final ReservationCreationCommandFacade reservationCreationCommandFacade;
+    private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     /**
      * Authenticated consumer reservation creation is delegated unchanged to the command facade.
@@ -68,5 +72,20 @@ public class ReservationController {
                 reservationId
         );
         return ApiResponse.success("조회되었습니다.", response);
+    }
+
+    /** Cancels the authenticated consumer's reservation through the cancellation facade. */
+    @PostMapping("/{reservationId}/cancellations")
+    public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long reservationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody ConsumerCancellationRequest request
+    ) {
+        ReservationCancellationCommandResult result =
+                reservationCancellationCommandFacade.cancelByConsumer(
+                        principal.accountId(), reservationId, IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
     }
 }

@@ -9,6 +9,8 @@ import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeRespon
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
+import com.miriyum.domain.reservation.entity.ReservationCancellationAudit;
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -18,16 +20,28 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import jakarta.persistence.EntityManager;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,6 +101,12 @@ class ReservationMigrationTest {
     private ReservationRepository reservationRepository;
 
     @Autowired
+    private ReservationCancellationAuditRepository cancellationAuditRepository;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
     private ReservationTimePolicyVersionRepository timePolicyRepository;
 
     @Autowired
@@ -110,6 +130,7 @@ class ReservationMigrationTest {
     @BeforeEach
     void resetRowsAndSeedParents() {
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
+        jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
         jdbcTemplate.execute("DELETE FROM reservation_time_policy_audits");
@@ -211,6 +232,290 @@ class ReservationMigrationTest {
                         "24".equals(String.valueOf(migration.getVersion()))
                                 && "V24__add_reservation_cancellation_contract.sql"
                                 .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("성공 취소 감사 스키마는 Flyway V26으로 적용된다")
+    void appliesCancellationAuditAsFlywayV26() {
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "26".equals(String.valueOf(migration.getVersion()))
+                                && "V26__create_reservation_cancellation_audits.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("Flyway 감사 테이블과 JPA 매핑으로 성공 취소 감사를 저장하고 예약으로 조회한다")
+    void persistsCancellationAuditAndFindsItByReservationId() {
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+        ReservationCancellationAudit savedAudit = cancellationAuditRepository.saveAndFlush(
+                cancellationAudit(savedReservation.getId(), "운영자 취소")
+        );
+
+        entityManager.clear();
+
+        ReservationCancellationAudit found = cancellationAuditRepository
+                .findByReservationId(savedReservation.getId())
+                .orElseThrow();
+
+        assertThat(found.getId()).isEqualTo(savedAudit.getId());
+        assertThat(found.getReservationId()).isEqualTo(savedReservation.getId());
+        assertThat(found.getActorType()).isEqualTo(ReservationCancellationActorType.STORE_OPERATOR);
+        assertThat(found.getCancellationReason()).isEqualTo("운영자 취소");
+        assertThat(found.getCommandId()).isEqualTo(cancellationAuditCommandId());
+    }
+
+    @Test
+    @DisplayName("성공 취소 감사의 MySQL 제약은 중복·참조·actor·사유·시각·상태·버전·명령을 거부한다")
+    void rejectsInvalidCancellationAuditRows() {
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+        insertCancellationAudit(
+                savedReservation.getId(),
+                "STORE_OPERATOR",
+                STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소",
+                CREATED_AT,
+                CREATED_AT.plusSeconds(1),
+                "CONFIRMED",
+                "CANCELLED",
+                1L,
+                1L,
+                cancellationAuditCommandId()
+        );
+
+        assertThatThrownBy(() -> insertCancellationAudit(
+                savedReservation.getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, "reservation-cancel:store-operator:20001:duplicate"
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uk_reservation_cancellation_audits_reservation");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                999_999L, "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("fk_reservation_cancellation_audits_reservation");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "SYSTEM", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_actor_type");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "CONSUMER", 0L,
+                null, CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_actor_id");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                null, CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_reason");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_reason");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "a".repeat(501), CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT.plusSeconds(1), CREATED_AT, "CONFIRMED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_time");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CANCELLED", "CANCELLED",
+                1L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_transition");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                0L, 1L, cancellationAuditCommandId()
+        )).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_reservation_cancellation_audits_versions");
+        assertThatThrownBy(() -> insertCancellationAudit(
+                reservationRepository.saveAndFlush(reservation()).getId(), "STORE_OPERATOR", STORE_OPERATOR_ACCOUNT_ID,
+                "운영자 취소", CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED",
+                1L, 1L, "a".repeat(101)
+        )).isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @DisplayName("소비자 null 사유·운영자 공백 사유·90자 correlation은 JDBC와 JPA에서 보존된다")
+    void acceptsCancellationAuditCompatibilityBoundaries() {
+        Reservation consumerReservation = reservationRepository.saveAndFlush(reservation());
+        Reservation operatorReservation = reservationRepository.saveAndFlush(reservation());
+        String maxCorrelation = "reservation-cancel:store-operator:" + Long.MAX_VALUE + ":" + "a".repeat(36);
+
+        insertCancellationAudit(
+                consumerReservation.getId(), "CONSUMER", CONSUMER_ACCOUNT_ID, null,
+                CREATED_AT, CREATED_AT.plusSeconds(1), "CONFIRMED", "CANCELLED", 1L, 1L,
+                "reservation-cancel:consumer:10001:jdbc"
+        );
+        ReservationCancellationAudit saved = cancellationAuditRepository.saveAndFlush(
+                ReservationCancellationAudit.recordSuccess(
+                        operatorReservation.getId(),
+                        ReservationCancellationActorType.STORE_OPERATOR,
+                        STORE_OPERATOR_ACCOUNT_ID,
+                        " ",
+                        CREATED_AT,
+                        CREATED_AT.plusSeconds(1),
+                        ReservationStatus.CONFIRMED,
+                        ReservationStatus.CANCELLED,
+                        1L,
+                        1L,
+                        maxCorrelation
+                )
+        );
+
+        entityManager.clear();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT cancellation_reason FROM reservation_cancellation_audits WHERE reservation_id = ?",
+                String.class,
+                consumerReservation.getId()
+        )).isNull();
+        assertThat(cancellationAuditRepository.findByReservationId(operatorReservation.getId()))
+                .get()
+                .extracting(
+                        ReservationCancellationAudit::getId,
+                        ReservationCancellationAudit::getCancellationReason,
+                        ReservationCancellationAudit::getCommandId
+                )
+                .containsExactly(saved.getId(), " ", maxCorrelation);
+    }
+
+    @Test
+    @DisplayName("예약 취소 actor 범위 조회는 상태를 숨기지 않고 실제 쓰기 잠금을 유지한다")
+    void reservationRepositoryContractsScopeAndHoldWriteLocks() throws Exception {
+        // given
+        long secondConsumerAccountId = CONSUMER_ACCOUNT_ID + 1;
+        jdbcTemplate.update(
+                """
+                        INSERT INTO consumer_accounts (
+                            consumer_account_id, email, password_hash, name, status,
+                            created_at, updated_at
+                        ) VALUES (?, 'second-reservation-test@example.com', 'hashed',
+                                  '두 번째 예약자', 'ACTIVE', NOW(6), NOW(6))
+                        """,
+                secondConsumerAccountId
+        );
+        insertStore(SECOND_STORE_ID, "1234567891", "두 번째 매장");
+
+        Reservation consumerReservation = reservationRepository.saveAndFlush(
+                reservation(CONSUMER_ACCOUNT_ID, STORE_ID)
+        );
+        Reservation operatorReservation = reservationRepository.saveAndFlush(
+                reservation(secondConsumerAccountId, SECOND_STORE_ID)
+        );
+        Reservation cancelledReservation = reservation(
+                secondConsumerAccountId, SECOND_STORE_ID);
+        cancelledReservation.cancel(CREATED_AT.plusSeconds(1));
+        Reservation savedCancelledReservation =
+                reservationRepository.saveAndFlush(cancelledReservation);
+
+        Method consumerLockMethod = requiredRepositoryMethod(
+                reservationRepository,
+                "findByIdAndConsumerAccountIdForUpdate",
+                2
+        );
+        Method operatorLockMethod = requiredRepositoryMethod(
+                reservationRepository,
+                "findByIdAndStoreIdForUpdate",
+                2
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> consumerScoped = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        consumerReservation.getId(),
+                        CONSUMER_ACCOUNT_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> operatorScoped = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        operatorReservation.getId(),
+                        SECOND_STORE_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> foreignConsumer = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        consumerReservation.getId(),
+                        secondConsumerAccountId
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> foreignStore = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        operatorReservation.getId(),
+                        STORE_ID
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> cancelledForConsumer = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        consumerLockMethod,
+                        reservationRepository,
+                        savedCancelledReservation.getId(),
+                        secondConsumerAccountId
+                )
+        );
+        @SuppressWarnings("unchecked")
+        Optional<Reservation> cancelledForStore = transactionTemplate.execute(status ->
+                (Optional<Reservation>) invokeRepositoryMethod(
+                        operatorLockMethod,
+                        reservationRepository,
+                        savedCancelledReservation.getId(),
+                        SECOND_STORE_ID
+                )
+        );
+
+        // then
+        assertThat(consumerScoped)
+                .get()
+                .extracting(Reservation::getId, Reservation::getConsumerAccountId)
+                .containsExactly(consumerReservation.getId(), CONSUMER_ACCOUNT_ID);
+        assertThat(operatorScoped)
+                .get()
+                .extracting(Reservation::getId, Reservation::getStoreId)
+                .containsExactly(operatorReservation.getId(), SECOND_STORE_ID);
+        assertThat(foreignConsumer).isEmpty();
+        assertThat(foreignStore).isEmpty();
+        assertThat(cancelledForConsumer).get().extracting(Reservation::getStatus)
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(cancelledForStore).get().extracting(Reservation::getStatus)
+                .isEqualTo(ReservationStatus.CANCELLED);
+
+        assertReservationWriteLock(
+                consumerLockMethod,
+                consumerReservation.getId(),
+                CONSUMER_ACCOUNT_ID
+        );
+        assertReservationWriteLock(
+                operatorLockMethod,
+                operatorReservation.getId(),
+                SECOND_STORE_ID
+        );
     }
 
     @Test
@@ -835,6 +1140,55 @@ class ReservationMigrationTest {
     }
 
     @Test
+    @DisplayName("V25 취소 예약은 V26 업그레이드 뒤 변경이나 감사 backfill 없이 보존된다")
+    void preservesCancelledV25ReservationWithoutInventingAuditWhenUpgradingToLatest() throws Exception {
+        try (MySQLContainer legacyMysql =
+                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))) {
+            legacyMysql.start();
+            Flyway.configure().dataSource(
+                    legacyMysql.getJdbcUrl(),
+                    legacyMysql.getUsername(),
+                    legacyMysql.getPassword())
+                    .target(MigrationVersion.fromVersion("25")).load().migrate();
+            insertV25ParentsAndCancelledReservation(legacyMysql);
+
+            String beforeMigration;
+            Long beforeCancellationPolicyVersion;
+            try (Connection connection = legacyConnection(legacyMysql)) {
+                beforeMigration = readLegacyReservation(connection);
+                beforeCancellationPolicyVersion = readCancellationPolicyVersion(connection);
+            }
+
+            Flyway upgraded = Flyway.configure().dataSource(
+                    legacyMysql.getJdbcUrl(),
+                    legacyMysql.getUsername(),
+                    legacyMysql.getPassword()).load();
+            upgraded.migrate();
+
+            try (Connection connection = legacyConnection(legacyMysql)) {
+                assertThat(readLegacyReservation(connection)).isEqualTo(beforeMigration);
+                assertThat(readCancellationPolicyVersion(connection))
+                        .isEqualTo(beforeCancellationPolicyVersion);
+                try (Statement statement = connection.createStatement();
+                     ResultSet resultSet = statement.executeQuery("""
+                             SELECT COUNT(*) AS audit_count
+                             FROM reservation_cancellation_audits
+                             WHERE reservation_id = 40001
+                             """)) {
+                    assertThat(resultSet.next()).isTrue();
+                    assertThat(resultSet.getLong("audit_count")).isZero();
+                    assertThat(resultSet.next()).isFalse();
+                }
+            }
+            assertThat(upgraded.info().applied())
+                    .anyMatch(migration ->
+                            "26".equals(String.valueOf(migration.getVersion()))
+                                    && "V26__create_reservation_cancellation_audits.sql"
+                                    .equals(migration.getScript()));
+        }
+    }
+
+    @Test
     @DisplayName("예약 당시 알림 대상 참조와 연락 가능 상태가 유효해야 한다")
     void rejectsInvalidContactSnapshot() {
         // when & then
@@ -1013,12 +1367,469 @@ class ReservationMigrationTest {
                 );
     }
 
+    @Test
+    @DisplayName("취소 복구용 원본 배정 조회는 버킷 PK 오름차순으로 반환한다")
+    void allocationRepositoryContractReturnsBucketAscending() {
+        // given
+        Reservation savedReservation = reservationRepository.saveAndFlush(reservation());
+        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                secondBucket.getId(),
+                4,
+                secondBucket.getPolicyVersion()
+        ));
+        capacityAllocationRepository.saveAndFlush(ReservationCapacityAllocation.allocate(
+                savedReservation.getId(),
+                firstBucket.getId(),
+                4,
+                firstBucket.getPolicyVersion()
+        ));
+        Method allocationMethod = requiredRepositoryMethod(
+                capacityAllocationRepository,
+                "findAllByReservationIdOrderByCapacityBucketIdAsc",
+                1
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        List<ReservationCapacityAllocation> allocations = transactionTemplate.execute(status ->
+                (List<ReservationCapacityAllocation>) invokeRepositoryMethod(
+                        allocationMethod,
+                        capacityAllocationRepository,
+                        savedReservation.getId()
+                )
+        );
+
+        // then
+        assertThat(allocations)
+                .extracting(ReservationCapacityAllocation::getCapacityBucketId)
+                .containsExactly(firstBucket.getId(), secondBucket.getId());
+    }
+
+    @Test
+    @DisplayName("최신 수용량 정책 버전 조회는 매장과 업무 날짜 범위를 유지한다")
+    void latestPolicyVersionRepositoryContractUsesStoreAndServiceDateScope() {
+        // given
+        capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        insertStore(SECOND_STORE_ID, "1234567891", "두번째 매장");
+        capacityBucketRepository.saveAndFlush(capacityBucket(
+                SECOND_STORE_ID,
+                9L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
+        ));
+        capacityBucketRepository.saveAndFlush(ReservationCapacityBucket.create(
+                STORE_ID,
+                LocalDate.of(2026, 8, 2),
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30),
+                20,
+                5,
+                0,
+                0,
+                1,
+                8,
+                true,
+                8L
+        ));
+        Method latestVersionMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findLatestPolicyVersion",
+                2
+        );
+
+        // when
+        @SuppressWarnings("unchecked")
+        Optional<Long> latestVersion = transactionTemplate.execute(status ->
+                (Optional<Long>) invokeRepositoryMethod(
+                        latestVersionMethod,
+                        capacityBucketRepository,
+                        STORE_ID,
+                        LocalDate.of(2026, 8, 1)
+                )
+        );
+
+        // then
+        assertThat(latestVersion).contains(3L);
+    }
+
+    @Test
+    @DisplayName("취소 후보 ID 관찰은 엔티티를 잔류시키지 않아 후속 잠금이 동시 점유를 보존한다")
+    void reservationRepositoryContractScalarObservationPreservesConcurrentOccupancy()
+            throws Exception {
+        ReservationCapacityBucket bucket = capacityBucket(
+                3L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
+        );
+        bucket.occupy(3);
+        ReservationCapacityBucket saved = capacityBucketRepository.saveAndFlush(bucket);
+        Method observationMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findLatestPolicyBucketIdsOverlapping",
+                4
+        );
+
+        CountDownLatch observationCompleted = new CountDownLatch(1);
+        CountDownLatch concurrentCommitCompleted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> cancellationWorker = executor.submit(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    @SuppressWarnings("unchecked")
+                    List<Long> observedIds = (List<Long>) invokeRepositoryMethod(
+                            observationMethod,
+                            capacityBucketRepository,
+                            List.of(STORE_ID),
+                            LocalDate.of(2026, 8, 1),
+                            LocalTime.of(18, 0),
+                            LocalTime.of(18, 30)
+                    );
+                    assertThat(observedIds).containsExactly(saved.getId());
+                    observationCompleted.countDown();
+                    try {
+                        if (!concurrentCommitCompleted.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("concurrent occupancy timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(
+                                "concurrent occupancy wait interrupted", exception);
+                    }
+
+                    List<ReservationCapacityBucket> locked =
+                            capacityBucketRepository.findAllByIdInForUpdate(observedIds);
+                    assertThat(locked).singleElement().satisfies(latest -> {
+                        assertThat(latest.getOccupiedPeople()).isEqualTo(5);
+                        assertThat(latest.getOccupiedTeams()).isEqualTo(2);
+                        latest.restore(3, 1);
+                    });
+                }));
+
+        try {
+            assertThat(observationCompleted.await(5, TimeUnit.SECONDS))
+                    .as("scalar observation must complete before concurrent occupancy")
+                    .isTrue();
+            transactionTemplate.executeWithoutResult(status -> {
+                List<ReservationCapacityBucket> locked =
+                        capacityBucketRepository.findAllByIdInForUpdate(List.of(saved.getId()));
+                assertThat(locked).singleElement().satisfies(current -> current.occupy(2));
+            });
+            concurrentCommitCompleted.countDown();
+        } finally {
+            concurrentCommitCompleted.countDown();
+            try {
+                cancellationWorker.get(5, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+
+        assertThat(jdbcTemplate.queryForMap(
+                """
+                        SELECT occupied_people, occupied_teams
+                        FROM reservation_capacity_buckets
+                        WHERE reservation_capacity_bucket_id = ?
+                        """,
+                saved.getId()
+        ))
+                .containsEntry("occupied_people", 2)
+                .containsEntry("occupied_teams", 1);
+    }
+
+    @Test
+    @DisplayName("앞 버킷 복구가 flush된 뒤 다음 버킷 underflow가 나면 전체 복구가 rollback된다")
+    void reservationRepositoryContractRollsBackFlushedRestoreBeforeLaterUnderflow() {
+        ReservationCapacityBucket first = capacityBucket(
+                3L,
+                LocalTime.of(18, 0),
+                LocalTime.of(18, 30)
+        );
+        first.occupy(3);
+        ReservationCapacityBucket second = capacityBucket(
+                3L,
+                LocalTime.of(18, 30),
+                LocalTime.of(19, 0)
+        );
+        second.occupy(2);
+        List<ReservationCapacityBucket> saved =
+                capacityBucketRepository.saveAllAndFlush(List.of(first, second));
+        List<Long> bucketIds = saved.stream()
+                .map(ReservationCapacityBucket::getId)
+                .sorted()
+                .toList();
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            List<ReservationCapacityBucket> locked =
+                    capacityBucketRepository.findAllByIdInForUpdate(bucketIds);
+            locked.getFirst().restore(3, 1);
+            entityManager.flush();
+            locked.get(1).restore(3, 1);
+        }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("capacity occupancy cannot be restored below zero");
+
+        assertThat(jdbcTemplate.queryForList(
+                """
+                        SELECT occupied_people, occupied_teams
+                        FROM reservation_capacity_buckets
+                        WHERE reservation_capacity_bucket_id IN (?, ?)
+                        ORDER BY reservation_capacity_bucket_id ASC
+                        """,
+                bucketIds.get(0),
+                bucketIds.get(1)
+        ))
+                .extracting(
+                        row -> row.get("occupied_people"),
+                        row -> row.get("occupied_teams")
+                )
+                .containsExactly(
+                        tuple(3, 1),
+                        tuple(2, 1)
+                );
+    }
+
+    @Test
+    @DisplayName("취소 복구용 수용량 잠금 조회는 PK 오름차순 행을 반환하고 쓰기 잠금을 유지한다")
+    void orderedLockRepositoryContractReturnsSortedRowsAndHoldsWriteLock() throws Exception {
+        // given
+        ReservationCapacityBucket firstBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(1L, LocalTime.of(18, 0), LocalTime.of(18, 30))
+        );
+        ReservationCapacityBucket secondBucket = capacityBucketRepository.saveAndFlush(
+                capacityBucket(3L, LocalTime.of(18, 30), LocalTime.of(19, 0))
+        );
+        Method orderedLockMethod = requiredRepositoryMethod(
+                capacityBucketRepository,
+                "findAllByIdInForUpdate",
+                1
+        );
+
+        CountDownLatch repositoryLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseRepositoryLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                @SuppressWarnings("unchecked")
+                List<ReservationCapacityBucket> lockedBuckets =
+                        (List<ReservationCapacityBucket>) invokeRepositoryMethod(
+                                orderedLockMethod,
+                                capacityBucketRepository,
+                                List.of(secondBucket.getId(), firstBucket.getId())
+                        );
+                assertThat(lockedBuckets)
+                        .extracting(ReservationCapacityBucket::getId)
+                        .containsExactly(firstBucket.getId(), secondBucket.getId());
+                repositoryLockHeld.countDown();
+                try {
+                    if (!releaseRepositoryLock.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("repository lock release timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("repository lock wait interrupted", exception);
+                }
+            }));
+
+            try {
+                try (Connection independentConnection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(),
+                        MYSQL.getUsername(),
+                        MYSQL.getPassword()
+                )) {
+                    assertThat(repositoryLockHeld.await(5, TimeUnit.SECONDS))
+                            .as("repository PESSIMISTIC_WRITE lock must be held before NOWAIT check")
+                            .isTrue();
+                    independentConnection.setAutoCommit(false);
+
+                    SQLException lockFailure = null;
+                    try (PreparedStatement statement = independentConnection.prepareStatement("""
+                            SELECT reservation_capacity_bucket_id
+                            FROM reservation_capacity_buckets
+                            WHERE reservation_capacity_bucket_id = ?
+                            FOR UPDATE NOWAIT
+                            """)) {
+                        statement.setLong(1, firstBucket.getId());
+                        statement.executeQuery();
+                    } catch (SQLException exception) {
+                        lockFailure = exception;
+                    }
+
+                    assertThat((Throwable) lockFailure)
+                            .as("MySQL must reject NOWAIT while the repository write lock is held")
+                            .isNotNull();
+                    assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
+                }
+            } finally {
+                releaseRepositoryLock.countDown();
+                worker.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private void assertReservationWriteLock(
+            Method repositoryMethod,
+            long reservationId,
+            long actorScopeId
+    ) throws Exception {
+        CountDownLatch reservationLockHeld = new CountDownLatch(1);
+        CountDownLatch releaseReservationLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> worker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                @SuppressWarnings("unchecked")
+                Optional<Reservation> lockedReservation =
+                        (Optional<Reservation>) invokeRepositoryMethod(
+                                repositoryMethod,
+                                reservationRepository,
+                                reservationId,
+                                actorScopeId
+                        );
+                assertThat(lockedReservation).isPresent();
+                reservationLockHeld.countDown();
+                try {
+                    if (!releaseReservationLock.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("reservation lock release timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "reservation lock wait interrupted", exception);
+                }
+            }));
+
+            try {
+                assertThat(reservationLockHeld.await(5, TimeUnit.SECONDS))
+                        .as("Reservation write lock must be held before NOWAIT check")
+                        .isTrue();
+                try (Connection independentConnection = DriverManager.getConnection(
+                        MYSQL.getJdbcUrl(),
+                        MYSQL.getUsername(),
+                        MYSQL.getPassword()
+                )) {
+                    independentConnection.setAutoCommit(false);
+                    SQLException lockFailure = null;
+                    try (PreparedStatement statement = independentConnection.prepareStatement("""
+                            SELECT reservation_id
+                            FROM reservations
+                            WHERE reservation_id = ?
+                            FOR UPDATE NOWAIT
+                            """)) {
+                        statement.setLong(1, reservationId);
+                        statement.executeQuery();
+                    } catch (SQLException exception) {
+                        lockFailure = exception;
+                    }
+
+                    assertThat((Throwable) lockFailure)
+                            .as("MySQL must reject NOWAIT while Reservation write lock is held")
+                            .isNotNull();
+                    assertThat(lockFailure.getErrorCode()).isEqualTo(3572);
+                }
+            } finally {
+                releaseReservationLock.countDown();
+                worker.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private Method requiredRepositoryMethod(
+            Object repository,
+            String methodName,
+            int parameterCount
+    ) {
+        Optional<Method> method = Arrays.stream(repository.getClass().getMethods())
+                .filter(candidate -> candidate.getName().equals(methodName))
+                .filter(candidate -> candidate.getParameterCount() == parameterCount)
+                .findFirst();
+        assertThat(method)
+                .as("repository method %s must be present before its contract is invoked", methodName)
+                .isPresent();
+        return method.orElseThrow();
+    }
+
+    private Object invokeRepositoryMethod(Method method, Object repository, Object... arguments) {
+        try {
+            return method.invoke(repository, arguments);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("repository contract invocation failed", exception);
+        }
+    }
+
     private Connection legacyConnection(MySQLContainer legacyMysql) throws Exception {
         return DriverManager.getConnection(
                 legacyMysql.getJdbcUrl(),
                 legacyMysql.getUsername(),
                 legacyMysql.getPassword()
         );
+    }
+
+    private void insertV25ParentsAndCancelledReservation(MySQLContainer legacyMysql) throws Exception {
+        try (Connection connection = legacyConnection(legacyMysql);
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO consumer_accounts (
+                        consumer_account_id, email, password_hash, name, status, created_at, updated_at
+                    ) VALUES (
+                        10001, 'v25-reservation@example.com', 'hashed', 'V25 예약자', 'ACTIVE',
+                        '2026-08-01 00:00:00.000000', '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO store_operator_accounts (
+                        store_operator_account_id, email, password_hash, display_name, status, created_at, updated_at
+                    ) VALUES (
+                        20001, 'v25-reservation-owner@example.com', 'hashed', 'V25 운영자', 'ACTIVE',
+                        '2026-08-01 00:00:00.000000', '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO stores (
+                        store_id, store_operator_account_id, business_registration_number, business_type,
+                        name, description, region, address, time_zone_id, applicant_self_attested_at,
+                        required_terms_agreed_at, required_terms_version, store_category_code,
+                        verification_status, operation_status, reservation_enabled, menu_hold_enabled,
+                        pickup_enabled, created_at, updated_at
+                    ) VALUES (
+                        30001, 20001, '1234567890', 'CAFE', 'V25 매장', '', 'SEOUL', '서울시 중구',
+                        'Asia/Seoul', '2026-08-01 00:00:00.000000', '2026-08-01 00:00:00.000000',
+                        'STORE_ONBOARDING_REQUIRED_TERMS_V1', 'CAFE_BAKERY', 'APPROVED', 'OPEN',
+                        TRUE, TRUE, TRUE, '2026-08-01 00:00:00.000000', '2026-08-01 00:00:00.000000'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO reservations (
+                        reservation_id, consumer_account_id, store_id, store_name_snapshot, service_date,
+                        start_time, end_time, adult_count, child_count, infant_count,
+                        notification_target_reference, contact_available_at_confirmation,
+                        capacity_policy_version, reservation_policy_version, cancellation_policy_version,
+                        status, created_at, cancelled_at, fulfilled_at
+                    ) VALUES (
+                        40001, 10001, 30001, 'V25 매장', '2026-08-01',
+                        '18:00:00.000000', '19:00:00.000000', 2, 1, 1,
+                        'consumer:10001:channel:primary', TRUE, 7, 9, 1,
+                        'CANCELLED', '2026-08-01 01:00:00.000000',
+                        '2026-08-01 02:00:00.000000', NULL
+                    )
+                    """);
+        }
     }
 
     private void insertLegacyParentsAndReservation(Connection connection) throws Exception {
@@ -1194,12 +2005,85 @@ class ReservationMigrationTest {
         }
     }
 
+    private Long readCancellationPolicyVersion(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("""
+                     SELECT cancellation_policy_version
+                     FROM reservations
+                     WHERE reservation_id = 40001
+                     """)) {
+            assertThat(resultSet.next()).isTrue();
+            Long value = resultSet.getObject("cancellation_policy_version", Long.class);
+            assertThat(resultSet.next()).isFalse();
+            return value;
+        }
+    }
+
+    private ReservationCancellationAudit cancellationAudit(long reservationId, String reason) {
+        return ReservationCancellationAudit.recordSuccess(
+                reservationId,
+                ReservationCancellationActorType.STORE_OPERATOR,
+                STORE_OPERATOR_ACCOUNT_ID,
+                reason,
+                CREATED_AT,
+                CREATED_AT.plusSeconds(1),
+                ReservationStatus.CONFIRMED,
+                ReservationStatus.CANCELLED,
+                1L,
+                1L,
+                cancellationAuditCommandId()
+        );
+    }
+
+    private String cancellationAuditCommandId() {
+        return "reservation-cancel:store-operator:20001:550e8400-e29b-41d4-a716-446655440000";
+    }
+
+    private void insertCancellationAudit(
+            long reservationId,
+            String actorType,
+            long actorId,
+            String reason,
+            Instant requestedAt,
+            Instant occurredAt,
+            String beforeStatus,
+            String afterStatus,
+            long cancellationPolicyVersion,
+            long capacityPolicyVersion,
+            String commandId
+    ) {
+        jdbcTemplate.update(
+                """
+                        INSERT INTO reservation_cancellation_audits (
+                            reservation_id, actor_type, actor_id, cancellation_reason, requested_at,
+                            occurred_at, before_status, after_status, cancellation_policy_version,
+                            capacity_policy_version, command_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                reservationId,
+                actorType,
+                actorId,
+                reason,
+                Timestamp.from(requestedAt),
+                Timestamp.from(occurredAt),
+                beforeStatus,
+                afterStatus,
+                cancellationPolicyVersion,
+                capacityPolicyVersion,
+                commandId
+        );
+    }
+
     private Reservation reservation() {
+        return reservation(CONSUMER_ACCOUNT_ID, STORE_ID);
+    }
+
+    private Reservation reservation(long consumerAccountId, long storeId) {
         return Reservation.confirm(
-                CONSUMER_ACCOUNT_ID,
-                STORE_ID,
+                consumerAccountId,
+                storeId,
                 "미리윰",
-                reservationTimeSnapshot(),
+                reservationTimeSnapshot(storeId),
                 PartyComposition.of(2, 1, 1),
                 ReservationContactSnapshot.contactable(NOTIFICATION_TARGET_REFERENCE),
                 1L,
@@ -1209,7 +2093,11 @@ class ReservationMigrationTest {
     }
 
     private ReservationTimeSnapshot reservationTimeSnapshot() {
-        ReservationTimePolicyVersion policy = timePolicy(1L);
+        return reservationTimeSnapshot(STORE_ID);
+    }
+
+    private ReservationTimeSnapshot reservationTimeSnapshot(long storeId) {
+        ReservationTimePolicyVersion policy = timePolicy(storeId, 1L);
         policy.activate(CREATED_AT.minusSeconds(60), "예약 계산 정책");
         return ReservationTimeSnapshot.calculate(
                 policy,
@@ -1258,8 +2146,12 @@ class ReservationMigrationTest {
     }
 
     private ReservationTimePolicyVersion timePolicy(long versionNumber) {
+        return timePolicy(STORE_ID, versionNumber);
+    }
+
+    private ReservationTimePolicyVersion timePolicy(long storeId, long versionNumber) {
         return ReservationTimePolicyVersion.createDraft(
-                STORE_ID,
+                storeId,
                 versionNumber,
                 30,
                 90,

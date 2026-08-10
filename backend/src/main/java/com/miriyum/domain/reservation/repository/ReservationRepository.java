@@ -67,9 +67,31 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             Long consumerAccountId
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select reservation from Reservation reservation
+            where reservation.id = :reservationId
+              and reservation.consumerAccountId = :consumerAccountId
+            """)
+    Optional<Reservation> findByIdAndConsumerAccountIdForUpdate(
+            @Param("reservationId") Long reservationId,
+            @Param("consumerAccountId") Long consumerAccountId
+    );
+
     Optional<Reservation> findByIdAndStoreId(
             Long reservationId,
             Long storeId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select reservation from Reservation reservation
+            where reservation.id = :reservationId
+              and reservation.storeId = :storeId
+            """)
+    Optional<Reservation> findByIdAndStoreIdForUpdate(
+            @Param("reservationId") Long reservationId,
+            @Param("storeId") Long storeId
     );
 
     Page<Reservation> findAllByConsumerAccountId(

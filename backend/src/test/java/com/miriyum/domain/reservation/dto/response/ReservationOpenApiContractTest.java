@@ -226,6 +226,44 @@ class ReservationOpenApiContractTest {
                 .containsEntry("$ref", "#/components/responses/StoreNotFound");
     }
 
+    @Test
+    void cancellationOperationsKeepReasonAndDetailContractsExplicit() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> consumerOperation = map(map(paths.get(
+                "/api/v1/reservations/{reservationId}/cancellations"
+        )).get("post"));
+        Map<String, Object> operatorOperation = map(map(paths.get(
+                "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations"
+        )).get("post"));
+
+        assertCancellationOperation(
+                consumerOperation,
+                "#/components/schemas/ConsumerCancellationRequest"
+        );
+        assertCancellationOperation(
+                operatorOperation,
+                "#/components/schemas/StoreCancellationRequest"
+        );
+
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> responses = map(components.get("responses"));
+        Map<String, Object> reservationStateConflict = map(
+                responses.get("ReservationStateConflict")
+        );
+        assertThat(reservationStateConflict.toString())
+                .contains("RESERVATION_005", "RESERVATION_006");
+
+        Map<String, Object> detail = map(map(components.get("schemas")).get("ReservationDetail"));
+        assertThat(list(detail.get("required")))
+                .contains("cancelledBy", "cancellationReason");
+        assertThat(map(detail.get("properties")))
+                .containsKeys("cancelledBy", "cancellationReason")
+                .doesNotContainKey("cancelledAt");
+    }
+
     private static void assertPolicyCommand(
             Map<String, Object> operation,
             String requestSchemaRef
@@ -245,6 +283,31 @@ class ReservationOpenApiContractTest {
 
         assertThat(map(operation.get("responses")))
                 .containsKeys("200", "400", "401", "403", "404", "409");
+    }
+
+    private static void assertCancellationOperation(
+            Map<String, Object> operation,
+            String requestSchemaRef
+    ) {
+        assertThat(list(operation.get("security"))).anySatisfy(requirement ->
+                assertThat(map(requirement)).containsKey("bearerAuth"));
+        assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry(
+                        "$ref",
+                        "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                ));
+
+        Map<String, Object> requestBody = map(operation.get("requestBody"));
+        assertThat(requestBody).containsEntry("required", true);
+        Map<String, Object> json = map(map(requestBody.get("content")).get("application/json"));
+        assertThat(map(json.get("schema"))).containsEntry("$ref", requestSchemaRef);
+
+        Map<String, Object> responses = map(operation.get("responses"));
+        assertThat(responses).containsKeys("200", "400", "401", "403", "404", "409");
+        Map<String, Object> success = map(responses.get("200"));
+        Map<String, Object> successJson = map(map(success.get("content")).get("application/json"));
+        assertThat(map(successJson.get("schema")))
+                .containsEntry("$ref", "#/components/schemas/ReservationSuccessResponse");
     }
 
     private static Map<String, Object> load(Path contract) throws IOException {
