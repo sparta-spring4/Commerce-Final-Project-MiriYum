@@ -67,6 +67,10 @@ public class MenuHoldAvailabilityQueryService {
         }
         var start = time.startAt().atZone(zone);
         var end = time.serviceEndAt().atZone(zone);
+        if (start.getOffset().getTotalSeconds() != time.startOffsetSeconds()
+                || end.getOffset().getTotalSeconds() != time.serviceEndOffsetSeconds()) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
         List<MenuHoldAvailabilityResponse.Item> items = List.of();
         if (!menus.isEmpty()) {
             List<MenuInventoryAvailability> availability = inventoryService.findOnlineAvailability(
@@ -102,7 +106,10 @@ public class MenuHoldAvailabilityQueryService {
                 || !end.equals(LocalDateTime.of(bucket.endDate(), bucket.endTime()))) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
+        int availableOnlineQuantity = bucket.availabilityStatus()
+                == MenuInventoryAvailability.AvailabilityStatus.SOLD_OUT
+                ? 0 : bucket.availableOnlineQuantity();
         return new MenuHoldAvailabilityResponse.Item(Long.toString(menu.menuId()), menu.menuName(),
-                menu.unitPrice(), bucket.availableOnlineQuantity(), bucket.availabilityStatus());
+                menu.unitPrice(), availableOnlineQuantity, bucket.availabilityStatus());
     }
 }
