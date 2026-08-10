@@ -33,6 +33,8 @@ public class ReservationSecurityConfig {
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
     private static final String STORE_RESERVATION_CANCELLATION =
             STORE_RESERVATION_ROOT + "/*/cancellations";
+    private static final String STORE_RESERVATION_FULFILLMENT =
+            STORE_RESERVATION_ROOT + "/*/fulfillments";
 
     @Bean
     @Order(-1)
@@ -50,6 +52,7 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_ROOT).authenticated()
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
+                        .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))

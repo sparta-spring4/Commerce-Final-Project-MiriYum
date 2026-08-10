@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.controller;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
+import com.miriyum.domain.reservation.dto.request.ReservationFulfillmentRequest;
 import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
@@ -8,6 +9,8 @@ import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandResult;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -36,6 +39,7 @@ public class StoreReservationController {
 
     private final ReservationService reservationService;
     private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
+    private final ReservationFulfillmentCommandFacade reservationFulfillmentCommandFacade;
 
     /**
      * 대상 매장의 예약 목록을 날짜·상태·페이지·단일 정렬 조건으로 조회한다.
@@ -112,5 +116,22 @@ public class StoreReservationController {
                         principal.accountId(), storeId, reservationId, IdempotencyKey.parse(rawKey), request);
         return ResponseEntity.status(result.httpStatus())
                 .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
+    }
+
+    /** Completes one confirmed reservation for the authenticated operator's managed store. */
+    @PostMapping("/{reservationId}/fulfillments")
+    public ResponseEntity<ApiResponse<ReservationDetailResponse>> fulfillReservation(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @PathVariable @Positive long reservationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
+            @Valid @RequestBody ReservationFulfillmentRequest request
+    ) {
+        ReservationFulfillmentCommandResult result =
+                reservationFulfillmentCommandFacade.fulfill(
+                        principal.accountId(), storeId, reservationId,
+                        IdempotencyKey.parse(rawKey), request);
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("예약 방문이 완료되었습니다.", result.data()));
     }
 }

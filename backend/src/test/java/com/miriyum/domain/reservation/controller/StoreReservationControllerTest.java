@@ -2,9 +2,11 @@ package com.miriyum.domain.reservation.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.reset;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,7 +15,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
+import com.miriyum.domain.reservation.dto.request.ReservationFulfillmentRequest;
 import com.miriyum.domain.reservation.dto.request.StoreCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.StoreReservationSearchRequest;
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
@@ -23,11 +27,14 @@ import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationPageResponse;
 import com.miriyum.domain.reservation.dto.response.StoreReservationSummaryResponse;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
-import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationFulfillmentCommandResult;
+import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.core.config.StoreManagementSecurityConfig;
 import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -35,9 +42,13 @@ import com.miriyum.global.response.PageMetadata;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,15 +58,20 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @WebMvcTest(StoreReservationController.class)
 @Import({ReservationSecurityConfig.class, StoreManagementSecurityConfig.class, GlobalExceptionHandler.class})
 class StoreReservationControllerTest {
 
+    private static final long OPERATOR_ID = 33L;
+    private static final long STORE_ID = 22L;
+    private static final long RESERVATION_ID = 77L;
     private static final String BASE_URL =
             "/api/v1/store-operator/stores/22/reservations";
     private static final String DETAIL_URL = BASE_URL + "/77";
     private static final String CANCELLATION_URL = DETAIL_URL + "/cancellations";
+    private static final String FULFILLMENT_URL = DETAIL_URL + "/fulfillments";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
@@ -66,6 +82,9 @@ class StoreReservationControllerTest {
 
     @MockitoBean
     private ReservationCancellationCommandFacade reservationCancellationCommandFacade;
+
+    @MockitoBean
+    private ReservationFulfillmentCommandFacade fulfillmentFacade;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -449,6 +468,199 @@ class StoreReservationControllerTest {
     }
 
     @Test
+    void fulfillsStoreReservationWithPrincipalKeyAndStrictEmptyBody() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        given(fulfillmentFacade.fulfill(eq(OPERATOR_ID), eq(STORE_ID), eq(RESERVATION_ID),
+                any(IdempotencyKey.class), any(ReservationFulfillmentRequest.class)))
+                .willReturn(new ReservationFulfillmentCommandResult(
+                        200, fulfilledDetailResponse()));
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.status").value("FULFILLED"))
+                .andExpect(jsonPath("$.data.fulfilledAt").doesNotExist());
+    }
+
+    @Test
+    void replaysStoredHttp200AndPayloadWithoutRewritingFacadeResult() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        ReservationDetailResponse stored = fulfilledDetailResponse();
+        given(fulfillmentFacade.fulfill(eq(OPERATOR_ID), eq(STORE_ID), eq(RESERVATION_ID),
+                any(IdempotencyKey.class), any(ReservationFulfillmentRequest.class)))
+                .willReturn(new ReservationFulfillmentCommandResult(200, stored));
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.reservationId").value(stored.reservationId()))
+                .andExpect(jsonPath("$.data.status").value("FULFILLED"));
+        then(fulfillmentFacade).should().fulfill(eq(OPERATOR_ID), eq(STORE_ID),
+                eq(RESERVATION_ID), any(IdempotencyKey.class),
+                any(ReservationFulfillmentRequest.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    void rejectsNonPositiveStoreIdBeforeFulfillmentFacade(String storeId) throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(
+                        "/api/v1/store-operator/stores/{storeId}/reservations/77/fulfillments",
+                        storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    void rejectsNonPositiveReservationIdBeforeFulfillmentFacade(String reservationId)
+            throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(
+                        "/api/v1/store-operator/stores/22/reservations/{reservationId}/fulfillments",
+                        reservationId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"{", "[]", "{\"unexpected\":true}"})
+    void rejectsMissingMalformedAndUnknownFulfillmentBodyAsCommon002(String body)
+            throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        MockHttpServletRequestBuilder request = post(FULFILLMENT_URL)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                .contentType(MediaType.APPLICATION_JSON);
+        if (body != null) {
+            request.content(body);
+        }
+
+        mockMvc.perform(request)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_002"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsMissingFulfillmentIdempotencyKeyAsCommon003BeforeFacade() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsMalformedFulfillmentIdempotencyKeyAsCommon004BeforeFacade() throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", "not-a-uuid")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_004"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void unauthenticatedFulfillmentReturnsAuth001() throws Exception {
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void consumerTokenCannotEnterStoreOperatorFulfillmentChain() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+        then(fulfillmentFacade).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void passesThroughReservationFulfillmentConflictWithoutControllerRemapping()
+            throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        given(fulfillmentFacade.fulfill(anyLong(), anyLong(), anyLong(), any(), any()))
+                .willThrow(new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION));
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESERVATION_005"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("fulfillmentPassthroughErrors")
+    void passesThroughStoreReservationAndMenuHoldFulfillmentErrors(
+            ErrorCode errorCode, int expectedStatus
+    ) throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+        reset(fulfillmentFacade);
+        given(fulfillmentFacade.fulfill(anyLong(), anyLong(), anyLong(), any(), any()))
+                .willThrow(new ServiceException(errorCode));
+
+        mockMvc.perform(post(FULFILLMENT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().is(expectedStatus))
+                .andExpect(jsonPath("$.code").value(errorCode.getCode()));
+        then(fulfillmentFacade).should().fulfill(
+                anyLong(), anyLong(), anyLong(), any(), any());
+    }
+
+    private static Stream<Arguments> fulfillmentPassthroughErrors() {
+        return Stream.of(
+                Arguments.of(StoreErrorCode.ACCESS_DENIED, 403),
+                Arguments.of(ReservationErrorCode.RESERVATION_NOT_FOUND, 404),
+                Arguments.of(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT, 409));
+    }
+
+    @Test
     void deniesUnknownPostAndNonApprovedMethodInStoreReservationFamily() throws Exception {
         authenticateStoreOperator(33L);
 
@@ -521,5 +733,13 @@ class StoreReservationControllerTest {
                 detail.timeStatus(), detail.startAt(), detail.serviceEndAt(), detail.timeZoneId(),
                 detail.party(), "CANCELLED", detail.menuSelections(), detail.createdAt(), "STORE_OPERATOR",
                 "store closure");
+    }
+
+    private ReservationDetailResponse fulfilledDetailResponse() {
+        ReservationDetailResponse detail = detailResponse();
+        return new ReservationDetailResponse(
+                detail.reservationId(), detail.storeId(), detail.storeName(), detail.serviceDate(),
+                detail.timeStatus(), detail.startAt(), detail.serviceEndAt(), detail.timeZoneId(),
+                detail.party(), "FULFILLED", detail.menuSelections(), detail.createdAt());
     }
 }
