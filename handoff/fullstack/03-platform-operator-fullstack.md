@@ -1,5 +1,9 @@
 # MiriYum 플랫폼 운영자 풀스택 화면 구현 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`docs/01-product-vision.md`](../../docs/01-product-vision.md), [`docs/02-users-and-permissions.md`](../../docs/02-users-and-permissions.md), [`docs/05-functional-requirements.md`](../../docs/05-functional-requirements.md), [`docs/06-system-architecture.md`](../../docs/06-system-architecture.md)를 기준으로 한다. 현재 플랫폼 운영자용 승인 OpenAPI와 Controller는 없으므로 새 계약이 승인되기 전에는 실제 라우트·클라이언트·mock success를 만들지 않는다.
+
 ## 현재 단계와 구현 조건
 
 1차 MVP와 2차 MVP에는 플랫폼 운영자 기능을 실제 서비스에 포함하지 않는다.
@@ -14,7 +18,7 @@
 - 공개 route는 로그인만, 나머지는 운영자 인증·권한 guard 적용
 - 일반 운영자와 슈퍼관리자는 route metadata와 서버 권한을 모두 검사
 - Access·Refresh·CSRF는 별도 namespace와 쿠키 Path 사용
-- 30분 유휴·8시간 절대 만료 등 최종 승인 정책을 서버 응답 기준으로 적용
+- 세션·토큰 수명은 고도화 구현 시 승인되는 인증 OpenAPI와 서버 응답을 기준으로 적용하고 과거 세션 정책의 수치를 선반영하지 않는다.
 - feature modules: dashboard, members, onboarding, stores, reservations, waiting, payment-recovery, operators, audit
 - 민감 원문 query는 기본 목록 query와 분리하고 재인증·사건 배정·필드 권한 확인
 

@@ -1,5 +1,9 @@
 # MiriYum 플랫폼 운영자 화면 디자인 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`docs/01-product-vision.md`](../../docs/01-product-vision.md), [`docs/02-users-and-permissions.md`](../../docs/02-users-and-permissions.md), [`docs/05-functional-requirements.md`](../../docs/05-functional-requirements.md), [`docs/06-system-architecture.md`](../../docs/06-system-architecture.md)를 기준으로 한다. 현재 플랫폼 운영자용 승인 OpenAPI와 Controller는 없으므로 새 계약이 승인되기 전에는 실제 라우트·클라이언트·mock success를 만들지 않는다.
+
 ## 적용 범위
 
 플랫폼 운영자 전체 화면은 고도화 전용이다. 1차 MVP와 2차 MVP 서비스에는 로그인·메뉴·라우트·버튼을 노출하지 않는다. 일반 사용자·식당 대표자 서비스와 독립된 운영 콘솔로 디자인한다.

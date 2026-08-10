@@ -1,5 +1,9 @@
 # MiriYum 일반 사용자 화면 디자인 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`ConsumerAuthController`](../../backend/src/main/java/com/miriyum/domain/consumer/controller/ConsumerAuthController.java)·[`StoreSearchController`](../../backend/src/main/java/com/miriyum/domain/store/search/controller/StoreSearchController.java)·[`ReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/ReservationController.java)·[`MenuHoldAvailabilityController`](../../backend/src/main/java/com/miriyum/domain/menuhold/controller/MenuHoldAvailabilityController.java)·[`PickupReservationController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupReservationController.java)를 기준으로 한다.
+
 ## 문서 사용법
 
 이 문서는 저장소에 접근할 수 없는 디자인 AI에게 그대로 전달한다. 화면을 임의로 합치거나 기능을 생략하지 말고, 각 화면의 기본·로딩·빈 상태·오류·완료 상태를 함께 디자인한다. 사용자 화면에 `1차 MVP`, `2차 MVP`, `고도화`라는 개발 용어는 표시하지 않는다.
@@ -149,7 +153,7 @@
 - 요일별 운영시간과 브레이크타임
 - 대표 메뉴 카드: 이름, 설명, 가격, 판매 가능 상태
 - 예약 조건 요약 및 `예약하기`
-- 카페·베이커리이며 픽업 가능한 경우에만 `픽업 예약`
+- 등록 업종과 무관하게 `pickupEnabled`가 활성화된 픽업 가능 매장에만 `픽업 예약`
 
 #### 화면 상태
 
@@ -285,7 +289,7 @@
 
 웨이팅·결제·환불·노쇼 내역을 같은 목록에 혼합하지 않는다.
 
-### 10. 카페·베이커리 픽업 선택 화면
+### 10. 픽업 선택 화면
 
 #### 화면 목적
 
@@ -310,21 +314,20 @@
 
 성인·아동·영유아, 팀 수, 좌석, 수령 준비 완료 상태, 결제.
 
-### 11. 픽업 예약 목록·상세 화면
+### 11. 픽업 예약 상세 화면
 
 #### 화면 목적
 
-본인 픽업 예약의 예약 완료·취소·수령 완료 상태를 조회하고 취소한다.
+생성 직후 이동한 본인 픽업 예약의 예약 완료·취소·수령 완료 상태를 조회하고 취소한다. 현재 1차 MVP에는 일반 사용자 픽업 목록 조회 계약이 없으므로 목록 화면이나 내역 링크를 만들지 않는다.
 
 #### 반드시 포함할 요소
 
-- 목록 필터와 카드: 상태, 매장, 픽업 날짜·시간, 메뉴·수량
 - 상세: 매장 주소, 메뉴 스냅샷, 생성 시각, 취소 가능 여부
 - 취소 확인 모달, 수령 완료 표시
 
 #### 화면 상태
 
-목록 없음, 상세 없음, 취소 불가, 취소 완료, 수령 완료.
+상세 없음, 취소 불가, 취소 완료, 수령 완료.
 
 #### 포함하지 않을 요소
 
@@ -341,7 +344,7 @@
 - 읽기 전용 이메일·휴대전화·계정 상태
 - 닉네임 편집, 저장·취소
 - 최근 변경 후 7일 제한 안내
-- 내 예약과 픽업 내역 이동
+- 내 예약 이동. 픽업 내역은 목록 API가 승인되기 전까지 추가하지 않는다.
 
 #### 화면 상태와 문구
 

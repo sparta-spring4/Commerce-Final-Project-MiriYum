@@ -1,5 +1,9 @@
 # MiriYum 식당 대표자 화면 디자인 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`StoreOperatorAuthController`](../../backend/src/main/java/com/miriyum/domain/storeoperator/controller/StoreOperatorAuthController.java)·[`StoreController`](../../backend/src/main/java/com/miriyum/domain/store/core/controller/StoreController.java)·[`StoreScheduleController`](../../backend/src/main/java/com/miriyum/domain/store/schedule/controller/StoreScheduleController.java)·[`StoreReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/StoreReservationController.java)·[`PickupStoreManagementController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupStoreManagementController.java)를 기준으로 한다.
+
 ## 문서 사용법과 공통 구조
 
 저장소를 볼 수 없는 디자인 AI가 사용하는 독립 문서다. 사용자에게는 `식당 대표자`, 서비스명은 `MiriYum Partner` 또는 `매장 관리`를 사용한다. 개발 내부 역할명은 화면에 노출하지 않는다.
@@ -46,8 +50,9 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 - 만료: `로그인 시간이 만료되었습니다. 다시 로그인해 주세요.`
 
 #### 로그인 성공 후 이동
-- 1차 MVP 등록 매장 없음 → 매장 등록
-- 등록 매장 있음 → 매장 관리 홈
+- 보호 화면에서 로그인으로 이동했다면 URL에 이미 알려진 `storeId`가 있는 원래 목적지로 복귀
+- 매장 등록 성공 직후라면 등록 응답의 `storeId`로 매장 관리 홈 이동
+- 현재 Controller·OpenAPI에는 로그인한 운영자의 매장 목록 또는 현재 매장 조회가 없으므로, 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하지 않는다. 이 분기는 조회 계약이 승인된 뒤 활성화한다.
 - 고도화 입점 심사가 실제 활성화된 경우에만 미신청 → 입점 신청, 심사 중 → 신청 현황
 사용자가 로그인 화면에서 분기를 선택하지 않는다.
 
@@ -71,10 +76,10 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 - 저장·취소, 필수 표시, 개인정보 안내
 
 #### 상호작용
-기타 업종에서 픽업을 켜면 해당 선택 옆에 오류를 표시하고 전체 등록 성공처럼 보이지 않는다. 카테고리·태그는 제공된 선택지에서 고른다.
+등록 업종은 픽업 가능 여부를 제한하지 않는다. 모든 업종에서 `pickupEnabled`를 선택할 수 있으며, 카테고리·태그는 제공된 선택지에서 고른다.
 
 #### 화면 상태와 문구
-초기, catalog 로딩, 입력 오류, 사업자번호 중복, 픽업 자격 오류, 등록 중, 성공, 네트워크 오류. 성공: `매장이 등록되었습니다. 운영 정보를 설정해 주세요.`
+초기, catalog 로딩, 입력 오류, 사업자번호 중복, 등록 중, 성공, 네트워크 오류. 성공: `매장이 등록되었습니다. 운영 정보를 설정해 주세요.`
 
 #### 성공 후 이동
 매장 관리 홈. 별도 승인 대기 화면으로 보내지 않는다.
@@ -85,7 +90,7 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 ### 4. 매장 관리 홈
 
 #### 화면 목적
-1차 MVP 관리 기능의 진입점이다. 고도화 통계 대시보드와 구분한다.
+등록 응답 또는 보호 화면의 알려진 `storeId`로 진입하는 1차 MVP 관리 기능의 진입점이다. 고도화 통계 대시보드와 구분한다. 현재 계약에 없는 운영 매장 목록 조회를 전제로 만들지 않는다.
 
 #### 반드시 포함할 요소
 매장명·운영 상태, 기본정보·운영시간·예약시간·메뉴·수용량·재고·예약·픽업 바로가기, 설정 미완료 안내, 최근 저장 실패 재시도.
@@ -105,7 +110,7 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 등록 정보 표시, 수정 가능한 이름·설명·지역·주소·카테고리·태그·운영 모드, 읽기 전용 또는 제한된 사업자번호·업종, 저장·취소·이탈 확인.
 
 #### 화면 상태
-조회 로딩, 수정 전·수정됨, 검증 오류, 픽업 자격 오류, 저장 중·완료·충돌.
+조회 로딩, 수정 전·수정됨, 검증 오류, 저장 중·완료·충돌.
 
 #### 포함하지 않을 요소
 이미지, 입점 재심사, 플랫폼 강제 상태 변경.
@@ -116,10 +121,10 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 요일별 복수 영업 구간과 브레이크타임의 전체 주간 설정을 편집한다.
 
 #### 반드시 포함할 요소
-월~일, 휴무 토글, 영업 시작·종료, 구간 추가·삭제, 브레이크타임, 요일 복사, 변경사항 요약, 전체 저장, 이탈 확인.
+월~일, 휴무 토글, 영업 시작·종료, 구간 추가·삭제, 브레이크타임, 요일 복사, 변경사항 요약, 초안 저장, 즉시·예약 게시, 예약 게시 취소, 변경 사유, 이탈 확인.
 
 #### 화면 상태와 문구
-설정 없음, 로딩, 편집, 구간 역전·중첩·브레이크 충돌, 저장 중·완료·충돌. `변경해도 기존 예약은 자동으로 이동하거나 취소되지 않습니다.`
+설정 없음, 편집, 구간 역전·중첩·브레이크 충돌, 초안 저장 중·완료, 게시 중·완료, 예약 게시, 게시 취소, 충돌. 현재 운영자용 조회 API가 없으므로 새로고침 뒤 기존 설정을 불러오는 상태는 조회 계약이 승인되기 전까지 실제 화면으로 활성화하지 않는다. `변경해도 기존 예약은 자동으로 이동하거나 취소되지 않습니다.`
 
 ### 7. 예약 접수 시간대 관리 화면
 
@@ -127,7 +132,9 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 영업시간 안에서 실제 예약을 받는 요일·시간 구간을 설정한다.
 
 #### 반드시 포함할 요소
-현재 영업시간 참조, 요일별 접수 구간, 추가·삭제·복사, 브레이크 충돌 표시, 전체 저장.
+현재 영업시간 참조, 요일별 접수 구간, 추가·삭제·복사, 브레이크 충돌 표시, 초안 저장, 즉시·예약 게시, 예약 게시 취소, 변경 사유. 예약 시작 슬롯 간격·서비스 소요시간·전환시간은 별도 예약 시간 정책으로 저장·게시한다.
+
+현재 두 설정 모두 운영자용 조회 API가 없으므로 새로고침 뒤 기존 설정을 불러오는 편집 화면은 조회 계약이 승인되기 전까지 활성화하지 않는다.
 
 #### 포함하지 않을 요소
 인원·팀 수 한도 입력. 이는 수용량 화면에서 관리한다.
@@ -142,7 +149,7 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 - 필터: 상태·대표 여부, 검색
 - 폼: 이름, 설명, 원화 정수 가격, 대표 여부, 주 카테고리, 보조 0~5개, 로컬 태그, 홀드·픽업 허용
 - 상태 축: 초안/예약 게시/게시/종료, 노출/숨김, 판매/일시중지
-- 저장·취소·이탈 확인
+- 내용 초안 저장, 즉시·예약 게시, 예약 게시 취소, 운영 종료, 노출·판매 상태 명령, 이탈 확인
 
 #### 화면 상태
 메뉴 없음, catalog 로딩, 검증 오류, 허용되지 않은 상태 전이, 저장 완료·충돌.
@@ -160,6 +167,8 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 
 #### 화면 상태와 문구
 설정 없음, 점유 있음, 유효성 오류, 현재 점유보다 작은 한도, 동시 변경 충돌. `기존 예약은 유지되며 신규 예약 가능 수량만 조정됩니다.`
+
+현재 운영자용 수용량 조회 API는 없고 날짜 전체 `PUT` 응답만 있으므로, 기존 날짜 설정을 먼저 불러와 편집하는 화면은 조회 계약이 승인되기 전까지 활성화하지 않는다.
 
 ### 10. 메뉴 수량·품절 관리 화면
 

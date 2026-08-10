@@ -1,5 +1,9 @@
 # MiriYum 일반 사용자 풀스택 화면 구현 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`ConsumerAuthController`](../../backend/src/main/java/com/miriyum/domain/consumer/controller/ConsumerAuthController.java)·[`StoreSearchController`](../../backend/src/main/java/com/miriyum/domain/store/search/controller/StoreSearchController.java)·[`ReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/ReservationController.java)·[`MenuHoldAvailabilityController`](../../backend/src/main/java/com/miriyum/domain/menuhold/controller/MenuHoldAvailabilityController.java)·[`PickupReservationController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupReservationController.java)를 기준으로 한다.
+
 ## 작업 원칙
 
 적용 단계는 1차 MVP, 2차 MVP, 고도화이며 현재 계약이 있는 단계만 실제 서비스에 노출한다.
@@ -66,6 +70,10 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 ### 6. 대표 메뉴 사전 선택
 
 - 메뉴 가용성: `GET /api/v1/stores/{storeId}/menu-hold-availability`
+- query: 필수 `serviceDate`(매장 업무일, `YYYY-MM-DD`)·`startTime`(분 단위 `HH:mm`), 선택 `startOffset`(DST 중복 시각 식별용 `±HH:mm`)
+- 성공 `data`: `serviceDate`, 서버가 계산한 offset 포함 `startAt`·`serviceEndAt`, IANA `timeZoneId`, `items`
+- 각 item: `menuId`, `menuName`, `unitPrice`, `availableOnlineQuantity`, `availabilityStatus(AVAILABLE/SOLD_OUT)`. 현재 구간의 온라인 재고 버킷이 있는 메뉴만 `menuId` 오름차순으로 표시하고 버킷이 없는 메뉴를 수량 0으로 합성하지 않는다.
+- 오류: `400 COMMON_001` 입력 오류, `404 STORE_001` 매장 없음, `409 RESERVATION_002` 예약 서비스 시간 불가, `503 COMMON_012` 필수 인프라 일시 장애(`Retry-After` 적용)
 - 선택 수량은 서버 잔여를 넘지 않게 안내하되 최종 쓰기에서 다시 검증한다.
 - 메뉴 없음은 menuSelections 생략 또는 빈 배열. 별도 skip API 금지
 
@@ -89,18 +97,19 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 - 빈 결과는 오류가 아닌 200·빈 목록으로 렌더링
 - 결제·노쇼·체크인 필드를 추측해 DTO에 추가하지 않는다.
 
-### 10. 픽업 선택·생성
+### 10. 픽업 선택·생성·상세 진입
 
-- 라우트: `/stores/:storeId/pickup`, `/pickup-reservations/:pickupReservationId`, `/mypage/pickups`
+- 라우트: `/stores/:storeId/pickup`, `/pickup-reservations/:pickupReservationId`
 - 가용성: `GET /api/v1/stores/{storeId}/pickup-availability`
 - 생성: `POST /api/v1/pickup-reservations`; pickupDate·pickupTime·메뉴와 수량, endTime·partySize 제외
 
-### 11. 픽업 목록·상세·취소
+### 11. 픽업 상세·취소
 
 - 상세: `GET /api/v1/pickup-reservations/{pickupReservationId}`
 - 취소: `POST /api/v1/pickup-reservations/{pickupReservationId}/cancellations`
 - 상태: `CONFIRMED/CANCELLED/PICKED_UP`만 사용
 - `PICKUP_002` 자격 없음, `_003` 구간, `_004` 수량, `_005` 전이, `_006` 취소 불가
+- 현재 일반 사용자 픽업 목록 Controller·OpenAPI가 없으므로 픽업 내역 route·query·menu를 만들지 않는다. 목록 계약이 승인되기 전에는 생성 성공 후 반환된 식별자로 상세에만 이동한다.
 - 일반 예약 캐시·수용량을 픽업 성공으로 수정하지 않는다.
 
 ### 12. 마이페이지·프로필

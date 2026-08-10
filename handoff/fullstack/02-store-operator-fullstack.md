@@ -1,5 +1,9 @@
 # MiriYum 식당 대표자 풀스택 화면 구현 상세 지시서
 
+> **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
+
+> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`StoreOperatorAuthController`](../../backend/src/main/java/com/miriyum/domain/storeoperator/controller/StoreOperatorAuthController.java)·[`StoreController`](../../backend/src/main/java/com/miriyum/domain/store/core/controller/StoreController.java)·[`StoreScheduleController`](../../backend/src/main/java/com/miriyum/domain/store/schedule/controller/StoreScheduleController.java)·[`StoreReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/StoreReservationController.java)·[`PickupStoreManagementController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupStoreManagementController.java)를 기준으로 한다.
+
 ## 작업 원칙
 
 적용 단계는 1차 MVP, 2차 MVP, 고도화이며 현재 계약이 있는 단계만 실제 서비스에 노출한다.
@@ -23,7 +27,8 @@
 - 재발급 `POST /api/v1/store-operator-auth/token-refreshes`
 - 로그아웃 `DELETE /api/v1/store-operator-auth/sessions/current`
 - 실패는 `AUTH_005`, 제한은 `COMMON_010`, 만료 재발급 실패 시 사유를 보존해 로그인 이동
-- 성공 후 관리 매장 조회 결과가 없으면 등록, 있으면 홈으로 자동 분기한다.
+- 보호 화면에서 넘어온 `returnTo`에 알려진 `storeId`가 있으면 그 화면으로 복귀하고, 매장 등록 성공 뒤에는 응답의 `storeId`로 이동한다.
+- 현재 운영 매장 목록·현재 운영자 매장 조회 API가 없으므로 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하거나 공개 검색 결과로 소유 매장을 찾지 않는다. 해당 조회 계약이 승인되기 전에는 자동 분기를 활성화하지 않는다.
 
 ### 3. 매장 등록
 - route: `/partner/stores/new`
@@ -32,45 +37,51 @@
 - 요청: 사업자등록번호, `CAFE/BAKERY/OTHER`, 이름·설명·지역·주소·category code·tag code·운영 모드
 - 운영자 ID·승인 필드·파일·이미지를 보내지 않는다.
 - 1차 성공 응답은 즉시 `verificationStatus=APPROVED`; 승인 대기 route를 만들지 않는다.
-- `STORE_002` 중복, `_004` catalog, `_008` OTHER+pickup 오류를 필드에 연결
+- `STORE_002` 사업자등록번호 중복과 `STORE_004` catalog 오류를 필드에 연결한다. 등록 업종은 픽업 판정에 사용하지 않고 모든 업종에서 `pickupEnabled`를 허용한다.
 
 ### 4. 관리 홈
 - route: `/partner`
-- 관리 매장 조회 결과로 기본정보·설정 page link를 구성한다.
+- 등록 응답 또는 보호 route의 알려진 `storeId`로 기본정보·설정 page link를 구성한다. 현재 계약에 없는 운영 매장 목록 query를 만들지 않는다.
 - 1차에는 통계 API를 추측하지 않고 설정 완성도와 운영 상태만 표현한다.
 
 ### 5. 매장 정보
 - route: `/partner/stores/:storeId/settings`
 - API: `GET/PATCH /api/v1/store-operator/stores/{storeId}`
 - 변경 가능한 필드만 PATCH하고 Idempotency-Key 사용
-- `STORE_003`은 권한 없음, `_005/_007` 상태 충돌, `_008` 픽업 자격
+- `STORE_003`은 권한 없음, `STORE_005/007`은 현재 매장·입점 상태 충돌로 처리한다. 업종을 근거로 픽업 변경을 거부하지 않는다.
 
 ### 6. 운영시간
 - route: `/partner/stores/:storeId/operating-hours`
-- `GET/PUT /api/v1/store-operator/stores/{storeId}/operating-hours`
-- PUT은 월~일 전체 설정을 게시한다. 일부 요일 로컬 병합 금지
+- 초안 저장: `PUT /api/v1/store-operator/stores/{storeId}/operating-hours`
+- 게시: `POST /api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication-cancellation`
+- PUT은 월~일 전체 초안을 만든다. 일부 요일 로컬 병합 금지. 게시 요청은 `IMMEDIATE/SCHEDULED`, 예약 게시일 때 offset 포함 `effectiveAt`, 필수 `changeReason`을 사용한다.
+- 현재 운영자용 GET은 없다. 기존 설정을 읽어 편집하거나 재접속 뒤 복구하는 route는 조회 계약이 승인되기 전까지 활성화하지 않는다.
 - 구간 `[startTime,endTime)`, 브레이크타임을 분리하고 `STORE_006`을 구간별 표시
 - 저장 성공 후 해당 매장 상세·공개 검색 관련 query를 갱신하되 기존 예약을 수정하지 않는다.
 
 ### 7. 예약 접수 시간대
 - route: `/partner/stores/:storeId/reservation-time-slots`
-- `GET/PUT /api/v1/store-operator/stores/{storeId}/reservation-time-slots`
-- 전체 주간 게시, 영업시간 밖·브레이크 충돌 표시
+- 접수 구간 초안: `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-slots`; 게시: `POST /api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation`
+- 예약 시간 정책 초안: `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-policies`; 게시: `POST /api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation`
+- 접수 구간은 전체 주간 초안이며 영업시간 밖·브레이크 충돌을 표시한다. 예약 시간 정책은 `slotInterval`, `serviceDuration`, `turnoverDuration`을 별도로 다룬다.
+- 두 계약 모두 현재 운영자용 GET이 없으므로 기존 설정 편집·재접속 복구는 조회 계약 승인 전까지 활성화하지 않는다.
 - 수용량 필드를 이 요청에 섞지 않는다.
 
 ### 8. 메뉴 목록·등록·수정
 - routes: `/partner/stores/:storeId/menus`, `/menus/new`, `/menus/:menuId/edit`
 - `GET/POST /api/v1/store-operator/stores/{storeId}/menus`
-- `GET/PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}`
+- `GET/PUT /api/v1/store-operator/stores/{storeId}/menus/{menuId}`로 조회·내용 초안 저장
+- 게시·예약 게시 취소·운영 종료는 각각 `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication`, `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication-cancellation`, `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/retirement`
+- 노출·판매 상태는 각각 `PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}/visibility`, `PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status`
 - menu category catalog는 `/api/v1/menu-categories`
 - 버전 `DRAFT/SCHEDULED/PUBLISHED/RETIRED`, 노출 `VISIBLE/HIDDEN`, 판매 `SELLING/PAUSED`를 독립 필드로 유지
 - `AVAILABLE/SOLD_OUT`은 이 폼에 저장하지 않는다.
 
 ### 9. 예약 수용량
 - route: `/partner/stores/:storeId/capacities/:serviceDate`
-- `GET/PUT /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}`
+- `PUT /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}`. 현재 운영자용 GET은 없으므로 기존 날짜 설정을 읽어 편집하는 route는 조회 계약 승인 전까지 활성화하지 않는다.
 - 날짜별 전체 버킷, maxPeople·maxTeams·minPartySize·maxPartySize·infantsAllowed
-- 현재 점유와 잔여를 서버 응답으로 표시; 클라이언트가 재계산해 원장처럼 저장하지 않는다.
+- PUT 성공 응답의 현재 점유와 잔여를 표시하되 클라이언트가 재계산해 원장처럼 저장하지 않는다.
 - `RESERVATION_008/009`, `COMMON_008` 처리
 
 ### 10. 메뉴 수량·품절
@@ -84,22 +95,22 @@
 
 ### 11. 예약 목록
 - routes: `/partner/stores/:storeId/reservations`, `/reservations/:reservationId`
-- 목록·상세: `GET /api/v1/store-operator/stores/{storeId}/reservations[/{reservationId}]`
+- 목록: `GET /api/v1/store-operator/stores/{storeId}/reservations`; 상세: `GET /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}`
 - 날짜·상태·0 기반 page; `CONFIRMED/CANCELLED/FULFILLED`
 
 ### 12. 예약 상세·처리
 
 - 상세 조회 뒤 현재 상태에 허용되는 명령만 렌더링한다.
-- 취소 `POST .../{reservationId}/cancellations`, 사유와 Idempotency-Key
-- 방문 완료 `POST .../{reservationId}/fulfillments`
+- 취소 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations`, 사유와 Idempotency-Key
+- 방문 완료 `POST /api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments`
 - 범용 status PATCH 금지. 취소는 수량 복구 API를 별도로 호출하지 않고 방문 완료는 복구하지 않는다.
 
 ### 13. 픽업 목록·상세·처리
 - routes: `/partner/stores/:storeId/pickups`, `/pickups/:pickupReservationId`
-- 목록·상세 `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations[/{pickupReservationId}]`
-- 취소 `POST .../{pickupReservationId}/cancellations`
-- 수령 완료 `POST .../{pickupReservationId}/fulfillments`
-- 상태 `CONFIRMED/CANCELLED/PICKED_UP`; CAFE·BAKERY와 pickupEnabled 조건이 아니면 route·menu 미등록
+- 목록 `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations`; 상세 `GET /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}`
+- 취소 `POST /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations`
+- 수령 완료 `POST /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments`
+- 상태 `CONFIRMED/CANCELLED/PICKED_UP`; 등록 업종과 무관하게 `pickupEnabled=false`이면 route·menu 미등록
 
 ### 14. 대표자 내 정보
 - route: `/partner/profile`
