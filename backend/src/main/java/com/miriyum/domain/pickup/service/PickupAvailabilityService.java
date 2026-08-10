@@ -81,6 +81,8 @@ public class PickupAvailabilityService {
                 .values().stream()
                 .filter(items -> items.size() == 1)
                 .map(List::getFirst)
+                .filter(item -> intervalTimePolicy.resolveUnambiguousInstant(
+                        store.timeZoneId(), item.serviceDate(), item.startTime()).isPresent())
                 .filter(item -> intervalTimePolicy.isOpen(
                         store.timeZoneId(), item.endDate(), item.endTime()))
                 .map(item -> toAvailableMenu(item, eligibleMenus.get(item.menuId())))

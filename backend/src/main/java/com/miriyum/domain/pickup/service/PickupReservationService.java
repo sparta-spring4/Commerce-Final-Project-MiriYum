@@ -37,11 +37,8 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.time.zone.ZoneRules;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -234,6 +231,7 @@ public class PickupReservationService {
     ) {
         StorePickupTransactionEligibility store = requireStoreEligibility(storeId);
         Map<Long, MenuTransactionEligibility> menus = requireMenus(storeId, selections);
+        Instant pickupAt = resolvePickupAt(store.timeZoneId(), request);
         Map<Long, SelectedAvailability> availability = selectAvailability(
                 store, request, selections);
 
@@ -267,7 +265,7 @@ public class PickupReservationService {
         PickupReservation reservation = PickupReservation.confirm(
                 consumerAccountId, storeId, store.storeName(), store.timeZoneId(),
                 request.pickupDate(), request.pickupTime(),
-                resolvePickupAt(store.timeZoneId(), request),
+                pickupAt,
                 acquired.operationId(), snapshots, createdAt);
         PickupReservation saved = repository.saveAndFlush(reservation);
         if (saved.getId() == null || saved.getId() <= 0) {
@@ -341,7 +339,6 @@ public class PickupReservationService {
             }
             result.put(menuId, new SelectedAvailability(match));
         }
-        resolvePickupAt(store.timeZoneId(), request);
         return result;
     }
 
@@ -378,18 +375,13 @@ public class PickupReservationService {
                 interval.endTime(), acquired.quantity());
     }
 
-    private static Instant resolvePickupAt(
+    private Instant resolvePickupAt(
             String timeZoneId,
             PickupReservationCreateRequest request
     ) {
-        ZoneId zoneId = ZoneId.of(timeZoneId);
-        LocalDateTime local = request.pickupDate().atTime(request.pickupTime());
-        ZoneRules rules = zoneId.getRules();
-        List<ZoneOffset> offsets = rules.getValidOffsets(local);
-        if (offsets.size() != 1) {
-            throw new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE);
-        }
-        return local.atOffset(offsets.getFirst()).toInstant();
+        return intervalTimePolicy.resolveUnambiguousInstant(
+                        timeZoneId, request.pickupDate(), request.pickupTime())
+                .orElseThrow(() -> new ServiceException(PickupErrorCode.SLOT_NOT_AVAILABLE));
     }
 
     private static String fingerprint(

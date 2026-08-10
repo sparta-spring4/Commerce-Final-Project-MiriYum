@@ -71,19 +71,21 @@ class PickupReservationServiceTest {
     @Mock PickupReservationRepository repository;
     @Mock IdempotencyExecutor idempotencyExecutor;
     @Mock ConsumerAccountService consumerAccountService;
-    @Mock PickupIntervalTimePolicy intervalTimePolicy;
+    private PickupIntervalTimePolicy intervalTimePolicy;
 
     private PickupReservationService service;
 
     @BeforeEach
     void setUp() {
+        intervalTimePolicy = org.mockito.Mockito.spy(new PickupIntervalTimePolicy(
+                Clock.fixed(NOW, ZoneOffset.UTC)));
         service = new PickupReservationService(
                 storeTransactionEligibilityService, storeService, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
-        org.mockito.Mockito.lenient().when(intervalTimePolicy.isOpen(
-                any(), any(), any())).thenReturn(true);
+        org.mockito.Mockito.lenient().doReturn(true).when(intervalTimePolicy)
+                .isOpen(any(), any(), any());
         org.mockito.Mockito.lenient()
                 .when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<BusinessResult<?>> work = invocation.getArgument(1);
@@ -386,8 +388,9 @@ class PickupReservationServiceTest {
         given(storeService.requireMenuTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
-        given(inventoryService.findOnlineAvailabilityByDate(any()))
-                .willReturn(List.of(new MenuInventoryAvailability(
+        org.mockito.Mockito.lenient()
+                .when(inventoryService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(new MenuInventoryAvailability(
                         33L, 6L, "America/New_York", date, time,
                         date, time.plusHours(1), 5, AvailabilityStatus.AVAILABLE)));
 
@@ -395,7 +398,32 @@ class PickupReservationServiceTest {
                 ServiceException.class, () -> service.create(11L, KEY, request));
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
-        then(inventoryService).should(never()).acquire(any());
+        then(inventoryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void rejectsDstGapBeforeClassifyingSoldOutIntervalAsInsufficientQuantity() {
+        LocalDate date = LocalDate.of(2026, 3, 8);
+        LocalTime time = LocalTime.of(2, 30);
+        PickupReservationCreateRequest request = new PickupReservationCreateRequest(
+                "22", date, time,
+                List.of(new PickupMenuSelectionRequest("33", 1)));
+        given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
+                .willReturn(new StorePickupTransactionEligibility(
+                        22L, "뉴욕 픽업 매장", "America/New_York"));
+        given(storeService.requireMenuTransactionEligibility(22L, 33L))
+                .willReturn(new MenuTransactionEligibility(
+                        22L, 33L, 5, "바질 파스타", 12_000, true, true));
+        org.mockito.Mockito.lenient()
+                .when(inventoryService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(new MenuInventoryAvailability(
+                        33L, 6L, "America/New_York", date, time,
+                        date, LocalTime.of(3, 30), 0, AvailabilityStatus.SOLD_OUT)));
+        ServiceException exception = catchThrowableOfType(
+                ServiceException.class, () -> service.create(11L, KEY, request));
+
+        assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.SLOT_NOT_AVAILABLE);
+        then(inventoryService).shouldHaveNoInteractions();
     }
 
     @Test

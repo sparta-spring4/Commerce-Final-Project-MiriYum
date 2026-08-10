@@ -109,6 +109,62 @@ class PickupAvailabilityServiceTest {
     }
 
     @Test
+    @DisplayName("DST gap에 해당하는 시작 시각은 픽업 가능 조회에서 제외한다")
+    void excludesStartTimeInDstGap() {
+        LocalDate springForwardDate = LocalDate.of(2026, 3, 8);
+        pickupAvailabilityService = new PickupAvailabilityService(
+                storePublicQueryService,
+                menuInventoryTransactionService,
+                policyAt("2026-03-08T05:00:00Z")
+        );
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(
+                        OperationStatus.OPEN, true, "America/New_York"));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "바질 파스타", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(new MenuInventoryAvailability(
+                        101L, 3L, "America/New_York",
+                        springForwardDate, LocalTime.of(2, 30),
+                        springForwardDate, LocalTime.of(3, 30),
+                        3, AvailabilityStatus.AVAILABLE)));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, springForwardDate);
+
+        assertThat(result.slots()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("DST overlap에 해당하는 시작 시각은 픽업 가능 조회에서 제외한다")
+    void excludesStartTimeInDstOverlap() {
+        LocalDate fallBackDate = LocalDate.of(2026, 11, 1);
+        pickupAvailabilityService = new PickupAvailabilityService(
+                storePublicQueryService,
+                menuInventoryTransactionService,
+                policyAt("2026-11-01T04:00:00Z")
+        );
+        when(storePublicQueryService.getDetail(STORE_ID, null, false))
+                .thenReturn(storeDetail(
+                        OperationStatus.OPEN, true, "America/New_York"));
+        when(storePublicQueryService.getMenus(STORE_ID)).thenReturn(List.of(
+                menu(101L, "바질 파스타", true, MenuSellingStatus.SELLING)
+        ));
+        when(menuInventoryTransactionService.findOnlineAvailabilityByDate(any()))
+                .thenReturn(List.of(new MenuInventoryAvailability(
+                        101L, 3L, "America/New_York",
+                        fallBackDate, LocalTime.of(1, 30),
+                        fallBackDate, LocalTime.of(2, 30),
+                        3, AvailabilityStatus.AVAILABLE)));
+
+        PickupAvailability result = pickupAvailabilityService.getAvailability(
+                STORE_ID, fallBackDate);
+
+        assertThat(result.slots()).isEmpty();
+    }
+
+    @Test
     @DisplayName("OPEN 픽업 매장의 SELLING 픽업 메뉴만 날짜별 재고 조회에 전달한다")
     void queriesOnlySellingPickupMenus() {
         when(storePublicQueryService.getDetail(STORE_ID, null, false))
@@ -270,9 +326,17 @@ class PickupAvailabilityServiceTest {
             OperationStatus operationStatus,
             boolean pickupEnabled
     ) {
+        return storeDetail(operationStatus, pickupEnabled, "Asia/Seoul");
+    }
+
+    private static PublicStoreDetail storeDetail(
+            OperationStatus operationStatus,
+            boolean pickupEnabled,
+            String timeZoneId
+    ) {
         return new PublicStoreDetail(
                 Long.toString(STORE_ID), "미리냠", "설명", Region.SEOUL, "서울",
-                "Asia/Seoul", "ETC", List.of(), operationStatus,
+                timeZoneId, "ETC", List.of(), operationStatus,
                 new PublicStoreModes(true, true, pickupEnabled),
                 List.of(), List.of(), List.of(), ReservationAvailability.NOT_REQUESTED
         );
