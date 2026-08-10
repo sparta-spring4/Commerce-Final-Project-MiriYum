@@ -44,11 +44,13 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,6 +67,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -86,6 +92,7 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.reservation.time-policy.activation-enabled=false"
         }
 )
+@Import(ReservationCreationIT.FixedClockConfig.class)
 class ReservationCreationIT {
 
     private static final String TIME_ZONE_ID = "Asia/Seoul";
@@ -700,6 +707,18 @@ class ReservationCreationIT {
 
         private static CreationAttempt failed(ErrorCode errorCode) {
             return new CreationAttempt(null, errorCode);
+        }
+    }
+
+    @TestConfiguration
+    static class FixedClockConfig {
+
+        @Bean
+        @Primary
+        Clock reservationCreationIntegrationClock() {
+            return Clock.fixed(
+                    Instant.parse("2026-08-10T01:00:00Z"),
+                    ZoneOffset.UTC);
         }
     }
 }
