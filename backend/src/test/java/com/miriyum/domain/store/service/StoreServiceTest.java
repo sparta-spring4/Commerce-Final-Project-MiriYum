@@ -18,16 +18,17 @@ import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.entity.Menu;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.model.AllergenDisclosure;
-import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
-import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
-import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
-import com.miriyum.domain.store.menu.model.MenuContent;
-import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.entity.Menu;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.model.AllergenDisclosure;
+import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -97,7 +98,9 @@ class StoreServiceTest {
         storeService = new StoreService(
                 operatorAccountService,
                 storeRepository,
-                menuRepository,
+                new MenuTransactionService(
+                        new StoreTransactionEligibilityService(storeRepository),
+                        menuRepository),
                 catalogPolicy,
                 idempotencyExecutor,
                 objectMapper,

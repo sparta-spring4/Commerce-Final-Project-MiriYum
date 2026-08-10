@@ -30,7 +30,7 @@ import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;

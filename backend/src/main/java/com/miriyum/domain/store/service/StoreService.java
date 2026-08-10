@@ -10,10 +10,8 @@ import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.VerificationStatus;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.entity.Menu;
-import com.miriyum.domain.store.menu.entity.MenuVersion;
-import com.miriyum.domain.store.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -53,7 +51,7 @@ public class StoreService {
 
     private final StoreOperatorAccountService operatorAccountService;
     private final StoreRepository storeRepository;
-    private final MenuRepository menuRepository;
+    private final MenuTransactionService menuTransactionService;
     private final StoreCatalogPolicy catalogPolicy;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -221,30 +219,7 @@ public class StoreService {
             long storeId,
             long menuId
     ) {
-        Store store = storeRepository.findByIdForUpdate(storeId)
-                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
-        requireTransactionState(store);
-
-        Menu menu = menuRepository.findByIdForUpdate(menuId)
-                .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
-        if (menu.getStoreId() != storeId) {
-            throw new ServiceException(StoreErrorCode.MENU_NOT_FOUND);
-        }
-
-        MenuVersion published = menu.requireTransactionVersion();
-        boolean menuHoldEligible = store.isReservationEnabled()
-                && store.isMenuHoldEnabled()
-                && published.isHoldSelectionAllowed();
-        boolean pickupEligible = store.isPickupEnabled()
-                && published.isPickupSelectionAllowed();
-        return new MenuTransactionEligibility(
-                storeId,
-                menuId,
-                published.getVersionNumber(),
-                published.getName(),
-                published.getPrice(),
-                menuHoldEligible,
-                pickupEligible);
+        return menuTransactionService.requireTransactionEligibility(storeId, menuId);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -268,16 +243,6 @@ public class StoreService {
                     StoreErrorCode.VERIFICATION_STATE_CONFLICT);
         }
         if (store.getOperationStatus() == OperationStatus.CLOSED) {
-            throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
-        }
-    }
-
-    private void requireTransactionState(Store store) {
-        if (store.getVerificationStatus() != VerificationStatus.APPROVED) {
-            throw new ServiceException(
-                    StoreErrorCode.VERIFICATION_STATE_CONFLICT);
-        }
-        if (store.getOperationStatus() != OperationStatus.OPEN) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
     }

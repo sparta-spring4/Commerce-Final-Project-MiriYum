@@ -13,11 +13,11 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.service.MenuQueryService;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;

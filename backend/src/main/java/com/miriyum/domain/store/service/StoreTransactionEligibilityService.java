@@ -2,6 +2,7 @@ package com.miriyum.domain.store.service;
 
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
+import com.miriyum.domain.store.dto.contract.StoreMenuTransactionEligibility;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.VerificationStatus;
@@ -64,6 +65,25 @@ public class StoreTransactionEligibilityService {
         }
         return new StorePickupTransactionEligibility(
                 store.getId(), store.getName(), store.getTimeZoneId());
+    }
+
+    /**
+     * 메뉴 도메인이 Menu 잠금 전에 사용할 Store 상태와 기능 모드를 잠금 검증한다.
+     *
+     * @param storeId 대상 매장 식별자
+     * @return 메뉴 거래 계산에 필요한 Store 기능 모드
+     * @throws ServiceException 매장이 없거나 현재 신규 거래를 받을 수 없는 경우
+     * @throws IllegalTransactionStateException 활성 거래 생성 트랜잭션 없이 호출한 경우
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoreMenuTransactionEligibility requireMenuTransactionEligibility(long storeId) {
+        Store store = loadStore(storeId);
+        requireOpenApproved(store);
+        return new StoreMenuTransactionEligibility(
+                store.getId(),
+                store.isReservationEnabled(),
+                store.isMenuHoldEnabled(),
+                store.isPickupEnabled());
     }
 
     private Store loadStore(long storeId) {

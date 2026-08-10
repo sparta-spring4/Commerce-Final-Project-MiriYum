@@ -16,7 +16,7 @@ import com.miriyum.domain.pickup.dto.response.PickupAvailabilityStatus;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.search.dto.PublicMenu;
 import com.miriyum.domain.store.search.dto.PublicStoreDetail;
 import com.miriyum.domain.store.search.dto.PublicStoreModes;

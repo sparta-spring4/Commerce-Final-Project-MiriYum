@@ -12,7 +12,7 @@ import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.schedule.repository.OperatingScheduleVersionRepository;
 import com.miriyum.domain.schedule.repository.ReservationScheduleVersionRepository;
 import com.miriyum.domain.schedule.repository.StoreScheduleStateRepository;

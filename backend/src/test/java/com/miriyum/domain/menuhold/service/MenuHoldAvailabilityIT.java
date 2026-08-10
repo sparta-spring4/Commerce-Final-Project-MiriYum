@@ -8,8 +8,8 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability.AvailabilitySta
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.service.ReservationService;
-import com.miriyum.domain.store.menu.dto.MenuHoldSelectableMenu;
-import com.miriyum.domain.store.menu.service.MenuHoldSelectionQueryService;
+import com.miriyum.domain.menu.dto.contract.MenuHoldSelectableMenu;
+import com.miriyum.domain.menu.service.MenuHoldSelectionQueryService;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;

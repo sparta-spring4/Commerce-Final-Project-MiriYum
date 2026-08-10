@@ -22,7 +22,7 @@ import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;

@@ -12,7 +12,7 @@ import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;

@@ -82,7 +82,7 @@ class StoreSearchControllerTest {
         given(publicQueryService.getMenus(7L)).willReturn(List.of(new PublicMenu(
                 "11", "아메리카노", "", 4500, true, "COFFEE", List.of(), List.of(),
                 true, true,
-                com.miriyum.domain.store.menu.enums.MenuSellingStatus.SELLING)));
+                com.miriyum.domain.menu.enums.MenuSellingStatus.SELLING)));
 
         mockMvc.perform(get("/api/v1/stores/7/menus"))
                 .andExpect(status().isOk())

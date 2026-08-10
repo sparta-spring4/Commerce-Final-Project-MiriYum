@@ -2,7 +2,7 @@ package com.miriyum.domain.store.search.repository;
 
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.store.search.dto.PublicMenu;
 import java.sql.ResultSet;
 import java.sql.SQLException;

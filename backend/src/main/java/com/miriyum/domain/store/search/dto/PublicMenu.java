@@ -1,6 +1,6 @@
 package com.miriyum.domain.store.search.dto;
 
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import java.util.List;
 
 public record PublicMenu(

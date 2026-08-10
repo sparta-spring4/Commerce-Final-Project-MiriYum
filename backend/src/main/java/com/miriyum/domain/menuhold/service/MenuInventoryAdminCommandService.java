@@ -11,8 +11,8 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.service.StoreService;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.service.MenuQueryService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
