@@ -401,4 +401,3 @@ gh pr create --draft --base dev --head codex/issue-82-design --title "refactor: 
 ```
 
 The PR body must state that this is PR1/2, list the package and cross-domain contract changes, state that URLs/OpenAPI/DB are unchanged, include exact verification results, link Issue #82 without `Closes`, and say PR2 will migrate routes after merge.
-
