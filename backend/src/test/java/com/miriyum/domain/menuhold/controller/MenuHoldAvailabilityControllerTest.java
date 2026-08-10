@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,6 +17,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -58,5 +61,18 @@ class MenuHoldAvailabilityControllerTest {
                         .queryParam("serviceDate", "2026-08-10"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Z", "+09", "+0900"})
+    void nonCanonicalStartOffsetIsRejectedBeforeService(String startOffset) throws Exception {
+        mockMvc.perform(get("/api/v1/stores/7/menu-hold-availability")
+                        .queryParam("serviceDate", "2026-08-10")
+                        .queryParam("startTime", "18:00")
+                        .queryParam("startOffset", startOffset))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        verifyNoInteractions(queryService);
     }
 }

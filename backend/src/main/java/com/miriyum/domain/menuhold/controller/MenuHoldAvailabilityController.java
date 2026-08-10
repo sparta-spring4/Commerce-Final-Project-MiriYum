@@ -28,6 +28,6 @@ public class MenuHoldAvailabilityController {
             @Valid @ModelAttribute MenuHoldAvailabilityRequest request) {
         return ApiResponse.success("메뉴 예약 가능 수량을 조회했습니다.",
                 queryService.findAvailability(storeId, request.serviceDate(),
-                        request.startTime(), request.startOffset()));
+                        request.startTime(), request.parsedStartOffset()));
     }
 }
