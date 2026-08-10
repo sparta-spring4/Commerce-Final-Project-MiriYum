@@ -91,8 +91,8 @@ public class StoreReservationController {
     @GetMapping("/{reservationId}")
     public ApiResponse<ReservationDetailResponse> getReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
-            @PathVariable long storeId,
-            @PathVariable long reservationId
+            @PathVariable @Positive long storeId,
+            @PathVariable @Positive long reservationId
     ) {
         ReservationDetailResponse response = reservationService.getStoreReservation(
                 principal.accountId(),

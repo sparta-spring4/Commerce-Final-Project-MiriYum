@@ -316,23 +316,33 @@ class StoreReservationControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(longs = {0L, -1L})
-    @DisplayName("0 이하 운영자 상세 예약 ID도 검증 오류 대신 같은 숨김 404를 반환한다")
-    void returnsHiddenNotFoundForNonPositiveDetailReservationId(long reservationId)
-            throws Exception {
-        // given
+    @ValueSource(strings = {"0", "-1"})
+    @DisplayName("0 이하 매장 ID의 운영자 예약 상세 조회는 서비스 호출 전에 거부한다")
+    void rejectsNonPositiveStoreIdBeforeDetailService(String storeId) throws Exception {
         authenticateStoreOperator(33L);
-        given(reservationService.getStoreReservation(33L, 22L, reservationId))
-                .willThrow(new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
 
-        // when & then
+        mockMvc.perform(get("/api/v1/store-operator/stores/{storeId}/reservations/77", storeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("storeId"));
+
+        then(reservationService).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    @DisplayName("0 이하 예약 ID의 운영자 예약 상세 조회는 서비스 호출 전에 거부한다")
+    void rejectsNonPositiveReservationIdBeforeDetailService(String reservationId) throws Exception {
+        authenticateStoreOperator(33L);
+
         mockMvc.perform(get(BASE_URL + "/{reservationId}", reservationId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESERVATION_001"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("reservationId"));
 
-        then(reservationService).should()
-                .getStoreReservation(33L, 22L, reservationId);
+        then(reservationService).shouldHaveNoInteractions();
     }
 
     @Test
