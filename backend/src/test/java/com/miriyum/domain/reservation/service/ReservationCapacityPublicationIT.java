@@ -271,6 +271,68 @@ class ReservationCapacityPublicationIT {
     }
 
     @Test
+    @DisplayName("실제 부분 재게시 뒤 소비자 취소는 원본과 겹치는 최신 버킷만 복구한다")
+    void partialPublicationThenConsumerCancellationRestoresOriginalAndOverlappingOccupancy() {
+        OwnerStore owner = createStore(
+                "capacity-partial-cancel@example.com", "1234567897");
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket original = seedOriginalCapacityAllocation(
+                owner.storeId(), reservationId);
+        acceptEveryStoreInterval();
+
+        ReservationCapacityCommandResult publication = commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(42),
+                partialRequest()
+        );
+        List<ReservationCapacityBucket> latestBuckets = publication.data().buckets().stream()
+                .map(bucket -> capacityBucketRepository.findById(
+                        Long.parseLong(bucket.capacityBucketId())).orElseThrow())
+                .toList();
+        ReservationCapacityBucket disjoint = latestBuckets.stream()
+                .filter(bucket -> bucket.getStartTime().equals(LocalTime.of(12, 0)))
+                .findFirst()
+                .orElseThrow();
+        ReservationCapacityBucket overlapping = latestBuckets.stream()
+                .filter(bucket -> bucket.getStartTime().equals(LocalTime.of(18, 30)))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(disjoint).satisfies(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+        });
+        assertThat(overlapping).satisfies(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+            assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+        });
+
+        long consumerId = reservationRepository.findById(reservationId)
+                .orElseThrow()
+                .getConsumerAccountId();
+        ReservationCancellationCommandResult cancellation = cancellationFacade.cancelByConsumer(
+                consumerId,
+                reservationId,
+                key(43),
+                new ConsumerCancellationRequest("partial publication")
+        );
+
+        assertThat(cancellation.httpStatus()).isEqualTo(200);
+        assertThat(reservationRepository.findById(reservationId).orElseThrow().getStatus())
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(capacityBucketRepository.findAllById(List.of(
+                original.getId(), disjoint.getId(), overlapping.getId()
+        ))).hasSize(3).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+        });
+        assertThat(count("reservation_cancellation_audits")).isOne();
+    }
+
+    @Test
     @DisplayName("정책을 반복 게시해도 최초 배정 이력을 보존한다")
     void repeatedPublicationsPreserveOriginalAllocationHistory() {
         // given
@@ -865,6 +927,29 @@ class ReservationCapacityPublicationIT {
                 4,
                 true
         )));
+    }
+
+    private static ReservationCapacitiesRequest partialRequest() {
+        return new ReservationCapacitiesRequest(List.of(
+                new CapacityBucketRequest(
+                        LocalTime.of(12, 0),
+                        LocalTime.of(13, 0),
+                        8,
+                        2,
+                        1,
+                        4,
+                        true
+                ),
+                new CapacityBucketRequest(
+                        LocalTime.of(18, 30),
+                        LocalTime.of(19, 30),
+                        8,
+                        2,
+                        1,
+                        4,
+                        true
+                )
+        ));
     }
 
     private static ReservationCapacitiesRequest twoBucketRequest() {
