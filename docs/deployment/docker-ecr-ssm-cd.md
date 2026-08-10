@@ -48,7 +48,21 @@ These are staging Environment variables, not application secrets. Application an
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
 
-After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication require the password-protected Valkey service. Compose waits for both MySQL and Valkey health before starting the backend. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
+The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Valkey has no host port and joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
+
+After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication use Valkey through Spring Data Redis/Lettuce. Compose waits for both MySQL and Valkey health before starting the backend. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
+
+After the first staging deployment that includes Valkey, verify the service from the EC2 instance:
+
+```bash
+cd /opt/miriyum
+sudo docker compose --env-file .env -f docker-compose.prod.yml ps valkey
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey valkey-cli ping
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping'
+sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
+```
+
+The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
 ## Release and rollback
 
