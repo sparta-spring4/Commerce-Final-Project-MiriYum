@@ -9,5 +9,12 @@ package com.miriyum.global.storage;
 public enum FileStoragePurpose {
     BUSINESS_LICENSE,  // 사업자 등록증
     STORE_IMAGE,       // 매장 이미지
-    MENU_IMAGE         // 메뉴 이미지
+    MENU_IMAGE;        // 메뉴 이미지
+
+    /** 업무 목적에 허용된 공개 범위인지 확인한다. */
+    public void validateVisibility(FileStorageVisibility visibility) {
+        if (this == BUSINESS_LICENSE && visibility != FileStorageVisibility.PRIVATE) {
+            throw new IllegalArgumentException("사업자등록증은 비공개 파일로만 저장할 수 있습니다.");
+        }
+    }
 }

@@ -12,8 +12,9 @@ public interface FileStoragePort {
      * 파일을 객체 키로 저장한다.
      *
      * @param request 저장할 파일의 객체 키·형식·크기·내용
+     * @return 실제 저장된 객체의 MIME·크기·SHA-256 검증 정보
      */
-    void save(FileStorageRequest request);
+    FileStorageSaveResult save(FileStorageRequest request);
 
     /**
      * 객체 키에 해당하는 파일을 읽는다.

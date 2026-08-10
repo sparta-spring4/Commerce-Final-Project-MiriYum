@@ -39,6 +39,23 @@ class FileMetadataTest {
     }
 
     @Test
+    @DisplayName("사업자등록증은 공개 파일로 생성하지 않는다")
+    void rejectsPublicBusinessLicense() {
+        assertThatIllegalArgumentException().isThrownBy(() -> FileMetadata.createPending(
+                "2567edb4-91f8-4ea4-9618-8f7754fd1440",
+                "STORE_OPERATOR",
+                11L,
+                FileStoragePurpose.BUSINESS_LICENSE,
+                "private/store-operator/11/business-license/object-1",
+                "image/jpeg",
+                512L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "BUSINESS_LICENSE_DEFAULT",
+                LocalDateTime.of(2026, 8, 10, 13, 30)));
+    }
+
+    @Test
     @DisplayName("대기 중인 파일 메타데이터를 저장 완료 상태로 변경한다")
     void confirmsPendingMetadata() {
         // given

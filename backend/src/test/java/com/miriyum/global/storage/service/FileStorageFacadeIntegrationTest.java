@@ -8,6 +8,7 @@ import com.miriyum.global.storage.FileStorageObject;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageRequest;
+import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
@@ -41,6 +42,9 @@ import org.testcontainers.mysql.MySQLContainer;
         })
 class FileStorageFacadeIntegrationTest {
 
+    private static final String FILE_CHECKSUM =
+            "3b9c358f36f0a31b6ad3e14f309c7cf198ac9246e8316f9ce543d5b19ac02b80";
+
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
 
@@ -71,7 +75,7 @@ class FileStorageFacadeIntegrationTest {
                 objectKey,
                 "image/jpeg",
                 4L,
-                "a".repeat(64),
+                FILE_CHECKSUM,
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
                 LocalDateTime.of(2026, 8, 10, 15, 0));
@@ -136,8 +140,10 @@ class FileStorageFacadeIntegrationTest {
         private final List<String> savedObjectKeys = new ArrayList<>();
 
         @Override
-        public void save(FileStorageRequest request) {
+        public FileStorageSaveResult save(FileStorageRequest request) {
             savedObjectKeys.add(request.objectKey());
+            return new FileStorageSaveResult(
+                    request.objectKey(), request.contentType(), request.sizeBytes(), FILE_CHECKSUM);
         }
 
         @Override
@@ -157,7 +163,7 @@ class FileStorageFacadeIntegrationTest {
     private record FailingFileStoragePort(RuntimeException failure) implements FileStoragePort {
 
         @Override
-        public void save(FileStorageRequest request) {
+        public FileStorageSaveResult save(FileStorageRequest request) {
             throw failure;
         }
 

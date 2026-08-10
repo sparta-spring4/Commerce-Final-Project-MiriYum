@@ -20,12 +20,17 @@ class FileStoragePortContractTest {
                 new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8))
         );
 
-        storage.save(request);
+        FileStorageSaveResult saveResult = storage.save(request);
 
         FileStorageObject stored = storage.read(request.objectKey());
 
         assertThat(stored.objectKey()).isEqualTo(request.objectKey());
         assertThat(stored.contentType()).isEqualTo("image/jpeg");
         assertThat(stored.bytes()).isEqualTo("hello".getBytes(StandardCharsets.UTF_8));
+        assertThat(saveResult.objectKey()).isEqualTo(request.objectKey());
+        assertThat(saveResult.contentType()).isEqualTo("image/jpeg");
+        assertThat(saveResult.sizeBytes()).isEqualTo(5L);
+        assertThat(saveResult.checksum())
+                .isEqualTo("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
     }
 }

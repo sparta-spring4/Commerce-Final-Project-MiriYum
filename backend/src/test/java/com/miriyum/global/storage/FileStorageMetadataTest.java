@@ -50,6 +50,31 @@ class FileStorageMetadataTest {
     }
 
     @Test
+    @DisplayName("16진수가 아닌 64자리 값은 SHA-256 체크섬으로 허용하지 않는다")
+    void rejectsNonHexChecksum() {
+        assertThatIllegalArgumentException().isThrownBy(() -> createMetadata(
+                "z".repeat(64), FileStorageStatus.CONFIRMED, null));
+    }
+
+    @Test
+    @DisplayName("사업자등록증은 공개 메타데이터로 만들지 않는다")
+    void rejectsPublicBusinessLicense() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
+                UUID.randomUUID(),
+                new FileStorageOwner("STORE_OPERATOR", 10L),
+                FileStoragePurpose.BUSINESS_LICENSE,
+                "private/store-operator/10/business-license/test-file",
+                "image/jpeg",
+                5L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                FileStorageStatus.PENDING,
+                "BUSINESS_LICENSE_DEFAULT",
+                Instant.parse("2026-08-09T00:00:00Z"),
+                null));
+    }
+
+    @Test
     @DisplayName("삭제 상태와 삭제 시각은 함께 기록해야 한다")
     void requiresDeletedAtOnlyForDeletedStatus() {
         assertThatIllegalArgumentException().isThrownBy(() -> createMetadata(

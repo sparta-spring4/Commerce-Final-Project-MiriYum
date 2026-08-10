@@ -7,6 +7,7 @@ import com.miriyum.global.storage.FileStorageObject;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageRequest;
+import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
@@ -19,6 +20,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class FileStorageFacadeTest {
+
+    private static final String FILE_CHECKSUM =
+            "3b9c358f36f0a31b6ad3e14f309c7cf198ac9246e8316f9ce543d5b19ac02b80";
 
     @Test
     @DisplayName("파일 저장 후 완료 상태 기록이 실패하면 실패 상태로 덮어쓰지 않는다")
@@ -68,6 +72,76 @@ class FileStorageFacadeTest {
         assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
     }
 
+    @Test
+    @DisplayName("메타데이터와 저장 요청의 MIME 타입이 다르면 저장을 시작하지 않는다")
+    void rejectsDifferentContentTypesBeforeStorageStarts() {
+        FileMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                metadata.getObjectKey(),
+                "image/png",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> facade.store(metadata, request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("메타데이터와 저장 요청의 파일 크기가 다르면 저장을 시작하지 않는다")
+    void rejectsDifferentSizesBeforeStorageStarts() {
+        FileMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+        FileStorageRequest request = new FileStorageRequest(
+                metadata.getObjectKey(),
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> facade.store(metadata, request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.pendingFileIds()).isEmpty();
+        assertThat(fileStoragePort.savedObjectKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("저장 결과의 MIME 타입이 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredContentTypeDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().getObjectKey(), "image/png", 4L, FILE_CHECKSUM));
+    }
+
+    @Test
+    @DisplayName("저장 결과의 파일 크기가 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredSizeDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().getObjectKey(), "image/jpeg", 5L, FILE_CHECKSUM));
+    }
+
+    @Test
+    @DisplayName("저장 결과의 SHA-256 체크섬이 다르면 실패 상태로 기록한다")
+    void marksFailedWhenStoredChecksumDiffers() {
+        assertStorageResultMismatch(new FileStorageSaveResult(
+                pendingMetadata().getObjectKey(), "image/jpeg", 4L, "a".repeat(64)));
+    }
+
+    private void assertStorageResultMismatch(FileStorageSaveResult saveResult) {
+        FileMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        FileStorageFacade facade = new FileStorageFacade(
+                new FixedResultFileStoragePort(saveResult), transactionExecutor);
+
+        assertThatThrownBy(() -> facade.store(metadata, request(metadata.getObjectKey())))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(transactionExecutor.failedFileIds()).containsExactly(metadata.getFileId());
+    }
+
     private FileMetadata pendingMetadata() {
         return FileMetadata.createPending(
                 "c8434be1-6b4d-473d-8e4c-5e0c35b2fbef",
@@ -77,7 +151,7 @@ class FileStorageFacadeTest {
                 "public/store/11/store-image/object-9",
                 "image/jpeg",
                 4L,
-                "c".repeat(64),
+                FILE_CHECKSUM,
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
                 LocalDateTime.of(2026, 8, 10, 16, 0));
@@ -142,8 +216,10 @@ class FileStorageFacadeTest {
         private final List<String> savedObjectKeys = new ArrayList<>();
 
         @Override
-        public void save(FileStorageRequest request) {
+        public FileStorageSaveResult save(FileStorageRequest request) {
             savedObjectKeys.add(request.objectKey());
+            return new FileStorageSaveResult(
+                    request.objectKey(), request.contentType(), request.sizeBytes(), FILE_CHECKSUM);
         }
 
         @Override
@@ -163,10 +239,27 @@ class FileStorageFacadeTest {
     private static final class SuccessfulFileStoragePort extends RecordingFileStoragePort {
     }
 
+    private record FixedResultFileStoragePort(FileStorageSaveResult result) implements FileStoragePort {
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            return result;
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+        }
+    }
+
     private record FailingFileStoragePort(RuntimeException failure) implements FileStoragePort {
 
         @Override
-        public void save(FileStorageRequest request) {
+        public FileStorageSaveResult save(FileStorageRequest request) {
             throw failure;
         }
 

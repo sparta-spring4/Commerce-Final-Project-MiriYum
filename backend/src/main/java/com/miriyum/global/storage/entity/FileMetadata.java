@@ -77,6 +77,7 @@ public class FileMetadata {
             String retentionPolicy,
             LocalDateTime createdAt) {
         validateChecksum(checksum);
+        validateVisibility(purpose, visibility);
         FileMetadata metadata = new FileMetadata();
         metadata.fileId = fileId;
         metadata.ownerType = ownerType;
@@ -94,9 +95,17 @@ public class FileMetadata {
     }
 
     private static void validateChecksum(String checksum) {
-        if (checksum == null || checksum.length() != 64) {
-            throw new IllegalArgumentException("체크섬은 64자리여야 합니다.");
+        if (checksum == null || !checksum.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("체크섬은 소문자 64자리 SHA-256 값이어야 합니다.");
         }
+    }
+
+    private static void validateVisibility(
+            FileStoragePurpose purpose, FileStorageVisibility visibility) {
+        if (purpose == null || visibility == null) {
+            throw new IllegalArgumentException("파일 목적과 공개 범위는 필수입니다.");
+        }
+        purpose.validateVisibility(visibility);
     }
 
     /** 파일 저장소에 원본 파일이 정상 저장된 뒤 완료 상태로 전환한다. */

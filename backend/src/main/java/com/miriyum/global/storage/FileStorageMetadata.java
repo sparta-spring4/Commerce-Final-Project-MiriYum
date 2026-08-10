@@ -31,6 +31,7 @@ public record FileStorageMetadata(
         if (owner == null || purpose == null || visibility == null || status == null) {
             throw new IllegalArgumentException("file metadata enum values must not be null");
         }
+        purpose.validateVisibility(visibility);
         if (objectKey == null || objectKey.isBlank()) {
             throw new IllegalArgumentException("object key must not be blank");
         }
@@ -40,8 +41,8 @@ public record FileStorageMetadata(
         if (sizeBytes < 0) {
             throw new IllegalArgumentException("file size must not be negative");
         }
-        if (checksum == null || checksum.length() != 64) {
-            throw new IllegalArgumentException("checksum must be 64 characters");
+        if (checksum == null || !checksum.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("checksum must be a lowercase SHA-256 hex value");
         }
         if (retentionPolicy == null || retentionPolicy.isBlank()) {
             throw new IllegalArgumentException("retention policy must not be blank");

@@ -2,6 +2,9 @@ package com.miriyum.global.storage;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -13,7 +16,7 @@ final class InMemoryFileStorageAdapter implements FileStoragePort {
     private final Map<String, FileStorageObject> objects = new ConcurrentHashMap<>();
 
     @Override
-    public void save(FileStorageRequest request) {
+    public FileStorageSaveResult save(FileStorageRequest request) {
         try (var content = request.content()) {
             byte[] bytes = content.readAllBytes();
             if (bytes.length != request.sizeBytes()) {
@@ -23,8 +26,21 @@ final class InMemoryFileStorageAdapter implements FileStoragePort {
                     request.objectKey(),
                     new FileStorageObject(request.objectKey(), request.contentType(), bytes)
             );
+            return new FileStorageSaveResult(
+                    request.objectKey(),
+                    request.contentType(),
+                    bytes.length,
+                    sha256(bytes));
         } catch (IOException exception) {
             throw new UncheckedIOException("failed to read file content", exception);
+        }
+    }
+
+    private String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", exception);
         }
     }
 

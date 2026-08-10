@@ -1,6 +1,7 @@
 package com.miriyum.global.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import java.time.LocalDateTime;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -74,5 +76,31 @@ class FileStorageMetadataSchemaIntegrationTest {
         String objectKey = jdbcTemplate.queryForObject(
                 "SELECT object_key FROM file_metadata WHERE file_id = ?", String.class, fileId.toString());
         assertThat(objectKey).isEqualTo("public/store/11/store-image/object-1");
+    }
+
+    @Test
+    @DisplayName("DB에서도 사업자등록증 공개 저장을 거절한다")
+    void rejectsPublicBusinessLicenseAtDatabaseBoundary() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                INSERT INTO file_metadata (
+                    file_id, owner_type, owner_id, purpose, object_key, content_type,
+                    size_bytes, checksum, visibility, storage_status, retention_policy, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                UUID.randomUUID().toString(),
+                "STORE_OPERATOR",
+                11L,
+                "BUSINESS_LICENSE",
+                "private/store-operator/11/business-license/object-public",
+                "image/jpeg",
+                512L,
+                "a".repeat(64),
+                "PUBLIC",
+                "PENDING",
+                "BUSINESS_LICENSE_DEFAULT",
+                LocalDateTime.of(2026, 8, 10, 12, 30)))
+                .isInstanceOf(UncategorizedSQLException.class)
+                .hasMessageContaining("ck_file_metadata_purpose_visibility");
     }
 }

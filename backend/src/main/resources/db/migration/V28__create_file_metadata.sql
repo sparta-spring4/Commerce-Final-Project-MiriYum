@@ -21,6 +21,10 @@ CREATE TABLE file_metadata (
         CHECK (purpose IN ('BUSINESS_LICENSE', 'STORE_IMAGE', 'MENU_IMAGE')),
     CONSTRAINT ck_file_metadata_visibility
         CHECK (visibility IN ('PRIVATE', 'PUBLIC')),
+    CONSTRAINT ck_file_metadata_purpose_visibility
+        CHECK (purpose <> 'BUSINESS_LICENSE' OR visibility = 'PRIVATE'),
+    CONSTRAINT ck_file_metadata_checksum
+        CHECK (checksum REGEXP '^[0-9a-f]{64}$'),
     CONSTRAINT ck_file_metadata_status
         CHECK (storage_status IN ('PENDING', 'CONFIRMED', 'FAILED', 'DELETED')),
     CONSTRAINT ck_file_metadata_deleted_at
