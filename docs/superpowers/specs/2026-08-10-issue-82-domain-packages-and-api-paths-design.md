@@ -113,6 +113,15 @@ PR1에서 정적으로 표현 가능한 규칙은 아키텍처 테스트로 고�
 
 PR1은 기존 URL과 OpenAPI 결과가 유지되는지 확인한 뒤 독립적으로 병합할 수 있어야 한다.
 
+PR1의 패키지 승격으로 기존에는 같은 `store` 내부에 감춰져 있던 최상위 도메인 의존이 드러난다. PR1이 새 순환을 만들거나 유지해서는 안 되므로, `StoreService`가 `MenuTransactionService`를 감싸 호출하는 역방향 의존은 제거한다. 메뉴 홀드와 픽업은 Menu가 공개한 거래 검증 경계를 직접 사용하여 의존 방향을 `menu -> store`로 단방향화한다. Store 잠금 후 Menu를 잠그는 순서와 기존 트랜잭션 경계는 유지한다.
+
+구조 테스트는 다음 회귀를 실제 타입과 전체 도메인 import 그래프를 기준으로 거부한다.
+
+- `@Entity` 선언 타입과 Repository 선언 타입을 패키지 이름과 무관하게 식별한다.
+- Controller, Store, 전체 도메인 소스 등 각 규칙의 검사 대상이 비어 있으면 실패한다.
+- Service와 DTO를 포함한 전체 최상위 도메인 의존 그래프에서 새로운 순환을 거부한다.
+- PR1 이전부터 존재한 `consumer <-> reservation`, `menuhold <-> reservation`만 명시적 baseline으로 기록하고 별도 후속 설계 대상으로 남긴다.
+
 ### 4.2 PR2: 사용자 유형별 API 경로 전환
 
 PR2는 PR1이 `dev`에 병합된 후 최신 `dev`에서 새 브랜치를 만들어 진행한다. 다음 경로를 변경한다.
@@ -144,6 +153,19 @@ PR2에서는 경로 문자열을 가진 모든 소비자를 하나의 변경 단
 - 기능별 OpenAPI와 통합 OpenAPI
 - 프론트엔드 생성 타입, API 호출부, 경로 상수
 - 기능 spec, 공통 정책, 로컬 실행 및 배포 문서의 경로와 예제
+
+### 4.3 PR2 공통 메뉴 거래 Facade
+
+PR1 검수에서 메뉴 홀드와 픽업이 동일한 Store-Menu 거래 검증 흐름을 사용한다는 근거가 확인되었다. PR2에서는 `menu.service.MenuTransactionService`를 `MenuTransactionFacade`로 승격한다. 새 범용 `application` wrapper package는 만들지 않고, 기존 Facade 선례와 같이 `menu.service` 안에서 목적이 명확한 교차 도메인 조정자 하나만 둔다.
+
+`MenuTransactionFacade`는 다음 책임만 소유한다.
+
+1. 호출자가 시작한 거래 트랜잭션에 참여한다.
+2. Store 공개 자격 계약을 먼저 호출하여 Store 잠금을 획득한다.
+3. Menu를 이어서 잠그고 Store 소유 관계와 게시 버전을 검증한다.
+4. 메뉴 홀드와 픽업이 공통으로 소비하는 `MenuTransactionEligibility`를 반환한다.
+
+MenuHold와 Pickup은 Facade를 직접 사용한다. Store는 Menu 또는 Facade를 참조하지 않으며, Menu의 일반 조회·관리 Service는 기존 Store 공개 계약만 사용한다. Facade 도입은 잠금 순서, 오류 코드, DTO, HTTP 계약을 변경하지 않는다. 기존 `consumer <-> reservation`, `menuhold <-> reservation` 순환은 이 Facade의 책임이 아니며 이름만 Facade로 바꾸어 우회하지 않는다.
 
 ## 5. 호환성 및 배포 정책
 
