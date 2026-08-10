@@ -95,6 +95,22 @@ class MenuHoldAvailabilityIT {
                 .isEqualTo(AvailabilityStatus.SOLD_OUT);
     }
 
+    @Test
+    void returnsOnlyCandidateWithCurrentMysqlBucket() {
+        jdbcTemplate.update(
+                "DELETE FROM menu_inventory_buckets WHERE menu_id = ?",
+                SOLD_OUT_MENU_ID);
+
+        var result = service.findAvailability(
+                STORE_ID, SERVICE_DATE, LocalTime.of(18, 0), null);
+
+        assertThat(result.items()).extracting(item -> item.menuId())
+                .containsExactly(Long.toString(AVAILABLE_MENU_ID));
+        assertThat(result.items().getFirst().availableOnlineQuantity()).isEqualTo(5);
+        assertThat(result.items().getFirst().availabilityStatus())
+                .isEqualTo(AvailabilityStatus.AVAILABLE);
+    }
+
     private void insertStoreAndMenus() {
         jdbcTemplate.update("""
                 INSERT INTO store_operator_accounts (

@@ -83,7 +83,8 @@ class MenuHoldAvailabilityQueryServiceTest {
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
-        given(inventoryService.findOnlineAvailability(org.mockito.ArgumentMatchers.any()))
+        given(inventoryService.findExistingOnlineAvailability(
+                org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(new MenuInventoryAvailability(
                         12L, 2L, "Asia/Seoul", date, LocalTime.of(18, 0),
                         date, LocalTime.of(19, 0), 0, AvailabilityStatus.SOLD_OUT)));
@@ -108,7 +109,8 @@ class MenuHoldAvailabilityQueryServiceTest {
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
-        given(inventoryService.findOnlineAvailability(org.mockito.ArgumentMatchers.any()))
+        given(inventoryService.findExistingOnlineAvailability(
+                org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of());
 
         service.findAvailability(7L, date, LocalTime.of(23, 30), null);
@@ -116,7 +118,7 @@ class MenuHoldAvailabilityQueryServiceTest {
         ArgumentCaptor<com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery> captor =
                 ArgumentCaptor.forClass(
                         com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery.class);
-        then(inventoryService).should().findOnlineAvailability(captor.capture());
+        then(inventoryService).should().findExistingOnlineAvailability(captor.capture());
         assertThat(captor.getValue().serviceDate()).isEqualTo(date);
         assertThat(captor.getValue().startTime()).isEqualTo(LocalTime.of(23, 30));
         assertThat(captor.getValue().endDate()).isEqualTo(date.plusDays(1));
@@ -157,7 +159,8 @@ class MenuHoldAvailabilityQueryServiceTest {
                 List.of(7L), new com.miriyum.domain.reservation.dto.request.ReservationTimeRequest(
                         date, LocalTime.of(18, 0), ZoneOffset.ofHours(9))))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
-        given(inventoryService.findOnlineAvailability(org.mockito.ArgumentMatchers.any()))
+        given(inventoryService.findExistingOnlineAvailability(
+                org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(new MenuInventoryAvailability(
                         11L, 5L, "Asia/Seoul", date, LocalTime.of(18, 0),
                         date, LocalTime.of(19, 30), 4, AvailabilityStatus.AVAILABLE)));

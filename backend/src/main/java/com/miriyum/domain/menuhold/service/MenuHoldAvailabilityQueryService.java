@@ -73,11 +73,12 @@ public class MenuHoldAvailabilityQueryService {
         }
         List<MenuHoldAvailabilityResponse.Item> items = List.of();
         if (!menus.isEmpty()) {
-            List<MenuInventoryAvailability> availability = inventoryService.findOnlineAvailability(
-                    new MenuInventoryAvailabilityQuery(menus.stream()
-                            .map(MenuHoldSelectableMenu::menuId).toList(),
-                            start.toLocalDate(), start.toLocalTime(),
-                            end.toLocalDate(), end.toLocalTime()));
+            List<MenuInventoryAvailability> availability =
+                    inventoryService.findExistingOnlineAvailability(
+                            new MenuInventoryAvailabilityQuery(menus.stream()
+                                    .map(MenuHoldSelectableMenu::menuId).toList(),
+                                    start.toLocalDate(), start.toLocalTime(),
+                                    end.toLocalDate(), end.toLocalTime()));
             if (availability == null || availability.stream().anyMatch(java.util.Objects::isNull)) {
                 throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
             }
