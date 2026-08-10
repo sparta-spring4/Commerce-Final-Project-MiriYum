@@ -38,7 +38,8 @@ public class StoreSearchSecurityConfig {
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/stores",
                                 "/api/v1/stores/{storeId}",
-                                "/api/v1/stores/{storeId}/menus")
+                                "/api/v1/stores/{storeId}/menus",
+                                "/api/v1/stores/{storeId}/menu-hold-availability")
                         .permitAll()
                         .anyRequest().denyAll())
                 .addFilterBefore(

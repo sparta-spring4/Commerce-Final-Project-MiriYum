@@ -72,6 +72,15 @@ public final class PickupMenuInventoryContractFixture
     }
 
     @Override
+    public List<MenuInventoryAvailability> findExistingOnlineAvailability(
+            MenuInventoryAvailabilityQuery query
+    ) {
+        availabilityQueries.add(query);
+        throwIfConfigured();
+        return availability;
+    }
+
+    @Override
     public List<MenuInventoryAvailability> findOnlineAvailabilityByDate(
             MenuInventoryAvailabilityDateQuery query
     ) {
