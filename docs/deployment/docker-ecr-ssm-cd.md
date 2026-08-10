@@ -48,7 +48,18 @@ These are staging Environment variables, not application secrets. Application an
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
 
-The current backend continues to use stateless Access/Refresh JWT validation. #141 only starts and health-checks the password-protected Valkey service. Spring Data Redis/Lettuce, Refresh Token rotation, revocation, reuse detection, and Valkey failure-closed authentication belong to #140.
+The current backend continues to use stateless Access/Refresh JWT validation. #141 only starts and health-checks the password-protected Valkey service. Valkey has no host port and joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it. Spring Data Redis/Lettuce, Refresh Token rotation, revocation, reuse detection, and Valkey failure-closed authentication belong to #140.
+
+After the first staging deployment that includes Valkey, verify the service from the EC2 instance:
+
+```bash
+cd /opt/miriyum
+sudo docker compose --env-file .env -f docker-compose.prod.yml ps valkey
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping'
+sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
+```
+
+The expected result is `healthy`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
 ## Release and rollback
 

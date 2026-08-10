@@ -56,6 +56,20 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
 
+    def test_valkey_uses_a_backend_only_internal_network(self):
+        self.assertIn("backend-valkey:", self.compose)
+        self.assertIn("internal: true", self.compose)
+
+        backend_start = self.compose.index("  backend:")
+        valkey_start = self.compose.index("  valkey:")
+        nginx_start = self.compose.index("  nginx:")
+        backend = self.compose[backend_start:valkey_start]
+        valkey = self.compose[valkey_start:nginx_start]
+
+        self.assertIn("backend-valkey:", backend)
+        self.assertIn("backend-valkey:", valkey)
+        self.assertNotIn("app:\n        ipv4_address: 172.29.81.12", valkey)
+
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
         self.assertIn('["AWS/EC2", "NetworkOut", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
