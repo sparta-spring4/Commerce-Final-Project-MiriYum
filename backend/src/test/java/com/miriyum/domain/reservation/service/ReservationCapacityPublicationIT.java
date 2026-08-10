@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doAnswer;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
+import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
@@ -15,6 +16,7 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
@@ -114,6 +116,9 @@ class ReservationCapacityPublicationIT {
     @Autowired
     private ReservationCapacityCommandFacade commandFacade;
 
+    @Autowired
+    private ReservationCancellationCommandFacade cancellationFacade;
+
     @MockitoSpyBean
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
@@ -143,6 +148,7 @@ class ReservationCapacityPublicationIT {
         reservationLockQueryStarted = null;
         RESERVATION_LOCK_QUERY_ATTEMPTS.set(0);
         RESERVATION_LOCK_WAITS_OBSERVED.set(0);
+        jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
@@ -219,6 +225,49 @@ class ReservationCapacityPublicationIT {
             assertThat(allocation.get("capacity_policy_version")).isEqualTo(1L);
         });
         assertThat(count("idempotency_commands")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("실제 완전 비겹침 재게시 뒤 소비자 취소는 원본 점유만 복구한다")
+    void disjointPublicationThenConsumerCancellationRestoresOnlyOriginalOccupancy() {
+        OwnerStore owner = createStore(
+                "capacity-disjoint-cancel@example.com", "1234567896");
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket original = seedOriginalCapacityAllocation(
+                owner.storeId(), reservationId);
+        acceptEveryStoreInterval();
+
+        ReservationCapacityCommandResult publication = commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(40),
+                disjointRequest()
+        );
+        long consumerId = reservationRepository.findById(reservationId)
+                .orElseThrow()
+                .getConsumerAccountId();
+        ReservationCancellationCommandResult cancellation = cancellationFacade.cancelByConsumer(
+                consumerId,
+                reservationId,
+                key(41),
+                new ConsumerCancellationRequest("disjoint publication")
+        );
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(publication.data().buckets()).singleElement().satisfies(bucket -> {
+            assertThat(bucket.occupiedPeople()).isZero();
+            assertThat(bucket.occupiedTeams()).isZero();
+        });
+        assertThat(cancellation.httpStatus()).isEqualTo(200);
+        assertThat(reservationRepository.findById(reservationId).orElseThrow().getStatus())
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(capacityBucketRepository.findById(original.getId()).orElseThrow())
+                .satisfies(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        assertThat(count("reservation_cancellation_audits")).isOne();
     }
 
     @Test
@@ -802,6 +851,18 @@ class ReservationCapacityPublicationIT {
                 maxTeams,
                 1,
                 Math.min(maxPeople, 4),
+                true
+        )));
+    }
+
+    private static ReservationCapacitiesRequest disjointRequest() {
+        return new ReservationCapacitiesRequest(List.of(new CapacityBucketRequest(
+                LocalTime.of(12, 0),
+                LocalTime.of(13, 0),
+                8,
+                2,
+                1,
+                4,
                 true
         )));
     }
