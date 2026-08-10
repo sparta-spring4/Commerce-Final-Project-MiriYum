@@ -24,6 +24,7 @@ import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -317,6 +318,25 @@ class ReservationControllerTest {
                         .content(validReservationJson()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("RESERVATION_003"));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 매장으로 예약을 생성하면 STORE_001을 반환한다")
+    void returnsStoreNotFoundWhenCreatingReservation() throws Exception {
+        // given
+        authenticateConsumer(11L);
+        given(reservationCreationCommandFacade.create(
+                eq(11L), any(IdempotencyKey.class), any()))
+                .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("STORE_001"));
     }
 
     @Test
