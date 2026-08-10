@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.menuhold.controller.dto.MenuHoldAvailabilityResponse;
 import com.miriyum.domain.menuhold.service.MenuHoldAvailabilityQueryService;
-import com.miriyum.domain.store.search.config.StoreSearchSecurityConfig;
+import com.miriyum.domain.search.config.StoreSearchSecurityConfig;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;

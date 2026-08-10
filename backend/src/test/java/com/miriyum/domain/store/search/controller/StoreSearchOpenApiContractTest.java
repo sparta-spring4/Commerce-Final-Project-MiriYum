@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.search.controller;
+package com.miriyum.domain.search.controller.publicapi;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

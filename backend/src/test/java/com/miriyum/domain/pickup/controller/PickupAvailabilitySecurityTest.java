@@ -11,7 +11,7 @@ import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import com.miriyum.domain.pickup.config.PickupSecurityConfig;
 import com.miriyum.domain.pickup.dto.response.PickupAvailability;
 import com.miriyum.domain.pickup.service.PickupAvailabilityService;
-import com.miriyum.domain.store.search.config.StoreSearchSecurityConfig;
+import com.miriyum.domain.search.config.StoreSearchSecurityConfig;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.time.LocalDate;
 import java.util.List;
