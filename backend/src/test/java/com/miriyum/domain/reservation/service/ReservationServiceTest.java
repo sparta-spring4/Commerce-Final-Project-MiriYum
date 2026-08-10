@@ -24,10 +24,12 @@ import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -50,6 +52,7 @@ import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersio
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
@@ -58,6 +61,7 @@ import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
@@ -71,6 +75,7 @@ import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
 import com.miriyum.domain.store.schedule.service.StoreScheduleService;
 import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -102,6 +107,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -109,6 +115,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -133,6 +141,15 @@ class ReservationServiceTest {
             "reservation-cancel:consumer:11:" + CANCELLATION_KEY;
     private static final String OPERATOR_CANCELLATION_CORRELATION =
             "reservation-cancel:store-operator:33:" + CANCELLATION_KEY;
+    private static final long OPERATOR_ID = 33L;
+    private static final long STORE_ID = 22L;
+    private static final long RESERVATION_ID = 77L;
+    private static final Instant REQUESTED_AT = NOW.minusSeconds(10);
+    private static final Instant OCCURRED_AT = NOW;
+    private static final String FULFILLMENT_KEY =
+            "550e8400-e29b-41d4-a716-446655440000";
+    private static final String FULFILLMENT_CORRELATION =
+            "reservation-fulfill:store-operator:33:" + FULFILLMENT_KEY;
 
     @Mock
     private StoreScheduleService storeScheduleService;
@@ -182,10 +199,17 @@ class ReservationServiceTest {
     @Mock
     private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
 
+    @Mock
+    private Clock clock;
+
+    @Mock
+    private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
+
     private ReservationService reservationService;
 
     @BeforeEach
     void setUp() {
+        lenient().when(clock.instant()).thenReturn(NOW);
         reservationService = new ReservationService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
@@ -194,7 +218,7 @@ class ReservationServiceTest {
                 idempotencyExecutor,
                 timePolicyAuditRepository,
                 new ObjectMapper(),
-                Clock.fixed(NOW, ZoneOffset.UTC),
+                clock,
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
@@ -204,7 +228,8 @@ class ReservationServiceTest {
                 cancellationPolicySelector,
                 menuHoldService,
                 cancellationAuditRepository,
-                cancellationPolicyEvaluator
+                cancellationPolicyEvaluator,
+                fulfillmentAuditRepository
         );
     }
 
@@ -3478,6 +3503,280 @@ class ReservationServiceTest {
         then(reservationRepository).shouldHaveNoInteractions();
     }
 
+    @Test
+    void fulfillmentChecksCurrentOwnershipBeforeIdempotencyClaim() {
+        willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED))
+                .given(storeService)
+                .requireManagementOwnership(OPERATOR_ID, STORE_ID);
+
+        assertServiceError(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        ), StoreErrorCode.ACCESS_DENIED);
+
+        then(idempotencyExecutor).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void fulfillmentTransitionsReservationAndPresentHoldWithoutResourceRestore() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldService.fulfill(any(MenuHoldFulfillCommand.class)))
+                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+
+        ReservationFulfillmentCommandResult result =
+                reservationService.fulfillStoreReservation(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        RESERVATION_ID,
+                        fulfillmentCommand(),
+                        REQUESTED_AT,
+                        FULFILLMENT_CORRELATION
+                );
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(result.data().status()).isEqualTo("FULFILLED");
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void fulfillmentUsesOwnershipOnlyAndNeverChecksTransactionEligibility() {
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                RESERVATION_ID,
+                STORE_ID
+        )).willReturn(Optional.of(confirmedReservation()));
+        given(menuHoldService.lockForTermination(RESERVATION_ID))
+                .willReturn(MenuHoldTerminationPresence.NO_HOLD);
+        given(fulfillmentAuditRepository.saveAndFlush(
+                any(ReservationFulfillmentAudit.class)
+        )).willAnswer(invocation -> invocation.getArgument(0));
+
+        reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        );
+
+        then(storeService).should().requireManagementOwnership(OPERATOR_ID, STORE_ID);
+        then(storeService).shouldHaveNoMoreInteractions();
+        then(storeTransactionEligibilityService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void replayRechecksOwnershipAndDoesNotReadOrMutateReservationHoldOrAudit() {
+        given(idempotencyExecutor.execute(eq(fulfillmentCommand()), any()))
+                .willReturn(successfulFulfillmentOutcome());
+
+        ReservationFulfillmentCommandResult result =
+                reservationService.fulfillStoreReservation(
+                        OPERATOR_ID,
+                        STORE_ID,
+                        RESERVATION_ID,
+                        fulfillmentCommand(),
+                        REQUESTED_AT,
+                        FULFILLMENT_CORRELATION
+                );
+
+        then(storeService).should().requireManagementOwnership(OPERATOR_ID, STORE_ID);
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(menuHoldService).shouldHaveNoInteractions();
+        then(fulfillmentAuditRepository).shouldHaveNoInteractions();
+        assertThat(result.httpStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void noHoldNeverCallsFulfillAndDoesNotCreateOrRestoreResources() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.NO_HOLD);
+
+        reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        );
+
+        then(menuHoldService).should(never()).fulfill(any());
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void acceptsAlreadyFulfilledMenuHoldAsThePublicFulfilledOutcome() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldService.fulfill(new MenuHoldFulfillCommand(
+                RESERVATION_ID,
+                FULFILLMENT_CORRELATION
+        ))).willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+
+        reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        );
+
+        then(fulfillmentAuditRepository).should().saveAndFlush(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ReservationStatus.class,
+            names = {"CONFIRMED"},
+            mode = EnumSource.Mode.EXCLUDE
+    )
+    void rejectsEveryNonConfirmedStateBeforeLockingMenuHold(ReservationStatus status) {
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                RESERVATION_ID,
+                STORE_ID
+        )).willReturn(Optional.of(reservationIn(status)));
+
+        assertServiceError(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        ), ReservationErrorCode.INVALID_STATE_TRANSITION);
+
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void usesOneOccurredAtLocksInOrderAndNeverRehydratesAfterMenuHoldFulfill() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldService.fulfill(any()))
+                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+
+        reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        );
+
+        InOrder order = inOrder(
+                reservationRepository,
+                menuHoldService,
+                fulfillmentAuditRepository
+        );
+        order.verify(reservationRepository)
+                .findByIdAndStoreIdForUpdate(RESERVATION_ID, STORE_ID);
+        order.verify(menuHoldService).lockForTermination(RESERVATION_ID);
+        order.verify(menuHoldService).fulfill(new MenuHoldFulfillCommand(
+                RESERVATION_ID,
+                FULFILLMENT_CORRELATION
+        ));
+        ArgumentCaptor<ReservationFulfillmentAudit> audit =
+                ArgumentCaptor.forClass(ReservationFulfillmentAudit.class);
+        order.verify(fulfillmentAuditRepository).saveAndFlush(audit.capture());
+        assertThat(audit.getValue().getOccurredAt()).isEqualTo(OCCURRED_AT);
+        then(reservationRepository).should(never()).findById(anyLong());
+        then(clock).should().instant();
+    }
+
+    @Test
+    void propagatesAuditFailureSoTheTransactionCanRollBack() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldService.fulfill(any()))
+                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+        DataIntegrityViolationException failure =
+                new DataIntegrityViolationException("audit insert");
+        given(fulfillmentAuditRepository.saveAndFlush(any())).willThrow(failure);
+
+        assertThatThrownBy(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        )).isSameAs(failure);
+    }
+
+    @Test
+    void missingOrWrongStoreReservationIsHiddenAsReservation001() {
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                RESERVATION_ID,
+                STORE_ID
+        )).willReturn(Optional.empty());
+
+        assertServiceError(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        ), ReservationErrorCode.RESERVATION_NOT_FOUND);
+
+        then(menuHoldService).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("inconsistentFulfillmentHoldResults")
+    void rejectsNullOrInconsistentMenuHoldResult(MenuHoldCommandResult result) {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldService.fulfill(new MenuHoldFulfillCommand(
+                RESERVATION_ID,
+                FULFILLMENT_CORRELATION
+        ))).willReturn(result);
+
+        assertThatThrownBy(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("menu hold fulfillment result is inconsistent");
+        then(fulfillmentAuditRepository).shouldHaveNoInteractions();
+    }
+
+    private static Stream<MenuHoldCommandResult> inconsistentFulfillmentHoldResults() {
+        return Stream.of(
+                null,
+                MenuHoldCommandResult.fulfilled(RESERVATION_ID + 1),
+                MenuHoldCommandResult.released(RESERVATION_ID)
+        );
+    }
+
+    @Test
+    void propagatesMenuHoldServiceExceptionWithoutReservationRemapping() {
+        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        ServiceException failure = new ServiceException(
+                MenuHoldErrorCode.INVENTORY_STATE_CONFLICT
+        );
+        given(menuHoldService.fulfill(any())).willThrow(failure);
+
+        assertThatThrownBy(() -> reservationService.fulfillStoreReservation(
+                OPERATOR_ID,
+                STORE_ID,
+                RESERVATION_ID,
+                fulfillmentCommand(),
+                REQUESTED_AT,
+                FULFILLMENT_CORRELATION
+        )).isSameAs(failure);
+        then(fulfillmentAuditRepository).shouldHaveNoInteractions();
+    }
+
     private static Stream<Arguments> approvedSortCases() {
         return Stream.of(
                 Arguments.of("createdAt,desc", "createdAt", Sort.Direction.DESC),
@@ -3507,6 +3806,68 @@ class ReservationServiceTest {
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+    }
+
+    private IdempotencyCommand fulfillmentCommand() {
+        return new IdempotencyCommand(
+                "store-operator",
+                OPERATOR_ID,
+                "RESERVATION_FULFILL",
+                FULFILLMENT_KEY,
+                "f".repeat(64)
+        );
+    }
+
+    private Reservation confirmedReservation() {
+        return reservation(RESERVATION_ID, 11L);
+    }
+
+    private Reservation reservationIn(ReservationStatus status) {
+        Reservation reservation = confirmedReservation();
+        switch (status) {
+            case CONFIRMED -> {
+            }
+            case CANCELLED -> reservation.cancel(OCCURRED_AT);
+            case FULFILLED -> reservation.fulfill(OCCURRED_AT);
+        }
+        return reservation;
+    }
+
+    private void stubFreshConfirmed(MenuHoldTerminationPresence presence) {
+        stubFreshIdempotency(fulfillmentCommand(), null);
+        given(reservationRepository.findByIdAndStoreIdForUpdate(
+                RESERVATION_ID,
+                STORE_ID
+        )).willReturn(Optional.of(confirmedReservation()));
+        given(menuHoldService.lockForTermination(RESERVATION_ID)).willReturn(presence);
+        lenient().when(fulfillmentAuditRepository.saveAndFlush(
+                any(ReservationFulfillmentAudit.class)
+        )).thenAnswer(invocation -> invocation.getArgument(0));
+        if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
+            lenient().when(menuHoldSnapshotQueryService.findByReservationId(RESERVATION_ID))
+                    .thenReturn(List.of());
+        }
+    }
+
+    private IdempotentOutcome successfulFulfillmentOutcome() {
+        Reservation replayed = confirmedReservation();
+        replayed.fulfill(OCCURRED_AT);
+        ReservationDetailResponse data = ReservationDetailResponse.from(replayed, List.of());
+        return new IdempotentOutcome(
+                true,
+                200,
+                "SUCCESS",
+                "RESERVATION",
+                String.valueOf(RESERVATION_ID),
+                new ObjectMapper().valueToTree(data)
+        );
+    }
+
+    private static void assertServiceError(ThrowingCallable call, ErrorCode expected) {
+        assertThatThrownBy(call)
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(expected));
     }
 
     private IdempotencyCommand cancellationCommand(String namespace, long actorId) {
