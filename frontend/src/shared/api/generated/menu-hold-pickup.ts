@@ -225,8 +225,14 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 픽업 기능·제공 구간·메뉴 수량 충돌 */
+    /** @description 픽업 기능·메뉴 상태·제공 구간·메뉴 수량 충돌 */
     PickupConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 또는 대상 매장의 메뉴를 찾을 수 없음 */
+    PickupCreationNotFound: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -237,7 +243,19 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 현재 픽업 상태 또는 취소 정책에서 명령 불가 */
+    /** @description 매장 또는 대상 매장 범위에서 픽업 예약을 찾을 수 없음 */
+    StorePickupNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 픽업 상태 또는 소비자 취소 정책에서 취소 불가 */
+    PickupCancellationConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 픽업 상태에서 명령 불가 */
     PickupStateConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
@@ -467,6 +485,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: components["responses"]["PickupCreationNotFound"];
       409: components["responses"]["PickupConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
@@ -516,7 +535,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
       404: components["responses"]["PickupNotFound"];
-      409: components["responses"]["PickupStateConflict"];
+      409: components["responses"]["PickupCancellationConflict"];
     };
   };
   /** 매장 픽업 예약 목록 조회 */
@@ -543,6 +562,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
     };
   };
   /** 매장 픽업 예약 상세 조회 */
@@ -562,7 +582,7 @@ export interface operations {
       };
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
     };
   };
   /** 픽업 수령 완료 */
@@ -591,7 +611,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
       409: components["responses"]["PickupStateConflict"];
     };
   };
@@ -621,7 +641,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
       409: components["responses"]["PickupStateConflict"];
     };
   };
