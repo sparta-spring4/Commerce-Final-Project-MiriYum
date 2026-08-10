@@ -722,6 +722,8 @@ menus
 
 ### 유스케이스별 적용
 
+예약 방문 완료의 잠금 순서는 Global idempotency row → store-scoped Reservation → MenuHold root다. CONFIRMED Reservation과 연결 MenuHold만 FULFILLED로 종결하고 capacity bucket·allocation·inventory·ledger는 잠그거나 변경하지 않는다.
+
 | 유스케이스 | 잠금 대상과 순서 |
 |---|---|
 | 일반 예약만 생성 | 멱등 기록 → 수용량 버킷 오름차순 → 예약·배정·결과 기록 |

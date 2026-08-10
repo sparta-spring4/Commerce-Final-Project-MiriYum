@@ -243,7 +243,7 @@ paths:
         "404":
           $ref: "#/components/responses/ReservationNotFound"
         "409":
-          $ref: "#/components/responses/ReservationStateConflict"
+          $ref: "#/components/responses/ReservationFulfillmentConflict"
   /api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}:
     put:
       tags: [Reservation Capacity]
@@ -947,6 +947,21 @@ components:
               value:
                 code: RESERVATION_006
                 message: 현재 취소 정책에서 처리할 수 없습니다.
+    ReservationFulfillmentConflict:
+      description: 방문 완료 상태·MenuHold·멱등·동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidReservationState:
+              value: { code: RESERVATION_005, message: 현재 예약 상태에서 처리할 수 없습니다. }
+            invalidMenuHoldState:
+              value: { code: MENU_HOLD_006, message: 현재 수량 상태에서 요청한 전이를 수행할 수 없습니다. }
+            idempotencyKeyReused:
+              value: { code: COMMON_007, message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다. }
+            concurrentModification:
+              value: { code: COMMON_008, message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요. }
     CapacityConfigurationConflict:
       description: 시간대·현재 점유와 수용량 설정 충돌
       content:

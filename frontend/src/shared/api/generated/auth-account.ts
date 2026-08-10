@@ -671,6 +671,12 @@ export interface external {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
         };
+        /** @description 방문 완료 상태·MenuHold·멱등·동시 요청 충돌 */
+        ReservationFulfillmentConflict: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
         /** @description 시간대·현재 점유와 수용량 설정 충돌 */
         CapacityConfigurationConflict: {
           content: {
@@ -1255,7 +1261,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreAccessDenied"];
       404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationNotFound"];
-      409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationStateConflict"];
+      409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationFulfillmentConflict"];
     };
   };
   /** 날짜별 예약 수용량 전체 게시 */

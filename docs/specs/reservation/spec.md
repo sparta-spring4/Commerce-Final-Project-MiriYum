@@ -156,6 +156,7 @@
 
 ## 방문 완료
 
+- 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 CONFIRMED인 예약의 방문 완료는 허용한다. Reservation과 연결 MenuHold, reservation_fulfillment_audits 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback하며 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
 - 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이할 수 있다.
 - 연결된 `MenuHold`가 있으면 같은 트랜잭션에서 `FULFILLED`로 전이한다.
 - 방문 완료는 메뉴 수량을 복구하지 않는다.
