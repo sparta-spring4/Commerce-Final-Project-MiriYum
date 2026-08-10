@@ -383,6 +383,25 @@ class StoreReservationControllerTest {
         then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    void rejectsNonPositiveReservationIdBeforeCancellationFacade(String reservationId)
+            throws Exception {
+        authenticateStoreOperator(OPERATOR_ID);
+
+        mockMvc.perform(post(
+                        "/api/v1/store-operator/stores/22/reservations/{reservationId}/cancellations",
+                        reservationId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"store closure\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.details[0].field").value("reservationId"));
+        then(reservationCancellationCommandFacade).shouldHaveNoInteractions();
+    }
+
     @Test
     void rejectsInvalidStoreCancellationBodyBeforeFacadeInvocation() throws Exception {
         authenticateStoreOperator(33L);

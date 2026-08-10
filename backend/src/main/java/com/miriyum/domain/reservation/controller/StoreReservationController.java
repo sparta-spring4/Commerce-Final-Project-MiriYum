@@ -107,7 +107,7 @@ public class StoreReservationController {
     public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
-            @PathVariable long reservationId,
+            @PathVariable @Positive long reservationId,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @Valid @RequestBody StoreCancellationRequest request
     ) {
