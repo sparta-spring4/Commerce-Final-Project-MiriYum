@@ -422,7 +422,7 @@ class IntegratedStoreSearchRepositoryIT {
                         "querydsl-owner-" + sequence + "@example.com",
                         "Password123!",
                         "Password123!",
-                        "010-1000-0002",
+                        String.format("010-1000-%04d", sequence),
                         "QueryDSL 운영자")).accountId());
         operatorId = createdId;
         return createdId;
