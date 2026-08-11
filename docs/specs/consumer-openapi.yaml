@@ -35,3 +35,9 @@ paths:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}"
   /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/consumers/payments:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1payments"
+  /api/v1/consumers/payments/{paymentId}:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1payments~1{paymentId}"
+  /api/v1/consumers/payments/{paymentId}/confirmations:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1payments~1{paymentId}~1confirmations"

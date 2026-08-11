@@ -23,3 +23,5 @@ paths:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menu-hold-availability"
   /api/v1/stores/{storeId}/pickup-availability:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1pickup-availability"
+  /api/v1/payments/webhooks/portone:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1payments~1webhooks~1portone"

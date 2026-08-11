@@ -2,7 +2,7 @@
 
 ## OpenAPI 소유권과 진입점
 
-기능별 원본은 `docs/specs/auth-account`, `store-search`, `reservation`, `menu-hold-pickup`의 `openapi.yaml`이 소유한다. 클라이언트별 진입점은 `public-openapi.yaml`, `consumer-openapi.yaml`, `store-operator-openapi.yaml`이며, 세 파일의 path 집합은 중복 없이 `mvp1-openapi.yaml` 전체와 일치한다. 진입점과 aggregate는 path item을 다시 정의하지 않고 단일 `$ref`로만 연결한다. TypeScript 계약은 기능별 원본에서 생성하며 수동 편집하지 않는다.
+기능별 원본은 `docs/specs/auth-account`, `store-search`, `reservation`, `menu-hold-pickup`, `payment`의 `openapi.yaml`이 소유한다. 클라이언트별 진입점은 `public-openapi.yaml`, `consumer-openapi.yaml`, `store-operator-openapi.yaml`이며, 세 파일의 path 집합은 중복 없이 `mvp1-openapi.yaml` 전체와 일치한다. 진입점과 aggregate는 path item을 다시 정의하지 않고 단일 `$ref`로만 연결한다. TypeScript 계약은 기능별 원본에서 생성하며 수동 편집하지 않는다.
 
 ## MySQL 원본과 방식 A
 
