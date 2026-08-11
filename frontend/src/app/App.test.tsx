@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react'
-import { expect, test, describe } from 'vitest'
+import { beforeEach, describe, expect, test } from 'vitest'
+import { catalogHandlers } from '../features/store-search/test/handlers'
+import { server } from '../test/msw/server'
 import App from './App'
 
 function renderAt(path: string) {
@@ -7,11 +9,26 @@ function renderAt(path: string) {
   render(<App />)
 }
 
+beforeEach(() => {
+  // 홈은 매장 카테고리 catalog를 부른다. 등록하지 않으면 MSW가 실패로 잡는다.
+  server.use(...catalogHandlers)
+})
+
 describe('앱 셸', () => {
-  test('홈에서 서비스 이름을 표시한다', () => {
+  test('홈이 매장 검색 진입점 역할을 한다', () => {
     renderAt('/')
 
-    expect(screen.getByRole('heading', { level: 1, name: 'MiriYum' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('미리냠')
+    expect(screen.getByRole('form', { name: '매장 검색 조건' })).toBeInTheDocument()
+  })
+
+  test('홈에 큐레이션·추천 목록을 만들지 않는다', () => {
+    // 1차 MVP 계약에 큐레이션 기준이 없다. 이력 추천은 2차 MVP다.
+    renderAt('/')
+
+    for (const label of ['오늘의 추천', '추천 맛집', '인기 매장']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
+    }
   })
 
   test('공개 shell의 네비게이션에 뒤 단계 기능 항목이 없다', () => {

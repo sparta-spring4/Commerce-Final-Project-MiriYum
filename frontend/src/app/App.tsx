@@ -1,6 +1,11 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { createQueryClient } from '../shared/api/queryClient'
+import {
+  HomePage,
+  StoreDetailPage,
+  StoreSearchPage,
+} from '../features/store-search'
 import { AppErrorBoundary } from './AppErrorBoundary'
 import { AppLayout } from './AppLayout'
 import { ForbiddenPage } from './ForbiddenPage'
@@ -20,7 +25,9 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<AppLayout shell="public" />}>
-              <Route path={ROUTES.home} element={<h1>MiriYum</h1>} />
+              <Route path={ROUTES.home} element={<HomePage />} />
+              <Route path={ROUTES.stores} element={<StoreSearchPage />} />
+              <Route path={ROUTES.storeDetail} element={<StoreDetailPage />} />
               <Route path={ROUTES.forbidden} element={<ForbiddenPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

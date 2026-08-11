@@ -10,6 +10,8 @@ export type Shell = 'public' | 'consumer' | 'storeOperator'
 
 export const ROUTES = {
   home: '/',
+  stores: '/stores',
+  storeDetail: '/stores/:storeId',
   consumerSignIn: '/sign-in',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
@@ -31,7 +33,7 @@ export interface NavigationItem {
  * 웨이팅·결제·리뷰·채팅처럼 뒤 단계 기능의 항목은 넣지 않는다.
  */
 export const NAVIGATION: Record<Shell, NavigationItem[]> = {
-  public: [{ label: '매장 검색', path: ROUTES.home }],
-  consumer: [{ label: '매장 검색', path: ROUTES.home }],
+  public: [{ label: '매장 찾기', path: ROUTES.stores }],
+  consumer: [{ label: '매장 찾기', path: ROUTES.stores }],
   storeOperator: [],
 }
