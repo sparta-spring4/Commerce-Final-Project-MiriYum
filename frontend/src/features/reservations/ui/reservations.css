@@ -1,0 +1,207 @@
+/* 예약 작성·상세 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.reservation-create,
+.reservation-detail {
+  max-width: 48rem;
+  padding-bottom: var(--space-8);
+}
+
+.reservation-create__header,
+.reservation-detail__header {
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.reservation-create__header h1,
+.reservation-detail__header h1 {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+}
+
+.reservation-detail__header h1 {
+  margin-top: var(--space-1);
+}
+
+.reservation-detail__breadcrumb,
+.reservation-detail__meta {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-detail__meta {
+  margin-top: 0.375rem;
+  font-size: var(--font-size-body-lg);
+  color: var(--color-on-surface);
+}
+
+.reservation-detail__breadcrumb {
+  padding: var(--space-2) 0;
+}
+
+/* ── 단계 표시 ────────────────────────────────────────────────────────── */
+
+.reservation-stepper {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+
+.reservation-stepper__item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 1;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-stepper__item--current {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.reservation-stepper__item--done {
+  background-color: var(--color-secondary-fixed);
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+.reservation-stepper__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-container-lowest);
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+/* ── 조건 입력 ────────────────────────────────────────────────────────── */
+
+.reservation-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.reservation-form__party {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.reservation-form__total {
+  font-weight: 700;
+}
+
+.reservation-create__actions,
+.reservation-detail__actions {
+  display: flex;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+/* ── 메뉴 선택 ────────────────────────────────────────────────────────── */
+
+.menu-selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.menu-selection__list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 40rem) {
+  .menu-selection__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.menu-selection__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.menu-selection__head h3 {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+}
+
+.menu-selection__price {
+  margin-top: 0.25rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.menu-selection__stock {
+  margin-top: 0.375rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.menu-selection__quantity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.menu-selection__quantity output {
+  min-width: 2rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* ── 확인·상세 ────────────────────────────────────────────────────────── */
+
+.reservation-confirm,
+.reservation-detail__section {
+  margin-top: var(--space-2);
+}
+
+.reservation-confirm h2,
+.reservation-detail__section h2 {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  margin-bottom: var(--space-2);
+}
+
+.reservation-confirm__list,
+.reservation-detail__list {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.reservation-confirm__list dt,
+.reservation-detail__list dt {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-confirm__list dd,
+.reservation-detail__list dd {
+  margin: 0;
+}
+
+.reservation-detail__reason {
+  min-height: 5rem;
+  padding: var(--space-1) var(--space-2);
+  resize: vertical;
+}

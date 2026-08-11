@@ -10,6 +10,10 @@ import {
 } from '../features/auth'
 import { MyPage, MyReservationsPage } from '../features/consumer-account'
 import {
+  ReservationCreatePage,
+  ReservationDetailPage,
+} from '../features/reservations'
+import {
   HomePage,
   StoreDetailPage,
   StoreSearchPage,
@@ -73,6 +77,14 @@ export default function App() {
                   <Route
                     path={ROUTES.myReservations}
                     element={<MyReservationsPage />}
+                  />
+                  <Route
+                    path={ROUTES.reservationCreate}
+                    element={<ReservationCreatePage />}
+                  />
+                  <Route
+                    path={ROUTES.reservationDetail}
+                    element={<ReservationDetailPage />}
                   />
                 </Route>
               </Route>

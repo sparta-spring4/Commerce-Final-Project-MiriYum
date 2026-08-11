@@ -16,6 +16,8 @@ export const ROUTES = {
   consumerSignUp: '/sign-up',
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
+  reservationCreate: '/stores/:storeId/reserve',
+  reservationDetail: '/reservations/:reservationId',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
 } as const
