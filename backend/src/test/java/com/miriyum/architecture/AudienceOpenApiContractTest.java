@@ -15,6 +15,12 @@ import org.yaml.snakeyaml.Yaml;
 class AudienceOpenApiContractTest {
 
     private static final Path SPECS = Path.of("..", "docs", "specs");
+    private static final Set<String> FEATURE_OPENAPI_FILES = Set.of(
+            "auth-account/openapi.yaml",
+            "store-search/openapi.yaml",
+            "reservation/openapi.yaml",
+            "menu-hold-pickup/openapi.yaml");
+    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
     private static final Set<String> LEGACY_PREFIXES = Set.of(
@@ -47,6 +53,23 @@ class AudienceOpenApiContractTest {
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
         assertThat(allAudiencePaths).containsAll(aggregatePaths);
+    }
+
+    @Test
+    void audienceEntrypointsExposeEveryFeaturePathUnlessExplicitlyExcluded() throws IOException {
+        Set<String> featurePaths = new HashSet<>();
+        for (String file : FEATURE_OPENAPI_FILES) {
+            featurePaths.addAll(paths(file).keySet());
+        }
+
+        Set<String> audiencePaths = new HashSet<>(paths("public-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("consumer-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("store-operator-openapi.yaml").keySet());
+
+        assertThat(intersection(audiencePaths, APPROVED_UNEXPOSED_FEATURE_PATHS)).isEmpty();
+        Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
+        exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
+        assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
     }
 
     @Test
