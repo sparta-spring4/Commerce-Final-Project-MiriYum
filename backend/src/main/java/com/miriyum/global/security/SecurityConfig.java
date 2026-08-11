@@ -74,7 +74,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(1)
+    @Order(2)
     public SecurityFilterChain consumerAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
@@ -95,7 +95,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(2)
+    @Order(3)
     public SecurityFilterChain storeOperatorAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
@@ -116,7 +116,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(3)
+    @Order(1)
     public SecurityFilterChain publicAuthFilterChain(
             HttpSecurity http,
             RateLimiter rateLimiter,
