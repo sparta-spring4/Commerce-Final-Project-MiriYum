@@ -41,10 +41,6 @@ tags:
     description: 매장 운영자 픽업 관리
   - name: Menu Inventory
     description: 매장 운영자 시간대별 메뉴 수량 관리
-  - name: Payment
-    description: 일반 사용자 본인의 결제 확정과 결제·환불 조회
-  - name: Payment Webhook
-    description: PortOne V2가 호출하는 서명 검증 Webhook
 paths:
   /api/v1/stores:
     $ref: "./public-openapi.yaml#/paths/~1api~1v1~1stores"
@@ -62,8 +58,6 @@ paths:
     $ref: "./public-openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menu-hold-availability"
   /api/v1/stores/{storeId}/pickup-availability:
     $ref: "./public-openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1pickup-availability"
-  /api/v1/payments/webhooks/portone:
-    $ref: "./public-openapi.yaml#/paths/~1api~1v1~1payments~1webhooks~1portone"
   /api/v1/consumers/auth/accounts:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1accounts"
   /api/v1/consumers/auth/sessions:
@@ -92,12 +86,6 @@ paths:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}"
   /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}~1cancellations"
-  /api/v1/consumers/payments:
-    $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1payments"
-  /api/v1/consumers/payments/{paymentId}:
-    $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1payments~1{paymentId}"
-  /api/v1/consumers/payments/{paymentId}/confirmations:
-    $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1payments~1{paymentId}~1confirmations"
   /api/v1/store-operators/auth/accounts:
     $ref: "./store-operator-openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1accounts"
   /api/v1/store-operators/auth/sessions:

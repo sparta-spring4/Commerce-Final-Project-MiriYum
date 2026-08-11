@@ -175,8 +175,9 @@ public class PaymentWebhookService {
 
     private static WebhookResult mapOutcome(Outcome outcome) {
         return switch (outcome) {
-            case RECEIVED, PROCESSING, RECONCILIATION_REQUIRED ->
-                    WebhookResult.RECONCILIATION_REQUIRED;
+            case RECEIVED, PROCESSING ->
+                    throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+            case RECONCILIATION_REQUIRED -> WebhookResult.RECONCILIATION_REQUIRED;
             case PROCESSED -> WebhookResult.PROCESSED;
             case IGNORED -> WebhookResult.IGNORED;
         };

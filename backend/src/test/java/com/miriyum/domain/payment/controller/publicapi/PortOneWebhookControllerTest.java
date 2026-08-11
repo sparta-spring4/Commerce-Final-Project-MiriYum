@@ -12,6 +12,7 @@ import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.service.PaymentWebhookService;
 import com.miriyum.domain.payment.service.PaymentWebhookService.WebhookResult;
 import com.miriyum.global.exception.GlobalExceptionHandler;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,23 @@ class PortOneWebhookControllerTest {
                         .header("webhook-signature", "v1,signature")
                         .content(RAW_BODY))
                 .andExpect(status().isAccepted());
+    }
+
+    @Test
+    @DisplayName("다른 인스턴스가 처리 중인 Webhook은 제공자 재전송을 위해 503을 반환한다")
+    void returnsServiceUnavailableForProcessingDuplicate() throws Exception {
+        given(webhookService.handle(
+                RAW_BODY, "msg_1", "1786410000", "v1,signature"))
+                .willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        mockMvc.perform(post("/api/v1/payments/webhooks/portone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("webhook-id", "msg_1")
+                        .header("webhook-timestamp", "1786410000")
+                        .header("webhook-signature", "v1,signature")
+                        .content(RAW_BODY))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COMMON_012"));
     }
 
     @Test

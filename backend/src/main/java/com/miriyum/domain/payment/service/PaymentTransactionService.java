@@ -36,6 +36,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -241,6 +243,9 @@ public class PaymentTransactionService {
         if (!payment.getPortOnePaymentId().equals(command.portOnePaymentId())) {
             throw new ServiceException(PaymentErrorCode.PROVIDER_MAPPING_MISMATCH);
         }
+        if (isRefundReconciliationRequired(payment)) {
+            return ConfirmationClaim.completed(toResult(payment));
+        }
         if (payment.getStatus() == Payment.Status.PAID
                 || payment.getStatus() == Payment.Status.PARTIALLY_REFUNDED
                 || payment.getStatus() == Payment.Status.REFUNDED) {
@@ -282,6 +287,9 @@ public class PaymentTransactionService {
                 .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
         boolean cancellationWebhook = webhookType.endsWith("Cancelled")
                 || webhookType.endsWith("CancelPending");
+        if (!cancellationWebhook && isRefundReconciliationRequired(payment)) {
+            return ConfirmationClaim.completed(toResult(payment));
+        }
         if (!cancellationWebhook && (payment.getStatus() == Payment.Status.READY
                 || payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED)) {
             payment.beginConfirmation(now);
@@ -350,10 +358,7 @@ public class PaymentTransactionService {
                 payment.markCancelled(now);
                 attempt.finish(Payment.AttemptStatus.CANCELLED, providerPayment.transactionId(), now);
             }
-            case PAY_PENDING -> {
-                return toResult(payment);
-            }
-            case PARTIALLY_CANCELLED, UNKNOWN -> {
+            case PAY_PENDING, PARTIALLY_CANCELLED, UNKNOWN -> {
                 payment.markReconciliationRequired(now);
                 attempt.finish(Payment.AttemptStatus.UNKNOWN, providerPayment.transactionId(), now);
                 recordPaymentReconciliation(payment, attempt, now);
@@ -438,7 +443,10 @@ public class PaymentTransactionService {
                 && payment.getStatus() != Payment.Status.PARTIALLY_REFUNDED) {
             throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
         }
-        if (command.refundAmountMinor() > payment.getRefundableAmountMinor()) {
+        long processingAmount = refunds.sumAmountMinorByPaymentIdAndStatus(
+                payment.getId(), RefundStatus.PROCESSING);
+        long availableAmount = payment.getRefundableAmountMinor() - processingAmount;
+        if (command.refundAmountMinor() > availableAmount) {
             throw new ServiceException(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED);
         }
         String refundId = references.nextRefundId();
@@ -559,7 +567,7 @@ public class PaymentTransactionService {
     @Transactional(readOnly = true)
     public PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query) {
         String cursorSecret = settings.requireCursorSecret();
-        String fingerprint = "status=" + (query.status() == null ? "ALL" : query.status().name());
+        String fingerprint = historyFingerprint(cursorSecret, query);
         PaymentCursorCodec.Cursor cursor = query.cursor() == null
                 ? null
                 : new PaymentCursorCodec(cursorSecret, clock)
@@ -603,6 +611,18 @@ public class PaymentTransactionService {
     private PaymentAttempt latestAttempt(Payment payment) {
         return attempts.findFirstByPayment_IdOrderByAttemptNoDesc(payment.getId())
                 .orElseThrow(() -> new IllegalStateException("confirmation attempt is missing"));
+    }
+
+    private boolean hasUnresolvedRefund(Payment payment) {
+        return refunds.existsByPayment_IdAndStatusIn(
+                payment.getId(),
+                List.of(RefundStatus.PROCESSING, RefundStatus.RECONCILIATION_REQUIRED)
+        );
+    }
+
+    private boolean isRefundReconciliationRequired(Payment payment) {
+        return payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED
+                && hasUnresolvedRefund(payment);
     }
 
     private void requireProviderMapping(ConfirmationClaim claim, ProviderPayment providerPayment) {
@@ -706,6 +726,26 @@ public class PaymentTransactionService {
         String canonical = command.paymentId() + "\n" + command.consumerAccountId()
                 + "\n" + command.portOnePaymentId();
         return sha256(canonical);
+    }
+
+    private static String historyFingerprint(String secret, PaymentHistoryQuery query) {
+        String principalScope = hmacSha256(
+                secret,
+                "consumer:" + query.consumerAccountId()
+        );
+        return "v1:principal=" + principalScope
+                + ":status=" + (query.status() == null ? "ALL" : query.status().name());
+    }
+
+    private static String hmacSha256(String secret, String value) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return HexFormat.of().formatHex(
+                    mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("HMAC-SHA256 is not available", exception);
+        }
     }
 
     private static String sha256(String canonical) {

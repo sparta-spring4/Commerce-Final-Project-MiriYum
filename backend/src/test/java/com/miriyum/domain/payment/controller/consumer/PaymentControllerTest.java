@@ -98,7 +98,7 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("PortOne PAY_PENDING은 완료로 표시하지 않고 202 CONFIRMING으로 반환한다")
+    @DisplayName("PortOne PAY_PENDING은 완료로 표시하지 않고 202 대사 상태로 반환한다")
     void returnsAcceptedWhileProviderPaymentIsPending() throws Exception {
         authenticateConsumer();
         given(paymentService.confirmPayment(new ConfirmPaymentCommand(
@@ -106,7 +106,9 @@ class PaymentControllerTest {
                 11L,
                 "payment-reservation-900000000000000001",
                 IDEMPOTENCY_KEY
-        ))).willReturn(result(PaymentStatus.CONFIRMING, PaymentAttemptStatus.PENDING));
+        ))).willReturn(result(
+                PaymentStatus.RECONCILIATION_REQUIRED,
+                PaymentAttemptStatus.UNKNOWN));
 
         mockMvc.perform(post("/api/v1/consumers/payments/{paymentId}/confirmations", PAYMENT_ID)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
@@ -116,7 +118,7 @@ class PaymentControllerTest {
                                 {"portOnePaymentId":"payment-reservation-900000000000000001"}
                                 """))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.data.status").value("CONFIRMING"));
+                .andExpect(jsonPath("$.data.status").value("RECONCILIATION_REQUIRED"));
     }
 
     @Test

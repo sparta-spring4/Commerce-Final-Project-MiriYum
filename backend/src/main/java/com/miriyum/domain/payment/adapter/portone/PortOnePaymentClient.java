@@ -73,7 +73,7 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                     .uri("/payments/{paymentId}/cancel", portOnePaymentId)
                     .header(HttpHeaders.AUTHORIZATION,
                             "PortOne " + settings.getPortone().requireApiSecret())
-                    .header("Idempotency-Key", refundId)
+                    .header("Idempotency-Key", "\"" + refundId + "\"")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()

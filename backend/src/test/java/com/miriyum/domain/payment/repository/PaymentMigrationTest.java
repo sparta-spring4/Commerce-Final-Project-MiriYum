@@ -25,8 +25,8 @@ class PaymentMigrationTest {
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.0.40");
 
     @Test
-    @DisplayName("실제 MySQL V28 데이터를 보존하며 Payment V29와 분리 공개 ID 채번을 적용한다")
-    void upgradesV28ToPaymentRuntimeV29() throws Exception {
+    @DisplayName("실제 MySQL V28 데이터를 보존하며 Payment V30과 분리 공개 ID 채번을 적용한다")
+    void upgradesV28ToPaymentRuntimeV30() throws Exception {
         try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)) {
             mysql.start();
             Flyway.configure()
@@ -43,7 +43,7 @@ class PaymentMigrationTest {
 
             assertThat(upgraded.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V29__create_payment_runtime.sql");
+                    .contains("V30__create_payment_runtime.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(singleLong(connection,
                         "SELECT COUNT(*) FROM consumer_accounts WHERE consumer_account_id = 10001"))

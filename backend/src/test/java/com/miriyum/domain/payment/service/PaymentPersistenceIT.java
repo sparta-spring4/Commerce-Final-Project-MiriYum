@@ -36,6 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
@@ -247,6 +248,29 @@ class PaymentPersistenceIT {
     }
 
     @Test
+    @DisplayName("PortOne PAY_PENDING은 confirmation 임대를 끝내고 UNKNOWN 대사 상태로 격리한다")
+    void isolatesPendingProviderPaymentForReconciliation() {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("133", 30_000L));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(), "transaction-133",
+                        ProviderStatus.PAY_PENDING, 30_000L, "KRW"));
+
+        PaymentResult result = paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                "550e8400-e29b-41d4-a716-446655440133"));
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_attempts WHERE status = 'UNKNOWN'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payments WHERE status = 'CONFIRMING'", Long.class))
+                .isZero();
+    }
+
+    @Test
     @DisplayName("서명된 Webhook 재전송은 하나의 receipt와 하나의 PortOne 조회로 수렴한다")
     void deduplicatesVerifiedWebhookBeforeProviderLookup() throws Exception {
         PaymentPreparation preparation = paymentService.prepareReservationDeposit(
@@ -277,6 +301,48 @@ class PaymentPersistenceIT {
                 "SELECT COUNT(*) FROM payment_webhook_receipts WHERE webhook_message_id = 'msg_webhook_1'",
                 Long.class
         )).isEqualTo(1L);
+        verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
+    }
+
+    @Test
+    @DisplayName("처리 중 Webhook 재전송은 5xx 신호를 내고 만료된 lease 재전송으로 복구한다")
+    void retriesProcessingWebhookAndRecoversExpiredLease() throws Exception {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("134", 30_000L));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(), "transaction-134",
+                        ProviderStatus.PAID, 30_000L, "KRW"));
+        String body = """
+                {"type":"Transaction.Paid","timestamp":"2026-08-11T01:00:00Z","data":{"storeId":"store-1","paymentId":"%s","transactionId":"transaction-134"}}"""
+                .formatted(preparation.portOnePaymentId());
+        String messageId = "msg_webhook_recovery_134";
+        jdbcTemplate.update("""
+                INSERT INTO payment_webhook_receipts (
+                    webhook_message_id, event_type, body_sha256, portone_payment_id,
+                    provider_transaction_id, outcome, received_at, processed_at
+                ) VALUES (?, 'Transaction.Paid', ?, ?, 'transaction-134',
+                          'PROCESSING', NOW(6), NOW(6))
+                """, messageId, sha256(body), preparation.portOnePaymentId());
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = "v1," + webhookSignature(messageId, timestamp, body);
+
+        assertThatThrownBy(() -> webhookService.handle(body, messageId, timestamp, signature))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+        verify(providerClient, times(0)).getPayment(preparation.portOnePaymentId());
+
+        jdbcTemplate.update("""
+                UPDATE payment_webhook_receipts
+                   SET processed_at = DATE_SUB(NOW(6), INTERVAL 6 MINUTE)
+                 WHERE webhook_message_id = ?
+                """, messageId);
+
+        assertThat(webhookService.handle(body, messageId, timestamp, signature))
+                .isEqualTo(PaymentWebhookService.WebhookResult.PROCESSED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PAID);
         verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
     }
 
@@ -404,6 +470,59 @@ class PaymentPersistenceIT {
     }
 
     @Test
+    @DisplayName("환불 timeout 대사 상태는 이후 Paid Webhook이 해제하지 않는다")
+    void keepsRefundReconciliationIsolatedFromPaidWebhook() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("135");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+
+        RefundResult refund = paymentService.requestRefund(new RequestRefundCommand(
+                preparation.paymentId(), "reservation:135:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440135"));
+        assertThat(refund.status()).isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+
+        String body = """
+                {"type":"Transaction.Paid","timestamp":"2026-08-11T01:00:00Z","data":{"storeId":"store-1","paymentId":"%s","transactionId":"transaction-135"}}"""
+                .formatted(preparation.portOnePaymentId());
+        String messageId = "msg_webhook_paid_after_refund_135";
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = "v1," + webhookSignature(messageId, timestamp, body);
+
+        assertThat(webhookService.handle(body, messageId, timestamp, signature))
+                .isEqualTo(PaymentWebhookService.WebhookResult.RECONCILIATION_REQUIRED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
+    }
+
+    @Test
+    @DisplayName("환불 timeout 대사 상태는 새 Consumer confirmation 키로도 해제하지 않는다")
+    void keepsRefundReconciliationIsolatedFromConsumerConfirmation() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("139");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        paymentService.requestRefund(new RequestRefundCommand(
+                preparation.paymentId(), "reservation:139:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440139"));
+
+        PaymentResult result = paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                "550e8400-e29b-41d4-a716-446655440140"));
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds WHERE status = 'RECONCILIATION_REQUIRED'",
+                Long.class)).isEqualTo(1L);
+        verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
+    }
+
+    @Test
     @DisplayName("PortOne이 취소 실패를 명시하면 환불만 FAILED로 종결하고 결제 원장은 PAID를 유지한다")
     void recordsExplicitProviderRefundFailure() {
         PaymentPreparation preparation = prepareAndConfirmPaidPayment("126");
@@ -518,6 +637,84 @@ class PaymentPersistenceIT {
         verify(providerClient, times(1)).getPayment(preparation.portOnePaymentId());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM payment_attempts", Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("서로 다른 동시 환불은 PROCESSING 금액을 예약해 원 승인액 초과 외부 취소를 막는다")
+    void reservesProcessingRefundAmountAcrossConcurrentClaims() throws Exception {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("136");
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        AtomicInteger providerCalls = new AtomicInteger();
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(20_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenAnswer(invocation -> {
+            int call = providerCalls.incrementAndGet();
+            if (call == 1) {
+                providerEntered.countDown();
+                if (!releaseProvider.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("provider release timed out");
+                }
+            }
+            return new ProviderCancellation(
+                    "cancellation-concurrent-" + call,
+                    ProviderStatus.PARTIALLY_CANCELLED,
+                    20_000L,
+                    "KRW"
+            );
+        });
+        RequestRefundCommand firstCommand = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:136:first", 20_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440136");
+        RequestRefundCommand secondCommand = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:136:second", 20_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440137");
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<RefundResult> first = executor.submit(
+                    () -> paymentService.requestRefund(firstCommand));
+            assertThat(providerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<Throwable> concurrent = executor.submit(() -> {
+                try {
+                    paymentService.requestRefund(secondCommand);
+                    return null;
+                } catch (Throwable error) {
+                    return error;
+                }
+            });
+            try {
+                assertThat(concurrent.get(5, TimeUnit.SECONDS))
+                        .isInstanceOf(ServiceException.class)
+                        .extracting(error -> ((ServiceException) error).getErrorCode())
+                        .isEqualTo(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED);
+            } finally {
+                releaseProvider.countDown();
+            }
+            assertThat(first.get(5, TimeUnit.SECONDS).status()).isEqualTo(RefundStatus.COMPLETED);
+        }
+
+        verify(providerClient, times(1)).cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(20_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("다른 일반 사용자의 유효한 결제 이력 cursor는 PAYMENT_005로 거부한다")
+    void rejectsHistoryCursorAcrossConsumers() {
+        paymentService.prepareReservationDeposit(prepareCommand("137", 30_000L));
+        paymentService.prepareReservationDeposit(prepareCommand("138", 30_000L));
+        PaymentHistoryQuery firstPage = new PaymentHistoryQuery(11L, null, 1, null);
+        String ownerCursor = paymentService.getConsumerPaymentHistory(firstPage).nextCursor();
+
+        assertThat(ownerCursor).isNotBlank();
+        assertThatThrownBy(() -> paymentService.getConsumerPaymentHistory(
+                new PaymentHistoryQuery(12L, null, 1, ownerCursor)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.INVALID_HISTORY_CURSOR);
     }
 
     private PaymentPreparation prepareAndConfirmPaidPayment(String reservationReferenceId) {

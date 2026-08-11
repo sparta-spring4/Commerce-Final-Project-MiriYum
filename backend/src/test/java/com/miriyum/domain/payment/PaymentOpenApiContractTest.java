@@ -21,7 +21,7 @@ class PaymentOpenApiContractTest {
     private static final String WEBHOOK_PATH = "/api/v1/payments/webhooks/portone";
 
     @Test
-    void featureContractIsComposedIntoExactlyOneAudienceAndTheAggregate() throws Exception {
+    void featureContractRemainsOutsideMvp1AudienceAndAggregateEntrypoints() throws Exception {
         Map<String, Object> payment = paths("payment/openapi.yaml");
         Map<String, Object> consumer = paths("consumer-openapi.yaml");
         Map<String, Object> publicApi = paths("public-openapi.yaml");
@@ -35,11 +35,12 @@ class PaymentOpenApiContractTest {
                         WEBHOOK_PATH
                 )
         );
-        assertThat(consumer.keySet()).containsAll(CONSUMER_PATHS);
-        assertThat(publicApi.keySet()).contains(WEBHOOK_PATH);
-        assertThat(aggregate.keySet()).containsAll(CONSUMER_PATHS).contains(WEBHOOK_PATH);
+        assertThat(CONSUMER_PATHS).noneMatch(consumer::containsKey);
         assertThat(CONSUMER_PATHS).noneMatch(publicApi::containsKey);
+        assertThat(CONSUMER_PATHS).noneMatch(aggregate::containsKey);
         assertThat(consumer).doesNotContainKey(WEBHOOK_PATH);
+        assertThat(publicApi).doesNotContainKey(WEBHOOK_PATH);
+        assertThat(aggregate).doesNotContainKey(WEBHOOK_PATH);
     }
 
     @SuppressWarnings("unchecked")

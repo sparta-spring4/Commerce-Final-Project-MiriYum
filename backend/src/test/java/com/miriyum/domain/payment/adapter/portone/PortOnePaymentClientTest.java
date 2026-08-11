@@ -2,6 +2,7 @@ package com.miriyum.domain.payment.adapter.portone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -14,6 +15,13 @@ import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellatio
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderUnavailableException;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -77,7 +85,7 @@ class PortOnePaymentClientTest {
                         "https://api.portone.test/payments/payment-reservation-900000000000000001/cancel"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "PortOne test-api-secret"))
-                .andExpect(header("Idempotency-Key", "910000000000000001"))
+                .andExpect(header("Idempotency-Key", "\"910000000000000001\""))
                 .andExpect(content().json("""
                         {
                           "storeId": "store-1",
@@ -119,5 +127,51 @@ class PortOnePaymentClientTest {
         assertThatThrownBy(() -> client.getPayment(
                 "payment-reservation-900000000000000001"))
                 .isInstanceOf(ProviderUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("응답을 끝내지 않는 PortOne 서버도 버전된 제한 시간 안에 불명확 결과로 반환한다")
+    void timesOutHangingProviderResponse() throws Exception {
+        CountDownLatch requestReceived = new CountDownLatch(1);
+        CountDownLatch releaseResponse = new CountDownLatch(1);
+        HttpServer hangingServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ExecutorService serverExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        hangingServer.setExecutor(serverExecutor);
+        hangingServer.createContext("/", exchange -> {
+            requestReceived.countDown();
+            try {
+                releaseResponse.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        hangingServer.start();
+
+        try {
+            String baseUrl = "http://127.0.0.1:" + hangingServer.getAddress().getPort();
+            PaymentSettings timeoutSettings = new PaymentSettings();
+            timeoutSettings.getPortone().setApiSecret("test-api-secret");
+            timeoutSettings.getPortone().setBaseUrl(baseUrl);
+            timeoutSettings.getPortone().setTimeoutPolicyVersion("portone-v2-v1");
+            timeoutSettings.getPortone().setConnectTimeout(Duration.ofMillis(100));
+            timeoutSettings.getPortone().setReadTimeout(Duration.ofMillis(100));
+            PortOnePaymentClient timeoutClient = new PortOnePaymentClient(
+                    timeoutSettings.portOneRestClientBuilder(),
+                    timeoutSettings,
+                    new ObjectMapper()
+            );
+
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
+                    assertThatThrownBy(() -> timeoutClient.getPayment(
+                            "payment-reservation-900000000000000001"))
+                            .isInstanceOf(ProviderUnavailableException.class));
+            assertThat(requestReceived.await(1, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            releaseResponse.countDown();
+            hangingServer.stop(0);
+            serverExecutor.close();
+        }
     }
 }
