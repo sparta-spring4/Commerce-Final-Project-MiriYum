@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
@@ -60,6 +62,8 @@ class ReservationDetailResponseTest {
                 );
         assertThat(response.createdAt())
                 .isEqualTo(OffsetDateTime.parse("2026-08-01T09:00:00Z"));
+        assertThat(response.cancelledBy()).isNull();
+        assertThat(response.cancellationReason()).isNull();
     }
 
     @Test
@@ -132,16 +136,30 @@ class ReservationDetailResponseTest {
                 "party",
                 "status",
                 "menuSelections",
-                "createdAt"
+                "createdAt",
+                "cancelledBy",
+                "cancellationReason"
         );
         assertThat(componentNames).doesNotContain(
                 "contactSnapshot",
                 "contact",
                 "endTime",
                 "occupancyEndAt",
-                "cancelledBy",
-                "cancellationReason"
+                "cancelledAt"
         );
+    }
+
+    @Test
+    void projectsCancellationActorAndReasonWithoutPublishingCancelledAt() {
+        ReservationDetailResponse response = ReservationDetailResponse.from(
+                resolvedReservation(), List.of(),
+                ReservationCancellationActorType.STORE_OPERATOR, "operator cancellation");
+
+        assertThat(response.cancelledBy()).isEqualTo("STORE_OPERATOR");
+        assertThat(response.cancellationReason()).isEqualTo("operator cancellation");
+        assertThat(Arrays.stream(ReservationDetailResponse.class.getRecordComponents())
+                .map(RecordComponent::getName))
+                .doesNotContain("cancelledAt");
     }
 
     private Reservation resolvedReservation() {
@@ -167,6 +185,7 @@ class ReservationDetailResponseTest {
                 PartyComposition.of(2, 1, 0),
                 ReservationContactSnapshot.contactable("consumer:11:channel:primary"),
                 3L,
+                new ReservationCancellationPolicyVersion(1L),
                 Instant.parse("2026-08-01T09:00:00Z")
         );
         ReflectionTestUtils.setField(reservation, "id", 77L);

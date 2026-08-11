@@ -2,3 +2,5 @@
 .superpowers/sdd/
 # EC2 실행 비밀값은 서버에서만 만들며 Git에 포함하지 않는다.
 deploy/.env
+# 로컬 실행 비밀값은 기여자 PC에서만 만들며 Git에 포함하지 않는다.
+deploy/local/.env

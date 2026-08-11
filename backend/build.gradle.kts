@@ -25,6 +25,7 @@ dependencies {
     implementation("io.github.openfeign.querydsl:querydsl-jpa:7.5")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
+    implementation("com.ibm.icu:icu4j:78.3")
     runtimeOnly("org.flywaydb:flyway-mysql")
     runtimeOnly("com.mysql:mysql-connector-j")
 

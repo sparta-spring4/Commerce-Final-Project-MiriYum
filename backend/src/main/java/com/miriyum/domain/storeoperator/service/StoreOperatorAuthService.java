@@ -3,6 +3,7 @@ package com.miriyum.domain.storeoperator.service;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.AccountType;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
@@ -12,13 +13,12 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
+import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -32,7 +32,7 @@ public class StoreOperatorAuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordPolicy passwordPolicy;
     private final LoginDelayGuard loginDelayGuard;
-    private final boolean identityVerificationDevStubEnabled;
+    private final PhoneNumberPolicy phoneNumberPolicy;
 
     public StoreOperatorAuthService(
             StoreOperatorAccountRepository storeOperatorAccountRepository,
@@ -40,31 +40,35 @@ public class StoreOperatorAuthService {
             JwtTokenProvider jwtTokenProvider,
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
-            @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
+            PhoneNumberPolicy phoneNumberPolicy
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.passwordPolicy = passwordPolicy;
         this.loginDelayGuard = loginDelayGuard;
-        this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
+        this.phoneNumberPolicy = phoneNumberPolicy;
     }
 
     @Transactional
     public AccountCreatedResponse signUp(StoreOperatorSignUpRequest request) {
-        if (!identityVerificationDevStubEnabled) {
-            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
-        }
         if (!request.password().equals(request.passwordConfirm())) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+        String normalizedPhone = phoneNumberPolicy.normalize(request.phoneNumber());
         if (storeOperatorAccountRepository.existsByEmail(request.email())) {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
         }
+        if (storeOperatorAccountRepository.existsByPhone(normalizedPhone)) {
+            throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+        }
 
         String normalizedPassword = passwordPolicy.normalize(request.password());
-        StoreOperatorAccount account = StoreOperatorAccount.create(
-                request.email(), passwordEncoder.encode(normalizedPassword), request.displayName());
+        StoreOperatorAccount account = StoreOperatorAccount.createWithContact(
+                request.email(),
+                passwordEncoder.encode(normalizedPassword),
+                request.displayName(),
+                normalizedPhone);
 
         try {
             StoreOperatorAccount saved = storeOperatorAccountRepository.saveAndFlush(account);
@@ -78,6 +82,9 @@ public class StoreOperatorAuthService {
         String message = exception.getMostSpecificCause().getMessage();
         if (message != null && message.contains("uk_store_operator_accounts_email")) {
             return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+        if (message != null && message.contains("uk_store_operator_accounts_phone")) {
+            return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
         }
         return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
@@ -96,7 +103,7 @@ public class StoreOperatorAuthService {
 
         boolean completed = false;
         try {
-            boolean passwordMatches = passwordEncoder.matches(
+            boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
                     TokenNamespace.STORE_OPERATOR, account.getId(), attempt, passwordMatches);
@@ -151,5 +158,13 @@ public class StoreOperatorAuthService {
         return new TokenPair(
                 jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId),
                 jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId));
+    }
+
+    private boolean matchesPassword(String rawPassword, String encodedPassword) {
+        try {
+            return passwordEncoder.matches(rawPassword, encodedPassword);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }

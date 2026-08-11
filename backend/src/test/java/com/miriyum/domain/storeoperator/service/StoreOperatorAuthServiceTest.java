@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
@@ -21,7 +22,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.storeoperator.dto.request.StoreOperatorSignUpRequest;
+import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -62,7 +63,7 @@ class StoreOperatorAuthServiceTest {
     void setUp() {
         storeOperatorAuthService = new StoreOperatorAuthService(
                 storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
-                loginDelayGuard, true);
+                loginDelayGuard, new PhoneNumberPolicy());
     }
 
     @Test
@@ -71,7 +72,7 @@ class StoreOperatorAuthServiceTest {
         // given
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "미리윰식당");
+                "010-1234-5678", "미리윰식당");
         given(storeOperatorAccountRepository.existsByEmail("owner@example.com")).willReturn(true);
 
         // when & then
@@ -87,7 +88,7 @@ class StoreOperatorAuthServiceTest {
         // given
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "password123", "different456",
-                "email-ref", "identity-ref", "미리윰식당");
+                "010-1234-5678", "미리윰식당");
 
         // when & then
         assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
@@ -97,30 +98,12 @@ class StoreOperatorAuthServiceTest {
     }
 
     @Test
-    @DisplayName("본인확인 스텁이 꺼져 있으면 가입을 차단한다")
-    void rejectsSignUpWhenIdentityVerificationStubDisabled() {
-        // given
-        StoreOperatorAuthService serviceWithStubDisabled = new StoreOperatorAuthService(
-                storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
-                loginDelayGuard, false);
-        StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
-                "owner@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "미리윰식당");
-
-        // when & then
-        assertThatThrownBy(() -> serviceWithStubDisabled.signUp(request))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
-    }
-
-    @Test
     @DisplayName("가입에 성공하면 표시 이름을 저장하고 가입 응답을 반환한다")
     void signUpSucceeds() {
         // given
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "Password123!", "Password123!",
-                "email-ref", "identity-ref", "미리윰식당");
+                "010-1234-5678", "미리윰식당");
         given(passwordEncoder.encode("Password123!")).willReturn("hashed");
         given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
@@ -132,6 +115,7 @@ class StoreOperatorAuthServiceTest {
         ArgumentCaptor<StoreOperatorAccount> captor = ArgumentCaptor.forClass(StoreOperatorAccount.class);
         verify(storeOperatorAccountRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getDisplayName()).isEqualTo("미리윰식당");
+        assertThat(captor.getValue().getPhone()).isEqualTo("01012345678");
         assertThat(response.accountType()).isEqualTo(AccountType.STORE_OPERATOR);
         assertThat(response.status()).isEqualTo("ACTIVE");
     }
@@ -142,7 +126,7 @@ class StoreOperatorAuthServiceTest {
         // given
         StoreOperatorSignUpRequest request = new StoreOperatorSignUpRequest(
                 "owner@example.com", "password123", "password123",
-                "email-ref", "identity-ref", "미리윰식당");
+                "010-1234-5678", "미리윰식당");
 
         // when & then
         assertThatThrownBy(() -> storeOperatorAuthService.signUp(request))
@@ -180,6 +164,24 @@ class StoreOperatorAuthServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+    }
+
+    @Test
+    @DisplayName("잘못된 비밀번호 해시 형식으로 운영자 로그인을 거부한다")
+    void rejectsLoginWithMalformedPasswordHash() {
+        StoreOperatorAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed"))
+                .willThrow(new IllegalArgumentException("No PasswordEncoder mapped for id null"));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS);
+        verify(loginDelayGuard).completeAttempt(
+                eq(TokenNamespace.STORE_OPERATOR), eq(ACCOUNT_ID), any(), eq(false));
     }
 
     @Test

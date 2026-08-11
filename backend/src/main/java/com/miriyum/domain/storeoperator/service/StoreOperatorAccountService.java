@@ -1,17 +1,24 @@
 package com.miriyum.domain.storeoperator.service;
 
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import com.miriyum.domain.storeoperator.dto.request.StoreOperatorAccountUpdateRequest;
-import com.miriyum.domain.storeoperator.dto.response.StoreOperatorAccountResponse;
+import com.miriyum.domain.storeoperator.dto.account.StoreOperatorContactRegistrationRequest;
+import com.miriyum.domain.storeoperator.dto.account.StoreOperatorAccountUpdateRequest;
+import com.miriyum.domain.storeoperator.dto.account.StoreOperatorAccountResponse;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -34,10 +41,61 @@ public class StoreOperatorAccountService {
 
     private final StoreOperatorAccountRepository storeOperatorAccountRepository;
     private final IdempotencyExecutor idempotencyExecutor;
+    private final PhoneNumberPolicy phoneNumberPolicy;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public StoreOperatorAccountResponse getMe(Long accountId) {
         return StoreOperatorAccountResponse.from(getActiveAccount(accountId));
+    }
+
+    /**
+     * Controller가 업무 입력을 처리하기 전에 C-013 계정 상태 경계를 확인한다.
+     */
+    @Transactional(readOnly = true)
+    public void requireActiveAccount(Long accountId) {
+        getActiveAccount(accountId);
+    }
+
+    /**
+     * 기존 매장 운영자 계정의 최초 연락처를 등록한다. 운영자 연락처는 예약 참조를 만들지 않는다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public IdempotentOutcome registerContact(
+            IdempotencyCommand command,
+            Long accountId,
+            StoreOperatorContactRegistrationRequest request
+    ) {
+        getActiveAccount(accountId);
+        return idempotencyExecutor.execute(command, () -> {
+            StoreOperatorAccount account = getActiveAccountForUpdate(accountId);
+            String normalizedPhone = phoneNumberPolicy.normalize(request.phoneNumber());
+            if (account.getPhone() != null) {
+                String existingNormalizedPhone = phoneNumberPolicy.normalize(account.getPhone());
+                if (!existingNormalizedPhone.equals(normalizedPhone)) {
+                    throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+                }
+                if (!account.getPhone().equals(normalizedPhone)) {
+                    account.registerContact(normalizedPhone);
+                }
+            }
+            if (account.getPhone() == null && storeOperatorAccountRepository.existsByPhone(normalizedPhone)) {
+                throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            try {
+                if (account.getPhone() == null) {
+                    account.registerContact(normalizedPhone);
+                }
+                storeOperatorAccountRepository.saveAndFlush(account);
+            } catch (DataIntegrityViolationException exception) {
+                throw mapDuplicateConstraint(exception);
+            }
+            return new BusinessResult<>(HttpStatus.OK.value(), SUCCESS_RESPONSE_CODE,
+                    RESOURCE_TYPE, String.valueOf(account.getId()),
+                    StoreOperatorAccountResponse.from(account));
+        });
     }
 
     /**
@@ -82,5 +140,23 @@ public class StoreOperatorAccountService {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
         return account;
+    }
+
+    private StoreOperatorAccount getActiveAccountForUpdate(Long accountId) {
+        entityManager.clear();
+        StoreOperatorAccount account = storeOperatorAccountRepository.findByIdForUpdate(accountId)
+                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
+        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+        }
+        return account;
+    }
+
+    private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
+        String message = exception.getMostSpecificCause().getMessage();
+        if (message != null && message.contains("uk_store_operator_accounts_phone")) {
+            return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+        }
+        return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
 }

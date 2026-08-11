@@ -10,10 +10,12 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
@@ -23,24 +25,25 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepos
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryPolicyChange;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketCreateCommand;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.menu.entity.Menu;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.model.AllergenDisclosure;
-import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
-import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
-import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
-import com.miriyum.domain.store.menu.model.MenuContent;
-import com.miriyum.domain.store.menu.repository.MenuRepository;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.menu.entity.Menu;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.model.AllergenDisclosure;
+import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -67,6 +70,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
@@ -117,6 +121,9 @@ class MenuInventoryRuntimeIT {
 
     @MockitoSpyBean
     private StoreService storeService;
+
+    @MockitoBean
+    private MenuTransactionService menuTransactionService;
 
     @MockitoSpyBean
     private MenuQueryService menuQueryService;
@@ -290,11 +297,17 @@ class MenuInventoryRuntimeIT {
                 bucketRepository.saveAndFlush(bucket(menuId, 1L, 2, 3)));
         String acquireOperation = "pickup-public-acquire-" + SEQUENCE.incrementAndGet();
 
-        transactionTemplate.execute(status -> transactionService.acquire(
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(
                 new MenuInventoryAcquireCommand(
                         acquireOperation, List.of(publicSelection(menuId, 1L, 4)))));
 
         MenuInventoryBucket acquired = bucketRepository.findById(bucket.getId()).orElseThrow();
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        bucket.getId(), menuId, 1L, 4));
         assertThat(acquired.getOnlineHoldRemaining()).isZero();
         assertThat(acquired.getSharedRemaining()).isEqualTo(1);
 
@@ -310,6 +323,36 @@ class MenuInventoryRuntimeIT {
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
+    }
+
+    @Test
+    void publicAcquireKeepsBucketAndMenuMappingWhenLockOrderDiffersFromMenuOrder() {
+        long secondMenuId = transactionTemplate.execute(status -> menuRepository.saveAndFlush(
+                Menu.create(
+                        storeId,
+                        menuContent(),
+                        operatorId,
+                        Instant.parse("2026-08-01T00:00:01Z"))).getId());
+        MenuInventoryBucket lowerBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(secondMenuId, 1L, 5, 0)));
+        MenuInventoryBucket higherBucketId = transactionTemplate.execute(status ->
+                bucketRepository.saveAndFlush(bucket(menuId, 1L, 5, 0)));
+
+        MenuInventoryAcquireResult result = transactionTemplate.execute(status ->
+                transactionService.acquire(new MenuInventoryAcquireCommand(
+                        "pickup-public-mapping-" + SEQUENCE.incrementAndGet(),
+                        List.of(
+                                publicSelection(menuId, 1L, 2),
+                                publicSelection(secondMenuId, 1L, 3)))));
+
+        assertThat(result).isNotNull();
+        assertThat(result.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                higherBucketId.getId(), menuId, 1L, 2),
+                        org.assertj.core.groups.Tuple.tuple(
+                                lowerBucketId.getId(), secondMenuId, 1L, 3));
     }
 
     @Test
@@ -393,7 +436,7 @@ class MenuInventoryRuntimeIT {
         InventoryAcquireRequest acquire = new InventoryAcquireRequest(
                 "reservation:77:create", List.of(selection(menuId, 4)));
 
-        List<InventoryAllocationResult> acquired = transactionTemplate.execute(status ->
+        List<InventoryAcquisitionResult> acquired = transactionTemplate.execute(status ->
                 menuHoldService.acquireInventory(acquire));
         transactionTemplate.executeWithoutResult(status -> menuHoldService.restoreInventory(
                 new InventoryRestoreRequest("reservation:77:cancel:1", acquire.operationId())));
@@ -402,7 +445,9 @@ class MenuInventoryRuntimeIT {
 
         MenuInventoryBucket restored = bucketRepository.findById(bucket.getId()).orElseThrow();
         assertThat(acquired).containsExactly(
-                new InventoryAllocationResult(bucket.getId(), 2, 2));
+                new InventoryAcquisitionResult(
+                        acquire.selections().getFirst().key(),
+                        bucket.getId(), menuId, 1L, 4, 2, 2));
         assertThat(restored.getOnlineHoldRemaining()).isEqualTo(2);
         assertThat(restored.getSharedRemaining()).isEqualTo(3);
         assertThat(ledgerRepository.count()).isEqualTo(ledgerCountBefore + 4);
@@ -904,8 +949,8 @@ class MenuInventoryRuntimeIT {
                 .requireSchedulePublicationAuthority(operatorId, storeId);
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
-                .given(storeService)
-                .requireMenuTransactionEligibility(storeId, menuId);
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, menuId);
     }
 
     private InventoryBucketCreateCommand createCommand(int totalSupply) {

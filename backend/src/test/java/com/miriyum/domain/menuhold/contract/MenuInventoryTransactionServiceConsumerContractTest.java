@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireResult;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAcquireSelection;
+import com.miriyum.domain.menuhold.dto.MenuInventoryAcquiredItem;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityDateQuery;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery;
@@ -38,6 +39,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     void exposesTransactionBoundariesForPickupConsumer() throws Exception {
         Method availability = MenuInventoryTransactionService.class.getMethod(
                 "findOnlineAvailability", MenuInventoryAvailabilityQuery.class);
+        Method existingAvailability = MenuInventoryTransactionService.class.getMethod(
+                "findExistingOnlineAvailability", MenuInventoryAvailabilityQuery.class);
         Method availabilityByDate = MenuInventoryTransactionService.class.getMethod(
                 "findOnlineAvailabilityByDate", MenuInventoryAvailabilityDateQuery.class);
         Method acquire = MenuInventoryTransactionService.class.getMethod(
@@ -46,6 +49,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
                 "restore", MenuInventoryRestoreCommand.class);
 
         Transactional availabilityTx = availability.getAnnotation(Transactional.class);
+        Transactional existingAvailabilityTx =
+                existingAvailability.getAnnotation(Transactional.class);
         Transactional availabilityByDateTx =
                 availabilityByDate.getAnnotation(Transactional.class);
         Transactional acquireTx = acquire.getAnnotation(Transactional.class);
@@ -54,6 +59,10 @@ class MenuInventoryTransactionServiceConsumerContractTest {
         assertThat(availabilityTx).isNotNull();
         assertThat(availabilityTx.readOnly()).isTrue();
         assertThat(availability.getGenericReturnType().getTypeName())
+                .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
+        assertThat(existingAvailabilityTx).isNotNull();
+        assertThat(existingAvailabilityTx.readOnly()).isTrue();
+        assertThat(existingAvailability.getGenericReturnType().getTypeName())
                 .isEqualTo("java.util.List<com.miriyum.domain.menuhold.dto.MenuInventoryAvailability>");
         assertThat(availabilityByDateTx).isNotNull();
         assertThat(availabilityByDateTx.readOnly()).isTrue();
@@ -134,7 +143,7 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     }
 
     @Test
-    @DisplayName("공개 결과에는 내부 버킷 식별자와 풀 배분이 없다")
+    @DisplayName("확보 결과는 실제 버킷 식별자만 공개하고 내부 풀 배분은 숨긴다")
     void publicResultsExposeOnlyConsumerContract() {
         assertThat(MenuInventoryAvailability.class.getRecordComponents())
                 .extracting(component -> component.getName())
@@ -142,6 +151,11 @@ class MenuInventoryTransactionServiceConsumerContractTest {
         assertThat(MenuInventoryAcquireResult.class.getRecordComponents())
                 .extracting(component -> component.getName())
                 .doesNotContain("bucketId", "lockVersion", "onlineHoldQuantity", "sharedQuantity");
+        assertThat(MenuInventoryAcquiredItem.class.getRecordComponents())
+                .extracting(component -> component.getName())
+                .containsExactly(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .doesNotContain("lockVersion", "onlineHoldQuantity", "sharedQuantity");
     }
 
     @Test
@@ -182,25 +196,56 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     @DisplayName("픽업 fixture는 공개 명령을 기록하고 내부 풀 정보 없는 결과를 반환한다")
     void fixtureSupportsPickupConsumerWithoutProductionFake() {
         PickupMenuInventoryContractFixture fixture =
-                PickupMenuInventoryContractFixture.succeeding(List.of());
+                PickupMenuInventoryContractFixture.succeeding(
+                        List.of(), Map.of(selection(1L, 1), 41L));
         MenuInventoryAvailabilityDateQuery availability =
                 new MenuInventoryAvailabilityDateQuery(List.of(2L, 1L), SERVICE_DATE);
+        MenuInventoryAvailabilityQuery existingAvailability =
+                new MenuInventoryAvailabilityQuery(
+                        List.of(2L, 1L), SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME);
         MenuInventoryAcquireCommand acquire = new MenuInventoryAcquireCommand(
                 "pickup-acquire-01", List.of(selection(1L, 2)));
         MenuInventoryRestoreCommand restore = new MenuInventoryRestoreCommand(
                 "pickup-restore-01", "pickup-acquire-01");
 
         fixture.findOnlineAvailabilityByDate(availability);
+        fixture.findExistingOnlineAvailability(existingAvailability);
         MenuInventoryAcquireResult acquired = fixture.acquire(acquire);
         MenuInventoryRestoreResult restored = fixture.restore(restore);
 
         assertThat(fixture.dateAvailabilityQueries()).containsExactly(availability);
+        assertThat(fixture.availabilityQueries()).containsExactly(existingAvailability);
         assertThat(fixture.acquireCommands()).containsExactly(acquire);
         assertThat(fixture.restoreCommands()).containsExactly(restore);
         assertThat(acquired.operationId()).isEqualTo("pickup-acquire-01");
-        assertThat(acquired.items()).extracting("menuId", "quantity")
-                .containsExactly(tuple(1L, 2));
+        assertThat(acquired.items()).extracting("inventoryBucketId", "menuId", "quantity")
+                .containsExactly(tuple(41L, 1L, 2));
         assertThat(restored.sourceAcquireOperationId()).isEqualTo("pickup-acquire-01");
+    }
+
+    @Test
+    @DisplayName("픽업 fixture는 같은 메뉴의 서로 다른 서비스 구간을 별도 버킷으로 반환한다")
+    void fixtureMapsInventoryBucketByCompleteBucketKey() {
+        LocalTime laterStartTime = LocalTime.of(14, 0);
+        LocalTime laterEndTime = LocalTime.of(15, 0);
+        MenuInventoryAcquireSelection first = selection(1L, 2);
+        MenuInventoryAcquireSelection second = new MenuInventoryAcquireSelection(
+                1L, SERVICE_DATE, laterStartTime, SERVICE_DATE, laterEndTime, 1L, 3);
+        MenuInventoryAcquireSelection nextPolicy = new MenuInventoryAcquireSelection(
+                1L, SERVICE_DATE, START_TIME, SERVICE_DATE, END_TIME, 2L, 4);
+        PickupMenuInventoryContractFixture fixture =
+                PickupMenuInventoryContractFixture.succeeding(
+                        List.of(), Map.of(first, 41L, second, 42L, nextPolicy, 43L));
+
+        MenuInventoryAcquireResult acquired = fixture.acquire(new MenuInventoryAcquireCommand(
+                "pickup-acquire-intervals", List.of(second, nextPolicy, first)));
+
+        assertThat(acquired.items()).extracting(
+                        "inventoryBucketId", "menuId", "inventoryPolicyVersion", "quantity")
+                .containsExactly(
+                        tuple(41L, 1L, 1L, 2),
+                        tuple(43L, 1L, 2L, 4),
+                        tuple(42L, 1L, 1L, 3));
     }
 
     @Test
@@ -219,7 +264,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     @DisplayName("픽업 소비자는 멱등 재생에서 수량 서비스를 다시 호출하지 않는다")
     void pickupConsumerSkipsInventoryCallsOnIdempotentReplay() {
         PickupMenuInventoryContractFixture fixture =
-                PickupMenuInventoryContractFixture.succeeding(List.of());
+                PickupMenuInventoryContractFixture.succeeding(
+                        List.of(), Map.of(selection(1L, 2), 41L));
         PickupConsumer consumer = new PickupConsumer(fixture);
 
         MenuInventoryAcquireResult firstAcquire =
@@ -241,7 +287,8 @@ class MenuInventoryTransactionServiceConsumerContractTest {
     @DisplayName("픽업 소비자는 논리 명령마다 서로 다른 operationId를 발급한다")
     void pickupConsumerIssuesUniqueOperationIdPerLogicalCommand() {
         PickupMenuInventoryContractFixture fixture =
-                PickupMenuInventoryContractFixture.succeeding(List.of());
+                PickupMenuInventoryContractFixture.succeeding(
+                        List.of(), Map.of(selection(1L, 1), 41L));
         PickupConsumer consumer = new PickupConsumer(fixture);
 
         MenuInventoryAcquireResult first =

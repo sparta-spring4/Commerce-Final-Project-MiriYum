@@ -1,0 +1,7 @@
+# pnpm 11부터 package.json의 "pnpm" 필드를 읽지 않는다. 설정은 이 파일이 소유한다.
+
+# msw의 postinstall은 브라우저 mocking용 service worker를 만든다.
+# 테스트에서 msw/node만 사용하므로 실행하지 않는다.
+# 명시하지 않으면 설치가 ERR_PNPM_IGNORED_BUILDS로 실패한다.
+allowBuilds:
+  msw: false
