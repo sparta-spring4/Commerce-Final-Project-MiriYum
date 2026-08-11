@@ -1,0 +1,37 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Consumer API
+  version: 1.0.0
+  description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/consumers/auth/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1accounts"
+  /api/v1/consumers/auth/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1sessions"
+  /api/v1/consumers/auth/token-refreshes:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1token-refreshes"
+  /api/v1/consumers/auth/csrf-tokens/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1csrf-tokens~1current"
+  /api/v1/consumers/auth/sessions/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1sessions~1current"
+  /api/v1/consumers/me:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me"
+  /api/v1/consumers/me/contact:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
+  /api/v1/consumers/me/reservations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
+  /api/v1/consumers/reservations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations"
+  /api/v1/consumers/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}"
+  /api/v1/consumers/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}~1cancellations"
+  /api/v1/consumers/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations"
+  /api/v1/consumers/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}~1cancellations"

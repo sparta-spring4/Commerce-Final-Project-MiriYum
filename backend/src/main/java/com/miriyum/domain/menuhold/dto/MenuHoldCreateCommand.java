@@ -1,0 +1,74 @@
+package com.miriyum.domain.menuhold.dto;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** 예약 생성 트랜잭션이 메뉴 홀드 생성에 전달하는 공개 명령이다. */
+public record MenuHoldCreateCommand(
+        long reservationId,
+        long storeId,
+        long consumerAccountId,
+        LocalDate serviceDate,
+        LocalTime startTime,
+        LocalDate endDate,
+        LocalTime endTime,
+        Instant startAt,
+        Instant serviceEndAt,
+        String operationId,
+        List<MenuSelection> menuSelections
+) {
+
+    public MenuHoldCreateCommand {
+        requirePositive(reservationId, "reservationId");
+        requirePositive(storeId, "storeId");
+        requirePositive(consumerAccountId, "consumerAccountId");
+        if (serviceDate == null) {
+            throw new IllegalArgumentException("serviceDate must not be null");
+        }
+        if (startTime == null || endDate == null || endTime == null
+                || !LocalDateTime.of(serviceDate, startTime)
+                        .isBefore(LocalDateTime.of(endDate, endTime))) {
+            throw new IllegalArgumentException("service time range must be increasing");
+        }
+        if (startAt == null || serviceEndAt == null || !startAt.isBefore(serviceEndAt)) {
+            throw new IllegalArgumentException("resolved service time range must be increasing");
+        }
+        requireText(operationId, "operationId");
+        if (menuSelections == null) {
+            throw new IllegalArgumentException("menuSelections must not be null");
+        }
+        if (menuSelections.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new IllegalArgumentException("menuSelections must not contain null");
+        }
+        Map<Long, Integer> quantitiesByMenuId = new LinkedHashMap<>();
+        for (MenuSelection selection : menuSelections) {
+            try {
+                quantitiesByMenuId.merge(
+                        selection.menuId(), selection.quantity(), Math::addExact);
+            } catch (ArithmeticException exception) {
+                throw new IllegalArgumentException(
+                        "menu selection quantity sum exceeds integer range", exception);
+            }
+        }
+        menuSelections = quantitiesByMenuId.entrySet().stream()
+                .map(entry -> new MenuSelection(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private static void requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " must not be blank");
+        }
+    }
+
+    private static void requirePositive(long value, String field) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(field + " must be positive");
+        }
+    }
+}

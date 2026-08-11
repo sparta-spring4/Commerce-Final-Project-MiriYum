@@ -21,11 +21,11 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 
 ### 이번 결정에서 확정하지 않는 항목
 
-다음 항목은 현재 MVP 구현 전에 필요하지만 이 ADR에서 값을 임의로 정하지 않는다.
+토큰 유효기간은 2026-07-28 후속 팀 결정으로 Access JWT 1시간·Refresh JWT 14일로 확정했다. 이 수치 결정은 이 ADR의 단계별 저장·회전·폐기 구조를 변경하지 않는다.
 
-- 액세스 토큰과 리프레시 토큰의 만료시간은 팀원 상의 필요 상태다.
-- 리프레시 토큰의 브라우저 전달·저장 방식과 이에 따른 CSRF 경계는 팀원 상의 필요 상태다.
-- 역할별 동시 로그인 상한과 기존 상한 유지 여부는 팀원 상의 필요 상태다.
+`1차 MVP`에는 계정별 동시 로그인 상한·활성 로그인 목록·기기별 종료를 제공하지 않으며, 과거 중앙 세션 정책의 역할별 상한을 stateless JWT에 변환하지 않는다. 정확한 상한과 초과 시 종료 순서는 Valkey 로그인 상태를 활성화하는 고도화 전에 별도 결정한다.
+
+리프레시 토큰의 브라우저 전달·저장 방식과 CSRF 경계는 2026-07-28 후속 팀 결정으로 확정했다. Access JWT는 응답 본문·shell별 메모리·Bearer 헤더를 사용하고 Refresh JWT는 namespace별 `HttpOnly`, `Secure`, `SameSite=Lax` 쿠키로만 전달한다. 재발급은 동일 Origin의 `POST` JSON 요청과 `Origin`·`Referer` 검증을 요구하며 로그아웃에는 Spring Security CSRF 보호를 적용한다. 이 브라우저 계약은 1차 MVP의 무저장 JWT와 고도화의 Valkey 상태 관리 모두에 유지된다.
 
 ## 검토한 대안
 
@@ -82,6 +82,7 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - **1차 MVP와 2차 MVP:** Access Token과 Refresh Token 모두 서버 저장소 없는 JWT다. 서명, 만료, 발급자, audience, 계정 유형별 토큰 namespace를 검증하며 정상 토큰 저장소·폐기 목록·Valkey 의존성을 두지 않는다.
 - **고도화:** Valkey에 Refresh Token family의 회전, 폐기, 재사용 탐지와 로그인 단위 종료 상태를 둔다. Access Token은 짧은 수명의 stateless JWT를 유지하며 권한·계정 상태는 요청 경계에서 검증한다.
 - 일반 사용자, 매장 운영자, 플랫폼 운영자는 계정 테이블·PK·principal·토큰 namespace가 다르다. 다른 계정 유형의 Refresh Token을 교환하거나 같은 subject 문자열로 결합하지 않는다.
+- 단계가 바뀌어도 브라우저는 Access Token을 shell별 메모리, Refresh Token을 namespace별 `HttpOnly` 쿠키로 다룬다. 고도화 전환은 브라우저 저장 위치를 바꾸지 않고 Refresh Token의 서버 검증에 Valkey 회전·폐기·재사용 탐지를 추가한다.
 
 ### 전환과 검증
 

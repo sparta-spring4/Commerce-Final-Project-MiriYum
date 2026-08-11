@@ -1,0 +1,143 @@
+package com.miriyum.global.security;
+
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import tools.jackson.databind.ObjectMapper;
+import com.miriyum.domain.auth.jwt.JwtAccessDeniedHandler;
+import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
+import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
+import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.password.Sha256BCryptPasswordEncoder;
+import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
+import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import java.util.Map;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+/**
+ * 계정 namespace별로 필터체인을 분리한다. 일반 사용자·매장 운영자 보호 API는 각자 namespace의
+ * Bearer Access JWT를 요구하고, 인증 진입점(가입·로그인·재발급·로그아웃)은 컨트롤러·서비스 안에서
+ * 쿠키·CSRF·Origin을 자체 검증하므로 Security 단계에서는 permitAll로 통과시킨다.
+ */
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    /**
+     * 컨테이너 배포 확인에 쓰는 최소 범위의 Actuator health 엔드포인트만 허용한다.
+     * 여기서 허용한다는 뜻은 인증을 요구하지 않는다는 뜻이며, 외부 공개 여부는 Nginx와
+     * backend의 127.0.0.1 포트 바인딩으로 별도 제어한다. 다른 관리 엔드포인트는 노출하지 않고
+     * Nginx 공개 경로에서도 Actuator를 차단한다.
+     */
+    @Bean
+    @Order(0)
+    public SecurityFilterChain healthEndpointFilterChain(HttpSecurity http) {
+        http
+                .securityMatcher(EndpointRequest.to("health"))
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    /**
+     * 비밀번호 해시 방식을 저장 값 접두사로 구분하는 {@link DelegatingPasswordEncoder}를 쓴다.
+     *
+     * <p>기본 방식은 {@code sha256-bcrypt}다. BCrypt는 72 UTF-8 byte를 넘는 입력을 처리하지 못하는데
+     * AUTH-006은 최대 64 유니코드 코드 포인트를 허용하므로, 한글처럼 코드 포인트당 byte 수가 큰
+     * 비밀번호를 그대로 BCrypt에 넘기면 정책상 유효한 값을 거부하게 된다. 자세한 이유는
+     * {@link Sha256BCryptPasswordEncoder} 참고.</p>
+     *
+     * <p>접두사가 없는 순수 BCrypt 해시는 더 이상 허용하지 않는다. 모든 저장 값은
+     * {@code {sha256-bcrypt}}처럼 방식 식별자를 포함해야 하며, 이전 형식의 데이터는 운영 전환 전에
+     * 비밀번호 재설정 또는 승인된 마이그레이션으로 정리해야 한다.</p>
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        BCryptPasswordEncoder bcryptPasswordEncoder = new BCryptPasswordEncoder();
+        DelegatingPasswordEncoder passwordEncoder = new DelegatingPasswordEncoder(
+                Sha256BCryptPasswordEncoder.ENCODING_ID,
+                Map.of(
+                        Sha256BCryptPasswordEncoder.ENCODING_ID,
+                        new Sha256BCryptPasswordEncoder(bcryptPasswordEncoder)));
+        return passwordEncoder;
+    }
+
+    @Bean
+    @Order(2)
+    public SecurityFilterChain consumerAccountFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) {
+        http
+                .securityMatcher("/api/v1/consumers/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.CONSUMER),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
+    public SecurityFilterChain storeOperatorAccountFilterChain(
+            HttpSecurity http,
+            JwtTokenProvider jwtTokenProvider,
+            ObjectMapper objectMapper
+    ) {
+        http
+                .securityMatcher("/api/v1/store-operators/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new JwtAccessDeniedHandler(objectMapper)))
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.STORE_OPERATOR),
+                        UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
+    @Order(1)
+    public SecurityFilterChain publicAuthFilterChain(
+            HttpSecurity http,
+            RateLimiter rateLimiter,
+            ObjectMapper objectMapper
+    ) {
+        http
+                .securityMatcher("/api/v1/consumers/auth/**", "/api/v1/store-operators/auth/**")
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .addFilterBefore(new RateLimitFilter(rateLimiter, objectMapper), UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
+    @Order(4)
+    public SecurityFilterChain defaultFilterChain(HttpSecurity http) {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().denyAll());
+        return http.build();
+    }
+}

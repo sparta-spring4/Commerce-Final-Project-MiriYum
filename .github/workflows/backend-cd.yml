@@ -1,0 +1,353 @@
+# CI를 통과한 dev 리비전을 ARM64 이미지로 빌드하고 앱 비밀값 없이 SSM으로 배포한다.
+name: Backend CD (Staging)
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    branches: [dev]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Deploy an existing immutable 40-character Git SHA image tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  deployments: read
+
+concurrency:
+  # 진행 중인 배포는 취소하지 않는다. 새 이미지는 기존 health 확인이 끝날 때까지 대기한다.
+  group: backend-cd-staging
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
+  EC2_INSTANCE_ID: ${{ vars.AWS_EC2_INSTANCE_ID }}
+  BACKEND_DEPLOYMENT_ENVIRONMENT: staging-backend
+
+jobs:
+  verify-source:
+    name: verify-staging-deployment-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: read
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'dev' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+    outputs:
+      deployable: ${{ steps.source.outputs.deployable }}
+
+    steps:
+      - name: Checkout automatic deployment revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: Verify automatic deployment uses the current dev revision
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            current_dev_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/dev" --jq '.object.sha')
+
+            if [ "$current_dev_sha" != "$WORKFLOW_SHA" ]; then
+              echo "deployable=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current dev is $current_dev_sha."
+              exit 0
+            fi
+
+            last_deployed_sha=$(gh api \
+              "repos/$GITHUB_REPOSITORY/deployments?environment=$BACKEND_DEPLOYMENT_ENVIRONMENT&per_page=100" \
+              --jq 'sort_by(.created_at) | reverse | .[] | [.id, .sha] | @tsv' \
+              | while IFS=$'\t' read -r deployment_id deployment_sha; do
+                  state=$(gh api \
+                    "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses?per_page=1" \
+                    --jq '.[0].state // ""')
+                  if [ "$state" = "success" ]; then
+                    printf '%s' "$deployment_sha"
+                    break
+                  fi
+                done)
+
+            if [ -n "$last_deployed_sha" ]; then
+              git fetch --no-tags --depth=1 origin "$last_deployed_sha"
+              changed_files=$(git diff --name-only "$last_deployed_sha" "$WORKFLOW_SHA")
+            else
+              empty_tree=$(git hash-object -t tree /dev/null)
+              changed_files=$(git diff --name-only "$empty_tree" "$WORKFLOW_SHA")
+            fi
+
+            deployable=$(printf '%s\n' "$changed_files" | python3 scripts/should-deploy-backend.py)
+            echo "deployable=$deployable" >> "$GITHUB_OUTPUT"
+
+            if [ "$deployable" != "true" ]; then
+              echo "::notice::Skipping staging CD because the revision has no backend deployment input changes."
+            fi
+            exit 0
+          fi
+
+          echo "deployable=true" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: build-and-deploy-backend-staging
+    needs: verify-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # staging Environment의 변수와 배포 이력을 사용한다. 운영 Environment는 이 워크플로에서 사용하지 않는다.
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+    if: needs.verify-source.outputs.deployable == 'true'
+
+    steps:
+      - name: Validate deployment configuration
+        env:
+          ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          for value in "$AWS_REGION" "$ECR_REPOSITORY" "$EC2_INSTANCE_ID" "$ROLE_TO_ASSUME"; do
+            if [ -z "$value" ]; then
+              echo "::error::Required GitHub Actions variable is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Select immutable image tag
+        id: image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            image_tag="$WORKFLOW_SHA"
+          else
+            image_tag="$MANUAL_TAG"
+          fi
+
+          if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Only a full 40-character Git SHA image tag can be deployed."
+            exit 1
+          fi
+
+          echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout successful CI revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Checkout manual deployment revision
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.image_tag }}
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          # IAM/OIDC 설정 오류는 장시간 재시도하지 않고, 일시적 AWS 오류에만 한 번 재시도한다.
+          retry-max-attempts: 2
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      # SSM 단계만 실패한 실행을 재시작할 때 immutable SHA 태그를 다시 push하지 않는다.
+      - name: Check immutable ECR image exists
+        id: ecr-image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          if ! image_count=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" \
+            --query 'length(images)' \
+            --output text); then
+            echo "::error::ECR image lookup failed. The staging CD role requires ecr:BatchGetImage on $ECR_REPOSITORY."
+            exit 1
+          fi
+
+          if [ "$image_count" = "1" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing immutable ECR image tag: $IMAGE_TAG"
+          else
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "::error::Manual deployment requires an existing immutable ECR image tag: $IMAGE_TAG."
+              exit 1
+            fi
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU for ARM64 builds
+        if: github.event_name == 'workflow_run'
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'workflow_run'
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build and push ARM64 backend image
+        if: github.event_name == 'workflow_run' && steps.ecr-image.outputs.exists != 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: backend
+          file: backend/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record backend deployment marker
+        id: backend-deployment
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deployment_response=$(jq -n \
+            --arg ref "$IMAGE_TAG" \
+            --arg environment "$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            '{ref: $ref, environment: $environment, description: ("Backend image " + $ref), auto_merge: false, required_contexts: []}' \
+            | gh api --method POST "repos/$GITHUB_REPOSITORY/deployments" --input -)
+
+          deployment_id=$(jq -er --arg image_tag "$IMAGE_TAG" '
+            if .sha != $image_tag then
+              error("Deployment response SHA does not match selected image tag")
+            elif (.id | type) != "number" then
+              error("Deployment response did not include a numeric id")
+            else
+              .id
+            end
+          ' <<< "$deployment_response")
+
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
+            --field state=in_progress \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend deployment started for image $IMAGE_TAG" \
+            >/dev/null
+
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+
+      - name: Upload deployment files with SSM
+        id: ssm
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          # 실행 .env는 EC2의 제한된 권한으로만 유지하므로 의도적으로 전송 대상에서 제외한다.
+          compose_base64=$(base64 --wrap=0 deploy/docker-compose.prod.yml)
+          nginx_base64=$(base64 --wrap=0 deploy/nginx/default.conf)
+          script_base64=$(base64 --wrap=0 deploy/deploy.sh)
+          cloudwatch_base64=$(base64 --wrap=0 deploy/monitoring/cloudwatch-agent-config.json)
+          image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          cat > ssm-command.json <<EOF
+          {
+            "DocumentName": "AWS-RunShellScript",
+            "InstanceIds": ["$EC2_INSTANCE_ID"],
+            "TimeoutSeconds": 900,
+            "Parameters": {
+              "commands": [
+                "set -Eeuo pipefail",
+                "install -d -m 0755 /opt/miriyum/nginx",
+                "echo '$compose_base64' | base64 --decode > /opt/miriyum/docker-compose.prod.yml",
+                "echo '$nginx_base64' | base64 --decode > /opt/miriyum/nginx/default.conf",
+                "echo '$script_base64' | base64 --decode > /opt/miriyum/deploy.sh",
+                "install -d -m 0755 /opt/miriyum/monitoring",
+                "echo '$cloudwatch_base64' | base64 --decode > /opt/miriyum/monitoring/cloudwatch-agent.json",
+                "if [ -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/miriyum/monitoring/cloudwatch-agent.json -s; fi",
+                "chmod 700 /opt/miriyum/deploy.sh",
+                "AWS_REGION='$AWS_REGION' BACKEND_IMAGE='$image_uri' /opt/miriyum/deploy.sh"
+              ]
+            }
+          }
+          EOF
+
+          command_id=$(aws ssm send-command --cli-input-json file://ssm-command.json --query 'Command.CommandId' --output text)
+          echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM deployment result
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          for ((attempt = 0; attempt < 90; attempt++)); do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+
+            case "$status" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query 'StandardOutputContent' \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query '{status:Status,stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+                  --output json
+                exit 1
+                ;;
+            esac
+
+            sleep 10
+          done
+
+          echo "::error::SSM deployment did not finish within 15 minutes. Command: $COMMAND_ID"
+          exit 1
+
+      - name: Mark backend deployment successful
+        if: success()
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=success \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployed successfully" \
+            >/dev/null
+
+      - name: Mark backend deployment failed
+        if: failure() && steps.backend-deployment.outputs.deployment_id != ''
+        env:
+          DEPLOYMENT_ID: ${{ steps.backend-deployment.outputs.deployment_id }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --field state=failure \
+            --field environment="$BACKEND_DEPLOYMENT_ENVIRONMENT" \
+            --field description="Backend image $IMAGE_TAG deployment failed" \
+            >/dev/null

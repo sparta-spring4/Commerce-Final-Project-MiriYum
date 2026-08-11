@@ -1,0 +1,828 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Auth and Account API
+  version: 1.0.0
+  description: 일반 사용자·매장 운영자 인증, 본인 정보와 마이페이지 예약 내역 계약
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경의 동일 origin
+security: []
+tags:
+  - name: Consumer Auth
+    description: 일반 사용자 인증
+  - name: Store Operator Auth
+    description: 매장 운영자 인증
+  - name: Account
+    description: 계정 유형별 본인 정보
+  - name: My Page
+    description: 일반 사용자 마이페이지
+paths:
+  /api/v1/consumers/auth/accounts:
+    post:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 가입
+      operationId: createConsumerAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerSignUpRequest"
+      responses:
+        "201":
+          description: 일반 사용자 계정 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountCreatedSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/AccountConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/auth/sessions:
+    post:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 로그인
+      operationId: createConsumerSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 로그인 성공
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_CONSUMER_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/auth/token-refreshes:
+    post:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 Access Token 재발급
+      operationId: refreshConsumerToken
+      security:
+        - consumerRefreshCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyJsonRequest"
+      responses:
+        "200":
+          description: Access Token 재발급
+          headers:
+            Set-Cookie:
+              description: 새 MIRIYUM_CONSUMER_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidRefreshToken"
+        "403":
+          $ref: "#/components/responses/OriginRejected"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/auth/csrf-tokens/current:
+    get:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 shell CSRF 토큰 준비
+      operationId: getConsumerCsrfToken
+      responses:
+        "200":
+          description: CSRF 토큰 준비
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_CONSUMER_XSRF_TOKEN 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/consumers/auth/sessions/current:
+    delete:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 현재 shell 로그아웃
+      operationId: deleteConsumerCurrentSession
+      security:
+        - consumerRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: 클라이언트 토큰 제거와 Refresh 쿠키 만료
+          headers:
+            Set-Cookie:
+              description: Max-Age=0인 MIRIYUM_CONSUMER_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoDataSuccessResponse"
+        "401":
+          $ref: "#/components/responses/InvalidRefreshToken"
+        "403":
+          $ref: "#/components/responses/CsrfRejected"
+  /api/v1/store-operators/auth/accounts:
+    post:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 가입
+      operationId: createStoreOperatorAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorSignUpRequest"
+      responses:
+        "201":
+          description: 매장 운영자 계정 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountCreatedSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/AccountConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/auth/sessions:
+    post:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 로그인
+      operationId: createStoreOperatorSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 로그인 성공
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_STORE_OPERATOR_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/auth/token-refreshes:
+    post:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 Access Token 재발급
+      operationId: refreshStoreOperatorToken
+      security:
+        - storeOperatorRefreshCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyJsonRequest"
+      responses:
+        "200":
+          description: Access Token 재발급
+          headers:
+            Set-Cookie:
+              description: 새 MIRIYUM_STORE_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidRefreshToken"
+        "403":
+          $ref: "#/components/responses/OriginRejected"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/auth/csrf-tokens/current:
+    get:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 shell CSRF 토큰 준비
+      operationId: getStoreOperatorCsrfToken
+      responses:
+        "200":
+          description: CSRF 토큰 준비
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_STORE_OPERATOR_XSRF_TOKEN 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/store-operators/auth/sessions/current:
+    delete:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 현재 shell 로그아웃
+      operationId: deleteStoreOperatorCurrentSession
+      security:
+        - storeOperatorRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: 클라이언트 토큰 제거와 Refresh 쿠키 만료
+          headers:
+            Set-Cookie:
+              description: Max-Age=0인 MIRIYUM_STORE_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoDataSuccessResponse"
+        "401":
+          $ref: "#/components/responses/InvalidRefreshToken"
+        "403":
+          $ref: "#/components/responses/CsrfRejected"
+  /api/v1/consumers/me:
+    get:
+      tags: [Account]
+      summary: 일반 사용자 본인 정보 조회
+      operationId: getCurrentConsumerAccount
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 일반 사용자 본인 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerAccountSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+    patch:
+      tags: [Account]
+      summary: 일반 사용자 닉네임 수정
+      operationId: updateCurrentConsumerAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerAccountUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 일반 사용자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/NicknameChangeConflict"
+  /api/v1/consumers/me/contact:
+    put:
+      tags: [Account]
+      summary: 일반 사용자 최초 연락처 등록
+      description: 기존 연락처가 없는 계정이 1차 MVP 신뢰 연락처를 최초 등록한다.
+      operationId: registerCurrentConsumerContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerContactRegistrationRequest"
+      responses:
+        "200":
+          description: 등록된 일반 사용자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumerAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ContactRegistrationConflict"
+  /api/v1/store-operators/me/contact:
+    put:
+      tags: [Account]
+      summary: 매장 운영자 최초 연락처 등록
+      description: 기존 연락처가 없는 매장 운영자 계정이 1차 MVP 신뢰 연락처를 최초 등록한다. 매장 운영자 연락처는 예약 알림용 opaque reference를 생성하지 않는다.
+      operationId: registerCurrentStoreOperatorContact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorContactRegistrationRequest"
+      responses:
+        "200":
+          description: 등록된 매장 운영자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreOperatorAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ContactRegistrationConflict"
+  /api/v1/store-operators/me:
+    get:
+      tags: [Account]
+      summary: 매장 운영자 본인 정보 조회
+      operationId: getCurrentStoreOperatorAccount
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 매장 운영자 본인 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreOperatorAccountSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+    patch:
+      tags: [Account]
+      summary: 매장 운영자 표시 이름 수정
+      operationId: updateCurrentStoreOperatorAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorAccountUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 매장 운영자 정보
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreOperatorAccountSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Conflict"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+    consumerRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_CONSUMER_REFRESH
+      description: Path=/api/v1/consumers/auth인 HttpOnly Refresh JWT 쿠키
+    storeOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_STORE_OPERATOR_REFRESH
+      description: Path=/api/v1/store-operators/auth인 HttpOnly Refresh JWT 쿠키
+  parameters:
+    CsrfToken:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+      description: 현재 계정 shell의 namespace별 CSRF 쿠키 값
+  schemas:
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+    Password:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 64
+      description: NFC 정규화 뒤 8~64 Unicode code point이며 대문자·소문자·숫자·특수문자 중 3종 이상을 포함해야 한다. 이모지와 이모지 조합에 사용되는 제어 문자는 허용하지 않는다.
+    MvpPhoneNumber:
+      type: string
+      minLength: 11
+      maxLength: 11
+      pattern: '^010[0-9]{8}$'
+      description: 공백·하이픈을 제거한 정규화된 010 시작 11자리 숫자. 1차 MVP 신뢰 연락처이며 실제 소유 인증을 의미하지 않는다.
+      example: '01012345678'
+    MvpPhoneNumberInput:
+      anyOf:
+        - $ref: "#/components/schemas/MvpPhoneNumber"
+        - type: string
+          pattern: '^ *0 *1 *0(?:[ -]*[0-9]){8} *$'
+      description: 입력 원문. Auth가 공백과 하이픈을 제거한 뒤 MvpPhoneNumber 형식으로 정규화하고 검증한다.
+      examples:
+        - '010-1234-5678'
+        - '010 1234 5678'
+    MaskedPhoneNumber:
+      type: [string, "null"]
+      pattern: '^010-\*{4}-[0-9]{4}$'
+      description: 응답 전용 마스킹 연락처. 기존 연락처 미등록 계정은 null이다.
+      example: '010-****-5678'
+    EmptyJsonRequest:
+      type: object
+      additionalProperties: false
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/Password"
+    ConsumerSignUpRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+        - passwordConfirm
+        - phoneNumber
+        - ageConfirmed
+        - nickname
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/Password"
+        passwordConfirm:
+          $ref: "#/components/schemas/Password"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+        ageConfirmed:
+          type: boolean
+          const: true
+          description: 실제 연령 인증이 아닌 만 14세 이상 자기 확인값
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 20
+          pattern: "^[가-힣A-Za-z0-9 _-]+$"
+    StoreOperatorSignUpRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+        - passwordConfirm
+        - phoneNumber
+        - displayName
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/Password"
+        passwordConfirm:
+          $ref: "#/components/schemas/Password"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+    ConsumerAccountUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [nickname]
+      properties:
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 20
+          pattern: "^[가-힣A-Za-z0-9 _-]+$"
+    ConsumerContactRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+      description: 최초 등록 후 다른 번호로 변경할 수 없는 1차 MVP 신뢰 연락처 등록 요청
+    StoreOperatorContactRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+      description: 최초 등록 후 다른 번호로 변경할 수 없는 매장 운영자의 1차 MVP 신뢰 연락처 등록 요청
+    StoreOperatorAccountUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+    AccountCreatedData:
+      type: object
+      additionalProperties: false
+      required: [accountId, accountType, status]
+      properties:
+        accountId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        accountType:
+          type: string
+          enum: [CONSUMER, STORE_OPERATOR]
+        status:
+          type: string
+          const: ACTIVE
+    TokenData:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+          description: shell 메모리에만 보관할 Access JWT
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          const: 3600
+          description: Access JWT 수명(초)
+    CsrfTokenData:
+      type: object
+      additionalProperties: false
+      required: [token, headerName]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        headerName:
+          type: string
+          const: X-CSRF-TOKEN
+    ConsumerAccount:
+      type: object
+      additionalProperties: false
+      required: [accountId, email, phoneNumber, nickname, status]
+      properties:
+        accountId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        email:
+          $ref: "#/components/schemas/Email"
+        phoneNumber:
+          $ref: "#/components/schemas/MaskedPhoneNumber"
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 20
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+    StoreOperatorAccount:
+      type: object
+      additionalProperties: false
+      required: [accountId, email, phoneNumber, displayName, status]
+      properties:
+        accountId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        email:
+          $ref: "#/components/schemas/Email"
+        phoneNumber:
+          $ref: "#/components/schemas/MaskedPhoneNumber"
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+    AccountCreatedSuccessResponse:
+      $ref: "#/components/schemas/SuccessAccountCreated"
+    SuccessAccountCreated:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/AccountCreatedData"
+    TokenSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/TokenData"
+    CsrfTokenSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/CsrfTokenData"
+    NoDataSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/NoData"
+    ConsumerAccountSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ConsumerAccount"
+    StoreOperatorAccountSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/StoreOperatorAccount"
+  responses:
+    InvalidCredentials:
+      description: 이메일 또는 비밀번호 불일치
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_005
+            message: 이메일 또는 비밀번호가 올바르지 않습니다.
+    InvalidRefreshToken:
+      description: Refresh Token 쿠키가 없거나 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_008
+            message: 유효한 Refresh Token이 필요합니다.
+    AccountRestricted:
+      description: 현재 계정 상태가 이용을 허용하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로 이용할 수 없습니다.
+    OriginRejected:
+      description: Origin 또는 Referer 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_010
+            message: 허용되지 않은 요청 출처입니다.
+    CsrfRejected:
+      description: CSRF 토큰 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_009
+            message: CSRF 토큰이 올바르지 않습니다.
+    AccountConflict:
+      description: 같은 계정 유형의 이메일 또는 휴대전화 중복
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            DuplicateEmail:
+              summary: 같은 계정 유형에서 이미 사용 중인 이메일
+              value:
+                code: ACCOUNT_001
+                message: 이미 사용 중인 이메일입니다.
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 휴대전화
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
+    ContactRegistrationConflict:
+      description: 연락처 최초 등록 중복 또는 이미 등록한 연락처를 다른 번호로 변경하려는 요청
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            DuplicatePhoneNumber:
+              summary: 같은 계정 유형에서 이미 사용 중인 번호
+              value:
+                code: ACCOUNT_002
+                message: 이미 사용 중인 휴대전화입니다.
+            ContactAlreadyRegistered:
+              summary: 최초 등록 후 다른 번호로 변경하려는 요청
+              value:
+                code: ACCOUNT_007
+                message: 최초 등록한 연락처는 변경할 수 없습니다.
+    NicknameChangeConflict:
+      description: 닉네임 변경 가능 시각 전 재변경
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: ACCOUNT_005
+            message: 닉네임은 7일에 한 번 변경할 수 있습니다.
