@@ -1,7 +1,7 @@
-import type { MapStore } from './map.types'
+import type { MappableStore } from './map.types'
 
 export class StoreMapMarker {
-  private store: MapStore
+  private store: MappableStore
   private readonly map: KakaoMapInstance
   private readonly marker: KakaoMarkerInstance
   private readonly selectedOverlay: KakaoCustomOverlayInstance
@@ -10,12 +10,15 @@ export class StoreMapMarker {
   constructor(
     private readonly maps: KakaoMapsNamespace,
     map: KakaoMapInstance,
-    store: MapStore,
+    store: MappableStore,
     onSelect: (storeId: string) => void,
   ) {
     this.store = store
     this.map = map
-    const position = new maps.LatLng(store.latitude, store.longitude)
+    const position = new maps.LatLng(
+      store.coordinates.latitude,
+      store.coordinates.longitude,
+    )
     this.marker = new maps.Marker({
       map,
       position,
@@ -45,9 +48,12 @@ export class StoreMapMarker {
     maps.event.addListener(this.marker, 'click', this.clickListener)
   }
 
-  update(store: MapStore): void {
+  update(store: MappableStore): void {
     this.store = store
-    const position = new this.maps.LatLng(store.latitude, store.longitude)
+    const position = new this.maps.LatLng(
+      store.coordinates.latitude,
+      store.coordinates.longitude,
+    )
     this.marker.setPosition(position)
     this.selectedOverlay.setPosition(position)
     this.marker.setTitle(store.name)

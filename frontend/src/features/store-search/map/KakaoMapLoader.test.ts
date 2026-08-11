@@ -107,6 +107,39 @@ describe('KakaoMapLoader', () => {
     expect(loader.load('javascript-key')).not.toBe(load)
   })
 
+  it('ignores a stale event from a timed-out script while a retry is loading', async () => {
+    vi.useFakeTimers()
+    const loader = new KakaoMapLoader()
+    const first = loader.load('javascript-key')
+    const firstScript = document.head.querySelector<HTMLScriptElement>(
+      'script[data-miriyum-kakao-map]',
+    )
+    const firstRejection = expect(first).rejects.toThrow(
+      'Kakao 지도 SDK 로딩 시간이 초과되었습니다.',
+    )
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    await firstRejection
+
+    const retry = loader.load('javascript-key')
+    const retryScript = document.head.querySelector<HTMLScriptElement>(
+      'script[data-miriyum-kakao-map]',
+    )
+    firstScript?.dispatchEvent(new Event('error'))
+
+    expect(loader.load('javascript-key')).toBe(retry)
+    expect(retryScript).not.toBe(firstScript)
+    expect(
+      document.head.querySelectorAll('script[data-miriyum-kakao-map]'),
+    ).toHaveLength(1)
+
+    const maps = { load: vi.fn((callback: () => void) => callback()) }
+    window.kakao = { maps: maps as unknown as KakaoMapsNamespace }
+    retryScript?.dispatchEvent(new Event('load'))
+
+    await expect(retry).resolves.toBe(maps)
+  })
+
   it('times out and retries when the SDK exists but maps.load stalls', async () => {
     vi.useFakeTimers()
     const maps = { load: vi.fn<(_callback: () => void) => void>() }
