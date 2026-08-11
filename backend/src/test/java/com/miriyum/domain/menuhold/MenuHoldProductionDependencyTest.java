@@ -19,12 +19,12 @@ class MenuHoldProductionDependencyTest {
     private static final List<String> FORBIDDEN_IMPORTS = List.of(
             "com.miriyum.domain.reservation.entity",
             "com.miriyum.domain.reservation.repository",
-            "com.miriyum.domain.store.core.entity",
-            "com.miriyum.domain.store.core.repository",
-            "com.miriyum.domain.store.menu.entity",
-            "com.miriyum.domain.store.menu.repository",
-            "com.miriyum.domain.store.schedule.entity",
-            "com.miriyum.domain.store.schedule.repository",
+            "com.miriyum.domain.store.entity",
+            "com.miriyum.domain.store.repository",
+            "com.miriyum.domain.menu.entity",
+            "com.miriyum.domain.menu.repository",
+            "com.miriyum.domain.schedule.entity",
+            "com.miriyum.domain.schedule.repository",
             "com.miriyum.domain.pickup.entity",
             "com.miriyum.domain.pickup.repository");
     private static final List<String> FORBIDDEN_PUBLIC_TYPE_PACKAGES = List.of(

@@ -24,26 +24,27 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepos
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.entity.Menu;
-import com.miriyum.domain.store.menu.model.AllergenDisclosure;
-import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
-import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
-import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
-import com.miriyum.domain.store.menu.model.MenuContent;
-import com.miriyum.domain.store.menu.repository.MenuRepository;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.entity.Menu;
+import com.miriyum.domain.menu.model.AllergenDisclosure;
+import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -78,6 +79,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -118,7 +120,7 @@ class MenuHoldRuntimeIT {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TransactionTemplate transactions;
     @Autowired EntityManagerFactory entityManagerFactory;
-    @MockitoSpyBean StoreService storeService;
+    @MockitoBean MenuTransactionService menuTransactionService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
     @MockitoSpyBean MenuInventoryService inventoryService;
 
@@ -145,8 +147,9 @@ class MenuHoldRuntimeIT {
         });
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
-                .given(storeService).requireMenuTransactionEligibility(storeId, menuId);
-        willAnswer(invocation -> invocation.<List<com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest>>getArgument(0)
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, menuId);
+        willAnswer(invocation -> invocation.<List<com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest>>getArgument(0)
                 .stream().map(request -> new StoreServiceIntervalResult(
                         request.storeId(), request.startAt(), request.serviceEndAt(),
                         StoreServiceIntervalStatus.ACCEPTING)).toList())
@@ -217,7 +220,8 @@ class MenuHoldRuntimeIT {
                         Instant.parse("2026-08-01T00:00:00Z"))).getId());
         willReturn(new MenuTransactionEligibility(
                 storeId, secondMenuId, 1, "Cafe Latte", 6_500, true, false))
-                .given(storeService).requireMenuTransactionEligibility(storeId, secondMenuId);
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, secondMenuId);
         transactions.executeWithoutResult(status -> {
             bucketRepository.saveAndFlush(bucket(menuId, 2));
             bucketRepository.saveAndFlush(bucket(secondMenuId, 1));
@@ -880,7 +884,8 @@ class MenuHoldRuntimeIT {
         return Reservation.confirm(consumerId, storeId, "store", timeSnapshot,
                 PartyComposition.of(2, 0, 0),
                 ReservationContactSnapshot.contactable("consumer:" + consumerId),
-                1L, Instant.parse("2026-08-01T00:00:00Z"));
+                1L, new ReservationCancellationPolicyVersion(1L),
+                Instant.parse("2026-08-01T00:00:00Z"));
     }
 
     private MenuHoldCreateCommand command(long reservationId, int quantity, String operationId) {

@@ -21,22 +21,31 @@ com.miriyum
 │  └─ security
 └─ domain
    ├─ auth
+   ├─ consumer
+   ├─ storeoperator
    ├─ store
+   ├─ schedule
+   ├─ menu
+   ├─ search
    ├─ reservation
    ├─ menuhold
    └─ pickup
 ```
 
-각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto/request`, `dto/response`, `exception`을 만든다. `booking`, `account`, `application` wrapper package를 만들지 않는다. 초기 구현에서 Command/Query/Application Service, Facade, Manager, `ServiceImpl`을 분리하거나 모든 Service에 형식적인 interface를 만들지 않는다.
+각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto`, `exception`을 만든다. HTTP 호출자 구분이 필요한 Controller와 HTTP DTO만 `publicapi`, `consumer`, `storeoperator` 하위로 나눈다. `publicapi`는 별도 제휴 API가 아니라 인증 principal을 요구하지 않는 공개 HTTP 조회 경계다. 사용자 유형 자체가 도메인인 `consumer`, `storeoperator`는 Controller와 HTTP DTO를 `auth`, `account` 목적별로 나눈다. Service·Repository·Entity를 호출자별로 복제하지 않는다.
+
+`booking`, `account`, `application` wrapper package를 만들지 않는다. 초기 구현에서 Command/Query/Application Service, Manager, `ServiceImpl`을 분리하거나 모든 Service에 형식적인 interface를 만들지 않는다. 복잡도가 실제로 확인되어 Issue와 테스트로 근거가 남은 경우에만 목적이 명확한 Service나 Facade를 추가한다.
 
 호출 방향은 `Controller → Service → Repository`다. Controller가 Repository를 직접 호출하지 않고 business logic을 `global` 또는 범용 `util`로 옮기지 않는다.
 
 ## Service와 교차 도메인 계약
 
-1차 MVP는 도메인별 주 Service 하나로 시작한다.
+1차 MVP는 도메인별 주 Service에서 시작하고, 동시성·조회 projection·공개 교차 도메인 계약처럼 독립 책임이 검증된 경우에만 목적별 Service를 둔다.
 
 - `AuthService`
 - `StoreService`
+- `StoreScheduleQueryService`
+- `MenuTransactionService`
 - `ReservationService`
 - `MenuHoldService`
 - `PickupService`
@@ -61,6 +70,7 @@ API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한
 - 범위가 정해진 기능이 이를 정의한 후에는 Spring Security가 서버 인증 및 인가 경계를 소유한다.
 - 사용자, 역할, 인증 흐름, 공개 경로 또는 secret 처리를 임의로 만들지 않는다.
 - controller는 HTTP 경계에, service는 유스케이스 및 트랜잭션 경계에, repository는 영속성 경계에 둔다.
+- `controller.publicapi`는 인증 principal을 필수로 받지 않고, `controller.consumer`와 `controller.storeoperator`는 예상한 token namespace를 검증한다.
 
 Controller와 Service는 생성자 주입을 사용하며 필요한 경우 `@RequiredArgsConstructor`를 사용한다. request/response DTO는 `record`를 우선한다. 공개 JSON ID는 문자열로 표현한다. `userId`, `role`, `accountType`을 요청값으로 신뢰하지 않고 인증 principal을 사용한다.
 

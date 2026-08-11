@@ -2,11 +2,16 @@ package com.miriyum.domain.consumer.service;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import com.miriyum.domain.consumer.dto.request.ConsumerAccountUpdateRequest;
-import com.miriyum.domain.consumer.dto.response.ConsumerAccountResponse;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
+import com.miriyum.domain.consumer.dto.account.ConsumerAccountUpdateRequest;
+import com.miriyum.domain.consumer.dto.account.ConsumerContactRegistrationRequest;
+import com.miriyum.domain.consumer.dto.account.ConsumerAccountResponse;
+import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -14,7 +19,10 @@ import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -38,10 +46,68 @@ public class ConsumerAccountService {
     private final NicknamePolicy nicknamePolicy;
     private final Clock clock;
     private final IdempotencyExecutor idempotencyExecutor;
+    private final PhoneNumberPolicy phoneNumberPolicy;
+    private final ReservationContactReferenceGenerator contactReferenceGenerator;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public ConsumerAccountResponse getMe(Long accountId) {
         return ConsumerAccountResponse.from(getActiveAccount(accountId));
+    }
+
+    /**
+     * Controller가 업무 입력을 처리하기 전에 C-013 계정 상태 경계를 확인한다.
+     */
+    @Transactional(readOnly = true)
+    public void requireActiveAccount(Long accountId) {
+        getActiveAccount(accountId);
+    }
+
+    /**
+     * 기존 계정의 최초 연락처를 등록한다. 연락처 원문은 Reservation으로 전달하지 않고,
+     * 소비자 계정에 저장한 불투명 참조만 이후 예약 생성 경계에서 제공한다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public IdempotentOutcome registerContact(
+            IdempotencyCommand command,
+            Long accountId,
+            ConsumerContactRegistrationRequest request
+    ) {
+        getActiveAccount(accountId);
+        return idempotencyExecutor.execute(command, () -> {
+            ConsumerAccount account = getActiveAccountForUpdate(accountId);
+            String normalizedPhone = phoneNumberPolicy.normalize(request.phoneNumber());
+            if (account.getPhone() == null && consumerAccountRepository.existsByPhone(normalizedPhone)) {
+                throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+            }
+            try {
+                registerContactIfAllowed(account, normalizedPhone);
+                consumerAccountRepository.saveAndFlush(account);
+            } catch (DataIntegrityViolationException exception) {
+                throw mapDuplicateConstraint(exception);
+            }
+            return new BusinessResult<>(HttpStatus.OK.value(), SUCCESS_RESPONSE_CODE,
+                    RESOURCE_TYPE, String.valueOf(account.getId()),
+                    ConsumerAccountResponse.from(account));
+        });
+    }
+
+    /**
+     * 예약 생성 시 Auth가 제공하는 연락처 결과다.
+     */
+    @Transactional(readOnly = true)
+    public ReservationContactResult getReservationContact(Long accountId) {
+        ConsumerAccount account = getActiveAccount(accountId);
+        if (account.getPhone() == null) {
+            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
+        }
+        String reference = account.getReservationContactReference();
+        if (reference == null || reference.isBlank()) {
+            throw new ServiceException(AccountErrorCode.RESERVATION_CONTACT_REQUIRED);
+        }
+        return new ReservationContactResult(reference, true);
     }
 
     /**
@@ -81,6 +147,29 @@ public class ConsumerAccountService {
         }
     }
 
+    private void registerContactIfAllowed(ConsumerAccount account, String normalizedPhone) {
+        if (account.getPhone() != null) {
+            String existingNormalizedPhone = phoneNumberPolicy.normalize(account.getPhone());
+            if (!existingNormalizedPhone.equals(normalizedPhone)) {
+                throw new ServiceException(AccountErrorCode.CONTACT_CHANGE_NOT_ALLOWED);
+            }
+            if (!account.getPhone().equals(normalizedPhone)) {
+                account.registerContact(normalizedPhone, account.getReservationContactReference());
+            }
+        }
+        if (account.getPhone() == null || account.getReservationContactReference() == null) {
+            account.registerContact(normalizedPhone, contactReferenceGenerator.generate());
+        }
+    }
+
+    private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
+        String message = exception.getMostSpecificCause().getMessage();
+        if (message != null && message.contains("uk_consumer_accounts_phone")) {
+            return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
+        }
+        return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+    }
+
     /**
      * JWT subject에 해당하는 현재 계정을 확인한다.
      *
@@ -92,6 +181,16 @@ public class ConsumerAccountService {
      */
     private ConsumerAccount getActiveAccount(Long accountId) {
         ConsumerAccount account = consumerAccountRepository.findById(accountId)
+                .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
+        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
+        }
+        return account;
+    }
+
+    private ConsumerAccount getActiveAccountForUpdate(Long accountId) {
+        entityManager.clear();
+        ConsumerAccount account = consumerAccountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);

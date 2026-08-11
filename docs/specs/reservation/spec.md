@@ -1,7 +1,7 @@
 # 기능 명세: 일반 예약
 
 > 문서 상태: 4단계 승인
-> 적용 단계: 1차 MVP
+> 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통)
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
 > 관련 정책 ID: RES-001~RES-015의 1차 범위, S-001~S-003, E-003, E-005, C-001~C-013
@@ -24,7 +24,7 @@
 
 - 예약 변경·시간 이동·인원 변경
 - 매장 승인·거절 대기
-- 결제·예약금·환불·결제 상태
+- 결제·예약금·환불·결제 상태와 금전 취소 시간 구간·cutoff
 - 체크인·노쇼
 - 대리 예약·예약 양도·단체 별도 승인
 - 웨이팅 전환·자동 승계
@@ -55,7 +55,10 @@
 - `endTime`, `serviceEndAt`, `occupancyEndAt`은 요청하지 않는다. 해당 매장의 현재 Reservation 시간 정책으로 서버가 계산한다.
 - 전체 동행 인원은 `adultCount + childCount + infantCount`이며 영유아도 수용량에 포함한다.
 - 합계는 1명 이상이어야 하고 현재 매장 정책의 최소·최대 일행 인원 안에 있어야 한다.
-- 연락처는 인증된 일반 사용자 계정의 검증된 연락처를 거래 스냅샷으로 사용한다. 요청 본문으로 다른 사람의 연락처·소유자 ID를 받지 않는다.
+- 연락처는 Auth가 제공하는 일반 사용자의 `MVP 신뢰 연락처`(실제 소유 인증은 생략했지만 1차 MVP에서 사용할 수 있다고 간주한 연락처) 결과를 거래 스냅샷으로 사용한다. 요청 본문으로 다른 사람의 연락처·소유자 ID를 받지 않는다.
+- Reservation은 전화번호 원문을 받거나 해석하지 않고 opaque reference(내부 구조나 실제 전화번호를 알 수 없는 무작위 참조값)와 예약 생성 당시 연락 가능 상태만 기존 스냅샷 컬럼에 저장한다.
+- 1차 MVP에서 예약 생성이 성공하면 `contact_available_at_confirmation`은 항상 `true`이다. `ck_reservations_contact_available_at_confirmation` CHECK 제약이 이를 강제하며, 전화번호 또는 예약 참조가 준비되지 않으면 `false`를 저장하지 않고 `ACCOUNT_006`으로 예약 생성을 실패시킨다. 참조가 준비된 뒤 참조 저장소를 사용할 수 없는 실제 서버 장애만 `COMMON_012`로 구분한다.
+- 활성 계정에 등록된 전화번호 또는 예약 참조가 없으면 Auth의 `ACCOUNT_006`을 전달하고 예약을 생성하지 않는다. 참조가 준비된 뒤 내부 참조 저장소를 사용할 수 없는 서버 상태는 `COMMON_012`로 구분한다.
 - `menuSelections`는 선택 사항이다. 없거나 빈 배열이면 `MenuHold`를 만들지 않는다.
 - 같은 메뉴·제공 구간이 반복되면 요청 경계에서 수량을 합산하고 한 항목으로 정규화한다.
 
@@ -68,7 +71,7 @@
 - 시작 시각은 자정이 아니라 Store가 반환한 현재 예약 접수 구간의 `windowStartAt`을 기준으로 `slotInterval`에 정렬한다.
 - 계산·저장하는 시작 시각은 초와 나노초가 없는 분 단위여야 한다.
 - `serviceEndAt = startAt + serviceDuration`, `occupancyEndAt = serviceEndAt + turnoverDuration`으로 계산한다.
-- 고객 서비스 종료는 `serviceEndAt`, 수용량·중복 판정의 실제 점유 종료는 `occupancyEndAt`이다. 내부에서 모호한 `endTime`을 두 의미 중 하나로 사용하지 않는다.
+- 고객 서비스 종료와 사용자 중복 예약 판정은 `serviceEndAt`을 사용한다. 수용량의 실제 점유 종료는 `occupancyEndAt`이며, 중복 예약은 서비스 구간 `[startAt, serviceEndAt)`, 수용량은 점유 구간 `[startAt, occupancyEndAt)`를 사용한다. 내부에서 모호한 `endTime`을 두 의미 중 하나로 사용하지 않는다.
 - Store의 `windowEndAt`은 예약 **시작** 접수 상한이다. `serviceEndAt`이나 `occupancyEndAt`으로 사용하지 않는다.
 - 입력 매장 순서·개수·중복을 보존하고 accepting 매장의 시간 정책만 한 번에 조회한다. 같은 시작 시각도 매장별 정책에 따라 서로 다른 점유 종료를 계산한다.
 - 정책·시간대가 없거나 비활성이고, 슬롯이 맞지 않거나 현지 시각이 존재하지 않으며, 중복 현지 시각에 유효 offset이 없으면 해당 매장은 실패 폐쇄한다.
@@ -141,8 +144,11 @@
 
 - 일반 사용자는 자신의 `CONFIRMED` 예약을 취소할 수 있다.
 - 매장 운영자는 유효한 소속이 있는 매장의 `CONFIRMED` 예약을 사유와 함께 취소할 수 있다.
-- 취소 가능 여부는 서버 중앙 시각과 예약 당시 취소 정책 버전으로 판정한다.
-- 1차 MVP에는 결제가 없으므로 환불 비율·금액·PAY 참조를 응답하지 않는다.
+- 1·2차 MVP의 비금전 V1(양수 BIGINT `1`)은 서버 중앙에서 한 번 얻은 `requestedAt: Instant`와 예약에 저장된 `cancellationPolicyVersion=1`으로 판정한다. 클라이언트 시각·입력 version·현재 version 조회 또는 fallback을 사용하지 않는다.
+- 소유권 또는 매장 관리 권한과 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`는 `requestedAt`이 `startAt` 전·정각·후라는 이유만으로 추가 거절되지 않는다. V1에는 시간 구간·cutoff가 없다.
+- null·unknown `cancellationPolicyVersion`은 V1 또는 현재 version으로 fallback하지 않으며 허용 결과를 만들지 않는다. 기존 예약은 저장된 version 의미로 판정하고 근거 없는 V1 backfill이나 소급 재해석을 하지 않는다.
+- 1차 MVP에는 결제가 없고 V1은 비금전이므로 환불 비율·금액·시간 구간·cutoff·`PAY-*` 참조를 응답하거나 판정에 포함하지 않는다. 이 항목은 고도화에서 별도 정책 버전으로 확정한다.
+- #51은 권한·소유 확인, 상태 전이·자원 복구, 멱등·감사와 기존 공개 오류 매핑을 조정한다. 본 명세는 V1 판정 계약만 정하며 새 API·상태·외부 오류·결제 동작을 추가하지 않는다.
 - 예약 상태 `CANCELLED`, 모든 수용량 배정 해제, 연결 메뉴 홀드 `RELEASED`와 메뉴 수량 복구를 한 트랜잭션에서 확정한다.
 - 같은 멱등 키·지문의 재시도는 수량을 다시 복구하지 않고 기존 취소 결과를 반환한다.
 - `CANCELLED`, `FULFILLED`에서 새로운 취소 명령을 실행할 수 없다.
@@ -150,6 +156,7 @@
 
 ## 방문 완료
 
+- 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 CONFIRMED인 예약의 방문 완료는 허용한다. Reservation과 연결 MenuHold, reservation_fulfillment_audits 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback하며 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
 - 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이할 수 있다.
 - 연결된 `MenuHold`가 있으면 같은 트랜잭션에서 `FULFILLED`로 전이한다.
 - 방문 완료는 메뉴 수량을 복구하지 않는다.
@@ -165,7 +172,7 @@
 | `RESERVATION_003` | 409 | 모든 점유 구간의 인원·팀 수를 확보할 수 없음 |
 | `RESERVATION_004` | 409 | 같은 사용자·매장에 겹치는 활성 예약이 있음 |
 | `RESERVATION_005` | 409 | 현재 예약 상태에서 요청한 전이 불가 |
-| `RESERVATION_006` | 409 | 현재 시각·정책에서 취소 불가 |
+| `RESERVATION_006` | 409 | 저장된 취소 정책에서 취소 불가(공개 오류 매핑은 #51 소유이며 V1은 `startAt` 시간만으로 사용하지 않음) |
 | `RESERVATION_007` | 409 | 조회 뒤 정책·수용량 버전이 변경됨 |
 | `RESERVATION_008` | 409 | 수용량 설정이 시간대·현재 점유와 충돌 |
 | `RESERVATION_009` | 409 | 요청 인원이 매장 최소·최대 정책을 벗어남 |
@@ -188,6 +195,7 @@
 
 - 예약은 `BIGINT` PK와 외부 문자열 ID를 사용한다.
 - 수용량 버킷·배정 이력·정책 버전과 거래 스냅샷을 보존한다.
+- 신규 예약은 server-side selector가 반환한 known `cancellationPolicyVersion`을 시간·수용량 정책 버전과 분리해 명시적으로 저장한다. 기존 행의 null·unknown version을 근거 없이 V1로 backfill하지 않으며, 해당 행은 V1으로 fallback하지 않는다.
 - 신규 예약의 `startAt`, `serviceEndAt`, `occupancyEndAt`은 실제 날짜를 포함한 `Instant`로 저장하고 계산 당시 IANA 시간대·offset·duration을 함께 보존한다.
 - 시간 정책 버전에는 게시 사유를 보존하고, due worker 조회 인덱스와 append-only lifecycle 감사 원장을 둔다.
 - V15의 `serviceDate + startTime + endTime` 행은 offset을 추측해 소급 변환하지 않는다. 새 migration은 기존 값을 보존하고 Instant 스냅샷이 없는 과거 행을 신규 가용성 근거로 사용하지 않으며 고객 조회에는 `LEGACY_UNRESOLVED`를 명시한다.
@@ -208,6 +216,8 @@
 - 시간 계산에 성공한 후보만 `[startAt, serviceEndAt)`으로 Store batch 검증하며 turnover 구간을 보내지 않는다. Store의 `NOT_ACCEPTING`은 `UNAVAILABLE`이고 계약과 다른 batch 응답은 전체 실패 폐쇄된다.
 - 고객 응답에 `timeStatus`, `serviceEndAt`, `timeZoneId`가 있고 `occupancyEndAt` 또는 모호한 `endTime`이 없다. 과거 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 안전하게 구분된다.
 - 자정 넘김과 DST 누락·중복 시각이 날짜·offset 손실 없이 처리되거나 명시적으로 실패 폐쇄된다.
+- 1·2차 MVP의 V1에서 권한·소유 및 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`의 취소 결과는 `requestedAt`이 `startAt` 전·정각·후라는 시간만으로 달라지지 않는다.
+- V1 판정은 저장된 `cancellationPolicyVersion`과 서버 중앙에서 한 번 얻은 `requestedAt`을 사용하며 client timestamp·client version·current-version fallback이 없다. 금전·환불·시간 구간·cutoff·`PAY-*` 참조는 공개 응답과 판정에 없다.
 
 ## 추천안 결정 이력
 
@@ -218,8 +228,10 @@
 | 2026-08-03 | 실제 시각은 Instant와 IANA 시간대·offset 스냅샷으로 보존 | 자정 넘김과 DST 중복·누락 시각을 LocalTime 비교로 손실하지 않음 |
 | 2026-08-03 | Store `windowEndAt`은 시작 접수 상한으로만 소비 | PR #84의 window를 실제 서비스·점유 종료로 오해하는 결합 방지 |
 | 2026-07-28 | 생성 요청에서 endTime을 받지 않음 | 서버의 현재 슬롯·서비스 소요 정책과 다른 임의 구간 요청 차단 |
-| 2026-07-28 | 검증된 계정 연락처를 예약 스냅샷으로 사용 | 다른 소유자·연락처를 요청으로 주입하는 문제와 불필요한 개인정보 입력 축소 |
+| 2026-08-06 | 1차 MVP의 신뢰 연락처는 Auth의 무작위 참조와 연락 가능 상태만 예약 스냅샷으로 사용 | 실제 인증 완료로 오해하지 않으면서 다른 소유자·연락처 주입과 전화번호 원문 복제를 차단 |
+| 2026-07-28 | 검증된 계정 연락처를 예약 스냅샷으로 사용 | 2026-08-06 임시 신뢰 정책으로 인증 의미를 구체화하되 요청 본문 연락처 주입 금지와 스냅샷 원칙은 유지 |
 | 2026-07-28 | 선택 메뉴 홀드를 예약 생성에 포함 | 프론트엔드의 두 쓰기 호출로 원자성을 대신하는 구조 방지 |
 | 2026-07-28 | 취소·방문 완료를 명령 리소스로 분리 | 범용 status PATCH와 허용되지 않은 상태 전이 방지 |
 | 2026-07-28 | 날짜별 수용량 버킷 전체 게시 | 시간대 일부 병합 규칙 차이와 기존 예약 소급 수정 방지 |
 | 2026-07-28 | 1차 중간 선점은 생성 트랜잭션 내부로 제한 | 결제 없는 단계에 사용자용 10분 선점·만료 기술을 억지로 노출하지 않음 |
+| 2026-08-06 | 취소 정책 V1은 저장 버전과 서버 중앙 `requestedAt`으로 판정 | Issue #168; 권한·소유 및 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`에 `startAt` 시간 cutoff를 두지 않고, 금전·환불·시간 구간·`PAY-*` 연결은 고도화로 유예 |

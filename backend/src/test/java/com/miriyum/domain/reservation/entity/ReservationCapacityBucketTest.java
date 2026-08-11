@@ -2,7 +2,10 @@ package com.miriyum.domain.reservation.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import org.junit.jupiter.api.DisplayName;
@@ -84,6 +87,154 @@ class ReservationCapacityBucketTest {
 
         // then
         assertThat(available).isTrue();
+    }
+
+    @Test
+    @DisplayName("잠긴 버킷은 인원과 팀 한 건을 함께 점유한다")
+    void occupiesPeopleAndOneTeamTogether() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                4,
+                1,
+                1,
+                6,
+                true
+        );
+
+        // when
+        bucket.occupy(3);
+
+        // then
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(7);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("인원 또는 팀 수용량이 부족하면 버킷 점유를 전혀 변경하지 않고 RESERVATION_003을 반환한다")
+    void keepsOccupancyUnchangedWhenPeopleOrTeamCapacityIsInsufficient() {
+        // given
+        ReservationCapacityBucket peopleFull = capacityBucket(
+                5,
+                3,
+                4,
+                1,
+                1,
+                5,
+                true
+        );
+        ReservationCapacityBucket teamsFull = capacityBucket(
+                10,
+                2,
+                2,
+                2,
+                1,
+                6,
+                true
+        );
+
+        // when & then
+        assertThatThrownBy(() -> peopleFull.occupy(2))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        assertThat(peopleFull.getOccupiedPeople()).isEqualTo(4);
+        assertThat(peopleFull.getOccupiedTeams()).isEqualTo(1);
+
+        assertThatThrownBy(() -> teamsFull.occupy(2))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        assertThat(teamsFull.getOccupiedPeople()).isEqualTo(2);
+        assertThat(teamsFull.getOccupiedTeams()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("잠긴 버킷은 인원과 팀 한 건을 함께 정확히 복구한다")
+    void restoresPeopleAndExactlyOneTeamTogether() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                5,
+                2,
+                1,
+                6,
+                true
+        );
+
+        // when
+        bucket.restore(3, 1);
+
+        // then
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(2);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("인원 복구가 점유 인원을 초과하면 두 점유량 모두 유지한다")
+    void rejectsPeopleUnderflowWithoutPartialMutation() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                2,
+                1,
+                1,
+                6,
+                true
+        );
+
+        // when & then
+        assertThatThrownBy(() -> bucket.restore(3, 1))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(2);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("양수가 아닌 인원 또는 한 건이 아닌 팀 복구를 거부하고 점유량을 유지한다")
+    void rejectsInvalidRestoreArgumentsWithoutMutation() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                5,
+                2,
+                1,
+                6,
+                true
+        );
+
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() -> bucket.restore(0, 1));
+        assertThatIllegalArgumentException().isThrownBy(() -> bucket.restore(-1, 1));
+        assertThatIllegalArgumentException().isThrownBy(() -> bucket.restore(1, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> bucket.restore(1, 2));
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+        assertThat(bucket.getOccupiedTeams()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("팀 점유가 없으면 복구를 거부하고 인원 점유도 유지한다")
+    void rejectsTeamUnderflowWithoutPartialMutation() {
+        // given
+        ReservationCapacityBucket bucket = capacityBucket(
+                10,
+                3,
+                5,
+                0,
+                1,
+                6,
+                true
+        );
+
+        // when & then
+        assertThatThrownBy(() -> bucket.restore(3, 1))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+        assertThat(bucket.getOccupiedTeams()).isZero();
     }
 
     @Test
