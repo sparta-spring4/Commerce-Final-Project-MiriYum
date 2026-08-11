@@ -17,7 +17,8 @@
 ### 1. 대표자 회원가입
 - route: `/partner/signup`
 - API: `POST /api/v1/store-operator-auth/accounts`
-- 이메일·비밀번호·표시 이름과 OpenAPI 확인 참조를 사용한다.
+- 요청은 `email`, `password`, `passwordConfirm`, `phoneNumber`, `displayName`만 보낸다. 스키마가 `additionalProperties: false`이므로 이메일·본인확인 참조 등 임의 필드를 추가하지 않는다.
+- `400 COMMON_001` 입력 오류, `409 ACCOUNT_001/002` 이메일·휴대전화 중복, `429 COMMON_010` 요청 제한을 처리한다.
 - 계정 생성과 매장 등록을 한 요청으로 합치지 않는다. 성공 후 로그인.
 
 ### 2. 대표자 로그인
@@ -28,13 +29,14 @@
 - 로그아웃 `DELETE /api/v1/store-operator-auth/sessions/current`
 - 실패는 `AUTH_005`, 제한은 `COMMON_010`, 만료 재발급 실패 시 사유를 보존해 로그인 이동
 - 보호 화면에서 넘어온 `returnTo`에 알려진 `storeId`가 있으면 그 화면으로 복귀하고, 매장 등록 성공 뒤에는 응답의 `storeId`로 이동한다.
-- 현재 운영 매장 목록·현재 운영자 매장 조회 API가 없으므로 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하거나 공개 검색 결과로 소유 매장을 찾지 않는다. 해당 조회 계약이 승인되기 전에는 자동 분기를 활성화하지 않는다.
+- 현재 없는 계약은 로그인한 운영자 소유 매장 목록 `GET /api/v1/store-operator/stores`다. 따라서 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하거나 공개 검색 결과로 소유 매장을 찾지 않는다. 반면 알려진 `storeId`가 있으면 `GET /api/v1/store-operator/stores/{storeId}` 단건 조회를 사용할 수 있다.
 
 ### 3. 매장 등록
 - route: `/partner/stores/new`
 - catalog: `GET /api/v1/store-categories`, `/api/v1/store-tags`
 - 생성: `POST /api/v1/store-operator/stores` + Idempotency-Key
-- 요청: 사업자등록번호, `CAFE/BAKERY/OTHER`, 이름·설명·지역·주소·category code·tag code·운영 모드
+- 요청: `businessRegistrationNumber`, `businessType(CAFE/BAKERY/OTHER)`, `name`, `description`, `region`, `address`, IANA `timeZoneId`, `storeCategoryCode`, `tagCodes`, `modes`, `applicantSelfAttested=true`, `requiredTermsAgreed=true`
+- 주소나 브라우저 기본값으로 시간대를 추측하지 않고 사용자가 확인한 IANA 식별자를 제출한다. 자기확약과 필수 입점 약관 동의가 모두 확인되기 전에는 생성 요청을 보내지 않는다.
 - 운영자 ID·승인 필드·파일·이미지를 보내지 않는다.
 - 1차 성공 응답은 즉시 `verificationStatus=APPROVED`; 승인 대기 route를 만들지 않는다.
 - `STORE_002` 사업자등록번호 중복과 `STORE_004` catalog 오류를 필드에 연결한다. 등록 업종은 픽업 판정에 사용하지 않고 모든 업종에서 `pickupEnabled`를 허용한다.
@@ -67,6 +69,16 @@
 - 두 계약 모두 현재 운영자용 GET이 없으므로 기존 설정 편집·재접속 복구는 조회 계약 승인 전까지 활성화하지 않는다.
 - 수용량 필드를 이 요청에 섞지 않는다.
 
+### 7-1. 정기·임시 휴점
+
+- route: `/partner/stores/:storeId/closures`
+- 정기 휴무 전체 초안: `PUT /api/v1/store-operator/stores/{storeId}/regular-closures`에 `weeklyDays`, `dates`와 Idempotency-Key를 보낸다.
+- 정기 휴무 게시: `POST /api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication`에 `publicationMode`, 필수 `changeReason`, 예약 게시일 때 offset 포함 `effectiveAt`을 보낸다.
+- 정기 휴무 예약 게시 취소: `POST /api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication-cancellation`에 `changeReason`을 보낸다.
+- 임시 휴무 등록: `POST /api/v1/store-operator/stores/{storeId}/temporary-closures`에 offset 포함 `startAt`, `endAt`, `reason(MAINTENANCE/STAFFING/PRIVATE_EVENT/OTHER)`, 선택 `publicMessage`를 보낸다.
+- 임시 휴무 종료 변경: `PUT /api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/end-at`에 `endAt`, `changeReason`을 보낸다. 취소는 `POST /api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/cancellation`에 `changeReason`을 보낸다.
+- 모든 쓰기에 Idempotency-Key를 사용하고 `STORE_003` 권한 없음, `STORE_001` 매장 없음, `409` 게시·기간 충돌을 처리한다. 현재 운영자용 휴점 목록 GET은 없으므로 서버 응답으로 받은 버전·식별자를 보존하되 임의 조회 API를 만들지 않는다.
+
 ### 8. 메뉴 목록·등록·수정
 - routes: `/partner/stores/:storeId/menus`, `/menus/new`, `/menus/:menuId/edit`
 - `GET/POST /api/v1/store-operator/stores/{storeId}/menus`
@@ -74,6 +86,7 @@
 - 게시·예약 게시 취소·운영 종료는 각각 `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication`, `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication-cancellation`, `POST /api/v1/store-operator/stores/{storeId}/menus/{menuId}/retirement`
 - 노출·판매 상태는 각각 `PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}/visibility`, `PATCH /api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status`
 - menu category catalog는 `/api/v1/menu-categories`
+- 내용 초안 요청에는 기본정보와 함께 `allergenInformationStatus`, `allergenDisclosures`, `originInformationStatus`, `originDisclosures`, `alcoholic`을 모두 보낸다. 알레르기·원산지·주류 여부를 운영자에게 명시적으로 입력받으며, 빈 배열이나 `NOT_REGISTERED`를 안전·해당 없음으로 추론하지 않는다.
 - 버전 `DRAFT/SCHEDULED/PUBLISHED/RETIRED`, 노출 `VISIBLE/HIDDEN`, 판매 `SELLING/PAUSED`를 독립 필드로 유지
 - `AVAILABLE/SOLD_OUT`은 이 폼에 저장하지 않는다.
 
@@ -89,7 +102,8 @@
 - 목록 `GET /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`
 - 생성 `POST /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`
 - 수정 `PATCH /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}`
-- 전체 totalSupply·ONLINE_HOLD·ONSITE·SHARED·availabilityStatus를 함께 제출
+- 생성은 `menuId`, `serviceDate`, `startTime`, `endDate`, `endTime`, `totalSupply`, `pools.onlineHold`, `pools.onsite`, `pools.shared`, `sharedOnlineAllowed`, `availabilityStatus`를 모두 제출한다.
+- 수정은 제공 구간 식별자를 경로에서 유지하고 `totalSupply`, 세 `pools` 값, `sharedOnlineAllowed`, `availabilityStatus`를 모두 제출한다. `sharedOnlineAllowed`를 공유 수량 존재 여부로 추론하지 않는다.
 - `MENU_HOLD_004` 합계, `_005` 사용량 이하 축소, `_006` 전이 오류
 - 성공 후 해당 버킷·공개 가용성·픽업 가용성 query 무효화
 

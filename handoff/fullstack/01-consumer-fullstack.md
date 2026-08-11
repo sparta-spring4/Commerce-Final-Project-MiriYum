@@ -28,9 +28,9 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 
 - 권장 라우트: `/signup`
 - API: `POST /api/v1/consumer-auth/accounts`
-- 요청: 이메일·비밀번호·닉네임과 실제 OpenAPI의 `emailVerificationReference`, `identityVerificationReference`
-- 검증: 이메일, 닉네임 2~20자, 비밀번호 확인, 확인 참조 존재
-- 오류: `ACCOUNT_001` 이메일 중복, `ACCOUNT_002` 휴대전화 중복, `ACCOUNT_003/004` 확인 실패
+- 요청은 `email`, `password`, `passwordConfirm`, `phoneNumber`, `ageConfirmed=true`, `nickname`만 보낸다. 스키마가 `additionalProperties: false`이므로 확인 참조 등 임의 필드를 추가하지 않는다.
+- 검증: 이메일 형식, 비밀번호와 확인 일치, 휴대전화 형식, 만 14세 이상 자기확인, 닉네임 2~20자
+- 오류: `400 COMMON_001` 입력 오류, `409 ACCOUNT_001` 이메일 중복, `409 ACCOUNT_002` 휴대전화 중복, `429 COMMON_010` 요청 제한(`Retry-After` 적용)
 - 성공: 로그인으로 이동하며 자동 로그인하지 않는다.
 
 ### 2. 로그인·세션 복구
@@ -82,11 +82,13 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 - 생성: `POST /api/v1/reservations`; endTime·연락처·사용자 ID를 보내지 않는다.
 - 프론트가 예약 생성 후 메뉴 홀드 쓰기를 별도로 호출하지 않는다.
 - 성공은 `CONFIRMED`만 허용하고 상세 `GET /api/v1/reservations/{reservationId}`로 이동
+- 생성 `409`의 `RESERVATION_002/003/004/007/009`는 시간·수용량·중복·정책·인원 재선택으로, `MENU_HOLD_001/002`는 메뉴 재선택 또는 메뉴 없이 진행으로 복구한다.
+- `409 ACCOUNT_006`은 예약 draft와 `returnTo`를 보존한 채 마이페이지의 최초 연락처 등록으로 이동한다. `PUT /api/v1/consumer-accounts/me/contact`에 `phoneNumber`와 별도 Idempotency-Key를 보내 성공하면 원래 예약 확인 화면으로 돌아와 같은 예약 의도의 안정적인 Idempotency-Key로 생성 요청을 다시 제출한다.
 
 ### 8. 예약 상세·취소
 
 - 취소: `POST /api/v1/reservations/{reservationId}/cancellations`
-- 오류: `RESERVATION_002` 시간 불가, `_003` 수용량, `_004` 중복, `_006` 취소 불가, `_007` 버전 변경, `_009` 인원; `MENU_HOLD_001/002`는 메뉴 재선택 또는 메뉴 없이 진행
+- 취소 `409`는 `RESERVATION_005` 현재 상태에서 전이 불가와 `RESERVATION_006` 취소 정책 불가로만 분기한다. 예약 생성 오류나 메뉴 재선택 UI를 취소 흐름에 표시하지 않는다.
 - 성공 후 매장 검색 가용성, 내 예약 목록, 해당 상세 캐시를 무효화한다.
 
 ### 9. 내 예약 목록
@@ -117,6 +119,7 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 - 라우트: `/mypage`, `/mypage/profile`
 - 조회·수정: `GET/PATCH /api/v1/consumer-accounts/me`
 - PATCH는 닉네임만 보내고 Idempotency-Key 사용
+- 조회 응답의 `phoneNumber`가 `null`인 기존 계정에는 최초 연락처 등록 폼을 표시한다. `PUT /api/v1/consumer-accounts/me/contact`는 `phoneNumber`만 보내며 Idempotency-Key를 사용하고, `ACCOUNT_002` 중복과 `ACCOUNT_007` 이미 등록됨을 처리한다. 등록된 번호를 바꾸는 폼으로 재사용하지 않는다.
 - `ACCOUNT_005`는 서버가 제공하는 다음 변경 가능 시각을 기준으로 안내
 - 이메일·휴대전화·비밀번호 변경 폼을 1차에 만들지 않는다.
 
