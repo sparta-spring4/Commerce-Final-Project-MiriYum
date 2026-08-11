@@ -22,6 +22,68 @@ class IdempotencyKeyTest {
     }
 
     @Test
+    @DisplayName("UUID version 1~5와 RFC variant 8, 9, a, b를 대소문자 구분 없이 허용한다")
+    void parse_rfcUuidVersionsAndVariants_caseInsensitive() {
+        // given
+        String[][] validValues = {
+                {"123E4567-E89B-12D3-8456-426614174000", "123e4567-e89b-12d3-8456-426614174000"},
+                {"123e4567-e89b-22d3-9456-426614174000", "123e4567-e89b-22d3-9456-426614174000"},
+                {"123e4567-e89b-32d3-a456-426614174000", "123e4567-e89b-32d3-a456-426614174000"},
+                {"123e4567-e89b-42d3-b456-426614174000", "123e4567-e89b-42d3-b456-426614174000"},
+                {"123e4567-e89b-52d3-B456-426614174000", "123e4567-e89b-52d3-b456-426614174000"}
+        };
+
+        // when & then
+        for (String[] valid : validValues) {
+            assertThat(IdempotencyKey.parse(valid[0]).value())
+                    .as("valid=%s", valid[0])
+                    .isEqualTo(valid[1]);
+        }
+    }
+
+    @Test
+    @DisplayName("잘못된 UUID version은 COMMON_004로 거절한다")
+    void parse_invalidUuidVersion_common004() {
+        // given
+        String[] invalidVersions = {
+                "123e4567-e89b-02d3-8456-426614174000",
+                "123e4567-e89b-62d3-8456-426614174000",
+                "123e4567-e89b-f2d3-8456-426614174000"
+        };
+
+        // when & then
+        for (String invalidVersion : invalidVersions) {
+            assertThatThrownBy(() -> IdempotencyKey.parse(invalidVersion))
+                    .as("invalidVersion=%s", invalidVersion)
+                    .asInstanceOf(InstanceOfAssertFactories.type(ServiceException.class))
+                    .extracting(ServiceException::getErrorCode)
+                    .isEqualTo(CommonErrorCode.INVALID_IDEMPOTENCY_KEY);
+        }
+    }
+
+    @Test
+    @DisplayName("잘못된 UUID variant는 COMMON_004로 거절한다")
+    void parse_invalidUuidVariant_common004() {
+        // given
+        String[] invalidVariants = {
+                "123e4567-e89b-12d3-0456-426614174000",
+                "123e4567-e89b-12d3-7456-426614174000",
+                "123e4567-e89b-12d3-c456-426614174000",
+                "123e4567-e89b-12d3-f456-426614174000",
+                "123e4567-e89b-12d3-F456-426614174000"
+        };
+
+        // when & then
+        for (String invalidVariant : invalidVariants) {
+            assertThatThrownBy(() -> IdempotencyKey.parse(invalidVariant))
+                    .as("invalidVariant=%s", invalidVariant)
+                    .asInstanceOf(InstanceOfAssertFactories.type(ServiceException.class))
+                    .extracting(ServiceException::getErrorCode)
+                    .isEqualTo(CommonErrorCode.INVALID_IDEMPOTENCY_KEY);
+        }
+    }
+
+    @Test
     @DisplayName("헤더 누락은 COMMON_003이다")
     void parse_missing_common003() {
         // when & then

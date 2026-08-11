@@ -43,6 +43,9 @@ public class ConsumerAccount extends BaseEntity {
     @Column(name = "phone", length = 512)
     private String phone;
 
+    @Column(name = "reservation_contact_reference", length = 512, unique = true)
+    private String reservationContactReference;
+
     @NonNull
     @Column(name = "name", nullable = false, length = 20)
     private String name;
@@ -58,6 +61,27 @@ public class ConsumerAccount extends BaseEntity {
         ConsumerAccount account = new ConsumerAccount(email, passwordHash, name);
         account.status = ConsumerAccountStatus.ACTIVE;
         return account;
+    }
+
+    public static ConsumerAccount createWithContact(
+            String email,
+            String passwordHash,
+            String name,
+            String phone,
+            String reservationContactReference
+    ) {
+        ConsumerAccount account = create(email, passwordHash, name);
+        account.registerContact(phone, reservationContactReference);
+        return account;
+    }
+
+    public void registerContact(String normalizedPhone, String reservationContactReference) {
+        this.phone = normalizedPhone;
+        this.reservationContactReference = reservationContactReference;
+    }
+
+    public String getReservationContactReference() {
+        return reservationContactReference;
     }
 
     public void changeName(String newName, LocalDateTime changedAt) {

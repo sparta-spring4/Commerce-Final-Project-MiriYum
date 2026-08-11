@@ -3,6 +3,8 @@ package com.miriyum.domain.consumer.service;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.AccountType;
+import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
@@ -12,13 +14,12 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
+import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -33,7 +34,8 @@ public class ConsumerAuthService {
     private final NicknamePolicy nicknamePolicy;
     private final PasswordPolicy passwordPolicy;
     private final LoginDelayGuard loginDelayGuard;
-    private final boolean identityVerificationDevStubEnabled;
+    private final PhoneNumberPolicy phoneNumberPolicy;
+    private final ReservationContactReferenceGenerator contactReferenceGenerator;
 
     public ConsumerAuthService(
             ConsumerAccountRepository consumerAccountRepository,
@@ -42,7 +44,8 @@ public class ConsumerAuthService {
             NicknamePolicy nicknamePolicy,
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
-            @Value("${miriyum.identity-verification.dev-stub-enabled}") boolean identityVerificationDevStubEnabled
+            PhoneNumberPolicy phoneNumberPolicy,
+            ReservationContactReferenceGenerator contactReferenceGenerator
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -50,25 +53,34 @@ public class ConsumerAuthService {
         this.nicknamePolicy = nicknamePolicy;
         this.passwordPolicy = passwordPolicy;
         this.loginDelayGuard = loginDelayGuard;
-        this.identityVerificationDevStubEnabled = identityVerificationDevStubEnabled;
+        this.phoneNumberPolicy = phoneNumberPolicy;
+        this.contactReferenceGenerator = contactReferenceGenerator;
     }
 
     @Transactional
     public AccountCreatedResponse signUp(ConsumerSignUpRequest request) {
-        if (!identityVerificationDevStubEnabled) {
-            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
-        }
         if (!request.password().equals(request.passwordConfirm())) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
+        if (!request.ageConfirmed()) {
+            throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        String normalizedPhone = phoneNumberPolicy.normalize(request.phoneNumber());
         if (consumerAccountRepository.existsByEmail(request.email())) {
             throw new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+        if (consumerAccountRepository.existsByPhone(normalizedPhone)) {
+            throw new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
         }
 
         String normalizedNickname = nicknamePolicy.normalize(request.nickname());
         String normalizedPassword = passwordPolicy.normalize(request.password());
-        ConsumerAccount account = ConsumerAccount.create(
-                request.email(), passwordEncoder.encode(normalizedPassword), normalizedNickname);
+        ConsumerAccount account = ConsumerAccount.createWithContact(
+                request.email(),
+                passwordEncoder.encode(normalizedPassword),
+                normalizedNickname,
+                normalizedPhone,
+                contactReferenceGenerator.generate());
 
         try {
             ConsumerAccount saved = consumerAccountRepository.saveAndFlush(account);
@@ -82,6 +94,9 @@ public class ConsumerAuthService {
         String message = exception.getMostSpecificCause().getMessage();
         if (message != null && message.contains("uk_consumer_accounts_email")) {
             return new ServiceException(AccountErrorCode.EMAIL_ALREADY_EXISTS);
+        }
+        if (message != null && message.contains("uk_consumer_accounts_phone")) {
+            return new ServiceException(AccountErrorCode.PHONE_ALREADY_EXISTS);
         }
         return new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
@@ -100,7 +115,7 @@ public class ConsumerAuthService {
 
         boolean completed = false;
         try {
-            boolean passwordMatches = passwordEncoder.matches(
+            boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
                     TokenNamespace.CONSUMER, account.getId(), attempt, passwordMatches);
@@ -155,5 +170,13 @@ public class ConsumerAuthService {
         return new TokenPair(
                 jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId),
                 jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId));
+    }
+
+    private boolean matchesPassword(String rawPassword, String encodedPassword) {
+        try {
+            return passwordEncoder.matches(rawPassword, encodedPassword);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }

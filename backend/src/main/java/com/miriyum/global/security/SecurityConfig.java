@@ -58,9 +58,9 @@ public class SecurityConfig {
      * 비밀번호를 그대로 BCrypt에 넘기면 정책상 유효한 값을 거부하게 된다. 자세한 이유는
      * {@link Sha256BCryptPasswordEncoder} 참고.</p>
      *
-     * <p>접두사가 없는 해시는 이 방식을 도입하기 전 개발 DB에 남은 순수 BCrypt 값이므로
-     * {@code setDefaultPasswordEncoderForMatches}로 계속 검증만 되게 둔다. 운영 데이터가 생기기
-     * 전에 정리하고 이 fallback은 제거해야 한다.</p>
+     * <p>접두사가 없는 순수 BCrypt 해시는 더 이상 허용하지 않는다. 모든 저장 값은
+     * {@code {sha256-bcrypt}}처럼 방식 식별자를 포함해야 하며, 이전 형식의 데이터는 운영 전환 전에
+     * 비밀번호 재설정 또는 승인된 마이그레이션으로 정리해야 한다.</p>
      */
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -69,9 +69,7 @@ public class SecurityConfig {
                 Sha256BCryptPasswordEncoder.ENCODING_ID,
                 Map.of(
                         Sha256BCryptPasswordEncoder.ENCODING_ID,
-                        new Sha256BCryptPasswordEncoder(bcryptPasswordEncoder),
-                        "bcrypt", bcryptPasswordEncoder));
-        passwordEncoder.setDefaultPasswordEncoderForMatches(bcryptPasswordEncoder);
+                        new Sha256BCryptPasswordEncoder(bcryptPasswordEncoder)));
         return passwordEncoder;
     }
 

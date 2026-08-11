@@ -6,6 +6,8 @@
 
 이 문서는 확정된 팀원 분담을 바꾸지 않고, 여러 담당 영역이 만나는 기능의 데이터·상태·파일·API 소유권과 의존 방향을 기록한다. 승인되지 않은 경계는 구현 계약으로 사용하지 않는다.
 
+현재 MVP1 도메인 소유권과 연결 범위는 이 문서를 우선 기준으로 판단한다. 세부 요청·응답과 상태 계약은 연결된 도메인 spec·OpenAPI를 확인하고, 실제 활성화 여부는 Controller·Service·테스트·릴리스 근거까지 확인한다. 이 문서의 소유권 표현만으로 존재하지 않는 화면·API를 추가하지 않는다.
+
 ## 확정 팀원 분담
 
 | 팀원 | 구현 담당 |
@@ -235,6 +237,7 @@
 
 ### 상태와 API 경계
 
+- 공통 관리 권한은 활성 store-operator 계정과 현재 대표 운영자 FK 일치까지다. 신규 거래의 Store 상태 적격성과 기존 거래 종결의 허용 여부는 각 명령 계약이 결정하며, 예약 방문 완료는 CLOSED·휴점에서도 현재 대표 운영자에게 허용한다.
 - 일반 사용자 취소와 매장 운영자 상태 변경은 행위자와 허용 전이가 다르더라도 예약 도메인의 같은 상태 기계가 판정한다.
 - 클라이언트가 보낸 역할·매장 ID만으로 운영자 명령을 승인하지 않고 현재 principal, 중앙 소속과 대상 매장 상태를 함께 검증한다.
 - 정확한 사용자·운영자 HTTP 경로는 `4. 공통 계약과 API 명세`에서 확정하되 동일한 예약 조회·상태 변경 API를 매장 도메인과 예약 도메인이 중복 작성하지 않는다.
@@ -278,6 +281,8 @@
 - 1번 팀원의 계정 가입이 성공한 뒤, 2번 팀원의 매장 등록 흐름에서 새 매장의 `store_operator_account_id`에 인증된 운영자 계정 ID를 저장한다.
 - 매장 등록 실패가 이미 생성된 계정의 비밀번호·인증 상태를 롤백하거나 임의 삭제하지 않는다. 사용자는 유효한 계정으로 매장 등록을 다시 시도한다.
 - 같은 사업자등록번호의 중복 매장 생성은 매장 도메인의 유일 제약과 멱등 계약으로 차단한다.
+- 현재 MVP1 사용자 흐름은 `가입 → 로그인 → 매장 등록 → 등록 응답으로 반환된 매장 바로 관리`이며 별도 승인 대기 단계가 없다.
+- 매장 승인·운영 상태 검증은 서버의 권한·거래 적격성 계약이지 플랫폼 운영자 승인 화면을 뜻하지 않는다. 기존 매장 등록 계약과 응답을 사용하며 별도 자동 승인 API를 발명하지 않는다.
 
 ### 인증과 권한 검증
 
@@ -367,7 +372,7 @@
 | 팀원 | 소유 도메인·주요 데이터 | 공개 API 최종 관리 | 예약 패키지 경로 | 기능 명세·OpenAPI |
 |---|---|---|---|---|
 | 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth`(JWT·쿠키·CSRF·공통 에러코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) | `docs/specs/auth-account/` |
-| 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 기능 상태, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store` | `docs/specs/store-search/` |
+| 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 기능 상태, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store`, `com.miriyum.domain.schedule`, `com.miriyum.domain.menu`, `com.miriyum.domain.search` | `docs/specs/store-search/` |
 | 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
 | 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.domain.menuhold`, `com.miriyum.domain.pickup` | `docs/specs/menu-hold-pickup/` |
 
@@ -411,6 +416,12 @@ O-009의 데이터·API·파일 소유자와 공동 검토 책임은 변경하�
 ### 2026-07-29 코드 구조 보정
 
 O-009의 1번 팀원 담당 범위와 소유권은 변경하지 않는다. 1번 팀원의 예약 패키지 경로를 `com.miriyum.domain.auth` 하나에서 `com.miriyum.domain.auth`(JWT 발급·검증, 쿠키·CSRF 처리, 공통 에러 코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) 세 개의 최상위 패키지로 정정했다. 계정 물리 분리 원칙(`docs/02-users-and-permissions.md`)이 폴더 구조에서도 바로 드러나도록 팀 협의로 정했으며, 4번 팀원이 이미 `menuhold`·`pickup` 두 최상위 패키지를 갖는 것과 같은 전례를 따른다. 이 보정은 3계층 구조(ADR-001)와 O-009의 담당자·소유권 배정을 바꾸지 않으며, 새 도메인이나 담당자 재배정을 의미하지 않는다.
+
+### 2026-08-11 도메인·HTTP 경계 구조 보정
+
+Issue #82 결정에 따라 2번 팀원의 기존 `store` 집중 패키지를 `store`, `schedule`, `menu`, `search` 최상위 도메인 패키지로 분리한다. 담당자, 데이터, API와 마이그레이션 소유권은 바뀌지 않는다. 세 도메인은 다른 도메인의 Entity·Repository를 직접 사용하지 않고 공개 Service·DTO로 협력한다.
+
+HTTP 호출자 구분은 Controller와 HTTP DTO에만 둔다. `publicapi`는 인증 principal이 필요 없는 공개 조회 경계이며, `consumer`와 `storeoperator`는 해당 principal 전용 경계다. `consumer`·`storeoperator` 계정 도메인은 중복 사용자 이름 대신 `auth`·`account` 목적을 사용한다. Service·Repository·Entity는 사용자 유형별로 복제하지 않는다. 이 보정은 HTTP URL을 변경하지 않으며 URL namespace 전환은 Issue #82의 후속 PR에서 별도로 수행한다.
 
 ## 2단계 마감
 

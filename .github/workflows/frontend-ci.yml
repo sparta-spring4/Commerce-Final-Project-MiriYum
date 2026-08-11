@@ -1,0 +1,82 @@
+# 프론트엔드 타입 검사·테스트·빌드를 검증한다. frontend-ci 집계 job의 이름은 Required check 호환성을 위해 유지한다.
+#
+# path 필터를 두지 않는다. 필터로 건너뛴 Required check는 완료되지 않아 Pull Request가
+# 대기 상태로 남는다. frontend 검증은 1~2분 규모라 backend 변경 PR에서 함께 실행돼도 부담이 작다.
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # package.json의 packageManager 필드에서 pnpm 버전을 읽어 설치한다.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # frontend/package.json의 engines가 허용하는 메이저에 고정한다.
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # --frozen-lockfile은 package.json과 lockfile이 어긋난 상태를 실패로 잡는다.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 생성 타입은 저장소에 커밋한다. OpenAPI를 고치고 다시 만들지 않은 상태를 여기서 잡는다.
+      #
+      # --intent-to-add를 먼저 실행한다. git diff는 untracked 파일을 보지 않아서,
+      # generate:api에 새 문서를 추가하고 생성 결과를 커밋하지 않으면 그냥 통과한다.
+      - name: Verify generated API types are up to date
+        run: |
+          pnpm run generate:api
+          git add --intent-to-add src/shared/api/generated
+          git diff --exit-code -- src/shared/api/generated
+
+      # 실패 지점이 로그에서 구분되도록 세 검증을 개별 step으로 나눈다.
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
+
+  frontend-ci:
+    name: frontend-ci
+    needs: [verify]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification job to succeed
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          echo "verify=$VERIFY_RESULT"
+          test "$VERIFY_RESULT" = "success"

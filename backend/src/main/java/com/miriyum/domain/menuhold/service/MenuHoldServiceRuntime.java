@@ -12,12 +12,12 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
-import com.miriyum.domain.store.core.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.DateTimeException;
 import java.time.ZoneId;
@@ -38,7 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MenuHoldServiceRuntime implements MenuHoldService {
 
-    private final StoreService storeService;
+    private final MenuTransactionService menuTransactionService;
     private final StoreServiceIntervalValidationService intervalService;
     private final MenuInventoryService inventoryService;
     private final MenuHoldRepository holdRepository;
@@ -74,7 +74,8 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
             long menuId = selection.menuId();
             MenuTransactionEligibility eligibility;
             try {
-                eligibility = storeService.requireMenuTransactionEligibility(storeId, menuId);
+                eligibility = menuTransactionService.requireTransactionEligibility(
+                        storeId, menuId);
             } catch (ServiceException exception) {
                 if (exception.getErrorCode() == StoreErrorCode.MENU_STATE_CONFLICT) {
                     throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);

@@ -1151,6 +1151,8 @@ findById(reservationId)
 
 ### 매장 운영자 권한 판정
 
+활성 계정과 현재 대표 소유권은 모든 매장 관리 명령의 공통 preflight다. OPEN·승인·기능 활성 같은 거래 상태는 명령별 계약이며 기존 CONFIRMED 예약의 취소·방문 완료에는 별도 OPEN 조건을 적용하지 않는다.
+
 매장 운영자 JWT는 `store-operator` namespace와 계정 subject만 증명한다. 대상 매장의 현재 소속과 운영 가능 상태는 매장 명령마다 매장 도메인의 `StoreService` 운영 권한 검증 공개 메서드로 확인한다.
 
 판정 순서는 다음과 같다.

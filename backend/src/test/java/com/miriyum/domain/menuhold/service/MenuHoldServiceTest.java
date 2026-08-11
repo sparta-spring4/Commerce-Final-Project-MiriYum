@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.then;
 
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquireRequest;
+import com.miriyum.domain.menuhold.inventory.dto.InventoryAcquisitionResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryAllocationResult;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
@@ -33,7 +34,7 @@ class MenuHoldServiceTest {
     private MenuInventoryLedgerRepository ledgerRepository;
 
     @Test
-    void acquiresBucketsInPrimaryKeyOrderAndReturnsPoolBreakdown() {
+    void acquiresBucketsInPrimaryKeyOrderAndKeepsMenuMapping() {
         MenuInventoryBucket first = bucket(9L, 1, 3);
         MenuInventoryBucket second = bucket(3L, 2, 0);
         InventoryAcquireRequest request = new InventoryAcquireRequest(
@@ -48,10 +49,17 @@ class MenuHoldServiceTest {
 
         MenuInventoryService service = service();
 
-        List<InventoryAllocationResult> results = service.acquireInventory(request);
+        List<InventoryAcquisitionResult> results = service.acquireInventory(request);
 
-        assertThat(results).extracting(InventoryAllocationResult::bucketId)
+        assertThat(results).extracting(InventoryAcquisitionResult::inventoryBucketId)
                 .containsExactly(3L, 9L);
+        assertThat(results).extracting(
+                        InventoryAcquisitionResult::inventoryBucketId,
+                        InventoryAcquisitionResult::menuId,
+                        InventoryAcquisitionResult::quantity)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(3L, 3L, 2),
+                        org.assertj.core.groups.Tuple.tuple(9L, 9L, 2));
         assertThat(results.getFirst().onlineHoldQuantity()).isEqualTo(2);
         assertThat(results.getLast().onlineHoldQuantity()).isEqualTo(1);
         assertThat(results.getLast().sharedQuantity()).isEqualTo(1);

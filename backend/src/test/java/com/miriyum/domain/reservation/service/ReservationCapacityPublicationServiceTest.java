@@ -10,16 +10,17 @@ import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -333,6 +334,7 @@ class ReservationCapacityPublicationServiceTest {
                 PartyComposition.of(3, 1, 1),
                 ReservationContactSnapshot.contactable("notification-target:31"),
                 1L,
+                new ReservationCancellationPolicyVersion(1L),
                 Instant.parse("2026-08-01T00:00:00Z")
         );
         ReflectionTestUtils.setField(reservation, "id", 301L);

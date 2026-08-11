@@ -6,10 +6,12 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +44,7 @@ class ReservationTest {
                 .isEqualTo(NOTIFICATION_TARGET_REFERENCE);
         assertThat(reservation.getContactSnapshot().isContactAvailableAtConfirmation()).isTrue();
         assertThat(reservation.getCapacityPolicyVersion()).isEqualTo(3L);
+        assertThat(reservation.getCancellationPolicyVersion()).isEqualTo(1L);
         assertThat(reservation.getReservationTimePolicyVersion()).isEqualTo(5L);
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         assertThat(reservation.getCreatedAt()).isEqualTo(CREATED_AT);
@@ -198,9 +201,11 @@ class ReservationTest {
     void rejectsNonPositiveOwnerId() {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
-                0L, 22L, "Miri Yum Restaurant", 3L, CREATED_AT));
+                0L, 22L, "Miri Yum Restaurant", 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT));
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
-                11L, 0L, "Miri Yum Restaurant", 3L, CREATED_AT));
+                11L, 0L, "Miri Yum Restaurant", 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT));
     }
 
     @Test
@@ -208,7 +213,8 @@ class ReservationTest {
     void rejectsBlankStoreNameSnapshot() {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
-                11L, 22L, " ", 3L, CREATED_AT));
+                11L, 22L, " ", 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT));
     }
 
     @Test
@@ -216,7 +222,46 @@ class ReservationTest {
     void rejectsNonPositivePolicyVersion() {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
-                11L, 22L, "Miri Yum Restaurant", 0L, CREATED_AT));
+                11L, 22L, "Miri Yum Restaurant", 0L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT));
+    }
+
+    @Test
+    @DisplayName("취소 정책 버전 값은 양수여야 한다")
+    void rejectsNonPositiveCancellationPolicyVersionValue() {
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                new ReservationCancellationPolicyVersion(0L)
+        );
+    }
+
+    @Test
+    @DisplayName("취소 정책 버전이 없으면 예약을 확정할 수 없다")
+    void rejectsMissingCancellationPolicyVersion() {
+        assertThatIllegalArgumentException().isThrownBy(() -> createReservation(
+                11L, 22L, "Miri Yum Restaurant", 3L, null, CREATED_AT
+        ));
+    }
+
+    @Test
+    @DisplayName("취소 정책 버전을 명시하는 예약 확정 API만 제공한다")
+    void exposesOnlyCancellationPolicyVersionConfirmApi() {
+        assertThat(Arrays.stream(Reservation.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("confirm")
+                        && Modifier.isPublic(method.getModifiers())
+                        && Modifier.isStatic(method.getModifiers()))
+                .toList())
+                .singleElement()
+                .satisfies(method -> assertThat(method.getParameterTypes()).containsExactly(
+                        Long.class,
+                        Long.class,
+                        String.class,
+                        ReservationTimeSnapshot.class,
+                        PartyComposition.class,
+                        ReservationContactSnapshot.class,
+                        long.class,
+                        ReservationCancellationPolicyVersion.class,
+                        Instant.class
+                ));
     }
 
     @Test
@@ -225,7 +270,8 @@ class ReservationTest {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", null,
-                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, CREATED_AT
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT
         ));
     }
 
@@ -235,7 +281,8 @@ class ReservationTest {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", timeSnapshot(),
-                PartyComposition.of(2, 1, 0), null, 3L, CREATED_AT
+                PartyComposition.of(2, 1, 0), null, 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT
         ));
     }
 
@@ -257,12 +304,20 @@ class ReservationTest {
 
         assertThatIllegalArgumentException().isThrownBy(() -> Reservation.confirm(
                 11L, 22L, "Miri Yum Restaurant", anotherStoreSnapshot,
-                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L, CREATED_AT
+                PartyComposition.of(2, 1, 0), contactSnapshot(), 3L,
+                new ReservationCancellationPolicyVersion(1L), CREATED_AT
         ));
     }
 
     private static Reservation createConfirmedReservation() {
-        return createReservation(11L, 22L, "Miri Yum Restaurant", 3L, CREATED_AT);
+        return createReservation(
+                11L,
+                22L,
+                "Miri Yum Restaurant",
+                3L,
+                new ReservationCancellationPolicyVersion(1L),
+                CREATED_AT
+        );
     }
 
     private static Reservation createReservation(
@@ -270,11 +325,13 @@ class ReservationTest {
             Long storeId,
             String storeNameSnapshot,
             long capacityPolicyVersion,
+            ReservationCancellationPolicyVersion cancellationPolicyVersion,
             Instant createdAt
     ) {
         return Reservation.confirm(
                 consumerAccountId, storeId, storeNameSnapshot, timeSnapshot(),
-                PartyComposition.of(2, 1, 0), contactSnapshot(), capacityPolicyVersion, createdAt
+                PartyComposition.of(2, 1, 0), contactSnapshot(), capacityPolicyVersion,
+                cancellationPolicyVersion, createdAt
         );
     }
 
