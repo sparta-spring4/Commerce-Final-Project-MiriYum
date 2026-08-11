@@ -5,6 +5,7 @@ import { Loading } from '../../../shared/ui/Feedback'
 import { toDisplayNameMap, useCatalog, useStoreSearch } from '../api/queries'
 import { categoryArt, categoryTint } from '../model/categoryArt'
 import { REGION_LABEL } from '../model/labels'
+import { regionArt } from '../model/regionArt'
 import {
   EMPTY_FILTERS,
   REGIONS,
@@ -293,8 +294,8 @@ export function HomePage() {
 /**
  * 지역 타일.
  *
- * 지역 사진 자산이 없으므로 팔레트 그라디언트에 지역명을 크게 얹는다.
- * 색만으로 구분하지 않도록 이름을 타일 아래에도 둔다.
+ * 시안처럼 정사각 이미지 아래에 지역명을 둔다. 랜드마크 일러스트는 프론트
+ * 번들의 정적 자산이고, 이름은 이미지가 아니라 아래 텍스트가 전달한다.
  */
 function RegionTile({
   region,
@@ -311,9 +312,17 @@ function RegionTile({
       <span
         className="home__region-tile"
         style={{ '--tile-from': tint.from, '--tile-to': tint.to } as CSSProperties}
-        aria-hidden="true"
       >
-        {label}
+        <img
+          className="home__region-art"
+          src={regionArt(region)}
+          // 바로 아래에 같은 이름이 있다. alt를 채우면 두 번 읽힌다.
+          alt=""
+          width={480}
+          height={480}
+          loading="lazy"
+          decoding="async"
+        />
       </span>
       <span className="home__region-name">{label}</span>
     </button>

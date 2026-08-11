@@ -283,10 +283,22 @@
     box-shadow 200ms ease;
 }
 
+.home__region-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 400ms ease;
+}
+
 .home__region:hover .home__region-tile,
 .home__region:focus-visible .home__region-tile {
   transform: translateY(-3px);
   box-shadow: var(--shadow-3);
+}
+
+.home__region:hover .home__region-art,
+.home__region:focus-visible .home__region-art {
+  transform: scale(1.08);
 }
 
 .home__region-name {
