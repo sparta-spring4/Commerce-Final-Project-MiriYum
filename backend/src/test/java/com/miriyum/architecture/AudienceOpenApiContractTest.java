@@ -15,6 +15,8 @@ import org.yaml.snakeyaml.Yaml;
 class AudienceOpenApiContractTest {
 
     private static final Path SPECS = Path.of("..", "docs", "specs");
+    private static final String MENU_ALTERNATIVE_SEARCH_PATH =
+            "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -45,6 +47,12 @@ class AudienceOpenApiContractTest {
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
         assertThat(allAudiencePaths).isEqualTo(aggregatePaths);
+    }
+
+    @Test
+    void publicMenuAlternativeSearchIsExposedThroughBothEntrypoints() throws IOException {
+        assertThat(paths("public-openapi.yaml")).containsKey(MENU_ALTERNATIVE_SEARCH_PATH);
+        assertThat(paths("mvp1-openapi.yaml")).containsKey(MENU_ALTERNATIVE_SEARCH_PATH);
     }
 
     @Test
