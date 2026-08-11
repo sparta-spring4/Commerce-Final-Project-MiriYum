@@ -68,7 +68,7 @@ export function PickupCreatePage() {
             return
           }
           void navigate(
-            `/pickup-reservations/${reservation.pickupReservationId}`,
+            `/pickup-reservations/${reservation.pickupReservationId}/complete`,
             { replace: true },
           )
         },

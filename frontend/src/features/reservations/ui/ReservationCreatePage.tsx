@@ -84,7 +84,7 @@ export function ReservationCreatePage() {
             })
             return
           }
-          void navigate(`/reservations/${reservation.reservationId}`, {
+          void navigate(`/reservations/${reservation.reservationId}/complete`, {
             replace: true,
           })
         },
@@ -107,7 +107,7 @@ export function ReservationCreatePage() {
       { body: toCreateRequest(storeId, next), idempotencyKey: key },
       {
         onSuccess: (reservation) =>
-          void navigate(`/reservations/${reservation.reservationId}`, {
+          void navigate(`/reservations/${reservation.reservationId}/complete`, {
             replace: true,
           }),
         onError: (error) => setRecovery(toCreateRecovery(error)),

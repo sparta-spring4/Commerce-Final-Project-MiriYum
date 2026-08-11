@@ -42,6 +42,10 @@ function renderCreate(search = SCHEDULE_QUERY) {
               element={<ReservationCreatePage />}
             />
             <Route
+              path={ROUTES.reservationComplete}
+              element={<LocationProbe />}
+            />
+            <Route
               path={ROUTES.reservationDetail}
               element={<LocationProbe />}
             />
@@ -127,7 +131,7 @@ describe('예약 생성 화면', () => {
     ])
   })
 
-  it('성공하면 예약 상세로 이동한다', async () => {
+  it('성공하면 예약 완료 화면으로 이동한다', async () => {
     respondCreateWith(() => successResponse(reservationDetail()))
 
     renderCreate()
@@ -138,7 +142,7 @@ describe('예약 생성 화면', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent(
-        '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1',
+        '/reservations/01JBQ8Z4T7K2N9V6M3P5R8W1R1/complete',
       ),
     )
   })

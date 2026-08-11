@@ -6,5 +6,6 @@
  */
 import './ui/pickup.css'
 
+export { PickupCompletePage } from './ui/PickupCompletePage'
 export { PickupCreatePage } from './ui/PickupCreatePage'
 export { PickupDetailPage } from './ui/PickupDetailPage'

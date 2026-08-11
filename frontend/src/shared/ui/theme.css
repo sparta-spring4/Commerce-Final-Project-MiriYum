@@ -71,7 +71,11 @@
    * 아래 값은 항상 텍스트 레이블·아이콘과 함께 쓴다.
    * (docs/08-ui-and-frontend-guidelines.md 접근성 규칙)
    */
-  --color-status-available: #2e7d32;
+  /*
+   * 뱃지는 12px 작은 글씨라 AA 기준 4.5:1을 넘겨야 한다.
+   * #2e7d32는 뱃지 배경(#e3f2e4) 위에서 4.42:1로 미달이라 한 단계 어둡게 잡았다.
+   */
+  --color-status-available: #1b5e20;
   --color-status-unavailable: #93000a;
   --color-status-unknown: #5a413a;
 
