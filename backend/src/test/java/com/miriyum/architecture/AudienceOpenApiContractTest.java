@@ -27,7 +27,7 @@ class AudienceOpenApiContractTest {
             "/api/v1/pickup-reservations");
 
     @Test
-    void audienceEntrypointsPartitionTheAggregatePaths() throws IOException {
+    void audienceEntrypointsAreDisjointAndCoverTheMvp1AggregatePaths() throws IOException {
         Set<String> publicPaths = paths("public-openapi.yaml").keySet();
         Set<String> consumerPaths = paths("consumer-openapi.yaml").keySet();
         Set<String> operatorPaths = paths("store-operator-openapi.yaml").keySet();
@@ -46,13 +46,13 @@ class AudienceOpenApiContractTest {
         Set<String> allAudiencePaths = new HashSet<>(publicPaths);
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
-        assertThat(allAudiencePaths).isEqualTo(aggregatePaths);
+        assertThat(allAudiencePaths).containsAll(aggregatePaths);
     }
 
     @Test
-    void publicMenuAlternativeSearchIsExposedThroughBothEntrypoints() throws IOException {
+    void publicMenuAlternativeSearchDoesNotExpandTheMvp1Aggregate() throws IOException {
         assertThat(paths("public-openapi.yaml")).containsKey(MENU_ALTERNATIVE_SEARCH_PATH);
-        assertThat(paths("mvp1-openapi.yaml")).containsKey(MENU_ALTERNATIVE_SEARCH_PATH);
+        assertThat(paths("mvp1-openapi.yaml")).doesNotContainKey(MENU_ALTERNATIVE_SEARCH_PATH);
     }
 
     @Test
