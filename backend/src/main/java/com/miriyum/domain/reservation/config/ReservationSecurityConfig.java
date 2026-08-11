@@ -28,7 +28,7 @@ public class ReservationSecurityConfig {
     private static final String RESERVATION_CANCELLATION =
             RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_ROOT =
-            "/api/v1/store-operator/stores/*/reservations";
+            "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
     private static final String STORE_RESERVATION_CANCELLATION =

@@ -44,7 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class StoreScheduleControllerTest {
 
     private static final String BASE_URL =
-            "/api/v1/store-operator/stores/7";
+            "/api/v1/store-operators/stores/7";
     private static final String TEST_KEY =
             "550e8400-e29b-41d4-a716-446655440000";
 
@@ -225,7 +225,7 @@ class StoreScheduleControllerTest {
         authenticateStoreOperator(11L);
 
         mockMvc.perform(put(
-                        "/api/v1/store-operator/stores/{storeId}/operating-hours",
+                        "/api/v1/store-operators/stores/{storeId}/operating-hours",
                         storeId)
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")
@@ -274,7 +274,7 @@ class StoreScheduleControllerTest {
         authenticateStoreOperator(11L);
 
         mockMvc.perform(put(
-                        "/api/v1/store-operator/stores/{storeId}/reservation-time-slots",
+                        "/api/v1/store-operators/stores/{storeId}/reservation-time-slots",
                         storeId)
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")

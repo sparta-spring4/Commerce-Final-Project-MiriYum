@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}/pickup-reservations")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}/pickup-reservations")
 public class PickupStoreManagementController {
 
     private final PickupStoreManagementService service;

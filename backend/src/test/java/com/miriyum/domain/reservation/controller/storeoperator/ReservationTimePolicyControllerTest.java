@@ -40,7 +40,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class ReservationTimePolicyControllerTest {
 
     private static final String BASE_URL =
-            "/api/v1/store-operator/stores/7/reservation-time-policies";
+            "/api/v1/store-operators/stores/7/reservation-time-policies";
     private static final String TEST_KEY =
             "550e8400-e29b-41d4-a716-446655440000";
 

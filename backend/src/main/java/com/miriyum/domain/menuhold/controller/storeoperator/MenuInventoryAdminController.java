@@ -32,7 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Validated
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets")
 @RequiredArgsConstructor
 public class MenuInventoryAdminController {
 

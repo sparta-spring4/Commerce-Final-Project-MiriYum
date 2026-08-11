@@ -17,7 +17,7 @@ public enum TokenNamespace {
             "store-operator",
             "MIRIYUM_STORE_OPERATOR_REFRESH",
             "MIRIYUM_STORE_OPERATOR_XSRF_TOKEN",
-            "/api/v1/store-operator-auth"
+            "/api/v1/store-operators/auth"
     );
 
     private final String value;

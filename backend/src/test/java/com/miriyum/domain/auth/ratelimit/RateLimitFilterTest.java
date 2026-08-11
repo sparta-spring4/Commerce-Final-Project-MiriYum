@@ -150,10 +150,10 @@ class RateLimitFilterTest {
                 Arguments.of("LOGIN", "/api/v1/consumers/auth/sessions", "POST", 5, "2"),
                 Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "3"),
                 Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "4"),
-                Arguments.of("SIGN_UP", "/api/v1/store-operator-auth/accounts", "POST", 5, "5"),
-                Arguments.of("LOGIN", "/api/v1/store-operator-auth/sessions", "POST", 5, "6"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operator-auth/token-refreshes", "POST", 30, "7"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operator-auth/csrf-tokens/current", "GET", 2, "8")
+                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/accounts", "POST", 5, "5"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/sessions", "POST", 5, "6"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "7"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "8")
         );
     }
 
@@ -171,7 +171,7 @@ class RateLimitFilterTest {
                     });
         }
         for (int i = 0; i < 2; i++) {
-            mockMvc.perform(post("/api/v1/store-operator-auth/accounts").with(ip))
+            mockMvc.perform(post("/api/v1/store-operators/auth/accounts").with(ip))
                     .andExpect(result -> {
                         if (result.getResponse().getStatus() == 429) {
                             throw new AssertionError("한도(5) 이내인데 StoreOperator 가입이 429를 받았습니다.");

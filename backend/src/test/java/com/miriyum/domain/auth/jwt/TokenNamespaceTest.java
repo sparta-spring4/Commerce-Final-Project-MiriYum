@@ -11,4 +11,10 @@ class TokenNamespaceTest {
         assertThat(TokenNamespace.CONSUMER.cookiePath())
                 .isEqualTo("/api/v1/consumers/auth");
     }
+
+    @Test
+    void storeOperatorUsesStoreOperatorAuthRootForCookiePath() {
+        assertThat(TokenNamespace.STORE_OPERATOR.cookiePath())
+                .isEqualTo("/api/v1/store-operators/auth");
+    }
 }
