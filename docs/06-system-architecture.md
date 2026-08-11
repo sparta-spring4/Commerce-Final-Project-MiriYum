@@ -6,7 +6,7 @@ MiriYum은 `1차 MVP`, `2차 MVP`와 `고도화`까지 **방식 A**를 유지한
 
 - 백엔드 배포 단위는 하나의 Spring Boot 애플리케이션이다.
 - 활성 업무 데이터의 원장은 하나의 MySQL이다.
-- 도메인은 패키지와 공개 service/application 포트로 분리하되 다른 도메인의 controller·repository·entity를 직접 사용하지 않는다.
+- 도메인은 패키지와 공개 Service·DTO 계약으로 분리하되 다른 도메인의 Controller·Repository·Entity를 직접 사용하지 않는다.
 - 기능·운영 증거 없이 백엔드, 데이터베이스 또는 배포 단위를 나누지 않는다.
 
 이 선택은 계정 경계를 합친다는 뜻이 아니다. 일반 사용자, 매장 운영자와 플랫폼 운영자는 전용 테이블·PK·principal·토큰 namespace를 사용한다. 같은 애플리케이션과 MySQL 안에서도 세 인증 경계와 UI 진입 경로를 분리하고, 이메일·외부 로그인·클라이언트 역할 값으로 유형이나 권한을 바꾸지 않는다.
@@ -27,10 +27,10 @@ frontend/
         │
         ▼
 하나의 Spring Boot
-  auth ─ store ─ reservation ─ menuhold ─ pickup
-               ├─ store.recommendation(2차 MVP)
-               ├─ payment(고도화)
-               └─ notification(고도화)
+  auth ─ consumer ─ storeoperator
+  store ─ schedule ─ menu ─ search
+  reservation ─ menuhold ─ pickup
+  payment(고도화) ─ notification(고도화)
         │
         ▼
 하나의 MySQL 업무 원장
@@ -43,17 +43,23 @@ frontend/
 ## 계층과 모듈 의존 규칙
 
 - controller는 요청 검증, 인증 주체 전달과 응답 변환만 담당한다.
-- service/application 경계는 유스케이스, 권한 재검증과 트랜잭션을 소유한다.
+- service 경계는 유스케이스, 권한 재검증과 트랜잭션을 소유한다.
 - repository는 JPA와 고경합 쓰기에 필요한 좁은 명시적 SQL을 캡슐화한다.
 - API DTO와 내부 entity를 분리하고 entity를 응답으로 직접 노출하지 않는다.
-- 다른 모듈의 기능은 공개 service/application 포트로만 사용한다.
+- 다른 모듈의 기능은 공개 Service 메서드와 DTO로만 사용한다.
 - `global`은 보안·오류·관측 같은 기술 관심사만 소유하고 업무 규칙을 갖지 않는다.
+
+HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicapi`는 인증 없는 공개 조회, `consumer`와 `storeoperator`는 각 principal namespace의 인증 경계다. Service·Repository·Entity는 호출자별로 복제하지 않는다. 계정 유형 자체가 도메인인 `consumer`와 `storeoperator`의 HTTP 경계는 `auth`와 `account` 목적별로 나눈다.
 
 구조 테스트는 controller→repository 직접 호출, 모듈 간 repository/entity 직접 접근과 순환 의존을 거부한다.
 
+Issue #82 1단계가 완료될 때까지 기존 `consumer`, `reservation`, `menuhold`의 단일 순환 컴포넌트만 임시 baseline으로 둔다. 허용되는 직접 순환 edge는 `consumer → reservation`, `reservation → consumer`, `reservation → menuhold`, `menuhold → reservation` 네 개뿐이다. 구조 테스트는 이 edge를 그래프에서 삭제하지 않고 전체 그래프의 상호 도달 가능한 도메인 쌍과 실제 순환 edge 집합을 baseline과 정확히 비교한다. 따라서 새 도메인이나 새 경로가 이 컴포넌트에 들어오는 경우도 실패한다.
+
+Issue #82 2단계에서는 예약 내역 HTTP 경계를 `reservation.controller.consumer`로 옮겨 `consumer → reservation`을 제거하고, Reservation 소유 Port와 MenuHold Adapter로 `reservation → menuhold`을 역전해 순환 baseline을 빈 집합으로 만든다. 공통 Store→Menu 잠금·검증 흐름은 기존 `MenuTransactionService`를 `MenuTransactionFacade`로 승격해 MenuHold와 Pickup이 사용하지만, 이 Facade는 두 예약 순환을 우회하거나 대신 해결하는 수단이 아니다.
+
 ## `1차 MVP` 기술과 모듈
 
-`1차 MVP`는 `auth`, `store`, `reservation`, `menuhold`, `pickup`의 실제 기능만 둔다. Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.6.1, Spring MVC, Spring Data JPA, Spring Security, Flyway와 MySQL을 사용한다. 프런트엔드는 Node.js 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10과 React Testing Library 16.3.2를 사용한다.
+`1차 MVP`는 `auth`, `consumer`, `storeoperator`, `store`, `schedule`, `menu`, `search`, `reservation`, `menuhold`, `pickup`의 실제 기능만 둔다. Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.6.1, Spring MVC, Spring Data JPA, Spring Security, Flyway와 MySQL을 사용한다. 프런트엔드는 Node.js 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10과 React Testing Library 16.3.2를 사용한다.
 
 정확히 확인되지 않은 MySQL·Testcontainers 버전은 적지 않는다. Testcontainers MySQL은 첫 단계부터 Flyway, MySQL 제약, 조건부 SQL, 락·격리와 전체 롤백을 검증하는 통합 테스트 경계다.
 
@@ -67,7 +73,7 @@ frontend/
 
 - `RuleInterpreter`: 한국어 입력의 정규화, 명시적 시간대와 `Clock`, 가격, 승인된 지역·분위기·카테고리 사전 및 남은 키워드를 결정적으로 해석한다.
 - QueryDSL: 선택 조건 조합과 projection을 타입 안전하게 구성한다.
-- `store.recommendation`: 유효한 예약·확정 메뉴 이력을 요청 시 MySQL에서 집계하고 Java 점수 계산으로 설명 가능한 후보를 만든다.
+- `recommendation`: 유효한 예약·확정 메뉴 이력을 요청 시 MySQL에서 집계하고 Java 점수 계산으로 설명 가능한 후보를 만든다. 1차 MVP의 지리 계산·반경 판정만 `search.geo`가 소유하고, 실제 추천 점수·정렬·사용자 이력 정책은 2차 MVP에서 별도 최상위 도메인으로 생성한다.
 - 동기 추천 가용성 조회: `1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 선구현 금지는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약에만 적용하며, 해당 계약은 `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다.
 - 카카오 좌표 포트: 입점·주소 변경 때만 Kakao Local REST를 호출한다. 지도 SDK는 결과 표시와 매장 운영자의 좌표 확인에만 사용한다.
 

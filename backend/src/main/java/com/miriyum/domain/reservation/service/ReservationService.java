@@ -1,7 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.auth.exception.AccountErrorCode;
-import com.miriyum.domain.consumer.dto.response.ReservationContactResult;
+import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
@@ -52,17 +52,17 @@ import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepo
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.dto.StoreReservationTransactionEligibility;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.core.service.StoreTransactionEligibilityService;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowStatus;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalStatus;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
+import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
+import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowStatus;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;

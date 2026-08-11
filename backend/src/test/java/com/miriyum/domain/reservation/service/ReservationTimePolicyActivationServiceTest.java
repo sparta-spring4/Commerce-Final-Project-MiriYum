@@ -14,10 +14,10 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import java.time.Clock;
 import java.time.Instant;

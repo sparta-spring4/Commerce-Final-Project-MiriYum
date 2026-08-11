@@ -6,7 +6,7 @@ import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
-import com.miriyum.domain.store.core.service.StoreService;
+import com.miriyum.domain.store.service.StoreService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;

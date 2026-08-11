@@ -1,0 +1,178 @@
+package com.miriyum.domain.search.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.inOrder;
+
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
+import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
+import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.store.enums.OperationStatus;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.error.StoreErrorCode;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.schedule.dto.contract.PublicStoreSchedules;
+import com.miriyum.domain.schedule.service.StoreScheduleQueryService;
+import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.search.dto.publicapi.PublicMenu;
+import com.miriyum.domain.search.model.ReservationSearchCondition;
+import com.miriyum.domain.search.repository.PublicStoreSnapshot;
+import com.miriyum.domain.search.repository.StorePublicReadRepository;
+import com.miriyum.global.exception.ServiceException;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class StorePublicQueryServiceTest {
+
+    @Mock StorePublicReadRepository publicReadRepository;
+    @Mock StoreScheduleQueryService scheduleQueryService;
+    @Mock ReservationService reservationService;
+
+    private StorePublicQueryService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new StorePublicQueryService(
+                publicReadRepository,
+                scheduleQueryService,
+                reservationService);
+    }
+
+    @Test
+    void publicMenusExposeOnlyCurrentPublishedVisibleNonRetiredMenus() {
+        PublicMenu visible = publicMenu(11L);
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of(visible));
+
+        var result = service.getMenus(7L);
+
+        assertThat(result).singleElement().satisfies(menu -> {
+            assertThat(menu.menuId()).isEqualTo("11");
+            assertThat(menu.name()).isEqualTo("아메리카노");
+            assertThat(menu.saleStatus()).isEqualTo(MenuSellingStatus.SELLING);
+        });
+    }
+
+    @Test
+    void publicMenusTreatStoreClosedDuringProjectionAsNotFound() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.empty());
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+
+        assertThatThrownBy(() -> service.getMenus(7L))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(StoreErrorCode.STORE_NOT_FOUND));
+        var order = inOrder(publicReadRepository);
+        order.verify(publicReadRepository).findPublicMenus(7L);
+        order.verify(publicReadRepository).findPublicStore(7L);
+    }
+
+    @Test
+    void detailUsesReservationBatchAndFailsClosedOnMismatchedStoreId() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(publicStore(7L)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+        given(scheduleQueryService.getPublicSchedules(7L))
+                .willReturn(PublicStoreSchedules.empty());
+        given(reservationService.getAvailabilities(org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        8L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        var result = service.getDetail(
+                7L,
+                new ReservationSearchCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 2),
+                true);
+
+        assertThat(result.reservationAvailability())
+                .isEqualTo(ReservationAvailability.UNAVAILABLE);
+        assertThat(result.operatingHours()).isEmpty();
+        assertThat(result.reservationTimeSlots()).isEmpty();
+        var order = inOrder(reservationService, publicReadRepository);
+        order.verify(reservationService).getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any());
+        order.verify(publicReadRepository).findPublicMenus(7L);
+        order.verify(publicReadRepository).findPublicStore(7L);
+    }
+
+    @Test
+    void detailReconcilesAvailableWhenFinalStoreIsTemporarilyClosed() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(
+                publicStore(7L, OperationStatus.TEMPORARILY_CLOSED, true)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+        given(scheduleQueryService.getPublicSchedules(7L))
+                .willReturn(PublicStoreSchedules.empty());
+        given(reservationService.getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        var result = service.getDetail(
+                7L,
+                new ReservationSearchCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 2),
+                false);
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.TEMPORARILY_CLOSED);
+        assertThat(result.modes().reservationEnabled()).isTrue();
+        assertThat(result.reservationAvailability())
+                .isEqualTo(ReservationAvailability.UNAVAILABLE);
+    }
+
+    @Test
+    void detailReconcilesAvailableWhenFinalReservationModeIsDisabled() {
+        given(publicReadRepository.findPublicStore(7L)).willReturn(Optional.of(
+                publicStore(7L, OperationStatus.OPEN, false)));
+        given(publicReadRepository.findPublicMenus(7L)).willReturn(List.of());
+        given(scheduleQueryService.getPublicSchedules(7L))
+                .willReturn(PublicStoreSchedules.empty());
+        given(reservationService.getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.any()))
+                .willReturn(List.of(new ReservationAvailabilityResult(
+                        7L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        var result = service.getDetail(
+                7L,
+                new ReservationSearchCondition(
+                        LocalDate.of(2026, 8, 3), LocalTime.of(18, 0), 2),
+                false);
+
+        assertThat(result.operationStatus()).isEqualTo(OperationStatus.OPEN);
+        assertThat(result.modes().reservationEnabled()).isFalse();
+        assertThat(result.reservationAvailability())
+                .isEqualTo(ReservationAvailability.UNAVAILABLE);
+    }
+
+    private static PublicStoreSnapshot publicStore(long id) {
+        return publicStore(id, OperationStatus.OPEN, true);
+    }
+
+    private static PublicStoreSnapshot publicStore(
+            long id,
+            OperationStatus operationStatus,
+            boolean reservationEnabled
+    ) {
+        return new PublicStoreSnapshot(
+                id, "미리윰", "", Region.SEOUL, "서울 중구", "Asia/Seoul",
+                "CAFE_BAKERY", List.of("DATE"), operationStatus,
+                reservationEnabled, true, true);
+    }
+
+    private static PublicMenu publicMenu(long id) {
+        return new PublicMenu(
+                Long.toString(id), "아메리카노", "", 4500, true, "COFFEE",
+                List.of(), List.of(), false, false, MenuSellingStatus.SELLING);
+    }
+}
