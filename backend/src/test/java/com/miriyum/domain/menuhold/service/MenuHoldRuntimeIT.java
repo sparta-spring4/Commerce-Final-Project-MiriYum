@@ -79,6 +79,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -119,7 +120,7 @@ class MenuHoldRuntimeIT {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TransactionTemplate transactions;
     @Autowired EntityManagerFactory entityManagerFactory;
-    @MockitoSpyBean MenuTransactionService menuTransactionService;
+    @MockitoBean MenuTransactionService menuTransactionService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
     @MockitoSpyBean MenuInventoryService inventoryService;
 

@@ -70,6 +70,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
@@ -121,7 +122,7 @@ class MenuInventoryRuntimeIT {
     @MockitoSpyBean
     private StoreService storeService;
 
-    @MockitoSpyBean
+    @MockitoBean
     private MenuTransactionService menuTransactionService;
 
     @MockitoSpyBean
