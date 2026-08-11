@@ -37,6 +37,7 @@ miriyum:
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   payment:
+    enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
     cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
     portone:
       api-secret: ${MIRIYUM_PORTONE_API_SECRET:}

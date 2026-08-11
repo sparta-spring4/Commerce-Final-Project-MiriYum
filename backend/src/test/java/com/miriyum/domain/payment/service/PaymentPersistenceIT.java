@@ -2,8 +2,10 @@ package com.miriyum.domain.payment.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -83,6 +85,9 @@ class PaymentPersistenceIT {
 
     @Autowired
     private PaymentService paymentService;
+
+    @Autowired
+    private PaymentTransactionService transactions;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -699,6 +704,76 @@ class PaymentPersistenceIT {
         verify(providerClient, times(1)).cancelPayment(
                 eq(preparation.portOnePaymentId()), anyString(), eq(20_000L),
                 eq("KRW"), eq("RESERVATION_CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("외부 호출 전에 중단된 환불 claim은 lease 만료 후 재호출 없이 대사 상태로 격리한다")
+    void isolatesStaleRefundClaimWithoutRetryingProviderCancellation() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("140");
+        RequestRefundCommand command = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:140:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440141");
+        Instant claimedAt = Instant.now();
+
+        PaymentTransactionService.RefundClaim claim = transactions.claimRefund(command, claimedAt);
+        PaymentTransactionService.RefundClaim activeLeaseReplay = transactions.claimRefund(
+                command, claimedAt.plusSeconds(299));
+        PaymentTransactionService.RefundClaim staleLeaseReplay = transactions.claimRefund(
+                command, claimedAt.plusSeconds(301));
+
+        assertThat(claim.requiresProviderCall()).isTrue();
+        assertThat(activeLeaseReplay.completedResult().status()).isEqualTo(RefundStatus.PROCESSING);
+        assertThat(staleLeaseReplay.completedResult().status())
+                .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                WHERE entry_type = 'REFUND_RECONCILIATION_REQUIRED'
+                  AND event_key = ?
+                """, Long.class, "refund-reconciliation:" + claim.refundId())).isEqualTo(1L);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("sibling 환불이 미해결이면 다른 환불 성공 후에도 결제 대사 상태를 유지한다")
+    void keepsPaymentReconciliationWhenSiblingRefundRemainsUnresolved() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("141");
+        Instant claimedAt = Instant.now();
+        PaymentTransactionService.RefundClaim first = transactions.claimRefund(
+                new RequestRefundCommand(
+                        preparation.paymentId(), "reservation:141:first", 10_000L,
+                        "RESERVATION_CANCELLED", 7L,
+                        "550e8400-e29b-41d4-a716-446655440142"),
+                claimedAt);
+        PaymentTransactionService.RefundClaim second = transactions.claimRefund(
+                new RequestRefundCommand(
+                        preparation.paymentId(), "reservation:141:second", 10_000L,
+                        "RESERVATION_CANCELLED", 7L,
+                        "550e8400-e29b-41d4-a716-446655440143"),
+                claimedAt.plusSeconds(1));
+
+        RefundResult unresolved = transactions.markRefundUnknown(first, claimedAt.plusSeconds(2));
+        RefundResult completed = transactions.finalizeRefund(
+                second,
+                new ProviderCancellation(
+                        "cancellation-sibling-141",
+                        ProviderStatus.PARTIALLY_CANCELLED,
+                        10_000L,
+                        "KRW"),
+                claimedAt.plusSeconds(3));
+
+        assertThat(unresolved.status()).isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        assertThat(completed.status()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_refunds
+                WHERE payment_pk = (SELECT payment_pk FROM payments WHERE payment_id = ?)
+                  AND status = 'RECONCILIATION_REQUIRED'
+                """, Long.class, preparation.paymentId())).isEqualTo(1L);
     }
 
     @Test

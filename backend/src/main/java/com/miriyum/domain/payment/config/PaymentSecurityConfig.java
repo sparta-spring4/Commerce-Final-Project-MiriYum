@@ -5,6 +5,7 @@ import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -27,6 +28,7 @@ public class PaymentSecurityConfig {
 
     @Bean
     @Order(-3)
+    @ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
     public SecurityFilterChain paymentWebhookFilterChain(HttpSecurity http) throws Exception {
         http
                 .securityMatcher(PORTONE_WEBHOOK)
@@ -39,6 +41,7 @@ public class PaymentSecurityConfig {
 
     @Bean
     @Order(-2)
+    @ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
     public SecurityFilterChain consumerPaymentFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
@@ -57,6 +60,26 @@ public class PaymentSecurityConfig {
                         new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.CONSUMER),
                         UsernamePasswordAuthenticationFilter.class
                 );
+        return http.build();
+    }
+
+    @Bean
+    @Order(-3)
+    @ConditionalOnProperty(
+            name = "miriyum.payment.enabled",
+            havingValue = "false",
+            matchIfMissing = true
+    )
+    public SecurityFilterChain disabledPaymentFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher(
+                        CONSUMER_PAYMENT_ROOT,
+                        CONSUMER_PAYMENT_FAMILY,
+                        PORTONE_WEBHOOK)
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
 }

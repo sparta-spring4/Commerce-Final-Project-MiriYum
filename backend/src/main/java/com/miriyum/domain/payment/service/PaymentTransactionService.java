@@ -32,6 +32,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
@@ -126,6 +127,7 @@ public class PaymentTransactionService {
     }
 
     private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
+    private static final Duration REFUND_PROCESSING_LEASE = Duration.ofMinutes(5);
 
     private final PaymentRepository payments;
     private final PaymentAttemptRepository attempts;
@@ -433,6 +435,10 @@ public class PaymentTransactionService {
             if (!existing.getRequestFingerprint().equals(fingerprint)) {
                 throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
+            if (existing.getStatus() == RefundStatus.PROCESSING
+                    && existing.getRequestedAt().isBefore(now.minus(REFUND_PROCESSING_LEASE))) {
+                markRefundReconciliation(existing, payment, now);
+            }
             return RefundClaim.completed(toRefundResult(existing));
         }
         if (refunds.findByPayment_IdAndSourceEventId(
@@ -499,6 +505,9 @@ public class PaymentTransactionService {
             case CANCELLED, PARTIALLY_CANCELLED -> {
                 payment.applyCompletedRefund(refund.getAmountMinor(), now);
                 refund.complete(cancellation.cancellationId(), now);
+                if (hasUnresolvedRefund(payment)) {
+                    payment.markRefundReconciliationRequired(now);
+                }
                 ledger.save(PaymentLedgerEntry.record(
                         payment,
                         refund,

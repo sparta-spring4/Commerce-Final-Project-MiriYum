@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,7 +51,7 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                     requiredLong(payment.path("amount"), "total"),
                     requiredText(payment, "currency")
             );
-        } catch (RestClientException | IllegalArgumentException exception) {
+        } catch (RestClientException | JacksonException | IllegalArgumentException exception) {
             throw new ProviderUnavailableException("PortOne payment lookup was inconclusive", exception);
         }
     }
@@ -92,7 +93,7 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                     requiredLong(cancellation, "totalAmount"),
                     currency
             );
-        } catch (RestClientException | IllegalArgumentException exception) {
+        } catch (RestClientException | JacksonException | IllegalArgumentException exception) {
             throw new ProviderUnavailableException("PortOne cancellation was inconclusive", exception);
         }
     }

@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -127,6 +129,38 @@ class PortOnePaymentClientTest {
         assertThatThrownBy(() -> client.getPayment(
                 "payment-reservation-900000000000000001"))
                 .isInstanceOf(ProviderUnavailableException.class);
+    }
+
+    @ParameterizedTest(name = "lookup body={0}")
+    @ValueSource(strings = {"{", ""})
+    @DisplayName("PortOne 결제 조회의 malformed 또는 빈 2xx 응답은 결과 불명으로 변환한다")
+    void mapsInvalidPaymentResponseToUnavailableResult(String responseBody) {
+        server.expect(requestTo(
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                .andRespond(withSuccess(responseBody, MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.getPayment(
+                "payment-reservation-900000000000000001"))
+                .isInstanceOf(ProviderUnavailableException.class);
+        server.verify();
+    }
+
+    @ParameterizedTest(name = "cancel body={0}")
+    @ValueSource(strings = {"{", ""})
+    @DisplayName("PortOne 취소의 malformed 또는 빈 2xx 응답은 결과 불명으로 변환한다")
+    void mapsInvalidCancellationResponseToUnavailableResult(String responseBody) {
+        server.expect(requestTo(
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001/cancel"))
+                .andRespond(withSuccess(responseBody, MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.cancelPayment(
+                "payment-reservation-900000000000000001",
+                "910000000000000001",
+                10_000L,
+                "KRW",
+                "RESERVATION_CANCELLED"))
+                .isInstanceOf(ProviderUnavailableException.class);
+        server.verify();
     }
 
     @Test

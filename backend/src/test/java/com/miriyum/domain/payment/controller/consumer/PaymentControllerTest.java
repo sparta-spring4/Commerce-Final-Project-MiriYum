@@ -31,7 +31,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(PaymentController.class)
+@WebMvcTest(
+        controllers = PaymentController.class,
+        properties = "miriyum.payment.enabled=true"
+)
 @Import({PaymentSecurityConfig.class, GlobalExceptionHandler.class})
 class PaymentControllerTest {
 
