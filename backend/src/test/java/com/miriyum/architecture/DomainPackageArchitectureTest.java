@@ -30,15 +30,6 @@ class DomainPackageArchitectureTest {
             "core", "schedule", "closure", "menu", "search", "recommendation");
     private static final Set<String> HTTP_BOUNDARIES = Set.of(
             "publicapi", "consumer", "storeoperator", "auth", "account");
-    private static final Set<DomainPair> LEGACY_CYCLIC_DOMAIN_PAIRS = Set.of(
-            new DomainPair("consumer", "menuhold"),
-            new DomainPair("consumer", "reservation"),
-            new DomainPair("menuhold", "reservation"));
-    private static final Set<DependencyEdge> LEGACY_CYCLIC_EDGES = Set.of(
-            new DependencyEdge("consumer", "reservation"),
-            new DependencyEdge("menuhold", "reservation"),
-            new DependencyEdge("reservation", "consumer"),
-            new DependencyEdge("reservation", "menuhold"));
     private static final Pattern PACKAGE_PATTERN =
             Pattern.compile("(?m)^package\\s+([\\w.]+);");
     private static final Pattern IMPORT_PATTERN =
@@ -107,18 +98,16 @@ class DomainPackageArchitectureTest {
     }
 
     @Test
-    void domainsDoNotAddDependencyCycles() {
+    void domainsDoNotHaveDependencyCycles() {
         Map<String, Set<String>> dependencies = domainDependencies(javaSources());
 
         assertThat(dependencies).isNotEmpty();
-        assertThat(cyclicDomainPairs(dependencies))
-                .isEqualTo(LEGACY_CYCLIC_DOMAIN_PAIRS);
-        assertThat(cyclicDependencyEdges(dependencies))
-                .isEqualTo(LEGACY_CYCLIC_EDGES);
+        assertThat(cyclicDomainPairs(dependencies)).isEmpty();
+        assertThat(cyclicDependencyEdges(dependencies)).isEmpty();
     }
 
     @Test
-    void legacyCycleBaselineDoesNotHideANewLongCycle() {
+    void cycleDetectionFindsALongCycle() {
         Map<String, Set<String>> dependencies = Map.of(
                 "consumer", Set.of("reservation"),
                 "reservation", Set.of("consumer", "menuhold", "foo"),
