@@ -166,6 +166,15 @@ export function KakaoMap({
     return <MapFallback reason="표시할 수 있는 매장 좌표가 없습니다." />
   }
 
+  if (appKey.trim() === '') {
+    return (
+      <MapFallback
+        reason="지도 설정이 필요합니다."
+        guidance="Kakao 지도 JavaScript 키를 확인해 주세요."
+      />
+    )
+  }
+
   if (loadError) {
     return (
       <MapFallback
@@ -182,6 +191,10 @@ export function KakaoMap({
   const selectedStore = validStores.find(
     (store: MappableStore) => store.storeId === selectedStoreId,
   )
+  const selectedStoreWithoutCoordinates = stores.some(
+    (store) =>
+      store.storeId === selectedStoreId && !hasValidCoordinates(store),
+  )
 
   return (
     <section aria-label="매장 지도">
@@ -193,6 +206,9 @@ export function KakaoMap({
       />
       {selectedStore !== undefined ? (
         <p role="status">선택된 매장: {selectedStore.name}</p>
+      ) : null}
+      {selectedStoreWithoutCoordinates ? (
+        <p role="status">선택한 매장은 지도에 표시할 수 없습니다.</p>
       ) : null}
       {invalidStoreCount > 0 ? (
         <p>좌표를 확인할 수 없는 매장 {invalidStoreCount}곳</p>

@@ -434,6 +434,51 @@ describe('KakaoMap', () => {
     expect(Map).toHaveBeenCalledOnce()
   })
 
+  it('explains a missing app key without offering a futile retry', async () => {
+    vi.stubEnv('VITE_KAKAO_MAP_APP_KEY', '')
+    mocks.load.mockRejectedValue(
+      new Error('Kakao 지도 JavaScript 키가 설정되지 않았습니다.'),
+    )
+
+    render(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('지도 설정이 필요합니다.')).toBeVisible()
+    expect(
+      screen.getByText('Kakao 지도 JavaScript 키를 확인해 주세요.'),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: '지도 다시 시도' }),
+    ).not.toBeInTheDocument()
+    expect(mocks.load).not.toHaveBeenCalled()
+  })
+
+  it('explains when the selected store has no map coordinates', async () => {
+    const { maps } = createMaps()
+    mocks.load.mockResolvedValue(maps)
+
+    render(
+      <KakaoMap
+        stores={[
+          stores[0],
+          { ...stores[1], coordinates: null },
+        ]}
+        selectedStoreId="store-2"
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(mocks.markerConstruct).toHaveBeenCalledOnce())
+    expect(
+      screen.getByText('선택한 매장은 지도에 표시할 수 없습니다.'),
+    ).toHaveAttribute('role', 'status')
+  })
+
   it('does not load the SDK when no valid coordinates exist', async () => {
     render(
       <KakaoMap
