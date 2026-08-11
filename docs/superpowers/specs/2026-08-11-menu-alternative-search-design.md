@@ -14,6 +14,7 @@
 - #112의 Reservation 일괄 가용성 계약을 사용한다.
 - #117의 저장·검증 매장 좌표와 #71의 bounding box 및 Haversine 구현을 사용한다.
 - #75 / PR #222의 MenuHold `findExistingOnlineAvailability` 계약을 사용한다.
+- #82 / PR #228의 최상위 `search`, `menu`, `store` 패키지와 도메인 공개 계약 경계를 따른다.
 - 구현 전에 최신 `dev`를 `mvp2`에 반영하고 위 공개 계약이 기준 브랜치에 실제로 존재하는지 검증한다.
 - 다른 도메인의 Entity 또는 Repository를 직접 참조하지 않는다.
 
@@ -107,9 +108,9 @@ Content-Type: application/json
 
 Controller는 요청 형식과 공개 응답 envelope만 소유한다. 후보 규칙, 거리, 예약 및 수량 판정을 계산하지 않는다. 공개 경로는 기존 Store 검색 보안 체인과 `PUBLIC_STORE_READ` rate-limit을 재사용한다.
 
-### AlternativeMenuQueryRepository
+### Search-owned MenuAlternativeCandidateQueryService
 
-Store 도메인 내부 QueryDSL projection으로 원본 메뉴와 후보를 읽는다. projection은 Store·Menu Entity를 외부에 노출하지 않고 다음 값만 제공한다.
+최상위 Search 도메인이 QueryDSL 기반 공개 읽기 모델로 원본 메뉴와 후보를 읽는다. Search 소유의 immutable Service·DTO 계약은 Store·Menu Entity·Repository·내부 model을 Recommendation에 노출하지 않고 다음 값만 제공한다.
 
 - 매장 ID·이름·검증 좌표·운영 상태·예약/메뉴홀드 모드
 - 메뉴 ID·이름·단가·주 카테고리·보조 카테고리
@@ -118,7 +119,9 @@ Store 도메인 내부 QueryDSL projection으로 원본 메뉴와 후보를 읽�
 
 같은 매장 조회와 bounding box 기반 다른 매장 조회를 분리한다. 다른 매장 후보 평가는 기존 `StoreSearchCandidateLimit`으로 제한한다.
 
-### MenuAlternativeEligibility
+Search 공개 계약은 Recommendation 구현보다 먼저 별도 contract-first PR로 검토한다. Recommendation은 이 Service·DTO가 선행 stacked base에 포함된 뒤에만 구현한다.
+
+### Recommendation-owned MenuAlternativeEligibility
 
 외부 의존성 없는 결정적 정책 객체다. 다음을 판정한다.
 
@@ -130,13 +133,13 @@ Store 도메인 내부 QueryDSL projection으로 원본 메뉴와 후보를 읽�
 
 제외 알레르기 조건이 하나라도 있으면 후보의 알레르기 정보가 `REGISTERED`여야 한다. 제외 코드가 `CONTAINS` 또는 `MAY_CONTAIN`이면 후보에서 제외한다. 정보 미등록 또는 위험을 배제할 수 없는 후보도 제외한다.
 
-### MenuAlternativeSearchService
+### Recommendation-owned MenuAlternativeSearchService
 
 오케스트레이션 순서는 고정한다.
 
-1. 원본 매장·메뉴 현재 게시 스냅샷을 조회한다.
+1. Search 공개 계약으로 원본 매장·메뉴 현재 게시 스냅샷을 조회한다.
 2. Reservation 공개 계약으로 원본 매장의 서비스 구간을 계산한다.
-3. 같은 매장 후보를 Store 정책으로 필터링한다.
+3. Search 공개 계약이 반환한 같은 매장 후보를 Recommendation 정책으로 필터링한다.
 4. MenuHold `findExistingOnlineAvailability`로 현재 버킷 존재와 요청 수량을 검증한다.
 5. 같은 매장 적격 후보가 하나라도 있으면 정렬·절단 후 즉시 반환한다.
 6. 원본 좌표가 없으면 `REGION_SELECTION_REQUIRED`를 반환한다.
