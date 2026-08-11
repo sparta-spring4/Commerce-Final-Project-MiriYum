@@ -4,6 +4,8 @@
 
 > **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`ConsumerAuthController`](../../backend/src/main/java/com/miriyum/domain/consumer/controller/ConsumerAuthController.java)·[`StoreSearchController`](../../backend/src/main/java/com/miriyum/domain/store/search/controller/StoreSearchController.java)·[`ReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/ReservationController.java)·[`MenuHoldAvailabilityController`](../../backend/src/main/java/com/miriyum/domain/menuhold/controller/MenuHoldAvailabilityController.java)·[`PickupReservationController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupReservationController.java)를 기준으로 한다.
 
+> **화면 경로 경계:** [`frontend/src/app/routes.ts`](../../frontend/src/app/routes.ts)가 전체 화면 경로의 단독 소유 파일이다. 현재 일반 사용자 경로는 매장 검색 `/`와 로그인 `/sign-in`이며, 공통 접근 거부 경로 `/forbidden`도 등록되어 있다. 아래의 다른 화면 이름은 흐름·화면 구조를 설명할 뿐 경로를 승인하지 않으며, 담당 화면 Issue가 `routes.ts`에 경로를 등록하기 전에는 URL·내비게이션·라우트 가드 대상을 추측하지 않는다.
+
 ## 문서 사용법
 
 이 문서는 저장소에 접근할 수 없는 디자인 AI에게 그대로 전달한다. 화면을 임의로 합치거나 기능을 생략하지 말고, 각 화면의 기본·로딩·빈 상태·오류·완료 상태를 함께 디자인한다. 사용자 화면에 `1차 MVP`, `2차 MVP`, `고도화`라는 개발 용어는 표시하지 않는다.
@@ -15,8 +17,8 @@
 반드시 포함할 공통 요소:
 
 - MiriYum 로고와 일반 사용자 서비스임을 알 수 있는 헤더
-- 데스크톱: 상단 내비게이션, 모바일: 하단 내비게이션
-- 핵심 메뉴: 매장 찾기, 내 예약, 마이페이지
+- 데스크톱: 상단 내비게이션, 모바일: 하단 내비게이션. 현재는 `routes.ts`에 등록된 매장 찾기만 실제 항목으로 노출한다.
+- 내 예약·마이페이지는 화면 구조상 핵심 메뉴 후보로 설계하되, 각 화면 Issue가 `routes.ts`와 테스트에 경로를 등록한 뒤에만 내비게이션 항목으로 활성화한다.
 - 로그인 전·후 헤더 변형
 - 로딩 스켈레톤, 결과 없음, 네트워크 오류, 재시도
 - 색상 외에 텍스트·아이콘·형태를 함께 사용한 상태 표시
@@ -237,7 +239,7 @@
 
 #### 화면 상태와 문구
 
-기본, 생성 중, 수용량 부족, 메뉴 부족, 중복 예약, 정책 변경, 연락처 등록 필요, 성공. 연락처 등록 필요 시 예약 draft를 보존하고 마이페이지의 최초 연락처 등록으로 이동한 뒤 원래 확인 화면으로 복귀한다.
+기본, 생성 중, 수용량 부족, 메뉴 부족, 중복 예약, 정책 변경, 연락처 등록 필요, 성공. 연락처 등록 필요 시 예약 draft를 보존하고 최초 연락처 등록 단계와 원래 확인 단계가 이어지는 흐름을 설계한다. 실제 마이페이지 이동·복귀는 담당 화면 Issue가 `routes.ts`와 테스트에 두 경로를 등록한 뒤에만 연결한다.
 
 #### 성공 후 이동
 
@@ -346,7 +348,7 @@
 - 닉네임 편집, 저장·취소
 - 휴대전화가 아직 없을 때만 노출하는 최초 연락처 등록 입력·저장과 `등록 후에는 변경할 수 없습니다.` 안내
 - 최근 변경 후 7일 제한 안내
-- 내 예약 이동. 픽업 내역은 목록 API가 승인되기 전까지 추가하지 않는다.
+- 내 예약 진입 요소는 해당 화면 Issue가 `routes.ts`와 테스트에 경로를 등록한 뒤에만 활성화한다. 픽업 내역은 목록 API가 승인되기 전까지 추가하지 않는다.
 
 #### 화면 상태와 문구
 

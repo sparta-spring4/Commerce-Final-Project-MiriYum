@@ -2,7 +2,9 @@
 
 > **문서 지위:** 이 문서는 프론트 작업을 위한 비정본 인계 자료다. 제품·정책·아키텍처·API 사실은 이 문서가 소유하지 않는다. 충돌하거나 구현 시점이 달라졌다면 [`AGENTS.md`](../../AGENTS.md), [`ai/document-routing.md`](../../ai/document-routing.md), [`docs/00-index.md`](../../docs/00-index.md), 활성 [`service-policies`](../../docs/service-policies/README.md), 도메인별 `spec.md`·`openapi.yaml`, 실제 Controller·테스트 순으로 다시 확인한다.
 
-> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`StoreOperatorAuthController`](../../backend/src/main/java/com/miriyum/domain/storeoperator/controller/StoreOperatorAuthController.java)·[`StoreController`](../../backend/src/main/java/com/miriyum/domain/store/core/controller/StoreController.java)·[`StoreScheduleController`](../../backend/src/main/java/com/miriyum/domain/store/schedule/controller/StoreScheduleController.java)·[`StoreReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/StoreReservationController.java)·[`PickupStoreManagementController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupStoreManagementController.java)를 기준으로 한다.
+> **직접 대조:** [`ownership.md`](../../docs/specs/mvp1-common/ownership.md), [`auth-account/openapi.yaml`](../../docs/specs/auth-account/openapi.yaml), [`store-search/openapi.yaml`](../../docs/specs/store-search/openapi.yaml), [`reservation/openapi.yaml`](../../docs/specs/reservation/openapi.yaml), [`menu-hold-pickup/openapi.yaml`](../../docs/specs/menu-hold-pickup/openapi.yaml), 실제 [`StoreOperatorAuthController`](../../backend/src/main/java/com/miriyum/domain/storeoperator/controller/StoreOperatorAuthController.java)·[`StoreOperatorAccountController`](../../backend/src/main/java/com/miriyum/domain/storeoperator/controller/StoreOperatorAccountController.java)·[`StoreController`](../../backend/src/main/java/com/miriyum/domain/store/core/controller/StoreController.java)·[`StoreScheduleController`](../../backend/src/main/java/com/miriyum/domain/store/schedule/controller/StoreScheduleController.java)·[`StoreReservationController`](../../backend/src/main/java/com/miriyum/domain/reservation/controller/StoreReservationController.java)·[`PickupStoreManagementController`](../../backend/src/main/java/com/miriyum/domain/pickup/controller/PickupStoreManagementController.java)를 기준으로 한다.
+
+> **화면 경로 경계:** [`frontend/src/app/routes.ts`](../../frontend/src/app/routes.ts)가 전체 화면 경로의 단독 소유 파일이다. 현재 식당 대표자 경로는 로그인 `/store-operator/sign-in`이며, 공통 접근 거부 경로 `/forbidden`도 등록되어 있다. 아래의 다른 화면 이름은 흐름·화면 구조를 설명할 뿐 `/partner/**` 등의 경로를 승인하지 않으며, 담당 화면 Issue가 `routes.ts`에 경로를 등록하기 전에는 URL·내비게이션·라우트 가드 대상을 추측하지 않는다.
 
 ## 문서 사용법과 공통 구조
 
@@ -50,8 +52,8 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 - 만료: `로그인 시간이 만료되었습니다. 다시 로그인해 주세요.`
 
 #### 로그인 성공 후 이동
-- 보호 화면에서 로그인으로 이동했다면 URL에 이미 알려진 `storeId`가 있는 원래 목적지로 복귀
-- 매장 등록 성공 직후라면 등록 응답의 `storeId`로 매장 관리 홈 이동
+- `routes.ts`와 테스트에 등록된 보호 화면에서 로그인으로 이동한 경우에만 URL에 이미 알려진 `storeId`가 있는 원래 목적지로 복귀
+- 매장 등록 성공 뒤 관리 홈 이동은 두 화면 Issue가 해당 경로와 테스트를 `routes.ts`에 등록한 이후에만 연결하고, 등록 전에는 목적 URL을 추측하지 않는다.
 - 현재 Controller·OpenAPI에 없는 것은 로그인한 운영자 소유 매장 목록 `GET /api/v1/store-operator/stores`다. 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하지 않되, URL이나 등록 응답으로 알려진 `storeId`가 있으면 `GET /api/v1/store-operator/stores/{storeId}` 단건 조회를 사용한다.
 - 고도화 입점 심사가 실제 활성화된 경우에만 미신청 → 입점 신청, 심사 중 → 신청 현황
 사용자가 로그인 화면에서 분기를 선택하지 않는다.
@@ -96,7 +98,7 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 등록 응답 또는 보호 화면의 알려진 `storeId`로 진입하는 1차 MVP 관리 기능의 진입점이다. 고도화 통계 대시보드와 구분한다. 현재 계약에 없는 운영 매장 목록 조회를 전제로 만들지 않는다.
 
 #### 반드시 포함할 요소
-매장명·운영 상태, 기본정보·운영시간·예약시간·메뉴·수용량·재고·예약·픽업 바로가기, 설정 미완료 안내, 최근 저장 실패 재시도.
+매장명·운영 상태, 설정 미완료 안내, 최근 저장 실패 재시도. 기본정보·운영시간·예약시간·메뉴·수용량·재고·예약·픽업 바로가기는 각 대상 화면 Issue가 `routes.ts`와 테스트에 경로를 등록한 항목만 노출한다.
 
 #### 화면 상태
 매장 없음, 정상 운영, 임시 휴무, 폐점, 일부 설정 없음, 조회 오류.
@@ -244,13 +246,13 @@ POS·식재료 재고, 플랫폼 보정, 메뉴 기본정보 수정.
 ### 14. 대표자 내 정보 화면
 
 #### 화면 목적
-대표자 계정 정보를 확인하고 표시 이름을 수정한다.
+대표자 계정 정보를 확인하고 표시 이름을 수정한다. 기존 계정의 휴대전화가 등록되지 않은 경우에만 신뢰 연락처를 최초 등록한다.
 #### 반드시 포함할 요소
-읽기 전용 이메일·휴대전화·계정 상태, 표시 이름 편집, 저장·취소, 로그아웃.
+읽기 전용 이메일·계정 상태, 표시 이름 편집, 저장·취소, 로그아웃. 휴대전화는 등록된 값이 있으면 읽기 전용으로 표시하고, 값이 없을 때만 휴대전화 입력·최초 등록 버튼과 `등록 후에는 변경할 수 없습니다.` 안내를 노출한다.
 #### 화면 상태
-조회·편집·검증 오류·저장·충돌·세션 만료.
+조회·편집·검증 오류·저장·충돌·세션 만료. 연락처 최초 등록은 입력 전·형식 오류·등록 중·등록 성공·다른 계정과 중복·이미 등록됨 상태를 구분하며, 성공 후 입력을 읽기 전용 표시로 바꾼다.
 #### 포함하지 않을 요소
-1차 MVP 비밀번호 찾기·변경, 직원, 탈퇴, 프로필 이미지.
+1차 MVP 비밀번호 찾기·변경, 등록된 휴대전화 변경, 직원, 탈퇴, 프로필 이미지.
 
 ---
 
