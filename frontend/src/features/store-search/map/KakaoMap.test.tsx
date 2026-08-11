@@ -479,6 +479,22 @@ describe('KakaoMap', () => {
     ).toHaveAttribute('role', 'status')
   })
 
+  it('explains the selected store when every store lacks map coordinates', async () => {
+    render(
+      <KakaoMap
+        stores={stores.map((store) => ({ ...store, coordinates: null }))}
+        selectedStoreId="store-2"
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(
+      screen.getByText('선택한 매장은 지도에 표시할 수 없습니다.'),
+    ).toBeVisible()
+    await act(async () => {})
+    expect(mocks.load).not.toHaveBeenCalled()
+  })
+
   it('does not load the SDK when no valid coordinates exist', async () => {
     render(
       <KakaoMap

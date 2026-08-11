@@ -32,6 +32,13 @@ export function KakaoMap({
   const invalidStoreCount = stores.length - validStores.length
   const hasValidStores = validStores.length > 0
   const appKey = import.meta.env.VITE_KAKAO_MAP_APP_KEY ?? ''
+  const selectedStore = validStores.find(
+    (store: MappableStore) => store.storeId === selectedStoreId,
+  )
+  const selectedStoreWithoutCoordinates = stores.some(
+    (store) =>
+      store.storeId === selectedStoreId && !hasValidCoordinates(store),
+  )
 
   storesRef.current = stores
   selectedStoreIdRef.current = selectedStoreId
@@ -163,7 +170,15 @@ export function KakaoMap({
   }
 
   if (!hasValidStores) {
-    return <MapFallback reason="표시할 수 있는 매장 좌표가 없습니다." />
+    return (
+      <MapFallback
+        reason={
+          selectedStoreWithoutCoordinates
+            ? '선택한 매장은 지도에 표시할 수 없습니다.'
+            : '표시할 수 있는 매장 좌표가 없습니다.'
+        }
+      />
+    )
   }
 
   if (appKey.trim() === '') {
@@ -187,14 +202,6 @@ export function KakaoMap({
       />
     )
   }
-
-  const selectedStore = validStores.find(
-    (store: MappableStore) => store.storeId === selectedStoreId,
-  )
-  const selectedStoreWithoutCoordinates = stores.some(
-    (store) =>
-      store.storeId === selectedStoreId && !hasValidCoordinates(store),
-  )
 
   return (
     <section aria-label="매장 지도">
