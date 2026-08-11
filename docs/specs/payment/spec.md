@@ -53,12 +53,12 @@ PortOne  → Payment Webhook HTTP
 
 | 식별자 | 채번·소유자 | 관계와 공개 규칙 |
 | --- | --- | --- |
-| `paymentId` | MiriYum Payment | 외부 문자열 결제 참조이며 본인 조회와 Payment HTTP path에 사용한다. 내부 DB PK는 공개하지 않는다. |
+| `paymentId` | MiriYum Payment | 내부 DB PK와 별도로 채번한 공개 전용 양수 숫자 문자열 참조이며 본인 조회와 Payment HTTP path에 사용한다. 클라이언트는 불투명 값으로 취급한다. |
 | `paymentOrderId` | MiriYum Payment | 내부 주문 식별자다. 하나의 `paymentId`와 일대일이며 외부 응답에 노출하지 않는다. |
 | `portOnePaymentId` | MiriYum Payment | `paymentOrderId`에서 결정적으로 파생한 고객사 채번 PortOne 식별자다. 준비 응답과 확정 요청의 조회 선택자로만 사용한다. |
 | `transactionId` | PortOne | 한 `portOnePaymentId` 아래 시도별로 달라질 수 있다. 인증된 서버 조회 또는 검증된 Webhook에서 얻은 값만 저장한다. |
 | `sourceReferenceId` | Reservation | Payment가 해석하지 않는 예약 선점·거래 연결 참조다. 공개 이력에서는 `reservationReferenceId`로만 반환한다. |
-| `refundId` | MiriYum Payment | 환불 명령과 원장을 식별하는 외부 문자열 참조다. 내부 DB PK는 공개하지 않는다. |
+| `refundId` | MiriYum Payment | 내부 DB PK와 별도로 채번한 공개 전용 환불 양수 숫자 문자열 참조이며 환불 명령과 원장을 식별한다. 클라이언트는 불투명 값으로 취급한다. |
 
 브라우저가 보낸 성공 여부, 금액, 통화, `transactionId`, 환불 완료 주장은 모두 신뢰하지 않는다. 확정 요청은 path의 MiriYum `paymentId`와 본문의 준비된 `portOnePaymentId`만 전달하며, 서버는 인증 principal의 소유권과 원장 매핑을 확인한 뒤 PortOne V2 API를 조회한다.
 
@@ -118,20 +118,20 @@ PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query)
 
 ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + consumerAccountId`로 한 번에 조회하고 실제 부재와 타인 소유를 같은 `PAYMENT_001` 404로 숨긴다.
 
-이력은 `createdAt DESC, paymentId DESC`의 안정 정렬과 불투명 cursor를 사용한다. 기본 `limit`은 20, 최대는 100이다. cursor에는 정렬 경계와 필터 지문을 위변조 방지 형식으로 담고 원문 ID 목록이나 개인정보를 넣지 않는다. 잘못됐거나 다른 필터에 재사용한 cursor는 `PAYMENT_005` 400으로 거부한다.
+이력은 `createdAt DESC, paymentId DESC`의 안정 정렬과 불투명 cursor를 사용한다. 페이지 크기는 공통 `Size` query parameter의 `size`를 재사용하며 기본 20, 최대 100이다. cursor와 결제 전용 slice는 현재 Payment만 소비하므로 도메인 계약에 유지하고, 두 번째 소비 도메인이 생기기 전에는 공통 계약으로 승격하지 않는다. cursor에는 정렬 경계와 필터 지문을 위변조 방지 형식으로 담고 원문 ID 목록이나 개인정보를 넣지 않는다. 잘못됐거나 다른 필터에 재사용한 cursor는 `PAYMENT_005` 400으로 거부한다.
 
 ## 공개 HTTP 계약
 
 | 사용자 목적 | API | 인증·멱등 |
 | --- | --- | --- |
-| 결제 확정 요청 | `POST /api/v1/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
-| 본인 결제 상세 | `GET /api/v1/payments/{paymentId}` | Consumer Access JWT |
-| 본인 결제·환불 이력 | `GET /api/v1/payments` | Consumer Access JWT, cursor pagination |
+| 결제 확정 요청 | `POST /api/v1/consumers/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
+| 본인 결제 상세 | `GET /api/v1/consumers/payments/{paymentId}` | Consumer Access JWT |
+| 본인 결제·환불 이력 | `GET /api/v1/consumers/payments` | Consumer Access JWT, cursor pagination |
 | PortOne Webhook | `POST /api/v1/payments/webhooks/portone` | Access JWT 없음, Webhook signature·원문 body 검증 |
 
 확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.
 
-Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 필드 `type`, `timestamp`, `data.storeId`를 먼저 검증하고, 지원하는 결제·환불 type에서 `data.paymentId`, `data.transactionId`와 조건부 `data.cancellationId`를 필수 상관관계·중복 제거 입력으로 사용한다. 서명은 유효하지만 지원하지 않는 type은 거래를 변경하지 않고 성공적으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
+Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 필드 `type`, `timestamp`, `data.storeId`를 먼저 검증한다. 현재 처리 allowlist는 결제 상태용 `Transaction.Paid`, `Transaction.Failed`, `Transaction.PayPending`과 취소·환불 상태용 `Transaction.PartialCancelled`, `Transaction.Cancelled`, `Transaction.CancelPending`이다. 결제 type은 `data.paymentId`, `data.transactionId`를 필수로 요구하고 취소·환불 type은 `data.cancellationId`도 필수로 요구한다. 지원 type에서 필수 식별자가 누락되면 `COMMON_001` 400으로 거부하고 원장을 변경하지 않는다. 서명이 유효하지만 allowlist 밖의 알려진 또는 미래 type은 추가 필드를 허용한 채 거래를 변경하지 않고 200으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
 
 ## 상태와 전이
 
@@ -202,7 +202,7 @@ PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환
 - Service 단위 계약: 준비 지문, 소유권, 금액·통화, 상태 전이와 환불 잔액
 - MockMvc 계약: 확정 요청 최소 body, 본인 존재 은닉, cursor 경계, 202 대사 응답, secret 비노출
 - MySQL 통합 계약: 중복 준비·확정·Webhook·환불, 상태 버전 경합, 원장 추가 전용성과 재시작 복구
-- PortOne adapter 계약: `paymentId` 조회, `PAID` 검증, 실패·대기·timeout 분리, 최신 Webhook 서명 검증
+- PortOne adapter 계약: `paymentId` 조회, `PAID` 검증, 실패·대기·timeout 분리, 최신 Webhook 서명 검증, 지원 type별 필수 식별자와 미지원 type 200 무시
 - sandbox 검증은 자격 증명과 도달 가능한 Webhook 환경이 구성된 경우에만 별도 증거로 기록하며 unit·mock 성공을 sandbox 성공으로 표현하지 않는다.
 
 ## 인수 조건

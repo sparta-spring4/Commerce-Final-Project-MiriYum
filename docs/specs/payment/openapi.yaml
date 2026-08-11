@@ -18,7 +18,7 @@ tags:
   - name: Payment Webhook
     description: PortOne V2가 호출하는 서명 검증 Webhook
 paths:
-  /api/v1/payments:
+  /api/v1/consumers/payments:
     get:
       tags: [Payment]
       summary: 본인 결제·환불 이력 조회
@@ -34,15 +34,7 @@ paths:
             type: string
             minLength: 1
             maxLength: 2048
-        - name: limit
-          in: query
-          required: false
-          description: 페이지 크기
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
         - name: status
           in: query
           required: false
@@ -68,7 +60,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/payments/{paymentId}:
+  /api/v1/consumers/payments/{paymentId}:
     get:
       tags: [Payment]
       summary: 본인 결제 상세 조회
@@ -84,6 +76,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
@@ -96,7 +90,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/payments/{paymentId}/confirmations:
+  /api/v1/consumers/payments/{paymentId}/confirmations:
     post:
       tags: [Payment]
       summary: PortOne 서버 조회 기반 결제 확정
@@ -152,6 +146,8 @@ paths:
       description: |
         2024-04-25 body와 Standard Webhooks 서명을 raw body 기준으로 검증한다.
         유효한 사건도 성공 근거로 바로 사용하지 않고 알려진 paymentId를 PortOne V2 API에서 다시 조회한다.
+        Paid·Failed·PayPending과 PartialCancelled·Cancelled·CancelPending만 처리하며 지원 type의 필수 식별자 누락은 400으로 거부한다.
+        allowlist 밖의 알려진 또는 미래 type은 서명 검증 후 거래를 변경하지 않고 200으로 무시한다.
       operationId: receivePortOnePaymentWebhook
       parameters:
         - $ref: "#/components/parameters/WebhookId"
@@ -197,7 +193,7 @@ components:
       required: true
       description: MiriYum이 공개한 내부 결제 참조
       schema:
-        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        $ref: "#/components/schemas/PaymentId"
     WebhookId:
       name: webhook-id
       in: header
@@ -226,6 +222,16 @@ components:
         minLength: 1
         maxLength: 2048
   schemas:
+    PaymentId:
+      type: string
+      pattern: "^[1-9][0-9]*$"
+      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 양수 숫자 문자열 참조. 클라이언트는 불투명 값으로 취급한다.
+      example: "900000000000000001"
+    RefundId:
+      type: string
+      pattern: "^[1-9][0-9]*$"
+      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 환불 양수 숫자 문자열 참조. 클라이언트는 불투명 값으로 취급한다.
+      example: "910000000000000001"
     PortOnePaymentId:
       type: string
       minLength: 6
@@ -289,7 +295,7 @@ components:
         - completedAt
       properties:
         refundId:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+          $ref: "#/components/schemas/RefundId"
         amountMinor:
           $ref: "#/components/schemas/MoneyMinor"
         currency:
@@ -320,7 +326,7 @@ components:
         - refunds
       properties:
         paymentId:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+          $ref: "#/components/schemas/PaymentId"
         reservationReferenceId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         amountMinor:
@@ -366,10 +372,34 @@ components:
           maxLength: 2048
         hasNext:
           type: boolean
-    PortOneWebhookData:
+    PortOneIgnoredWebhookData:
       type: object
       additionalProperties: true
       required: [storeId]
+      properties:
+        storeId:
+          type: string
+          minLength: 1
+          maxLength: 255
+    PortOneSupportedPaymentWebhookData:
+      type: object
+      additionalProperties: true
+      required: [storeId, paymentId, transactionId]
+      properties:
+        storeId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        paymentId:
+          $ref: "#/components/schemas/PortOnePaymentId"
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 255
+    PortOneSupportedCancellationWebhookData:
+      type: object
+      additionalProperties: true
+      required: [storeId, paymentId, transactionId, cancellationId]
       properties:
         storeId:
           type: string
@@ -385,7 +415,39 @@ components:
           type: string
           minLength: 1
           maxLength: 255
-    PortOneWebhookRequest:
+    PortOneSupportedPaymentWebhookRequest:
+      type: object
+      additionalProperties: true
+      required: [type, timestamp, data]
+      properties:
+        type:
+          type: string
+          enum:
+            - Transaction.Paid
+            - Transaction.Failed
+            - Transaction.PayPending
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          $ref: "#/components/schemas/PortOneSupportedPaymentWebhookData"
+    PortOneSupportedCancellationWebhookRequest:
+      type: object
+      additionalProperties: true
+      required: [type, timestamp, data]
+      properties:
+        type:
+          type: string
+          enum:
+            - Transaction.PartialCancelled
+            - Transaction.Cancelled
+            - Transaction.CancelPending
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          $ref: "#/components/schemas/PortOneSupportedCancellationWebhookData"
+    PortOneIgnoredWebhookRequest:
       type: object
       additionalProperties: true
       required: [type, timestamp, data]
@@ -394,12 +456,25 @@ components:
           type: string
           minLength: 1
           maxLength: 255
-          description: PortOne V2 Webhook 사건 유형
+          not:
+            enum:
+              - Transaction.Paid
+              - Transaction.Failed
+              - Transaction.PayPending
+              - Transaction.PartialCancelled
+              - Transaction.Cancelled
+              - Transaction.CancelPending
+          description: 현재 Payment 처리 allowlist 밖의 알려진 또는 미래 type. 서명 검증 후 거래를 변경하지 않고 200으로 무시한다.
         timestamp:
           type: string
           format: date-time
         data:
-          $ref: "#/components/schemas/PortOneWebhookData"
+          $ref: "#/components/schemas/PortOneIgnoredWebhookData"
+    PortOneWebhookRequest:
+      oneOf:
+        - $ref: "#/components/schemas/PortOneSupportedPaymentWebhookRequest"
+        - $ref: "#/components/schemas/PortOneSupportedCancellationWebhookRequest"
+        - $ref: "#/components/schemas/PortOneIgnoredWebhookRequest"
     PaymentSuccessResponse:
       type: object
       additionalProperties: false
@@ -485,7 +560,7 @@ components:
                 code: COMMON_007
                 message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
     PaymentHistoryBadRequest:
-      description: limit·status 입력값 또는 이력 cursor가 올바르지 않음
+      description: size·status 입력값 또는 이력 cursor가 올바르지 않음
       content:
         application/json:
           schema:
@@ -496,7 +571,7 @@ components:
                 code: COMMON_001
                 message: 입력값이 올바르지 않습니다.
                 details:
-                  - field: limit
+                  - field: size
                     reason: 1 이상 100 이하여야 합니다.
             invalidCursor:
               value:

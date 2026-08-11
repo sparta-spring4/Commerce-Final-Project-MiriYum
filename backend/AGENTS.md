@@ -7,7 +7,7 @@ backend 작업 전에는 [`backend/ai/document-routing.md`](ai/document-routing.
 - 관련 없는 사용자 변경 사항을 보존하고, 수정·stage·commit은 승인된 작업 허용 목록 안에서만 수행한다.
 - 승인된 요구사항과 활성화 증거 없이 제품 엔드포인트, 빈 도메인 패키지, 인프라, 자격 증명, 연기된 도구를 추가하지 않는다.
 - 저장소의 결과 어휘를 사용하여 실제로 실행한 명령과 실제로 관찰한 결과만 보고한다.
-- 도메인은 `auth`, `store`, `reservation`, `menuhold`, `pickup`, `payment`로 한정하고 `booking`, `account`, `application` wrapper package를 만들지 않는다.
+- 활성 도메인 package 목록은 [`backend/ai/implementation-guardrails.md`](ai/implementation-guardrails.md)의 package tree를 정본으로 사용하고, `booking`, `account`, `application` wrapper package를 만들지 않는다.
 - 다른 도메인은 소유자의 공개 Service 메서드와 DTO로만 사용하며 Entity·Repository를 직접 참조하지 않는다.
 - 선행 계약이 없으면 가짜 구현을 만들지 않고 `BLOCKED`로 보고한다.
 
