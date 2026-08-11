@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { kakaoMapLoader } from './KakaoMapLoader'
 import { MapFallback } from './MapFallback'
 import { StoreMapMarker } from './StoreMapMarker'
-import type { KakaoMapProps, MapStore } from './map.types'
+import type { KakaoMapProps, MappableStore } from './map.types'
 import { hasValidCoordinates } from './map.types'
 
 type MapRuntime = {
@@ -39,10 +39,14 @@ export function KakaoMap({
 
   useEffect(() => {
     if (!hasValidStores || containerRef.current === null) {
+      setRuntime(null)
+      setLoadError(false)
       return
     }
 
     let active = true
+    setRuntime(null)
+    setLoadError(false)
 
     void kakaoMapLoader
       .load(appKey)
@@ -64,8 +68,8 @@ export function KakaoMap({
         const container = containerRef.current
         const map = new maps.Map(container, {
           center: new maps.LatLng(
-            centerStore.latitude,
-            centerStore.longitude,
+            centerStore.coordinates.latitude,
+            centerStore.coordinates.longitude,
           ),
         })
         setRuntime({ maps, map, container })
@@ -125,8 +129,8 @@ export function KakaoMap({
     if (selectedStore !== undefined) {
       runtime.map.setCenter(
         new runtime.maps.LatLng(
-          selectedStore.latitude,
-          selectedStore.longitude,
+          selectedStore.coordinates.latitude,
+          selectedStore.coordinates.longitude,
         ),
       )
     }
@@ -176,7 +180,7 @@ export function KakaoMap({
   }
 
   const selectedStore = validStores.find(
-    (store: MapStore) => store.storeId === selectedStoreId,
+    (store: MappableStore) => store.storeId === selectedStoreId,
   )
 
   return (

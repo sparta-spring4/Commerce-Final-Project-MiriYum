@@ -4,6 +4,7 @@ const SDK_LOAD_TIMEOUT_MS = 10_000
 
 export class KakaoMapLoader {
   private loadPromise: Promise<KakaoMapsNamespace> | null = null
+  private activeAttempt: object | null = null
 
   load(appKey: string): Promise<KakaoMapsNamespace> {
     if (appKey.trim() === '') {
@@ -16,9 +17,12 @@ export class KakaoMapLoader {
       return this.loadPromise
     }
 
+    const attempt = {}
+    this.activeAttempt = attempt
     this.loadPromise = new Promise<KakaoMapsNamespace>((resolve, reject) => {
       let script: HTMLScriptElement | null = null
       let timeoutId: ReturnType<typeof setTimeout> | null = null
+      let settled = false
 
       const clearLoadTimeout = () => {
         if (timeoutId !== null) {
@@ -26,9 +30,20 @@ export class KakaoMapLoader {
         }
       }
 
+      const removeScriptListeners = () => {
+        script?.removeEventListener('load', resolveLoadedMaps)
+        script?.removeEventListener('error', handleScriptError)
+      }
+
       const rejectLoad = (error: Error) => {
+        if (settled || this.activeAttempt !== attempt) {
+          return
+        }
+        settled = true
         clearLoadTimeout()
+        removeScriptListeners()
         script?.remove()
+        this.activeAttempt = null
         this.loadPromise = null
         reject(error)
       }
@@ -41,10 +56,19 @@ export class KakaoMapLoader {
         }
 
         maps.load(() => {
+          if (settled || this.activeAttempt !== attempt) {
+            return
+          }
+          settled = true
           clearLoadTimeout()
+          removeScriptListeners()
+          this.activeAttempt = null
           resolve(maps)
         })
       }
+
+      const handleScriptError = () =>
+        rejectLoad(new Error('Kakao 지도 SDK를 불러오지 못했습니다.'))
 
       timeoutId = setTimeout(
         () =>
@@ -64,11 +88,7 @@ export class KakaoMapLoader {
       script.async = true
       script.src = `${KAKAO_MAP_SDK_URL}?appkey=${encodeURIComponent(appKey)}&autoload=false`
       script.addEventListener('load', resolveLoadedMaps, { once: true })
-      script.addEventListener(
-        'error',
-        () => rejectLoad(new Error('Kakao 지도 SDK를 불러오지 못했습니다.')),
-        { once: true },
-      )
+      script.addEventListener('error', handleScriptError, { once: true })
       document.head.append(script)
     })
 

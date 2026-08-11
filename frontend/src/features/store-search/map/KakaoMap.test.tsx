@@ -64,16 +64,24 @@ const stores: MapStore[] = [
   {
     storeId: 'store-1',
     name: '미리냠 강남점',
-    latitude: 37.4979,
-    longitude: 127.0276,
+    coordinates: { latitude: 37.4979, longitude: 127.0276 },
   },
   {
     storeId: 'store-2',
     name: '미리냠 역삼점',
-    latitude: 37.5007,
-    longitude: 127.0365,
+    coordinates: { latitude: 37.5007, longitude: 127.0365 },
   },
 ]
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
 
 function createMaps() {
   const setCenter = vi.fn()
@@ -122,7 +130,11 @@ describe('KakaoMap', () => {
       <KakaoMap
         stores={[
           ...stores,
-          { ...stores[0], storeId: 'invalid', latitude: Number.NaN },
+          {
+            ...stores[0],
+            storeId: 'invalid',
+            coordinates: { latitude: Number.NaN, longitude: 127.0276 },
+          },
         ]}
         selectedStoreId="store-2"
         onSelectStore={onSelectStore}
@@ -275,7 +287,10 @@ describe('KakaoMap', () => {
 
     rerender(
       <KakaoMap
-        stores={stores.map((store) => ({ ...store, latitude: 91 }))}
+        stores={stores.map((store) => ({
+          ...store,
+          coordinates: { latitude: 91, longitude: 127 },
+        }))}
         selectedStoreId={null}
         onSelectStore={vi.fn()}
       />,
@@ -295,6 +310,101 @@ describe('KakaoMap', () => {
     const secondMap = Map.mock.results[1]?.value
     expect(mocks.markerConstruct.mock.calls[2]?.[1]).toBe(secondMap)
     expect(mocks.markerConstruct.mock.calls[3]?.[1]).toBe(secondMap)
+  })
+
+  it('returns to loading when valid coordinates come back after a map existed', async () => {
+    const firstMaps = createMaps()
+    const retryMaps = createMaps()
+    const retry = deferred<KakaoMapsNamespace>()
+    mocks.load
+      .mockResolvedValueOnce(firstMaps.maps)
+      .mockReturnValueOnce(retry.promise)
+    const { rerender } = render(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(firstMaps.Map).toHaveBeenCalledOnce())
+
+    rerender(
+      <KakaoMap
+        stores={stores.map((store) => ({
+          ...store,
+          coordinates: { latitude: 91, longitude: 127 },
+        }))}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    rerender(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '지도를 불러오는 중입니다.',
+    )
+
+    retry.resolve(retryMaps.maps)
+    await waitFor(() => expect(retryMaps.Map).toHaveBeenCalledOnce())
+  })
+
+  it('clears a previous SDK error when valid coordinates return', async () => {
+    const { maps, Map } = createMaps()
+    mocks.load
+      .mockRejectedValueOnce(new Error('SDK failure'))
+      .mockResolvedValueOnce(maps)
+    const { rerender } = render(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    expect(
+      await screen.findByText('지도를 불러오지 못했습니다.'),
+    ).toBeVisible()
+
+    rerender(
+      <KakaoMap
+        stores={[{ ...stores[0], coordinates: null }]}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('표시할 수 있는 매장 좌표가 없습니다.')).toBeVisible()
+
+    rerender(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(Map).toHaveBeenCalledOnce())
+    expect(
+      screen.queryByText('지도를 불러오지 못했습니다.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('treats an OpenAPI null coordinate pair as unavailable', async () => {
+    render(
+      <KakaoMap
+        stores={[{ ...stores[0], coordinates: null }]}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('표시할 수 있는 매장 좌표가 없습니다.')).toBeVisible()
+    await act(async () => {})
+    expect(mocks.load).not.toHaveBeenCalled()
   })
 
   it('shows a list-preserving fallback when the SDK fails', async () => {
@@ -327,7 +437,12 @@ describe('KakaoMap', () => {
   it('does not load the SDK when no valid coordinates exist', async () => {
     render(
       <KakaoMap
-        stores={[{ ...stores[0], latitude: 91 }]}
+        stores={[
+          {
+            ...stores[0],
+            coordinates: { latitude: 91, longitude: 127 },
+          },
+        ]}
         selectedStoreId={null}
         onSelectStore={vi.fn()}
       />,

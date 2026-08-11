@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { describe, expect, it, vi } from 'vitest'
 
 import { StoreMapMarker } from './StoreMapMarker'
-import type { MapStore } from './map.types'
+import type { MappableStore } from './map.types'
 
 class FakeLatLng {
   constructor(
@@ -40,12 +40,11 @@ class FakeCustomOverlay {
   ) {}
 }
 
-function store(overrides: Partial<MapStore> = {}): MapStore {
+function store(overrides: Partial<MappableStore> = {}): MappableStore {
   return {
     storeId: 'store-1',
     name: '미리냠 성수점',
-    latitude: 37.5445,
-    longitude: 127.056,
+    coordinates: { latitude: 37.5445, longitude: 127.056 },
     ...overrides,
   }
 }
@@ -93,7 +92,10 @@ describe('StoreMapMarker', () => {
     expect(onSelect).toHaveBeenCalledWith('store-1')
 
     marker.update(
-      store({ name: '미리냠 새 지점', latitude: 35.1796, longitude: 129.0756 }),
+      store({
+        name: '미리냠 새 지점',
+        coordinates: { latitude: 35.1796, longitude: 129.0756 },
+      }),
     )
     expect(instance?.setPosition).toHaveBeenCalledWith(
       expect.objectContaining({ latitude: 35.1796, longitude: 129.0756 }),
