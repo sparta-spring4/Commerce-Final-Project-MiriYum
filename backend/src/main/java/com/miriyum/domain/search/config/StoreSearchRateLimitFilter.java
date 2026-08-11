@@ -28,6 +28,8 @@ public class StoreSearchRateLimitFilter extends OncePerRequestFilter {
     private static final Pattern STORE_MENUS = Pattern.compile("^/api/v1/stores/[^/]+/menus$");
     private static final Pattern MENU_HOLD_AVAILABILITY =
             Pattern.compile("^/api/v1/stores/[^/]+/menu-hold-availability$");
+    private static final Pattern MENU_ALTERNATIVE_SEARCH = Pattern.compile(
+            "^/api/v1/stores/[^/]+/menus/[^/]+/alternatives/search$");
 
     private final RateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
@@ -39,14 +41,15 @@ public class StoreSearchRateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        if (!HttpMethod.GET.matches(request.getMethod())) {
-            return true;
-        }
         String requestUri = request.getRequestURI();
-        return !STORE_LIST.matcher(requestUri).matches()
-                && !STORE_DETAIL.matcher(requestUri).matches()
-                && !STORE_MENUS.matcher(requestUri).matches()
-                && !MENU_HOLD_AVAILABILITY.matcher(requestUri).matches();
+        boolean publicGet = HttpMethod.GET.matches(request.getMethod())
+                && (STORE_LIST.matcher(requestUri).matches()
+                || STORE_DETAIL.matcher(requestUri).matches()
+                || STORE_MENUS.matcher(requestUri).matches()
+                || MENU_HOLD_AVAILABILITY.matcher(requestUri).matches());
+        boolean alternativePost = HttpMethod.POST.matches(request.getMethod())
+                && MENU_ALTERNATIVE_SEARCH.matcher(requestUri).matches();
+        return !publicGet && !alternativePost;
     }
 
     @Override

@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -55,6 +56,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
             "spring.task.scheduling.enabled=false"
         })
 class StoreGeocodingTransactionIT {
+
+    private static final AtomicInteger PHONE_SEQUENCE = new AtomicInteger();
 
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
@@ -238,7 +241,8 @@ class StoreGeocodingTransactionIT {
                         email,
                         "Password123!",
                         "Password123!",
-                        "010-1000-0003",
+                        String.format(
+                                "010-2000-%04d", PHONE_SEQUENCE.incrementAndGet()),
                         "지오코딩 운영자")).accountId());
     }
 

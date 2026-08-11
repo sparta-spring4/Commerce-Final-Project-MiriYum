@@ -189,6 +189,37 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search:
+    post:
+      tags: [Store Search]
+      summary: 품절 메뉴 대안 검색
+      operationId: searchMenuAlternatives
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "#/components/parameters/MenuId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuAlternativeSearchRequest"
+      responses:
+        "200":
+          description: 같은 매장 우선 메뉴 대안 검색 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuAlternativeSearchSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/MenuNotFound"
+        "409":
+          $ref: "../reservation/openapi.yaml#/components/responses/ReservationConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-categories:
     get:
       tags: [Catalog]
@@ -972,6 +1003,127 @@ components:
       schema:
         $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
   schemas:
+    MenuAlternativeMode:
+      type: string
+      enum: [SAME_STORE, NEARBY_STORE, NO_ALTERNATIVE, REGION_SELECTION_REQUIRED]
+    AlternativeReasonCode:
+      type: string
+      enum: [SAME_PRIMARY_CATEGORY, PRICE_WITHIN_20_PERCENT, SECONDARY_CATEGORY_MATCH, ALLERGEN_FILTER_PASSED, IN_STOCK]
+    AllergenIngredientCode:
+      type: string
+      enum: [EGG, MILK, BUCKWHEAT, PEANUT, SOYBEAN, WHEAT, MACKEREL, CRAB, SHRIMP, PORK, PEACH, TOMATO, SULFITES, WALNUT, CHICKEN, BEEF, SQUID, SHELLFISH, PINE_NUT]
+    MenuAlternativeSearchRequest:
+      type: object
+      additionalProperties: false
+      required: [quantity, serviceDate, startTime, partySize]
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+        serviceDate:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/LocalDate"
+        startTime:
+          type: string
+          pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+        startOffset:
+          type: string
+          pattern: "^(?:[+-](?:0\\d|1[0-7]):[0-5]\\d|[+-]18:00)$"
+        partySize:
+          type: integer
+          minimum: 1
+          maximum: 100
+        includesInfants:
+          type: boolean
+          default: false
+        excludedAllergenCodes:
+          type: array
+          uniqueItems: true
+          default: []
+          items:
+            $ref: "#/components/schemas/AllergenIngredientCode"
+        size:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 10
+    MenuAlternativeCoordinates:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
+    MenuAlternativeItem:
+      type: object
+      additionalProperties: false
+      required: [storeId, storeName, menuId, menuName, unitPrice, availableOnlineQuantity, secondaryCategoryMatchCount, distanceMeters, coordinates, reasonCodes]
+      properties:
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeName:
+          type: string
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        menuName:
+          type: string
+        unitPrice:
+          type: integer
+          minimum: 0
+        availableOnlineQuantity:
+          type: integer
+          minimum: 0
+        secondaryCategoryMatchCount:
+          type: integer
+          minimum: 0
+        distanceMeters:
+          type: [number, "null"]
+        coordinates:
+          oneOf:
+            - $ref: "#/components/schemas/MenuAlternativeCoordinates"
+            - type: "null"
+        reasonCodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlternativeReasonCode"
+    MenuAlternativeSearchData:
+      type: object
+      additionalProperties: false
+      required: [sourceStoreId, sourceMenuId, quantity, startAt, serviceEndAt, timeZoneId, mode, items]
+      properties:
+        sourceStoreId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        sourceMenuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        quantity:
+          type: integer
+          minimum: 1
+        startAt:
+          type: string
+          format: date-time
+        serviceEndAt:
+          type: string
+          format: date-time
+        timeZoneId:
+          type: string
+        mode:
+          $ref: "#/components/schemas/MenuAlternativeMode"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuAlternativeItem"
+    MenuAlternativeSearchSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/MenuAlternativeSearchData"
     Region:
       type: string
       enum: [SEOUL, BUSAN, DAEGU, DAEJEON, GWANGJU]

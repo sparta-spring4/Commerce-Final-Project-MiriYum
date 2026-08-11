@@ -14,6 +14,8 @@ class StoreSearchOpenApiContractTest {
 
     private static final String TOO_MANY_REQUESTS_RESPONSE =
             "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests";
+    private static final String RESERVATION_CONFLICT_RESPONSE =
+            "../reservation/openapi.yaml#/components/responses/ReservationConflict";
 
     @Test
     void publicRoutesParametersAndResponseFieldsMatchRuntimeContract() throws Exception {
@@ -26,7 +28,17 @@ class StoreSearchOpenApiContractTest {
         assertThat(paths).containsKeys(
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
-                "/api/v1/stores/{storeId}/menus");
+                "/api/v1/stores/{storeId}/menus",
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search");
+        Map<String, Object> alternativePath = map(paths.get(
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search"));
+        assertThat(alternativePath).containsOnlyKeys("post");
+        Map<String, Object> alternativePost = map(alternativePath.get("post"));
+        assertThat(map(map(map(alternativePost.get("requestBody")).get("content"))
+                .get("application/json"))).containsEntry("schema",
+                Map.of("$ref", "#/components/schemas/MenuAlternativeSearchRequest"));
+        assertThat((String) map(map(alternativePost.get("responses")).get("409")).get("$ref"))
+                .isEqualTo(RESERVATION_CONFLICT_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}", "429"))
@@ -74,6 +86,11 @@ class StoreSearchOpenApiContractTest {
                 .contains("serviceDate", "startTime", "partySize", "includesInfants");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        assertThat(list(map(schemas.get("MenuAlternativeMode")).get("enum")))
+                .containsExactly("SAME_STORE", "NEARBY_STORE", "NO_ALTERNATIVE",
+                        "REGION_SELECTION_REQUIRED");
+        assertThat(list(map(schemas.get("MenuAlternativeSearchRequest")).get("required")))
+                .containsExactlyInAnyOrder("quantity", "serviceDate", "startTime", "partySize");
         assertThat(list(map(schemas.get("StoreSummary")).get("required")))
                 .containsExactlyInAnyOrder(
                         "storeId", "name", "region", "address", "storeCategoryCode",
