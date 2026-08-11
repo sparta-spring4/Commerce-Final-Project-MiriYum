@@ -2,10 +2,9 @@ package com.miriyum.domain.reservation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
-import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
-import com.miriyum.domain.menuhold.service.MenuHoldService;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.store.service.StoreService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -19,17 +18,17 @@ import org.junit.jupiter.api.Test;
 class ReservationProductionDependencyTest {
 
     @Test
-    void fulfillmentConsumesOnlyApprovedStoreAndMenuHoldServiceSignatures()
+    void fulfillmentConsumesOnlyApprovedStoreAndReservationMenuHoldPortSignatures()
             throws NoSuchMethodException {
         assertThat(StoreService.class.getMethod(
                 "requireManagementOwnership", long.class, long.class).getReturnType())
                 .isEqualTo(void.class);
-        assertThat(MenuHoldService.class.getMethod(
+        assertThat(ReservationMenuHoldPort.class.getMethod(
                 "lockForTermination", long.class).getReturnType())
-                .isEqualTo(MenuHoldTerminationPresence.class);
-        assertThat(MenuHoldService.class.getMethod(
-                "fulfill", MenuHoldFulfillCommand.class).getReturnType())
-                .isEqualTo(MenuHoldCommandResult.class);
+                .isEqualTo(ReservationMenuHoldTerminationPresence.class);
+        assertThat(ReservationMenuHoldPort.class.getMethod(
+                "fulfill", long.class, String.class).getReturnType())
+                .isEqualTo(ReservationMenuHoldResult.class);
     }
 
     @Test

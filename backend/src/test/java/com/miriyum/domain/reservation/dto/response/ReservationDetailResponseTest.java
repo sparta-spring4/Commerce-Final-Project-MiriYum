@@ -3,7 +3,7 @@ package com.miriyum.domain.reservation.dto.response;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
@@ -30,9 +30,9 @@ class ReservationDetailResponseTest {
     void mapsResolvedReservationAndMenuSnapshotsInServiceOrder() {
         // given
         Reservation reservation = resolvedReservation();
-        List<MenuHoldItemResult> snapshots = List.of(
-                new MenuHoldItemResult(91L, "아메리카노", 4_500L, 2),
-                new MenuHoldItemResult(92L, "바스크 치즈케이크", 7_000L, 1)
+        List<ReservationMenuHoldItemSnapshot> snapshots = List.of(
+                new ReservationMenuHoldItemSnapshot(91L, "아메리카노", 4_500L, 2),
+                new ReservationMenuHoldItemSnapshot(92L, "바스크 치즈케이크", 7_000L, 1)
         );
 
         // when

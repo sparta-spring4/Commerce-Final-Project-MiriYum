@@ -85,7 +85,7 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/PickupTransactionEligibilityConflict"
-  /api/v1/pickup-reservations:
+  /api/v1/consumers/pickup-reservations:
     post:
       tags: [Pickup]
       summary: 픽업 예약 생성
@@ -119,7 +119,7 @@ paths:
           $ref: "#/components/responses/PickupConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/pickup-reservations/{pickupReservationId}:
+  /api/v1/consumers/pickup-reservations/{pickupReservationId}:
     get:
       tags: [Pickup]
       summary: 본인 픽업 예약 상세 조회
@@ -141,7 +141,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/PickupNotFound"
-  /api/v1/pickup-reservations/{pickupReservationId}/cancellations:
+  /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
     post:
       tags: [Pickup]
       summary: 본인 픽업 예약 취소
@@ -174,7 +174,7 @@ paths:
           $ref: "#/components/responses/PickupNotFound"
         "409":
           $ref: "#/components/responses/PickupCancellationConflict"
-  /api/v1/store-operator/stores/{storeId}/pickup-reservations:
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations:
     get:
       tags: [Pickup Management]
       summary: 매장 픽업 예약 목록 조회
@@ -220,7 +220,7 @@ paths:
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
           $ref: "#/components/responses/StoreNotFound"
-  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}:
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}:
     get:
       tags: [Pickup Management]
       summary: 매장 픽업 예약 상세 조회
@@ -243,7 +243,7 @@ paths:
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
           $ref: "#/components/responses/StorePickupNotFound"
-  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
     post:
       tags: [Pickup Management]
       summary: 픽업 수령 완료
@@ -277,7 +277,7 @@ paths:
           $ref: "#/components/responses/StorePickupNotFound"
         "409":
           $ref: "#/components/responses/PickupStateConflict"
-  /api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
     post:
       tags: [Pickup Management]
       summary: 운영자 픽업 예약 취소
@@ -311,7 +311,7 @@ paths:
           $ref: "#/components/responses/StorePickupNotFound"
         "409":
           $ref: "#/components/responses/PickupStateConflict"
-  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets:
+  /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets:
     get:
       tags: [Menu Inventory]
       summary: 운영자 메뉴 재고 버킷 목록 조회
@@ -379,7 +379,7 @@ paths:
           $ref: "#/components/responses/MenuNotFound"
         "409":
           $ref: "#/components/responses/MenuInventoryConflict"
-  /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
+  /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
     patch:
       tags: [Menu Inventory]
       summary: 메뉴 재고 수량·풀·품절 상태 수정

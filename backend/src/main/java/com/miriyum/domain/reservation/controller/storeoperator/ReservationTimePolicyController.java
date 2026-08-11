@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}/reservation-time-policies")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}/reservation-time-policies")
 @RequiredArgsConstructor
 public class ReservationTimePolicyController {
 

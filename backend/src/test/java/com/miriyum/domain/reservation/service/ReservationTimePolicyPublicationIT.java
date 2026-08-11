@@ -97,6 +97,9 @@ class ReservationTimePolicyPublicationIT {
     private ReservationService reservationService;
 
     @Autowired
+    private ReservationTimeResolutionService timeResolutionService;
+
+    @Autowired
     private ReservationTimePolicyVersionRepository policyRepository;
 
     @MockitoSpyBean
@@ -440,7 +443,7 @@ class ReservationTimePolicyPublicationIT {
                 requestedAt.plusHours(1)
         )));
 
-        ReservationTimeResolutionResult result = reservationService
+        ReservationTimeResolutionResult result = timeResolutionService
                 .resolveReservationTimes(
                         List.of(owner.storeId()),
                         new ReservationTimeRequest(serviceDate, startTime, null)

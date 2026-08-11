@@ -8,7 +8,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResu
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationTimeResolutionService;
 import com.miriyum.domain.menu.dto.contract.MenuHoldSelectableMenu;
 import com.miriyum.domain.menu.service.MenuHoldSelectionQueryService;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -30,14 +30,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class MenuHoldAvailabilityQueryService {
 
     private final MenuHoldSelectionQueryService selectionQueryService;
-    private final ReservationService reservationService;
+    private final ReservationTimeResolutionService reservationTimeResolutionService;
     private final MenuInventoryTransactionService inventoryService;
 
     public MenuHoldAvailabilityQueryService(MenuHoldSelectionQueryService selectionQueryService,
-            ReservationService reservationService,
+            ReservationTimeResolutionService reservationTimeResolutionService,
             MenuInventoryTransactionService inventoryService) {
         this.selectionQueryService = selectionQueryService;
-        this.reservationService = reservationService;
+        this.reservationTimeResolutionService = reservationTimeResolutionService;
         this.inventoryService = inventoryService;
     }
 
@@ -45,7 +45,8 @@ public class MenuHoldAvailabilityQueryService {
     public MenuHoldAvailabilityResponse findAvailability(long storeId, LocalDate serviceDate,
             LocalTime startTime, ZoneOffset startOffset) {
         List<MenuHoldSelectableMenu> menus = selectionQueryService.findSelectableMenus(storeId);
-        List<ReservationTimeResolutionResult> results = reservationService.resolveReservationTimes(
+        List<ReservationTimeResolutionResult> results =
+                reservationTimeResolutionService.resolveReservationTimes(
                 List.of(storeId), new ReservationTimeRequest(serviceDate, startTime, startOffset));
         if (results == null || results.size() != 1 || results.getFirst().storeId() != storeId) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);

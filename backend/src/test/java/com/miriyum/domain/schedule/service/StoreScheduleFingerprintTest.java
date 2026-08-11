@@ -7,6 +7,7 @@ import com.miriyum.domain.schedule.dto.storeoperator.DailyReservationSlotsReques
 import com.miriyum.domain.schedule.dto.storeoperator.TimeRangeRequest;
 import com.miriyum.domain.schedule.dto.storeoperator.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.schedule.dto.storeoperator.WeeklyReservationTimeSlotsRequest;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -16,6 +17,19 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class StoreScheduleFingerprintTest {
+
+    @Test
+    void operatingFingerprintUsesCanonicalStoreOperatorNamespace() {
+        WeeklyOperatingHoursRequest request = new WeeklyOperatingHoursRequest(List.of(
+                new DailyOperatingScheduleRequest(DayOfWeek.MONDAY, List.of(), List.of())));
+
+        assertThat(StoreScheduleFingerprint.forOperating(7L, request)).isEqualTo(
+                RequestFingerprint.of(
+                        "PUT|/api/v1/store-operators/stores/{storeId}/operating-hours|"
+                                + "storeId=1:7|day=6:MONDAY|"
+                                + "MONDAY.businessHours.size=1:0|"
+                                + "MONDAY.breakTimes.size=1:0|"));
+    }
 
     @Test
     void operatingFingerprintIgnoresDayAndRangeArrayOrder() {

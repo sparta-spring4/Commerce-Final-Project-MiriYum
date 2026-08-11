@@ -16,7 +16,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}")
 @RequiredArgsConstructor
 public class StoreClosureController {
     private final StoreClosureCommandFacade service;

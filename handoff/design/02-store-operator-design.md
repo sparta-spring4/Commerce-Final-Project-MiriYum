@@ -54,7 +54,7 @@ MiriYum 로고, MiriYum Partner 서비스명, `식당 대표자 로그인`, 이�
 #### 로그인 성공 후 이동
 - `routes.ts`와 테스트에 등록된 보호 화면에서 로그인으로 이동한 경우에만 URL에 이미 알려진 `storeId`가 있는 원래 목적지로 복귀
 - 매장 등록 성공 뒤 관리 홈 이동은 두 화면 Issue가 해당 경로와 테스트를 `routes.ts`에 등록한 이후에만 연결하고, 등록 전에는 목적 URL을 추측하지 않는다.
-- 현재 Controller·OpenAPI에 없는 것은 로그인한 운영자 소유 매장 목록 `GET /api/v1/store-operator/stores`다. 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하지 않되, URL이나 등록 응답으로 알려진 `storeId`가 있으면 `GET /api/v1/store-operator/stores/{storeId}` 단건 조회를 사용한다.
+- 현재 Controller·OpenAPI에 없는 것은 로그인한 운영자 소유 매장 목록 `GET /api/v1/store-operators/stores`다. 일반 로그인 직후 `매장 없음/있음`을 추측해 자동 분기하지 않되, URL이나 등록 응답으로 알려진 `storeId`가 있으면 `GET /api/v1/store-operators/stores/{storeId}` 단건 조회를 사용한다.
 - 고도화 입점 심사가 실제 활성화된 경우에만 미신청 → 입점 신청, 심사 중 → 신청 현황
 사용자가 로그인 화면에서 분기를 선택하지 않는다.
 

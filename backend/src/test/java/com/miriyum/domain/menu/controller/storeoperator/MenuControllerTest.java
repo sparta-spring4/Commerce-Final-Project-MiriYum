@@ -70,7 +70,7 @@ class MenuControllerTest {
         given(commandService.create(eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                 .willReturn(new MenuCommandResult(201, menu()));
 
-        mockMvc.perform(post("/api/v1/store-operator/stores/7/menus")
+        mockMvc.perform(post("/api/v1/store-operators/stores/7/menus")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -88,7 +88,7 @@ class MenuControllerTest {
         given(commandService.update(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
 
-        mockMvc.perform(put("/api/v1/store-operator/stores/7/menus/21")
+        mockMvc.perform(put("/api/v1/store-operators/stores/7/menus/21")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -109,26 +109,26 @@ class MenuControllerTest {
         given(commandService.retire(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
 
-        perform(post("/api/v1/store-operator/stores/7/menus/21/publication"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publication"),
                 "{\"mode\":\"IMMEDIATE\",\"changeReason\":\"가격 확정\"}")
                 .andExpect(status().isOk());
-        perform(post("/api/v1/store-operator/stores/7/menus/21/publication-cancellation"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publication-cancellation"),
                 "{\"changeReason\":\"게시 일정 변경\"}")
                 .andExpect(status().isOk());
-        perform(patch("/api/v1/store-operator/stores/7/menus/21/visibility"),
+        perform(patch("/api/v1/store-operators/stores/7/menus/21/visibility"),
                 "{\"visibility\":\"VISIBLE\",\"changeReason\":\"메뉴 공개\"}")
                 .andExpect(status().isOk());
-        perform(patch("/api/v1/store-operator/stores/7/menus/21/selling-status"),
+        perform(patch("/api/v1/store-operators/stores/7/menus/21/selling-status"),
                 "{\"sellingStatus\":\"SELLING\",\"changeReason\":\"판매 재개\"}")
                 .andExpect(status().isOk());
-        perform(post("/api/v1/store-operator/stores/7/menus/21/retirement"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/retirement"),
                 "{\"changeReason\":\"메뉴 종료\"}")
                 .andExpect(status().isOk());
     }
 
     @Test
     void publicationWithoutChangeReasonReturnsBadRequest() throws Exception {
-        perform(post("/api/v1/store-operator/stores/7/menus/21/publication"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publication"),
                 "{\"mode\":\"IMMEDIATE\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
@@ -139,14 +139,14 @@ class MenuControllerTest {
         given(commandService.changeSellingStatus(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
 
-        perform(patch("/api/v1/store-operator/stores/7/menus/21/selling-status"),
+        perform(patch("/api/v1/store-operators/stores/7/menus/21/selling-status"),
                 "{\"sellingStatus\":\"SOLD_OUT\",\"changeReason\":\"당일 소진\"}")
                 .andExpect(status().isOk());
     }
 
     @Test
     void arbitraryAllergenIngredientIsRejected() throws Exception {
-        mockMvc.perform(post("/api/v1/store-operator/stores/7/menus")
+        mockMvc.perform(post("/api/v1/store-operators/stores/7/menus")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -161,11 +161,11 @@ class MenuControllerTest {
         given(queryService.list(11L, 7L)).willReturn(List.of(menu()));
         given(queryService.get(11L, 7L, 21L)).willReturn(menu());
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/7/menus")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7/menus")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].menuId").value("21"));
-        mockMvc.perform(get("/api/v1/store-operator/stores/7/menus/21")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7/menus/21")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.menuId").value("21"));
@@ -173,7 +173,7 @@ class MenuControllerTest {
 
     @Test
     void writeWithoutIdempotencyKeyReturnsCommon003() throws Exception {
-        mockMvc.perform(post("/api/v1/store-operator/stores/7/menus")
+        mockMvc.perform(post("/api/v1/store-operators/stores/7/menus")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(contentJson()))

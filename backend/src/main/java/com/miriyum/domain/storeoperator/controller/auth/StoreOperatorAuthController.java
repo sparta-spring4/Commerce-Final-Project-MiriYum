@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 매장 운영자 가입·로그인·재발급·로그아웃·CSRF 준비 API다.
  */
 @RestController
-@RequestMapping("/api/v1/store-operator-auth")
+@RequestMapping("/api/v1/store-operators/auth")
 @RequiredArgsConstructor
 public class StoreOperatorAuthController {
 

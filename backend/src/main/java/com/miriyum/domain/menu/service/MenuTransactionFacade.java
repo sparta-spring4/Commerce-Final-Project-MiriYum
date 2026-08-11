@@ -16,12 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
  * 신규 메뉴 홀드·픽업 거래를 위해 Store와 Menu를 정해진 순서로 잠금 검증한다.
  */
 @Service
-public class MenuTransactionService {
+public class MenuTransactionFacade {
 
     private final StoreTransactionEligibilityService storeEligibilityService;
     private final MenuRepository menuRepository;
 
-    public MenuTransactionService(
+    public MenuTransactionFacade(
             StoreTransactionEligibilityService storeEligibilityService,
             MenuRepository menuRepository
     ) {

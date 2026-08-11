@@ -1,0 +1,93 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Store Operator API
+  version: 1.0.0
+  description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/store-operators/auth/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1accounts"
+  /api/v1/store-operators/auth/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1sessions"
+  /api/v1/store-operators/auth/token-refreshes:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1token-refreshes"
+  /api/v1/store-operators/auth/csrf-tokens/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1csrf-tokens~1current"
+  /api/v1/store-operators/auth/sessions/current:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1sessions~1current"
+  /api/v1/store-operators/me/contact:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me~1contact"
+  /api/v1/store-operators/me:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me"
+  /api/v1/store-operators/stores:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores"
+  /api/v1/store-operators/stores/{storeId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}"
+  /api/v1/store-operators/stores/{storeId}/operating-hours:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1operating-hours"
+  /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1operating-hours~1{version}~1publication"
+  /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellation:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1operating-hours~1{version}~1publication-cancellation"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-slots:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-slots"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-slots~1{version}~1publication"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-slots~1{version}~1publication-cancellation"
+  /api/v1/store-operators/stores/{storeId}/regular-closures:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1regular-closures"
+  /api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1regular-closures~1{version}~1publication"
+  /api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellation:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1regular-closures~1{version}~1publication-cancellation"
+  /api/v1/store-operators/stores/{storeId}/temporary-closures:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1temporary-closures"
+  /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1temporary-closures~1{closureId}~1end-at"
+  /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1temporary-closures~1{closureId}~1cancellation"
+  /api/v1/store-operators/stores/{storeId}/menus:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1publication"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1publication-cancellation"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1visibility"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/selling-status:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1selling-status"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1retirement"
+  /api/v1/store-operators/stores/{storeId}/reservations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservations"
+  /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservations~1{reservationId}"
+  /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservations~1{reservationId}~1cancellations"
+  /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservations~1{reservationId}~1fulfillments"
+  /api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-capacities~1{serviceDate}"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-policies:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-policies"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-policies~1{version}~1publication"
+  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservation-time-policies~1{version}~1publication-cancellation"
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1pickup-reservations"
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}~1fulfillments"
+  /api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menu-inventory-buckets"
+  /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menu-inventory-buckets~1{inventoryBucketId}"

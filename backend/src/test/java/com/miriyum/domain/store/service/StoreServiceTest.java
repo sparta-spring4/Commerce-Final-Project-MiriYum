@@ -28,7 +28,7 @@ import com.miriyum.domain.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.model.MenuContent;
 import com.miriyum.domain.menu.repository.MenuRepository;
-import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -89,14 +89,14 @@ class StoreServiceTest {
 
     private ObjectMapper objectMapper;
     private StoreService storeService;
-    private MenuTransactionService menuTransactionService;
+    private MenuTransactionFacade menuTransactionFacade;
 
     @BeforeEach
     void setUp() {
         objectMapper = JsonMapper.builder()
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
-        menuTransactionService = new MenuTransactionService(
+        menuTransactionFacade = new MenuTransactionFacade(
                 new StoreTransactionEligibilityService(storeRepository),
                 menuRepository);
         storeService = new StoreService(
@@ -266,7 +266,7 @@ class StoreServiceTest {
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
@@ -281,7 +281,7 @@ class StoreServiceTest {
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.VERIFICATION_STATE_CONFLICT);
@@ -297,7 +297,7 @@ class StoreServiceTest {
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
@@ -312,7 +312,7 @@ class StoreServiceTest {
         given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.STORE_STATE_CONFLICT);
@@ -327,7 +327,7 @@ class StoreServiceTest {
         given(menuRepository.findByIdForUpdate(MENU_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.MENU_NOT_FOUND);
@@ -339,7 +339,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         assertThatThrownBy(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(StoreErrorCode.MENU_NOT_FOUND);
@@ -350,7 +350,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu(STORE_ID, true, true));
 
         assertMenuStateConflict(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID));
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID));
     }
 
     @Test
@@ -360,7 +360,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         assertMenuStateConflict(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID));
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID));
     }
 
     @Test
@@ -370,7 +370,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         assertMenuStateConflict(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID));
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID));
     }
 
     @Test
@@ -380,7 +380,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         assertMenuStateConflict(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID));
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID));
     }
 
     @Test
@@ -390,7 +390,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         assertMenuStateConflict(() ->
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID));
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID));
     }
 
     @Test
@@ -402,7 +402,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         MenuTransactionEligibility result =
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID);
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result).isEqualTo(new MenuTransactionEligibility(
                 STORE_ID, MENU_ID, 2, "카페라떼", 6_500, true, true));
@@ -434,7 +434,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(transactionStore(), menu);
 
         MenuTransactionEligibility result =
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID);
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result.menuHoldEligible()).isFalse();
         assertThat(result.pickupEligible()).isFalse();
@@ -447,7 +447,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(store, publishedMenu(true, true));
 
         MenuTransactionEligibility result =
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID);
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result.menuHoldEligible()).isFalse();
         assertThat(result.pickupEligible()).isFalse();
@@ -460,7 +460,7 @@ class StoreServiceTest {
         stubTransactionStoreAndMenu(store, publishedMenu(true, true));
 
         MenuTransactionEligibility result =
-                menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID);
+                menuTransactionFacade.requireTransactionEligibility(STORE_ID, MENU_ID);
 
         assertThat(result.menuHoldEligible()).isFalse();
     }

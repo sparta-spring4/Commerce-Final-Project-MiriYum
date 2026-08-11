@@ -32,99 +32,99 @@ export interface paths {
     /** 매장 태그 조회 */
     get: operations["getStoreTags"];
   };
-  "/api/v1/store-operator/stores": {
+  "/api/v1/store-operators/stores": {
     /** 매장 등록 */
     post: operations["createStore"];
   };
-  "/api/v1/store-operator/stores/{storeId}": {
+  "/api/v1/store-operators/stores/{storeId}": {
     /** 운영 매장 정보 조회 */
     get: operations["getManagedStore"];
     /** 매장 기본정보 수정 */
     patch: operations["updateStore"];
   };
-  "/api/v1/store-operator/stores/{storeId}/operating-hours": {
+  "/api/v1/store-operators/stores/{storeId}/operating-hours": {
     /** 주간 영업시간 전체 초안 저장 */
     put: operations["createOperatingHoursDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication": {
     /** 영업시간 초안 즉시 또는 예약 게시 */
     post: operations["publishOperatingHoursDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/operating-hours/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellation": {
     /** 영업시간 예약 게시 취소 */
     post: operations["cancelOperatingHoursPublication"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-slots": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots": {
     /** 주간 예약 접수 시간대 전체 초안 저장 */
     put: operations["createReservationTimeSlotsDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication": {
     /** 예약 접수 시간대 초안 즉시 또는 예약 게시 */
     post: operations["publishReservationTimeSlotsDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation": {
     /** 예약 접수 시간대 예약 게시 취소 */
     post: operations["cancelReservationTimeSlotsPublication"];
   };
-  "/api/v1/store-operator/stores/{storeId}/regular-closures": {
+  "/api/v1/store-operators/stores/{storeId}/regular-closures": {
     /** 정기 휴무 전체 초안 저장 */
     put: operations["createRegularClosureDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication": {
     /** 정기 휴무 초안 즉시 또는 예약 게시 */
     post: operations["publishRegularClosureDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/regular-closures/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellation": {
     /** 정기 휴무 예약 게시 취소 */
     post: operations["cancelRegularClosurePublication"];
   };
-  "/api/v1/store-operator/stores/{storeId}/temporary-closures": {
+  "/api/v1/store-operators/stores/{storeId}/temporary-closures": {
     /** 임시 휴무 등록 */
     post: operations["createTemporaryClosure"];
   };
-  "/api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/end-at": {
+  "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at": {
     /** 임시 휴무 종료 시각 변경 */
     put: operations["changeTemporaryClosureEndAt"];
   };
-  "/api/v1/store-operator/stores/{storeId}/temporary-closures/{closureId}/cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation": {
     /** 임시 휴무 취소 */
     post: operations["cancelTemporaryClosure"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus": {
+  "/api/v1/store-operators/stores/{storeId}/menus": {
     /** 관리용 메뉴 목록 조회 */
     get: operations["listManagedMenus"];
     /** 메뉴 초안 등록 */
     post: operations["createMenu"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}": {
     /** 관리용 메뉴 상세 조회 */
     get: operations["getManagedMenu"];
     /** 메뉴 내용을 수정해 새 초안 등록 */
     put: operations["updateMenu"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication": {
     /** 메뉴 초안 즉시 게시 또는 예약 게시 */
     post: operations["publishMenu"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation": {
     /**
      * 메뉴 예약 게시 취소
      * @description 예약 이후 생성한 활성 초안이 이미 있으면 최신 초안을 보존하기 위해 STORE_010 충돌로 거부한다.
      */
     post: operations["cancelMenuPublication"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/visibility": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility": {
     /** 메뉴 공개 노출 상태 변경 */
     patch: operations["changeMenuVisibility"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/selling-status": {
     /**
      * 메뉴 판매 상태 변경
      * @description SELLING, SOLD_OUT, PAUSED는 운영자가 관리하는 메뉴 전체 수동 판매 상태다. 메뉴 홀드·픽업의 InventoryAvailabilityStatus AVAILABLE/SOLD_OUT은 운영자가 제어하는 제공 날짜·시간 구간별 수동 가용 상태다. 온라인 가용량은 ONLINE_HOLD와 정책상 허용된 SHARED 잔여로 별도 계산하며 수량 변화만으로 구간 상태나 메뉴 기본 판매 상태를 자동 변경하지 않는다. 신규 거래는 구간 상태가 AVAILABLE이고 온라인 가용량이 양수일 때만 허용한다.
      */
     patch: operations["changeMenuSellingStatus"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/retirement": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement": {
     /** 메뉴 운영 종료 */
     post: operations["retireMenu"];
   };

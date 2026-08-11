@@ -66,7 +66,7 @@ class StoreOperatorAuthControllerTest {
                 """;
 
         // when & then
-        mockMvc.perform(post("/api/v1/store-operator-auth/accounts")
+        mockMvc.perform(post("/api/v1/store-operators/auth/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())

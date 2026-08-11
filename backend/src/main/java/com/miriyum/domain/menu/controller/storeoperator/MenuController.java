@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}/menus")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}/menus")
 @RequiredArgsConstructor
 public class MenuController {
 

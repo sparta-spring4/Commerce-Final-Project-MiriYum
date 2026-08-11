@@ -42,7 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class PickupStoreManagementControllerTest {
 
     private static final String ROOT =
-            "/api/v1/store-operator/stores/22/pickup-reservations";
+            "/api/v1/store-operators/stores/22/pickup-reservations";
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired MockMvc mockMvc;

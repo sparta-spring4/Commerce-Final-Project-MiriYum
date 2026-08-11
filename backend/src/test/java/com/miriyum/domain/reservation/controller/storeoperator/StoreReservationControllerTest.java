@@ -68,7 +68,7 @@ class StoreReservationControllerTest {
     private static final long STORE_ID = 22L;
     private static final long RESERVATION_ID = 77L;
     private static final String BASE_URL =
-            "/api/v1/store-operator/stores/22/reservations";
+            "/api/v1/store-operators/stores/22/reservations";
     private static final String DETAIL_URL = BASE_URL + "/77";
     private static final String CANCELLATION_URL = DETAIL_URL + "/cancellations";
     private static final String FULFILLMENT_URL = DETAIL_URL + "/fulfillments";
@@ -180,7 +180,7 @@ class StoreReservationControllerTest {
         authenticateStoreOperator(33L);
 
         // when & then
-        mockMvc.perform(get("/api/v1/store-operator/stores/0/reservations")
+        mockMvc.perform(get("/api/v1/store-operators/stores/0/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"))
@@ -352,7 +352,7 @@ class StoreReservationControllerTest {
     void rejectsNonPositiveStoreIdBeforeDetailService(String storeId) throws Exception {
         authenticateStoreOperator(33L);
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/{storeId}/reservations/77", storeId)
+        mockMvc.perform(get("/api/v1/store-operators/stores/{storeId}/reservations/77", storeId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"))
@@ -431,7 +431,7 @@ class StoreReservationControllerTest {
         authenticateStoreOperator(OPERATOR_ID);
 
         mockMvc.perform(post(
-                        "/api/v1/store-operator/stores/22/reservations/{reservationId}/cancellations",
+                        "/api/v1/store-operators/stores/22/reservations/{reservationId}/cancellations",
                         reservationId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
@@ -577,7 +577,7 @@ class StoreReservationControllerTest {
         authenticateStoreOperator(OPERATOR_ID);
 
         mockMvc.perform(post(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/77/fulfillments",
+                        "/api/v1/store-operators/stores/{storeId}/reservations/77/fulfillments",
                         storeId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
@@ -595,7 +595,7 @@ class StoreReservationControllerTest {
         authenticateStoreOperator(OPERATOR_ID);
 
         mockMvc.perform(post(
-                        "/api/v1/store-operator/stores/22/reservations/{reservationId}/fulfillments",
+                        "/api/v1/store-operators/stores/22/reservations/{reservationId}/fulfillments",
                         reservationId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
