@@ -1,0 +1,128 @@
+/* 마이페이지·예약 내역 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.mypage {
+  padding-bottom: var(--space-8);
+}
+
+.mypage__header {
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.mypage__header h1 {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+}
+
+.mypage__header p {
+  margin-top: 0.375rem;
+  color: var(--color-on-surface-variant);
+}
+
+.mypage__section {
+  margin-top: var(--space-2);
+}
+
+.mypage__section h2,
+.profile h2 {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  margin-bottom: var(--space-1);
+}
+
+.mypage__section p {
+  margin-bottom: var(--space-2);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 프로필 ───────────────────────────────────────────────────────────── */
+
+.profile__list {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 0.375rem var(--space-1);
+  margin: var(--space-2) 0;
+}
+
+.profile__list dt {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.profile__list dd {
+  margin: 0;
+}
+
+.profile__readonly {
+  margin-left: var(--space-1);
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-surface-container-highest);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-sm);
+  color: var(--color-on-surface-variant);
+}
+
+.profile__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.profile__label {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.profile__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.profile__actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* ── 예약 내역 ────────────────────────────────────────────────────────── */
+
+.reservation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+}
+
+.reservation-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 48rem) {
+  .reservation-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.reservation-list__store {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+}
+
+.reservation-list__store a {
+  color: var(--color-on-surface);
+}
+
+.reservation-list__meta {
+  margin-top: 0.375rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}

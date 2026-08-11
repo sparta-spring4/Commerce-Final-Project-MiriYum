@@ -6,7 +6,9 @@ import {
   ConsumerAuthProvider,
   ConsumerSignInPage,
   ConsumerSignUpPage,
+  RequireConsumerAuth,
 } from '../features/auth'
+import { MyPage, MyReservationsPage } from '../features/consumer-account'
 import {
   HomePage,
   StoreDetailPage,
@@ -55,6 +57,24 @@ export default function App() {
                 />
                 <Route path={ROUTES.forbidden} element={<ForbiddenPage />} />
                 <Route path="*" element={<NotFoundPage />} />
+              </Route>
+
+              {/* 일반 사용자 인증이 필요한 화면. 매장 운영자 화면은 여기 두지 않는다. */}
+              <Route
+                element={
+                  <AppLayout
+                    shell="consumer"
+                    accountSlot={<ConsumerAccountMenu />}
+                  />
+                }
+              >
+                <Route element={<RequireConsumerAuth />}>
+                  <Route path={ROUTES.myPage} element={<MyPage />} />
+                  <Route
+                    path={ROUTES.myReservations}
+                    element={<MyReservationsPage />}
+                  />
+                </Route>
               </Route>
             </Routes>
           </ConsumerAuthProvider>

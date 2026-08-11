@@ -14,6 +14,8 @@ export const ROUTES = {
   storeDetail: '/stores/:storeId',
   consumerSignIn: '/sign-in',
   consumerSignUp: '/sign-up',
+  myPage: '/mypage',
+  myReservations: '/mypage/reservations',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
 } as const
@@ -35,6 +37,10 @@ export interface NavigationItem {
  */
 export const NAVIGATION: Record<Shell, NavigationItem[]> = {
   public: [{ label: '매장 찾기', path: ROUTES.stores }],
-  consumer: [{ label: '매장 찾기', path: ROUTES.stores }],
+  consumer: [
+    { label: '매장 찾기', path: ROUTES.stores },
+    { label: '내 예약', path: ROUTES.myReservations },
+    { label: '마이페이지', path: ROUTES.myPage },
+  ],
   storeOperator: [],
 }
