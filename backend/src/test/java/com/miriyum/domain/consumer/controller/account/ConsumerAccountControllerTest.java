@@ -119,7 +119,7 @@ class ConsumerAccountControllerTest {
         consumerAccountRepository.deleteAll();
         consumerAccountRepository.flush();
 
-        String deletedAccountBody = mockMvc.perform(get("/api/v1/consumer-accounts/me")
+        String deletedAccountBody = mockMvc.perform(get("/api/v1/consumers/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_003"))
@@ -127,7 +127,7 @@ class ConsumerAccountControllerTest {
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
 
-        String invalidTokenBody = mockMvc.perform(get("/api/v1/consumer-accounts/me")
+        String invalidTokenBody = mockMvc.perform(get("/api/v1/consumers/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
                 .andExpect(status().isUnauthorized())
                 .andReturn()
@@ -144,7 +144,7 @@ class ConsumerAccountControllerTest {
         jdbcTemplate.update(
                 "UPDATE consumer_accounts SET status = 'SUSPENDED' WHERE consumer_account_id = ?", accountId);
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me")
+        mockMvc.perform(get("/api/v1/consumers/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_011"));
@@ -180,7 +180,7 @@ class ConsumerAccountControllerTest {
                 ))
         )).willReturn(page);
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+        mockMvc.perform(get("/api/v1/consumers/me/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .queryParam("status", "CONFIRMED")
                         .queryParam("page", "0")
@@ -211,7 +211,7 @@ class ConsumerAccountControllerTest {
                 new PageMetadata(0, 20, 0, 0, false)
         ));
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+        mockMvc.perform(get("/api/v1/consumers/me/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items").isEmpty())
@@ -226,7 +226,7 @@ class ConsumerAccountControllerTest {
     void getReservationHistoryRejectsUnknownSort() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+        mockMvc.perform(get("/api/v1/consumers/me/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .queryParam("sort", "status,asc"))
                 .andExpect(status().isBadRequest())
@@ -238,7 +238,7 @@ class ConsumerAccountControllerTest {
     void registerContactReturnsMaskedPhoneNumber() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
 
-        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/consumers/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -254,7 +254,7 @@ class ConsumerAccountControllerTest {
         consumerAccountRepository.deleteAll();
         consumerAccountRepository.flush();
 
-        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/consumers/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -268,14 +268,14 @@ class ConsumerAccountControllerTest {
     void registerContactReplaysForEquivalentPhoneFormatting() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
 
-        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/consumers/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phoneNumber\": \"010-1234-5678\"}"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(put("/api/v1/consumer-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/consumers/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -291,14 +291,14 @@ class ConsumerAccountControllerTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<MvcResult> first = executor.submit(() -> mockMvc.perform(
-                    put("/api/v1/consumer-accounts/me/contact")
+                    put("/api/v1/consumers/me/contact")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440001")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"phoneNumber\": \"010-1111-1111\"}"))
                     .andReturn());
             Future<MvcResult> second = executor.submit(() -> mockMvc.perform(
-                    put("/api/v1/consumer-accounts/me/contact")
+                    put("/api/v1/consumers/me/contact")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440002")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -327,7 +327,7 @@ class ConsumerAccountControllerTest {
         consumerAccountRepository.deleteAll();
         consumerAccountRepository.flush();
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+        mockMvc.perform(get("/api/v1/consumers/me/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .queryParam("sort", "status,asc"))
                 .andExpect(status().isUnauthorized())
@@ -341,7 +341,7 @@ class ConsumerAccountControllerTest {
         jdbcTemplate.update(
                 "UPDATE consumer_accounts SET status = 'SUSPENDED' WHERE consumer_account_id = ?", accountId);
 
-        mockMvc.perform(get("/api/v1/consumer-accounts/me/reservations")
+        mockMvc.perform(get("/api/v1/consumers/me/reservations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .queryParam("sort", "status,asc"))
                 .andExpect(status().isForbidden())
@@ -357,7 +357,7 @@ class ConsumerAccountControllerTest {
     @DisplayName("수정 성공 후 계정이 사라지면 같은 Idempotency-Key 재요청도 401 AUTH_003을 반환한다")
     void updateMeDoesNotReplayStoredResultAfterAccountDisappears() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
-        mockMvc.perform(patch("/api/v1/consumer-accounts/me")
+        mockMvc.perform(patch("/api/v1/consumers/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -368,7 +368,7 @@ class ConsumerAccountControllerTest {
         consumerAccountRepository.flush();
 
         // 같은 키·같은 본문이라 멱등 기록은 그대로 남아 있지만, 인증 경계가 먼저 걸린다.
-        mockMvc.perform(patch("/api/v1/consumer-accounts/me")
+        mockMvc.perform(patch("/api/v1/consumers/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)

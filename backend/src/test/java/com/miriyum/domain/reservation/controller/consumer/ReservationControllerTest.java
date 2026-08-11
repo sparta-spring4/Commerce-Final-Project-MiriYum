@@ -49,8 +49,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({ReservationSecurityConfig.class, GlobalExceptionHandler.class})
 class ReservationControllerTest {
 
-    private static final String DETAIL_URL = "/api/v1/reservations/77";
-    private static final String ROOT_URL = "/api/v1/reservations";
+    private static final String DETAIL_URL = "/api/v1/consumers/reservations/77";
+    private static final String ROOT_URL = "/api/v1/consumers/reservations";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
@@ -176,7 +176,7 @@ class ReservationControllerTest {
                 .willThrow(new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
 
         // when & then
-        mockMvc.perform(get("/api/v1/reservations/{reservationId}", reservationId)
+        mockMvc.perform(get("/api/v1/consumers/reservations/{reservationId}", reservationId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESERVATION_001"));
@@ -347,7 +347,7 @@ class ReservationControllerTest {
                 eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
                 .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse("CONSUMER")));
 
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -374,7 +374,7 @@ class ReservationControllerTest {
         authenticateConsumer(11L);
 
         // when & then
-        mockMvc.perform(get("/api/v1/reservations/77/unknown")
+        mockMvc.perform(get("/api/v1/consumers/reservations/77/unknown")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_006"));
@@ -389,7 +389,7 @@ class ReservationControllerTest {
                 eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
                 .willReturn(new ReservationCancellationCommandResult(200, cancelledDetailResponse("CONSUMER")));
 
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -401,13 +401,13 @@ class ReservationControllerTest {
     void rejectsCancellationKeyFailuresBeforeFacadeInvocation() throws Exception {
         authenticateConsumer(11L);
 
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_003"));
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", "bad-key")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -422,14 +422,14 @@ class ReservationControllerTest {
     void rejectsInvalidConsumerCancellationBodyBeforeFacadeInvocation() throws Exception {
         authenticateConsumer(11L);
 
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"" + "a".repeat(501) + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -442,7 +442,7 @@ class ReservationControllerTest {
 
     @Test
     void rejectsUnauthenticatedOrOperatorConsumerCancellation() throws Exception {
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -450,7 +450,7 @@ class ReservationControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_001"));
         given(jwtTokenProvider.parseAccessToken("store-token"))
                 .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
-        mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -472,7 +472,7 @@ class ReservationControllerTest {
                     eq(11L), eq(77L), any(IdempotencyKey.class), any(ConsumerCancellationRequest.class)))
                     .willThrow(new ServiceException(errorCode));
 
-            mockMvc.perform(post("/api/v1/reservations/77/cancellations")
+            mockMvc.perform(post("/api/v1/consumers/reservations/77/cancellations")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                             .header("Idempotency-Key", IDEMPOTENCY_KEY)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -486,7 +486,7 @@ class ReservationControllerTest {
     void deniesNonApprovedMethodOnCancellationPath() throws Exception {
         authenticateConsumer(11L);
 
-        mockMvc.perform(get("/api/v1/reservations/77/cancellations")
+        mockMvc.perform(get("/api/v1/consumers/reservations/77/cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_006"));

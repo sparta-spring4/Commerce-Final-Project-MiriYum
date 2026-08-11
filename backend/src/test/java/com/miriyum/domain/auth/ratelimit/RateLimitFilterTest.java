@@ -72,11 +72,11 @@ class RateLimitFilterTest {
     void blocksRequestsOverTheLimit() throws Exception {
         // given: CSRF 준비 한도(2회)만큼 먼저 소비
         RequestPostProcessor ip = withRemoteAddr("10.0.0.1");
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
 
         // when & then
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip))
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("COMMON_010"))
                 .andExpect(header().exists("Retry-After"));
@@ -88,7 +88,7 @@ class RateLimitFilterTest {
         // 로그아웃은 목록에 없으므로 몇 번을 호출해도 429가 아니라(401/403 등) 다른 결과여야 한다.
         RequestPostProcessor ip = withRemoteAddr("10.0.0.3");
         for (int i = 0; i < 5; i++) {
-            mockMvc.perform(delete("/api/v1/consumer-auth/sessions/current").with(ip))
+            mockMvc.perform(delete("/api/v1/consumers/auth/sessions/current").with(ip))
                     .andExpect(result -> {
                         int status = result.getResponse().getStatus();
                         if (status == 429) {
@@ -103,13 +103,13 @@ class RateLimitFilterTest {
     void tracksDifferentCategoriesIndependently() throws Exception {
         // given: CSRF 준비 한도(2회)를 다 소비해도
         RequestPostProcessor ip = withRemoteAddr("10.0.0.2");
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/consumer-auth/csrf-tokens/current").with(ip))
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/consumers/auth/csrf-tokens/current").with(ip))
                 .andExpect(status().isTooManyRequests());
 
         // when & then: 다른 등급(토큰 재발급)은 영향받지 않는다
-        mockMvc.perform(post("/api/v1/consumer-auth/token-refreshes").with(ip))
+        mockMvc.perform(post("/api/v1/consumers/auth/token-refreshes").with(ip))
                 .andExpect(result -> {
                     int status = result.getResponse().getStatus();
                     if (status == 429) {
@@ -146,10 +146,10 @@ class RateLimitFilterTest {
 
     private static Stream<Arguments> limitedRoutes() {
         return Stream.of(
-                Arguments.of("SIGN_UP", "/api/v1/consumer-auth/accounts", "POST", 5, "1"),
-                Arguments.of("LOGIN", "/api/v1/consumer-auth/sessions", "POST", 5, "2"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/consumer-auth/token-refreshes", "POST", 30, "3"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/consumer-auth/csrf-tokens/current", "GET", 2, "4"),
+                Arguments.of("SIGN_UP", "/api/v1/consumers/auth/accounts", "POST", 5, "1"),
+                Arguments.of("LOGIN", "/api/v1/consumers/auth/sessions", "POST", 5, "2"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "3"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "4"),
                 Arguments.of("SIGN_UP", "/api/v1/store-operator-auth/accounts", "POST", 5, "5"),
                 Arguments.of("LOGIN", "/api/v1/store-operator-auth/sessions", "POST", 5, "6"),
                 Arguments.of("TOKEN_REFRESH", "/api/v1/store-operator-auth/token-refreshes", "POST", 30, "7"),
@@ -163,7 +163,7 @@ class RateLimitFilterTest {
         // given: 회원가입 한도(5회)를 Consumer 3회 + StoreOperator 2회로 나눠 소비
         RequestPostProcessor ip = withRemoteAddr("10.2.0.1");
         for (int i = 0; i < 3; i++) {
-            mockMvc.perform(post("/api/v1/consumer-auth/accounts").with(ip))
+            mockMvc.perform(post("/api/v1/consumers/auth/accounts").with(ip))
                     .andExpect(result -> {
                         if (result.getResponse().getStatus() == 429) {
                             throw new AssertionError("한도(5) 이내인데 Consumer 가입이 429를 받았습니다.");
@@ -180,7 +180,7 @@ class RateLimitFilterTest {
         }
 
         // when & then: 두 namespace를 합쳐 6번째 요청이므로 어느 쪽이든 429여야 한다
-        mockMvc.perform(post("/api/v1/consumer-auth/accounts").with(ip))
+        mockMvc.perform(post("/api/v1/consumers/auth/accounts").with(ip))
                 .andExpect(status().isTooManyRequests());
     }
 

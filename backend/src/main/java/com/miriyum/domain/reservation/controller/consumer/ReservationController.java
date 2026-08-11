@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 인증된 소비자 본인의 일반 예약 상세를 조회하는 HTTP 경계다. */
 @RestController
-@RequestMapping("/api/v1/reservations")
+@RequestMapping("/api/v1/consumers/reservations")
 @RequiredArgsConstructor
 public class ReservationController {
 

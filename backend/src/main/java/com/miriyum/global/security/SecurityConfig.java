@@ -81,7 +81,7 @@ public class SecurityConfig {
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/consumer-accounts/**")
+                .securityMatcher("/api/v1/consumers/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
@@ -123,7 +123,7 @@ public class SecurityConfig {
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/consumer-auth/**", "/api/v1/store-operator-auth/**")
+                .securityMatcher("/api/v1/consumers/auth/**", "/api/v1/store-operator-auth/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())

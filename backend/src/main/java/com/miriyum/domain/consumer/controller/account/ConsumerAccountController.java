@@ -33,14 +33,14 @@ import tools.jackson.databind.JsonNode;
  * 예약 조회 규칙과 응답 DTO는 예약 도메인의 공개 {@link ReservationService} 계약을 사용한다.
  */
 @RestController
-@RequestMapping("/api/v1/consumer-accounts")
+@RequestMapping("/api/v1/consumers")
 @RequiredArgsConstructor
 public class ConsumerAccountController {
 
     private static final String UPDATE_COMMAND_TYPE = "CONSUMER_ACCOUNT_UPDATE";
-    private static final String UPDATE_ROUTE = "PATCH /api/v1/consumer-accounts/me";
+    private static final String UPDATE_ROUTE = "PATCH /api/v1/consumers/me";
     private static final String CONTACT_COMMAND_TYPE = "CONSUMER_CONTACT_REGISTER";
-    private static final String CONTACT_ROUTE = "PUT /api/v1/consumer-accounts/me/contact";
+    private static final String CONTACT_ROUTE = "PUT /api/v1/consumers/me/contact";
 
     private final ConsumerAccountService consumerAccountService;
     private final ReservationService reservationService;

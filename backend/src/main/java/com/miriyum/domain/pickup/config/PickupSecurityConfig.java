@@ -21,7 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class PickupSecurityConfig {
 
-    private static final String PICKUP_ROOT = "/api/v1/pickup-reservations";
+    private static final String PICKUP_ROOT = "/api/v1/consumers/pickup-reservations";
     private static final String PICKUP_FAMILY = PICKUP_ROOT + "/**";
     private static final String PUBLIC_AVAILABILITY =
             "/api/v1/stores/*/pickup-availability";

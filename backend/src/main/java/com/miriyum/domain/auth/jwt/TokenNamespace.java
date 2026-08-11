@@ -11,7 +11,7 @@ public enum TokenNamespace {
             "consumer",
             "MIRIYUM_CONSUMER_REFRESH",
             "MIRIYUM_CONSUMER_XSRF_TOKEN",
-            "/api/v1/consumer-auth"
+            "/api/v1/consumers/auth"
     ),
     STORE_OPERATOR(
             "store-operator",

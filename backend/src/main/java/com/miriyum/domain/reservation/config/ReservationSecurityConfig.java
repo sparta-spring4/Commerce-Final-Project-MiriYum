@@ -22,7 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class ReservationSecurityConfig {
 
-    private static final String RESERVATION_ROOT = "/api/v1/reservations";
+    private static final String RESERVATION_ROOT = "/api/v1/consumers/reservations";
     private static final String RESERVATION_FAMILY = RESERVATION_ROOT + "/**";
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
     private static final String RESERVATION_CANCELLATION =
