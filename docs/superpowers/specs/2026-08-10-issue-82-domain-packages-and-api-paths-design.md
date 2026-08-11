@@ -120,7 +120,7 @@ PR1의 패키지 승격으로 기존에는 같은 `store` 내부에 감춰져 �
 - `@Entity` 선언 타입과 Repository 선언 타입을 패키지 이름과 무관하게 식별한다.
 - Controller, Store, 전체 도메인 소스 등 각 규칙의 검사 대상이 비어 있으면 실패한다.
 - Service와 DTO를 포함한 전체 최상위 도메인 의존 그래프에서 새로운 순환을 거부한다.
-- PR1 이전부터 존재한 `consumer <-> reservation`, `menuhold <-> reservation`만 명시적 baseline으로 기록하고 별도 후속 설계 대상으로 남긴다.
+- PR1 이전부터 존재한 `consumer <-> reservation`, `menuhold <-> reservation`만 PR1의 명시적 baseline으로 기록한다. PR2에서는 아래의 소유권 이동과 Port/Adapter 전환으로 두 baseline을 제거하고 순환 0건을 요구한다.
 
 ### 4.2 PR2: 사용자 유형별 API 경로 전환
 
@@ -166,6 +166,16 @@ PR1 검수에서 메뉴 홀드와 픽업이 동일한 Store-Menu 거래 검증 �
 4. 메뉴 홀드와 픽업이 공통으로 소비하는 `MenuTransactionEligibility`를 반환한다.
 
 MenuHold와 Pickup은 Facade를 직접 사용한다. Store는 Menu 또는 Facade를 참조하지 않으며, Menu의 일반 조회·관리 Service는 기존 Store 공개 계약만 사용한다. Facade 도입은 잠금 순서, 오류 코드, DTO, HTTP 계약을 변경하지 않는다. 기존 `consumer <-> reservation`, `menuhold <-> reservation` 순환은 이 Facade의 책임이 아니며 이름만 Facade로 바꾸어 우회하지 않는다.
+
+### 4.4 PR2 기존 도메인 순환 제거
+
+업무 협력 자체는 유지하되 컴파일 의존을 한 방향으로 정리한다.
+
+`consumer <-> reservation`은 예약 내역 HTTP 경계의 소유권을 바로잡아 제거한다. `ConsumerAccountController`의 예약 내역 메서드와 Reservation 요청·응답 DTO 참조를 `reservation.controller.consumer`로 이동한다. 외부 URL과 인증 principal 계약은 유지한다. Reservation은 계정 활성 상태와 예약 연락처를 확인하기 위해 Consumer 공개 Service/DTO를 계속 사용하므로 최종 의존 방향은 `reservation -> consumer`다.
+
+`menuhold <-> reservation`은 Reservation 소유 Port와 MenuHold Adapter로 제거한다. Reservation은 MenuHold 구현 Service/DTO를 직접 import하지 않고 예약 생성·해제·이행에 필요한 `ReservationMenuHoldPort`와 전용 명령·결과 계약을 소유한다. MenuHold Adapter가 이 Port를 구현하고 기존 MenuHold Service/DTO로 변환한다. 런타임 호출은 유지되지만 소스 의존은 구현체에서 Port 방향으로 역전된다.
+
+MenuHold의 공개 가용 수량 조회는 예약 시간 정책을 계속 사용한다. 다만 거대한 `ReservationService` 전체가 아니라 시간 해석만 공개하는 `ReservationTimeResolutionService`와 전용 계약을 사용한다. 이에 따라 MenuHold에서 Reservation으로 향하는 의존만 남고, Reservation은 MenuHold를 Port 타입으로만 인식한다. PR2 구조 테스트의 허용 순환 baseline은 빈 집합이어야 한다.
 
 ## 5. 호환성 및 배포 정책
 
