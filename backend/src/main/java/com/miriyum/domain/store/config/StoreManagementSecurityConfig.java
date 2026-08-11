@@ -20,7 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class StoreManagementSecurityConfig {
 
-    private static final String STORE_MANAGEMENT_ROOT = "/api/v1/store-operator/stores";
+    private static final String STORE_MANAGEMENT_ROOT = "/api/v1/store-operators/stores";
     private static final String STORE_MANAGEMENT_FAMILY = STORE_MANAGEMENT_ROOT + "/**";
 
     @Bean

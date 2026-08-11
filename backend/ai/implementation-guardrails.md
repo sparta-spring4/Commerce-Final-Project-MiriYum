@@ -46,11 +46,13 @@ com.miriyum
 - `AuthService`
 - `StoreService`
 - `StoreScheduleQueryService`
-- `MenuTransactionService`
+- `MenuTransactionFacade`
 - `ReservationService`
 - `MenuHoldService`
 - `PickupService`
 - `PaymentService`
+
+예약과 MenuHold의 교차 트랜잭션은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`로 연결한다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
 

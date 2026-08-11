@@ -109,7 +109,7 @@ class ReservationCancellationCommandFacadeTest {
                 "550e8400-e29b-41d4-a716-446655440000",
                 RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=50:/api/v1/reservations/{reservationId}/cancellations|"
+                                + "route=60:/api/v1/consumers/reservations/{reservationId}/cancellations|"
                                 + "reservationId=3:321|"
                                 + "reason=-1:|"
                 )
@@ -163,7 +163,7 @@ class ReservationCancellationCommandFacadeTest {
                 "550e8400-e29b-41d4-a716-446655440000",
                 RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=82:/api/v1/store-operator/stores/{storeId}/reservations/"
+                                + "route=83:/api/v1/store-operators/stores/{storeId}/reservations/"
                                 + "{reservationId}/cancellations|"
                                 + "storeId=2:73|"
                                 + "reservationId=3:321|"
@@ -222,21 +222,21 @@ class ReservationCancellationCommandFacadeTest {
         assertThat(consumerCommands.getAllValues().get(0).requestFingerprint())
                 .isEqualTo(RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=50:/api/v1/reservations/{reservationId}/cancellations|"
+                                + "route=60:/api/v1/consumers/reservations/{reservationId}/cancellations|"
                                 + "reservationId=3:321|"
                                 + "reason=8:reason-a|"
                 ));
         assertThat(consumerCommands.getAllValues().get(1).requestFingerprint())
                 .isEqualTo(RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=50:/api/v1/reservations/{reservationId}/cancellations|"
+                                + "route=60:/api/v1/consumers/reservations/{reservationId}/cancellations|"
                                 + "reservationId=3:321|"
                                 + "reason=8:reason-b|"
                 ));
         assertThat(operatorCommand.getValue().requestFingerprint())
                 .isEqualTo(RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=82:/api/v1/store-operator/stores/{storeId}/reservations/"
+                                + "route=83:/api/v1/store-operators/stores/{storeId}/reservations/"
                                 + "{reservationId}/cancellations|"
                                 + "storeId=2:73|"
                                 + "reservationId=3:321|"
@@ -282,28 +282,28 @@ class ReservationCancellationCommandFacadeTest {
                 .containsExactly(
                         RequestFingerprint.of(
                                 "method=4:POST|"
-                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "route=60:/api/v1/consumers/reservations/{reservationId}/"
                                         + "cancellations|"
                                         + "reservationId=3:321|"
                                         + "reason=-1:|"
                         ),
                         RequestFingerprint.of(
                                 "method=4:POST|"
-                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "route=60:/api/v1/consumers/reservations/{reservationId}/"
                                         + "cancellations|"
                                         + "reservationId=3:321|"
                                         + "reason=1: |"
                         ),
                         RequestFingerprint.of(
                                 "method=4:POST|"
-                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "route=60:/api/v1/consumers/reservations/{reservationId}/"
                                         + "cancellations|"
                                         + "reservationId=3:321|"
                                         + "reason=8: leading|"
                         ),
                         RequestFingerprint.of(
                                 "method=4:POST|"
-                                        + "route=50:/api/v1/reservations/{reservationId}/"
+                                        + "route=60:/api/v1/consumers/reservations/{reservationId}/"
                                         + "cancellations|"
                                         + "reservationId=3:321|"
                                         + "reason=9:trailing |"

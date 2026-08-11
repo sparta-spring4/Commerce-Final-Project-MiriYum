@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class ReservationCapacityControllerTest {
 
     private static final String URL =
-            "/api/v1/store-operator/stores/7/reservation-capacities/2026-08-10";
+            "/api/v1/store-operators/stores/7/reservation-capacities/2026-08-10";
     private static final String KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired

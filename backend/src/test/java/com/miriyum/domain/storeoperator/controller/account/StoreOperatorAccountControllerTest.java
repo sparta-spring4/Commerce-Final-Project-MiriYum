@@ -96,7 +96,7 @@ class StoreOperatorAccountControllerTest {
     @Test
     @DisplayName("Access Token 없이 조회하면 401과 AUTH_001을 반환한다")
     void getMeWithoutTokenReturnsUnauthorized() throws Exception {
-        mockMvc.perform(get("/api/v1/store-operator-accounts/me"))
+        mockMvc.perform(get("/api/v1/store-operators/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_001"));
     }
@@ -106,7 +106,7 @@ class StoreOperatorAccountControllerTest {
     void getMeWithConsumerTokenReturnsNamespaceMismatch() throws Exception {
         String consumerToken = jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId);
 
-        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + consumerToken))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_004"));
@@ -117,7 +117,7 @@ class StoreOperatorAccountControllerTest {
     void getMeReturnsAccount() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
-        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.displayName").value("미리윰식당"))
@@ -142,7 +142,7 @@ class StoreOperatorAccountControllerTest {
         storeOperatorAccountRepository.deleteAll();
         storeOperatorAccountRepository.flush();
 
-        String deletedAccountBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        String deletedAccountBody = mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_003"))
@@ -150,7 +150,7 @@ class StoreOperatorAccountControllerTest {
                 .getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
 
-        String invalidTokenBody = mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        String invalidTokenBody = mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
                 .andExpect(status().isUnauthorized())
                 .andReturn()
@@ -168,7 +168,7 @@ class StoreOperatorAccountControllerTest {
                 "UPDATE store_operator_accounts SET status = 'SUSPENDED' WHERE store_operator_account_id = ?",
                 accountId);
 
-        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_011"));
@@ -179,7 +179,7 @@ class StoreOperatorAccountControllerTest {
     void updateMeWithoutIdempotencyKeyReturnsBadRequest() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"displayName\": \"새상호명\"}"))
@@ -192,7 +192,7 @@ class StoreOperatorAccountControllerTest {
     void updateMeChangesDisplayName() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -206,7 +206,7 @@ class StoreOperatorAccountControllerTest {
     void registerContactReturnsMaskedPhoneNumber() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
-        mockMvc.perform(put("/api/v1/store-operator-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/store-operators/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -222,7 +222,7 @@ class StoreOperatorAccountControllerTest {
         storeOperatorAccountRepository.deleteAll();
         storeOperatorAccountRepository.flush();
 
-        mockMvc.perform(put("/api/v1/store-operator-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/store-operators/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -236,14 +236,14 @@ class StoreOperatorAccountControllerTest {
     void registerContactReplaysForEquivalentPhoneFormatting() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
-        mockMvc.perform(put("/api/v1/store-operator-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/store-operators/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phoneNumber\": \"010-1234-5678\"}"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(put("/api/v1/store-operator-accounts/me/contact")
+        mockMvc.perform(put("/api/v1/store-operators/me/contact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -259,14 +259,14 @@ class StoreOperatorAccountControllerTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<MvcResult> first = executor.submit(() -> mockMvc.perform(
-                    put("/api/v1/store-operator-accounts/me/contact")
+                    put("/api/v1/store-operators/me/contact")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440003")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"phoneNumber\": \"010-1111-1111\"}"))
                     .andReturn());
             Future<MvcResult> second = executor.submit(() -> mockMvc.perform(
-                    put("/api/v1/store-operator-accounts/me/contact")
+                    put("/api/v1/store-operators/me/contact")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .header("Idempotency-Key", "550e8400-e29b-41d4-a716-446655440004")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -294,7 +294,7 @@ class StoreOperatorAccountControllerTest {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
 
         for (int attempt = 0; attempt < 2; attempt++) {
-            mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+            mockMvc.perform(patch("/api/v1/store-operators/me")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -311,7 +311,7 @@ class StoreOperatorAccountControllerTest {
     @DisplayName("같은 Idempotency-Key를 다른 본문으로 재사용하면 409와 COMMON_007을 반환한다")
     void updateMeRejectsSameKeyWithDifferentBody() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -319,7 +319,7 @@ class StoreOperatorAccountControllerTest {
                 .andExpect(status().isOk());
 
         // when & then: 같은 키에 다른 입력을 실으면 두 번째 요청을 실행하지 않고 거절한다
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -328,7 +328,7 @@ class StoreOperatorAccountControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_007"));
 
         // then: 최초 결과가 덮어써지지 않았는지 확인한다
-        mockMvc.perform(get("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(get("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.data.displayName").value("첫상호명"));
     }
@@ -342,7 +342,7 @@ class StoreOperatorAccountControllerTest {
     @DisplayName("수정 성공 후 계정이 사라지면 같은 Idempotency-Key 재요청도 401 AUTH_003을 반환한다")
     void updateMeDoesNotReplayStoredResultAfterAccountDisappears() throws Exception {
         String token = jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId);
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -353,7 +353,7 @@ class StoreOperatorAccountControllerTest {
         storeOperatorAccountRepository.flush();
 
         // 같은 키·같은 본문이라 멱등 기록은 그대로 남아 있지만, 인증 경계가 먼저 걸린다.
-        mockMvc.perform(patch("/api/v1/store-operator-accounts/me")
+        mockMvc.perform(patch("/api/v1/store-operators/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("Idempotency-Key", VALID_IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)

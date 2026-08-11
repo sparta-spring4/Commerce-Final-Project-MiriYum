@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -21,14 +22,6 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
-import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
-import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
-import com.miriyum.domain.menuhold.service.MenuHoldService;
-import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
-import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
@@ -58,6 +51,11 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
@@ -179,7 +177,7 @@ class ReservationServiceTest {
     private ConsumerAccountService consumerAccountService;
 
     @Mock
-    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private ReservationMenuHoldPort menuHoldPort;
 
     @Mock
     private StoreTransactionEligibilityService storeTransactionEligibilityService;
@@ -189,9 +187,6 @@ class ReservationServiceTest {
 
     @Mock
     private ReservationCancellationPolicySelector cancellationPolicySelector;
-
-    @Mock
-    private MenuHoldService menuHoldService;
 
     @Mock
     private ReservationCancellationAuditRepository cancellationAuditRepository;
@@ -206,10 +201,16 @@ class ReservationServiceTest {
     private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
 
     private ReservationService reservationService;
+    private ReservationTimeResolutionService timeResolutionService;
 
     @BeforeEach
     void setUp() {
         lenient().when(clock.instant()).thenReturn(NOW);
+        timeResolutionService = new ReservationTimeResolutionService(
+                storeScheduleService,
+                storeServiceIntervalValidationService,
+                timePolicyRepository,
+                clock);
         reservationService = new ReservationService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
@@ -222,11 +223,11 @@ class ReservationServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService,
+                menuHoldPort,
+                timeResolutionService,
                 storeTransactionEligibilityService,
                 capacityAllocationRepository,
                 cancellationPolicySelector,
-                menuHoldService,
                 cancellationAuditRepository,
                 cancellationPolicyEvaluator,
                 fulfillmentAuditRepository
@@ -264,7 +265,7 @@ class ReservationServiceTest {
         then(storeTransactionEligibilityService).shouldHaveNoInteractions();
         then(reservationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @ParameterizedTest
@@ -361,7 +362,7 @@ class ReservationServiceTest {
                     ReflectionTestUtils.setField(saved, "id", 77L);
                     return saved;
                 });
-        lenient().when(menuHoldSnapshotQueryService.findByReservationId(77L))
+        lenient().when(menuHoldPort.findSnapshots(77L))
                 .thenThrow(new IllegalStateException("menu-less creation must not query menu snapshots"));
 
         ReservationCreationCommandResult result = reservationService.createReservation(
@@ -386,8 +387,8 @@ class ReservationServiceTest {
                 .isEqualTo("consumer:11:channel:primary");
         assertThat(reservationCaptor.getValue().getCapacityPolicyVersion()).isEqualTo(7L);
         then(capacityAllocationRepository).should().saveAll(any());
-        then(menuHoldService).shouldHaveNoInteractions();
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -461,10 +462,10 @@ class ReservationServiceTest {
                     ReflectionTestUtils.setField(saved, "id", 77L);
                     return saved;
                 });
-        lenient().when(menuHoldService.create(any(MenuHoldCreateCommand.class)))
-                .thenReturn(MenuHoldCommandResult.confirmed(77L));
-        lenient().when(menuHoldSnapshotQueryService.findByReservationId(77L))
-                .thenReturn(List.of(new MenuHoldItemResult(91L, "Menu", 4_500L, 1)));
+        lenient().when(menuHoldPort.create(any(ReservationMenuHoldCreateCommand.class)))
+                .thenReturn(ReservationMenuHoldResult.confirmed(77L));
+        lenient().when(menuHoldPort.findSnapshots(77L))
+                .thenReturn(List.of(new ReservationMenuHoldItemSnapshot(91L, "Menu", 4_500L, 1)));
 
         assertThatThrownBy(() -> reservationService.createReservation(
                 11L,
@@ -482,8 +483,8 @@ class ReservationServiceTest {
         then(reservationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -566,12 +567,12 @@ class ReservationServiceTest {
                 10, 3, 0, 0, 1, 6, true, 7L);
         ReflectionTestUtils.setField(bucket, "id", 301L);
         stubSuccessfulCreation(bucket, activePolicy(22L, 30, 60, 0));
-        given(menuHoldService.create(any(MenuHoldCreateCommand.class)))
-                .willReturn(MenuHoldCommandResult.confirmed(77L));
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+        given(menuHoldPort.create(any(ReservationMenuHoldCreateCommand.class)))
+                .willReturn(ReservationMenuHoldResult.confirmed(77L));
+        given(menuHoldPort.findSnapshots(77L))
                 .willReturn(List.of(
-                        new MenuHoldItemResult(91L, "아메리카노", 4_500L, 3),
-                        new MenuHoldItemResult(92L, "케이크", 7_000L, 2)));
+                        new ReservationMenuHoldItemSnapshot(91L, "아메리카노", 4_500L, 3),
+                        new ReservationMenuHoldItemSnapshot(92L, "케이크", 7_000L, 2)));
         AtomicInteger contactLookups = new AtomicInteger();
         given(consumerAccountService.getReservationContact(11L)).willAnswer(invocation -> {
             if (contactLookups.getAndIncrement() == 0) {
@@ -621,7 +622,7 @@ class ReservationServiceTest {
         then(consumerAccountService).should(times(2)).requireActiveAccount(11L);
         then(consumerAccountService).should(times(1)).getReservationContact(11L);
         then(reservationRepository).should(times(1)).saveAndFlush(any(Reservation.class));
-        then(menuHoldService).should(times(1)).create(any(MenuHoldCreateCommand.class));
+        then(menuHoldPort).should(times(1)).create(any(ReservationMenuHoldCreateCommand.class));
     }
 
     @Test
@@ -669,12 +670,12 @@ class ReservationServiceTest {
                 10, 3, 0, 0, 1, 6, true, 7L);
         ReflectionTestUtils.setField(bucket, "id", 301L);
         stubSuccessfulCreation(bucket, activePolicy(22L, 30, 60, 0));
-        given(menuHoldService.create(any(MenuHoldCreateCommand.class)))
-                .willReturn(MenuHoldCommandResult.confirmed(77L));
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+        given(menuHoldPort.create(any(ReservationMenuHoldCreateCommand.class)))
+                .willReturn(ReservationMenuHoldResult.confirmed(77L));
+        given(menuHoldPort.findSnapshots(77L))
                 .willReturn(List.of(
-                        new MenuHoldItemResult(91L, "아메리카노", 4_500L, 3),
-                        new MenuHoldItemResult(92L, "케이크", 7_000L, 2)));
+                        new ReservationMenuHoldItemSnapshot(91L, "아메리카노", 4_500L, 3),
+                        new ReservationMenuHoldItemSnapshot(92L, "케이크", 7_000L, 2)));
 
         ReservationCreationCommandResult result = reservationService.createReservation(
                 11L,
@@ -684,9 +685,9 @@ class ReservationServiceTest {
         assertThat(result.data().menuSelections())
                 .extracting(selection -> selection.menuId(), selection -> selection.quantity())
                 .containsExactly(tuple("91", 3), tuple("92", 2));
-        ArgumentCaptor<MenuHoldCreateCommand> command =
-                ArgumentCaptor.forClass(MenuHoldCreateCommand.class);
-        then(menuHoldService).should().create(command.capture());
+        ArgumentCaptor<ReservationMenuHoldCreateCommand> command =
+                ArgumentCaptor.forClass(ReservationMenuHoldCreateCommand.class);
+        then(menuHoldPort).should().create(command.capture());
         assertThat(command.getValue().reservationId()).isEqualTo(77L);
         assertThat(command.getValue().operationId())
                 .isEqualTo("reservation-create:77:550e8400-e29b-41d4-a716-446655440000");
@@ -1152,7 +1153,7 @@ class ReservationServiceTest {
         ));
 
         // when
-        List<ReservationTimeResolutionResult> results = reservationService
+        List<ReservationTimeResolutionResult> results = timeResolutionService
                 .resolveReservationTimes(
                         storeIds,
                         new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
@@ -1213,7 +1214,7 @@ class ReservationServiceTest {
                 StoreReservationWindowResult.notAccepting(4L)
         ));
 
-        List<ReservationTimeResolutionResult> results = reservationService
+        List<ReservationTimeResolutionResult> results = timeResolutionService
                 .resolveReservationTimes(
                         storeIds,
                         new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
@@ -1253,7 +1254,7 @@ class ReservationServiceTest {
                 org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
                 org.mockito.ArgumentMatchers.eq(NOW)
         )).willReturn(List.of(activePolicy(1L, 30, 60, 0)));
-        List<ReservationTimeResolutionResult> results = reservationService
+        List<ReservationTimeResolutionResult> results = timeResolutionService
                 .resolveReservationTimes(
                         storeIds,
                         new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
@@ -1295,11 +1296,11 @@ class ReservationServiceTest {
                 List.of(interval)
         )).willReturn(List.of(StoreServiceIntervalResult.of(interval, true)));
 
-        ReservationTimeResolutionResult ambiguous = reservationService.resolveReservationTimes(
+        ReservationTimeResolutionResult ambiguous = timeResolutionService.resolveReservationTimes(
                 storeIds,
                 new ReservationTimeRequest(serviceDate, startTime, null)
         ).getFirst();
-        ReservationTimeResolutionResult explicit = reservationService.resolveReservationTimes(
+        ReservationTimeResolutionResult explicit = timeResolutionService.resolveReservationTimes(
                 storeIds,
                 new ReservationTimeRequest(serviceDate, startTime, ZoneOffset.ofHours(2))
         ).getFirst();
@@ -1340,7 +1341,7 @@ class ReservationServiceTest {
                 org.mockito.ArgumentMatchers.eq(NOW)
         )).willReturn(List.of());
 
-        assertThat(reservationService.resolveReservationTimes(
+        assertThat(timeResolutionService.resolveReservationTimes(
                 storeIds,
                 new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
         )).singleElement().satisfies(result ->
@@ -1395,7 +1396,7 @@ class ReservationServiceTest {
         );
 
         for (int attempt = 0; attempt < 4; attempt++) {
-            assertThat(reservationService.resolveReservationTimes(
+            assertThat(timeResolutionService.resolveReservationTimes(
                     storeIds,
                     new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
             )).singleElement().satisfies(result -> {
@@ -1441,7 +1442,7 @@ class ReservationServiceTest {
                 due
         ));
 
-        assertThat(reservationService.resolveReservationTimes(
+        assertThat(timeResolutionService.resolveReservationTimes(
                 storeIds,
                 new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
         )).singleElement().satisfies(result -> {
@@ -1454,7 +1455,7 @@ class ReservationServiceTest {
     @Test
     @DisplayName("빈 매장 입력은 Store와 정책 repository를 조회하지 않고 빈 결과를 반환한다")
     void returnsEmptyWithoutDependenciesForEmptyStoreInput() {
-        assertThat(reservationService.resolveReservationTimes(
+        assertThat(timeResolutionService.resolveReservationTimes(
                 List.of(),
                 new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)
         )).isEmpty();
@@ -1986,7 +1987,7 @@ class ReservationServiceTest {
                 .findByIdAndConsumerAccountIdForUpdate(77L, 11L);
         then(reservationRepository).should(never()).findById(77L);
         then(capacityBucketRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
@@ -1995,7 +1996,7 @@ class ReservationServiceTest {
     void cancellationAllowsEmptyCurrentBucketsForNewerPolicy() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
-                command, MenuHoldTerminationPresence.NO_HOLD);
+                command, ReservationMenuHoldTerminationPresence.NO_HOLD);
         ReservationCapacityBucket firstOriginal = fixture.lockedBuckets().get(0);
         ReservationCapacityBucket secondOriginal = fixture.lockedBuckets().get(1);
 
@@ -2028,7 +2029,7 @@ class ReservationServiceTest {
     void cancellationAllowsPartialCurrentCoverageForNewerPolicy() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
-                command, MenuHoldTerminationPresence.NO_HOLD);
+                command, ReservationMenuHoldTerminationPresence.NO_HOLD);
         ReservationCapacityBucket firstOriginal = fixture.lockedBuckets().get(0);
         ReservationCapacityBucket secondOriginal = fixture.lockedBuckets().get(1);
         ReservationCapacityBucket current = cancellationBucket(
@@ -2124,7 +2125,7 @@ class ReservationServiceTest {
         then(idempotencyExecutor).shouldHaveNoInteractions();
         then(reservationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
@@ -2164,8 +2165,8 @@ class ReservationServiceTest {
         then(reservationRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
         then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
     }
@@ -2187,7 +2188,7 @@ class ReservationServiceTest {
                                 .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION));
 
         then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
@@ -2214,7 +2215,7 @@ class ReservationServiceTest {
                                 .isEqualTo(ReservationErrorCode.CANCELLATION_NOT_ALLOWED));
 
         then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
@@ -2250,7 +2251,7 @@ class ReservationServiceTest {
                 requestedAt
         )).willReturn(ReservationCancellationDecision.ALLOWED);
         IllegalStateException afterEvaluator = new IllegalStateException("after evaluator");
-        willThrow(afterEvaluator).given(menuHoldService).lockForTermination(77L);
+        willThrow(afterEvaluator).given(menuHoldPort).lockForTermination(77L);
 
         assertThatThrownBy(() -> {
             if (storeOperator) {
@@ -2313,7 +2314,7 @@ class ReservationServiceTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.CANCELLATION_NOT_ALLOWED));
 
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
@@ -2324,7 +2325,7 @@ class ReservationServiceTest {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD
+                ReservationMenuHoldTerminationPresence.NO_HOLD
         );
 
         Object result = invokeConsumerCancellation(
@@ -2338,7 +2339,7 @@ class ReservationServiceTest {
         InOrder order = inOrder(
                 reservationRepository,
                 cancellationPolicyEvaluator,
-                menuHoldService,
+                menuHoldPort,
                 capacityAllocationRepository,
                 capacityBucketRepository
         );
@@ -2351,7 +2352,7 @@ class ReservationServiceTest {
                 fixture.reservation().getStartAt(),
                 NOW.minusSeconds(10)
         );
-        order.verify(menuHoldService).lockForTermination(77L);
+        order.verify(menuHoldPort).lockForTermination(77L);
         order.verify(capacityAllocationRepository)
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L);
         order.verify(capacityBucketRepository)
@@ -2375,7 +2376,7 @@ class ReservationServiceTest {
     @DisplayName("취소의 최신 후보 관찰은 scalar ID만 읽고 mutable 엔티티는 단일 잠금에서 처음 적재한다")
     void cancellationCapacityObservesScalarIdsBeforeHydratingMutableBuckets() {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
-        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+        stubSuccessfulCancellation(command, ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
                 command,
@@ -2405,7 +2406,7 @@ class ReservationServiceTest {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD
+                ReservationMenuHoldTerminationPresence.NO_HOLD
         );
 
         invokeConsumerCancellation(
@@ -2459,8 +2460,8 @@ class ReservationServiceTest {
                 reservation.getStartAt(),
                 NOW.minusSeconds(10)
         )).willReturn(ReservationCancellationDecision.ALLOWED);
-        given(menuHoldService.lockForTermination(77L))
-                .willReturn(MenuHoldTerminationPresence.NO_HOLD);
+        given(menuHoldPort.lockForTermination(77L))
+                .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         ReservationCapacityAllocation allocation =
                 ReservationCapacityAllocation.allocate(77L, 301L, 3, 3L);
@@ -2553,7 +2554,7 @@ class ReservationServiceTest {
         AtomicReference<BusinessResult<?>> succeeded = new AtomicReference<>();
         Reservation reservation = stubCancellationThroughAllocation(
                 command,
-                MenuHoldTerminationPresence.HOLD_PRESENT,
+                ReservationMenuHoldTerminationPresence.HOLD_PRESENT,
                 succeeded
         );
         ReservationCapacityBucket original = cancellationBucket(
@@ -2644,7 +2645,7 @@ class ReservationServiceTest {
                         .isEqualTo(ReservationErrorCode.CAPACITY_POLICY_CHANGED));
         assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
         assertThat(succeeded).hasNullValue();
-        then(menuHoldService).should(never()).release(any(MenuHoldReleaseCommand.class));
+        then(menuHoldPort).should(never()).release(anyLong(), anyString());
         then(cancellationAuditRepository).shouldHaveNoInteractions();
     }
 
@@ -2659,16 +2660,16 @@ class ReservationServiceTest {
         CancellationFixture fixture = stubCancellation(
                 command,
                 holdPresent
-                        ? MenuHoldTerminationPresence.HOLD_PRESENT
-                        : MenuHoldTerminationPresence.NO_HOLD,
+                        ? ReservationMenuHoldTerminationPresence.HOLD_PRESENT
+                        : ReservationMenuHoldTerminationPresence.NO_HOLD,
                 expectedToComplete
         );
         if ("WRONG_ID".equals(holdCase)) {
-            given(menuHoldService.release(any(MenuHoldReleaseCommand.class)))
-                    .willReturn(MenuHoldCommandResult.released(78L));
+            given(menuHoldPort.release(anyLong(), anyString()))
+                    .willReturn(ReservationMenuHoldResult.released(78L));
         } else if ("WRONG_OUTCOME".equals(holdCase)) {
-            given(menuHoldService.release(any(MenuHoldReleaseCommand.class)))
-                    .willReturn(MenuHoldCommandResult.confirmed(77L));
+            given(menuHoldPort.release(anyLong(), anyString()))
+                    .willReturn(ReservationMenuHoldResult.confirmed(77L));
         }
 
         Throwable failure = catchThrowable(() -> invokeConsumerCancellation(
@@ -2686,12 +2687,10 @@ class ReservationServiceTest {
         }
         assertThat(failure).isNull();
         if (holdPresent) {
-            then(menuHoldService).should().release(new MenuHoldReleaseCommand(
-                    77L,
-                    CONSUMER_CANCELLATION_CORRELATION
-            ));
+            then(menuHoldPort).should().release(
+                    77L, CONSUMER_CANCELLATION_CORRELATION);
         } else {
-            then(menuHoldService).should(never()).release(any(MenuHoldReleaseCommand.class));
+            then(menuHoldPort).should(never()).release(anyLong(), anyString());
         }
     }
 
@@ -2701,7 +2700,7 @@ class ReservationServiceTest {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
                 command,
-                MenuHoldTerminationPresence.HOLD_PRESENT
+                ReservationMenuHoldTerminationPresence.HOLD_PRESENT
         );
         Reservation original = fixture.reservation();
         Reservation rehydrated = reservation(77L, 11L);
@@ -2722,14 +2721,12 @@ class ReservationServiceTest {
         assertThat(cancellationData(result).status()).isEqualTo("CANCELLED");
 
         InOrder order = inOrder(
-                menuHoldService,
+                menuHoldPort,
                 reservationRepository,
                 cancellationAuditRepository
         );
-        order.verify(menuHoldService).release(new MenuHoldReleaseCommand(
-                77L,
-                CONSUMER_CANCELLATION_CORRELATION
-        ));
+        order.verify(menuHoldPort).release(
+                77L, CONSUMER_CANCELLATION_CORRELATION);
         order.verify(reservationRepository).findById(77L);
         order.verify(cancellationAuditRepository).saveAndFlush(
                 any(ReservationCancellationAudit.class));
@@ -2741,7 +2738,7 @@ class ReservationServiceTest {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD
+                ReservationMenuHoldTerminationPresence.NO_HOLD
         );
 
         invokeConsumerCancellation(
@@ -2773,7 +2770,7 @@ class ReservationServiceTest {
     @DisplayName("운영자 공백 사유는 trimming 없이 감사와 결과에 그대로 보존한다")
     void cancellationAuditAcceptsWhitespaceOperatorReason() {
         IdempotencyCommand command = cancellationCommand("store-operator", 33L);
-        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+        stubSuccessfulCancellation(command, ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         Object result = invokeStoreCancellation(
                 command,
@@ -2800,7 +2797,7 @@ class ReservationServiceTest {
     void cancellationAcceptsFiveHundredCodePointConsumerReason() {
         String reason = "😀".repeat(500);
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
-        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+        stubSuccessfulCancellation(command, ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         Object result = invokeConsumerCancellation(
                 command,
@@ -2817,7 +2814,7 @@ class ReservationServiceTest {
     void cancellationAcceptsFiveHundredCodePointOperatorReason() {
         String reason = "😀".repeat(500);
         IdempotencyCommand command = cancellationCommand("store-operator", 33L);
-        stubSuccessfulCancellation(command, MenuHoldTerminationPresence.NO_HOLD);
+        stubSuccessfulCancellation(command, ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         Object result = invokeStoreCancellation(
                 command,
@@ -2855,7 +2852,7 @@ class ReservationServiceTest {
         AtomicReference<BusinessResult<?>> succeeded = new AtomicReference<>();
         CancellationFixture fixture = stubCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD,
+                ReservationMenuHoldTerminationPresence.NO_HOLD,
                 false,
                 succeeded
         );
@@ -2875,7 +2872,7 @@ class ReservationServiceTest {
 
         assertThat(succeeded).hasNullValue();
         assertThat(fixture.reservation().getCancelledAt()).isEqualTo(NOW);
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).should(never()).findSnapshots(anyLong());
     }
 
     @Test
@@ -2885,7 +2882,7 @@ class ReservationServiceTest {
         AtomicReference<BusinessResult<?>> captured = new AtomicReference<>();
         stubCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD,
+                ReservationMenuHoldTerminationPresence.NO_HOLD,
                 true,
                 captured
         );
@@ -2943,7 +2940,7 @@ class ReservationServiceTest {
         then(cancellationAuditRepository).shouldHaveNoInteractions();
         then(reservationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -2952,7 +2949,7 @@ class ReservationServiceTest {
         IdempotencyCommand command = cancellationCommand("consumer", 11L);
         CancellationFixture fixture = stubSuccessfulCancellation(
                 command,
-                MenuHoldTerminationPresence.NO_HOLD
+                ReservationMenuHoldTerminationPresence.NO_HOLD
         );
         invokeConsumerCancellation(
                 command,
@@ -2970,7 +2967,7 @@ class ReservationServiceTest {
                 .willReturn(Optional.of(fixture.reservation()));
         given(cancellationAuditRepository.findByReservationId(77L))
                 .willReturn(Optional.of(audit), Optional.empty());
-        given(menuHoldSnapshotQueryService.findByReservationId(77L)).willReturn(List.of());
+        given(menuHoldPort.findSnapshots(77L)).willReturn(List.of());
 
         ReservationDetailResponse consumer =
                 reservationService.getConsumerReservation(11L, 77L);
@@ -3162,13 +3159,13 @@ class ReservationServiceTest {
     void findsConsumerDetailAfterActiveAccountCheck() {
         // given
         Reservation reservation = reservation(77L, 11L);
-        List<MenuHoldItemResult> snapshots = List.of(
-                new MenuHoldItemResult(91L, "아메리카노", 4_500L, 2),
-                new MenuHoldItemResult(92L, "바스크 치즈케이크", 7_000L, 1)
+        List<ReservationMenuHoldItemSnapshot> snapshots = List.of(
+                new ReservationMenuHoldItemSnapshot(91L, "아메리카노", 4_500L, 2),
+                new ReservationMenuHoldItemSnapshot(92L, "바스크 치즈케이크", 7_000L, 1)
         );
         given(reservationRepository.findByIdAndConsumerAccountId(77L, 11L))
                 .willReturn(Optional.of(reservation));
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+        given(menuHoldPort.findSnapshots(77L))
                 .willReturn(snapshots);
 
         // when
@@ -3183,11 +3180,11 @@ class ReservationServiceTest {
         InOrder order = inOrder(
                 consumerAccountService,
                 reservationRepository,
-                menuHoldSnapshotQueryService
+                menuHoldPort
         );
         order.verify(consumerAccountService).getMe(11L);
         order.verify(reservationRepository).findByIdAndConsumerAccountId(77L, 11L);
-        order.verify(menuHoldSnapshotQueryService).findByReservationId(77L);
+        order.verify(menuHoldPort).findSnapshots(77L);
         then(reservationRepository).should(never()).findById(anyLong());
     }
 
@@ -3206,7 +3203,7 @@ class ReservationServiceTest {
         assertHiddenReservationNotFound(() ->
                 reservationService.getConsumerReservation(11L, 88L));
         then(reservationRepository).should(never()).findById(anyLong());
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3229,7 +3226,7 @@ class ReservationServiceTest {
         then(reservationRepository).should()
                 .findByIdAndConsumerAccountId(-1L, 11L);
         then(reservationRepository).should(never()).findById(anyLong());
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3242,7 +3239,7 @@ class ReservationServiceTest {
         // when & then
         assertHiddenReservationNotFound(() ->
                 reservationService.getConsumerReservation(11L, 77L));
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(reservationRepository).should(never()).findById(anyLong());
     }
 
@@ -3260,7 +3257,7 @@ class ReservationServiceTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
         then(reservationRepository).shouldHaveNoInteractions();
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3268,13 +3265,13 @@ class ReservationServiceTest {
     void findsStoreDetailAfterManagementAuthorization() {
         // given
         Reservation reservation = reservation(77L, 11L);
-        List<MenuHoldItemResult> snapshots = List.of(
-                new MenuHoldItemResult(91L, "아메리카노", 4_500L, 2),
-                new MenuHoldItemResult(92L, "바스크 치즈케이크", 7_000L, 1)
+        List<ReservationMenuHoldItemSnapshot> snapshots = List.of(
+                new ReservationMenuHoldItemSnapshot(91L, "아메리카노", 4_500L, 2),
+                new ReservationMenuHoldItemSnapshot(92L, "바스크 치즈케이크", 7_000L, 1)
         );
         given(reservationRepository.findByIdAndStoreId(77L, 22L))
                 .willReturn(Optional.of(reservation));
-        given(menuHoldSnapshotQueryService.findByReservationId(77L))
+        given(menuHoldPort.findSnapshots(77L))
                 .willReturn(snapshots);
 
         // when
@@ -3290,11 +3287,11 @@ class ReservationServiceTest {
         InOrder order = inOrder(
                 storeService,
                 reservationRepository,
-                menuHoldSnapshotQueryService
+                menuHoldPort
         );
         order.verify(storeService).requireManagementOwnership(33L, 22L);
         order.verify(reservationRepository).findByIdAndStoreId(77L, 22L);
-        order.verify(menuHoldSnapshotQueryService).findByReservationId(77L);
+        order.verify(menuHoldPort).findSnapshots(77L);
         then(reservationRepository).should(never()).findById(anyLong());
     }
 
@@ -3313,7 +3310,7 @@ class ReservationServiceTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(StoreErrorCode.ACCESS_DENIED));
         then(reservationRepository).shouldHaveNoInteractions();
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3331,7 +3328,7 @@ class ReservationServiceTest {
         assertHiddenReservationNotFound(() ->
                 reservationService.getStoreReservation(33L, 22L, 88L));
         then(reservationRepository).should(never()).findById(anyLong());
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3352,7 +3349,7 @@ class ReservationServiceTest {
         then(reservationRepository).should().findByIdAndStoreId(0L, 22L);
         then(reservationRepository).should().findByIdAndStoreId(-1L, 22L);
         then(reservationRepository).should(never()).findById(anyLong());
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
@@ -3365,7 +3362,7 @@ class ReservationServiceTest {
         // when & then
         assertHiddenReservationNotFound(() ->
                 reservationService.getStoreReservation(33L, 22L, 77L));
-        then(menuHoldSnapshotQueryService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(reservationRepository).should(never()).findById(anyLong());
     }
 
@@ -3523,9 +3520,9 @@ class ReservationServiceTest {
 
     @Test
     void fulfillmentTransitionsReservationAndPresentHoldWithoutResourceRestore() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
-        given(menuHoldService.fulfill(any(MenuHoldFulfillCommand.class)))
-                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldPort.fulfill(anyLong(), anyString()))
+                .willReturn(ReservationMenuHoldResult.fulfilled(RESERVATION_ID));
 
         ReservationFulfillmentCommandResult result =
                 reservationService.fulfillStoreReservation(
@@ -3550,8 +3547,8 @@ class ReservationServiceTest {
                 RESERVATION_ID,
                 STORE_ID
         )).willReturn(Optional.of(confirmedReservation()));
-        given(menuHoldService.lockForTermination(RESERVATION_ID))
-                .willReturn(MenuHoldTerminationPresence.NO_HOLD);
+        given(menuHoldPort.lockForTermination(RESERVATION_ID))
+                .willReturn(ReservationMenuHoldTerminationPresence.NO_HOLD);
         given(fulfillmentAuditRepository.saveAndFlush(
                 any(ReservationFulfillmentAudit.class)
         )).willAnswer(invocation -> invocation.getArgument(0));
@@ -3587,14 +3584,14 @@ class ReservationServiceTest {
 
         then(storeService).should().requireManagementOwnership(OPERATOR_ID, STORE_ID);
         then(reservationRepository).shouldHaveNoInteractions();
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
         then(fulfillmentAuditRepository).shouldHaveNoInteractions();
         assertThat(result.httpStatus()).isEqualTo(200);
     }
 
     @Test
     void noHoldNeverCallsFulfillAndDoesNotCreateOrRestoreResources() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.NO_HOLD);
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.NO_HOLD);
 
         reservationService.fulfillStoreReservation(
                 OPERATOR_ID,
@@ -3605,18 +3602,16 @@ class ReservationServiceTest {
                 FULFILLMENT_CORRELATION
         );
 
-        then(menuHoldService).should(never()).fulfill(any());
+        then(menuHoldPort).should(never()).fulfill(anyLong(), anyString());
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
     }
 
     @Test
     void acceptsAlreadyFulfilledMenuHoldAsThePublicFulfilledOutcome() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
-        given(menuHoldService.fulfill(new MenuHoldFulfillCommand(
-                RESERVATION_ID,
-                FULFILLMENT_CORRELATION
-        ))).willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldPort.fulfill(RESERVATION_ID, FULFILLMENT_CORRELATION))
+                .willReturn(ReservationMenuHoldResult.fulfilled(RESERVATION_ID));
 
         reservationService.fulfillStoreReservation(
                 OPERATOR_ID,
@@ -3652,14 +3647,14 @@ class ReservationServiceTest {
                 FULFILLMENT_CORRELATION
         ), ReservationErrorCode.INVALID_STATE_TRANSITION);
 
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
     void usesOneOccurredAtLocksInOrderAndNeverRehydratesAfterMenuHoldFulfill() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
-        given(menuHoldService.fulfill(any()))
-                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldPort.fulfill(anyLong(), anyString()))
+                .willReturn(ReservationMenuHoldResult.fulfilled(RESERVATION_ID));
 
         reservationService.fulfillStoreReservation(
                 OPERATOR_ID,
@@ -3672,16 +3667,14 @@ class ReservationServiceTest {
 
         InOrder order = inOrder(
                 reservationRepository,
-                menuHoldService,
+                menuHoldPort,
                 fulfillmentAuditRepository
         );
         order.verify(reservationRepository)
                 .findByIdAndStoreIdForUpdate(RESERVATION_ID, STORE_ID);
-        order.verify(menuHoldService).lockForTermination(RESERVATION_ID);
-        order.verify(menuHoldService).fulfill(new MenuHoldFulfillCommand(
-                RESERVATION_ID,
-                FULFILLMENT_CORRELATION
-        ));
+        order.verify(menuHoldPort).lockForTermination(RESERVATION_ID);
+        order.verify(menuHoldPort).fulfill(
+                RESERVATION_ID, FULFILLMENT_CORRELATION);
         ArgumentCaptor<ReservationFulfillmentAudit> audit =
                 ArgumentCaptor.forClass(ReservationFulfillmentAudit.class);
         order.verify(fulfillmentAuditRepository).saveAndFlush(audit.capture());
@@ -3692,9 +3685,9 @@ class ReservationServiceTest {
 
     @Test
     void propagatesAuditFailureSoTheTransactionCanRollBack() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
-        given(menuHoldService.fulfill(any()))
-                .willReturn(MenuHoldCommandResult.fulfilled(RESERVATION_ID));
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldPort.fulfill(anyLong(), anyString()))
+                .willReturn(ReservationMenuHoldResult.fulfilled(RESERVATION_ID));
         DataIntegrityViolationException failure =
                 new DataIntegrityViolationException("audit insert");
         given(fulfillmentAuditRepository.saveAndFlush(any())).willThrow(failure);
@@ -3726,17 +3719,15 @@ class ReservationServiceTest {
                 FULFILLMENT_CORRELATION
         ), ReservationErrorCode.RESERVATION_NOT_FOUND);
 
-        then(menuHoldService).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @ParameterizedTest
     @MethodSource("inconsistentFulfillmentHoldResults")
-    void rejectsNullOrInconsistentMenuHoldResult(MenuHoldCommandResult result) {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
-        given(menuHoldService.fulfill(new MenuHoldFulfillCommand(
-                RESERVATION_ID,
-                FULFILLMENT_CORRELATION
-        ))).willReturn(result);
+    void rejectsNullOrInconsistentMenuHoldResult(ReservationMenuHoldResult result) {
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
+        given(menuHoldPort.fulfill(RESERVATION_ID, FULFILLMENT_CORRELATION))
+                .willReturn(result);
 
         assertThatThrownBy(() -> reservationService.fulfillStoreReservation(
                 OPERATOR_ID,
@@ -3750,21 +3741,21 @@ class ReservationServiceTest {
         then(fulfillmentAuditRepository).shouldHaveNoInteractions();
     }
 
-    private static Stream<MenuHoldCommandResult> inconsistentFulfillmentHoldResults() {
+    private static Stream<ReservationMenuHoldResult> inconsistentFulfillmentHoldResults() {
         return Stream.of(
                 null,
-                MenuHoldCommandResult.fulfilled(RESERVATION_ID + 1),
-                MenuHoldCommandResult.released(RESERVATION_ID)
+                ReservationMenuHoldResult.fulfilled(RESERVATION_ID + 1),
+                ReservationMenuHoldResult.released(RESERVATION_ID)
         );
     }
 
     @Test
     void propagatesMenuHoldServiceExceptionWithoutReservationRemapping() {
-        stubFreshConfirmed(MenuHoldTerminationPresence.HOLD_PRESENT);
+        stubFreshConfirmed(ReservationMenuHoldTerminationPresence.HOLD_PRESENT);
         ServiceException failure = new ServiceException(
                 MenuHoldErrorCode.INVENTORY_STATE_CONFLICT
         );
-        given(menuHoldService.fulfill(any())).willThrow(failure);
+        given(menuHoldPort.fulfill(anyLong(), anyString())).willThrow(failure);
 
         assertThatThrownBy(() -> reservationService.fulfillStoreReservation(
                 OPERATOR_ID,
@@ -3833,18 +3824,18 @@ class ReservationServiceTest {
         return reservation;
     }
 
-    private void stubFreshConfirmed(MenuHoldTerminationPresence presence) {
+    private void stubFreshConfirmed(ReservationMenuHoldTerminationPresence presence) {
         stubFreshIdempotency(fulfillmentCommand(), null);
         given(reservationRepository.findByIdAndStoreIdForUpdate(
                 RESERVATION_ID,
                 STORE_ID
         )).willReturn(Optional.of(confirmedReservation()));
-        given(menuHoldService.lockForTermination(RESERVATION_ID)).willReturn(presence);
+        given(menuHoldPort.lockForTermination(RESERVATION_ID)).willReturn(presence);
         lenient().when(fulfillmentAuditRepository.saveAndFlush(
                 any(ReservationFulfillmentAudit.class)
         )).thenAnswer(invocation -> invocation.getArgument(0));
-        if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
-            lenient().when(menuHoldSnapshotQueryService.findByReservationId(RESERVATION_ID))
+        if (presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
+            lenient().when(menuHoldPort.findSnapshots(RESERVATION_ID))
                     .thenReturn(List.of());
         }
     }
@@ -3903,7 +3894,7 @@ class ReservationServiceTest {
 
     private Reservation stubCancellationThroughAllocation(
             IdempotencyCommand command,
-            MenuHoldTerminationPresence presence,
+            ReservationMenuHoldTerminationPresence presence,
             AtomicReference<BusinessResult<?>> capturedResult
     ) {
         Reservation reservation = reservation(77L, 11L);
@@ -3917,7 +3908,7 @@ class ReservationServiceTest {
                 reservation.getStartAt(),
                 NOW.minusSeconds(10)
         )).willReturn(ReservationCancellationDecision.ALLOWED);
-        given(menuHoldService.lockForTermination(77L)).willReturn(presence);
+        given(menuHoldPort.lockForTermination(77L)).willReturn(presence);
         given(capacityAllocationRepository
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))
                 .willReturn(List.of(
@@ -3928,14 +3919,14 @@ class ReservationServiceTest {
 
     private CancellationFixture stubSuccessfulCancellation(
             IdempotencyCommand command,
-            MenuHoldTerminationPresence presence
+            ReservationMenuHoldTerminationPresence presence
     ) {
         return stubCancellation(command, presence, true);
     }
 
     private CancellationFixture stubCancellation(
             IdempotencyCommand command,
-            MenuHoldTerminationPresence presence,
+            ReservationMenuHoldTerminationPresence presence,
             boolean expectedToComplete
     ) {
         return stubCancellation(command, presence, expectedToComplete, null);
@@ -3943,7 +3934,7 @@ class ReservationServiceTest {
 
     private CancellationFixture stubCancellation(
             IdempotencyCommand command,
-            MenuHoldTerminationPresence presence,
+            ReservationMenuHoldTerminationPresence presence,
             boolean expectedToComplete,
             AtomicReference<BusinessResult<?>> capturedResult
     ) {
@@ -3984,7 +3975,7 @@ class ReservationServiceTest {
                 reservation.getStartAt(),
                 NOW.minusSeconds(10)
         )).willReturn(ReservationCancellationDecision.ALLOWED);
-        given(menuHoldService.lockForTermination(77L)).willReturn(presence);
+        given(menuHoldPort.lockForTermination(77L)).willReturn(presence);
         given(capacityAllocationRepository
                 .findAllByReservationIdOrderByCapacityBucketIdAsc(77L))
                 .willReturn(List.of(firstAllocation, secondAllocation));
@@ -3999,11 +3990,9 @@ class ReservationServiceTest {
         given(capacityBucketRepository.findAllByIdInForUpdate(
                 List.of(301L, 302L, 401L)))
                 .willReturn(lockedBuckets);
-        if (expectedToComplete && presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
-            given(menuHoldService.release(new MenuHoldReleaseCommand(
-                    77L,
-                    correlationId
-            ))).willReturn(MenuHoldCommandResult.released(77L));
+        if (expectedToComplete && presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
+            given(menuHoldPort.release(77L, correlationId))
+                    .willReturn(ReservationMenuHoldResult.released(77L));
         }
         if (expectedToComplete) {
             lenient().when(reservationRepository.findById(77L))
@@ -4011,8 +4000,8 @@ class ReservationServiceTest {
             given(cancellationAuditRepository.saveAndFlush(
                     any(ReservationCancellationAudit.class)))
                     .willAnswer(invocation -> invocation.getArgument(0));
-            if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
-                given(menuHoldSnapshotQueryService.findByReservationId(77L)).willReturn(List.of());
+            if (presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
+                given(menuHoldPort.findSnapshots(77L)).willReturn(List.of());
             }
         }
 

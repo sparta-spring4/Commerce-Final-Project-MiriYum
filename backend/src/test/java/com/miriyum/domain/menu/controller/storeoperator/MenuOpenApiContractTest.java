@@ -23,16 +23,16 @@ class MenuOpenApiContractTest {
         }
 
         Map<String, Object> paths = map(document.get("paths"));
-        assertThat(map(paths.get("/api/v1/store-operator/stores/{storeId}/menus")))
+        assertThat(map(paths.get("/api/v1/store-operators/stores/{storeId}/menus")))
                 .containsKeys("get", "post");
-        assertThat(map(paths.get("/api/v1/store-operator/stores/{storeId}/menus/{menuId}")))
+        assertThat(map(paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}")))
                 .containsKeys("get", "put");
         assertThat(paths).containsKeys(
-                "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication",
-                "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/publication-cancellation",
-                "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/visibility",
-                "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/selling-status",
-                "/api/v1/store-operator/stores/{storeId}/menus/{menuId}/retirement");
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/selling-status",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement");
 
         Map<String, Object> components = map(document.get("components"));
         Map<String, Object> schemas = map(components.get("schemas"));

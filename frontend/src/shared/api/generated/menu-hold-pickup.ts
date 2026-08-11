@@ -13,41 +13,41 @@ export interface paths {
     /** 픽업 가능 시간과 메뉴 수량 조회 */
     get: operations["getPickupAvailability"];
   };
-  "/api/v1/pickup-reservations": {
+  "/api/v1/consumers/pickup-reservations": {
     /** 픽업 예약 생성 */
     post: operations["createPickupReservation"];
   };
-  "/api/v1/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/consumers/pickup-reservations/{pickupReservationId}": {
     /** 본인 픽업 예약 상세 조회 */
     get: operations["getPickupReservation"];
   };
-  "/api/v1/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 본인 픽업 예약 취소 */
     post: operations["cancelPickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations": {
     /** 매장 픽업 예약 목록 조회 */
     get: operations["getStorePickupReservations"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}": {
     /** 매장 픽업 예약 상세 조회 */
     get: operations["getStorePickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments": {
     /** 픽업 수령 완료 */
     post: operations["fulfillPickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 운영자 픽업 예약 취소 */
     post: operations["cancelStorePickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets": {
+  "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets": {
     /** 운영자 메뉴 재고 버킷 목록 조회 */
     get: operations["getMenuInventoryBuckets"];
     /** 메뉴 재고 버킷 생성 */
     post: operations["createMenuInventoryBucket"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}": {
+  "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}": {
     /** 메뉴 재고 수량·풀·품절 상태 수정 */
     patch: operations["updateMenuInventoryBucket"];
   };

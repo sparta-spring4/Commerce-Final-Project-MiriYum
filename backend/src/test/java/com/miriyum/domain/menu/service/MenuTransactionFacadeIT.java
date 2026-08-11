@@ -57,7 +57,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.menu.schedule.enabled=false"
         })
-class MenuTransactionServiceIT {
+class MenuTransactionFacadeIT {
 
     private static final long LOCK_WAIT_TIMEOUT_MILLIS = 5_000;
     private static final long LOCK_WAIT_POLL_MILLIS = 50;
@@ -76,7 +76,7 @@ class MenuTransactionServiceIT {
     }
 
     @Autowired
-    private MenuTransactionService service;
+    private MenuTransactionFacade service;
 
     @Autowired
     private MenuRepository menuRepository;

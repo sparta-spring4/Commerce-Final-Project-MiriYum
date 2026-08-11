@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 일반 사용자 가입·로그인·재발급·로그아웃·CSRF 준비 API다.
  */
 @RestController
-@RequestMapping("/api/v1/consumer-auth")
+@RequestMapping("/api/v1/consumers/auth")
 @RequiredArgsConstructor
 public class ConsumerAuthController {
 

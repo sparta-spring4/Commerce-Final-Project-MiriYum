@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 인증된 매장 운영자가 관리 권한을 가진 매장의 예약 목록을 조회하는 HTTP 경계다.
  */
 @RestController
-@RequestMapping("/api/v1/store-operator/stores/{storeId}/reservations")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}/reservations")
 @RequiredArgsConstructor
 public class StoreReservationController {
 

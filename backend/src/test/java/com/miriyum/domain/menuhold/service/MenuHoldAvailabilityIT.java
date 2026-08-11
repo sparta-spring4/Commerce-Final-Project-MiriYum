@@ -7,7 +7,7 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability.AvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationTimeResolutionService;
 import com.miriyum.domain.menu.dto.contract.MenuHoldSelectableMenu;
 import com.miriyum.domain.menu.service.MenuHoldSelectionQueryService;
 import java.time.Instant;
@@ -59,7 +59,7 @@ class MenuHoldAvailabilityIT {
     @Autowired MenuHoldAvailabilityQueryService service;
     @Autowired JdbcTemplate jdbcTemplate;
     @MockitoBean MenuHoldSelectionQueryService selectionQueryService;
-    @MockitoBean ReservationService reservationService;
+    @MockitoBean ReservationTimeResolutionService reservationTimeResolutionService;
 
     @BeforeEach
     void resetAndSeed() {
@@ -74,7 +74,7 @@ class MenuHoldAvailabilityIT {
         given(selectionQueryService.findSelectableMenus(STORE_ID)).willReturn(List.of(
                 new MenuHoldSelectableMenu(SOLD_OUT_MENU_ID, "Sold out", 9000),
                 new MenuHoldSelectableMenu(AVAILABLE_MENU_ID, "Available", 4500)));
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 org.mockito.ArgumentMatchers.eq(List.of(STORE_ID)),
                 org.mockito.ArgumentMatchers.any())).willReturn(List.of(
                         ReservationTimeResolutionResult.resolved(STORE_ID, resolvedTime())));

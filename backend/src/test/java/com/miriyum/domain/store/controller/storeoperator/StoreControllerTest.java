@@ -55,7 +55,7 @@ class StoreControllerTest {
 
     @Test
     void missingBearerTokenReturnsUnauthorized() throws Exception {
-        mockMvc.perform(get("/api/v1/store-operator/stores/7"))
+        mockMvc.perform(get("/api/v1/store-operators/stores/7"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_001"));
     }
@@ -65,7 +65,7 @@ class StoreControllerTest {
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 11L));
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/7")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_004"));
@@ -77,7 +77,7 @@ class StoreControllerTest {
         given(storeService.create(eq(11L), any(IdempotencyKey.class), any()))
                 .willReturn(new StoreCommandResult(201, managedStore(7L)));
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -93,7 +93,7 @@ class StoreControllerTest {
     void createRejectsUnknownIanaTimeZone() throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -110,7 +110,7 @@ class StoreControllerTest {
     void createRejectsMissingOnboardingDeclarations() throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -133,7 +133,7 @@ class StoreControllerTest {
     void createRejectsFalseRequiredTermsAgreement() throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,7 +162,7 @@ class StoreControllerTest {
             throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/{storeId}", storeId)
+        mockMvc.perform(get("/api/v1/store-operators/stores/{storeId}", storeId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"))
@@ -176,7 +176,7 @@ class StoreControllerTest {
         authenticateStoreOperator(11L);
         given(storeService.getManagedStore(11L, 7L)).willReturn(managedStore(7L));
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/7")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -190,7 +190,7 @@ class StoreControllerTest {
             throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(patch("/api/v1/store-operator/stores/{storeId}", storeId)
+        mockMvc.perform(patch("/api/v1/store-operators/stores/{storeId}", storeId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -212,7 +212,7 @@ class StoreControllerTest {
         given(storeService.update(eq(11L), eq(7L), any(IdempotencyKey.class), any()))
                 .willReturn(new StoreCommandResult(200, managedStore(7L)));
 
-        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+        mockMvc.perform(patch("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -232,7 +232,7 @@ class StoreControllerTest {
             throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+        mockMvc.perform(patch("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -252,7 +252,7 @@ class StoreControllerTest {
     void createRejectsMissingModeField(String modesJson) throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -266,7 +266,7 @@ class StoreControllerTest {
     void patchRejectsMissingModeField(String modesJson) throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(patch("/api/v1/store-operator/stores/7")
+        mockMvc.perform(patch("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -283,7 +283,7 @@ class StoreControllerTest {
     void invalidIdempotencyKeyReturnsCommon004() throws Exception {
         authenticateStoreOperator(11L);
 
-        mockMvc.perform(post("/api/v1/store-operator/stores")
+        mockMvc.perform(post("/api/v1/store-operators/stores")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", "bad-key")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -298,7 +298,7 @@ class StoreControllerTest {
         given(storeService.getManagedStore(12L, 7L))
                 .willThrow(new ServiceException(StoreErrorCode.ACCESS_DENIED));
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/7")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("STORE_003"));
@@ -310,7 +310,7 @@ class StoreControllerTest {
         given(storeService.getManagedStore(11L, 7L))
                 .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
 
-        mockMvc.perform(get("/api/v1/store-operator/stores/7")
+        mockMvc.perform(get("/api/v1/store-operators/stores/7")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("STORE_001"));

@@ -118,7 +118,7 @@ public class PickupStoreManagementService {
         storeService.requireManagementOwnership(operatorAccountId, storeId);
         IdempotencyCommand command = command(
                 operatorAccountId, "PICKUP_STORE_CANCEL", key,
-                "POST|/api/v1/store-operator/stores/" + storeId
+                "POST|/api/v1/store-operators/stores/" + storeId
                         + "/pickup-reservations/" + pickupReservationId
                         + "/cancellations|" + reason);
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
@@ -149,7 +149,7 @@ public class PickupStoreManagementService {
         storeService.requireManagementOwnership(operatorAccountId, storeId);
         IdempotencyCommand command = command(
                 operatorAccountId, "PICKUP_FULFILL", key,
-                "POST|/api/v1/store-operator/stores/" + storeId
+                "POST|/api/v1/store-operators/stores/" + storeId
                         + "/pickup-reservations/" + pickupReservationId
                         + "/fulfillments");
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {

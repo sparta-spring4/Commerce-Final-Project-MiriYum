@@ -1,0 +1,25 @@
+openapi: 3.1.0
+info:
+  title: MiriYum MVP1 Public API
+  version: 1.0.0
+  description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/stores:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores"
+  /api/v1/stores/{storeId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}"
+  /api/v1/stores/{storeId}/menus:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus"
+  /api/v1/store-categories:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-categories"
+  /api/v1/menu-categories:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1menu-categories"
+  /api/v1/store-tags:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-tags"
+  /api/v1/stores/{storeId}/menu-hold-availability:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menu-hold-availability"
+  /api/v1/stores/{storeId}/pickup-availability:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1pickup-availability"

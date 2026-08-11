@@ -3,15 +3,6 @@ package com.miriyum.domain.reservation.service;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
-import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
-import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
-import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
-import com.miriyum.domain.menuhold.dto.MenuSelection;
-import com.miriyum.domain.menuhold.service.MenuHoldService;
-import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -45,6 +36,12 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldSelection;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
@@ -130,11 +127,11 @@ public class ReservationService {
     private final ReservationCapacityBucketRepository capacityBucketRepository;
     private final ReservationRepository reservationRepository;
     private final ConsumerAccountService consumerAccountService;
-    private final MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private final ReservationMenuHoldPort menuHoldPort;
+    private final ReservationTimeResolutionService timeResolutionService;
     private StoreTransactionEligibilityService storeTransactionEligibilityService;
     private ReservationCapacityAllocationRepository capacityAllocationRepository;
     private ReservationCancellationPolicySelector cancellationPolicySelector;
-    private MenuHoldService menuHoldService;
     private ReservationCancellationAuditRepository cancellationAuditRepository;
     private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
     private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
@@ -151,7 +148,8 @@ public class ReservationService {
             ReservationCapacityBucketRepository capacityBucketRepository,
             ReservationRepository reservationRepository,
             ConsumerAccountService consumerAccountService,
-            MenuHoldSnapshotQueryService menuHoldSnapshotQueryService
+            ReservationMenuHoldPort menuHoldPort,
+            ReservationTimeResolutionService timeResolutionService
     ) {
         this.storeScheduleService = storeScheduleService;
         this.storeServiceIntervalValidationService = storeServiceIntervalValidationService;
@@ -164,7 +162,8 @@ public class ReservationService {
         this.capacityBucketRepository = capacityBucketRepository;
         this.reservationRepository = reservationRepository;
         this.consumerAccountService = consumerAccountService;
-        this.menuHoldSnapshotQueryService = menuHoldSnapshotQueryService;
+        this.menuHoldPort = menuHoldPort;
+        this.timeResolutionService = timeResolutionService;
     }
 
     /** Spring constructor including the public contracts used by creation and cancellation. */
@@ -181,11 +180,11 @@ public class ReservationService {
             ReservationCapacityBucketRepository capacityBucketRepository,
             ReservationRepository reservationRepository,
             ConsumerAccountService consumerAccountService,
-            MenuHoldSnapshotQueryService menuHoldSnapshotQueryService,
+            ReservationMenuHoldPort menuHoldPort,
+            ReservationTimeResolutionService timeResolutionService,
             StoreTransactionEligibilityService storeTransactionEligibilityService,
             ReservationCapacityAllocationRepository capacityAllocationRepository,
             ReservationCancellationPolicySelector cancellationPolicySelector,
-            MenuHoldService menuHoldService,
             ReservationCancellationAuditRepository cancellationAuditRepository,
             ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator,
             ReservationFulfillmentAuditRepository fulfillmentAuditRepository
@@ -202,12 +201,12 @@ public class ReservationService {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService
+                menuHoldPort,
+                timeResolutionService
         );
         this.storeTransactionEligibilityService = storeTransactionEligibilityService;
         this.capacityAllocationRepository = capacityAllocationRepository;
         this.cancellationPolicySelector = cancellationPolicySelector;
-        this.menuHoldService = menuHoldService;
         this.cancellationAuditRepository = cancellationAuditRepository;
         this.cancellationPolicyEvaluator = cancellationPolicyEvaluator;
         this.fulfillmentAuditRepository = fulfillmentAuditRepository;
@@ -355,8 +354,8 @@ public class ReservationService {
         if (!request.menuSelections().isEmpty()) {
             ZonedDateTime localStart = timeSnapshot.getStartAt().atZone(timeZone);
             ZonedDateTime localEnd = timeSnapshot.getServiceEndAt().atZone(timeZone);
-            MenuHoldCommandResult menuResult = menuHoldService.create(
-                    new MenuHoldCreateCommand(
+            ReservationMenuHoldResult menuResult = menuHoldPort.create(
+                    new ReservationMenuHoldCreateCommand(
                             saved.getId(),
                             request.storeId(),
                             consumerAccountId,
@@ -371,7 +370,7 @@ public class ReservationService {
                     ));
             if (menuResult == null
                     || menuResult.reservationId() != saved.getId()
-                    || menuResult.outcome() != MenuHoldCommandResult.Outcome.CONFIRMED) {
+                    || menuResult.outcome() != ReservationMenuHoldResult.Outcome.CONFIRMED) {
                 throw new IllegalStateException("menu hold creation result is inconsistent");
             }
         }
@@ -380,7 +379,7 @@ public class ReservationService {
                 saved,
                 request.menuSelections().isEmpty()
                         ? List.of()
-                        : menuHoldSnapshotQueryService.findByReservationId(saved.getId())
+                        : menuHoldPort.findSnapshots(saved.getId())
         );
         return new BusinessResult<>(
                 HttpStatus.CREATED.value(),
@@ -395,7 +394,7 @@ public class ReservationService {
         if (storeTransactionEligibilityService == null
                 || capacityAllocationRepository == null
                 || cancellationPolicySelector == null
-                || menuHoldService == null) {
+                || menuHoldPort == null) {
             throw new IllegalStateException("reservation creation dependencies are required");
         }
         return storeTransactionEligibilityService;
@@ -446,7 +445,7 @@ public class ReservationService {
     }
 
     private void requireFulfillmentDependencies() {
-        if (menuHoldService == null || fulfillmentAuditRepository == null) {
+        if (menuHoldPort == null || fulfillmentAuditRepository == null) {
             throw new IllegalStateException("reservation fulfillment dependencies are required");
         }
     }
@@ -488,21 +487,20 @@ public class ReservationService {
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
-        MenuHoldTerminationPresence presence =
-                menuHoldService.lockForTermination(reservation.getId());
+        ReservationMenuHoldTerminationPresence presence =
+                menuHoldPort.lockForTermination(reservation.getId());
         if (presence == null) {
             throw new IllegalStateException("menu hold termination presence is required");
         }
 
         Instant occurredAt = clock.instant();
         reservation.fulfill(occurredAt);
-        if (presence == MenuHoldTerminationPresence.HOLD_PRESENT) {
-            MenuHoldCommandResult result = menuHoldService.fulfill(
-                    new MenuHoldFulfillCommand(reservation.getId(), correlationId)
-            );
+        if (presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
+            ReservationMenuHoldResult result = menuHoldPort.fulfill(
+                    reservation.getId(), correlationId);
             if (result == null
                     || result.reservationId() != reservation.getId()
-                    || result.outcome() != MenuHoldCommandResult.Outcome.FULFILLED) {
+                    || result.outcome() != ReservationMenuHoldResult.Outcome.FULFILLED) {
                 throw new IllegalStateException(
                         "menu hold fulfillment result is inconsistent"
                 );
@@ -522,9 +520,9 @@ public class ReservationService {
                 correlationId
         );
         fulfillmentAuditRepository.saveAndFlush(audit);
-        List<MenuHoldItemResult> menuSnapshots =
-                presence == MenuHoldTerminationPresence.HOLD_PRESENT
-                        ? menuHoldSnapshotQueryService.findByReservationId(reservation.getId())
+        List<ReservationMenuHoldItemSnapshot> menuSnapshots =
+                presence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT
+                        ? menuHoldPort.findSnapshots(reservation.getId())
                         : List.of();
         ReservationDetailResponse response = ReservationDetailResponse.from(
                 reservation,
@@ -642,8 +640,8 @@ public class ReservationService {
             throw new IllegalStateException("cancellation policy decision is required");
         }
 
-        MenuHoldTerminationPresence menuHoldPresence =
-                menuHoldService.lockForTermination(reservation.getId());
+        ReservationMenuHoldTerminationPresence menuHoldPresence =
+                menuHoldPort.lockForTermination(reservation.getId());
         if (menuHoldPresence == null) {
             throw new IllegalStateException("menu hold termination presence is required");
         }
@@ -716,12 +714,12 @@ public class ReservationService {
             lockedById.get(bucketId).restore(partySize, 1);
         }
 
-        if (menuHoldPresence == MenuHoldTerminationPresence.HOLD_PRESENT) {
-            MenuHoldCommandResult releaseResult = menuHoldService.release(
-                    new MenuHoldReleaseCommand(reservation.getId(), correlationId));
+        if (menuHoldPresence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT) {
+            ReservationMenuHoldResult releaseResult = menuHoldPort.release(
+                    reservation.getId(), correlationId);
             if (releaseResult == null
                     || releaseResult.reservationId() != reservation.getId()
-                    || releaseResult.outcome() != MenuHoldCommandResult.Outcome.RELEASED) {
+                    || releaseResult.outcome() != ReservationMenuHoldResult.Outcome.RELEASED) {
                 throw new IllegalStateException("menu hold release result is inconsistent");
             }
         }
@@ -737,10 +735,9 @@ public class ReservationService {
                 cancellationPolicyVersion, capacityPolicyVersion, correlationId
         );
         cancellationAuditRepository.saveAndFlush(audit);
-        List<MenuHoldItemResult> menuSnapshots =
-                menuHoldPresence == MenuHoldTerminationPresence.HOLD_PRESENT
-                        ? menuHoldSnapshotQueryService.findByReservationId(
-                                managedReservation.getId())
+        List<ReservationMenuHoldItemSnapshot> menuSnapshots =
+                menuHoldPresence == ReservationMenuHoldTerminationPresence.HOLD_PRESENT
+                        ? menuHoldPort.findSnapshots(managedReservation.getId())
                         : List.of();
         if (menuSnapshots == null) {
             throw new IllegalStateException("menu hold snapshots are required");
@@ -1211,8 +1208,9 @@ public class ReservationService {
                         selection.quantity(),
                         Math::addExact);
             }
-            List<MenuSelection> menuSelections = quantitiesByMenuId.entrySet().stream()
-                    .map(entry -> new MenuSelection(entry.getKey(), entry.getValue()))
+            List<ReservationMenuHoldSelection> menuSelections = quantitiesByMenuId.entrySet().stream()
+                    .map(entry -> new ReservationMenuHoldSelection(
+                            entry.getKey(), entry.getValue()))
                     .toList();
             return new NormalizedCreationRequest(
                     storeId,
@@ -1230,7 +1228,8 @@ public class ReservationService {
     }
 
     private static String fingerprintForCreation(NormalizedCreationRequest request) {
-        StringBuilder canonical = new StringBuilder("POST|/api/v1/reservations|");
+        StringBuilder canonical = new StringBuilder(
+                "POST|/api/v1/consumers/reservations|");
         append(canonical, "storeId", Long.toString(request.storeId()));
         append(canonical, "serviceDate", request.serviceDate().toString());
         append(canonical, "startTime", request.startTime().toString());
@@ -1239,7 +1238,7 @@ public class ReservationService {
         append(canonical, "adultCount", Integer.toString(request.adultCount()));
         append(canonical, "childCount", Integer.toString(request.childCount()));
         append(canonical, "infantCount", Integer.toString(request.infantCount()));
-        for (MenuSelection selection : request.menuSelections()) {
+        for (ReservationMenuHoldSelection selection : request.menuSelections()) {
             append(canonical, "menuId", Long.toString(selection.menuId()));
             append(canonical, "quantity", Integer.toString(selection.quantity()));
         }
@@ -1259,7 +1258,7 @@ public class ReservationService {
             int childCount,
             int infantCount,
             int partySize,
-            List<MenuSelection> menuSelections
+            List<ReservationMenuHoldSelection> menuSelections
     ) {
     }
 
@@ -1588,7 +1587,8 @@ public class ReservationService {
             return List.of();
         }
 
-        List<ReservationTimeResolutionResult> timeResults = resolveReservationTimes(
+        List<ReservationTimeResolutionResult> timeResults =
+                timeResolutionService.resolveReservationTimes(
                 candidateStoreIds,
                 new ReservationTimeRequest(
                         condition.serviceDate(),
@@ -1655,122 +1655,6 @@ public class ReservationService {
     }
 
     /**
-     * Store의 시작 접수 window와 Reservation의 현재 시간 정책으로 매장별 실제 종료를 계산한다.
-     *
-     * <p>결과는 입력 순서·개수·중복을 보존한다. Store의 {@code windowEndAt}은 시작 접수
-     * 상한일 뿐이므로 서비스 또는 점유 종료 계산에 사용하지 않는다. 계산된
-     * {@code [startAt, serviceEndAt)}은 Store 일정 계약으로 검증하며 turnover 구간은 전달하지
-     * 않는다. 이 결과만으로 최종 수용량 가용성이 확인되는 것은 아니다.</p>
-     *
-     * @param storeIds 계산 대상 매장 ID 목록
-     * @param request 고객이 선택한 현지 시작 시각과 선택적 offset
-     * @return 입력 매장과 같은 순서의 계산 또는 실패 폐쇄 결과
-     */
-    @Transactional(readOnly = true)
-    public List<ReservationTimeResolutionResult> resolveReservationTimes(
-            List<Long> storeIds,
-            ReservationTimeRequest request
-    ) {
-        List<Long> candidates = validateRequest(storeIds, request);
-        if (candidates.isEmpty()) {
-            return List.of();
-        }
-
-        List<StoreReservationWindowResult> windows =
-                storeScheduleService.resolveReservationWindows(
-                        candidates,
-                        request.serviceDate(),
-                        request.startTime()
-                );
-        if (!matchesInput(candidates, windows)) {
-            return unavailableResults(candidates);
-        }
-
-        Set<Long> acceptingStoreIds = new LinkedHashSet<>();
-        for (StoreReservationWindowResult window : windows) {
-            if (window.status() == StoreReservationWindowStatus.ACCEPTING) {
-                acceptingStoreIds.add(window.storeId());
-            }
-        }
-        if (acceptingStoreIds.isEmpty()) {
-            return unavailableResults(candidates);
-        }
-
-        Instant evaluatedAt = clock.instant();
-        Map<Long, List<ReservationTimePolicyVersion>> policiesByStore = new HashMap<>();
-        for (ReservationTimePolicyVersion policy :
-                timePolicyRepository.findResolutionCandidatesByStoreIds(
-                        acceptingStoreIds,
-                        ReservationTimePolicyStatus.ACTIVE,
-                        ReservationTimePolicyStatus.SCHEDULED,
-                        evaluatedAt
-                )) {
-            policiesByStore.computeIfAbsent(policy.getStoreId(), ignored -> new ArrayList<>())
-                    .add(policy);
-        }
-
-        LocalDateTime requestedAt = LocalDateTime.of(
-                request.serviceDate(),
-                request.startTime()
-        );
-        List<ReservationTimeResolutionResult> provisionalResults =
-                new ArrayList<>(candidates.size());
-        for (int index = 0; index < candidates.size(); index++) {
-            long storeId = candidates.get(index);
-            StoreReservationWindowResult window = windows.get(index);
-            ReservationTimePolicyVersion policy = singleEffectivePolicy(
-                    policiesByStore.get(storeId),
-                    storeId,
-                    evaluatedAt
-            );
-            provisionalResults.add(resolveTime(
-                    storeId,
-                    window,
-                    policy,
-                    requestedAt,
-                    request
-            ));
-        }
-
-        List<StoreServiceIntervalRequest> intervalRequests = provisionalResults.stream()
-                .filter(result -> result.status() == ReservationTimeResolutionStatus.RESOLVED)
-                .map(result -> new StoreServiceIntervalRequest(
-                        result.storeId(),
-                        result.time().startAt(),
-                        result.time().serviceEndAt()
-                ))
-                .toList();
-        if (intervalRequests.isEmpty()) {
-            return List.copyOf(provisionalResults);
-        }
-
-        List<StoreServiceIntervalResult> intervalResults =
-                storeServiceIntervalValidationService.validateServiceIntervals(
-                        intervalRequests
-                );
-        if (!matchesServiceIntervals(intervalRequests, intervalResults)) {
-            return unavailableResults(candidates);
-        }
-
-        List<ReservationTimeResolutionResult> results =
-                new ArrayList<>(candidates.size());
-        int intervalIndex = 0;
-        for (ReservationTimeResolutionResult provisionalResult : provisionalResults) {
-            if (provisionalResult.status() != ReservationTimeResolutionStatus.RESOLVED) {
-                results.add(provisionalResult);
-                continue;
-            }
-            StoreServiceIntervalResult intervalResult = intervalResults.get(intervalIndex++);
-            results.add(intervalResult.status() == StoreServiceIntervalStatus.ACCEPTING
-                    ? provisionalResult
-                    : ReservationTimeResolutionResult.unavailable(
-                            provisionalResult.storeId()
-                    ));
-        }
-        return List.copyOf(results);
-    }
-
-    /**
      * 소비자 본인의 예약 내역을 승인된 상태·페이지·정렬 조건으로 조회한다.
      *
      * @param consumerAccountId 인증된 소비자 계정 식별자
@@ -1828,8 +1712,8 @@ public class ReservationService {
                 )
                 .orElseThrow(() ->
                         new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
-        List<MenuHoldItemResult> menuSnapshots =
-                menuHoldSnapshotQueryService.findByReservationId(reservation.getId());
+        List<ReservationMenuHoldItemSnapshot> menuSnapshots =
+                menuHoldPort.findSnapshots(reservation.getId());
         Optional<ReservationCancellationAudit> cancellationAudit =
                 findCancellationAudit(reservation.getId());
         return ReservationDetailResponse.from(
@@ -1866,8 +1750,8 @@ public class ReservationService {
                 )
                 .orElseThrow(() ->
                         new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
-        List<MenuHoldItemResult> menuSnapshots =
-                menuHoldSnapshotQueryService.findByReservationId(reservation.getId());
+        List<ReservationMenuHoldItemSnapshot> menuSnapshots =
+                menuHoldPort.findSnapshots(reservation.getId());
         Optional<ReservationCancellationAudit> cancellationAudit =
                 findCancellationAudit(reservation.getId());
         return ReservationDetailResponse.from(
@@ -2025,7 +1909,7 @@ public class ReservationService {
             ReservationTimePolicyDraftRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "PUT|/api/v1/store-operator/stores/{storeId}"
+                "PUT|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies|"
         );
         append(canonical, "storeId", Long.toString(storeId));
@@ -2041,7 +1925,7 @@ public class ReservationService {
             ReservationTimePolicyPublicationRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/store-operator/stores/{storeId}"
+                "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies/{version}/publication|"
         );
         append(canonical, "storeId", Long.toString(storeId));
@@ -2064,7 +1948,7 @@ public class ReservationService {
             ReservationTimePolicyPublicationCancellationRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/store-operator/stores/{storeId}"
+                "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies/{version}"
                         + "/publication-cancellation|"
         );
@@ -2256,35 +2140,6 @@ public class ReservationService {
         }
     }
 
-    private static List<Long> validateRequest(
-            List<Long> storeIds,
-            ReservationTimeRequest request
-    ) {
-        if (storeIds == null || request == null) {
-            throw new IllegalArgumentException("storeIds and request are required");
-        }
-        if (storeIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("storeIds must be positive");
-        }
-        return List.copyOf(storeIds);
-    }
-
-    private static boolean matchesInput(
-            List<Long> storeIds,
-            List<StoreReservationWindowResult> windows
-    ) {
-        if (windows == null || windows.size() != storeIds.size()) {
-            return false;
-        }
-        for (int index = 0; index < storeIds.size(); index++) {
-            StoreReservationWindowResult window = windows.get(index);
-            if (window == null || window.storeId() != storeIds.get(index)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private static ReservationTimePolicyVersion singleEffectivePolicy(
             List<ReservationTimePolicyVersion> policies,
             long storeId,
@@ -2303,34 +2158,6 @@ public class ReservationService {
         return policy;
     }
 
-    private static ReservationTimeResolutionResult resolveTime(
-            long storeId,
-            StoreReservationWindowResult window,
-            ReservationTimePolicyVersion policy,
-            LocalDateTime requestedAt,
-            ReservationTimeRequest request
-    ) {
-        if (window.status() != StoreReservationWindowStatus.ACCEPTING
-                || policy == null
-                || !isSlotAligned(window.windowStartAt(), requestedAt, policy)) {
-            return ReservationTimeResolutionResult.unavailable(storeId);
-        }
-        try {
-            ReservationTimeSnapshot snapshot = ReservationTimeSnapshot.calculate(
-                    policy,
-                    requestedAt,
-                    ZoneId.of(window.timeZoneId()),
-                    request.startOffset()
-            );
-            return ReservationTimeResolutionResult.resolved(
-                    storeId,
-                    ResolvedReservationTime.from(snapshot)
-            );
-        } catch (DateTimeException | IllegalArgumentException exception) {
-            return ReservationTimeResolutionResult.unavailable(storeId);
-        }
-    }
-
     private static boolean isSlotAligned(
             LocalDateTime windowStartAt,
             LocalDateTime requestedAt,
@@ -2343,35 +2170,6 @@ public class ReservationService {
         long elapsedMinutes = elapsed.toMinutes();
         return elapsed.equals(Duration.ofMinutes(elapsedMinutes))
                 && elapsedMinutes % policy.getSlotIntervalMinutes() == 0;
-    }
-
-    private static List<ReservationTimeResolutionResult> unavailableResults(
-            List<Long> storeIds
-    ) {
-        return storeIds.stream()
-                .map(ReservationTimeResolutionResult::unavailable)
-                .toList();
-    }
-
-    private static boolean matchesServiceIntervals(
-            List<StoreServiceIntervalRequest> requests,
-            List<StoreServiceIntervalResult> results
-    ) {
-        if (results == null || requests.size() != results.size()) {
-            return false;
-        }
-        for (int index = 0; index < requests.size(); index++) {
-            StoreServiceIntervalRequest request = requests.get(index);
-            StoreServiceIntervalResult result = results.get(index);
-            if (result == null
-                    || result.storeId() != request.storeId()
-                    || !request.startAt().equals(result.startAt())
-                    || !request.serviceEndAt().equals(result.serviceEndAt())
-                    || result.status() == null) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private record CapacityWindow(

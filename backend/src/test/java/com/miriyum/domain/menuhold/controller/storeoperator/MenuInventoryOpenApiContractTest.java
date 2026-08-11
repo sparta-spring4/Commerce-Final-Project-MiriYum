@@ -58,12 +58,12 @@ class MenuInventoryOpenApiContractTest {
 
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> collectionRoute = map(paths.get(
-                "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets"));
+                "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets"));
         assertThat(collectionRoute).containsKeys("get", "post");
         assertMenuNotFoundResponse(map(collectionRoute.get("get")));
         assertMenuNotFoundResponse(map(collectionRoute.get("post")));
         assertThat(map(paths.get(
-                "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}")))
+                "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}")))
                 .containsKey("patch");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));

@@ -23,56 +23,56 @@ class ReservationOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
         List<OperationContract> contracts = List.of(
                 new OperationContract(
-                        "/api/v1/reservations", "post", "createReservation",
+                        "/api/v1/consumers/reservations", "post", "createReservation",
                         "#/components/schemas/ReservationCreateRequest",
                         Set.of("201", "400", "401", "403", "404", "409", "503")),
                 new OperationContract(
-                        "/api/v1/reservations/{reservationId}", "get", "getReservation",
+                        "/api/v1/consumers/reservations/{reservationId}", "get", "getReservation",
                         null, Set.of("200", "401", "403", "404")),
                 new OperationContract(
-                        "/api/v1/reservations/{reservationId}/cancellations", "post",
+                        "/api/v1/consumers/reservations/{reservationId}/cancellations", "post",
                         "cancelReservationByConsumer",
                         "#/components/schemas/ConsumerCancellationRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservations", "get",
+                        "/api/v1/store-operators/stores/{storeId}/reservations", "get",
                         "getStoreReservations", null,
                         Set.of("200", "400", "401", "403", "404")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}",
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}",
                         "get", "getStoreReservation", null,
                         Set.of("200", "400", "401", "403", "404")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
                                 + "/cancellations",
                         "post", "cancelReservationByStoreOperator",
                         "#/components/schemas/StoreCancellationRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
                                 + "/fulfillments",
                         "post", "fulfillReservation",
                         "#/components/schemas/EmptyCommandRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}"
+                        "/api/v1/store-operators/stores/{storeId}"
                                 + "/reservation-capacities/{serviceDate}",
                         "put", "replaceReservationCapacities",
                         "#/components/schemas/ReservationCapacitiesRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies",
+                        "/api/v1/store-operators/stores/{storeId}/reservation-time-policies",
                         "put", "createReservationTimePolicyDraft",
                         "#/components/schemas/ReservationTimePolicyDraftRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies"
+                        "/api/v1/store-operators/stores/{storeId}/reservation-time-policies"
                                 + "/{version}/publication",
                         "post", "publishReservationTimePolicyDraft",
                         "#/components/schemas/ReservationTimePolicyPublicationRequest",
                         Set.of("200", "400", "401", "403", "404", "409")),
                 new OperationContract(
-                        "/api/v1/store-operator/stores/{storeId}/reservation-time-policies"
+                        "/api/v1/store-operators/stores/{storeId}/reservation-time-policies"
                                 + "/{version}/publication-cancellation",
                         "post", "cancelReservationTimePolicyPublication",
                         "#/components/schemas/ReservationTimePolicyPublicationCancellationRequest",
@@ -80,8 +80,9 @@ class ReservationOpenApiContractTest {
         );
 
         assertThat(paths.keySet())
-                .containsExactlyInAnyOrderElementsOf(
-                        contracts.stream().map(OperationContract::path).toList());
+                .hasSize(12)
+                .contains("/api/v1/consumers/me/reservations")
+                .containsAll(contracts.stream().map(OperationContract::path).toList());
         Map<String, Object> aggregate = load(
                 Path.of("..", "docs", "specs", "mvp1-openapi.yaml")
         );
@@ -123,7 +124,9 @@ class ReservationOpenApiContractTest {
                     .containsOnlyKeys("$ref")
                     .containsEntry(
                             "$ref",
-                            "./reservation/openapi.yaml#/paths/"
+                            (contract.path().startsWith("/api/v1/consumers/")
+                                    ? "./consumer-openapi.yaml#/paths/"
+                                    : "./store-operator-openapi.yaml#/paths/")
                                     + escapeJsonPointer(contract.path())
                     );
         });
@@ -135,7 +138,7 @@ class ReservationOpenApiContractTest {
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
         Map<String, Object> operation = map(map(map(document.get("paths")).get(
-                "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
         )).get("get"));
 
         assertThat(list(operation.get("parameters")).stream()
@@ -168,14 +171,14 @@ class ReservationOpenApiContractTest {
 
         assertNotFoundResponse(
                 document,
-                map(map(paths.get("/api/v1/reservations")).get("post")),
+                map(map(paths.get("/api/v1/consumers/reservations")).get("post")),
                 "#/components/responses/ReservationCreationNotFound",
                 Set.of("STORE_001", "STORE_009", "MENU_HOLD_003")
         );
         assertNotFoundResponse(
                 document,
                 map(map(paths.get(
-                        "/api/v1/store-operator/stores/{storeId}/reservations"
+                        "/api/v1/store-operators/stores/{storeId}/reservations"
                 )).get("get")),
                 "#/components/responses/StoreNotFound",
                 Set.of("STORE_001")
@@ -183,7 +186,7 @@ class ReservationOpenApiContractTest {
         assertNotFoundResponse(
                 document,
                 map(map(paths.get(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
                 )).get("get")),
                 "#/components/responses/StoreReservationNotFound",
                 Set.of("STORE_001", "RESERVATION_001")
@@ -191,7 +194,7 @@ class ReservationOpenApiContractTest {
         assertNotFoundResponse(
                 document,
                 map(map(paths.get(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
                                 + "/cancellations"
                 )).get("post")),
                 "#/components/responses/StoreReservationNotFound",
@@ -200,7 +203,7 @@ class ReservationOpenApiContractTest {
         assertNotFoundResponse(
                 document,
                 map(map(paths.get(
-                        "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}"
+                        "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}"
                                 + "/fulfillments"
                 )).get("post")),
                 "#/components/responses/StoreReservationNotFound",
@@ -219,7 +222,7 @@ class ReservationOpenApiContractTest {
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
         Map<String, Object> operation = map(map(map(document.get("paths")).get(
-                "/api/v1/reservations"
+                "/api/v1/consumers/reservations"
         )).get("post"));
         Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
         Map<String, Object> examples = map(
@@ -238,24 +241,25 @@ class ReservationOpenApiContractTest {
     }
 
     @Test
-    void consumerHistoryKeepsAuthOwnedSchemaNamesAndCanonicalTimeShape() throws IOException {
-        Map<String, Object> auth = load(
-                Path.of("..", "docs", "specs", "auth-account", "openapi.yaml")
+    void consumerHistoryIsReservationOwnedWithCanonicalTimeShape() throws IOException {
+        Map<String, Object> reservation = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
 
-        Map<String, Object> authSchemas = map(map(auth.get("components")).get("schemas"));
-        assertThat(authSchemas).containsKeys(
+        Map<String, Object> reservationSchemas =
+                map(map(reservation.get("components")).get("schemas"));
+        assertThat(reservationSchemas).containsKeys(
                 "ReservationHistoryStatus",
                 "ReservationHistoryItem",
                 "ReservationHistoryPageData"
         );
-        assertThat(list(map(authSchemas.get("ReservationHistoryStatus")).get("enum")))
+        assertThat(list(map(reservationSchemas.get("ReservationHistoryStatus")).get("enum")))
                 .containsExactly("CONFIRMED", "CANCELLED", "FULFILLED");
 
-        Map<String, Object> item = map(authSchemas.get("ReservationHistoryItem"));
+        Map<String, Object> item = map(reservationSchemas.get("ReservationHistoryItem"));
         assertCustomerTimeShape(
                 item,
-                "../reservation/openapi.yaml#/components/schemas/ReservationTimeStatus"
+                "#/components/schemas/ReservationTimeStatus"
         );
         assertThat(map(item.get("properties")))
                 .containsKeys(
@@ -269,23 +273,23 @@ class ReservationOpenApiContractTest {
                 .doesNotContainKeys("startTime", "endTime", "cancelledBy");
 
         Map<String, Object> pageProperties = map(
-                map(authSchemas.get("ReservationHistoryPageData")).get("properties")
+                map(reservationSchemas.get("ReservationHistoryPageData")).get("properties")
         );
         assertThat(map(map(pageProperties.get("items")).get("items"))).containsEntry(
                 "$ref",
                 "#/components/schemas/ReservationHistoryItem"
         );
         Map<String, Object> successProperties = map(
-                map(authSchemas.get("ReservationHistoryPageSuccessResponse")).get("properties")
+                map(reservationSchemas.get("ReservationHistoryPageSuccessResponse")).get("properties")
         );
         assertThat(map(successProperties.get("data"))).containsEntry(
                 "$ref",
                 "#/components/schemas/ReservationHistoryPageData"
         );
 
-        Map<String, Object> authPaths = map(auth.get("paths"));
-        Map<String, Object> operation = map(map(authPaths.get(
-                "/api/v1/consumer-accounts/me/reservations"
+        Map<String, Object> reservationPaths = map(reservation.get("paths"));
+        Map<String, Object> operation = map(map(reservationPaths.get(
+                "/api/v1/consumers/me/reservations"
         )).get("get"));
         Map<String, Object> statusParameter = list(operation.get("parameters")).stream()
                 .map(ReservationOpenApiContractTest::map)
@@ -343,7 +347,7 @@ class ReservationOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
 
         String draftsPath =
-                "/api/v1/store-operator/stores/{storeId}/reservation-time-policies";
+                "/api/v1/store-operators/stores/{storeId}/reservation-time-policies";
         String publicationPath = draftsPath + "/{version}/publication";
         String cancellationPath = draftsPath + "/{version}/publication-cancellation";
 
@@ -397,22 +401,22 @@ class ReservationOpenApiContractTest {
         assertThat(map(aggregatePaths.get(draftsPath)))
                 .containsEntry(
                         "$ref",
-                        "./reservation/openapi.yaml#/paths/"
-                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                        "./store-operator-openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operators~1stores~1{storeId}"
                                 + "~1reservation-time-policies"
                 );
         assertThat(map(aggregatePaths.get(publicationPath)))
                 .containsEntry(
                         "$ref",
-                        "./reservation/openapi.yaml#/paths/"
-                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                        "./store-operator-openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operators~1stores~1{storeId}"
                                 + "~1reservation-time-policies~1{version}~1publication"
                 );
         assertThat(map(aggregatePaths.get(cancellationPath)))
                 .containsEntry(
                         "$ref",
-                        "./reservation/openapi.yaml#/paths/"
-                                + "~1api~1v1~1store-operator~1stores~1{storeId}"
+                        "./store-operator-openapi.yaml#/paths/"
+                                + "~1api~1v1~1store-operators~1stores~1{storeId}"
                                 + "~1reservation-time-policies~1{version}"
                                 + "~1publication-cancellation"
                 );
@@ -443,7 +447,7 @@ class ReservationOpenApiContractTest {
 
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> operation = map(map(paths.get(
-                "/api/v1/store-operator/stores/{storeId}"
+                "/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-capacities/{serviceDate}"
         )).get("put"));
         assertThat(map(map(operation.get("responses")).get("404")))
@@ -457,10 +461,10 @@ class ReservationOpenApiContractTest {
         );
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> consumerOperation = map(map(paths.get(
-                "/api/v1/reservations/{reservationId}/cancellations"
+                "/api/v1/consumers/reservations/{reservationId}/cancellations"
         )).get("post"));
         Map<String, Object> operatorOperation = map(map(paths.get(
-                "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations"
+                "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations"
         )).get("post"));
 
         assertCancellationOperation(
@@ -494,7 +498,7 @@ class ReservationOpenApiContractTest {
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
         Map<String, Object> operation = map(map(map(document.get("paths")).get(
-                "/api/v1/store-operator/stores/{storeId}"
+                "/api/v1/store-operators/stores/{storeId}"
                         + "/reservations/{reservationId}/fulfillments"
         )).get("post"));
         Map<String, Object> json = map(

@@ -67,7 +67,7 @@ class ConsumerAuthControllerTest {
                 """;
 
         // when & then
-        mockMvc.perform(post("/api/v1/consumer-auth/accounts")
+        mockMvc.perform(post("/api/v1/consumers/auth/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())

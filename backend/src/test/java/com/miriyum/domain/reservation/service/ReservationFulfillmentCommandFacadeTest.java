@@ -96,7 +96,7 @@ class ReservationFulfillmentCommandFacadeTest {
         assertThat(command.getValue().requestFingerprint()).isEqualTo(
                 RequestFingerprint.of(
                         "method=4:POST|"
-                                + "route=81:/api/v1/store-operator/stores/{storeId}/"
+                                + "route=82:/api/v1/store-operators/stores/{storeId}/"
                                 + "reservations/{reservationId}/fulfillments|"
                                 + "storeId=2:73|reservationId=3:321|"
                 )

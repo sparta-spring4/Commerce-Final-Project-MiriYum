@@ -20,7 +20,7 @@ tags:
   - name: My Page
     description: 일반 사용자 마이페이지
 paths:
-  /api/v1/consumer-auth/accounts:
+  /api/v1/consumers/auth/accounts:
     post:
       tags: [Consumer Auth]
       summary: 일반 사용자 가입
@@ -44,7 +44,7 @@ paths:
           $ref: "#/components/responses/AccountConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumer-auth/sessions:
+  /api/v1/consumers/auth/sessions:
     post:
       tags: [Consumer Auth]
       summary: 일반 사용자 로그인
@@ -75,7 +75,7 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumer-auth/token-refreshes:
+  /api/v1/consumers/auth/token-refreshes:
     post:
       tags: [Consumer Auth]
       summary: 일반 사용자 Access Token 재발급
@@ -108,7 +108,7 @@ paths:
           $ref: "#/components/responses/OriginRejected"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumer-auth/csrf-tokens/current:
+  /api/v1/consumers/auth/csrf-tokens/current:
     get:
       tags: [Consumer Auth]
       summary: 일반 사용자 shell CSRF 토큰 준비
@@ -127,7 +127,7 @@ paths:
                 $ref: "#/components/schemas/CsrfTokenSuccessResponse"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/consumer-auth/sessions/current:
+  /api/v1/consumers/auth/sessions/current:
     delete:
       tags: [Consumer Auth]
       summary: 일반 사용자 현재 shell 로그아웃
@@ -152,7 +152,7 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
-  /api/v1/store-operator-auth/accounts:
+  /api/v1/store-operators/auth/accounts:
     post:
       tags: [Store Operator Auth]
       summary: 매장 운영자 가입
@@ -176,7 +176,7 @@ paths:
           $ref: "#/components/responses/AccountConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operator-auth/sessions:
+  /api/v1/store-operators/auth/sessions:
     post:
       tags: [Store Operator Auth]
       summary: 매장 운영자 로그인
@@ -207,7 +207,7 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operator-auth/token-refreshes:
+  /api/v1/store-operators/auth/token-refreshes:
     post:
       tags: [Store Operator Auth]
       summary: 매장 운영자 Access Token 재발급
@@ -240,7 +240,7 @@ paths:
           $ref: "#/components/responses/OriginRejected"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operator-auth/csrf-tokens/current:
+  /api/v1/store-operators/auth/csrf-tokens/current:
     get:
       tags: [Store Operator Auth]
       summary: 매장 운영자 shell CSRF 토큰 준비
@@ -259,7 +259,7 @@ paths:
                 $ref: "#/components/schemas/CsrfTokenSuccessResponse"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operator-auth/sessions/current:
+  /api/v1/store-operators/auth/sessions/current:
     delete:
       tags: [Store Operator Auth]
       summary: 매장 운영자 현재 shell 로그아웃
@@ -284,7 +284,7 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
-  /api/v1/consumer-accounts/me:
+  /api/v1/consumers/me:
     get:
       tags: [Account]
       summary: 일반 사용자 본인 정보 조회
@@ -331,7 +331,7 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "#/components/responses/NicknameChangeConflict"
-  /api/v1/consumer-accounts/me/contact:
+  /api/v1/consumers/me/contact:
     put:
       tags: [Account]
       summary: 일반 사용자 최초 연락처 등록
@@ -362,7 +362,7 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "#/components/responses/ContactRegistrationConflict"
-  /api/v1/store-operator-accounts/me/contact:
+  /api/v1/store-operators/me/contact:
     put:
       tags: [Account]
       summary: 매장 운영자 최초 연락처 등록
@@ -393,7 +393,7 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "#/components/responses/ContactRegistrationConflict"
-  /api/v1/store-operator-accounts/me:
+  /api/v1/store-operators/me:
     get:
       tags: [Account]
       summary: 매장 운영자 본인 정보 조회
@@ -440,45 +440,6 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Conflict"
-  /api/v1/consumer-accounts/me/reservations:
-    get:
-      tags: [My Page]
-      summary: 내 예약 내역 조회
-      operationId: getCurrentConsumerReservations
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/ReservationHistoryStatus"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
-        - name: sort
-          in: query
-          description: 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다.
-          schema:
-            type: string
-            enum:
-              - "createdAt,desc"
-              - "createdAt,asc"
-              - "serviceDate,desc"
-              - "serviceDate,asc"
-            default: "createdAt,desc"
-      responses:
-        "200":
-          description: 본인 예약 내역 페이지
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReservationHistoryPageSuccessResponse"
-        "400":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/AccountRestricted"
 components:
   securitySchemes:
     bearerAuth:
@@ -487,12 +448,12 @@ components:
       type: apiKey
       in: cookie
       name: MIRIYUM_CONSUMER_REFRESH
-      description: Path=/api/v1/consumer-auth인 HttpOnly Refresh JWT 쿠키
+      description: Path=/api/v1/consumers/auth인 HttpOnly Refresh JWT 쿠키
     storeOperatorRefreshCookie:
       type: apiKey
       in: cookie
       name: MIRIYUM_STORE_OPERATOR_REFRESH
-      description: Path=/api/v1/store-operator-auth인 HttpOnly Refresh JWT 쿠키
+      description: Path=/api/v1/store-operators/auth인 HttpOnly Refresh JWT 쿠키
   parameters:
     CsrfToken:
       name: X-CSRF-TOKEN
@@ -708,72 +669,6 @@ components:
         status:
           type: string
           enum: [ACTIVE, SUSPENDED]
-    ReservationHistoryStatus:
-      type: string
-      enum: [CONFIRMED, CANCELLED, FULFILLED]
-    ReservationHistoryItem:
-      type: object
-      additionalProperties: false
-      required:
-        - reservationId
-        - storeId
-        - storeName
-        - serviceDate
-        - timeStatus
-        - startAt
-        - serviceEndAt
-        - timeZoneId
-        - partySize
-        - status
-        - createdAt
-      properties:
-        reservationId:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
-        storeId:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
-        storeName:
-          type: string
-          minLength: 1
-          maxLength: 100
-        serviceDate:
-          $ref: "../reservation/openapi.yaml#/components/schemas/StoreLocalDate"
-        timeStatus:
-          $ref: "../reservation/openapi.yaml#/components/schemas/ReservationTimeStatus"
-        startAt:
-          oneOf:
-            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
-            - type: "null"
-          description: LEGACY_UNRESOLVED이면 null
-        serviceEndAt:
-          oneOf:
-            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
-            - type: "null"
-          description: LEGACY_UNRESOLVED이면 null
-        timeZoneId:
-          type: [string, "null"]
-          minLength: 1
-          maxLength: 64
-          description: 예약 계산에 사용한 매장 IANA 시간대. LEGACY_UNRESOLVED이면 null
-          examples:
-            - Asia/Seoul
-        partySize:
-          type: integer
-          minimum: 1
-        status:
-          $ref: "#/components/schemas/ReservationHistoryStatus"
-        createdAt:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
-    ReservationHistoryPageData:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/ReservationHistoryItem"
-        page:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
     AccountCreatedSuccessResponse:
       $ref: "#/components/schemas/SuccessAccountCreated"
     SuccessAccountCreated:
@@ -842,17 +737,6 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/StoreOperatorAccount"
-    ReservationHistoryPageSuccessResponse:
-      type: object
-      additionalProperties: false
-      required: [code, message, data]
-      properties:
-        code:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
-        message:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
-        data:
-          $ref: "#/components/schemas/ReservationHistoryPageData"
   responses:
     InvalidCredentials:
       description: 이메일 또는 비밀번호 불일치

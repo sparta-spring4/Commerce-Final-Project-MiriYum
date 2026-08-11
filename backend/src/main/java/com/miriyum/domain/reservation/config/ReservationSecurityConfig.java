@@ -22,13 +22,15 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class ReservationSecurityConfig {
 
-    private static final String RESERVATION_ROOT = "/api/v1/reservations";
+    private static final String RESERVATION_ROOT = "/api/v1/consumers/reservations";
     private static final String RESERVATION_FAMILY = RESERVATION_ROOT + "/**";
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
     private static final String RESERVATION_CANCELLATION =
             RESERVATION_ROOT + "/*/cancellations";
+    private static final String RESERVATION_HISTORY =
+            "/api/v1/consumers/me/reservations";
     private static final String STORE_RESERVATION_ROOT =
-            "/api/v1/store-operator/stores/*/reservations";
+            "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
     private static final String STORE_RESERVATION_DETAIL = STORE_RESERVATION_ROOT + "/*";
     private static final String STORE_RESERVATION_CANCELLATION =
@@ -82,12 +84,13 @@ public class ReservationSecurityConfig {
             ObjectMapper objectMapper
     ) throws Exception {
         http
-                .securityMatcher(RESERVATION_ROOT, RESERVATION_FAMILY)
+                .securityMatcher(RESERVATION_ROOT, RESERVATION_FAMILY, RESERVATION_HISTORY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, RESERVATION_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, RESERVATION_HISTORY).authenticated()
                         .requestMatchers(HttpMethod.GET, RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CANCELLATION).authenticated()
                         .anyRequest().denyAll())

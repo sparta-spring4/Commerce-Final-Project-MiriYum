@@ -22,9 +22,11 @@ import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -128,6 +130,12 @@ class PickupStoreManagementServiceTest {
         assertThat(restore.getValue().sourceAcquireOperationId())
                 .isEqualTo("pickup-acquire-result");
         then(storeService).should().requireManagementOwnership(31L, 22L);
+        ArgumentCaptor<IdempotencyCommand> command =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should().execute(command.capture(), any());
+        assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
+                "POST|/api/v1/store-operators/stores/22/pickup-reservations/77/cancellations|"
+                        + "재료 소진"));
     }
 
     @Test
@@ -142,6 +150,11 @@ class PickupStoreManagementServiceTest {
         assertThat(result.data().status()).isEqualTo(PickupStatus.PICKED_UP);
         assertThat(pickup.getPickedUpAt()).isEqualTo(NOW);
         then(inventoryService).shouldHaveNoInteractions();
+        ArgumentCaptor<IdempotencyCommand> command =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should().execute(command.capture(), any());
+        assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
+                "POST|/api/v1/store-operators/stores/22/pickup-reservations/77/fulfillments"));
     }
 
     @Test
