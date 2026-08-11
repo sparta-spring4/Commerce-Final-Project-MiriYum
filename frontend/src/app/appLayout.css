@@ -1,0 +1,81 @@
+/* 앱 셸 레이아웃. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.app-skip-link {
+  position: absolute;
+  left: var(--space-1);
+  top: -3rem;
+  z-index: 10;
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  transition: top 150ms ease;
+}
+
+.app-skip-link:focus {
+  top: var(--space-1);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.app-header__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 4rem;
+}
+
+.app-header__brand {
+  font-size: var(--font-size-headline-md);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--color-primary);
+}
+
+.app-header__brand:hover {
+  text-decoration: none;
+}
+
+.app-header__nav {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.app-header__link {
+  display: inline-block;
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.app-header__link--active {
+  color: var(--color-primary);
+  border-bottom: 2px solid var(--color-primary);
+}
+
+main:focus {
+  outline: none;
+}
+
+.app-footer {
+  margin-top: var(--space-8);
+  padding: var(--space-4) 0;
+  background-color: var(--color-surface-container-low);
+  border-top: 1px solid var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-label-md);
+}
+
+.app-footer__brand {
+  font-size: var(--font-size-body-lg);
+  font-weight: 800;
+  color: var(--color-primary);
+}

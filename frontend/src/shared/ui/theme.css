@@ -1,0 +1,203 @@
+/*
+ * MiriYum 디자인 토큰.
+ *
+ * 값의 출처는 팀 디자인 시안(`MiriYum Culinary Narrative`)의 토큰 표다.
+ * 시안 HTML은 Tailwind CDN 설정으로 같은 값을 선언하지만, 이 저장소는
+ * `frontend/package.json`을 #191이 단독 소유하므로 새 의존성을 추가하지 않고
+ * 표준 CSS custom property로 같은 토큰을 표현한다.
+ *
+ * 개별 화면은 hex 값을 직접 쓰지 않고 여기 정의한 변수만 참조한다.
+ */
+
+:root {
+  /* Surface */
+  --color-surface: #fff9e7;
+  --color-surface-dim: #e0dac6;
+  --color-surface-bright: #fff9e7;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #faf4df;
+  --color-surface-container: #f4eed9;
+  --color-surface-container-high: #eee8d4;
+  --color-surface-container-highest: #e8e3ce;
+  --color-surface-variant: #e8e3ce;
+  --color-on-surface: #1e1c0f;
+  --color-on-surface-variant: #5a413a;
+  --color-inverse-surface: #333123;
+  --color-inverse-on-surface: #f7f1dc;
+
+  /* Outline */
+  --color-outline: #8e7069;
+  --color-outline-variant: #e3beb6;
+
+  /* Primary — Coral */
+  --color-primary: #b32a03;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #ff5f38;
+  --color-on-primary-container: #5c0f00;
+  --color-primary-fixed: #ffdad2;
+  --color-primary-fixed-dim: #ffb4a2;
+  --color-on-primary-fixed: #3c0700;
+  --color-on-primary-fixed-variant: #8a1c00;
+
+  /* Secondary — Mustard */
+  --color-secondary: #7c5800;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #feb700;
+  --color-on-secondary-container: #6b4b00;
+  --color-secondary-fixed: #ffdea8;
+  --color-secondary-fixed-dim: #ffba20;
+  --color-on-secondary-fixed: #271900;
+  --color-on-secondary-fixed-variant: #5e4200;
+
+  /* Tertiary */
+  --color-tertiary: #635d5a;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #9a938f;
+  --color-on-tertiary-container: #302c29;
+
+  /* Semantic */
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-success: #4caf50;
+  --color-warning: #fb8c00;
+
+  --color-background: #fff9e7;
+  --color-on-background: #1e1c0f;
+
+  /*
+   * 상태 색은 의미를 색으로만 전달하지 않는다.
+   * 아래 값은 항상 텍스트 레이블·아이콘과 함께 쓴다.
+   * (docs/08-ui-and-frontend-guidelines.md 접근성 규칙)
+   */
+  --color-status-available: #2e7d32;
+  --color-status-unavailable: #93000a;
+  --color-status-unknown: #5a413a;
+
+  /* Typography — 시안은 Plus Jakarta Sans를 쓰지만 외부 폰트 호스트에 의존하지
+     않기 위해 시스템 폰트로 대체한다. 폰트 자산 도입은 별도 승인 범위다. */
+  --font-family-base:
+    'Plus Jakarta Sans', 'Pretendard', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+
+  --font-size-display-lg: 3rem;
+  --line-height-display-lg: 3.5rem;
+  --font-size-headline-lg: 2rem;
+  --line-height-headline-lg: 2.5rem;
+  --font-size-headline-md: 1.5rem;
+  --line-height-headline-md: 2rem;
+  --font-size-body-lg: 1.125rem;
+  --line-height-body-lg: 1.75rem;
+  --font-size-body-md: 1rem;
+  --line-height-body-md: 1.5rem;
+  --font-size-label-md: 0.875rem;
+  --line-height-label-md: 1.25rem;
+  --font-size-label-sm: 0.75rem;
+  --line-height-label-sm: 1rem;
+
+  /* Spacing — 8px 기준 단위 */
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2rem;
+  --space-6: 3rem;
+  --space-8: 4rem;
+  --layout-container-max: 80rem;
+  --layout-gutter: 1.5rem;
+  --layout-margin-mobile: 1rem;
+  --layout-margin-desktop: 2.5rem;
+
+  /* Shape */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-full: 9999px;
+
+  /* Elevation — 시안의 "Sun-Kissed" 그림자. 낮은 불투명도, 높은 blur, coral 기미 */
+  --shadow-1: 0 1px 2px rgba(255, 95, 56, 0.08);
+  --shadow-2: 0 4px 16px rgba(255, 95, 56, 0.1);
+  --shadow-3: 0 8px 28px rgba(255, 95, 56, 0.14);
+
+  --focus-ring: 0 0 0 3px rgba(179, 42, 3, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-body-md);
+  line-height: var(--line-height-body-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+ul,
+ol {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/*
+ * 포커스는 항상 보이게 둔다. outline: none으로 지우지 않는다.
+ * :focus-visible을 쓰면 마우스 클릭에는 링이 뜨지 않고 키보드 이동에만 뜬다.
+ */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 시각적으로 숨기되 보조기술에는 남긴다. display:none은 읽히지 않으므로 쓰지 않는다. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
