@@ -107,8 +107,16 @@ public class IntegratedStoreSearchService {
         }
 
         int requestedSize = size == null ? 20 : size;
+        String principalScope = cursorCodec.principalScope(consumerAccountId);
         IntegratedStoreSearchQuery requestQuery = IntegratedStoreSearchQuery.from(
-                condition, sort, cursor, requestedSize, cursorCodec);
+                condition,
+                includesInfants,
+                availableOnly,
+                principalScope,
+                sort,
+                cursor,
+                requestedSize,
+                cursorCodec);
         if (requestQuery.sort() == IntegratedStoreSearchSort.RECOMMENDATION_DESC) {
             return searchRecommendations(
                     consumerAccountId,
@@ -128,7 +136,14 @@ public class IntegratedStoreSearchService {
                 && items.size() < requestedSize
                 && scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery query = IntegratedStoreSearchQuery.from(
-                    condition, sort, scanCursor, requestedSize, cursorCodec);
+                    condition,
+                    includesInfants,
+                    availableOnly,
+                    principalScope,
+                    sort,
+                    scanCursor,
+                    requestedSize,
+                    cursorCodec);
             var slice = repository.search(query);
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
@@ -227,6 +242,9 @@ public class IntegratedStoreSearchService {
         while (scannedCandidates < scanLimit) {
             IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
                     condition,
+                    includesInfants,
+                    availableOnly,
+                    cursorCodec.principalScope(consumerAccountId),
                     IntegratedStoreSearchSort.RELEVANCE_DESC.externalValue(),
                     scanCursor,
                     scanPageSize,

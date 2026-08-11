@@ -34,6 +34,9 @@ public final class IntegratedStoreSearchQuery {
 
     private IntegratedStoreSearchQuery(
             InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
             IntegratedStoreSearchSort sort,
             String rawCursor,
             int size,
@@ -50,6 +53,7 @@ public final class IntegratedStoreSearchQuery {
         this.remainingKeyword = condition.remainingKeyword();
         this.sort = sort;
         this.size = size;
+        Objects.requireNonNull(principalScope, "principalScope must not be null");
         this.fingerprint = SearchQueryFingerprint.create(
                 regionCodes,
                 storeCategoryCodes,
@@ -60,6 +64,9 @@ public final class IntegratedStoreSearchQuery {
                 reservationDate,
                 reservationTime,
                 remainingKeyword,
+                includesInfants,
+                availableOnly,
+                principalScope,
                 sort,
                 size);
         IntegratedSearchCursor decodedCursor = rawCursor == null
@@ -71,6 +78,9 @@ public final class IntegratedStoreSearchQuery {
 
     public static IntegratedStoreSearchQuery from(
             InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
             String sort,
             String cursor,
             Integer size,
@@ -84,9 +94,30 @@ public final class IntegratedStoreSearchQuery {
         }
         return new IntegratedStoreSearchQuery(
                 condition,
+                includesInfants,
+                availableOnly,
+                principalScope,
                 IntegratedStoreSearchSort.parse(sort),
                 cursor,
                 resolvedSize,
+                cursorCodec);
+    }
+
+    public static IntegratedStoreSearchQuery from(
+            InterpretedSearchCondition condition,
+            String sort,
+            String cursor,
+            Integer size,
+            IntegratedSearchCursorCodec cursorCodec
+    ) {
+        return from(
+                condition,
+                false,
+                false,
+                cursorCodec.principalScope(null),
+                sort,
+                cursor,
+                size,
                 cursorCodec);
     }
 

@@ -132,7 +132,8 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
         IntegratedStoreSearchCandidate third = candidate(3L, "가게3");
         IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
-                condition, null, null, 2, CURSOR_CODEC);
+                condition, false, true, CURSOR_CODEC.principalScope(null),
+                null, null, 2, CURSOR_CODEC);
         String next = CURSOR_CODEC.encode(
                 firstQuery, second.relevanceTier(), second.name(), second.storeId());
         given(repository.search(any()))
@@ -163,7 +164,8 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate first = candidate(1L, "가게1");
         IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
         IntegratedStoreSearchQuery firstQuery = IntegratedStoreSearchQuery.from(
-                condition, null, null, 3, CURSOR_CODEC);
+                condition, false, true, CURSOR_CODEC.principalScope(null),
+                null, null, 3, CURSOR_CODEC);
         String next = CURSOR_CODEC.encode(
                 firstQuery, second.relevanceTier(), second.name(), second.storeId());
         given(repository.search(any())).willReturn(
@@ -195,7 +197,8 @@ class IntegratedStoreSearchServiceTest {
         IntegratedStoreSearchCandidate second = candidate(2L, "가게2");
         IntegratedStoreSearchCandidate third = candidate(3L, "가게3");
         IntegratedStoreSearchQuery scanQuery = IntegratedStoreSearchQuery.from(
-                condition, "relevance,desc", null, 3, CURSOR_CODEC);
+                condition, false, false, CURSOR_CODEC.principalScope(41L),
+                "relevance,desc", null, 3, CURSOR_CODEC);
         String scanCursor = CURSOR_CODEC.encode(
                 scanQuery, second.relevanceTier(), second.name(), second.storeId());
         given(repository.search(any()))

@@ -1,5 +1,7 @@
-package com.miriyum.domain.recommendation.ranking;
+package com.miriyum.domain.recommendation.repository;
 
+import com.miriyum.domain.recommendation.ranking.RecommendationCandidateSignals;
+import com.miriyum.domain.recommendation.ranking.RecommendationSearchSignals;
 import com.miriyum.domain.store.entity.QStore;
 import com.miriyum.domain.menu.entity.QMenu;
 import com.miriyum.domain.menu.entity.QMenuVersion;

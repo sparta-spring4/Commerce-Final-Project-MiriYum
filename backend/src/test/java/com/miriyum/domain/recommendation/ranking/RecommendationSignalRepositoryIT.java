@@ -3,6 +3,7 @@ package com.miriyum.domain.recommendation.ranking;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.recommendation.repository.RecommendationSignalRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;

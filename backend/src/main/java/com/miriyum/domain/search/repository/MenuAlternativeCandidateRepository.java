@@ -40,7 +40,7 @@ public class MenuAlternativeCandidateRepository {
     public Optional<MenuAlternativeSourceView> findSource(long storeId, long menuId) {
         List<BaseRow> rows = baseQuery(new BooleanBuilder()
                         .and(QStore.store.id.eq(storeId))
-                        .and(QMenu.menu.id.eq(menuId)))
+                        .and(QMenu.menu.id.eq(menuId)), false)
                 .limit(1).fetch();
         if (rows.isEmpty()) {
             return Optional.empty();
@@ -53,7 +53,7 @@ public class MenuAlternativeCandidateRepository {
     public List<MenuAlternativeCandidateView> findSameStoreCandidates(
             long storeId, long sourceMenuId, int limit) {
         List<BaseRow> rows = baseQuery(new BooleanBuilder().and(QStore.store.id.eq(storeId))
-                        .and(QMenu.menu.id.ne(sourceMenuId)))
+                        .and(QMenu.menu.id.ne(sourceMenuId)), true)
                 .orderBy(QMenu.menu.id.asc()).limit(limit).fetch();
         return candidateViews(rows);
     }
@@ -70,12 +70,15 @@ public class MenuAlternativeCandidateRepository {
                         BigDecimal.valueOf(box.maxLatitude())))
                 .and(store.longitude.between(BigDecimal.valueOf(box.minLongitude()),
                         BigDecimal.valueOf(box.maxLongitude())));
-        List<BaseRow> rows = baseQuery(where).orderBy(store.id.asc(), QMenu.menu.id.asc())
+        List<BaseRow> rows = baseQuery(where, true).orderBy(store.id.asc(), QMenu.menu.id.asc())
                 .limit(limit).fetch();
         return candidateViews(rows);
     }
 
-    private com.querydsl.jpa.impl.JPAQuery<BaseRow> baseQuery(BooleanBuilder additional) {
+    private com.querydsl.jpa.impl.JPAQuery<BaseRow> baseQuery(
+            BooleanBuilder additional,
+            boolean sellingOnly
+    ) {
         QStore store = QStore.store;
         QMenu menu = QMenu.menu;
         QMenuVersion version = QMenuVersion.menuVersion;
@@ -86,10 +89,16 @@ public class MenuAlternativeCandidateRepository {
                 .and(store.operationStatus.eq(OperationStatus.OPEN))
                 .and(store.reservationEnabled.isTrue()).and(store.menuHoldEnabled.isTrue())
                 .and(menu.retired.isFalse()).and(menu.visibility.eq(MenuVisibility.VISIBLE))
-                .and(menu.sellingStatus.eq(MenuSellingStatus.SELLING))
                 .and(menu.publishedVersionNumber.eq(version.versionNumber))
                 .and(version.status.eq(MenuVersionStatus.PUBLISHED))
                 .and(version.holdSelectionAllowed.isTrue()).and(additional);
+        if (sellingOnly) {
+            where.and(menu.sellingStatus.eq(MenuSellingStatus.SELLING));
+        } else {
+            where.and(menu.sellingStatus.in(
+                    MenuSellingStatus.SELLING,
+                    MenuSellingStatus.SOLD_OUT));
+        }
         return queryFactory.select(Projections.constructor(BaseRow.class,
                         version.id, store.id, store.name, menu.id, version.name, version.price,
                         version.primaryCategoryCode, version.allergenInformationStatus,

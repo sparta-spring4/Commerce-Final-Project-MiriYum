@@ -72,6 +72,41 @@ class IntegratedStoreSearchQueryTest {
     }
 
     @Test
+    void fingerprintIncludesAvailabilityInfantAndKeyedPrincipalScopes() {
+        IntegratedStoreSearchQuery baseline = query(
+                condition(), false, false, null, "recommendation,desc", null, 20);
+
+        assertThat(query(condition(), true, false, null,
+                "recommendation,desc", null, 20).fingerprint())
+                .isNotEqualTo(baseline.fingerprint());
+        assertThat(query(condition(), false, true, null,
+                "recommendation,desc", null, 20).fingerprint())
+                .isNotEqualTo(baseline.fingerprint());
+        assertThat(query(condition(), false, false, 41L,
+                "recommendation,desc", null, 20).fingerprint())
+                .isNotEqualTo(baseline.fingerprint())
+                .isNotEqualTo(query(condition(), false, false, 42L,
+                        "recommendation,desc", null, 20).fingerprint());
+    }
+
+    @Test
+    void cursorRejectsChangedAvailabilityInfantAndPrincipalScopes() {
+        IntegratedStoreSearchQuery firstPage = query(
+                condition(), false, false, 41L, "recommendation,desc", null, 20);
+        String cursor = CURSOR_CODEC.encode(firstPage, "62|false|0|1|~", 42L);
+
+        query(condition(), false, false, 41L, "recommendation,desc", cursor, 20);
+        assertValidationFailed(() -> query(
+                condition(), true, false, 41L, "recommendation,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition(), false, true, 41L, "recommendation,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition(), false, false, 42L, "recommendation,desc", cursor, 20));
+        assertValidationFailed(() -> query(
+                condition(), false, false, null, "recommendation,desc", cursor, 20));
+    }
+
+    @Test
     void cursorIsAcceptedOnlyForTheSameVersionFingerprintAndSort() {
         IntegratedStoreSearchQuery firstPage = query(condition(), "name,asc", null, 20);
         String cursor = CURSOR_CODEC.encode(
@@ -175,6 +210,26 @@ class IntegratedStoreSearchQueryTest {
     ) {
         return IntegratedStoreSearchQuery.from(
                 condition, sort, cursor, size, CURSOR_CODEC);
+    }
+
+    private static IntegratedStoreSearchQuery query(
+            InterpretedSearchCondition condition,
+            boolean includesInfants,
+            boolean availableOnly,
+            Long consumerAccountId,
+            String sort,
+            String cursor,
+            Integer size
+    ) {
+        return IntegratedStoreSearchQuery.from(
+                condition,
+                includesInfants,
+                availableOnly,
+                CURSOR_CODEC.principalScope(consumerAccountId),
+                sort,
+                cursor,
+                size,
+                CURSOR_CODEC);
     }
 
     private static InterpretedSearchCondition condition() {

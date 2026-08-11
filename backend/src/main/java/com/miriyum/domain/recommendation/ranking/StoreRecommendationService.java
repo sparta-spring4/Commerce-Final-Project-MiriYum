@@ -1,5 +1,6 @@
 package com.miriyum.domain.recommendation.ranking;
 
+import com.miriyum.domain.recommendation.repository.RecommendationSignalRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

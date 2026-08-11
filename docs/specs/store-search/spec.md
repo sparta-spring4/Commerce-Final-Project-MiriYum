@@ -85,7 +85,7 @@
 
 - 통합 검색은 `searchInput`, `includesInfants`, `availableOnly`, `sort`, `cursor`, `size`만 허용한다. 1차 MVP의 `keyword`, `region`, `storeCategoryCode`, `serviceDate`, `startTime`, `partySize`, `page`와 혼용하면 `COMMON_001`로 거부한다.
 - `includesInfants=true`와 `availableOnly=true`는 해석 결과에 날짜·시각·인원이 모두 있을 때만 허용한다. 일부 예약 조건은 추측으로 채우지 않고 warning과 남은 일반 키워드로 축소한다.
-- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. `recommendation,desc`는 현재 검색 필수 조건을 통과한 후보를 `history-v1`으로 재정렬한다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 입력 조건·정렬·크기가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
+- 통합 검색의 기본 정렬은 `relevance,desc`, 기본 크기는 20, 최대 크기는 50이다. `recommendation,desc`는 현재 검색 필수 조건을 통과한 후보를 `history-v1`으로 재정렬한다. cursor는 서버 비밀키로 HMAC 인증한 불투명 문자열이며 payload가 변조되거나 정규화 입력 조건, `includesInfants`, `availableOnly`, 정렬, 크기 또는 인증 주체 범위가 달라진 요청에 재사용하면 `COMMON_001`로 거부한다. 인증 주체 범위는 원본 사용자 ID를 payload에 노출하지 않고 별도 HMAC 문맥에서 만든 익명 또는 소비자별 불투명 값으로 결합한다. 서버 비밀키가 회전하면 기존 cursor는 만료된 것으로 취급한다.
 - `GET /api/v1/stores`는 인증 헤더가 없는 요청도 허용한다. 유효한 소비자 Access Bearer가 있으면 추천 정렬에 자기 이력을 가산하고, 헤더를 제출했지만 형식·서명·만료·용도·namespace가 유효하지 않으면 익명으로 축소하지 않고 `AUTH_###` 401로 거부한다.
 - 통합 검색 응답은 기존 페이지 응답과 구분되는 `IntegratedStoreSearchData`를 사용한다. `items`, `normalizedCondition`, `warnings`, `ruleVersion`, `vocabularyVersion`, `rankingRuleVersion`, `nextCursor`를 반환하고 정확한 전체 건수나 페이지 번호를 추측하지 않는다. `rankingRuleVersion`은 추천 정렬에서 `history-v1`, 다른 정렬에서 `null`이다. 각 항목의 `recommendationReason`은 추천 정렬에서 실제 최고 양의 기여 요인의 코드·문구, 다른 정렬에서 `null`이며 내부 점수·가중치·이용 횟수는 노출하지 않는다.
 
@@ -315,4 +315,4 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | 2026-08-05 | 세 공개 매장 GET 경로가 IP당 60초에 60회의 중앙 공개 조회 한도를 공유 | `SCALE-005`를 적용하고 비용이 큰 가용성 검색을 컨트롤러 실행 전에 제한하며 경로별 우회 한도를 만들지 않음 |
 # 품절 메뉴 대안 검색
 
-`POST /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.
+`POST /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.

@@ -3,6 +3,7 @@ package com.miriyum.domain.recommendation.ranking;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 
+import com.miriyum.domain.recommendation.repository.RecommendationSignalRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;

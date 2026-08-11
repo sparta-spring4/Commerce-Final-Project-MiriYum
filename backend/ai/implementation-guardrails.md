@@ -27,12 +27,14 @@ com.miriyum
    ├─ schedule
    ├─ menu
    ├─ search
+   ├─ alternative
+   ├─ recommendation
    ├─ reservation
    ├─ menuhold
    └─ pickup
 ```
 
-각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto`, `exception`을 만든다. HTTP 호출자 구분이 필요한 Controller와 HTTP DTO만 `publicapi`, `consumer`, `storeoperator` 하위로 나눈다. `publicapi`는 별도 제휴 API가 아니라 인증 principal을 요구하지 않는 공개 HTTP 조회 경계다. 사용자 유형 자체가 도메인인 `consumer`, `storeoperator`는 Controller와 HTTP DTO를 `auth`, `account` 목적별로 나눈다. Service·Repository·Entity를 호출자별로 복제하지 않는다.
+각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto`, `exception`을 만든다. 검증된 계산 책임은 `recommendation.ranking`처럼 목적이 분명한 capability 패키지에 둘 수 있지만, 영속 조회 구현은 `repository` 패키지에 둔다. HTTP 호출자 구분이 필요한 Controller와 HTTP DTO만 `publicapi`, `consumer`, `storeoperator` 하위로 나눈다. `publicapi`는 별도 제휴 API가 아니라 인증 principal을 요구하지 않는 공개 HTTP 조회 경계다. 사용자 유형 자체가 도메인인 `consumer`, `storeoperator`는 Controller와 HTTP DTO를 `auth`, `account` 목적별로 나눈다. Service·Repository·Entity를 호출자별로 복제하지 않는다.
 
 `booking`, `account`, `application` wrapper package를 만들지 않는다. 초기 구현에서 Command/Query/Application Service, Manager, `ServiceImpl`을 분리하거나 모든 Service에 형식적인 interface를 만들지 않는다. 복잡도가 실제로 확인되어 Issue와 테스트로 근거가 남은 경우에만 목적이 명확한 Service나 Facade를 추가한다.
 
@@ -53,6 +55,15 @@ com.miriyum
 예약과 MenuHold의 교차 트랜잭션은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`로 연결한다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
+
+2차 MVP의 통합 검색·추천 projection은 다음 네 읽기 전용 QueryDSL reader에 한해 Store·Menu의 생성 `Q*` 메타모델을 직접 읽을 수 있다.
+
+- `recommendation/repository/RecommendationSignalRepository.java`
+- `search/repository/IntegratedStoreSearchPredicates.java`
+- `search/repository/IntegratedStoreSearchRepository.java`
+- `search/repository/MenuAlternativeCandidateRepository.java`
+
+이 예외는 Store·Menu Entity를 반환하거나 변경하는 계약이 아니다. 위 reader는 scalar·projection만 반환하고 쓰기, Entity materialization 공개, 다른 도메인 확장을 금지한다. `DomainPackageArchitectureTest`는 정확한 경로와 대상 도메인만 허용하며 그 밖의 타 도메인 Entity·Repository·생성 `Q*` import를 실패시킨다.
 
 - 쓰기 메서드: `@Transactional`
 - 읽기 메서드: `@Transactional(readOnly = true)`

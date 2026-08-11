@@ -25,6 +25,9 @@ final class SearchQueryFingerprint {
             LocalDate reservationDate,
             LocalTime reservationTime,
             String remainingKeyword,
+            boolean includesInfants,
+            boolean availableOnly,
+            String principalScope,
             IntegratedStoreSearchSort sort,
             int size
     ) {
@@ -40,6 +43,9 @@ final class SearchQueryFingerprint {
             update(digest, reservationDate);
             update(digest, reservationTime);
             update(digest, remainingKeyword);
+            update(digest, includesInfants);
+            update(digest, availableOnly);
+            update(digest, principalScope);
             update(digest, sort.name());
             update(digest, size);
             return HexFormat.of().formatHex(digest.digest());

@@ -88,6 +88,9 @@ class IntegratedStoreSearchRepositoryIT {
     private IntegratedStoreSearchRepository repository;
 
     @Autowired
+    private MenuAlternativeCandidateRepository alternativeCandidateRepository;
+
+    @Autowired
     private StoreRepository storeRepository;
 
     @Autowired
@@ -184,6 +187,34 @@ class IntegratedStoreSearchRepositoryIT {
 
         assertThat(ids(result)).containsExactlyInAnyOrder(
                 selling.getId(), soldOut.getId(), paused.getId());
+    }
+
+    @Test
+    @Transactional
+    void soldOutMenuRemainsAVisibleSourceButNeverBecomesAnAlternativeCandidate() {
+        Store store = createStore(
+                "대안 검색 매장", Region.SEOUL, "CAFE_BAKERY", Set.of(), false);
+        Menu soldOutSource = publishMenu(
+                store, "품절 원본", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SOLD_OUT, MenuVisibility.VISIBLE, false);
+        Menu sellingCandidate = publishMenu(
+                store, "판매 후보", 11_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Menu soldOutCandidate = publishMenu(
+                store, "품절 후보", 12_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SOLD_OUT, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+
+        assertThat(alternativeCandidateRepository.findSource(
+                store.getId(), soldOutSource.getId()))
+                .get()
+                .extracting(source -> source.menuId())
+                .isEqualTo(soldOutSource.getId());
+        assertThat(alternativeCandidateRepository.findSameStoreCandidates(
+                store.getId(), soldOutSource.getId(), 20))
+                .extracting(candidate -> candidate.menuId())
+                .containsExactly(sellingCandidate.getId())
+                .doesNotContain(soldOutCandidate.getId());
     }
 
     @Test
@@ -428,7 +459,7 @@ class IntegratedStoreSearchRepositoryIT {
         return createdId;
     }
 
-    private void publishMenu(
+    private Menu publishMenu(
             Store store,
             String name,
             int price,
@@ -462,7 +493,7 @@ class IntegratedStoreSearchRepositoryIT {
         if (retired) {
             menu.retire(NOW.plusSeconds(2));
         }
-        menuRepository.saveAndFlush(menu);
+        return menuRepository.saveAndFlush(menu);
     }
 
     private IntegratedStoreSearchQuery query(

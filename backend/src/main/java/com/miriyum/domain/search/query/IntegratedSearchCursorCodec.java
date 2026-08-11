@@ -20,6 +20,7 @@ public final class IntegratedSearchCursorCodec {
     private static final int MAX_CURSOR_LENGTH = 1_024;
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final String SIGNING_CONTEXT = "miriyum-store-search-cursor\0";
+    private static final String PRINCIPAL_CONTEXT = "miriyum-store-search-principal\0";
     private final byte[] signingKey;
 
     public IntegratedSearchCursorCodec(
@@ -37,6 +38,17 @@ public final class IntegratedSearchCursorCodec {
             long storeId
     ) {
         return encode(query, 0, sortValue, storeId);
+    }
+
+    /** Returns a keyed opaque scope that binds cursors to an anonymous or consumer principal. */
+    public String principalScope(Long consumerAccountId) {
+        if (consumerAccountId != null && consumerAccountId <= 0) {
+            throw new IllegalArgumentException("consumerAccountId must be positive");
+        }
+        String principal = consumerAccountId == null
+                ? "anonymous"
+                : "consumer:" + consumerAccountId;
+        return sign(PRINCIPAL_CONTEXT, principal);
     }
 
     public String encode(
@@ -103,11 +115,15 @@ public final class IntegratedSearchCursorCodec {
     }
 
     private String sign(String payload) {
+        return sign(SIGNING_CONTEXT, payload);
+    }
+
+    private String sign(String context, String payload) {
         try {
             Mac mac = Mac.getInstance(HMAC_ALGORITHM);
             mac.init(new SecretKeySpec(signingKey, HMAC_ALGORITHM));
             byte[] signature = mac.doFinal(
-                    (SIGNING_CONTEXT + payload).getBytes(StandardCharsets.UTF_8));
+                    (context + payload).getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("HMAC-SHA256 is unavailable", exception);
