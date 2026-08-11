@@ -1,9 +1,12 @@
 package com.miriyum.domain.reservation.controller.consumer;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
@@ -21,17 +24,19 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 인증된 소비자 본인의 일반 예약 상세를 조회하는 HTTP 경계다. */
+/** 인증된 소비자의 일반 예약 생성·조회·취소와 예약 이력을 제공하는 HTTP 경계다. */
 @RestController
-@RequestMapping("/api/v1/consumers/reservations")
+@RequestMapping("/api/v1/consumers")
 @RequiredArgsConstructor
 public class ReservationController {
 
     private final ReservationService reservationService;
     private final ReservationCreationCommandFacade reservationCreationCommandFacade;
     private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
+    private final ConsumerAccountService consumerAccountService;
 
     /**
      * Authenticated consumer reservation creation is delegated unchanged to the command facade.
@@ -41,7 +46,7 @@ public class ReservationController {
      * @param request reservation creation input
      * @return facade-selected HTTP status with the common success envelope
      */
-    @PostMapping
+    @PostMapping("/reservations")
     public ResponseEntity<ApiResponse<ReservationDetailResponse>> createReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
@@ -62,7 +67,7 @@ public class ReservationController {
      * @param reservationId 조회할 예약 식별자
      * @return 공통 성공 봉투로 감싼 예약 상세
      */
-    @GetMapping("/{reservationId}")
+    @GetMapping("/reservations/{reservationId}")
     public ApiResponse<ReservationDetailResponse> getReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long reservationId
@@ -75,7 +80,7 @@ public class ReservationController {
     }
 
     /** Cancels the authenticated consumer's reservation through the cancellation facade. */
-    @PostMapping("/{reservationId}/cancellations")
+    @PostMapping("/reservations/{reservationId}/cancellations")
     public ResponseEntity<ApiResponse<ReservationDetailResponse>> cancelReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long reservationId,
@@ -87,5 +92,21 @@ public class ReservationController {
                         principal.accountId(), reservationId, IdempotencyKey.parse(rawKey), request);
         return ResponseEntity.status(result.httpStatus())
                 .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
+    }
+
+    @GetMapping("/me/reservations")
+    public ApiResponse<ReservationHistoryPageResponse> getReservationHistory(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort
+    ) {
+        consumerAccountService.getMe(principal.accountId());
+        ReservationHistorySearchRequest request = ReservationHistorySearchRequest.from(
+                status, page, size, sort);
+        ReservationHistoryPageResponse response =
+                reservationService.getConsumerReservationHistory(principal.accountId(), request);
+        return ApiResponse.success("조회했습니다.", response);
     }
 }

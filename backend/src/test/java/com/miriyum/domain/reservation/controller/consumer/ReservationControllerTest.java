@@ -12,10 +12,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
 import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationHistoryItemResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
@@ -28,6 +33,7 @@ import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
+import com.miriyum.global.response.PageMetadata;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -51,6 +57,7 @@ class ReservationControllerTest {
 
     private static final String DETAIL_URL = "/api/v1/consumers/reservations/77";
     private static final String ROOT_URL = "/api/v1/consumers/reservations";
+    private static final String HISTORY_URL = "/api/v1/consumers/me/reservations";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
 
     @Autowired
@@ -66,7 +73,91 @@ class ReservationControllerTest {
     private ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     @MockitoBean
+    private ConsumerAccountService consumerAccountService;
+
+    @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    void returnsAuthenticatedConsumersReservationHistory() throws Exception {
+        authenticateConsumer(11L);
+        ReservationHistoryPageResponse page = new ReservationHistoryPageResponse(
+                List.of(new ReservationHistoryItemResponse(
+                        "91", "7", "MiriYum",
+                        LocalDate.of(2026, 8, 10),
+                        CustomerReservationTimeStatus.RESOLVED,
+                        OffsetDateTime.parse("2026-08-10T18:00:00+09:00"),
+                        OffsetDateTime.parse("2026-08-10T19:00:00+09:00"),
+                        "Asia/Seoul", 2, "CONFIRMED",
+                        OffsetDateTime.parse("2026-08-01T00:00:00Z"))),
+                new PageMetadata(0, 20, 1, 1, false));
+        given(reservationService.getConsumerReservationHistory(
+                eq(11L),
+                eq(ReservationHistorySearchRequest.from(
+                        "CONFIRMED", 0, 20, "serviceDate,asc"))))
+                .willReturn(page);
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("status", "CONFIRMED")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20")
+                        .queryParam("sort", "serviceDate,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].reservationId").value("91"))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1));
+
+        then(consumerAccountService).should().getMe(11L);
+        then(reservationService).should().getConsumerReservationHistory(
+                11L,
+                ReservationHistorySearchRequest.from(
+                        "CONFIRMED", 0, 20, "serviceDate,asc"));
+    }
+
+    @Test
+    void accountStatePrecedesReservationHistoryQueryValidation() throws Exception {
+        authenticateConsumer(11L);
+        given(consumerAccountService.getMe(11L))
+                .willThrow(new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED));
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("sort", "status,asc"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_011"));
+
+        then(reservationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void returnsEmptyReservationHistoryPage() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationService.getConsumerReservationHistory(
+                11L, ReservationHistorySearchRequest.from(null, null, null, null)))
+                .willReturn(new ReservationHistoryPageResponse(
+                        List.of(), new PageMetadata(0, 20, 0, 0, false)));
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.page.totalElements").value(0))
+                .andExpect(jsonPath("$.data.page.hasNext").value(false));
+    }
+
+    @Test
+    void rejectsUnsupportedReservationHistorySort() throws Exception {
+        authenticateConsumer(11L);
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("sort", "status,asc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        then(consumerAccountService).should().getMe(11L);
+        then(reservationService).shouldHaveNoInteractions();
+    }
 
     @Test
     @DisplayName("Access Token이 없으면 본인 예약 상세를 조회할 수 없다")
