@@ -1,0 +1,497 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Payment API
+  version: 1.0.0
+  description: |
+    고도화 Payment 도메인의 일반 사용자 결제 확정·본인 조회와 PortOne V2 Webhook 계약이다.
+    결제 준비는 Reservation 조정자가 Payment 공개 Service를 호출하며 별도 브라우저 HTTP API를 제공하지 않는다.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경과 동일 origin
+security: []
+tags:
+  - name: Payment
+    description: 일반 사용자 본인의 결제 확정과 결제·환불 조회
+  - name: Payment Webhook
+    description: PortOne V2가 호출하는 서명 검증 Webhook
+paths:
+  /api/v1/payments:
+    get:
+      tags: [Payment]
+      summary: 본인 결제·환불 이력 조회
+      operationId: getCurrentConsumerPayments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: 이전 응답의 불투명 nextCursor. 다른 필터에 재사용할 수 없다.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+        - name: limit
+          in: query
+          required: false
+          description: 페이지 크기
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          required: false
+          description: 공개 결제 상태 필터
+          schema:
+            $ref: "#/components/schemas/PaymentStatus"
+      responses:
+        "200":
+          description: 생성 시각·결제 ID 역순의 본인 결제·환불 이력 slice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentHistorySuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidCursor"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "500":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/payments/{paymentId}:
+    get:
+      tags: [Payment]
+      summary: 본인 결제 상세 조회
+      operationId: getCurrentConsumerPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: 본인 결제와 환불 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentSuccessResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PaymentNotFound"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "500":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/payments/{paymentId}/confirmations:
+    post:
+      tags: [Payment]
+      summary: PortOne 서버 조회 기반 결제 확정
+      description: |
+        브라우저가 전달한 성공 여부·금액·통화·transactionId를 받거나 신뢰하지 않는다.
+        준비된 portOnePaymentId를 서버에서 조회하고 원장 스냅샷과 대조한 뒤 같은 멱등 확정 경로를 실행한다.
+      operationId: confirmCurrentConsumerPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentConfirmationRequest"
+      responses:
+        "200":
+          description: 인증된 서버 조회로 최종 상태를 확정했거나 기존 최종 결과를 재생함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentSuccessResponse"
+        "202":
+          description: 결과가 불명확하여 신규 청구·환불을 차단하고 대사 대상으로 격리함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentReconciliationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PaymentNotFound"
+        "409":
+          $ref: "#/components/responses/PaymentConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "500":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/payments/webhooks/portone:
+    post:
+      tags: [Payment Webhook]
+      summary: PortOne V2 결제·환불 Webhook 수신
+      description: |
+        2024-04-25 body와 Standard Webhooks 서명을 raw body 기준으로 검증한다.
+        유효한 사건도 성공 근거로 바로 사용하지 않고 알려진 paymentId를 PortOne V2 API에서 다시 조회한다.
+      operationId: receivePortOnePaymentWebhook
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/WebhookTimestamp"
+        - $ref: "#/components/parameters/WebhookSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortOneWebhookRequest"
+      responses:
+        "200":
+          description: 검증·중복 제거 후 처리했거나 이미 처리한 사건을 확인함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoDataSuccessResponse"
+        "202":
+          description: 서명은 유효하지만 PortOne 조회 결과가 불명확하여 대사 대상으로 격리함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoDataSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidWebhookSignature"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "500":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  parameters:
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      description: MiriYum이 공개한 내부 결제 참조
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    WebhookId:
+      name: webhook-id
+      in: header
+      required: true
+      description: Standard Webhooks 메시지 식별자
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    WebhookTimestamp:
+      name: webhook-timestamp
+      in: header
+      required: true
+      description: Standard Webhooks 서명 timestamp
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    WebhookSignature:
+      name: webhook-signature
+      in: header
+      required: true
+      description: PortOne Webhook Secret으로 검증하는 Standard Webhooks 서명
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2048
+  schemas:
+    PortOnePaymentId:
+      type: string
+      minLength: 6
+      maxLength: 64
+      pattern: "^[A-Za-z0-9_-]+$"
+      description: 준비된 내부 주문에서 결정적으로 파생해 MiriYum이 채번한 PortOne paymentId
+      example: payment-reservation-123456
+    Currency:
+      type: string
+      pattern: "^[A-Z]{3}$"
+      description: ISO 4217 통화 코드
+      example: KRW
+    MoneyMinor:
+      type: integer
+      format: int64
+      minimum: 0
+      description: 통화의 최소 단위 정수 금액
+    PaymentStatus:
+      type: string
+      enum:
+        - READY
+        - CONFIRMING
+        - PAID
+        - PARTIALLY_REFUNDED
+        - REFUNDED
+        - RECONCILIATION_REQUIRED
+    RefundStatus:
+      type: string
+      enum:
+        - REQUESTED
+        - VALIDATING
+        - PROCESSING
+        - COMPLETED
+        - FAILED
+        - RECONCILIATION_REQUIRED
+    PaymentAttemptStatus:
+      type: string
+      enum:
+        - NOT_STARTED
+        - PENDING
+        - PAID
+        - FAILED
+        - CANCELLED
+        - UNKNOWN
+    PaymentConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [portOnePaymentId]
+      properties:
+        portOnePaymentId:
+          $ref: "#/components/schemas/PortOnePaymentId"
+    RefundSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - refundId
+        - amountMinor
+        - currency
+        - status
+        - requestedAt
+        - completedAt
+      properties:
+        refundId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        amountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        currency:
+          $ref: "#/components/schemas/Currency"
+        status:
+          $ref: "#/components/schemas/RefundStatus"
+        requestedAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        completedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+    Payment:
+      type: object
+      additionalProperties: false
+      required:
+        - paymentId
+        - reservationReferenceId
+        - amountMinor
+        - refundedAmountMinor
+        - refundableAmountMinor
+        - currency
+        - status
+        - lastAttemptStatus
+        - createdAt
+        - paidAt
+        - updatedAt
+        - refunds
+      properties:
+        paymentId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        reservationReferenceId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        amountMinor:
+          allOf:
+            - $ref: "#/components/schemas/MoneyMinor"
+            - minimum: 1
+        refundedAmountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        refundableAmountMinor:
+          $ref: "#/components/schemas/MoneyMinor"
+        currency:
+          $ref: "#/components/schemas/Currency"
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        lastAttemptStatus:
+          $ref: "#/components/schemas/PaymentAttemptStatus"
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        paidAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+        updatedAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundSummary"
+    PaymentHistorySlice:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasNext]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        nextCursor:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 2048
+        hasNext:
+          type: boolean
+    PortOneWebhookData:
+      type: object
+      additionalProperties: true
+      required: [storeId]
+      properties:
+        storeId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        paymentId:
+          $ref: "#/components/schemas/PortOnePaymentId"
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        cancellationId:
+          type: string
+          minLength: 1
+          maxLength: 255
+    PortOneWebhookRequest:
+      type: object
+      additionalProperties: true
+      required: [type, timestamp, data]
+      properties:
+        type:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: PortOne V2 Webhook 사건 유형
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          $ref: "#/components/schemas/PortOneWebhookData"
+    PaymentSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/Payment"
+    PaymentReconciliationSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          type: string
+          const: 결제 결과를 확인 중입니다.
+        data:
+          allOf:
+            - $ref: "#/components/schemas/Payment"
+            - type: object
+              properties:
+                status:
+                  type: string
+                  const: RECONCILIATION_REQUIRED
+    PaymentHistorySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PaymentHistorySlice"
+    NoDataSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/NoData"
+  responses:
+    PaymentNotFound:
+      description: 본인 범위에서 결제를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PAYMENT_001
+            message: 결제를 찾을 수 없습니다.
+    PaymentConflict:
+      description: 결제 상태·소유자·금액·통화·PortOne 매핑·source 또는 공통 멱등 계약 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidTransition:
+              value:
+                code: PAYMENT_002
+                message: 현재 결제 상태에서는 요청을 처리할 수 없습니다.
+            mappingMismatch:
+              value:
+                code: PAYMENT_003
+                message: 결제 검증 정보가 준비된 거래와 일치하지 않습니다.
+            activeSourceConflict:
+              value:
+                code: PAYMENT_004
+                message: 같은 예약 거래에 처리 중인 결제가 있습니다.
+            idempotencyConflict:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+    InvalidCursor:
+      description: 이력 cursor가 잘못됐거나 현재 필터와 일치하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PAYMENT_005
+            message: 결제 이력 커서가 올바르지 않습니다.
+    InvalidWebhookSignature:
+      description: PortOne Webhook 서명 또는 timestamp 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: PAYMENT_006
+            message: 유효한 결제 Webhook이 아닙니다.

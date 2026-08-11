@@ -131,7 +131,7 @@ ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + co
 
 확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.
 
-Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. `type`, `timestamp`, `data.storeId`, `data.paymentId`, `data.transactionId`와 조건부 `data.cancellationId`를 상관관계·중복 제거 입력으로 사용하되, 검증 뒤에도 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 검증 실패 요청은 거래를 변경하지 않는다.
+Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 필드 `type`, `timestamp`, `data.storeId`를 먼저 검증하고, 지원하는 결제·환불 type에서 `data.paymentId`, `data.transactionId`와 조건부 `data.cancellationId`를 필수 상관관계·중복 제거 입력으로 사용한다. 서명은 유효하지만 지원하지 않는 type은 거래를 변경하지 않고 성공적으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
 
 ## 상태와 전이
 
@@ -152,13 +152,17 @@ Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks
 
 `REQUESTED`, `VALIDATING`, `PROCESSING`, `COMPLETED`, `FAILED`, `RECONCILIATION_REQUIRED`를 사용한다. 명시적 실패만 `FAILED`로 종결하고 외부 결과를 모르면 `RECONCILIATION_REQUIRED`를 유지한다.
 
+### 마지막 결제 시도 공개 상태
+
+`NOT_STARTED`, `PENDING`, `PAID`, `FAILED`, `CANCELLED`, `UNKNOWN`을 사용한다. 결제 aggregate가 재시도 가능한 `READY`여도 `lastAttemptStatus`로 최초 준비와 명시적 실패·취소를 구분한다. 제공자 오류 코드·문구와 `transactionId`는 공개하지 않는다.
+
 ## 공개 응답
 
 결제 상세·이력 항목은 다음 필드만 공개한다.
 
 - `paymentId`, `reservationReferenceId`
 - `amountMinor`, `refundedAmountMinor`, `refundableAmountMinor`, `currency`
-- 결제 `status`, `createdAt`, nullable `paidAt`, nullable `updatedAt`
+- 결제 `status`, `lastAttemptStatus`, `createdAt`, nullable `paidAt`, nullable `updatedAt`
 - `refunds`: `refundId`, 금액, 상태, 요청·완료 시각의 배열
 
 `paymentOrderId`, `transactionId`, PortOne 원문 응답, 결제수단 상세, 카드·계좌·휴대전화 원문, API Secret, Webhook Secret과 내부 대사 메모는 공개하지 않는다. 빈 이력은 `items: []`, `nextCursor: null`, `hasNext: false`다.
@@ -170,13 +174,13 @@ Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks
 | `PAYMENT_001` | 404 | 본인 범위에서 결제를 찾을 수 없음 |
 | `PAYMENT_002` | 409 | 현재 결제·환불 상태에서 요청한 전이 불가 |
 | `PAYMENT_003` | 409 | source, 소유자, 금액, 통화 또는 PortOne 매핑 불일치 |
-| `PAYMENT_004` | 409 | 같은 source에 다른 활성 결제가 존재하거나 멱등 지문 충돌 |
+| `PAYMENT_004` | 409 | 같은 source에 다른 활성 결제가 존재함 |
 | `PAYMENT_005` | 400 | 이력 cursor가 잘못됐거나 현재 필터와 일치하지 않음 |
 | `PAYMENT_006` | 401 | PortOne Webhook 서명·timestamp 검증 실패 |
 | `PAYMENT_007` | 409 | 환불 요청액이 검증된 환불 가능 잔액을 초과함 |
 | `PAYMENT_008` | 409 | 결제 준비 source가 이미 만료됐거나 확정 불가 상태임 |
 
-PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환하지 않고 202 상태 응답과 대사 상태로 보존한다. 기술 공통 입력·인증·속도 제한·멱등 오류는 공통 오류 계약을 사용한다.
+PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환하지 않고 202 상태 응답과 대사 상태로 보존한다. 기술 공통 입력·인증·속도 제한 오류와 같은 `Idempotency-Key`의 다른 요청 지문 충돌은 공통 오류 계약의 `COMMON_007`을 사용한다.
 
 ## 원장·동시성·복구
 

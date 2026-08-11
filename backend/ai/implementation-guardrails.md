@@ -29,7 +29,8 @@ com.miriyum
    ├─ search
    ├─ reservation
    ├─ menuhold
-   └─ pickup
+   ├─ pickup
+   └─ payment
 ```
 
 각 도메인은 실제 필요가 확인된 경우에만 `controller`, `service`, `repository`, `entity`, `dto`, `exception`을 만든다. HTTP 호출자 구분이 필요한 Controller와 HTTP DTO만 `publicapi`, `consumer`, `storeoperator` 하위로 나눈다. `publicapi`는 별도 제휴 API가 아니라 인증 principal을 요구하지 않는 공개 HTTP 조회 경계다. 사용자 유형 자체가 도메인인 `consumer`, `storeoperator`는 Controller와 HTTP DTO를 `auth`, `account` 목적별로 나눈다. Service·Repository·Entity를 호출자별로 복제하지 않는다.
@@ -49,6 +50,7 @@ com.miriyum
 - `ReservationService`
 - `MenuHoldService`
 - `PickupService`
+- `PaymentService`
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
 
@@ -86,15 +88,15 @@ Controller와 Service는 생성자 주입을 사용하며 필요한 경우 `@Req
 
 JSON 성공 응답은 `ApiResponse<T>(code, message, data)`를 사용한다. 반환 데이터가 없으면 `data: null`, 빈 조회는 `data: []`로 표현한다. 파일·stream 같은 비 JSON 응답은 envelope 예외가 될 수 있다.
 
-기술 공통 오류는 `CommonErrorCode`, 도메인별 오류는 `AuthErrorCode`, `StoreErrorCode`, `ReservationErrorCode`, `MenuHoldErrorCode`, `PickupErrorCode` 하나씩만 사용한다. 계정 상태·회원정보 오류도 인증 도메인의 `AuthErrorCode`가 소유하며 별도 `AccountErrorCode`나 `domain.account` package를 만들지 않는다. ErrorCode는 HTTP status, 외부 code, message를 제공하고 `ServiceException(ErrorCode)`와 `GlobalExceptionHandler`가 처리한다. Security `401/403`도 같은 JSON 오류 구조를 사용한다.
+기술 공통 오류는 `CommonErrorCode`, 도메인별 오류는 `AuthErrorCode`, `StoreErrorCode`, `ReservationErrorCode`, `MenuHoldErrorCode`, `PickupErrorCode`, `PaymentErrorCode` 하나씩만 사용한다. 계정 상태·회원정보 오류도 인증 도메인의 `AuthErrorCode`가 소유하며 별도 `AccountErrorCode`나 `domain.account` package를 만들지 않는다. ErrorCode는 HTTP status, 외부 code, message를 제공하고 `ServiceException(ErrorCode)`와 `GlobalExceptionHandler`가 처리한다. Security `401/403`도 같은 JSON 오류 구조를 사용한다.
 
 요청 DTO `record`에 Bean Validation을 선언하고 Controller에서 `@Valid`를 사용한다. 구조·형식 검증은 DTO, business 정책 검증은 Service가 소유한다. exception, SQL, stack trace, secret, token, 민감 입력값을 응답에 노출하지 않는다.
 
 ## 테스트
 
-- 핵심 Service의 성공·실패와 상태 전이·인가·정원·재고·날짜·시간을 unit test로 검증한다.
+- 핵심 Service의 성공·실패와 상태 전이·인가·정원·재고·날짜·시간·금액·통화·결제 멱등성을 unit test로 검증한다.
 - validation, HTTP status, 성공·오류 envelope, Security와 `Idempotency-Key`를 MockMvc로 검증한다.
-- Flyway, DB constraint, 조건부 수량 변경, 동시성·멱등성, rollback·취소 복구와 픽업 분리는 Testcontainers MySQL로 검증한다.
+- Flyway, DB constraint, 조건부 수량 변경, 동시성·멱등성, rollback·취소 복구, 픽업 분리와 결제·Webhook·환불 원장 중복 방지는 Testcontainers MySQL로 검증한다.
 - H2만으로 MySQL 동작을 증명하지 않는다.
 - given/when/then 구조, camelCase test method와 한국어 `@DisplayName`을 사용한다.
 - 시간은 `Clock`, 동시성은 barrier/latch로 제어하고 `sleep`에 의존하지 않는다.
