@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useCatalog } from '../api/queries'
 import { categoryArt, categoryTint } from '../model/categoryArt'
@@ -76,29 +77,38 @@ export function HomePage() {
         <section className="home__section" aria-label="미리냠이 특별한 이유">
           <div className="home__section-head">
             <h2>미리냠이 특별한 이유</h2>
-            <p>지금 바로 쓸 수 있는 기능만 담았습니다.</p>
+            <p>당신의 미식 경험을 한층 더 완벽하게 만들어 줄 기능들</p>
           </div>
 
           {/*
-            1차 MVP에서 실제로 동작하는 세 거래만 소개한다.
-            시안의 "실시간 스마트 웨이팅"·"검증된 리얼 리뷰" 카드는 고도화라
-            문구로도 노출하지 않는다.
+            시안의 bento 구성을 따르되 내용은 1차 MVP에서 실제로 동작하는
+            세 거래로 채운다. "실시간 스마트 웨이팅"·"검증된 리얼 리뷰"는
+            고도화라 문구로도 노출하지 않는다.
+
+            시안 큰 카드의 "75% 조리 준비 중" 진행 링도 만들지 않는다.
+            1차 MVP에 조리 상태 계약이 없어 가짜 진행 상태가 된다.
           */}
           <div className="home__features">
             <Feature
+              variant="lead"
               mark="1"
-              title="조건에 맞는 자리를 먼저 확인"
-              description="날짜·시간·인원을 넣으면 예약 가능한 매장만 골라 볼 수 있습니다."
-            />
+              title="메뉴를 미리 선택하고 도착 즉시 즐기세요"
+              description="예약과 동시에 대표 메뉴를 골라 두면, 매장이 도착 시간에 맞춰 준비합니다. 자리에 앉아 메뉴를 고르고 기다리는 시간이 사라집니다."
+            >
+              <FeatureFan />
+            </Feature>
+
             <Feature
               mark="2"
-              title="메뉴를 미리 선택하고 방문"
-              description="예약과 동시에 대표 메뉴를 골라 두면 도착 시간에 맞춰 준비합니다."
+              title="조건에 맞는 자리를 먼저 확인"
+              description="날짜·시간·인원을 넣으면 그 조건으로 예약할 수 있는 매장만 골라 볼 수 있습니다."
             />
+
             <Feature
+              variant="contrast"
               mark="3"
               title="기다리지 않는 픽업 예약"
-              description="원하는 시간대를 골라 메뉴를 주문하고 찾아가기만 하면 됩니다."
+              description="원하는 픽업 시간대를 고르고 메뉴를 주문한 뒤, 그 시간에 맞춰 찾아가기만 하면 됩니다."
             />
           </div>
         </section>
@@ -151,22 +161,53 @@ function CategoryTile({
 }
 
 function Feature({
+  variant,
   mark,
   title,
   description,
+  children,
 }: {
+  variant?: 'lead' | 'contrast'
   mark: string
   title: string
   description: string
+  children?: ReactNode
 }) {
+  const className = [
+    'home__feature',
+    variant ? `home__feature--${variant}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <article className="home__feature">
+    <article className={className}>
       {/* span으로 둔다. p로 두면 아래 본문 문단 규칙이 색·크기를 덮어쓴다. */}
       <span className="home__feature-mark" aria-hidden="true">
         {mark}
       </span>
       <h3>{title}</h3>
       <p>{description}</p>
+      {children}
     </article>
+  )
+}
+
+/**
+ * 큰 카드의 장식.
+ *
+ * 이미 번들에 있는 카테고리 일러스트를 겹쳐 둔다. 없는 매장·메뉴를 지어내지
+ * 않으면서 시안의 밀도를 만든다. 순수 장식이라 보조기술에서 숨긴다.
+ */
+function FeatureFan() {
+  return (
+    <div className="home__feature-fan" aria-hidden="true">
+      {['KOREAN', 'WESTERN', 'JAPANESE'].map((code) => {
+        const art = categoryArt(code)
+        return art === null ? null : (
+          <img key={code} src={art} alt="" width={320} height={320} loading="lazy" />
+        )
+      })}
+    </div>
   )
 }

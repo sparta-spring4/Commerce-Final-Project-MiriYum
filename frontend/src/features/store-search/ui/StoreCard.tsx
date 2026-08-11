@@ -1,5 +1,7 @@
+import type { CSSProperties } from 'react'
 import { Link } from 'react-router'
 import { Badge } from '../../../shared/ui/Badge'
+import { categoryArt, categoryTint } from '../model/categoryArt'
 import {
   AVAILABILITY_DESCRIPTION,
   AVAILABILITY_LABEL,
@@ -21,15 +23,34 @@ interface Props {
 /**
  * 검색 결과 항목.
  *
- * 1차 MVP 계약에 이미지·평점·리뷰 수 필드가 없다. 시안의 사진·별점 자리는
- * 만들지 않고 계약이 주는 값만 표시한다.
+ * 시안의 media 자리에는 카테고리 일러스트를 쓴다. 1차 MVP 계약에 매장 이미지
+ * 필드가 없어 매장 사진은 쓸 수 없고, 대신 이미 번들에 있는 카테고리 일러스트를
+ * 둔다. 평면 일러스트라 실제 매장 사진으로 오인될 여지가 적고, 어떤 카테고리인지
+ * 아래 메타 줄이 문구로 함께 알린다.
  */
 export function StoreCard({ store, categoryNames, detailSearch }: Props) {
   const availability = store.reservationAvailability
+  const art = categoryArt(store.storeCategoryCode)
+  const tint = categoryTint(store.storeCategoryCode)
 
   return (
     <li className="mi-card mi-card--interactive store-card">
-      <div className="mi-card__body">
+      <div
+        className="store-card__media"
+        style={{ '--tile-from': tint.from, '--tile-to': tint.to } as CSSProperties}
+      >
+        {art !== null && (
+          <img
+            className="store-card__art"
+            src={art}
+            // 매장 사진이 아니라 카테고리 장식이다. 카테고리명은 본문에 있다.
+            alt=""
+            width={320}
+            height={320}
+            loading="lazy"
+            decoding="async"
+          />
+        )}
         <div className="store-card__badges">
           <Badge tone={OPERATION_STATUS_TONE[store.operationStatus]}>
             {OPERATION_STATUS_LABEL[store.operationStatus]}
@@ -38,7 +59,9 @@ export function StoreCard({ store, categoryNames, detailSearch }: Props) {
             {AVAILABILITY_LABEL[availability]}
           </Badge>
         </div>
+      </div>
 
+      <div className="mi-card__body">
         <h3 className="store-card__name">
           <Link to={{ pathname: `/stores/${store.storeId}`, search: detailSearch }}>
             {store.name}

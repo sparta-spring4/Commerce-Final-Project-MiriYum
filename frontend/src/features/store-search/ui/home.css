@@ -254,40 +254,66 @@
   text-align: center;
 }
 
-/* ── 특징 섹션 ────────────────────────────────────────────────────────── */
+/* ── 특징 섹션 (bento) ────────────────────────────────────────────────── */
 
+/*
+ * 시안은 왼쪽 큰 카드 하나에 오른쪽 작은 카드 둘을 쌓은 bento다.
+ * 좁은 화면에서는 한 줄로 떨어진다.
+ */
 .home__features {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-2);
 }
 
-@media (min-width: 48rem) {
+@media (min-width: 56rem) {
   .home__features {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1.35fr 1fr;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .home__feature--lead {
+    grid-row: span 2;
   }
 }
 
 .home__feature {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  overflow: hidden;
   padding: var(--space-3);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background-color: var(--color-surface-container-lowest);
   border: 1px solid var(--color-surface-container-highest);
   box-shadow: var(--shadow-1);
 }
 
+/* 큰 카드. 코럴 계열 그라디언트로 시선을 먼저 받는다. */
+.home__feature--lead {
+  justify-content: flex-start;
+  padding: var(--space-4);
+  background:
+    radial-gradient(
+      120% 90% at 100% 0%,
+      rgba(255, 180, 162, 0.5) 0%,
+      rgba(255, 222, 168, 0.28) 45%,
+      transparent 75%
+    ),
+    var(--color-surface-container-low);
+  border-color: var(--color-primary-fixed);
+}
+
 .home__feature-mark {
   display: grid;
   place-items: center;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: var(--radius-md);
   background-color: var(--color-primary);
   color: var(--color-on-primary);
-  font-size: var(--font-size-body-lg);
+  font-size: var(--font-size-body-md);
   font-weight: 800;
 }
 
@@ -298,9 +324,82 @@
   word-break: keep-all;
 }
 
+.home__feature.home__feature--lead h3 {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  letter-spacing: -0.01em;
+}
+
 .home__feature p {
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-label-md);
   line-height: 1.6;
   word-break: keep-all;
+}
+
+.home__feature.home__feature--lead p {
+  max-width: 24rem;
+  font-size: var(--font-size-body-md);
+}
+
+/*
+ * 대비를 주는 어두운 카드. 시안의 charcoal 카드 자리다.
+ *
+ * 변형 규칙은 반드시 기본 `.home__feature p` 뒤에 둔다. 명시도가 같아서
+ * 앞에 두면 기본 규칙이 이겨 본문이 어두운 배경에 어두운 글씨가 된다
+ * (실제로 대비 1.40:1까지 떨어졌다).
+ */
+.home__feature.home__feature--contrast {
+  background-color: var(--color-inverse-surface);
+  border-color: var(--color-inverse-surface);
+  color: var(--color-inverse-on-surface);
+}
+
+.home__feature.home__feature--contrast h3 {
+  color: var(--color-inverse-on-surface);
+}
+
+.home__feature.home__feature--contrast p {
+  color: #ddd7c2;
+}
+
+.home__feature.home__feature--contrast .home__feature-mark {
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+}
+
+/*
+ * 큰 카드의 장식. 카테고리 일러스트를 부채꼴로 겹쳐 둔다.
+ * 실제 자산이라 없는 데이터를 지어내지 않으면서 시안의 밀도를 만든다.
+ */
+.home__feature-fan {
+  display: flex;
+  margin-top: auto;
+  padding-top: var(--space-3);
+}
+
+.home__feature-fan img {
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-container-lowest);
+  box-shadow: var(--shadow-2);
+  object-fit: cover;
+}
+
+.home__feature-fan img:not(:first-child) {
+  margin-left: -1.75rem;
+}
+
+.home__feature-fan img:nth-child(1) {
+  transform: rotate(-7deg);
+}
+
+.home__feature-fan img:nth-child(2) {
+  transform: translateY(-0.5rem);
+  z-index: 1;
+}
+
+.home__feature-fan img:nth-child(3) {
+  transform: rotate(7deg);
 }
