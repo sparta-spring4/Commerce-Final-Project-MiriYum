@@ -19,6 +19,12 @@ declare global {
       position: KakaoLatLng
       title: string
     }) => KakaoMarkerInstance
+    CustomOverlay: new (options: {
+      position: KakaoLatLng
+      content: HTMLElement
+      yAnchor: number
+      zIndex: number
+    }) => KakaoCustomOverlayInstance
     event: {
       addListener: (
         target: KakaoMarkerInstance,
@@ -45,5 +51,10 @@ declare global {
     setPosition: (position: KakaoLatLng) => void
     setTitle: (title: string) => void
     setZIndex: (zIndex: number) => void
+  }
+
+  interface KakaoCustomOverlayInstance {
+    setMap: (map: KakaoMapInstance | null) => void
+    setPosition: (position: KakaoLatLng) => void
   }
 }
