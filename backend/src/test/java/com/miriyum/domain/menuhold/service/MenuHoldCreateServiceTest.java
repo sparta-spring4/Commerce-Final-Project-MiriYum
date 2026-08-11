@@ -11,8 +11,8 @@ import com.miriyum.domain.menuhold.inventory.dto.CurrentInventorySelection;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
@@ -30,7 +30,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 @ExtendWith(MockitoExtension.class)
 class MenuHoldCreateServiceTest {
 
-    @Mock StoreService storeService;
+    @Mock MenuTransactionService menuTransactionService;
     @Mock StoreServiceIntervalValidationService intervalService;
     @Mock MenuInventoryService inventoryService;
     @Mock MenuHoldRepository holdRepository;
@@ -38,7 +38,7 @@ class MenuHoldCreateServiceTest {
     @Test
     void createsConfirmedHoldAfterEligibilityIntervalAndInventorySucceed() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
@@ -64,7 +64,7 @@ class MenuHoldCreateServiceTest {
     @Test
     void rejectsMalformedServiceIntervalResultBeforeInventoryAcquisition() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
@@ -84,7 +84,7 @@ class MenuHoldCreateServiceTest {
     @Test
     void rejectsAcceptingServiceIntervalResultForDifferentRequest() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
@@ -111,7 +111,7 @@ class MenuHoldCreateServiceTest {
                 Instant.parse("2026-11-01T06:30:00Z"),
                 Instant.parse("2026-11-01T07:30:00Z"),
                 "operation-dst-overlap", List.of(new MenuSelection(40L, 1)));
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "America/New_York", command.serviceDate(), command.startTime(),
@@ -135,7 +135,7 @@ class MenuHoldCreateServiceTest {
     @Test
     void rejectsInventoryIntervalThatDoesNotMatchResolvedInstants() {
         MenuHoldCreateCommand command = command(List.of(new MenuSelection(40L, 2)));
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection mismatchedInventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul",
@@ -181,7 +181,7 @@ class MenuHoldCreateServiceTest {
     private CurrentInventorySelection prepareSuccessfulDependencies(
             MenuHoldCreateCommand command
     ) {
-        given(storeService.requireMenuTransactionEligibility(20L, 40L))
+        given(menuTransactionService.requireTransactionEligibility(20L, 40L))
                 .willReturn(eligibility());
         CurrentInventorySelection inventory = new CurrentInventorySelection(
                 40L, 50L, 3L, "Asia/Seoul", command.serviceDate(), command.startTime(),
@@ -200,7 +200,7 @@ class MenuHoldCreateServiceTest {
 
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
-                storeService, intervalService, inventoryService, holdRepository);
+                menuTransactionService, intervalService, inventoryService, holdRepository);
     }
 
     private static MenuTransactionEligibility eligibility() {

@@ -13,7 +13,7 @@
 - PR1 must not change HTTP methods, URLs, JSON, errors, authentication, transactions, database schema, Flyway, or OpenAPI.
 - Store must not import Menu after this remediation.
 - Store locking must occur before Menu locking.
-- PR1 may allow only `consumer <-> reservation` and `menuhold <-> reservation`; PR2 must reduce the allowed set to empty.
+- PR1 may cut only the legacy `consumer -> reservation` and `reservation -> menuhold` edges before checking the remaining graph for cycles; PR2 must reduce the cut set to empty.
 - Do not introduce the `MenuTransactionFacade` production class in PR1.
 
 ---
@@ -30,9 +30,9 @@
 - [ ] **Step 1: Add failing assertions for uncovered persistence types, non-empty targets, and cycle baseline**
 
 ```java
-private static final Set<DomainPair> ALLOWED_CYCLES = Set.of(
-        new DomainPair("consumer", "reservation"),
-        new DomainPair("menuhold", "reservation"));
+private static final Set<DependencyEdge> LEGACY_CYCLE_BREAK_EDGES = Set.of(
+        new DependencyEdge("consumer", "reservation"),
+        new DependencyEdge("reservation", "menuhold"));
 
 @Test
 void persistentTypesAreDetectedFromDeclarations() {
@@ -45,8 +45,9 @@ void persistentTypesAreDetectedFromDeclarations() {
 
 @Test
 void domainsDoNotAddDependencyCycles() {
-    assertThat(cyclicDomainPairs(domainDependencies(javaSources())))
-            .containsExactlyInAnyOrderElementsOf(ALLOWED_CYCLES);
+    Map<String, Set<String>> dependencies = domainDependencies(javaSources());
+    assertThat(cyclicDomainPairs(withoutLegacyCycleBreakEdges(dependencies)))
+            .isEmpty();
 }
 ```
 
@@ -75,7 +76,7 @@ private boolean isPersistentType() {
 }
 ```
 
-Build the dependency graph from every `com.miriyum.domain.*` import. For every canonical domain pair, add the pair when each domain is transitively reachable from the other. Compare the exact result with `ALLOWED_CYCLES`.
+Build the dependency graph from every `com.miriyum.domain.*` import. Assert that both legacy break edges still exist, remove only those edges, and reject every remaining transitive cycle. This catches long cycles without treating the existing three-domain strongly connected component as an extra direct baseline.
 
 - [ ] **Step 4: Run the architecture test and confirm the only remaining RED is `store <-> menu`**
 

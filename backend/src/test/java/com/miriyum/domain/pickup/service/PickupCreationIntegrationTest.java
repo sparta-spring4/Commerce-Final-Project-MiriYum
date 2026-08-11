@@ -20,7 +20,7 @@ import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
-import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
@@ -99,7 +99,7 @@ class PickupCreationIntegrationTest {
     @Autowired TransactionTemplate transactionTemplate;
     @Autowired JdbcTemplate jdbcTemplate;
     @MockitoBean StoreTransactionEligibilityService storeEligibilityService;
-    @MockitoBean StoreService storeService;
+    @MockitoBean MenuTransactionService menuTransactionService;
     @MockitoBean StoreServiceIntervalValidationService intervalValidationService;
     @MockitoSpyBean PickupReservationRepository pickupReservationRepository;
 
@@ -287,7 +287,7 @@ class PickupCreationIntegrationTest {
         given(storeEligibilityService.requirePickupTransactionEligibility(STORE_ID))
                 .willReturn(new StorePickupTransactionEligibility(
                         STORE_ID, "픽업 매장", "Asia/Seoul"));
-        given(storeService.requireMenuTransactionEligibility(STORE_ID, MENU_ID))
+        given(menuTransactionService.requireTransactionEligibility(STORE_ID, MENU_ID))
                 .willReturn(new MenuTransactionEligibility(
                         STORE_ID, MENU_ID, 2, "바질 파스타", 12_000, true, true));
         given(intervalValidationService.validateServiceIntervals(any()))

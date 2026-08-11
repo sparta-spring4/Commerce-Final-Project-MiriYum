@@ -43,6 +43,7 @@ import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.model.MenuContent;
 import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -119,6 +120,9 @@ class MenuInventoryRuntimeIT {
 
     @MockitoSpyBean
     private StoreService storeService;
+
+    @MockitoSpyBean
+    private MenuTransactionService menuTransactionService;
 
     @MockitoSpyBean
     private MenuQueryService menuQueryService;
@@ -944,8 +948,8 @@ class MenuInventoryRuntimeIT {
                 .requireSchedulePublicationAuthority(operatorId, storeId);
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
-                .given(storeService)
-                .requireMenuTransactionEligibility(storeId, menuId);
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, menuId);
     }
 
     private InventoryBucketCreateCommand createCommand(int totalSupply) {

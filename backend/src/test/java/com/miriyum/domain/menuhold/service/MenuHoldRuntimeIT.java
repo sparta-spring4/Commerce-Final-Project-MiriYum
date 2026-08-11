@@ -33,7 +33,6 @@ import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.repository.StoreRepository;
-import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
 import com.miriyum.domain.menu.entity.Menu;
 import com.miriyum.domain.menu.model.AllergenDisclosure;
@@ -42,6 +41,7 @@ import com.miriyum.domain.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.model.MenuContent;
 import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
@@ -119,7 +119,7 @@ class MenuHoldRuntimeIT {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TransactionTemplate transactions;
     @Autowired EntityManagerFactory entityManagerFactory;
-    @MockitoSpyBean StoreService storeService;
+    @MockitoSpyBean MenuTransactionService menuTransactionService;
     @MockitoSpyBean StoreServiceIntervalValidationService intervalService;
     @MockitoSpyBean MenuInventoryService inventoryService;
 
@@ -146,7 +146,8 @@ class MenuHoldRuntimeIT {
         });
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
-                .given(storeService).requireMenuTransactionEligibility(storeId, menuId);
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, menuId);
         willAnswer(invocation -> invocation.<List<com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest>>getArgument(0)
                 .stream().map(request -> new StoreServiceIntervalResult(
                         request.storeId(), request.startAt(), request.serviceEndAt(),
@@ -218,7 +219,8 @@ class MenuHoldRuntimeIT {
                         Instant.parse("2026-08-01T00:00:00Z"))).getId());
         willReturn(new MenuTransactionEligibility(
                 storeId, secondMenuId, 1, "Cafe Latte", 6_500, true, false))
-                .given(storeService).requireMenuTransactionEligibility(storeId, secondMenuId);
+                .given(menuTransactionService)
+                .requireTransactionEligibility(storeId, secondMenuId);
         transactions.executeWithoutResult(status -> {
             bucketRepository.saveAndFlush(bucket(menuId, 2));
             bucketRepository.saveAndFlush(bucket(secondMenuId, 1));

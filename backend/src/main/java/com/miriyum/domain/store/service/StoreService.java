@@ -10,8 +10,6 @@ import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.VerificationStatus;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
-import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
-import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAccountService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -51,7 +49,6 @@ public class StoreService {
 
     private final StoreOperatorAccountService operatorAccountService;
     private final StoreRepository storeRepository;
-    private final MenuTransactionService menuTransactionService;
     private final StoreCatalogPolicy catalogPolicy;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -204,22 +201,6 @@ public class StoreService {
         Store store = loadManagedStoreForUpdate(operatorAccountId, storeId);
         requireScheduleState(store);
         return new StoreMenuAuthority(store.getId());
-    }
-
-    /**
-     * 신규 메뉴 홀드·픽업 거래를 위해 Store와 Menu를 잠금 순서대로 검증한다.
-     *
-     * @param storeId 대상 매장 식별자
-     * @param menuId 대상 메뉴 식별자
-     * @return 현재 게시 버전과 최종 거래 기능 판정
-     * @throws ServiceException 매장·메뉴가 없거나 신규 거래를 받을 수 없는 경우
-     */
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
-    public MenuTransactionEligibility requireMenuTransactionEligibility(
-            long storeId,
-            long menuId
-    ) {
-        return menuTransactionService.requireTransactionEligibility(storeId, menuId);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
