@@ -1,5 +1,12 @@
 import '@testing-library/jest-dom/vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { MapStore } from './map.types'
@@ -38,6 +45,21 @@ vi.mock('./StoreMapMarker', () => ({
 
 import { KakaoMap } from './KakaoMap'
 
+class FakeResizeObserver {
+  static instances: FakeResizeObserver[] = []
+
+  readonly observe = vi.fn()
+  readonly disconnect = vi.fn()
+
+  constructor(readonly callback: ResizeObserverCallback) {
+    FakeResizeObserver.instances.push(this)
+  }
+
+  trigger() {
+    this.callback([], this as unknown as ResizeObserver)
+  }
+}
+
 const stores: MapStore[] = [
   {
     storeId: 'store-1',
@@ -73,18 +95,22 @@ function createMaps() {
     Map,
     LatLng,
     setCenter,
+    relayout,
   }
 }
 
 describe('KakaoMap', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_KAKAO_MAP_APP_KEY', 'test-key')
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    FakeResizeObserver.instances = []
     vi.clearAllMocks()
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
   })
 
   it('loads the SDK and creates markers only for stores with valid coordinates', async () => {
@@ -187,6 +213,54 @@ describe('KakaoMap', () => {
     expect(mocks.markerDestroy).toHaveBeenCalledTimes(2)
   })
 
+  it('relayouts after its container size changes and disconnects the observer', async () => {
+    const { maps, relayout } = createMaps()
+    mocks.load.mockResolvedValue(maps)
+    const { unmount } = render(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(FakeResizeObserver.instances).toHaveLength(1))
+    const observer = FakeResizeObserver.instances[0]
+    const mapContainer = screen.getByLabelText('검색 결과 지도')
+    expect(observer?.observe).toHaveBeenCalledWith(mapContainer)
+    relayout.mockClear()
+
+    act(() => observer?.trigger())
+
+    expect(relayout).toHaveBeenCalledOnce()
+    unmount()
+    expect(observer?.disconnect).toHaveBeenCalledOnce()
+  })
+
+  it('disconnects the resize observer when the map changes to a fallback', async () => {
+    const { maps } = createMaps()
+    mocks.load.mockResolvedValue(maps)
+    const { rerender } = render(
+      <KakaoMap
+        stores={stores}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(FakeResizeObserver.instances).toHaveLength(1))
+    const observer = FakeResizeObserver.instances[0]
+
+    rerender(
+      <KakaoMap
+        stores={[]}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('검색 결과가 없습니다.')).toBeVisible()
+    expect(observer?.disconnect).toHaveBeenCalledOnce()
+  })
+
   it('reattaches markers to a new map after coordinates become valid again', async () => {
     const { maps, Map } = createMaps()
     mocks.load.mockResolvedValue(maps)
@@ -224,7 +298,10 @@ describe('KakaoMap', () => {
   })
 
   it('shows a list-preserving fallback when the SDK fails', async () => {
-    mocks.load.mockRejectedValue(new Error('SDK failure'))
+    const { maps, Map } = createMaps()
+    mocks.load
+      .mockRejectedValueOnce(new Error('SDK failure'))
+      .mockResolvedValueOnce(maps)
 
     render(
       <KakaoMap
@@ -240,6 +317,11 @@ describe('KakaoMap', () => {
     expect(
       screen.getByText('매장 목록에서 계속 확인할 수 있습니다.'),
     ).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: '지도 다시 시도' }))
+
+    await waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(2))
+    expect(Map).toHaveBeenCalledOnce()
   })
 
   it('does not load the SDK when no valid coordinates exist', async () => {
@@ -252,6 +334,26 @@ describe('KakaoMap', () => {
     )
 
     expect(screen.getByText('표시할 수 있는 매장 좌표가 없습니다.')).toBeVisible()
+    await act(async () => {})
+    expect(mocks.load).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes an empty search result from stores without coordinates', async () => {
+    render(
+      <KakaoMap
+        stores={[]}
+        selectedStoreId={null}
+        onSelectStore={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('검색 결과가 없습니다.')).toBeVisible()
+    expect(
+      screen.getByText('검색 조건을 변경해 다시 확인해 주세요.'),
+    ).toBeVisible()
+    expect(
+      screen.queryByText('표시할 수 있는 매장 좌표가 없습니다.'),
+    ).not.toBeInTheDocument()
     await act(async () => {})
     expect(mocks.load).not.toHaveBeenCalled()
   })

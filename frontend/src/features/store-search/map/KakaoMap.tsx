@@ -24,6 +24,7 @@ export function KakaoMap({
   const onSelectStoreRef = useRef(onSelectStore)
   const [runtime, setRuntime] = useState<MapRuntime | null>(null)
   const [loadError, setLoadError] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const validStores = useMemo(
     () => stores.filter(hasValidCoordinates),
     [stores],
@@ -82,7 +83,7 @@ export function KakaoMap({
       }
       markersRef.current.clear()
     }
-  }, [appKey, hasValidStores])
+  }, [appKey, hasValidStores, loadAttempt])
 
   useEffect(() => {
     if (runtime === null || runtime.container !== containerRef.current) {
@@ -132,12 +133,46 @@ export function KakaoMap({
     runtime.map.relayout()
   }, [runtime, selectedStoreId, validStores])
 
+  useEffect(() => {
+    if (
+      runtime === null ||
+      runtime.container !== containerRef.current ||
+      !hasValidStores ||
+      typeof ResizeObserver === 'undefined'
+    ) {
+      return
+    }
+
+    const observer = new ResizeObserver(() => runtime.map.relayout())
+    observer.observe(runtime.container)
+
+    return () => observer.disconnect()
+  }, [hasValidStores, runtime])
+
+  if (stores.length === 0) {
+    return (
+      <MapFallback
+        reason="검색 결과가 없습니다."
+        guidance="검색 조건을 변경해 다시 확인해 주세요."
+      />
+    )
+  }
+
   if (!hasValidStores) {
     return <MapFallback reason="표시할 수 있는 매장 좌표가 없습니다." />
   }
 
   if (loadError) {
-    return <MapFallback reason="지도를 불러오지 못했습니다." />
+    return (
+      <MapFallback
+        reason="지도를 불러오지 못했습니다."
+        onRetry={() => {
+          setLoadError(false)
+          setRuntime(null)
+          setLoadAttempt((attempt) => attempt + 1)
+        }}
+      />
+    )
   }
 
   const selectedStore = validStores.find(
