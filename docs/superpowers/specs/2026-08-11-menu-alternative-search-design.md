@@ -1,8 +1,8 @@
 # Menu Alternative Search Design
 
-**Issue:** #114  
-**Stage:** 2차 MVP  
-**Target branch:** `mvp2`  
+**Issue:** #114
+**Stage:** 2차 MVP
+**Target branch:** `mvp2`
 **Status:** 사용자 승인 완료
 
 ## Outcome

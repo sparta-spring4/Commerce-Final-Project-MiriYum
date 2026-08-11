@@ -69,9 +69,12 @@ public class MenuAlternativeSearchService {
                 sourceView.secondaryCategoryCodes());
         List<EligibleAlternative> same = eligible(source,
                 candidateQuery.findSameStoreCandidates(sourceView), command.excludedAllergenCodes());
-        List<ResolvedAlternativeItem> sameItems = inStock(same, sourceWindow, command.quantity())
-                .stream().sorted(itemComparator(MenuAlternativeOrdering.sameStoreComparator()))
-                .limit(command.size()).toList();
+        List<ResolvedAlternativeItem> sameItems = same.isEmpty()
+                || !availableStores(List.of(storeId), command).contains(storeId)
+                ? List.of()
+                : inStock(same, sourceWindow, command.quantity()).stream()
+                        .sorted(itemComparator(MenuAlternativeOrdering.sameStoreComparator()))
+                        .limit(command.size()).toList();
         if (!sameItems.isEmpty()) {
             return result(sourceView, command, sourceWindow, MenuAlternativeMode.SAME_STORE, sameItems);
         }

@@ -1,6 +1,7 @@
 package com.miriyum.domain.alternative.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -18,6 +19,8 @@ import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeCandidateView;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeSourceView;
 import com.miriyum.domain.search.service.MenuAlternativeCandidateQueryService;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -50,6 +53,8 @@ class MenuAlternativeSearchServiceTest {
         given(reservationService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, ReservationAvailabilityStatus.AVAILABLE)));
         given(inventoryService.findExistingOnlineAvailability(any())).willReturn(List.of(
                 new MenuInventoryAvailability(11L, 1L, "Asia/Seoul",
                         LocalDate.of(2026, 8, 15), LocalTime.of(18, 30),
@@ -61,6 +66,39 @@ class MenuAlternativeSearchServiceTest {
         assertThat(result.mode()).isEqualTo(MenuAlternativeMode.SAME_STORE);
         assertThat(result.items()).extracting(item -> item.menuId()).containsExactly(11L);
         then(candidateQuery).should(never()).findNearbyCandidates(any(), any());
+    }
+
+    @Test
+    void skipsSameStoreInventoryWhenPartyAvailabilityIsUnavailable() {
+        var source = source(null, null);
+        given(candidateQuery.findSource(1L, 10L)).willReturn(source);
+        given(reservationService.resolveReservationTimes(any(), any()))
+                .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
+        given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, ReservationAvailabilityStatus.UNAVAILABLE)));
+
+        var result = service.search(1L, 10L, command());
+
+        assertThat(result.mode()).isEqualTo(MenuAlternativeMode.REGION_SELECTION_REQUIRED);
+        assertThat(result.items()).isEmpty();
+        then(inventoryService).should(never()).findExistingOnlineAvailability(any());
+    }
+
+    @Test
+    void rejectsMismatchedSameStoreAvailabilityResponse() {
+        var source = source(null, null);
+        given(candidateQuery.findSource(1L, 10L)).willReturn(source);
+        given(reservationService.resolveReservationTimes(any(), any()))
+                .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
+        given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(2L, ReservationAvailabilityStatus.AVAILABLE)));
+
+        assertThatThrownBy(() -> service.search(1L, 10L, command()))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
     }
 
     @Test

@@ -14,6 +14,8 @@ class StoreSearchOpenApiContractTest {
 
     private static final String TOO_MANY_REQUESTS_RESPONSE =
             "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests";
+    private static final String RESERVATION_CONFLICT_RESPONSE =
+            "../reservation/openapi.yaml#/components/responses/ReservationConflict";
 
     @Test
     void publicRoutesParametersAndResponseFieldsMatchRuntimeContract() throws Exception {
@@ -35,6 +37,8 @@ class StoreSearchOpenApiContractTest {
         assertThat(map(map(map(alternativePost.get("requestBody")).get("content"))
                 .get("application/json"))).containsEntry("schema",
                 Map.of("$ref", "#/components/schemas/MenuAlternativeSearchRequest"));
+        assertThat((String) map(map(alternativePost.get("responses")).get("409")).get("$ref"))
+                .isEqualTo(RESERVATION_CONFLICT_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}", "429"))

@@ -15,7 +15,9 @@ import com.miriyum.domain.alternative.service.MenuAlternativeSearchService;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.ratelimit.RateLimitCategory;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.search.config.StoreSearchSecurityConfig;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.exception.GlobalExceptionHandler;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -74,5 +76,20 @@ class MenuAlternativeSearchControllerTest {
                                 """))
                 .andExpect(status().isBadRequest());
         then(service).should(never()).search(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void preservesReservationConflictWhenSourceTimeIsOutsideWindow() throws Exception {
+        given(service.search(anyLong(), anyLong(), any())).willThrow(
+                new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternatives/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"quantity":2,"serviceDate":"2026-08-15","startTime":"18:30",
+                                 "partySize":2}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESERVATION_002"));
     }
 }

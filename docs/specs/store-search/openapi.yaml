@@ -215,7 +215,7 @@ paths:
         "404":
           $ref: "#/components/responses/MenuNotFound"
         "409":
-          $ref: "#/components/responses/MenuStateConflict"
+          $ref: "../reservation/openapi.yaml#/components/responses/ReservationConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
         "503":
