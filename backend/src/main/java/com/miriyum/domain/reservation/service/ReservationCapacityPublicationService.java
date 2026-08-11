@@ -284,7 +284,7 @@ public class ReservationCapacityPublicationService {
             List<CapacityBucketRequest> buckets
     ) {
         StringBuilder canonical = new StringBuilder(
-                "PUT|/api/v1/store-operator/stores/{storeId}"
+                "PUT|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-capacities/{serviceDate}|"
         );
         append(canonical, "storeId", Long.toString(storeId));

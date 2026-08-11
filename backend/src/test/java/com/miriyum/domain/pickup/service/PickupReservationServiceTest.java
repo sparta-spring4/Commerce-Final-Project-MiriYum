@@ -34,9 +34,11 @@ import com.miriyum.domain.menu.service.MenuTransactionService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -255,6 +257,12 @@ class PickupReservationServiceTest {
             assertThat(item.getServiceDate()).isEqualTo(PICKUP_DATE);
             assertThat(item.getEndTime()).isEqualTo(LocalTime.of(14, 0));
         });
+        ArgumentCaptor<IdempotencyCommand> command =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should().execute(command.capture(), any());
+        assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
+                "POST|/api/v1/consumers/pickup-reservations|"
+                        + "22|2026-08-10|12:00|33:2"));
     }
 
     @Test
@@ -496,6 +504,12 @@ class PickupReservationServiceTest {
         then(inventoryService).should().restore(restore.capture());
         assertThat(restore.getValue().sourceAcquireOperationId())
                 .isEqualTo("pickup-acquire-result");
+        ArgumentCaptor<IdempotencyCommand> command =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should().execute(command.capture(), any());
+        assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
+                "POST|/api/v1/consumers/pickup-reservations/77/cancellations|"
+                        + "일정 변경"));
         assertThat(restore.getValue().operationId())
                 .isEqualTo("pickup-cancel-11-" + KEY.value());
     }

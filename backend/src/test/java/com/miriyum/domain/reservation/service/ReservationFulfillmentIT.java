@@ -683,7 +683,7 @@ class ReservationFulfillmentIT {
         appendCanonical(
                 canonical,
                 "route",
-                "/api/v1/store-operator/stores/{storeId}/reservations/"
+                "/api/v1/store-operators/stores/{storeId}/reservations/"
                         + "{reservationId}/fulfillments");
         appendCanonical(canonical, "storeId", String.valueOf(storeId));
         appendCanonical(canonical, "reservationId", String.valueOf(reservationId));

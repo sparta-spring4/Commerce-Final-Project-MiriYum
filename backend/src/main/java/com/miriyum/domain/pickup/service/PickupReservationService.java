@@ -158,7 +158,7 @@ public class PickupReservationService {
         String reason = normalizeOptionalReason(request.reason());
         IdempotencyCommand command = new IdempotencyCommand(
                 "consumer", consumerAccountId, "PICKUP_CANCEL", key.value(),
-                RequestFingerprint.of("POST|/api/v1/pickup-reservations/"
+                RequestFingerprint.of("POST|/api/v1/consumers/pickup-reservations/"
                         + pickupReservationId + "/cancellations|"
                         + (reason == null ? "" : reason)));
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
@@ -392,7 +392,7 @@ public class PickupReservationService {
         String menuPart = selections.stream()
                 .map(item -> item.menuId() + ":" + item.quantity())
                 .collect(Collectors.joining(","));
-        return RequestFingerprint.of("POST|/api/v1/pickup-reservations|"
+        return RequestFingerprint.of("POST|/api/v1/consumers/pickup-reservations|"
                 + storeId + "|" + request.pickupDate() + "|"
                 + request.pickupTime() + "|" + menuPart);
     }
