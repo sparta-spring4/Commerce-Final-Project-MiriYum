@@ -105,7 +105,7 @@ export function HomePage() {
             />
 
             <Feature
-              variant="contrast"
+              variant="accent"
               mark="3"
               title="기다리지 않는 픽업 예약"
               description="원하는 픽업 시간대를 고르고 메뉴를 주문한 뒤, 그 시간에 맞춰 찾아가기만 하면 됩니다."
@@ -167,7 +167,7 @@ function Feature({
   description,
   children,
 }: {
-  variant?: 'lead' | 'contrast'
+  variant?: 'lead' | 'accent'
   mark: string
   title: string
   description: string

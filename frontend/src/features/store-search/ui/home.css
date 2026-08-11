@@ -343,29 +343,40 @@
 }
 
 /*
- * 대비를 주는 어두운 카드. 시안의 charcoal 카드 자리다.
+ * 세 번째 카드. 머스터드 계열로 코럴(1번)·흰색(2번)과 구분한다.
  *
- * 변형 규칙은 반드시 기본 `.home__feature p` 뒤에 둔다. 명시도가 같아서
- * 앞에 두면 기본 규칙이 이겨 본문이 어두운 배경에 어두운 글씨가 된다
- * (실제로 대비 1.40:1까지 떨어졌다).
+ * 시안은 이 자리에 charcoal 카드를 뒀지만, 시안 화면은 사진이 빽빽한
+ * 구성이라 검은 면이 균형을 잡아 준다. 사진 없는 크림 배경에 카드 셋만
+ * 놓이면 검은 블록이 혼자 튄다. 팔레트의 Flavor Trinity(코럴·머스터드·크림)
+ * 안에서 대비를 만든다.
+ *
+ * 변형 규칙은 명시도를 이중 클래스로 올려 둔다. 기본 `.home__feature p`와
+ * 명시도가 같으면 번들 순서가 승자를 정하고, 실제로 본문 대비가 1.40:1까지
+ * 떨어진 적이 있다.
  */
-.home__feature.home__feature--contrast {
-  background-color: var(--color-inverse-surface);
-  border-color: var(--color-inverse-surface);
-  color: var(--color-inverse-on-surface);
+.home__feature.home__feature--accent {
+  background:
+    radial-gradient(
+      120% 90% at 0% 100%,
+      rgba(254, 183, 0, 0.34) 0%,
+      rgba(255, 222, 168, 0.5) 45%,
+      transparent 78%
+    ),
+    var(--color-secondary-fixed);
+  border-color: var(--color-secondary-fixed-dim);
 }
 
-.home__feature.home__feature--contrast h3 {
-  color: var(--color-inverse-on-surface);
+.home__feature.home__feature--accent h3 {
+  color: var(--color-on-secondary-fixed);
 }
 
-.home__feature.home__feature--contrast p {
-  color: #ddd7c2;
+.home__feature.home__feature--accent p {
+  color: var(--color-on-secondary-fixed-variant);
 }
 
-.home__feature.home__feature--contrast .home__feature-mark {
-  background-color: var(--color-secondary-container);
-  color: var(--color-on-secondary-container);
+.home__feature.home__feature--accent .home__feature-mark {
+  background-color: var(--color-secondary);
+  color: var(--color-on-secondary);
 }
 
 /*
