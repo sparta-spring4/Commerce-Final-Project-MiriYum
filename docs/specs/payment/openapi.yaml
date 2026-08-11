@@ -223,14 +223,14 @@ components:
         maxLength: 2048
   schemas:
     PaymentId:
-      type: string
-      pattern: "^[1-9][0-9]*$"
-      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 양수 숫자 문자열 참조. 클라이언트는 불투명 값으로 취급한다.
+      allOf:
+        - $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 결제 참조. 채번·소유 규칙은 Payment spec을 따른다.
       example: "900000000000000001"
     RefundId:
-      type: string
-      pattern: "^[1-9][0-9]*$"
-      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 환불 양수 숫자 문자열 참조. 클라이언트는 불투명 값으로 취급한다.
+      allOf:
+        - $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+      description: Payment가 내부 DB PK와 별도로 채번한 공개 전용 환불 참조. 채번·소유 규칙은 Payment spec을 따른다.
       example: "910000000000000001"
     PortOnePaymentId:
       type: string
@@ -375,7 +375,6 @@ components:
     PortOneIgnoredWebhookData:
       type: object
       additionalProperties: true
-      required: [storeId]
       properties:
         storeId:
           type: string

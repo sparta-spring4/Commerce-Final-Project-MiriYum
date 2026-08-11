@@ -131,7 +131,7 @@ ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + co
 
 확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.
 
-Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 필드 `type`, `timestamp`, `data.storeId`를 먼저 검증한다. 현재 처리 allowlist는 결제 상태용 `Transaction.Paid`, `Transaction.Failed`, `Transaction.PayPending`과 취소·환불 상태용 `Transaction.PartialCancelled`, `Transaction.Cancelled`, `Transaction.CancelPending`이다. 결제 type은 `data.paymentId`, `data.transactionId`를 필수로 요구하고 취소·환불 type은 `data.cancellationId`도 필수로 요구한다. 지원 type에서 필수 식별자가 누락되면 `COMMON_001` 400으로 거부하고 원장을 변경하지 않는다. 서명이 유효하지만 allowlist 밖의 알려진 또는 미래 type은 추가 필드를 허용한 채 거래를 변경하지 않고 200으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
+Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks 서명을 raw body 기준으로 검증한다. 공통 envelope의 `type`, `timestamp`, `data`를 먼저 검증한다. 현재 처리 allowlist는 결제 상태용 `Transaction.Paid`, `Transaction.Failed`, `Transaction.PayPending`과 취소·환불 상태용 `Transaction.PartialCancelled`, `Transaction.Cancelled`, `Transaction.CancelPending`이다. 지원 type은 `data.storeId`, `data.paymentId`, `data.transactionId`를 필수로 요구하고 취소·환불 type은 `data.cancellationId`도 필수로 요구한다. 지원 type에서 필수 식별자가 누락되면 `COMMON_001` 400으로 거부하고 원장을 변경하지 않는다. 서명이 유효하지만 allowlist 밖의 알려진 또는 미래 type은 `data.storeId`가 없더라도 추가 필드를 허용한 채 거래를 변경하지 않고 200으로 무시해 제공자의 무한 재시도를 막는다. 지원 type은 알려진 `portOnePaymentId`를 서버 API로 다시 조회해 같은 확정 경로를 호출한다. 서명 검증 실패 요청은 거래를 변경하지 않는다.
 
 ## 상태와 전이
 
