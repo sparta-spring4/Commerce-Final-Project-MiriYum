@@ -3,9 +3,11 @@ package com.miriyum.domain.alternative.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.alternative.model.MenuAlternativeMode;
 import com.miriyum.domain.alternative.model.MenuAlternativeSearchCommand;
@@ -144,6 +146,60 @@ class MenuAlternativeSearchServiceTest {
         assertThat(result.items().getFirst().distanceMeters()).isPositive();
     }
 
+    @Test
+    void batchesNearbyTimeResolutionAndInventoryForSharedServiceWindow() {
+        var source = source(new java.math.BigDecimal("37.500000"),
+                new java.math.BigDecimal("127.000000"));
+        given(candidateQuery.findSource(1L, 10L)).willReturn(source);
+        given(reservationService.resolveReservationTimes(any(), any()))
+                .willAnswer(invocation -> {
+                    List<Long> storeIds = invocation.getArgument(0);
+                    return storeIds.stream()
+                            .map(storeId -> ReservationTimeResolutionResult.resolved(
+                                    storeId, resolved(storeId)))
+                            .toList();
+                });
+        given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of());
+        given(candidateQuery.findNearbyCandidates(any(), any())).willReturn(List.of(
+                nearbyCandidate(2L, 21L, "37.501000"),
+                nearbyCandidate(3L, 31L, "37.502000")));
+        given(reservationService.getAvailabilities(any(), any()))
+                .willAnswer(invocation -> {
+                    List<Long> storeIds = invocation.getArgument(0);
+                    return storeIds.stream()
+                            .map(storeId -> new ReservationAvailabilityResult(
+                                    storeId, ReservationAvailabilityStatus.AVAILABLE))
+                            .toList();
+                });
+        given(inventoryService.findExistingOnlineAvailability(any()))
+                .willAnswer(invocation -> {
+                    com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery query =
+                            invocation.getArgument(0);
+                    return query.menuIds().stream()
+                            .map(menuId -> new MenuInventoryAvailability(
+                                    menuId, 1L, "Asia/Seoul",
+                                    LocalDate.of(2026, 8, 15), LocalTime.of(18, 30),
+                                    LocalDate.of(2026, 8, 15), LocalTime.of(20, 0), 3,
+                                    MenuInventoryAvailability.AvailabilityStatus.AVAILABLE))
+                            .toList();
+                });
+
+        var result = service.search(1L, 10L, command());
+
+        assertThat(result.items()).extracting(item -> item.menuId())
+                .containsExactlyInAnyOrder(21L, 31L);
+        then(reservationService).should(times(2))
+                .resolveReservationTimes(any(), any());
+        then(reservationService).should()
+                .resolveReservationTimes(eq(List.of(2L, 3L)), any());
+        then(inventoryService).should(times(1))
+                .findExistingOnlineAvailability(eq(
+                        new com.miriyum.domain.menuhold.dto.MenuInventoryAvailabilityQuery(
+                                List.of(21L, 31L),
+                                LocalDate.of(2026, 8, 15), LocalTime.of(18, 30),
+                                LocalDate.of(2026, 8, 15), LocalTime.of(20, 0))));
+    }
+
     private static MenuAlternativeSearchCommand command() {
         return new MenuAlternativeSearchCommand(2, LocalDate.of(2026, 8, 15),
                 LocalTime.of(18, 30), ZoneOffset.ofHours(9), 2, false, Set.of(), 10);
@@ -158,6 +214,13 @@ class MenuAlternativeSearchServiceTest {
     private static MenuAlternativeCandidateView candidate(long menuId) {
         return new MenuAlternativeCandidateView(1L, "원본", menuId, "대안", 10_000,
                 "MAIN", List.of("A"), "REGISTERED", List.of(), null, null);
+    }
+
+    private static MenuAlternativeCandidateView nearbyCandidate(long storeId, long menuId,
+            String latitude) {
+        return new MenuAlternativeCandidateView(storeId, "근처 " + storeId, menuId,
+                "대안 " + menuId, 10_000, "MAIN", List.of("A"), "REGISTERED", List.of(),
+                new java.math.BigDecimal(latitude), new java.math.BigDecimal("127.000000"));
     }
 
     private static ResolvedReservationTime resolved(long storeId) {

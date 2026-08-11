@@ -103,19 +103,18 @@ public class MenuAlternativeSearchService {
         List<Long> storeIds = nearbyEligible.stream().map(value -> value.candidate().storeId())
                 .distinct().sorted().toList();
         Set<Long> availableStores = availableStores(storeIds, command);
-        Map<Long, ResolvedWindow> windows = new LinkedHashMap<>();
-        for (long candidateStoreId : storeIds) {
-            if (availableStores.contains(candidateStoreId)) {
-                ResolvedWindow window = resolveWindow(candidateStoreId, command, false);
-                if (window != null) windows.put(candidateStoreId, window);
-            }
-        }
+        List<Long> availableStoreIds = storeIds.stream()
+                .filter(availableStores::contains)
+                .toList();
+        Map<Long, ResolvedWindow> windows = resolveWindows(
+                availableStoreIds, command, false);
         List<ResolvedAlternativeItem> nearbyItems = new ArrayList<>();
         nearbyEligible.stream().filter(value -> windows.containsKey(value.candidate().storeId()))
-                .collect(Collectors.groupingBy(value -> value.candidate().storeId(),
+                .collect(Collectors.groupingBy(
+                        value -> windows.get(value.candidate().storeId()),
                         LinkedHashMap::new, Collectors.toList()))
-                .forEach((candidateStoreId, values) -> nearbyItems.addAll(
-                        inStock(values, windows.get(candidateStoreId), command.quantity())));
+                .forEach((window, values) -> nearbyItems.addAll(
+                        inStock(values, window, command.quantity())));
         nearbyItems.sort(itemComparator(MenuAlternativeOrdering.nearbyStoreComparator()));
         List<ResolvedAlternativeItem> page = nearbyItems.stream().limit(command.size()).toList();
         return result(sourceView, command, sourceWindow, page.isEmpty()
@@ -203,17 +202,34 @@ public class MenuAlternativeSearchService {
 
     private ResolvedWindow resolveWindow(long storeId, MenuAlternativeSearchCommand command,
             boolean source) {
+        return resolveWindows(List.of(storeId), command, source).get(storeId);
+    }
+
+    private Map<Long, ResolvedWindow> resolveWindows(List<Long> storeIds,
+            MenuAlternativeSearchCommand command, boolean source) {
+        if (storeIds.isEmpty()) return Map.of();
         List<ReservationTimeResolutionResult> results = reservationService.resolveReservationTimes(
-                List.of(storeId), new ReservationTimeRequest(command.serviceDate(),
+                storeIds, new ReservationTimeRequest(command.serviceDate(),
                         command.startTime(), command.startOffset()));
-        if (results == null || results.size() != 1 || results.getFirst().storeId() != storeId) {
-            unavailable();
+        if (results == null || results.size() != storeIds.size()) unavailable();
+        Map<Long, ResolvedWindow> windows = new LinkedHashMap<>();
+        for (int index = 0; index < storeIds.size(); index++) {
+            long storeId = storeIds.get(index);
+            ReservationTimeResolutionResult result = results.get(index);
+            if (result == null || result.storeId() != storeId) unavailable();
+            if (result.status() != ReservationTimeResolutionStatus.RESOLVED) {
+                if (source) {
+                    throw new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
+                }
+                continue;
+            }
+            windows.put(storeId, resolvedWindow(storeId, result, command));
         }
-        var result = results.getFirst();
-        if (result.status() != ReservationTimeResolutionStatus.RESOLVED) {
-            if (source) throw new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
-            return null;
-        }
+        return Map.copyOf(windows);
+    }
+
+    private ResolvedWindow resolvedWindow(long storeId,
+            ReservationTimeResolutionResult result, MenuAlternativeSearchCommand command) {
         ResolvedReservationTime time = result.time();
         if (time == null || time.policyStoreId() != storeId
                 || !time.serviceDate().equals(command.serviceDate())) unavailable();
