@@ -121,7 +121,7 @@ Controller는 요청 형식과 공개 응답 envelope만 소유한다. 후보 �
 
 Search 공개 계약은 Recommendation 구현보다 먼저 별도 contract-first PR로 검토한다. Recommendation은 이 Service·DTO가 선행 stacked base에 포함된 뒤에만 구현한다.
 
-### Recommendation-owned MenuAlternativeEligibility
+### Alternative-owned MenuAlternativeEligibility
 
 외부 의존성 없는 결정적 정책 객체다. 다음을 판정한다.
 
@@ -133,7 +133,7 @@ Search 공개 계약은 Recommendation 구현보다 먼저 별도 contract-first
 
 제외 알레르기 조건이 하나라도 있으면 후보의 알레르기 정보가 `REGISTERED`여야 한다. 제외 코드가 `CONTAINS` 또는 `MAY_CONTAIN`이면 후보에서 제외한다. 정보 미등록 또는 위험을 배제할 수 없는 후보도 제외한다.
 
-### Recommendation-owned MenuAlternativeSearchService
+### Alternative-owned MenuAlternativeSearchService
 
 오케스트레이션 순서는 고정한다.
 

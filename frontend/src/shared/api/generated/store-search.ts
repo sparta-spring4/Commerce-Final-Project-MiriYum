@@ -20,6 +20,10 @@ export interface paths {
     /** 매장 공개 메뉴 조회 */
     get: operations["getStoreMenus"];
   };
+  "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search": {
+    /** 품절 메뉴 대안 검색 */
+    post: operations["searchMenuAlternatives"];
+  };
   "/api/v1/store-categories": {
     /** 매장 카테고리 조회 */
     get: operations["getStoreCategories"];
@@ -135,6 +139,58 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /** @enum {string} */
+    MenuAlternativeMode: "SAME_STORE" | "NEARBY_STORE" | "NO_ALTERNATIVE" | "REGION_SELECTION_REQUIRED";
+    /** @enum {string} */
+    AlternativeReasonCode: "SAME_PRIMARY_CATEGORY" | "PRICE_WITHIN_20_PERCENT" | "SECONDARY_CATEGORY_MATCH" | "ALLERGEN_FILTER_PASSED" | "IN_STOCK";
+    /** @enum {string} */
+    AllergenIngredientCode: "EGG" | "MILK" | "BUCKWHEAT" | "PEANUT" | "SOYBEAN" | "WHEAT" | "MACKEREL" | "CRAB" | "SHRIMP" | "PORK" | "PEACH" | "TOMATO" | "SULFITES" | "WALNUT" | "CHICKEN" | "BEEF" | "SQUID" | "SHELLFISH" | "PINE_NUT";
+    MenuAlternativeSearchRequest: {
+      quantity: number;
+      serviceDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
+      startTime: string;
+      startOffset?: string;
+      partySize: number;
+      /** @default false */
+      includesInfants?: boolean;
+      /** @default [] */
+      excludedAllergenCodes?: components["schemas"]["AllergenIngredientCode"][];
+      /** @default 10 */
+      size?: number;
+    };
+    MenuAlternativeCoordinates: {
+      latitude: number;
+      longitude: number;
+    };
+    MenuAlternativeItem: {
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeName: string;
+      menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      menuName: string;
+      unitPrice: number;
+      availableOnlineQuantity: number;
+      secondaryCategoryMatchCount: number;
+      distanceMeters: number | null;
+      coordinates: components["schemas"]["MenuAlternativeCoordinates"] | null;
+      reasonCodes: components["schemas"]["AlternativeReasonCode"][];
+    };
+    MenuAlternativeSearchData: {
+      sourceStoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      sourceMenuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      quantity: number;
+      /** Format: date-time */
+      startAt: string;
+      /** Format: date-time */
+      serviceEndAt: string;
+      timeZoneId: string;
+      mode: components["schemas"]["MenuAlternativeMode"];
+      items: components["schemas"]["MenuAlternativeItem"][];
+    };
+    MenuAlternativeSearchSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["MenuAlternativeSearchData"];
+    };
+    /** @enum {string} */
     Region: "SEOUL" | "BUSAN" | "DAEGU" | "DAEJEON" | "GWANGJU";
     CatalogCode: string;
     /** @enum {string} */
@@ -166,6 +222,57 @@ export interface components {
       modes: components["schemas"]["StoreModes"];
       reservationAvailability: components["schemas"]["ReservationAvailability"];
     };
+    PublicStoreCoordinates: {
+      latitude: number;
+      longitude: number;
+    };
+    InterpretationWarning: {
+      /** @enum {string} */
+      code: "AMBIGUOUS_DICTIONARY_TERM" | "AMBIGUOUS_PRICE" | "CONFLICTING_PRICE" | "INVALID_PARTY_SIZE" | "CONFLICTING_PARTY_SIZE" | "AMBIGUOUS_DATE" | "CONFLICTING_DATE" | "AMBIGUOUS_TIME" | "CONFLICTING_TIME" | "INCOMPLETE_RESERVATION_CONDITION" | "OUT_OF_RANGE_NUMBER";
+      /** @enum {string} */
+      field: "DICTIONARY" | "PRICE" | "PARTY_SIZE" | "DATE" | "TIME" | "RESERVATION";
+    };
+    NormalizedSearchCondition: {
+      regionCodes: components["schemas"]["Region"][];
+      storeCategoryCodes: components["schemas"]["CatalogCode"][];
+      menuCategoryCodes: components["schemas"]["CatalogCode"][];
+      tagCodes: components["schemas"]["CatalogCode"][];
+      /** Format: int64 */
+      minimumPrice: number | null;
+      /** Format: int64 */
+      maximumPrice: number | null;
+      partySize: number | null;
+      reservationDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"] | null;
+      reservationTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"] | null;
+      remainingKeyword: string;
+    };
+    IntegratedStoreSearchItem: {
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      name: string;
+      region: components["schemas"]["Region"];
+      address: string;
+      storeCategoryCode: components["schemas"]["CatalogCode"];
+      operationStatus: components["schemas"]["OperationStatus"];
+      modes: components["schemas"]["StoreModes"];
+      reservationAvailability: components["schemas"]["ReservationAvailability"];
+      coordinates: components["schemas"]["PublicStoreCoordinates"] | null;
+      recommendationReason: components["schemas"]["RecommendationReason"] | null;
+    };
+    RecommendationReason: {
+      /** @enum {string} */
+      code: "KEYWORD_MATCH" | "STORE_CATEGORY_MATCH" | "MENU_PRIMARY_CATEGORY_MATCH" | "MENU_SECONDARY_CATEGORY_MATCH" | "TAG_MATCH" | "AVAILABILITY_MATCH" | "VISITED_STORE" | "ORDERED_MENU";
+      message: string;
+    };
+    IntegratedStoreSearchData: {
+      items: components["schemas"]["IntegratedStoreSearchItem"][];
+      normalizedCondition: components["schemas"]["NormalizedSearchCondition"];
+      warnings: components["schemas"]["InterpretationWarning"][];
+      ruleVersion: string;
+      vocabularyVersion: string;
+      /** @description recommendation,desc일 때 history-v1, 다른 정렬에서는 null */
+      rankingRuleVersion: string | null;
+      nextCursor: string | null;
+    };
     StoreDetail: {
       storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       name: string;
@@ -192,6 +299,21 @@ export interface components {
       verificationStatus: components["schemas"]["VerificationStatus"];
       operationStatus: components["schemas"]["OperationStatus"];
       modes: components["schemas"]["StoreModes"];
+      geocoding: components["schemas"]["StoreGeocoding"];
+    };
+    /** @description 현재 매장 주소 버전의 좌표 검증 상태. 외부 제공자 메타데이터는 공개하지 않는다. */
+    StoreGeocoding: {
+      /** @enum {string} */
+      status: "UNVERIFIED" | "VERIFIED";
+      /** Format: double */
+      latitude: number | null;
+      /** Format: double */
+      longitude: number | null;
+      verifiedAddress: string | null;
+      /** Format: date-time */
+      verifiedAt: string | null;
+      /** Format: int64 */
+      addressVersion: number;
     };
     PublicMenu: {
       menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -445,6 +567,12 @@ export interface components {
       items: components["schemas"]["StoreSummary"][];
       page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
     };
+    StoreSearchSuccessResponse: components["schemas"]["StorePageSuccessResponse"] | components["schemas"]["IntegratedStoreSearchSuccessResponse"];
+    IntegratedStoreSearchSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["IntegratedStoreSearchData"];
+    };
     MenuListData: {
       items: components["schemas"]["PublicMenu"][];
     };
@@ -538,7 +666,7 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 현재 매장 상태 때문에 변경 불가 */
+    /** @description 현재 매장 상태 또는 주소 선행 검증 이후 동시 변경 때문에 수정 불가 */
     StoreStateConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
@@ -710,6 +838,8 @@ export interface operations {
   searchStores: {
     parameters: {
       query?: {
+        /** @description 2차 MVP 통합 검색 원문. 있으면 cursor 응답 모드를 사용하며 keyword, region, storeCategoryCode, serviceDate, startTime, partySize, page와 혼용할 수 없다. */
+        searchInput?: string;
         keyword?: string;
         region?: components["schemas"]["Region"];
         storeCategoryCode?: components["schemas"]["CatalogCode"];
@@ -722,18 +852,21 @@ export interface operations {
         availableOnly?: boolean;
         page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
         size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 통합 검색에서 서버가 발급하고 HMAC 인증한 조건·정렬·크기 결합 불투명 cursor. 변조되었거나 서버 비밀키 회전 전에 발급된 값은 COMMON_001로 거부한다. */
+        cursor?: string;
         /** @description 매장 목록 정렬. 아래 허용값 외에는 400을 반환한다. */
-        sort?: "name,asc" | "name,desc" | "createdAt,desc" | "createdAt,asc";
+        sort?: "name,asc" | "name,desc" | "createdAt,desc" | "createdAt,asc" | "relevance,desc" | "recommendation,desc";
       };
     };
     responses: {
       /** @description 매장 검색 결과 페이지. availableOnly=true일 때 totalElements는 고정 정렬의 공개 후보 최대 5,000개 안에서 AVAILABLE로 판정된 정확한 수다. */
       200: {
         content: {
-          "application/json": components["schemas"]["StorePageSuccessResponse"];
+          "application/json": components["schemas"]["StoreSearchSuccessResponse"];
         };
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };
@@ -779,6 +912,33 @@ export interface operations {
       };
       404: components["responses"]["StoreNotFound"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+    };
+  };
+  /** 품절 메뉴 대안 검색 */
+  searchMenuAlternatives: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        menuId: components["parameters"]["MenuId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MenuAlternativeSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description 같은 매장 우선 메뉴 대안 검색 결과 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MenuAlternativeSearchSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      404: components["responses"]["MenuNotFound"];
+      409: components["responses"]["MenuStateConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 카테고리 조회 */
@@ -892,6 +1052,7 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];
       409: components["responses"]["StoreStateConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 주간 영업시간 전체 초안 저장 */

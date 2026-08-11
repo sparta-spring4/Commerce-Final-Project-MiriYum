@@ -10,6 +10,13 @@
 
 ## Global Constraints
 
+> **Execution amendment (2026-08-11):** The synchronized architecture test proves that
+> Search already depends on Recommendation for history ranking. To avoid creating the reverse
+> Recommendation -> Search edge, the alternative orchestration/policy is implemented in the
+> independent top-level `alternative` domain. The Search contract and feature are delivered in
+> one feature PR stacked directly on the sync PR; the contract remains a separate commit-level
+> boundary inside that PR.
+
 - 대상 단계와 브랜치는 `2차 MVP`, `mvp2`다.
 - 구현 전에 최신 `dev`를 별도 sync 브랜치로 `mvp2`에 반영하고 PR #222 계약을 확인한다.
 - 다른 도메인의 Entity·Repository를 직접 참조하지 않고 Reservation·MenuHold 공개 Service·DTO만 사용한다.
@@ -191,13 +198,13 @@ The feature PR must target `codex/114-alternative-candidate-contract` until the 
 ### Task 3: Implement deterministic menu eligibility and ordering
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/AlternativeMenuSource.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/AlternativeMenuCandidate.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/AlternativeReasonCode.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeEligibility.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeOrdering.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeEligibilityTest.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeOrderingTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/AlternativeMenuSource.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/AlternativeMenuCandidate.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/AlternativeReasonCode.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/service/MenuAlternativeEligibility.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/service/MenuAlternativeOrdering.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeEligibilityTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeOrderingTest.java`
 
 **Interfaces:**
 - Consumes: Search contract DTO scalar allergen code, disclosure status, and registration status values from Task 2
@@ -252,8 +259,8 @@ Expected: PASS.
 - [ ] **Step 6: Commit the pure policy**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/recommendation/alternative `
-  backend/src/test/java/com/miriyum/domain/recommendation/alternative
+git add backend/src/main/java/com/miriyum/domain/alternative `
+  backend/src/test/java/com/miriyum/domain/alternative
 git commit -m "feat(store): 대안 메뉴 적격성과 정렬 규칙 추가"
 ```
 
@@ -313,11 +320,11 @@ git commit -m "docs(recommendation): 품절 대안 검색 계약 추가"
 ### Task 5: Implement same-store-first orchestration
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/MenuAlternativeMode.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/MenuAlternativeResult.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/model/ResolvedAlternativeItem.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchService.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchServiceTest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/MenuAlternativeMode.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/MenuAlternativeResult.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/model/ResolvedAlternativeItem.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchService.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchServiceTest.java`
 
 **Interfaces:**
 - Consumes:
@@ -362,8 +369,8 @@ Expected: same-store cases PASS; nearby cases are not added yet.
 - [ ] **Step 5: Commit the same-store vertical slice**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/recommendation/alternative `
-  backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchServiceTest.java
+git add backend/src/main/java/com/miriyum/domain/alternative `
+  backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchServiceTest.java
 git commit -m "feat(store): 같은 매장 메뉴 대안 조회 추가"
 ```
 
@@ -372,9 +379,9 @@ git commit -m "feat(store): 같은 매장 메뉴 대안 조회 추가"
 ### Task 6: Implement coordinate fallback and nearby-store revalidation
 
 **Files:**
-- Modify: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchService.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchServiceTest.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchServiceIT.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchService.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchServiceTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchServiceIT.java`
 
 **Interfaces:**
 - Consumes:
@@ -437,8 +444,8 @@ Expected: PASS.
 - [ ] **Step 8: Commit the nearby-store slice**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/recommendation/alternative/service/MenuAlternativeSearchService.java `
-  backend/src/test/java/com/miriyum/domain/recommendation/alternative/service
+git add backend/src/main/java/com/miriyum/domain/alternative/service/MenuAlternativeSearchService.java `
+  backend/src/test/java/com/miriyum/domain/alternative/service
 git commit -m "feat(store): 3km 인근 매장 대안 조회 추가"
 ```
 
@@ -447,12 +454,12 @@ git commit -m "feat(store): 3km 인근 매장 대안 조회 추가"
 ### Task 7: Expose the public POST endpoint and reuse security/rate limiting
 
 **Files:**
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/controller/publicapi/MenuAlternativeSearchController.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/dto/publicapi/MenuAlternativeSearchRequest.java`
-- Create: `backend/src/main/java/com/miriyum/domain/recommendation/alternative/dto/publicapi/MenuAlternativeSearchResponse.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/controller/publicapi/MenuAlternativeSearchController.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/dto/publicapi/MenuAlternativeSearchRequest.java`
+- Create: `backend/src/main/java/com/miriyum/domain/alternative/dto/publicapi/MenuAlternativeSearchResponse.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/search/config/StoreSearchSecurityConfig.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/search/config/StoreSearchRateLimitFilter.java`
-- Test: `backend/src/test/java/com/miriyum/domain/recommendation/alternative/controller/publicapi/MenuAlternativeSearchControllerTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/alternative/controller/publicapi/MenuAlternativeSearchControllerTest.java`
 - Modify test: `backend/src/test/java/com/miriyum/domain/search/config/StoreSearchSecurityConfigTest.java`
 - Modify test: `backend/src/test/java/com/miriyum/domain/search/config/StoreSearchRateLimitIT.java`
 
@@ -506,10 +513,10 @@ Expected: PASS.
 - [ ] **Step 7: Commit the HTTP slice**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/recommendation/alternative/controller `
-  backend/src/main/java/com/miriyum/domain/recommendation/alternative/dto `
+git add backend/src/main/java/com/miriyum/domain/alternative/controller `
+  backend/src/main/java/com/miriyum/domain/alternative/dto `
   backend/src/main/java/com/miriyum/domain/search/config `
-  backend/src/test/java/com/miriyum/domain/recommendation/alternative/controller `
+  backend/src/test/java/com/miriyum/domain/alternative/controller `
   backend/src/test/java/com/miriyum/domain/search/config
 git commit -m "feat(store): 공개 메뉴 대안 검색 API 추가"
 ```
@@ -568,9 +575,9 @@ Set-Location ..
 git diff --check
 git diff --name-only codex/114-alternative-candidate-contract...HEAD
 git grep -n "currentLocation\|geolocation\|navigator.geolocation" -- `
-  backend/src/main/java/com/miriyum/domain/recommendation/alternative
+  backend/src/main/java/com/miriyum/domain/alternative
 git grep -n "KakaoLocal\|KakaoMap\|OpenAI\|SpringAi" -- `
-  backend/src/main/java/com/miriyum/domain/recommendation/alternative
+  backend/src/main/java/com/miriyum/domain/alternative
 git status --short
 ```
 

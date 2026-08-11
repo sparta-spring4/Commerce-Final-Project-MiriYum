@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.menuhold.controller.dto.MenuHoldAvailabilityResponse;
 import com.miriyum.domain.menuhold.service.MenuHoldAvailabilityQueryService;
 import com.miriyum.domain.search.config.StoreSearchSecurityConfig;
@@ -31,6 +32,7 @@ class MenuHoldAvailabilityControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean MenuHoldAvailabilityQueryService queryService;
     @MockitoBean RateLimiter rateLimiter;
+    @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @BeforeEach
     void allowRateLimit() {
