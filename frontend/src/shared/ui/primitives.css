@@ -310,16 +310,24 @@
 
 /* ── Layout helpers ───────────────────────────────────────────────────── */
 
+/*
+ * 가로 여백만 담당한다.
+ *
+ * `padding: 0 X` 단축 속성을 쓰면 위·아래 padding도 0으로 덮어쓴다. 같은
+ * 요소에 붙은 화면 클래스가 세로 padding을 선언해도 명시도가 같아 번들 순서가
+ * 승자를 정하고, 실제로 히어로의 세로 여백이 전부 0이 돼 펼친 검색 패널이
+ * 섹션 끝에 딱 붙었다. `padding-inline`은 세로 padding을 건드리지 않는다.
+ */
 .mi-container {
   width: 100%;
   max-width: var(--layout-container-max);
-  margin: 0 auto;
-  padding: 0 var(--layout-margin-mobile);
+  margin-inline: auto;
+  padding-inline: var(--layout-margin-mobile);
 }
 
 @media (min-width: 48rem) {
   .mi-container {
-    padding: 0 var(--layout-margin-desktop);
+    padding-inline: var(--layout-margin-desktop);
   }
 }
 

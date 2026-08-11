@@ -115,6 +115,13 @@
   );
 }
 
+/*
+ * 세로 여백은 block 축만 지정한다. `.mi-container`가 가로만 담당하므로
+ * 단축 속성끼리 부딪히지 않는다.
+ *
+ * 상세 조건을 펼치면 내용이 길어진다. 아래 여백을 넉넉히 둬서 패널이 섹션
+ * 끝에 붙지 않게 한다.
+ */
 .home__hero-inner {
   position: relative;
   z-index: 1;
@@ -123,13 +130,13 @@
   justify-content: center;
   gap: var(--space-4);
   min-height: 26rem;
-  padding: var(--space-6) 0;
+  padding-block: var(--space-6);
 }
 
 @media (min-width: 60rem) {
   .home__hero-inner {
     min-height: 31rem;
-    padding: var(--space-8) 0;
+    padding-block: var(--space-8);
   }
 }
 
