@@ -23,6 +23,8 @@ class AudienceOpenApiContractTest {
     private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+    private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
+            Set.of(MENU_ALTERNATIVE_SEARCH_PATH);
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -33,7 +35,7 @@ class AudienceOpenApiContractTest {
             "/api/v1/pickup-reservations");
 
     @Test
-    void audienceEntrypointsAreDisjointAndCoverTheMvp1AggregatePaths() throws IOException {
+    void audienceEntrypointsMatchTheMvp1AggregateAndLaterStagePaths() throws IOException {
         Set<String> publicPaths = paths("public-openapi.yaml").keySet();
         Set<String> consumerPaths = paths("consumer-openapi.yaml").keySet();
         Set<String> operatorPaths = paths("store-operator-openapi.yaml").keySet();
@@ -52,7 +54,10 @@ class AudienceOpenApiContractTest {
         Set<String> allAudiencePaths = new HashSet<>(publicPaths);
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
-        assertThat(allAudiencePaths).containsAll(aggregatePaths);
+        assertThat(intersection(aggregatePaths, POST_MVP1_AUDIENCE_PATHS)).isEmpty();
+        Set<String> mvp1AndLaterStagePaths = new HashSet<>(aggregatePaths);
+        mvp1AndLaterStagePaths.addAll(POST_MVP1_AUDIENCE_PATHS);
+        assertThat(mvp1AndLaterStagePaths).isEqualTo(allAudiencePaths);
     }
 
     @Test
@@ -70,12 +75,6 @@ class AudienceOpenApiContractTest {
         Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
         exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
         assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
-    }
-
-    @Test
-    void publicMenuAlternativeSearchDoesNotExpandTheMvp1Aggregate() throws IOException {
-        assertThat(paths("public-openapi.yaml")).containsKey(MENU_ALTERNATIVE_SEARCH_PATH);
-        assertThat(paths("mvp1-openapi.yaml")).doesNotContainKey(MENU_ALTERNATIVE_SEARCH_PATH);
     }
 
     @Test
