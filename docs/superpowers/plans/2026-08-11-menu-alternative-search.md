@@ -4,7 +4,7 @@
 
 **Goal:** 품절 또는 마지막 수량 경합 실패 뒤 같은 매장 우선, 없을 때 원 매장 저장 좌표 3km 이내의 예약·수량 가능한 메뉴 대안을 결정적으로 조회하는 공개 API를 구현한다.
 
-**Architecture:** 최신 #82 경계에 맞춰 Search 도메인이 Store/Menu 테이블의 공개 읽기 모델을 `MenuAlternativeCandidateQueryService`와 immutable DTO로 제공하고, 새 최상위 Recommendation 도메인이 그 계약과 Reservation·MenuHold 공개 계약을 조합한다. 복합 조건과 알레르기 코드는 POST JSON body로 받고, 같은 매장 적격 후보가 하나라도 있으면 다른 매장 조회를 수행하지 않는다.
+**Architecture:** 최신 #82 경계에 맞춰 Search 도메인이 Store/Menu 테이블의 공개 읽기 모델을 `MenuAlternativeCandidateQueryService`와 immutable DTO로 제공하고, 독립 최상위 Alternative 도메인이 그 계약과 Reservation·MenuHold 공개 계약을 조합한다. 복합 조건과 알레르기 코드는 POST JSON body로 받고, 같은 매장 적격 후보가 하나라도 있으면 다른 매장 조회를 수행하지 않는다.
 
 **Tech Stack:** Java 21, Spring Boot, Spring MVC, Spring Security, QueryDSL JPA, MySQL, Testcontainers, JUnit 5, AssertJ, Mockito, MockMvc, OpenAPI, pnpm/TypeScript 생성 타입
 
@@ -13,7 +13,7 @@
 > **Execution amendment (2026-08-11):** The synchronized architecture test proves that
 > Search already depends on Recommendation for history ranking. To avoid creating the reverse
 > Recommendation -> Search edge, the alternative orchestration/policy is implemented in the
-> independent top-level `alternative` domain. The Search contract and feature are delivered in
+> independent top-level `alternative` domain (`com.miriyum.domain.alternative`). The Search contract and feature are delivered in
 > one feature PR stacked directly on the sync PR; the contract remains a separate commit-level
 > boundary inside that PR.
 
@@ -27,7 +27,7 @@
 - 새 오류 코드를 만들지 않고 기존 Store·Reservation·MenuHold·공통 오류 의미를 보존한다.
 - 모든 production 동작은 실패 테스트를 먼저 실행한 뒤 최소 구현으로 통과시킨다.
 - Issue #114의 실제 production/test/docs/OpenAPI allowlist를 동기화 후 확정하고 그 밖의 파일은 stage하지 않는다.
-- PR은 `dev → mvp2` sync, Search contract-first, Recommendation feature의 세 stacked 경계로 분리한다.
+- PR은 `dev → mvp2` sync, Search contract-first, Alternative feature의 세 stacked 경계로 분리한다.
 
 ---
 
@@ -144,7 +144,7 @@ git worktree add .superpowers/sdd/worktrees/issue-114-alternative-candidate-cont
   -b codex/114-alternative-candidate-contract codex/sync-dev-into-mvp2-20260811
 ```
 
-Add the exact Task 2 paths to Issue #114 and state that Recommendation may consume only these immutable DTOs and service methods, never Store/Menu Entity or Repository types.
+Add the exact Task 2 paths to Issue #114 and state that Alternative may consume only these immutable DTOs and service methods, never Store/Menu Entity or Repository types.
 
 - [ ] **Step 2: Write RED public contract and MySQL projection tests**
 
@@ -181,7 +181,7 @@ git push -u origin codex/114-alternative-candidate-contract
 gh pr create --base codex/sync-dev-into-mvp2-20260811 `
   --head codex/114-alternative-candidate-contract `
   --title "feat(search): 메뉴 대안 후보 조회 계약 추가" `
-  --body "Issue #114 Recommendation 구현이 소비할 Search 소유 read-only Service/DTO 계약입니다."
+  --body "Issue #114 Alternative 구현이 소비할 Search 소유 read-only Service/DTO 계약입니다."
 ```
 
 - [ ] **Step 7: Merge the local contract branch into the feature branch**
@@ -312,7 +312,7 @@ Expected: PASS and only `frontend/src/shared/api/generated/store-search.ts` chan
 git add docs/specs/store-search/spec.md docs/specs/store-search/openapi.yaml `
   backend/src/test/java/com/miriyum/domain/search/controller/publicapi/StoreSearchOpenApiContractTest.java `
   frontend/src/shared/api/generated/store-search.ts
-git commit -m "docs(recommendation): 품절 대안 검색 계약 추가"
+git commit -m "docs(alternative): 품절 대안 검색 계약 추가"
 ```
 
 ---
