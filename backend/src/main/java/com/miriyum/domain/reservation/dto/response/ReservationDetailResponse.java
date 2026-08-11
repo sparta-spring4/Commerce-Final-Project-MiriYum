@@ -1,8 +1,8 @@
 package com.miriyum.domain.reservation.dto.response;
 
-import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationActorType;
+import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -32,14 +32,14 @@ public record ReservationDetailResponse(
 
     public static ReservationDetailResponse from(
             Reservation reservation,
-            List<MenuHoldItemResult> menuSnapshots
+            List<ReservationMenuHoldItemSnapshot> menuSnapshots
     ) {
         return from(reservation, menuSnapshots, null, null);
     }
 
     public static ReservationDetailResponse from(
             Reservation reservation,
-            List<MenuHoldItemResult> menuSnapshots,
+            List<ReservationMenuHoldItemSnapshot> menuSnapshots,
             ReservationCancellationActorType cancelledBy,
             String cancellationReason
     ) {

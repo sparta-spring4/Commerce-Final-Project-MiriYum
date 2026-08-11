@@ -10,7 +10,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryAvailability.AvailabilitySta
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationTimeResolutionService;
 import com.miriyum.domain.menu.dto.contract.MenuHoldSelectableMenu;
 import com.miriyum.domain.menu.service.MenuHoldSelectionQueryService;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -32,7 +32,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class MenuHoldAvailabilityQueryServiceTest {
 
     @Mock MenuHoldSelectionQueryService selectionQueryService;
-    @Mock ReservationService reservationService;
+    @Mock ReservationTimeResolutionService reservationTimeResolutionService;
     @Mock MenuInventoryTransactionService inventoryService;
     @InjectMocks MenuHoldAvailabilityQueryService service;
 
@@ -40,7 +40,7 @@ class MenuHoldAvailabilityQueryServiceTest {
     void preservesReservationUnavailableError() {
         LocalDate date = LocalDate.of(2026, 8, 10);
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of());
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 List.of(7L), new com.miriyum.domain.reservation.dto.request.ReservationTimeRequest(
                         date, LocalTime.of(18, 0), null)))
                 .willReturn(List.of(ReservationTimeResolutionResult.unavailable(7L)));
@@ -59,7 +59,7 @@ class MenuHoldAvailabilityQueryServiceTest {
         ResolvedReservationTime malformed = resolvedTime(
                 date, "2026-08-10T09:00:00Z", "2026-08-10T10:00:00Z", 8L);
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of());
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 List.of(7L), new com.miriyum.domain.reservation.dto.request.ReservationTimeRequest(
                         date, LocalTime.of(18, 0), null)))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, malformed)));
@@ -79,7 +79,7 @@ class MenuHoldAvailabilityQueryServiceTest {
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of(
                 new MenuHoldSelectableMenu(11L, "Coffee", 4500),
                 new MenuHoldSelectableMenu(12L, "Cake", 9000)));
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
@@ -105,7 +105,7 @@ class MenuHoldAvailabilityQueryServiceTest {
                 date, "2026-08-10T14:30:00Z", "2026-08-10T15:30:00Z", 7L);
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of(
                 new MenuHoldSelectableMenu(11L, "Coffee", 4500)));
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
@@ -133,7 +133,7 @@ class MenuHoldAvailabilityQueryServiceTest {
                 Instant.parse("2026-08-10T10:00:00Z"), Instant.parse("2026-08-10T10:15:00Z"),
                 "Asia/Seoul", 0, 0, 0, 30, 60, 15, 7L, 1L);
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of());
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 List.of(7L), new com.miriyum.domain.reservation.dto.request.ReservationTimeRequest(
                         date, LocalTime.of(18, 0), null)))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, malformed)));
@@ -155,7 +155,7 @@ class MenuHoldAvailabilityQueryServiceTest {
         given(selectionQueryService.findSelectableMenus(7L)).willReturn(List.of(
                 new MenuHoldSelectableMenu(12L, "Cake", 9000),
                 new MenuHoldSelectableMenu(11L, "Coffee", 4500)));
-        given(reservationService.resolveReservationTimes(
+        given(reservationTimeResolutionService.resolveReservationTimes(
                 List.of(7L), new com.miriyum.domain.reservation.dto.request.ReservationTimeRequest(
                         date, LocalTime.of(18, 0), ZoneOffset.ofHours(9))))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(7L, time)));
