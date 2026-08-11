@@ -17,7 +17,7 @@ import com.miriyum.domain.menuhold.entity.MenuHoldStatus;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
-import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.LocalDate;
@@ -32,7 +32,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class MenuHoldTerminalServiceTest {
 
-    @Mock MenuTransactionService menuTransactionService;
+    @Mock MenuTransactionFacade menuTransactionFacade;
     @Mock StoreServiceIntervalValidationService intervalService;
     @Mock MenuInventoryService inventoryService;
     @Mock MenuHoldRepository holdRepository;
@@ -53,7 +53,7 @@ class MenuHoldTerminalServiceTest {
         assertThat(result).isEqualTo(MenuHoldTerminationPresence.HOLD_PRESENT);
         assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
         verify(holdRepository).findByReservationIdForUpdate(10L);
-        verifyNoInteractions(menuTransactionService, intervalService, inventoryService);
+        verifyNoInteractions(menuTransactionFacade, intervalService, inventoryService);
     }
 
     @Test
@@ -65,7 +65,7 @@ class MenuHoldTerminalServiceTest {
 
         assertThat(result).isEqualTo(MenuHoldTerminationPresence.NO_HOLD);
         verify(holdRepository).findByReservationIdForUpdate(10L);
-        verifyNoInteractions(menuTransactionService, intervalService, inventoryService);
+        verifyNoInteractions(menuTransactionFacade, intervalService, inventoryService);
     }
 
     @Test
@@ -159,7 +159,7 @@ class MenuHoldTerminalServiceTest {
 
     private MenuHoldServiceRuntime service() {
         return new MenuHoldServiceRuntime(
-                menuTransactionService, intervalService, inventoryService, holdRepository);
+                menuTransactionFacade, intervalService, inventoryService, holdRepository);
     }
 
     private static MenuHold confirmedHold() {

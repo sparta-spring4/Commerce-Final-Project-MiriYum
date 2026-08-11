@@ -30,7 +30,7 @@ import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
-import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -68,7 +68,7 @@ class PickupReservationServiceTest {
             "550e8400-e29b-41d4-a716-446655440000");
 
     @Mock StoreTransactionEligibilityService storeTransactionEligibilityService;
-    @Mock MenuTransactionService menuTransactionService;
+    @Mock MenuTransactionFacade menuTransactionFacade;
     @Mock MenuInventoryTransactionService inventoryService;
     @Mock PickupReservationRepository repository;
     @Mock IdempotencyExecutor idempotencyExecutor;
@@ -82,7 +82,7 @@ class PickupReservationServiceTest {
         intervalTimePolicy = org.mockito.Mockito.spy(new PickupIntervalTimePolicy(
                 Clock.fixed(NOW, ZoneOffset.UTC)));
         service = new PickupReservationService(
-                storeTransactionEligibilityService, menuTransactionService, inventoryService,
+                storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -103,7 +103,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -125,7 +125,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -210,7 +210,7 @@ class PickupReservationServiceTest {
         PickupReservationCreateRequest request = request(2);
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -269,7 +269,7 @@ class PickupReservationServiceTest {
     void rejectsMenuThatIsNotPickupEligibleBeforeInventoryAccess() {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, false));
 
@@ -285,7 +285,7 @@ class PickupReservationServiceTest {
     void mapsInventoryRaceToPickupQuantityError() {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -309,7 +309,7 @@ class PickupReservationServiceTest {
                 ServiceException.class, () -> service.create(11L, KEY, request(1)));
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.TRANSACTION_NOT_ELIGIBLE);
-        then(menuTransactionService).shouldHaveNoInteractions();
+        then(menuTransactionFacade).shouldHaveNoInteractions();
         then(inventoryService).shouldHaveNoInteractions();
     }
 
@@ -317,7 +317,7 @@ class PickupReservationServiceTest {
     void rejectsAvailabilityFromDifferentStoreTimeZone() {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -337,7 +337,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "MiriYum Gangnam", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "Pasta", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -362,7 +362,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "MiriYum Gangnam", "Asia/Seoul"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "Pasta", 12_000, true, true));
         given(inventoryService.findOnlineAvailabilityByDate(any()))
@@ -393,7 +393,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "뉴욕 픽업 매장", "America/New_York"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         org.mockito.Mockito.lenient()
@@ -419,7 +419,7 @@ class PickupReservationServiceTest {
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(
                         22L, "뉴욕 픽업 매장", "America/New_York"));
-        given(menuTransactionService.requireTransactionEligibility(22L, 33L))
+        given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
                 .willReturn(new MenuTransactionEligibility(
                         22L, 33L, 5, "바질 파스타", 12_000, true, true));
         org.mockito.Mockito.lenient()
@@ -453,7 +453,7 @@ class PickupReservationServiceTest {
         assertThat(result.data()).isEqualTo(stored);
         then(consumerAccountService).should().requireActiveAccount(11L);
         then(storeTransactionEligibilityService).shouldHaveNoInteractions();
-        then(menuTransactionService).shouldHaveNoInteractions();
+        then(menuTransactionFacade).shouldHaveNoInteractions();
         then(inventoryService).shouldHaveNoInteractions();
         then(repository).shouldHaveNoInteractions();
     }
@@ -518,7 +518,7 @@ class PickupReservationServiceTest {
     void usesStableRequestedAtEvenWhenServiceClockHasReachedPickupTime() {
         Instant requestedAt = Instant.parse("2026-08-10T02:59:59Z");
         service = new PickupReservationService(
-                storeTransactionEligibilityService, menuTransactionService, inventoryService,
+                storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-08-10T03:00:01Z"), ZoneOffset.UTC));
@@ -540,7 +540,7 @@ class PickupReservationServiceTest {
     @Test
     void rejectsConsumerCancellationExactlyAtPickupTimeBeforeRestore() {
         service = new PickupReservationService(
-                storeTransactionEligibilityService, menuTransactionService, inventoryService,
+                storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC));

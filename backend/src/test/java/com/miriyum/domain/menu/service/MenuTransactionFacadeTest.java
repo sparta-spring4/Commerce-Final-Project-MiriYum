@@ -26,7 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
-class MenuTransactionServiceTest {
+class MenuTransactionFacadeTest {
 
     private static final long STORE_ID = 7L;
     private static final long MENU_ID = 21L;
@@ -38,11 +38,11 @@ class MenuTransactionServiceTest {
     @Mock
     private MenuRepository menuRepository;
 
-    private MenuTransactionService service;
+    private MenuTransactionFacade service;
 
     @BeforeEach
     void setUp() {
-        service = new MenuTransactionService(storeEligibilityService, menuRepository);
+        service = new MenuTransactionFacade(storeEligibilityService, menuRepository);
     }
 
     @Test
