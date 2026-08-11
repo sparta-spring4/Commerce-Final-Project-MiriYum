@@ -42,7 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class MenuInventoryAdminControllerTest {
 
     private static final String URL =
-            "/api/v1/store-operator/stores/3/menu-inventory-buckets";
+            "/api/v1/store-operators/stores/3/menu-inventory-buckets";
     private static final String KEY =
             "123e4567-e89b-12d3-a456-426614174000";
 

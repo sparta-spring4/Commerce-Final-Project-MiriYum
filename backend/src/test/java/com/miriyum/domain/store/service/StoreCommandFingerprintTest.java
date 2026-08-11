@@ -7,11 +7,24 @@ import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class StoreCommandFingerprintTest {
+
+    @Test
+    void updateFingerprintUsesCanonicalStoreOperatorNamespace() {
+        StoreUpdateRequest request = updateName("MiriYum");
+
+        assertThat(StoreCommandFingerprint.forUpdate(7L, request)).isEqualTo(
+                RequestFingerprint.of(
+                        "PATCH|/api/v1/store-operators/stores/{storeId}|"
+                                + "storeId=1:7|name=7:MiriYum|description=-1:|"
+                                + "region=-1:|address=-1:|storeCategoryCode=-1:|"
+                                + "tagCodes=-1:|modes=-1:|operationStatus=-1:|"));
+    }
 
     @Test
     @DisplayName("태그 입력 순서는 매장 등록 fingerprint를 바꾸지 않는다")

@@ -26,7 +26,7 @@ public final class StoreScheduleFingerprint {
             WeeklyOperatingHoursRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "PUT|/api/v1/store-operator/stores/{storeId}/operating-hours|");
+                "PUT|/api/v1/store-operators/stores/{storeId}/operating-hours|");
         append(canonical, "storeId", Long.toString(storeId));
         request.days().stream()
                 .sorted(Comparator.comparingInt(day ->
@@ -40,7 +40,7 @@ public final class StoreScheduleFingerprint {
             WeeklyReservationTimeSlotsRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "PUT|/api/v1/store-operator/stores/{storeId}/reservation-time-slots|");
+                "PUT|/api/v1/store-operators/stores/{storeId}/reservation-time-slots|");
         append(canonical, "storeId", Long.toString(storeId));
         request.days().stream()
                 .sorted(Comparator.comparingInt(day ->
@@ -55,7 +55,7 @@ public final class StoreScheduleFingerprint {
             SchedulePublicationRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/store-operator/stores/{storeId}"
+                "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/operating-hours/{version}/publication|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
@@ -82,7 +82,7 @@ public final class StoreScheduleFingerprint {
             SchedulePublicationCancellationRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/store-operator/stores/{storeId}/"
+                "POST|/api/v1/store-operators/stores/{storeId}/"
                         + streamPath + "/{version}/publication-cancellation|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
@@ -97,7 +97,7 @@ public final class StoreScheduleFingerprint {
             SchedulePublicationRequest request
     ) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/store-operator/stores/{storeId}/"
+                "POST|/api/v1/store-operators/stores/{storeId}/"
                         + streamPath + "/{version}/publication|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));

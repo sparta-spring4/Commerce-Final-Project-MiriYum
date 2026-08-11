@@ -18,6 +18,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationTimeResolutionService;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeCandidateView;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeSourceView;
 import com.miriyum.domain.search.service.MenuAlternativeCandidateQueryService;
@@ -39,20 +40,22 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class MenuAlternativeSearchServiceTest {
     @Mock MenuAlternativeCandidateQueryService candidateQuery;
     @Mock ReservationService reservationService;
+    @Mock ReservationTimeResolutionService reservationTimeResolutionService;
     @Mock MenuInventoryTransactionService inventoryService;
     private MenuAlternativeSearchService service;
 
     @BeforeEach
     void setUp() {
         service = new MenuAlternativeSearchService(candidateQuery, reservationService,
-                inventoryService, new MenuAlternativeEligibility());
+                reservationTimeResolutionService, inventoryService,
+                new MenuAlternativeEligibility());
     }
 
     @Test
     void returnsOnlySameStoreAlternativesAndDoesNotQueryNearby() {
         var source = source(null, null);
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
         given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
@@ -74,7 +77,7 @@ class MenuAlternativeSearchServiceTest {
     void skipsSameStoreInventoryWhenPartyAvailabilityIsUnavailable() {
         var source = source(null, null);
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
         given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
@@ -91,7 +94,7 @@ class MenuAlternativeSearchServiceTest {
     void rejectsMismatchedSameStoreAvailabilityResponse() {
         var source = source(null, null);
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of(candidate(11L)));
         given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
@@ -107,7 +110,7 @@ class MenuAlternativeSearchServiceTest {
     void returnsRegionSelectionRequiredWhenNoSameStoreResultAndNoVerifiedCoordinates() {
         var source = source(null, null);
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of());
 
@@ -122,7 +125,7 @@ class MenuAlternativeSearchServiceTest {
         var source = source(new java.math.BigDecimal("37.500000"),
                 new java.math.BigDecimal("127.000000"));
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(2L, resolved(2L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of());
@@ -151,7 +154,7 @@ class MenuAlternativeSearchServiceTest {
         var source = source(new java.math.BigDecimal("37.500000"),
                 new java.math.BigDecimal("127.000000"));
         given(candidateQuery.findSource(1L, 10L)).willReturn(source);
-        given(reservationService.resolveReservationTimes(any(), any()))
+        given(reservationTimeResolutionService.resolveReservationTimes(any(), any()))
                 .willAnswer(invocation -> {
                     List<Long> storeIds = invocation.getArgument(0);
                     return storeIds.stream()
@@ -188,9 +191,9 @@ class MenuAlternativeSearchServiceTest {
 
         assertThat(result.items()).extracting(item -> item.menuId())
                 .containsExactlyInAnyOrder(21L, 31L);
-        then(reservationService).should(times(2))
+        then(reservationTimeResolutionService).should(times(2))
                 .resolveReservationTimes(any(), any());
-        then(reservationService).should()
+        then(reservationTimeResolutionService).should()
                 .resolveReservationTimes(eq(List.of(2L, 3L)), any());
         then(inventoryService).should(times(1))
                 .findExistingOnlineAvailability(eq(

@@ -13,8 +13,8 @@ import { createApiClient, type ApiClientDependencies } from './client'
 import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 
 const CATEGORIES = '/api/v1/store-categories'
-const ACCOUNT = '/api/v1/consumer-accounts/me'
-const RESERVATION = '/api/v1/reservations/{reservationId}'
+const ACCOUNT = '/api/v1/consumers/me'
+const RESERVATION = '/api/v1/consumers/reservations/{reservationId}'
 
 function client(dependencies: ApiClientDependencies = {}) {
   return createApiClient(dependencies)
@@ -335,7 +335,7 @@ describe('경로 변수와 query', () => {
   test('경로 변수를 치환해 호출한다', async () => {
     let seen = ''
     server.use(
-      http.get('/api/v1/reservations/:reservationId', ({ params }) => {
+      http.get('/api/v1/consumers/reservations/:reservationId', ({ params }) => {
         seen = String(params.reservationId)
         return successResponse(null)
       }),

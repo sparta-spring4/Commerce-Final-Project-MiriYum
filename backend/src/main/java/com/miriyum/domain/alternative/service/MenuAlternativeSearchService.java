@@ -20,6 +20,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStat
 import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationTimeResolutionService;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeCandidateView;
 import com.miriyum.domain.search.dto.contract.MenuAlternativeSourceView;
 import com.miriyum.domain.search.geo.BoundingBoxCalculator;
@@ -47,14 +48,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class MenuAlternativeSearchService {
     private final MenuAlternativeCandidateQueryService candidateQuery;
     private final ReservationService reservationService;
+    private final ReservationTimeResolutionService reservationTimeResolutionService;
     private final MenuInventoryTransactionService inventoryService;
     private final MenuAlternativeEligibility eligibility;
 
     public MenuAlternativeSearchService(MenuAlternativeCandidateQueryService candidateQuery,
-            ReservationService reservationService, MenuInventoryTransactionService inventoryService,
+            ReservationService reservationService,
+            ReservationTimeResolutionService reservationTimeResolutionService,
+            MenuInventoryTransactionService inventoryService,
             MenuAlternativeEligibility eligibility) {
         this.candidateQuery = candidateQuery;
         this.reservationService = reservationService;
+        this.reservationTimeResolutionService = reservationTimeResolutionService;
         this.inventoryService = inventoryService;
         this.eligibility = eligibility;
     }
@@ -208,9 +213,10 @@ public class MenuAlternativeSearchService {
     private Map<Long, ResolvedWindow> resolveWindows(List<Long> storeIds,
             MenuAlternativeSearchCommand command, boolean source) {
         if (storeIds.isEmpty()) return Map.of();
-        List<ReservationTimeResolutionResult> results = reservationService.resolveReservationTimes(
-                storeIds, new ReservationTimeRequest(command.serviceDate(),
-                        command.startTime(), command.startOffset()));
+        List<ReservationTimeResolutionResult> results =
+                reservationTimeResolutionService.resolveReservationTimes(
+                        storeIds, new ReservationTimeRequest(command.serviceDate(),
+                                command.startTime(), command.startOffset()));
         if (results == null || results.size() != storeIds.size()) unavailable();
         Map<Long, ResolvedWindow> windows = new LinkedHashMap<>();
         for (int index = 0; index < storeIds.size(); index++) {

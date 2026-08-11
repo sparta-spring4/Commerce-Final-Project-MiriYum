@@ -28,14 +28,14 @@ import tools.jackson.databind.JsonNode;
  * 매장 운영자 본인 정보 조회·수정(마이페이지) API다.
  */
 @RestController
-@RequestMapping("/api/v1/store-operator-accounts")
+@RequestMapping("/api/v1/store-operators")
 @RequiredArgsConstructor
 public class StoreOperatorAccountController {
 
     private static final String UPDATE_COMMAND_TYPE = "STORE_OPERATOR_ACCOUNT_UPDATE";
-    private static final String UPDATE_ROUTE = "PATCH /api/v1/store-operator-accounts/me";
+    private static final String UPDATE_ROUTE = "PATCH /api/v1/store-operators/me";
     private static final String CONTACT_COMMAND_TYPE = "STORE_OPERATOR_CONTACT_REGISTER";
-    private static final String CONTACT_ROUTE = "PUT /api/v1/store-operator-accounts/me/contact";
+    private static final String CONTACT_ROUTE = "PUT /api/v1/store-operators/me/contact";
 
     private final StoreOperatorAccountService storeOperatorAccountService;
     private final PhoneNumberPolicy phoneNumberPolicy;

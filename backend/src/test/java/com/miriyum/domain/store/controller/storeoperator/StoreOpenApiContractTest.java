@@ -23,11 +23,11 @@ class StoreOpenApiContractTest {
         }
 
         Map<String, Object> paths = map(document.get("paths"));
-        Map<String, Object> collection = map(paths.get("/api/v1/store-operator/stores"));
+        Map<String, Object> collection = map(paths.get("/api/v1/store-operators/stores"));
         assertThat(map(map(collection.get("post")).get("responses")))
                 .containsKeys("400", "503");
 
-        Map<String, Object> item = map(paths.get("/api/v1/store-operator/stores/{storeId}"));
+        Map<String, Object> item = map(paths.get("/api/v1/store-operators/stores/{storeId}"));
         assertThat(map(map(item.get("patch")).get("responses")))
                 .containsKeys("400", "409", "503");
 

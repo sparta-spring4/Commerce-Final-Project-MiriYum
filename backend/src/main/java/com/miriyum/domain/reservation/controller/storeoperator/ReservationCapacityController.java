@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping(
-        "/api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}"
+        "/api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}"
 )
 @RequiredArgsConstructor
 public class ReservationCapacityController {

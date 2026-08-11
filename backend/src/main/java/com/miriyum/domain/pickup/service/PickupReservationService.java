@@ -26,7 +26,7 @@ import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
-import com.miriyum.domain.menu.service.MenuTransactionService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -57,7 +57,7 @@ public class PickupReservationService {
     private static final String COMMAND_TYPE = "PICKUP_CREATE";
 
     private final StoreTransactionEligibilityService storeEligibilityService;
-    private final MenuTransactionService menuTransactionService;
+    private final MenuTransactionFacade menuTransactionFacade;
     private final MenuInventoryTransactionService inventoryService;
     private final PickupReservationRepository repository;
     private final IdempotencyExecutor idempotencyExecutor;
@@ -68,7 +68,7 @@ public class PickupReservationService {
 
     public PickupReservationService(
             StoreTransactionEligibilityService storeEligibilityService,
-            MenuTransactionService menuTransactionService,
+            MenuTransactionFacade menuTransactionFacade,
             MenuInventoryTransactionService inventoryService,
             PickupReservationRepository repository,
             IdempotencyExecutor idempotencyExecutor,
@@ -78,7 +78,7 @@ public class PickupReservationService {
             Clock clock
     ) {
         this.storeEligibilityService = storeEligibilityService;
-        this.menuTransactionService = menuTransactionService;
+        this.menuTransactionFacade = menuTransactionFacade;
         this.inventoryService = inventoryService;
         this.repository = repository;
         this.idempotencyExecutor = idempotencyExecutor;
@@ -158,7 +158,7 @@ public class PickupReservationService {
         String reason = normalizeOptionalReason(request.reason());
         IdempotencyCommand command = new IdempotencyCommand(
                 "consumer", consumerAccountId, "PICKUP_CANCEL", key.value(),
-                RequestFingerprint.of("POST|/api/v1/pickup-reservations/"
+                RequestFingerprint.of("POST|/api/v1/consumers/pickup-reservations/"
                         + pickupReservationId + "/cancellations|"
                         + (reason == null ? "" : reason)));
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () ->
@@ -296,7 +296,7 @@ public class PickupReservationService {
         for (PickupMenuSelectionRequest selection : selections) {
             long menuId = selection.menuIdAsLong();
             MenuTransactionEligibility menu =
-                    menuTransactionService.requireTransactionEligibility(storeId, menuId);
+                    menuTransactionFacade.requireTransactionEligibility(storeId, menuId);
             if (!menu.pickupEligible()) {
                 throw new ServiceException(StoreErrorCode.MENU_STATE_CONFLICT);
             }
@@ -392,7 +392,7 @@ public class PickupReservationService {
         String menuPart = selections.stream()
                 .map(item -> item.menuId() + ":" + item.quantity())
                 .collect(Collectors.joining(","));
-        return RequestFingerprint.of("POST|/api/v1/pickup-reservations|"
+        return RequestFingerprint.of("POST|/api/v1/consumers/pickup-reservations|"
                 + storeId + "|" + request.pickupDate() + "|"
                 + request.pickupTime() + "|" + menuPart);
     }

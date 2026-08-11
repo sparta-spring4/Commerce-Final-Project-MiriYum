@@ -6,7 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
@@ -66,7 +66,10 @@ class ReservationTimePolicyActivationServiceTest {
     private ConsumerAccountService consumerAccountService;
 
     @Mock
-    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private ReservationMenuHoldPort menuHoldPort;
+
+    @Mock
+    private ReservationTimeResolutionService timeResolutionService;
 
     private ReservationService reservationService;
 
@@ -84,7 +87,8 @@ class ReservationTimePolicyActivationServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService
+                menuHoldPort,
+                timeResolutionService
         );
     }
 
