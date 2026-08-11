@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, test } from 'vitest'
+import { unauthenticatedConsumer } from '../features/auth/test/handlers'
 import { catalogHandlers } from '../features/store-search/test/handlers'
 import { server } from '../test/msw/server'
 import App from './App'
@@ -10,8 +11,9 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
-  // 홈은 매장 카테고리 catalog를 부른다. 등록하지 않으면 MSW가 실패로 잡는다.
-  server.use(...catalogHandlers)
+  // 홈은 매장 카테고리 catalog를 부르고, 앱 셸은 항상 세션 복구를 시도한다.
+  // 등록하지 않으면 MSW가 실패로 잡는다.
+  server.use(...catalogHandlers, unauthenticatedConsumer)
 })
 
 describe('앱 셸', () => {
@@ -39,6 +41,26 @@ describe('앱 셸', () => {
     for (const label of ['웨이팅', '결제', '리뷰', '채팅', '알림']) {
       expect(nav).not.toHaveTextContent(label)
     }
+  })
+
+  test('비로그인 사용자에게 로그인·회원가입 진입점을 보여 준다', async () => {
+    renderAt('/')
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('link', { name: '회원가입' })).toBeInTheDocument()
+  })
+
+  test('공개 화면은 비로그인 상태에서도 로그인으로 튕기지 않는다', async () => {
+    renderAt('/')
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+    )
+    expect(
+      screen.getByRole('form', { name: '매장 검색 조건' }),
+    ).toBeInTheDocument()
   })
 
   test('없는 경로는 404 화면을 보여 준다', () => {

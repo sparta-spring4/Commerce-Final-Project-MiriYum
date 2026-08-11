@@ -43,14 +43,18 @@ export function FieldShell({
 
   return (
     <div className="mi-field">
-      <label className="mi-field__label" htmlFor={controlId}>
+      {/*
+        필수 표시는 CSS ::after의 별표로만 그린다. 레이블 텍스트에 마커를 넣으면
+        보조기술이 "이메일 별표"처럼 읽고, 레이블로 요소를 찾는 코드도 흔들린다.
+        필수 여부 자체는 입력의 required 속성이 보조기술에 전달한다.
+      */}
+      <label
+        className={
+          required ? 'mi-field__label mi-field__label--required' : 'mi-field__label'
+        }
+        htmlFor={controlId}
+      >
         {label}
-        {required && (
-          <span className="mi-field__required" aria-hidden="true">
-            *
-          </span>
-        )}
-        {required && <span className="visually-hidden">(필수)</span>}
       </label>
       {children({ controlId, describedBy, invalid })}
       {help && (

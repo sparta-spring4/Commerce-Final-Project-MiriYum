@@ -30,7 +30,22 @@ describe('TextField', () => {
   it('필수 입력임을 보조기술이 읽을 수 있게 알린다', () => {
     render(<TextField label="비밀번호" required />)
 
-    expect(screen.getByLabelText(/비밀번호.*\(필수\)/)).toBeRequired()
+    // 필수 마커를 레이블 텍스트에 넣지 않는다. required 속성이 그 역할을 한다.
+    expect(screen.getByLabelText('비밀번호')).toBeRequired()
+  })
+
+  it('레이블이 서로 접두사를 공유해도 정확히 구분된다', () => {
+    render(
+      <>
+        <TextField label="비밀번호" required />
+        <TextField label="비밀번호 확인" required />
+      </>,
+    )
+
+    expect(screen.getByLabelText('비밀번호')).toHaveAccessibleName('비밀번호')
+    expect(screen.getByLabelText('비밀번호 확인')).toHaveAccessibleName(
+      '비밀번호 확인',
+    )
   })
 })
 

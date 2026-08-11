@@ -82,7 +82,9 @@
   color: var(--color-on-surface);
 }
 
-.mi-field__required {
+/* 필수 표시. 텍스트가 아니라 장식이므로 레이블 문자열에 섞지 않는다. */
+.mi-field__label--required::after {
+  content: '*';
   margin-left: 0.25rem;
   color: var(--color-error);
 }

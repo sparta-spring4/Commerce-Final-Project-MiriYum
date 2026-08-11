@@ -1,0 +1,55 @@
+/* 가입·로그인 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.auth-page {
+  max-width: 30rem;
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-8);
+}
+
+.auth-page__header {
+  margin-bottom: var(--space-3);
+  text-align: center;
+}
+
+.auth-page__header h1 {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+}
+
+.auth-page__header p {
+  margin-top: 0.375rem;
+  color: var(--color-on-surface-variant);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.auth-form__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-body-md);
+}
+
+.auth-page__switch {
+  margin-top: var(--space-2);
+  text-align: center;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* 헤더의 계정 영역. 두 shell의 상태를 합치지 않고 소비자 shell만 표시한다. */
+.app-header__account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}

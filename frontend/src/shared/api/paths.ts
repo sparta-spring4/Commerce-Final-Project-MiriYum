@@ -92,3 +92,15 @@ export type IdempotencyOf<Op> = Op extends {
 }
   ? { idempotencyKey: string }
   : { idempotencyKey?: never }
+
+/**
+ * operation이 X-CSRF-TOKEN 헤더를 요구하면 호출에서도 필수로 만든다.
+ *
+ * CSRF double-submit은 로그아웃처럼 Refresh 쿠키로 동작하는 요청에만 걸린다.
+ * 어떤 경로가 요구하는지 손으로 기억하지 않고 계약이 정하게 한다.
+ */
+export type CsrfOf<Op> = Op extends {
+  parameters: { header: { 'X-CSRF-TOKEN': unknown } }
+}
+  ? { csrfToken: string }
+  : { csrfToken?: never }

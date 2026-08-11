@@ -13,6 +13,7 @@ export const ROUTES = {
   stores: '/stores',
   storeDetail: '/stores/:storeId',
   consumerSignIn: '/sign-in',
+  consumerSignUp: '/sign-up',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
 } as const

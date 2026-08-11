@@ -1,15 +1,21 @@
+import type { ReactNode } from 'react'
 import { Link, NavLink, Outlet } from 'react-router'
 import { NAVIGATION, ROUTES, type Shell } from './routes'
 
 interface Props {
   shell: Shell
+  /**
+   * 계정 영역 슬롯. 레이아웃이 특정 shell의 인증 상태를 직접 읽지 않게 한다.
+   * 두 shell이 각자의 계정 메뉴를 넣고 서로의 상태를 보지 않는다.
+   */
+  accountSlot?: ReactNode
 }
 
 /**
  * 공통 레이아웃. 네비게이션 항목은 계정 shell별로 분리한다.
  * 두 shell의 인증 상태나 권한을 UI 편의로 합치지 않는다.
  */
-export function AppLayout({ shell }: Props) {
+export function AppLayout({ shell, accountSlot }: Props) {
   const items = NAVIGATION[shell]
 
   return (
@@ -44,6 +50,7 @@ export function AppLayout({ shell }: Props) {
               </ul>
             </nav>
           )}
+          {accountSlot}
         </div>
       </header>
 
