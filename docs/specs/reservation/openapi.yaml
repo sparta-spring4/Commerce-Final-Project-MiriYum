@@ -410,6 +410,8 @@ paths:
               - "createdAt,asc"
               - "serviceDate,desc"
               - "serviceDate,asc"
+              - "startAt,desc"
+              - "startAt,asc"
             default: "createdAt,desc"
       responses:
         "200":

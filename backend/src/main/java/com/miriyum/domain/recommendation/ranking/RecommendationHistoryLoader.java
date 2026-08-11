@@ -45,7 +45,7 @@ public class RecommendationHistoryLoader {
                                     "FULFILLED",
                                     0,
                                     HISTORY_LIMIT,
-                                    "createdAt,desc"));
+                                    "startAt,desc"));
             List<ParsedReservation> reservations = parse(response, asOf);
             List<RecommendationHistoryEvent> events = new ArrayList<>(reservations.size());
             for (int index = 0; index < reservations.size(); index++) {

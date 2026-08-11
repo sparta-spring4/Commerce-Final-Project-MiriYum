@@ -720,6 +720,45 @@ class ReservationQueryRepositoryTest {
     }
 
     @Test
+    @DisplayName("소비자 이력은 생성 순서와 무관하게 실제 방문 시각 최신순 20건을 반환한다")
+    void selectsTwentyLatestFulfilledVisitsByStartAtInsteadOfCreatedAt() {
+        // given
+        Reservation[] reservations = new Reservation[21];
+        for (int index = 0; index < reservations.length; index++) {
+            Reservation reservation = saveReservation(
+                    CONSUMER_ACCOUNT_ID,
+                    STORE_ID,
+                    LocalDate.of(2026, 8, 1).plusDays(index),
+                    CREATED_AT.plusSeconds(reservations.length - index)
+            );
+            reservation.fulfill(CREATED_AT.plusSeconds(100 + index));
+            reservations[index] = reservationRepository.saveAndFlush(reservation);
+        }
+        ReservationHistorySearchRequest request = ReservationHistorySearchRequest.from(
+                "FULFILLED",
+                0,
+                20,
+                "startAt,desc"
+        );
+
+        // when
+        var result = reservationService.getConsumerReservationHistory(
+                CONSUMER_ACCOUNT_ID,
+                request
+        );
+
+        // then
+        assertThat(result.items())
+                .extracting(item -> item.reservationId())
+                .containsExactly(
+                        java.util.stream.IntStream.rangeClosed(1, 20)
+                                .mapToObj(index -> Long.toString(reservations[21 - index].getId()))
+                                .toArray(String[]::new)
+                )
+                .doesNotContain(Long.toString(reservations[0].getId()));
+    }
+
+    @Test
     @DisplayName("폐업 매장의 과거 예약은 소비자 내역과 두 복합 소유 조회에 남는다")
     void keepsClosedStoreReservationInConsumerHistoryAndBothCompositeQueries() {
         // given

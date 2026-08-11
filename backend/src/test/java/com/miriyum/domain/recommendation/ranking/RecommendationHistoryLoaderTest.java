@@ -82,7 +82,7 @@ class RecommendationHistoryLoaderTest {
         assertThat(request.getValue().page()).isZero();
         assertThat(request.getValue().size()).isEqualTo(20);
         assertThat(request.getValue().order())
-                .isEqualTo(ReservationHistorySearchRequest.Order.CREATED_AT_DESC);
+                .isEqualTo(ReservationHistorySearchRequest.Order.START_AT_DESC);
     }
 
     @Test

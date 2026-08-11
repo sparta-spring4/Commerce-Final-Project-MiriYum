@@ -2318,7 +2318,7 @@ export interface operations {
         page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
         size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
         /** @description 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다. */
-        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc";
+        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
       };
     };
     responses: {
