@@ -53,6 +53,10 @@ HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicap
 
 구조 테스트는 controller→repository 직접 호출, 모듈 간 repository/entity 직접 접근과 순환 의존을 거부한다.
 
+Issue #82 1단계가 완료될 때까지 기존 `consumer`, `reservation`, `menuhold`의 단일 순환 컴포넌트만 임시 baseline으로 둔다. 허용되는 직접 순환 edge는 `consumer → reservation`, `reservation → consumer`, `reservation → menuhold`, `menuhold → reservation` 네 개뿐이다. 구조 테스트는 이 edge를 그래프에서 삭제하지 않고 전체 그래프의 상호 도달 가능한 도메인 쌍과 실제 순환 edge 집합을 baseline과 정확히 비교한다. 따라서 새 도메인이나 새 경로가 이 컴포넌트에 들어오는 경우도 실패한다.
+
+Issue #82 2단계에서는 예약 내역 HTTP 경계를 `reservation.controller.consumer`로 옮겨 `consumer → reservation`을 제거하고, Reservation 소유 Port와 MenuHold Adapter로 `reservation → menuhold`을 역전해 순환 baseline을 빈 집합으로 만든다. 공통 Store→Menu 잠금·검증 흐름은 기존 `MenuTransactionService`를 `MenuTransactionFacade`로 승격해 MenuHold와 Pickup이 사용하지만, 이 Facade는 두 예약 순환을 우회하거나 대신 해결하는 수단이 아니다.
+
 ## `1차 MVP` 기술과 모듈
 
 `1차 MVP`는 `auth`, `consumer`, `storeoperator`, `store`, `schedule`, `menu`, `search`, `reservation`, `menuhold`, `pickup`의 실제 기능만 둔다. Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.6.1, Spring MVC, Spring Data JPA, Spring Security, Flyway와 MySQL을 사용한다. 프런트엔드는 Node.js 24.18.0, pnpm 11.17.0, React 19.2.8, TypeScript 7.0.2, Vite 8.1.5, Vitest 4.1.10과 React Testing Library 16.3.2를 사용한다.

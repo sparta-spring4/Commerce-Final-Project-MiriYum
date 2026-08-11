@@ -30,8 +30,14 @@ class DomainPackageArchitectureTest {
             "core", "schedule", "closure", "menu", "search", "recommendation");
     private static final Set<String> HTTP_BOUNDARIES = Set.of(
             "publicapi", "consumer", "storeoperator", "auth", "account");
-    private static final Set<DependencyEdge> LEGACY_CYCLE_BREAK_EDGES = Set.of(
+    private static final Set<DomainPair> LEGACY_CYCLIC_DOMAIN_PAIRS = Set.of(
+            new DomainPair("consumer", "menuhold"),
+            new DomainPair("consumer", "reservation"),
+            new DomainPair("menuhold", "reservation"));
+    private static final Set<DependencyEdge> LEGACY_CYCLIC_EDGES = Set.of(
             new DependencyEdge("consumer", "reservation"),
+            new DependencyEdge("menuhold", "reservation"),
+            new DependencyEdge("reservation", "consumer"),
             new DependencyEdge("reservation", "menuhold"));
     private static final Pattern PACKAGE_PATTERN =
             Pattern.compile("(?m)^package\\s+([\\w.]+);");
@@ -105,11 +111,28 @@ class DomainPackageArchitectureTest {
         Map<String, Set<String>> dependencies = domainDependencies(javaSources());
 
         assertThat(dependencies).isNotEmpty();
-        assertThat(LEGACY_CYCLE_BREAK_EDGES)
-                .allMatch(edge -> dependencies.getOrDefault(edge.from(), Set.of())
-                        .contains(edge.to()));
-        assertThat(cyclicDomainPairs(withoutLegacyCycleBreakEdges(dependencies)))
-                .isEmpty();
+        assertThat(cyclicDomainPairs(dependencies))
+                .isEqualTo(LEGACY_CYCLIC_DOMAIN_PAIRS);
+        assertThat(cyclicDependencyEdges(dependencies))
+                .isEqualTo(LEGACY_CYCLIC_EDGES);
+    }
+
+    @Test
+    void legacyCycleBaselineDoesNotHideANewLongCycle() {
+        Map<String, Set<String>> dependencies = Map.of(
+                "consumer", Set.of("reservation"),
+                "reservation", Set.of("consumer", "menuhold", "foo"),
+                "menuhold", Set.of("reservation"),
+                "foo", Set.of("consumer"));
+
+        assertThat(cyclicDomainPairs(dependencies))
+                .contains(
+                        new DomainPair("consumer", "foo"),
+                        new DomainPair("foo", "reservation"));
+        assertThat(cyclicDependencyEdges(dependencies))
+                .contains(
+                        new DependencyEdge("reservation", "foo"),
+                        new DependencyEdge("foo", "consumer"));
     }
 
     private static boolean isBelowLegacyStoreSubdomain(String relativePath) {
@@ -176,19 +199,18 @@ class DomainPackageArchitectureTest {
         return cycles;
     }
 
-    private static Map<String, Set<String>> withoutLegacyCycleBreakEdges(
+    private static Set<DependencyEdge> cyclicDependencyEdges(
             Map<String, Set<String>> dependencies
     ) {
-        Map<String, Set<String>> remaining = new LinkedHashMap<>();
-        dependencies.forEach((domain, targets) ->
-                remaining.put(domain, new TreeSet<>(targets)));
-        for (DependencyEdge edge : LEGACY_CYCLE_BREAK_EDGES) {
-            Set<String> targets = remaining.get(edge.from());
-            if (targets == null || !targets.remove(edge.to())) {
-                throw new IllegalStateException("legacy cycle edge is missing: " + edge);
+        Set<DependencyEdge> cyclicEdges = new LinkedHashSet<>();
+        dependencies.forEach((domain, targets) -> {
+            for (String target : targets) {
+                if (isReachable(target, domain, dependencies)) {
+                    cyclicEdges.add(new DependencyEdge(domain, target));
+                }
             }
-        }
-        return remaining;
+        });
+        return cyclicEdges;
     }
 
     private static boolean isReachable(

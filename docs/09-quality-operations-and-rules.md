@@ -17,7 +17,7 @@
 ## 공통 구조·보안 gate
 
 - 방식 A의 단일 Spring Boot·단일 MySQL 경계를 확인한다.
-- 모듈 간 repository/entity 직접 접근, controller→repository 직접 호출과 순환 의존을 구조 테스트로 차단한다.
+- 모듈 간 repository/entity 직접 접근과 controller→repository 직접 호출을 구조 테스트로 차단한다. 순환 검사는 전체 도메인 그래프의 상호 도달 쌍과 실제 순환 edge 집합을 활성 아키텍처 문서의 임시 baseline과 정확히 비교하며, baseline edge를 삭제한 나머지 그래프만 검사해서는 안 된다.
 - 1차 MVP에서는 일반 사용자·매장 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다. 플랫폼 운영자 계정·JWT 검증 gate는 해당 기능을 구현하는 고도화에서 추가한다.
 - 교차 namespace JWT, 클라이언트 역할 값, 이메일·외부 로그인에 의한 자가 승격을 거부한다.
 - 매장 명령이 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 재검증하는지 확인한다.
