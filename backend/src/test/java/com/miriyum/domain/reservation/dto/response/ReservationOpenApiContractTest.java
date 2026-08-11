@@ -80,8 +80,9 @@ class ReservationOpenApiContractTest {
         );
 
         assertThat(paths.keySet())
-                .containsExactlyInAnyOrderElementsOf(
-                        contracts.stream().map(OperationContract::path).toList());
+                .hasSize(12)
+                .contains("/api/v1/consumers/me/reservations")
+                .containsAll(contracts.stream().map(OperationContract::path).toList());
         Map<String, Object> aggregate = load(
                 Path.of("..", "docs", "specs", "mvp1-openapi.yaml")
         );
@@ -240,24 +241,25 @@ class ReservationOpenApiContractTest {
     }
 
     @Test
-    void consumerHistoryKeepsAuthOwnedSchemaNamesAndCanonicalTimeShape() throws IOException {
-        Map<String, Object> auth = load(
-                Path.of("..", "docs", "specs", "auth-account", "openapi.yaml")
+    void consumerHistoryIsReservationOwnedWithCanonicalTimeShape() throws IOException {
+        Map<String, Object> reservation = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
 
-        Map<String, Object> authSchemas = map(map(auth.get("components")).get("schemas"));
-        assertThat(authSchemas).containsKeys(
+        Map<String, Object> reservationSchemas =
+                map(map(reservation.get("components")).get("schemas"));
+        assertThat(reservationSchemas).containsKeys(
                 "ReservationHistoryStatus",
                 "ReservationHistoryItem",
                 "ReservationHistoryPageData"
         );
-        assertThat(list(map(authSchemas.get("ReservationHistoryStatus")).get("enum")))
+        assertThat(list(map(reservationSchemas.get("ReservationHistoryStatus")).get("enum")))
                 .containsExactly("CONFIRMED", "CANCELLED", "FULFILLED");
 
-        Map<String, Object> item = map(authSchemas.get("ReservationHistoryItem"));
+        Map<String, Object> item = map(reservationSchemas.get("ReservationHistoryItem"));
         assertCustomerTimeShape(
                 item,
-                "../reservation/openapi.yaml#/components/schemas/ReservationTimeStatus"
+                "#/components/schemas/ReservationTimeStatus"
         );
         assertThat(map(item.get("properties")))
                 .containsKeys(
@@ -271,22 +273,22 @@ class ReservationOpenApiContractTest {
                 .doesNotContainKeys("startTime", "endTime", "cancelledBy");
 
         Map<String, Object> pageProperties = map(
-                map(authSchemas.get("ReservationHistoryPageData")).get("properties")
+                map(reservationSchemas.get("ReservationHistoryPageData")).get("properties")
         );
         assertThat(map(map(pageProperties.get("items")).get("items"))).containsEntry(
                 "$ref",
                 "#/components/schemas/ReservationHistoryItem"
         );
         Map<String, Object> successProperties = map(
-                map(authSchemas.get("ReservationHistoryPageSuccessResponse")).get("properties")
+                map(reservationSchemas.get("ReservationHistoryPageSuccessResponse")).get("properties")
         );
         assertThat(map(successProperties.get("data"))).containsEntry(
                 "$ref",
                 "#/components/schemas/ReservationHistoryPageData"
         );
 
-        Map<String, Object> authPaths = map(auth.get("paths"));
-        Map<String, Object> operation = map(map(authPaths.get(
+        Map<String, Object> reservationPaths = map(reservation.get("paths"));
+        Map<String, Object> operation = map(map(reservationPaths.get(
                 "/api/v1/consumers/me/reservations"
         )).get("get"));
         Map<String, Object> statusParameter = list(operation.get("parameters")).stream()

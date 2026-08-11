@@ -385,6 +385,45 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/ReservationTimePolicyConflict"
+  /api/v1/consumers/me/reservations:
+    get:
+      tags: [My Page]
+      summary: 내 예약 내역 조회
+      operationId: getCurrentConsumerReservations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReservationHistoryStatus"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: sort
+          in: query
+          description: 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다.
+          schema:
+            type: string
+            enum:
+              - "createdAt,desc"
+              - "createdAt,asc"
+              - "serviceDate,desc"
+              - "serviceDate,asc"
+            default: "createdAt,desc"
+      responses:
+        "200":
+          description: 본인 예약 내역 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationHistoryPageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
 components:
   securitySchemes:
     bearerAuth:
@@ -417,6 +456,72 @@ components:
         format: int64
         minimum: 1
   schemas:
+    ReservationHistoryStatus:
+      type: string
+      enum: [CONFIRMED, CANCELLED, FULFILLED]
+    ReservationHistoryItem:
+      type: object
+      additionalProperties: false
+      required:
+        - reservationId
+        - storeId
+        - storeName
+        - serviceDate
+        - timeStatus
+        - startAt
+        - serviceEndAt
+        - timeZoneId
+        - partySize
+        - status
+        - createdAt
+      properties:
+        reservationId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        storeName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        serviceDate:
+          $ref: "#/components/schemas/StoreLocalDate"
+        timeStatus:
+          $ref: "#/components/schemas/ReservationTimeStatus"
+        startAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        serviceEndAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: LEGACY_UNRESOLVED이면 null
+        timeZoneId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: 예약 계산에 사용한 매장 IANA 시간대. LEGACY_UNRESOLVED이면 null
+          examples:
+            - Asia/Seoul
+        partySize:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/ReservationHistoryStatus"
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    ReservationHistoryPageData:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReservationHistoryItem"
+        page:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PageMetadata"
     StoreLocalDate:
       type: string
       format: date
@@ -913,7 +1018,27 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/ReservationTimePolicyResponse"
+    ReservationHistoryPageSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ReservationHistoryPageData"
   responses:
+    AccountRestricted:
+      description: 현재 계정 상태가 이용을 허용하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로 이용할 수 없습니다.
     ReservationNotFound:
       description: 본인 또는 대상 매장 범위에서 예약을 찾을 수 없음
       content:

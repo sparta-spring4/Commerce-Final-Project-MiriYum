@@ -95,7 +95,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 ## 매장 등록과 상태
 
-- `POST /api/v1/store-operator/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
+- `POST /api/v1/store-operators/stores`는 인증된 매장 운영자 계정으로 새 매장 신청을 만든다.
 - 요청의 운영자 ID나 역할 값은 받지 않고 JWT subject를 사용한다.
 - 사업자등록번호와 업종 구분 `CAFE`, `BAKERY`, `OTHER`를 구조화 입력한다.
 - 1차 MVP는 사업자등록번호 형식과 중앙 영구 중복을 검증한다. 한 번 매장에 귀속된 번호는 폐점 후에도 일반 등록에서 재사용할 수 없으며, 재개·이전·복구는 향후 플랫폼 운영자 전용 절차로 분리한다. 사전 사업자 진위·업종 기준 데이터 비교, 국세청 공식 진위조회와 플랫폼 운영자 심사는 사용하지 않는다.
@@ -125,7 +125,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 ### 초안·게시·취소 수명주기
 
-- `PUT /api/v1/store-operator/stores/{storeId}/operating-hours`와 `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-slots`는 제출한 전체 주간 설정을 새 불변 `DRAFT` 버전으로 저장할 뿐 게시하지 않는다.
+- `PUT /api/v1/store-operators/stores/{storeId}/operating-hours`와 `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-slots`는 제출한 전체 주간 설정을 새 불변 `DRAFT` 버전으로 저장할 뿐 게시하지 않는다.
 - 초안 내용은 제자리에서 수정하지 않는다. 변경하려면 새 초안 버전을 저장하고, 게시할 버전 번호를 명시한다.
 - `POST .../{version}/publication`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
 - 게시 명령은 비어 있지 않은 `changeReason`을 항상 요구한다. 초안 저장 자체에는 변경 사유를 요구하지 않지만 게시 감사에 사유를 보존한다.

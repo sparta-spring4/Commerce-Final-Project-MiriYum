@@ -23,7 +23,7 @@
 
 | ID | 교차 기능 | 결정 | 상태 | 승인일 |
 |---|---|---|---|---|
-| `O-001` | 내 예약 내역 조회 | 1번 구현, 3번 예약 데이터·조회 규칙 소유 | 승인 | 2026-07-28 |
+| `O-001` | 내 예약 내역 조회 | 3번이 HTTP 경계·예약 데이터·조회 규칙 소유, 1번은 principal 제공 | 승인 | 2026-08-11 |
 | `O-002` | 매장 조회의 예약 가능 여부 | 2번 매장·시간대 설정, 3번 최종 가능 판정 소유 | 승인 | 2026-07-28 |
 | `O-003` | 메뉴 기본정보와 수량·홀드 | 2번 메뉴 원본, 4번 수량·거래 가능성 소유 | 승인 | 2026-07-28 |
 | `O-004` | 예약 취소와 메뉴 수량 복구 | 3번 취소 조정, 4번 홀드 해제·수량 복구 소유 | 승인 | 2026-07-28 |
@@ -37,9 +37,9 @@
 
 ### 담당과 소유권
 
-- 1번 팀원은 마이페이지의 내 예약 내역 화면·사용자 흐름과 마이페이지 진입 경계의 구현을 담당한다.
+- 1번 팀원은 마이페이지의 내 예약 내역 화면·사용자 흐름과 인증 principal 제공을 담당한다.
 - 3번 팀원과 예약 도메인은 예약 상태 의미, 내역 포함 범위, 정렬·필터 기준과 예약 조회 데이터 계약을 소유한다.
-- 1번 팀원은 인증된 `consumer_account_id`를 예약 도메인의 공개 `ReservationService` 조회 메서드에 전달해 결과를 사용한다.
+- 예약 내역 HTTP 경계와 조회 흐름은 예약 도메인이 소유하며, 인증 도메인은 검증된 `consumer_account_id` principal만 제공한다.
 - 1번 팀원은 예약 entity나 repository를 직접 조회·수정하거나 별도의 예약 상태 해석 규칙을 만들지 않는다.
 - 공개 HTTP 경로와 OpenAPI 문서 소유 위치는 `4. 공통 계약과 API 명세`에서 한 번만 확정한다. 인증·마이페이지와 예약 도메인이 같은 기능의 공개 API를 각각 만들지 않는다.
 
@@ -145,7 +145,7 @@
 
 - 3번 팀원과 예약 도메인은 예약 취소 공개 명령·API, 취소 가능 여부, 예약 상태 전이와 전체 취소 유스케이스의 트랜잭션 조정을 소유한다.
 - 4번 팀원과 메뉴 홀드·픽업 도메인은 예약에 연결된 메뉴 홀드 조회, 홀드 해제, 날짜·시간대별 수량 복구와 중복 해제 방지를 소유한다.
-- 3번 팀원의 `ReservationService`는 4번 팀원이 제공하는 `MenuHoldService`의 공개 홀드 해제 메서드를 호출한다.
+- 3번 팀원의 `ReservationService`는 예약 소유 `ReservationMenuHoldPort`를 호출하고, 4번 팀원의 `ReservationMenuHoldAdapter`가 MenuHold 해제를 연결한다.
 - 3번 팀원은 메뉴 홀드·수량 entity나 repository를 직접 수정하지 않고, 4번 팀원은 예약 상태를 직접 변경하지 않는다.
 
 ### 트랜잭션과 멱등성
@@ -188,7 +188,7 @@
 - 3번 팀원과 예약 도메인은 일반 예약 생성 공개 API, 날짜·시간·인원·팀 수 수용량 검증과 전체 생성 유스케이스의 트랜잭션 조정을 소유한다.
 - 4번 팀원과 메뉴 홀드·픽업 도메인은 선택 메뉴와 매장의 일치, 홀드 가능 여부·잔여 수량 검증, 메뉴 수량 차감과 `MenuHold` 생성을 소유한다.
 - 예약 생성 요청의 메뉴 선택은 선택 항목이다. 메뉴를 건너뛰면 빈 메뉴 목록으로 같은 예약 생성 유스케이스를 사용하고 별도 “홀드 없음 예약” API를 만들지 않는다.
-- 메뉴가 선택되면 3번 팀원의 `ReservationService`가 4번 팀원이 제공하는 `MenuHoldService`의 공개 홀드 생성 메서드를 호출한다.
+- 메뉴가 선택되면 3번 팀원의 `ReservationService`가 예약 소유 `ReservationMenuHoldPort`를 호출하고, 4번 팀원의 `ReservationMenuHoldAdapter`가 MenuHold 생성을 연결한다.
 - 3번 팀원은 메뉴 수량을 직접 차감하거나 메뉴 홀드 entity를 생성하지 않고, 4번 팀원은 일반 예약 entity나 예약 수용량을 직접 생성·차감하지 않는다.
 
 ### 트랜잭션과 실패
@@ -364,16 +364,16 @@
 - 다른 도메인은 소유 도메인의 공개 Service 메서드와 DTO만 사용하고 entity·repository·내부 구현을 직접 참조하지 않는다.
 - 필요한 기능이 공개 계약에 없으면 소유 담당자와 메서드·DTO·오류 변경을 합의하고 해당 담당자의 검토를 받는다.
 - 누구든 PR을 리뷰하고 승인할 수 있지만, 비소유자가 엔티티·공개 Service 메서드·API·에러 코드를 변경하려면 소유자의 명시적 확인이 별도로 필요하다.
-- 1차 MVP는 `AuthService`, `StoreService`, `ReservationService`, `MenuHoldService`, `PickupService`로 시작한다. 복잡도가 실제로 확인되고 별도 Issue에 근거가 기록된 경우에만 추가 Service나 Facade를 검토한다.
+- 1차 MVP의 트랜잭션 조정 경계에는 `AuthService`, `StoreService`, `ReservationService`, `MenuHoldService`, `PickupService`와 Store→Menu 잠금·검증을 소유하는 `MenuTransactionFacade`를 사용한다. 교차 도메인 의존은 소유 도메인의 Port와 상대 도메인의 Adapter로 명시한다.
 - 아직 제품 런타임이 구성되지 않았으므로 아래 패키지 경로는 소유권만 예약한다. 빈 패키지·entity·API·마이그레이션은 실제 승인 기능 구현을 시작할 때 생성한다.
 
 ### 최종 도메인·엔티티·API·파일 소유권
 
 | 팀원 | 소유 도메인·주요 데이터 | 공개 API 최종 관리 | 예약 패키지 경로 | 기능 명세·OpenAPI |
 |---|---|---|---|---|
-| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보, 내 예약 내역 | `com.miriyum.domain.auth`(JWT·쿠키·CSRF·공통 에러코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) | `docs/specs/auth-account/` |
+| 1번 | 일반 사용자·매장 운영자 계정, 인증 자격·계정 상태, 사용자 프로필·마이페이지 진입 | 회원가입·로그인·재발급·로그아웃, 사용자 정보 | `com.miriyum.domain.auth`(JWT·쿠키·CSRF·공통 에러코드 등 공용 인프라 전용, 계정 entity 없음), `com.miriyum.domain.consumer`(일반 사용자 전용), `com.miriyum.domain.storeoperator`(매장 운영자 전용) | `docs/specs/auth-account/` |
 | 2번 | 매장, 대표 운영자 FK·권한 판정, 사업자 검증·픽업 기능 상태, 운영시간·예약 접수 시간대, 메뉴 기본정보·검색 | 매장 목록·상세·검색, 매장·운영시간·예약 접수 시간대·메뉴 기본정보 관리 | `com.miriyum.domain.store`, `com.miriyum.domain.schedule`, `com.miriyum.domain.menu`, `com.miriyum.domain.search` | `docs/specs/store-search/` |
-| 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
+| 3번 | 일반 예약, 예약 인원·팀 수 자원, 예약 가능 판정과 예약 상태 기계 | 일반 예약 생성·취소·조회·내 예약 내역·상태 변경, 운영자 예약 관리 | `com.miriyum.domain.reservation` | `docs/specs/reservation/` |
 | 4번 | 메뉴 수량 원장, 메뉴 홀드, 품절·복구, 픽업 예약·상태 | 픽업 예약, 메뉴 수량·홀드 가능 조회와 운영자 수량 관리 | `com.miriyum.domain.menuhold`, `com.miriyum.domain.pickup` | `docs/specs/menu-hold-pickup/` |
 
 정확한 물리 테이블 이름과 FK는 `3. 상태 전이와 논리 ERD`에서 확정한다. 1차 MVP는 `consumer_accounts`, `store_operator_accounts`, `stores.store_operator_account_id`와 계정 물리 분리 계약을 사용한다.
@@ -382,7 +382,7 @@
 
 | 사용자 기능 | OpenAPI 최종 관리 | 함께 검토할 소유자 |
 |---|---|---|
-| 마이페이지 내 예약 내역 | 1번 `auth-account` | 3번: 예약 상태·조회 조건·예약 DTO |
+| 마이페이지 내 예약 내역 | 3번 `reservation` | 1번: 인증 principal·계정 상태 |
 | 매장 목록·상세·검색의 예약 가능 여부 | 2번 `store-search` | 3번: 예약 가능 판정·가용성 DTO |
 | 일반 예약 생성과 선택 메뉴 홀드 | 3번 `reservation` | 4번: 메뉴 홀드 요청·수량·오류 |
 | 예약 취소와 메뉴 수량 복구 | 3번 `reservation` | 4번: 홀드 해제·수량 복구·오류 |

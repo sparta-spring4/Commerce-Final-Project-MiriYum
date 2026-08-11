@@ -22,7 +22,7 @@ paths:
   /api/v1/consumers/me/contact:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
   /api/v1/consumers/me/reservations:
-    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations"
   /api/v1/consumers/reservations/{reservationId}:

@@ -33,14 +33,14 @@
 
 | 사용자 목적 | 공개 API | 선택 이유 |
 | --- | --- | --- |
-| 예약 생성 | `POST /api/v1/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
-| 본인 상세 | `GET /api/v1/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
+| 예약 생성 | `POST /api/v1/consumers/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
+| 본인 상세 | `GET /api/v1/consumers/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
-| 운영자 목록·상세 | `/store-operator/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
+| 운영자 목록·상세 | `/api/v1/store-operators/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
-| 시간 정책 초안 | `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
+| 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
 | 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
 | 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellation` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
@@ -82,7 +82,7 @@
 
 ### 운영자 시간 정책 lifecycle
 
-- 공개 경로는 공통 정본 C-008에 따라 모두 `/api/v1/store-operator/stores/{storeId}/reservation-time-policies` 아래에 둔다. 세 쓰기 명령은 bearer 인증과 `Idempotency-Key`를 필수로 사용하고 요청 본문에서 계정 ID·역할을 받지 않는다.
+- 공개 경로는 공통 정본 C-008에 따라 모두 `/api/v1/store-operators/stores/{storeId}/reservation-time-policies` 아래에 둔다. 세 쓰기 명령은 bearer 인증과 `Idempotency-Key`를 필수로 사용하고 요청 본문에서 계정 ID·역할을 받지 않는다.
 - 초안 요청은 분 단위 `slotInterval`, `serviceDuration`, `turnoverDuration`만 받는다. 게시 요청은 `publicationMode: IMMEDIATE | SCHEDULED`, 조건부 `effectiveAt`, 1~500자의 `changeReason`을 받고 철회 요청은 `changeReason`만 받는다. 알 수 없는 필드는 거부한다.
 - 응답은 문자열 `storeId`, 숫자 `version`, 세 duration, 상태, nullable `effectiveAt`만 공개한다. Entity·내부 PK·감사 필드는 공개하지 않는다.
 - 멱등 기록을 선점한 뒤 Store 공개 계약 `StoreService.requireSchedulePublicationAuthority()`로 Store 행을 잠그고 계정·대표 운영자 소유권·입점 승인·폐점 상태를 검증한다. Reservation은 Store Entity·Repository를 직접 참조하지 않는다.
@@ -184,6 +184,7 @@
 
 - 생성·취소·방문 완료·수용량 게시·시간 정책 lifecycle 명령은 모두 `Idempotency-Key`를 요구한다.
 - 조정하는 `ReservationService`가 C-007의 5초 트랜잭션 경계와 `READ_COMMITTED`를 사용한다.
+- 메뉴 홀드 생성·해제는 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`를 통하며, MenuHold의 예약 시간 조회는 좁은 `ReservationTimeResolutionService`를 사용한다.
 - 시간 정책 명령의 잠금 순서는 멱등 기록 → Store 행 → 대상 정책 → 현재 ACTIVE다.
 - 잠금은 E-005에 따라 멱등 기록 → 예약 aggregate → 수용량 버킷 → 메뉴 재고 풀 순서와 각 PK 오름차순을 지킨다.
 - 교착·일시 잠금·낙관 버전 충돌만 최초 실행 포함 최대 총 3회 새 트랜잭션으로 재시도한다. 첫 실패 뒤 100~200ms, 두 번째 실패 뒤 300~500ms 지터를 트랜잭션 밖에서 기다린다.

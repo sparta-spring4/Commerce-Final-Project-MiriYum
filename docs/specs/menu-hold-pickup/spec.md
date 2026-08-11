@@ -32,7 +32,7 @@
 ## 메뉴 홀드와 일반 예약
 
 - 일반 예약의 `menuSelections`가 비어 있으면 메뉴 홀드 행을 만들지 않는다.
-- 메뉴가 있으면 3번의 `ReservationService`가 4번 `MenuHoldService`의 공개 홀드 생성 메서드를 같은 MySQL 트랜잭션에서 호출한다.
+- 메뉴가 있으면 `ReservationService`가 예약 소유 `ReservationMenuHoldPort`를 호출하고, `ReservationMenuHoldAdapter`가 MenuHold 생성 기능을 같은 MySQL 트랜잭션에서 연결한다.
 - 수용량을 먼저 잠그고 메뉴 재고 풀을 나중에 PK 오름차순으로 잠근다.
 - 모든 메뉴 수량을 확보해야 예약 `CONFIRMED`와 메뉴 홀드 `CONFIRMED`가 함께 확정된다.
 - 하나라도 부족하면 가능한 메뉴만 남기거나 메뉴를 자동 제거하지 않고 예약 전체를 실패시킨다.
@@ -147,9 +147,9 @@ Reservation이 `UNAVAILABLE`을 반환하면 소유 오류 `RESERVATION_002`를 
 
 ## 운영자 재고 API
 
-- `GET /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`로 날짜·메뉴 조건의 현재 재고 버킷을 페이지 조회한다.
-- `POST /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets`로 새 메뉴·제공 구간 정책 버전을 만든다.
-- `PATCH /api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}`로 총 공급·풀 배분·가용 상태의 새 버전을 게시한다.
+- `GET /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets`로 날짜·메뉴 조건의 현재 재고 버킷을 페이지 조회한다.
+- `POST /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets`로 새 메뉴·제공 구간 정책 버전을 만든다.
+- `PATCH /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}`로 총 공급·풀 배분·가용 상태의 새 버전을 게시한다.
 - 요청의 menuId는 2번 매장 도메인의 현재 메뉴와 대상 매장 귀속을 검증한다.
 - 수정 요청은 전체 풀 배분을 함께 제출해 부분 필드 병합으로 합계 불변식이 달라지지 않게 한다.
 - 모든 운영자 명령은 대상 매장의 대표 운영자 FK 일치와 `Idempotency-Key`를 검증한다.
