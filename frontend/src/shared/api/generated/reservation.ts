@@ -8,47 +8,47 @@
 type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
 export interface paths {
-  "/api/v1/reservations": {
+  "/api/v1/consumers/reservations": {
     /** 일반 예약과 선택 메뉴 홀드 생성 */
     post: operations["createReservation"];
   };
-  "/api/v1/reservations/{reservationId}": {
+  "/api/v1/consumers/reservations/{reservationId}": {
     /** 본인 예약 상세 조회 */
     get: operations["getReservation"];
   };
-  "/api/v1/reservations/{reservationId}/cancellations": {
+  "/api/v1/consumers/reservations/{reservationId}/cancellations": {
     /** 본인 예약 취소 */
     post: operations["cancelReservationByConsumer"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations": {
+  "/api/v1/store-operators/stores/{storeId}/reservations": {
     /** 매장 예약 목록 조회 */
     get: operations["getStoreReservations"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}": {
     /** 매장 예약 상세 조회 */
     get: operations["getStoreReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations": {
     /** 매장 사유 예약 취소 */
     post: operations["cancelReservationByStoreOperator"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments": {
     /** 예약 방문 완료 */
     post: operations["fulfillReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}": {
     /** 날짜별 예약 수용량 전체 게시 */
     put: operations["replaceReservationCapacities"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies": {
     /** 매장별 예약 시간 정책 초안 저장 */
     put: operations["createReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication": {
     /** 예약 시간 정책 초안 즉시 또는 예약 게시 */
     post: operations["publishReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
     /** 예약 시간 정책 예약 게시 철회 */
     post: operations["cancelReservationTimePolicyPublication"];
   };

@@ -8,73 +8,73 @@
 type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
 export interface paths {
-  "/api/v1/consumer-auth/accounts": {
+  "/api/v1/consumers/auth/accounts": {
     /** 일반 사용자 가입 */
     post: operations["createConsumerAccount"];
   };
-  "/api/v1/consumer-auth/sessions": {
+  "/api/v1/consumers/auth/sessions": {
     /** 일반 사용자 로그인 */
     post: operations["createConsumerSession"];
   };
-  "/api/v1/consumer-auth/token-refreshes": {
+  "/api/v1/consumers/auth/token-refreshes": {
     /** 일반 사용자 Access Token 재발급 */
     post: operations["refreshConsumerToken"];
   };
-  "/api/v1/consumer-auth/csrf-tokens/current": {
+  "/api/v1/consumers/auth/csrf-tokens/current": {
     /** 일반 사용자 shell CSRF 토큰 준비 */
     get: operations["getConsumerCsrfToken"];
   };
-  "/api/v1/consumer-auth/sessions/current": {
+  "/api/v1/consumers/auth/sessions/current": {
     /** 일반 사용자 현재 shell 로그아웃 */
     delete: operations["deleteConsumerCurrentSession"];
   };
-  "/api/v1/store-operator-auth/accounts": {
+  "/api/v1/store-operators/auth/accounts": {
     /** 매장 운영자 가입 */
     post: operations["createStoreOperatorAccount"];
   };
-  "/api/v1/store-operator-auth/sessions": {
+  "/api/v1/store-operators/auth/sessions": {
     /** 매장 운영자 로그인 */
     post: operations["createStoreOperatorSession"];
   };
-  "/api/v1/store-operator-auth/token-refreshes": {
+  "/api/v1/store-operators/auth/token-refreshes": {
     /** 매장 운영자 Access Token 재발급 */
     post: operations["refreshStoreOperatorToken"];
   };
-  "/api/v1/store-operator-auth/csrf-tokens/current": {
+  "/api/v1/store-operators/auth/csrf-tokens/current": {
     /** 매장 운영자 shell CSRF 토큰 준비 */
     get: operations["getStoreOperatorCsrfToken"];
   };
-  "/api/v1/store-operator-auth/sessions/current": {
+  "/api/v1/store-operators/auth/sessions/current": {
     /** 매장 운영자 현재 shell 로그아웃 */
     delete: operations["deleteStoreOperatorCurrentSession"];
   };
-  "/api/v1/consumer-accounts/me": {
+  "/api/v1/consumers/me": {
     /** 일반 사용자 본인 정보 조회 */
     get: operations["getCurrentConsumerAccount"];
     /** 일반 사용자 닉네임 수정 */
     patch: operations["updateCurrentConsumerAccount"];
   };
-  "/api/v1/consumer-accounts/me/contact": {
+  "/api/v1/consumers/me/contact": {
     /**
      * 일반 사용자 최초 연락처 등록
      * @description 기존 연락처가 없는 계정이 1차 MVP 신뢰 연락처를 최초 등록한다.
      */
     put: operations["registerCurrentConsumerContact"];
   };
-  "/api/v1/store-operator-accounts/me/contact": {
+  "/api/v1/store-operators/me/contact": {
     /**
      * 매장 운영자 최초 연락처 등록
      * @description 기존 연락처가 없는 매장 운영자 계정이 1차 MVP 신뢰 연락처를 최초 등록한다. 매장 운영자 연락처는 예약 알림용 opaque reference를 생성하지 않는다.
      */
     put: operations["registerCurrentStoreOperatorContact"];
   };
-  "/api/v1/store-operator-accounts/me": {
+  "/api/v1/store-operators/me": {
     /** 매장 운영자 본인 정보 조회 */
     get: operations["getCurrentStoreOperatorAccount"];
     /** 매장 운영자 표시 이름 수정 */
     patch: operations["updateCurrentStoreOperatorAccount"];
   };
-  "/api/v1/consumer-accounts/me/reservations": {
+  "/api/v1/consumers/me/reservations": {
     /** 내 예약 내역 조회 */
     get: operations["getCurrentConsumerReservations"];
   };
@@ -429,47 +429,47 @@ export interface external {
   };
   "../reservation/openapi.yaml": {
     paths: {
-      "/api/v1/reservations": {
+      "/api/v1/consumers/reservations": {
         /** 일반 예약과 선택 메뉴 홀드 생성 */
         post: operations["createReservation"];
       };
-      "/api/v1/reservations/{reservationId}": {
+      "/api/v1/consumers/reservations/{reservationId}": {
         /** 본인 예약 상세 조회 */
         get: operations["getReservation"];
       };
-      "/api/v1/reservations/{reservationId}/cancellations": {
+      "/api/v1/consumers/reservations/{reservationId}/cancellations": {
         /** 본인 예약 취소 */
         post: operations["cancelReservationByConsumer"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservations": {
+      "/api/v1/store-operators/stores/{storeId}/reservations": {
         /** 매장 예약 목록 조회 */
         get: operations["getStoreReservations"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}": {
+      "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}": {
         /** 매장 예약 상세 조회 */
         get: operations["getStoreReservation"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations": {
+      "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations": {
         /** 매장 사유 예약 취소 */
         post: operations["cancelReservationByStoreOperator"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments": {
+      "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments": {
         /** 예약 방문 완료 */
         post: operations["fulfillReservation"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}": {
         /** 날짜별 예약 수용량 전체 게시 */
         put: operations["replaceReservationCapacities"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservation-time-policies": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies": {
         /** 매장별 예약 시간 정책 초안 저장 */
         put: operations["createReservationTimePolicyDraft"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication": {
         /** 예약 시간 정책 초안 즉시 또는 예약 게시 */
         post: operations["publishReservationTimePolicyDraft"];
       };
-      "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
         /** 예약 시간 정책 예약 게시 철회 */
         post: operations["cancelReservationTimePolicyPublication"];
       };
