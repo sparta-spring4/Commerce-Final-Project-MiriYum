@@ -1,0 +1,163 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+
+import { kakaoMapLoader } from './KakaoMapLoader'
+import { MapFallback } from './MapFallback'
+import { StoreMapMarker } from './StoreMapMarker'
+import type { KakaoMapProps, MapStore } from './map.types'
+import { hasValidCoordinates } from './map.types'
+
+type MapRuntime = {
+  maps: KakaoMapsNamespace
+  map: KakaoMapInstance
+  container: HTMLElement
+}
+
+export function KakaoMap({
+  stores,
+  selectedStoreId,
+  onSelectStore,
+}: KakaoMapProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const markersRef = useRef(new Map<string, StoreMapMarker>())
+  const storesRef = useRef(stores)
+  const selectedStoreIdRef = useRef(selectedStoreId)
+  const onSelectStoreRef = useRef(onSelectStore)
+  const [runtime, setRuntime] = useState<MapRuntime | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const validStores = useMemo(
+    () => stores.filter(hasValidCoordinates),
+    [stores],
+  )
+  const invalidStoreCount = stores.length - validStores.length
+  const hasValidStores = validStores.length > 0
+  const appKey = import.meta.env.VITE_KAKAO_MAP_APP_KEY ?? ''
+
+  storesRef.current = stores
+  selectedStoreIdRef.current = selectedStoreId
+  onSelectStoreRef.current = onSelectStore
+
+  useEffect(() => {
+    if (!hasValidStores || containerRef.current === null) {
+      return
+    }
+
+    let active = true
+
+    void kakaoMapLoader
+      .load(appKey)
+      .then((maps) => {
+        if (!active || containerRef.current === null) {
+          return
+        }
+
+        const currentStores = storesRef.current.filter(hasValidCoordinates)
+        const centerStore =
+          currentStores.find(
+            (store) => store.storeId === selectedStoreIdRef.current,
+          ) ?? currentStores[0]
+
+        if (centerStore === undefined) {
+          return
+        }
+
+        const container = containerRef.current
+        const map = new maps.Map(container, {
+          center: new maps.LatLng(
+            centerStore.latitude,
+            centerStore.longitude,
+          ),
+        })
+        setRuntime({ maps, map, container })
+      })
+      .catch(() => {
+        if (active) {
+          setLoadError(true)
+        }
+      })
+
+    return () => {
+      active = false
+      for (const marker of markersRef.current.values()) {
+        marker.destroy()
+      }
+      markersRef.current.clear()
+    }
+  }, [appKey, hasValidStores])
+
+  useEffect(() => {
+    if (runtime === null || runtime.container !== containerRef.current) {
+      return
+    }
+
+    const storesById = new Map(
+      validStores.map((store) => [store.storeId, store]),
+    )
+
+    for (const [storeId, marker] of markersRef.current) {
+      const store = storesById.get(storeId)
+      if (store === undefined) {
+        marker.destroy()
+        markersRef.current.delete(storeId)
+        continue
+      }
+      marker.update(store)
+    }
+
+    for (const store of validStores) {
+      if (!markersRef.current.has(store.storeId)) {
+        markersRef.current.set(
+          store.storeId,
+          new StoreMapMarker(runtime.maps, runtime.map, store, (storeId) =>
+            onSelectStoreRef.current(storeId),
+          ),
+        )
+      }
+    }
+
+    for (const [storeId, marker] of markersRef.current) {
+      marker.setSelected(storeId === selectedStoreId)
+    }
+
+    const selectedStore = validStores.find(
+      (store) => store.storeId === selectedStoreId,
+    )
+    if (selectedStore !== undefined) {
+      runtime.map.setCenter(
+        new runtime.maps.LatLng(
+          selectedStore.latitude,
+          selectedStore.longitude,
+        ),
+      )
+    }
+    runtime.map.relayout()
+  }, [runtime, selectedStoreId, validStores])
+
+  if (!hasValidStores) {
+    return <MapFallback reason="표시할 수 있는 매장 좌표가 없습니다." />
+  }
+
+  if (loadError) {
+    return <MapFallback reason="지도를 불러오지 못했습니다." />
+  }
+
+  const selectedStore = validStores.find(
+    (store: MapStore) => store.storeId === selectedStoreId,
+  )
+
+  return (
+    <section aria-label="매장 지도">
+      {runtime === null ? <p role="status">지도를 불러오는 중입니다.</p> : null}
+      <div
+        ref={containerRef}
+        aria-label="검색 결과 지도"
+        style={{ width: '100%', minHeight: 320 }}
+      />
+      {selectedStore !== undefined ? (
+        <p role="status">선택된 매장: {selectedStore.name}</p>
+      ) : null}
+      {invalidStoreCount > 0 ? (
+        <p>좌표를 확인할 수 없는 매장 {invalidStoreCount}곳</p>
+      ) : null}
+    </section>
+  )
+}
