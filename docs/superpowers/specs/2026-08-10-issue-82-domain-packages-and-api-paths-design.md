@@ -248,3 +248,12 @@ PR1의 핵심 회귀 조건은 “동일 요청이 동일 URL에서 동일 인�
 - Security, JWT, cookie, CSRF, rate limit, idempotency, OpenAPI, frontend 소비 경로가 함께 전환된다.
 - DB migration 없이 두 PR이 각각 전체 필수 검증을 통과한다.
 - 관련 문서와 Issue #82의 완료 조건이 실제 구현과 일치한다.
+
+## 10. PR1 메뉴 거래 경계 통합 검증
+
+PR1에서 Store의 Menu 위임 래퍼를 제거한 뒤에도 실제 거래 경계의 트랜잭션·잠금 계약은 유지한다. `MenuTransactionService` 전용 Spring 통합 테스트는 mock이나 테스트용 서비스를 사용하지 않고 실제 운영 Bean과 Testcontainers MySQL을 사용한다.
+
+- 활성 caller transaction 없이 호출하면 `Propagation.MANDATORY`로 거부한다.
+- 활성 transaction에서는 Store 행을 먼저 잠그고 Menu 행을 다음으로 잠근다.
+- 서비스가 참여한 caller transaction의 후속 변경은 caller 실패 시 함께 롤백된다.
+- 잠금 순서 검증은 실제 MySQL row-lock 경합을 관찰하며 Repository 호출 순서 mock으로 대체하지 않는다.
