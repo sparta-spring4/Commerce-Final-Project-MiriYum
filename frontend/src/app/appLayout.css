@@ -17,12 +17,25 @@
   top: var(--space-1);
 }
 
+/*
+ * 시안의 반투명 sticky 헤더. 스크롤한 콘텐츠가 헤더 뒤로 비쳐 보이면서
+ * 코럴 기미의 옅은 그림자로 층을 만든다.
+ */
 .app-header {
   position: sticky;
   top: 0;
   z-index: 5;
-  background-color: var(--color-surface);
-  border-bottom: 1px solid var(--color-surface-container-highest);
+  background-color: rgba(255, 249, 231, 0.82);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 1px 8px rgba(255, 95, 56, 0.06);
+}
+
+/* backdrop-filter를 지원하지 않으면 불투명 배경으로 떨어진다. */
+@supports not (backdrop-filter: blur(16px)) {
+  .app-header {
+    background-color: var(--color-surface);
+    border-bottom: 1px solid var(--color-surface-container-highest);
+  }
 }
 
 .app-header__inner {
@@ -67,15 +80,56 @@ main:focus {
 
 .app-footer {
   margin-top: var(--space-8);
-  padding: var(--space-4) 0;
+  padding: var(--space-6) 0 var(--space-4);
   background-color: var(--color-surface-container-low);
   border-top: 1px solid var(--color-surface-container-highest);
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-label-md);
 }
 
+.app-footer__columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .app-footer__columns {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+
 .app-footer__brand {
-  font-size: var(--font-size-body-lg);
+  font-size: var(--font-size-headline-md);
   font-weight: 800;
+  letter-spacing: -0.01em;
   color: var(--color-primary);
+}
+
+.app-footer__tagline {
+  margin-top: 0.375rem;
+  max-width: 22rem;
+  line-height: 1.6;
+}
+
+.app-footer__heading {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-1);
+}
+
+.app-footer__links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.app-footer__note {
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+  font-size: var(--font-size-label-sm);
 }

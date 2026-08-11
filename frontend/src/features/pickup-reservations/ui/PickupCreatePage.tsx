@@ -85,7 +85,7 @@ export function PickupCreatePage() {
   )
 
   return (
-    <div className="mi-container pickup-create">
+    <div className="mi-container mi-container--narrow pickup-create">
       <header className="pickup-create__header">
         <h1>픽업 예약</h1>
         <p>

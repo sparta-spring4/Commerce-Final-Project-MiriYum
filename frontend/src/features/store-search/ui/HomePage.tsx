@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router'
-import { toDisplayNameMap, useCatalog } from '../api/queries'
+import { useCatalog } from '../api/queries'
 import {
   EMPTY_FILTERS,
   writeFilters,
+  type CatalogItem,
   type StoreSearchFilters,
 } from '../model/searchParams'
 import { SearchFilterForm } from './SearchFilterForm'
@@ -10,13 +11,15 @@ import { SearchFilterForm } from './SearchFilterForm'
 /**
  * 홈. 검색 진입점이다.
  *
- * 큐레이션·추천 목록을 두지 않는다. 1차 MVP 계약에 큐레이션 기준이 없고,
- * 이력 기반 추천은 2차 MVP 범위다. 시안의 "오늘의 추천 맛집" 자리는 만들지 않는다.
+ * 큐레이션·추천 목록은 두지 않는다. 1차 MVP 계약에 큐레이션 기준이 없고
+ * 이력 기반 추천은 2차 MVP다. 시안의 "오늘의 추천 맛집" 카드 자리는 만들지 않는다.
+ *
+ * 반대로 사진이 없다는 이유로 시안의 시각 언어까지 버리지는 않는다.
+ * 히어로 레이어·앰비언트 광원·카테고리 타일은 데이터가 아니라 표현이다.
  */
 export function HomePage() {
   const navigate = useNavigate()
   const categories = useCatalog('store-categories')
-  const categoryNames = toDisplayNameMap(categories.data)
 
   function submit(filters: StoreSearchFilters) {
     // 홈에서 제출한 조건이 결과 목록으로 그대로 이어진다.
@@ -24,47 +27,144 @@ export function HomePage() {
   }
 
   return (
-    <div className="mi-container home">
-      <section className="home__hero">
-        <p className="home__eyebrow">DISCOVER LOCAL FLAVORS</p>
-        <h1 className="home__title">
-          맛있는 기다림, <strong>미리냠</strong>과 함께 시작하세요.
-        </h1>
-        <p className="home__lead">
-          예약부터 메뉴 미리 선택, 픽업까지. 줄 서지 않고 여유롭게 맛집을 즐겨
-          보세요.
-        </p>
+    <div className="home">
+      <div className="home__ambient" aria-hidden="true" />
 
-        <SearchFilterForm
-          layout="compact"
-          value={EMPTY_FILTERS}
-          storeCategories={categories.data ?? []}
-          onSubmit={submit}
-        />
-      </section>
+      <div className="mi-container">
+        <section className="home__hero">
+          <p className="home__eyebrow">Discover Local Flavors</p>
+          <h1 className="home__title">
+            맛있는 기다림, <strong>미리냠</strong>과 함께 시작하세요.
+          </h1>
+          <p className="home__lead">
+            예약부터 메뉴 미리 선택, 픽업까지. 줄 서지 않고 여유롭게 맛집을 즐겨
+            보세요.
+          </p>
 
-      <section className="home__categories" aria-label="카테고리로 찾기">
-        <h2>어떤 메뉴를 찾으시나요?</h2>
-        {categories.isPending && <p>카테고리를 불러오는 중입니다.</p>}
-        {categories.isSuccess && categories.data.length > 0 && (
-          <ul className="home__category-list">
-            {categories.data.map((item) => (
-              <li key={item.code}>
-                <button
-                  type="button"
-                  className="mi-chip"
-                  onClick={() =>
+          <SearchFilterForm
+            layout="compact"
+            value={EMPTY_FILTERS}
+            storeCategories={categories.data ?? []}
+            onSubmit={submit}
+          />
+        </section>
+
+        <section className="home__section" aria-label="카테고리로 찾기">
+          <div className="home__section-head">
+            <h2>어떤 메뉴를 찾으시나요?</h2>
+            <p>카테고리를 고르면 그 조건으로 매장을 찾습니다.</p>
+          </div>
+
+          {categories.isPending && <p>카테고리를 불러오는 중입니다.</p>}
+
+          {categories.isSuccess && categories.data.length > 0 && (
+            <div className="home__category-grid">
+              {categories.data.map((item, index) => (
+                <CategoryTile
+                  key={item.code}
+                  item={item}
+                  index={index}
+                  onSelect={() =>
                     submit({ ...EMPTY_FILTERS, storeCategoryCode: item.code })
                   }
-                >
-                  {/* 표시명은 서버 catalog가 소유한다. code로 이름을 만들지 않는다. */}
-                  {categoryNames.get(item.code) ?? item.displayName}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="home__section" aria-label="미리냠이 특별한 이유">
+          <div className="home__section-head">
+            <h2>미리냠이 특별한 이유</h2>
+            <p>지금 바로 쓸 수 있는 기능만 담았습니다.</p>
+          </div>
+
+          {/*
+            1차 MVP에서 실제로 동작하는 세 거래만 소개한다.
+            시안의 "실시간 스마트 웨이팅"·"검증된 리얼 리뷰" 카드는 고도화라
+            문구로도 노출하지 않는다.
+          */}
+          <div className="home__features">
+            <Feature
+              mark="1"
+              title="조건에 맞는 자리를 먼저 확인"
+              description="날짜·시간·인원을 넣으면 예약 가능한 매장만 골라 볼 수 있습니다."
+            />
+            <Feature
+              mark="2"
+              title="메뉴를 미리 선택하고 방문"
+              description="예약과 동시에 대표 메뉴를 골라 두면 도착 시간에 맞춰 준비합니다."
+            />
+            <Feature
+              mark="3"
+              title="기다리지 않는 픽업 예약"
+              description="원하는 시간대를 골라 메뉴를 주문하고 찾아가기만 하면 됩니다."
+            />
+          </div>
+        </section>
+      </div>
     </div>
+  )
+}
+
+/**
+ * 카테고리 타일.
+ *
+ * 시안은 정사각 사진 타일이지만 1차 MVP 계약에 이미지 필드가 없다. 가짜 사진을
+ * 넣는 대신 팔레트 그라디언트로 같은 형태와 무게를 만들고, 표시명은 서버 catalog
+ * 값을 그대로 쓴다.
+ */
+function CategoryTile({
+  item,
+  index,
+  onSelect,
+}: {
+  item: CatalogItem
+  index: number
+  onSelect: () => void
+}) {
+  const palette = TILE_PALETTE[index % TILE_PALETTE.length]
+
+  return (
+    <button type="button" className="home__category" onClick={onSelect}>
+      <span
+        className="home__category-tile"
+        style={{ '--tile-from': palette.from, '--tile-to': palette.to } as React.CSSProperties}
+        aria-hidden="true"
+      >
+        {/* 표시명 첫 글자는 장식이다. 의미는 아래 이름이 전달한다. */}
+        {[...item.displayName][0]}
+      </span>
+      <span className="home__category-name">{item.displayName}</span>
+    </button>
+  )
+}
+
+/** 타일 색조. 코럴·머스터드 계열 안에서 순환해 한 화면이 한 팔레트로 읽히게 한다. */
+const TILE_PALETTE = [
+  { from: '#ffdad2', to: '#ffb4a2' },
+  { from: '#ffdea8', to: '#ffba20' },
+  { from: '#ffb4a2', to: '#ff5f38' },
+  { from: '#e9e1dc', to: '#cdc5c0' },
+] as const
+
+function Feature({
+  mark,
+  title,
+  description,
+}: {
+  mark: string
+  title: string
+  description: string
+}) {
+  return (
+    <article className="home__feature">
+      {/* span으로 둔다. p로 두면 아래 본문 문단 규칙이 색·크기를 덮어쓴다. */}
+      <span className="home__feature-mark" aria-hidden="true">
+        {mark}
+      </span>
+      <h3>{title}</h3>
+      <p>{description}</p>
+    </article>
   )
 }

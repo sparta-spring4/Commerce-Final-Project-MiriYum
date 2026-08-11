@@ -1,59 +1,7 @@
-/* 매장 검색·상세 화면 배치. 색·간격 값은 theme.css의 토큰만 참조한다. */
-
-/* ── 홈 ───────────────────────────────────────────────────────────────── */
-
-.home__hero {
-  padding: var(--space-6) 0 var(--space-4);
-}
-
-.home__eyebrow {
-  font-size: var(--font-size-label-sm);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--color-primary);
-}
-
-.home__title {
-  margin-top: var(--space-1);
-  font-size: var(--font-size-headline-lg);
-  line-height: var(--line-height-headline-lg);
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-
-.home__title strong {
-  color: var(--color-primary);
-}
-
-.home__lead {
-  margin-top: var(--space-1);
-  max-width: 44rem;
-  color: var(--color-on-surface-variant);
-  font-size: var(--font-size-body-lg);
-  line-height: var(--line-height-body-lg);
-}
-
-.home__categories {
-  padding: var(--space-4) 0 var(--space-8);
-}
-
-.home__categories h2 {
-  font-size: var(--font-size-headline-md);
-  margin-bottom: var(--space-2);
-}
-
-.home__category-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-@media (min-width: 60rem) {
-  .home__title {
-    font-size: var(--font-size-display-lg);
-    line-height: var(--line-height-display-lg);
-  }
-}
+/*
+ * 매장 검색 폼·결과·상세 배치. 색·간격 값은 theme.css의 토큰만 참조한다.
+ * 홈 고유 배치는 home.css가 소유한다.
+ */
 
 /* ── 검색 폼 ──────────────────────────────────────────────────────────── */
 
@@ -64,21 +12,118 @@
 }
 
 .store-search-form--compact {
-  margin-top: var(--space-3);
-  padding: var(--space-3);
-  background-color: var(--color-surface-container-lowest);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
+  max-width: 44rem;
+  gap: var(--space-2);
 }
 
-.store-search-form__keyword {
+/*
+ * 홈의 검색 필.
+ *
+ * 시안은 흰 카드 하나 안에 입력과 코럴 버튼이 함께 들어간다. 레이블을 위에
+ * 쌓으면 그 형태가 무너지므로, 레이블은 보조기술에만 남기고 시각적으로는
+ * placeholder와 아이콘이 역할을 대신한다.
+ */
+.store-search-form--compact .store-search-form__keyword {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--space-1);
+  padding: var(--space-1);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 8px 32px rgba(255, 95, 56, 0.12);
+  transition: box-shadow 250ms ease;
 }
 
-.store-search-form__keyword .mi-field {
+.store-search-form--compact .store-search-form__keyword:focus-within {
+  box-shadow: 0 16px 48px rgba(255, 95, 56, 0.18);
+}
+
+.store-search-form--compact .store-search-form__keyword .mi-field {
   flex: 1;
+  min-width: 0;
+}
+
+/* 필 안에서는 입력의 테두리·배경을 지운다. 카드가 곧 입력의 경계다. */
+.store-search-form--compact .mi-field__control {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+.store-search-form--compact .mi-field__control:focus {
+  border-color: transparent;
+}
+
+.store-search-form__search-mark {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-left: var(--space-1);
+  color: var(--color-primary);
+  font-size: 1.125rem;
+}
+
+.store-search-form--compact .mi-button {
+  border-radius: var(--radius-lg);
+  padding: 0 var(--space-4);
+  min-height: 3rem;
+}
+
+/*
+ * 상세 조건 접기.
+ *
+ * 홈에는 검색 한 줄만 두고 나머지 조건은 펼쳐 볼 수 있게 한다. 시안의 홈이
+ * 검색 진입점 하나로 정리돼 있고, 전체 필터는 결과 화면이 소유한다.
+ */
+.store-search-form__advanced {
+  border-radius: var(--radius-md);
+}
+
+.store-search-form__advanced > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  list-style: none;
+}
+
+.store-search-form__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.store-search-form__advanced > summary::after {
+  content: '▾';
+  transition: transform 200ms ease;
+}
+
+.store-search-form__advanced[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.store-search-form__advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.store-search-form--full .store-search-form__keyword {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 결과 화면의 필터는 20rem 사이드바 안에 들어간다.
+ * 위 3열 grid는 뷰포트 폭을 보므로 좁은 사이드바에서도 3열이 되어 입력이
+ * 뭉개진다. 사이드바 레이아웃은 항상 1열로 둔다.
+ */
+.store-search-form--full .store-search-form__grid {
+  grid-template-columns: 1fr;
 }
 
 .store-search-form__grid {

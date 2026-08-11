@@ -118,7 +118,7 @@ export function ReservationCreatePage() {
   const currentDestination = `/stores/${storeId}/reserve?${writeDraft(draft).toString()}`
 
   return (
-    <div className="mi-container reservation-create">
+    <div className="mi-container mi-container--narrow reservation-create">
       <header className="reservation-create__header">
         <h1>예약 정보 입력</h1>
         <p>

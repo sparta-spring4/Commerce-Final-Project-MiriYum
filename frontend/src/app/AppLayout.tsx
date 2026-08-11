@@ -60,8 +60,41 @@ export function AppLayout({ shell, accountSlot }: Props) {
 
       <footer className="app-footer">
         <div className="mi-container">
-          <p className="app-footer__brand">MiriYum</p>
-          <p>맛있는 기다림을 줄여 주는 예약·픽업 서비스입니다.</p>
+          <div className="app-footer__columns">
+            <div>
+              <p className="app-footer__brand">MiriYum</p>
+              <p className="app-footer__tagline">
+                줄 서지 않고 즐기는 예약·메뉴 미리 선택·픽업 서비스입니다.
+              </p>
+            </div>
+
+            {/*
+              실제로 존재하는 route만 건다. 준비 중 링크나 빈 페이지로 가는
+              항목을 만들지 않는다.
+            */}
+            <nav aria-label="서비스 메뉴">
+              <p className="app-footer__heading">서비스</p>
+              <div className="app-footer__links">
+                <Link to={ROUTES.stores}>매장 찾기</Link>
+                {shell === 'consumer' && (
+                  <Link to={ROUTES.myReservations}>내 예약</Link>
+                )}
+              </div>
+            </nav>
+
+            <nav aria-label="계정 메뉴">
+              <p className="app-footer__heading">계정</p>
+              <div className="app-footer__links">
+                <Link to={ROUTES.consumerSignIn}>로그인</Link>
+                <Link to={ROUTES.consumerSignUp}>회원가입</Link>
+              </div>
+            </nav>
+          </div>
+
+          <p className="app-footer__note">
+            표시되는 예약 가능 여부는 조회 시점 기준이며 최종 확정은 예약 시점에
+            서버가 판정합니다.
+          </p>
         </div>
       </footer>
     </>

@@ -27,7 +27,7 @@ export function ReservationDetailPage() {
 
   if (detail.isPending) {
     return (
-      <div className="mi-container reservation-detail">
+      <div className="mi-container mi-container--narrow reservation-detail">
         <Loading label="예약 정보를 불러오는 중입니다." />
       </div>
     )
@@ -36,7 +36,7 @@ export function ReservationDetailPage() {
   if (detail.isError) {
     const notFound = hasErrorCode(detail.error, ReservationErrorCode.NOT_FOUND)
     return (
-      <div className="mi-container reservation-detail">
+      <div className="mi-container mi-container--narrow reservation-detail">
         <ErrorState
           error={detail.error}
           message={notFound ? '예약을 찾을 수 없습니다.' : undefined}
@@ -52,7 +52,7 @@ export function ReservationDetailPage() {
   const reservation = detail.data
 
   return (
-    <div className="mi-container reservation-detail">
+    <div className="mi-container mi-container--narrow reservation-detail">
       <nav aria-label="이동 경로" className="reservation-detail__breadcrumb">
         <Link to={ROUTES.myReservations}>내 예약</Link>
         <span aria-hidden="true"> / </span>

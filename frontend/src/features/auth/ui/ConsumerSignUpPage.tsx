@@ -98,7 +98,7 @@ export function ConsumerSignUpPage() {
   }
 
   return (
-    <div className="mi-container auth-page">
+    <div className="mi-container mi-container--form auth-page">
       <header className="auth-page__header">
         <h1>회원가입</h1>
         <p>미리냠과 함께 맛있는 여정을 시작하세요</p>

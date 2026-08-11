@@ -2,7 +2,6 @@
 
 .pickup-create,
 .pickup-detail {
-  max-width: 48rem;
   padding-bottom: var(--space-8);
 }
 

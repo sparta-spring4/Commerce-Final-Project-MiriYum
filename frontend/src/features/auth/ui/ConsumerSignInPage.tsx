@@ -64,7 +64,7 @@ export function ConsumerSignInPage() {
   }
 
   return (
-    <div className="mi-container auth-page">
+    <div className="mi-container mi-container--form auth-page">
       <header className="auth-page__header">
         <h1>로그인</h1>
         <p>맛있는 여정의 시작</p>

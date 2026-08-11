@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import { SelectField, TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
@@ -18,16 +19,13 @@ interface Props {
   value: StoreSearchFilters
   storeCategories: CatalogItem[]
   onSubmit: (next: StoreSearchFilters) => void
-  /** 홈은 단일 검색줄, 결과 화면은 전체 필터를 보여 준다. */
+  /**
+   * 홈은 검색 한 줄과 접이식 상세 조건, 결과 화면은 항상 펼친 전체 필터를 쓴다.
+   * 시안의 홈이 검색 진입점 하나로 정리돼 있고 전체 필터는 결과 화면이 소유한다.
+   */
   layout: 'compact' | 'full'
 }
 
-/**
- * 매장 검색 조건 입력.
- *
- * 제출 전까지는 로컬 draft를 편집하고, 제출 시점에만 URL로 올린다.
- * 타이핑마다 주소가 바뀌면 뒤로가기 기록이 글자 수만큼 쌓인다.
- */
 export function SearchFilterForm({
   value,
   storeCategories,
@@ -41,6 +39,7 @@ export function SearchFilterForm({
 
   const conditionState = reservationConditionState(draft)
   const availableOnlyAllowed = canRequestAvailableOnly(draft)
+  const compact = layout === 'compact'
 
   function update(patch: Partial<StoreSearchFilters>) {
     setDraft((current) => ({ ...current, ...patch }))
@@ -56,28 +55,8 @@ export function SearchFilterForm({
     })
   }
 
-  return (
-    <form
-      className={`store-search-form store-search-form--${layout}`}
-      onSubmit={handleSubmit}
-      aria-label="매장 검색 조건"
-    >
-      <div className="store-search-form__keyword">
-        <TextField
-          label="검색어"
-          name="keyword"
-          value={draft.keyword}
-          maxLength={100}
-          placeholder="매장 이름이나 메뉴로 검색"
-          onChange={(event) => update({ keyword: event.target.value })}
-        />
-        {layout === 'compact' && (
-          <Button type="submit" variant="primary">
-            검색
-          </Button>
-        )}
-      </div>
-
+  const conditions = (
+    <>
       <div className="store-search-form__grid">
         <SelectField
           label="지역"
@@ -176,12 +155,74 @@ export function SearchFilterForm({
           </Alert>
         )}
       </fieldset>
+    </>
+  )
 
-      {layout === 'full' && (
-        <Button type="submit" variant="primary" block>
-          이 조건으로 검색
-        </Button>
+  return (
+    <form
+      className={`store-search-form store-search-form--${layout}`}
+      onSubmit={handleSubmit}
+      aria-label="매장 검색 조건"
+    >
+      <div className="store-search-form__keyword">
+        {compact && (
+          <span className="store-search-form__search-mark" aria-hidden="true">
+            ⌕
+          </span>
+        )}
+        <TextField
+          label="검색어"
+          // 필 형태에는 레이블 자리가 없다. 지우지 않고 숨겨 보조기술에는 남긴다.
+          labelHidden={compact}
+          name="keyword"
+          value={draft.keyword}
+          maxLength={100}
+          placeholder="매장 이름이나 메뉴로 검색해 보세요"
+          onChange={(event) => update({ keyword: event.target.value })}
+        />
+        {compact && (
+          <Button type="submit" variant="primary">
+            검색
+          </Button>
+        )}
+      </div>
+
+      {compact ? (
+        <Disclosure summary="지역·카테고리·예약 조건 더보기">
+          {conditions}
+          <Button type="submit" variant="primary" block>
+            이 조건으로 검색
+          </Button>
+        </Disclosure>
+      ) : (
+        <>
+          {conditions}
+          <Button type="submit" variant="primary" block>
+            이 조건으로 검색
+          </Button>
+        </>
       )}
     </form>
+  )
+}
+
+/**
+ * 접이식 상세 조건.
+ *
+ * `details`/`summary`를 쓰면 키보드 조작과 펼침 상태 전달을 브라우저가 맡는다.
+ * 직접 만든 토글은 aria-expanded를 빠뜨리기 쉽다.
+ */
+function Disclosure({
+  summary,
+  children,
+}: {
+  summary: string
+  children: ReactNode
+}) {
+  return (
+    <details className="store-search-form__advanced">
+      <summary>{summary}</summary>
+      <div className="store-search-form__advanced-body">{children}</div>
+    </details>
   )
 }

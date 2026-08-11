@@ -8,6 +8,14 @@ import type {
 interface FieldShellProps {
   label: string
   required?: boolean
+  /**
+   * 레이블을 시각적으로만 숨긴다.
+   *
+   * 홈의 검색 필처럼 형태가 레이블 자리를 허용하지 않을 때 쓴다. 레이블을
+   * 제거하지 않고 숨기기만 하므로 보조기술은 그대로 읽는다. placeholder는
+   * 레이블 대체물이 아니다.
+   */
+  labelHidden?: boolean
   help?: string
   /** 서버·클라이언트 검증 오류 문구. 입력 바로 아래에 붙는다. */
   error?: string | null
@@ -27,6 +35,7 @@ interface FieldShellProps {
 export function FieldShell({
   label,
   required = false,
+  labelHidden = false,
   help,
   error,
   children,
@@ -49,9 +58,12 @@ export function FieldShell({
         필수 여부 자체는 입력의 required 속성이 보조기술에 전달한다.
       */}
       <label
-        className={
-          required ? 'mi-field__label mi-field__label--required' : 'mi-field__label'
-        }
+        className={[
+          labelHidden ? 'visually-hidden' : 'mi-field__label',
+          required && !labelHidden ? 'mi-field__label--required' : null,
+        ]
+          .filter(Boolean)
+          .join(' ')}
         htmlFor={controlId}
       >
         {label}
@@ -76,12 +88,14 @@ type TextFieldProps = Omit<
   'id' | 'aria-invalid' | 'aria-describedby'
 > & {
   label: string
+  labelHidden?: boolean
   help?: string
   error?: string | null
 }
 
 export function TextField({
   label,
+  labelHidden,
   help,
   error,
   required,
@@ -89,7 +103,13 @@ export function TextField({
   ...rest
 }: TextFieldProps) {
   return (
-    <FieldShell label={label} required={required} help={help} error={error}>
+    <FieldShell
+      label={label}
+      required={required}
+      labelHidden={labelHidden}
+      help={help}
+      error={error}
+    >
       {({ controlId, describedBy, invalid }) => (
         <input
           {...rest}

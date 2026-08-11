@@ -323,6 +323,21 @@
   }
 }
 
+/*
+ * 좁은 컨테이너 변형.
+ *
+ * 기능 CSS에서 `.mi-container`와 같은 요소에 max-width를 다시 선언하면 두
+ * 규칙의 명시도가 같아 번들 순서가 승자를 정한다. 실제로 로그인 카드가
+ * 1280px로 벌어졌다. 변형을 같은 파일에서 정의해 순서를 고정한다.
+ */
+.mi-container--narrow {
+  max-width: 48rem;
+}
+
+.mi-container--form {
+  max-width: 30rem;
+}
+
 .mi-stack {
   display: flex;
   flex-direction: column;

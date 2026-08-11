@@ -31,7 +31,7 @@ export function PickupDetailPage() {
 
   if (detail.isPending) {
     return (
-      <div className="mi-container pickup-detail">
+      <div className="mi-container mi-container--narrow pickup-detail">
         <Loading label="픽업 예약을 불러오는 중입니다." />
       </div>
     )
@@ -40,7 +40,7 @@ export function PickupDetailPage() {
   if (detail.isError) {
     const notFound = hasErrorCode(detail.error, PickupErrorCode.NOT_FOUND)
     return (
-      <div className="mi-container pickup-detail">
+      <div className="mi-container mi-container--narrow pickup-detail">
         <ErrorState
           error={detail.error}
           message={notFound ? '픽업 예약을 찾을 수 없습니다.' : undefined}
@@ -56,7 +56,7 @@ export function PickupDetailPage() {
   const reservation = detail.data
 
   return (
-    <div className="mi-container pickup-detail">
+    <div className="mi-container mi-container--narrow pickup-detail">
       <header className="pickup-detail__header">
         <Badge tone={PICKUP_STATUS_TONE[reservation.status]}>
           {PICKUP_STATUS_LABEL[reservation.status]}

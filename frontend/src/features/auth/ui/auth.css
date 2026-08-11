@@ -1,7 +1,6 @@
 /* 가입·로그인 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
 
 .auth-page {
-  max-width: 30rem;
   padding-top: var(--space-6);
   padding-bottom: var(--space-8);
 }

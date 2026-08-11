@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { unauthenticatedConsumer } from '../features/auth/test/handlers'
 import { catalogHandlers } from '../features/store-search/test/handlers'
@@ -46,17 +46,22 @@ describe('앱 셸', () => {
   test('비로그인 사용자에게 로그인·회원가입 진입점을 보여 준다', async () => {
     renderAt('/')
 
+    // 푸터에도 같은 이름의 링크가 있으므로 헤더로 범위를 좁힌다.
+    const header = within(screen.getByRole('banner'))
+
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+      expect(header.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('link', { name: '회원가입' })).toBeInTheDocument()
+    expect(header.getByRole('link', { name: '회원가입' })).toBeInTheDocument()
   })
 
   test('공개 화면은 비로그인 상태에서도 로그인으로 튕기지 않는다', async () => {
     renderAt('/')
 
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: '로그인' })).toBeInTheDocument(),
+      expect(
+        within(screen.getByRole('banner')).getByRole('link', { name: '로그인' }),
+      ).toBeInTheDocument(),
     )
     expect(
       screen.getByRole('form', { name: '매장 검색 조건' }),
