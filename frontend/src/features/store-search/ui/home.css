@@ -209,6 +209,7 @@
   place-items: center;
   aspect-ratio: 1;
   width: 100%;
+  overflow: hidden;
   border-radius: var(--radius-lg);
   background: linear-gradient(
     145deg,
@@ -222,6 +223,22 @@
   transition:
     transform 200ms ease,
     box-shadow 200ms ease;
+}
+
+/*
+ * 일러스트는 타일을 꽉 채운다. 폭·높이 속성으로 비율을 미리 잡아
+ * 로딩 중 레이아웃이 밀리지 않게 한다.
+ */
+.home__category-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 400ms ease;
+}
+
+.home__category:hover .home__category-art,
+.home__category:focus-visible .home__category-art {
+  transform: scale(1.08);
 }
 
 .home__category:hover .home__category-tile,

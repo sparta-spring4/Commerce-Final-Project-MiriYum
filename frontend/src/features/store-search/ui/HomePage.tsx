@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router'
 import { useCatalog } from '../api/queries'
+import { categoryArt, categoryTint } from '../model/categoryArt'
 import {
   EMPTY_FILTERS,
   writeFilters,
@@ -59,11 +60,10 @@ export function HomePage() {
 
           {categories.isSuccess && categories.data.length > 0 && (
             <div className="home__category-grid">
-              {categories.data.map((item, index) => (
+              {categories.data.map((item) => (
                 <CategoryTile
                   key={item.code}
                   item={item}
-                  index={index}
                   onSelect={() =>
                     submit({ ...EMPTY_FILTERS, storeCategoryCode: item.code })
                   }
@@ -110,43 +110,45 @@ export function HomePage() {
 /**
  * 카테고리 타일.
  *
- * 시안은 정사각 사진 타일이지만 1차 MVP 계약에 이미지 필드가 없다. 가짜 사진을
- * 넣는 대신 팔레트 그라디언트로 같은 형태와 무게를 만들고, 표시명은 서버 catalog
- * 값을 그대로 쓴다.
+ * 일러스트는 프론트 번들의 정적 자산이고 catalog code로 고른다. 매핑에 없는
+ * 코드는 그라디언트 타일로 떨어진다. 표시명은 언제나 서버 값을 쓴다.
  */
 function CategoryTile({
   item,
-  index,
   onSelect,
 }: {
   item: CatalogItem
-  index: number
   onSelect: () => void
 }) {
-  const palette = TILE_PALETTE[index % TILE_PALETTE.length]
+  const art = categoryArt(item.code)
+  const tint = categoryTint(item.code)
 
   return (
     <button type="button" className="home__category" onClick={onSelect}>
       <span
         className="home__category-tile"
-        style={{ '--tile-from': palette.from, '--tile-to': palette.to } as React.CSSProperties}
-        aria-hidden="true"
+        style={{ '--tile-from': tint.from, '--tile-to': tint.to } as React.CSSProperties}
       >
-        {/* 표시명 첫 글자는 장식이다. 의미는 아래 이름이 전달한다. */}
-        {[...item.displayName][0]}
+        {art === null ? (
+          // 일러스트가 없는 코드. 첫 글자는 장식이고 의미는 아래 이름이 전한다.
+          <span aria-hidden="true">{[...item.displayName][0]}</span>
+        ) : (
+          <img
+            className="home__category-art"
+            src={art}
+            // 바로 아래에 같은 이름이 있다. alt를 채우면 두 번 읽힌다.
+            alt=""
+            width={320}
+            height={320}
+            loading="lazy"
+            decoding="async"
+          />
+        )}
       </span>
       <span className="home__category-name">{item.displayName}</span>
     </button>
   )
 }
-
-/** 타일 색조. 코럴·머스터드 계열 안에서 순환해 한 화면이 한 팔레트로 읽히게 한다. */
-const TILE_PALETTE = [
-  { from: '#ffdad2', to: '#ffb4a2' },
-  { from: '#ffdea8', to: '#ffba20' },
-  { from: '#ffb4a2', to: '#ff5f38' },
-  { from: '#e9e1dc', to: '#cdc5c0' },
-] as const
 
 function Feature({
   mark,
