@@ -1,7 +1,10 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { http } from 'msw'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { unauthenticatedConsumer } from '../features/auth/test/handlers'
+import { storePage } from '../features/store-search/test/fixtures'
 import { catalogHandlers } from '../features/store-search/test/handlers'
+import { successResponse } from '../test/msw/envelope'
 import { server } from '../test/msw/server'
 import App from './App'
 
@@ -11,9 +14,13 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
-  // 홈은 매장 카테고리 catalog를 부르고, 앱 셸은 항상 세션 복구를 시도한다.
-  // 등록하지 않으면 MSW가 실패로 잡는다.
-  server.use(...catalogHandlers, unauthenticatedConsumer)
+  // 홈은 catalog와 매장 미리보기를 부르고, 앱 셸은 항상 세션 복구를 시도한다.
+  // 등록하지 않으면 MSW가 처리하지 않은 요청으로 잡는다.
+  server.use(
+    ...catalogHandlers,
+    unauthenticatedConsumer,
+    http.get('/api/v1/stores', () => successResponse(storePage([]))),
+  )
 })
 
 describe('앱 셸', () => {
