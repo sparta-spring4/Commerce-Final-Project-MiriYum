@@ -45,7 +45,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class MenuAlternativeSearchService {
-    private static final int NEARBY_CANDIDATE_LIMIT = 200;
     private final MenuAlternativeCandidateQueryService candidateQuery;
     private final ReservationService reservationService;
     private final MenuInventoryTransactionService inventoryService;
@@ -86,7 +85,7 @@ public class MenuAlternativeSearchService {
         var box = BoundingBoxCalculator.around(origin,
                 StoreDistanceEligibility.MAX_DISTANCE_METERS);
         List<MenuAlternativeCandidateView> nearbyViews = candidateQuery.findNearbyCandidates(
-                sourceView, box, NEARBY_CANDIDATE_LIMIT);
+                sourceView, box);
         List<AlternativeMenuCandidate> nearbyCandidates = nearbyViews.stream()
                 .map(this::candidate)
                 .filter(value -> value.latitude() != null && value.longitude() != null)

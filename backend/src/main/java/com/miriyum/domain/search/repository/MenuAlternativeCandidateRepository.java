@@ -22,7 +22,10 @@ import com.querydsl.core.types.dsl.StringPath;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
@@ -35,18 +38,24 @@ public class MenuAlternativeCandidateRepository {
     }
 
     public Optional<MenuAlternativeSourceView> findSource(long storeId, long menuId) {
-        return Optional.ofNullable(baseQuery(new BooleanBuilder()
+        List<BaseRow> rows = baseQuery(new BooleanBuilder()
                         .and(QStore.store.id.eq(storeId))
                         .and(QMenu.menu.id.eq(menuId)))
-                .fetchFirst()).map(this::sourceView);
+                .limit(1).fetch();
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<Long, List<String>> secondary = secondaryByVersion(rows);
+        Map<Long, List<MenuAlternativeAllergenView>> allergens = allergensByVersion(rows);
+        return Optional.of(sourceView(rows.getFirst(), secondary, allergens));
     }
 
     public List<MenuAlternativeCandidateView> findSameStoreCandidates(
             long storeId, long sourceMenuId, int limit) {
-        return baseQuery(new BooleanBuilder().and(QStore.store.id.eq(storeId))
+        List<BaseRow> rows = baseQuery(new BooleanBuilder().and(QStore.store.id.eq(storeId))
                         .and(QMenu.menu.id.ne(sourceMenuId)))
-                .orderBy(QMenu.menu.id.asc()).limit(limit).fetch().stream()
-                .map(this::candidateView).toList();
+                .orderBy(QMenu.menu.id.asc()).limit(limit).fetch();
+        return candidateViews(rows);
     }
 
     public List<MenuAlternativeCandidateView> findNearbyCandidates(long sourceStoreId,
@@ -61,8 +70,9 @@ public class MenuAlternativeCandidateRepository {
                         BigDecimal.valueOf(box.maxLatitude())))
                 .and(store.longitude.between(BigDecimal.valueOf(box.minLongitude()),
                         BigDecimal.valueOf(box.maxLongitude())));
-        return baseQuery(where).orderBy(store.id.asc(), QMenu.menu.id.asc())
-                .limit(limit).fetch().stream().map(this::candidateView).toList();
+        List<BaseRow> rows = baseQuery(where).orderBy(store.id.asc(), QMenu.menu.id.asc())
+                .limit(limit).fetch();
+        return candidateViews(rows);
     }
 
     private com.querydsl.jpa.impl.JPAQuery<BaseRow> baseQuery(BooleanBuilder additional) {
@@ -91,37 +101,67 @@ public class MenuAlternativeCandidateRepository {
                 .join(store).on(store.id.eq(menu.storeId)).where(where);
     }
 
-    private MenuAlternativeSourceView sourceView(BaseRow row) {
+    private MenuAlternativeSourceView sourceView(BaseRow row,
+            Map<Long, List<String>> secondary,
+            Map<Long, List<MenuAlternativeAllergenView>> allergens) {
         return new MenuAlternativeSourceView(row.storeId(), row.storeName(), row.menuId(),
                 row.menuName(), row.unitPrice(), row.primaryCategoryCode(),
-                secondary(row.versionId()), row.allergenInformationStatus().name(),
-                allergens(row.versionId()), row.latitude(), row.longitude());
+                secondary.getOrDefault(row.versionId(), List.of()),
+                row.allergenInformationStatus().name(),
+                allergens.getOrDefault(row.versionId(), List.of()),
+                row.latitude(), row.longitude());
     }
 
-    private MenuAlternativeCandidateView candidateView(BaseRow row) {
+    private MenuAlternativeCandidateView candidateView(BaseRow row,
+            Map<Long, List<String>> secondary,
+            Map<Long, List<MenuAlternativeAllergenView>> allergens) {
         return new MenuAlternativeCandidateView(row.storeId(), row.storeName(), row.menuId(),
                 row.menuName(), row.unitPrice(), row.primaryCategoryCode(),
-                secondary(row.versionId()), row.allergenInformationStatus().name(),
-                allergens(row.versionId()), row.latitude(), row.longitude());
+                secondary.getOrDefault(row.versionId(), List.of()),
+                row.allergenInformationStatus().name(),
+                allergens.getOrDefault(row.versionId(), List.of()),
+                row.latitude(), row.longitude());
     }
 
-    private List<String> secondary(long versionId) {
+    private List<MenuAlternativeCandidateView> candidateViews(List<BaseRow> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<String>> secondary = secondaryByVersion(rows);
+        Map<Long, List<MenuAlternativeAllergenView>> allergens = allergensByVersion(rows);
+        return rows.stream().map(row -> candidateView(row, secondary, allergens)).toList();
+    }
+
+    private Map<Long, List<String>> secondaryByVersion(List<BaseRow> rows) {
         QMenuVersion version = QMenuVersion.menuVersion;
         StringPath category = Expressions.stringPath("alternativeSecondaryCategory");
-        return queryFactory.select(category).from(version)
+        List<Long> versionIds = versionIds(rows);
+        Map<Long, List<String>> result = new LinkedHashMap<>();
+        queryFactory.select(version.id, category).from(version)
                 .join(version.secondaryCategoryCodes, category)
-                .where(version.id.eq(versionId)).orderBy(category.asc()).fetch();
+                .where(version.id.in(versionIds)).orderBy(version.id.asc(), category.asc()).fetch()
+                .forEach(tuple -> result.computeIfAbsent(tuple.get(version.id), ignored ->
+                        new ArrayList<>()).add(tuple.get(category)));
+        return result;
     }
 
-    private List<MenuAlternativeAllergenView> allergens(long versionId) {
+    private Map<Long, List<MenuAlternativeAllergenView>> allergensByVersion(List<BaseRow> rows) {
         QMenuVersion version = QMenuVersion.menuVersion;
         QAllergenDisclosure allergen = new QAllergenDisclosure("alternativeAllergen");
-        return queryFactory.select(allergen.ingredientCode, allergen.status).from(version)
-                .join(version.allergenDisclosures, allergen).where(version.id.eq(versionId))
-                .orderBy(allergen.ingredientCode.asc()).fetch().stream()
-                .map(tuple -> new MenuAlternativeAllergenView(
-                        tuple.get(allergen.ingredientCode).name(),
-                        tuple.get(allergen.status).name())).toList();
+        List<Long> versionIds = versionIds(rows);
+        Map<Long, List<MenuAlternativeAllergenView>> result = new LinkedHashMap<>();
+        queryFactory.select(version.id, allergen.ingredientCode, allergen.status).from(version)
+                .join(version.allergenDisclosures, allergen).where(version.id.in(versionIds))
+                .orderBy(version.id.asc(), allergen.ingredientCode.asc()).fetch()
+                .forEach(tuple -> result.computeIfAbsent(tuple.get(version.id), ignored ->
+                        new ArrayList<>()).add(new MenuAlternativeAllergenView(
+                                tuple.get(allergen.ingredientCode).name(),
+                                tuple.get(allergen.status).name())));
+        return result;
+    }
+
+    private static List<Long> versionIds(List<BaseRow> rows) {
+        return rows.stream().map(BaseRow::versionId).distinct().toList();
     }
 
     public record BaseRow(long versionId, long storeId, String storeName, long menuId,

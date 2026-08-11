@@ -60,7 +60,7 @@ class MenuAlternativeSearchServiceTest {
 
         assertThat(result.mode()).isEqualTo(MenuAlternativeMode.SAME_STORE);
         assertThat(result.items()).extracting(item -> item.menuId()).containsExactly(11L);
-        then(candidateQuery).should(never()).findNearbyCandidates(any(), any(), any(Integer.class));
+        then(candidateQuery).should(never()).findNearbyCandidates(any(), any());
     }
 
     @Test
@@ -86,7 +86,7 @@ class MenuAlternativeSearchServiceTest {
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(1L, resolved(1L))))
                 .willReturn(List.of(ReservationTimeResolutionResult.resolved(2L, resolved(2L))));
         given(candidateQuery.findSameStoreCandidates(source)).willReturn(List.of());
-        given(candidateQuery.findNearbyCandidates(any(), any(), any(Integer.class)))
+        given(candidateQuery.findNearbyCandidates(any(), any()))
                 .willReturn(List.of(new MenuAlternativeCandidateView(2L, "근처", 21L, "대안",
                         10_000, "MAIN", List.of("A"), "REGISTERED", List.of(),
                         new java.math.BigDecimal("37.501000"),
