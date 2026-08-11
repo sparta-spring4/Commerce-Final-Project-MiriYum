@@ -18,6 +18,8 @@ export const ROUTES = {
   myReservations: '/mypage/reservations',
   reservationCreate: '/stores/:storeId/reserve',
   reservationDetail: '/reservations/:reservationId',
+  pickupCreate: '/stores/:storeId/pickup',
+  pickupDetail: '/pickup-reservations/:pickupReservationId',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
 } as const

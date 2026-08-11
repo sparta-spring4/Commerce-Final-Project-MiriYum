@@ -1,0 +1,182 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router'
+import { ROUTES } from '../../../app/routes'
+import { hasErrorCode } from '../../../shared/api/apiError'
+import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
+import { Badge } from '../../../shared/ui/Badge'
+import { Button } from '../../../shared/ui/Button'
+import { Alert, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { formatPrice } from '../../store-search/model/labels'
+import {
+  useCancelPickupReservation,
+  usePickupReservation,
+} from '../api/queries'
+import {
+  PICKUP_STATUS_LABEL,
+  PICKUP_STATUS_TONE,
+  PickupErrorCode,
+  pickupTotalPrice,
+  toPickupCancelMessage,
+} from '../model/pickup'
+
+/**
+ * 픽업 예약 상세와 취소.
+ *
+ * 일반 사용자 픽업 목록 계약이 없으므로 목록으로 돌아가는 경로를 만들지 않는다.
+ * 생성 직후 받은 식별자로만 이 화면에 들어온다.
+ */
+export function PickupDetailPage() {
+  const { pickupReservationId = '' } = useParams()
+  const detail = usePickupReservation(pickupReservationId)
+
+  if (detail.isPending) {
+    return (
+      <div className="mi-container pickup-detail">
+        <Loading label="픽업 예약을 불러오는 중입니다." />
+      </div>
+    )
+  }
+
+  if (detail.isError) {
+    const notFound = hasErrorCode(detail.error, PickupErrorCode.NOT_FOUND)
+    return (
+      <div className="mi-container pickup-detail">
+        <ErrorState
+          error={detail.error}
+          message={notFound ? '픽업 예약을 찾을 수 없습니다.' : undefined}
+          onRetry={notFound ? undefined : () => void detail.refetch()}
+        />
+        <p>
+          <Link to={ROUTES.stores}>매장 찾기로 돌아가기</Link>
+        </p>
+      </div>
+    )
+  }
+
+  const reservation = detail.data
+
+  return (
+    <div className="mi-container pickup-detail">
+      <header className="pickup-detail__header">
+        <Badge tone={PICKUP_STATUS_TONE[reservation.status]}>
+          {PICKUP_STATUS_LABEL[reservation.status]}
+        </Badge>
+        <h1>{reservation.storeName}</h1>
+        <p className="pickup-detail__meta">
+          {`${reservation.pickupDate} ${reservation.pickupTime} 픽업`}
+        </p>
+      </header>
+
+      <section className="mi-card pickup-detail__section" aria-label="픽업 내용">
+        <div className="mi-card__body">
+          <h2>주문 내역</h2>
+          <ul className="pickup-detail__items">
+            {reservation.items.map((item) => (
+              <li key={item.menuId}>
+                {`${item.menuName} x ${item.quantity} · ${formatPrice(item.unitPrice * item.quantity)}`}
+              </li>
+            ))}
+          </ul>
+          <p className="pickup-detail__total">
+            {`합계 ${formatPrice(pickupTotalPrice(reservation))}`}
+          </p>
+
+          {reservation.status === 'CANCELLED' && (
+            <dl className="pickup-detail__list">
+              <dt>취소 주체</dt>
+              <dd>
+                {reservation.cancelledBy === 'CONSUMER'
+                  ? '내가 취소'
+                  : reservation.cancelledBy === 'STORE_OPERATOR'
+                    ? '매장이 취소'
+                    : '확인할 수 없음'}
+              </dd>
+              <dt>취소 사유</dt>
+              <dd>{reservation.cancellationReason ?? '사유 없음'}</dd>
+            </dl>
+          )}
+
+          <Link to={`/stores/${reservation.storeId}`}>매장 정보 보기</Link>
+        </div>
+      </section>
+
+      {reservation.status === 'CONFIRMED' && (
+        <CancelSection pickupReservationId={pickupReservationId} />
+      )}
+    </div>
+  )
+}
+
+function CancelSection({
+  pickupReservationId,
+}: {
+  pickupReservationId: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey)
+
+  const mutation = useCancelPickupReservation(pickupReservationId)
+
+  function handleCancel() {
+    setError(null)
+    mutation.mutate(
+      { reason: reason.trim() || undefined, idempotencyKey },
+      {
+        onSuccess: () => setOpen(false),
+        onError: (cause) => {
+          setError(toPickupCancelMessage(cause))
+          setIdempotencyKey(createIdempotencyKey())
+        },
+      },
+    )
+  }
+
+  if (!open) {
+    return (
+      <section className="pickup-detail__section">
+        <Button variant="danger" onClick={() => setOpen(true)}>
+          픽업 예약 취소하기
+        </Button>
+      </section>
+    )
+  }
+
+  return (
+    <section className="mi-card pickup-detail__section" aria-label="픽업 예약 취소">
+      <div className="mi-card__body">
+        <h2>픽업 예약을 취소할까요?</h2>
+        {error !== null && <Alert tone="error" title={error} />}
+
+        <label className="mi-field">
+          <span className="mi-field__label">취소 사유 (선택)</span>
+          <textarea
+            className="mi-field__control pickup-detail__reason"
+            name="reason"
+            maxLength={500}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+
+        <div className="pickup-detail__actions">
+          <Button
+            variant="danger"
+            loading={mutation.isPending}
+            onClick={handleCancel}
+          >
+            취소 확정
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={mutation.isPending}
+            onClick={() => setOpen(false)}
+          >
+            돌아가기
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}

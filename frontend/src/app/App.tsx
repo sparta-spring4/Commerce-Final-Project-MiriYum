@@ -10,6 +10,10 @@ import {
 } from '../features/auth'
 import { MyPage, MyReservationsPage } from '../features/consumer-account'
 import {
+  PickupCreatePage,
+  PickupDetailPage,
+} from '../features/pickup-reservations'
+import {
   ReservationCreatePage,
   ReservationDetailPage,
 } from '../features/reservations'
@@ -85,6 +89,14 @@ export default function App() {
                   <Route
                     path={ROUTES.reservationDetail}
                     element={<ReservationDetailPage />}
+                  />
+                  <Route
+                    path={ROUTES.pickupCreate}
+                    element={<PickupCreatePage />}
+                  />
+                  <Route
+                    path={ROUTES.pickupDetail}
+                    element={<PickupDetailPage />}
                   />
                 </Route>
               </Route>
