@@ -186,7 +186,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         assertThat(rotate(state, now.plusSeconds(2)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
         assertThat(rotate(state, now.plusSeconds(3)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
 
         assertThat(markerStore.findPendingEvents())
                 .singleElement()
@@ -242,6 +242,47 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 .isEqualTo(RefreshTokenCreationResult.Status.CREATED);
     }
 
+    @Test
+    @DisplayName("회전 후 로그아웃된 family의 이전 Refresh Token 재사용도 위험 사건으로 남긴다")
+    void createsPendingRiskEventWhenRotatedTokenIsReusedAfterLogout() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-rotated-logout-risk", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        store.revoke(state.namespace(), state.familyId(), state.accountId(), now.plusSeconds(2));
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.sourceEvent()).isEqualTo("REUSED_ROTATED_TOKEN");
+                    assertThat(event.originEvent()).isEqualTo("ROTATION");
+                });
+    }
+    @Test
+    @DisplayName("회전 후 전체 로그아웃된 family의 이전 Refresh Token 재사용도 위험 사건으로 남긴다")
+    void createsPendingRiskEventWhenRotatedTokenIsReusedAfterRevokeAll() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-rotated-revoke-all-risk", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        store.revokeAll(
+                state.namespace(), state.accountId(), now.plusSeconds(2), now.plusSeconds(1_209_600));
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.sourceEvent()).isEqualTo("REUSED_ROTATED_TOKEN");
+                    assertThat(event.originEvent()).isEqualTo("ROTATION");
+                });
+    }
     private RefreshTokenState state(String familyId, String tokenId, Instant now) {
         return new RefreshTokenState(
                 TokenNamespace.CONSUMER,

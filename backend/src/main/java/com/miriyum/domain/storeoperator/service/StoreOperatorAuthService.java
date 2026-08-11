@@ -107,7 +107,6 @@ public class StoreOperatorAuthService {
 
         boolean completed = false;
         try {
-            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, account.getId());
             boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
@@ -117,10 +116,13 @@ public class StoreOperatorAuthService {
                 throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
             }
 
-            if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, account.getId());
+            StoreOperatorAccount currentAccount = storeOperatorAccountRepository.findById(account.getId())
+                    .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+            if (currentAccount.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId(), sessionEpoch);
+            return issueTokenPair(currentAccount.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.STORE_OPERATOR, account.getId(), attempt);

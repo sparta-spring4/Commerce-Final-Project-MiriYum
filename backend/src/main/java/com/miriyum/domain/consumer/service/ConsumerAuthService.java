@@ -119,7 +119,6 @@ public class ConsumerAuthService {
 
         boolean completed = false;
         try {
-            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, account.getId());
             boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
@@ -129,10 +128,13 @@ public class ConsumerAuthService {
                 throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
             }
 
-            if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, account.getId());
+            ConsumerAccount currentAccount = consumerAccountRepository.findById(account.getId())
+                    .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+            if (currentAccount.getStatus() != ConsumerAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId(), sessionEpoch);
+            return issueTokenPair(currentAccount.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.CONSUMER, account.getId(), attempt);

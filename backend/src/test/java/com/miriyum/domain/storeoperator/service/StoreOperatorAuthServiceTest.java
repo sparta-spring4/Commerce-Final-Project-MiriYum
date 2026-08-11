@@ -11,6 +11,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
@@ -242,8 +243,8 @@ class StoreOperatorAuthServiceTest {
         storeOperatorAuthService.login(request);
 
         InOrder order = inOrder(refreshTokenManager, passwordEncoder);
-        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
         order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
         order.verify(refreshTokenManager).issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 4L);
     }
     @Test
@@ -307,7 +308,7 @@ class StoreOperatorAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
-        given(storeOperatorAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> storeOperatorAuthService.refresh("refresh-token"))
                 .isInstanceOf(ServiceException.class)
@@ -333,6 +334,22 @@ class StoreOperatorAuthServiceTest {
      * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지
      * 않은 상태를 재현한다.
      */
+    @Test
+    @DisplayName("로그인 중 StoreOperatorAccount 계정이 정지되면 Refresh Token을 발급하지 않는다")
+    void rejectsLoginWhenAccountIsSuspendedAfterInitialLookup() {
+        StoreOperatorAccount initialAccount = persistedAccount();
+        StoreOperatorAccount currentAccount = persistedAccount();
+        ReflectionTestUtils.setField(currentAccount, "status", StoreOperatorAccountStatus.SUSPENDED);
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(initialAccount));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(1L);
+
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
+    }
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
@@ -346,6 +363,7 @@ class StoreOperatorAuthServiceTest {
     private StoreOperatorAccount persistedAccount() {
         StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
         ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
         return account;
     }
 }

@@ -11,7 +11,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
-/** Lua 원자 연산으로 Refresh Token family를 Valkey에 저장한다. */
+/** Lua 원자 연산으로 Refresh Token family 상태를 Valkey에 저장한다. */
 @Component
 public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
@@ -50,9 +50,6 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             local status = redis.call('HGET', KEYS[1], 'status')
             if redis.call('HGET', KEYS[1], 'currentTokenId') ~= ARGV[2]
                     or redis.call('HGET', KEYS[1], 'currentTokenHash') ~= ARGV[3] then
-                if status ~= 'ACTIVE' then
-                    return 2
-                end
                 redis.call('HSET', KEYS[1], 'status', 'REVOKED', 'lastRotatedAt', ARGV[6])
                 if redis.call('EXISTS', KEYS[3]) == 0 then
                     redis.call('HSET', KEYS[3],

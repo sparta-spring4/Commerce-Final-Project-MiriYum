@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -261,8 +262,8 @@ class ConsumerAuthServiceTest {
         consumerAuthService.login(request);
 
         InOrder order = inOrder(refreshTokenManager, passwordEncoder);
-        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID);
         order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID);
         order.verify(refreshTokenManager).issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 4L);
     }
     @Test
@@ -326,7 +327,7 @@ class ConsumerAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
-        given(consumerAccountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> consumerAuthService.refresh("refresh-token"))
                 .isInstanceOf(ServiceException.class)
@@ -352,6 +353,22 @@ class ConsumerAuthServiceTest {
      * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지
      * 않은 상태를 재현한다.
      */
+    @Test
+    @DisplayName("로그인 중 ConsumerAccount 계정이 정지되면 Refresh Token을 발급하지 않는다")
+    void rejectsLoginWhenAccountIsSuspendedAfterInitialLookup() {
+        ConsumerAccount initialAccount = persistedAccount();
+        ConsumerAccount currentAccount = persistedAccount();
+        ReflectionTestUtils.setField(currentAccount, "status", ConsumerAccountStatus.SUSPENDED);
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(initialAccount));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(1L);
+
+        assertThatThrownBy(() -> consumerAuthService.login(request))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
+    }
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
@@ -365,6 +382,7 @@ class ConsumerAuthServiceTest {
     private ConsumerAccount persistedAccount() {
         ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
         ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
         return account;
     }
 }
