@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -34,6 +35,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.InOrder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -245,6 +247,25 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("로그인 시작 시점의 세션 세대를 토큰 발급까지 유지한다")
+    void loginIssuesTokenPairWithCapturedSessionEpoch() {
+        ConsumerAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(4L);
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 4L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
+
+        consumerAuthService.login(request);
+
+        InOrder order = inOrder(refreshTokenManager, passwordEncoder);
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID);
+        order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 4L);
+    }
+    @Test
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
@@ -253,7 +274,8 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID))
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 0L))
                 .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
@@ -276,7 +298,8 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID))
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 0L))
                 .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when

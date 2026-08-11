@@ -31,13 +31,21 @@ public class RefreshTokenManager {
         this.clock = clock;
     }
 
+    public long captureSessionEpoch(TokenNamespace namespace, Long accountId) {
+        return refreshTokenStore.currentSessionEpoch(namespace, accountId);
+    }
+
     public TokenPair issue(TokenNamespace namespace, Long accountId) {
+        return issue(namespace, accountId, captureSessionEpoch(namespace, accountId));
+    }
+
+    public TokenPair issue(TokenNamespace namespace, Long accountId, long expectedSessionEpoch) {
         Instant now = clock.instant();
         RefreshTokenIdentity identity = identityGenerator.generate();
         String accessToken = jwtTokenProvider.generateAccessToken(namespace, accountId);
         String refreshToken = jwtTokenProvider.generateRefreshToken(
                 namespace, accountId, identity.familyId(), identity.tokenId());
-        refreshTokenStore.create(new RefreshTokenState(
+        RefreshTokenCreationResult result = refreshTokenStore.create(new RefreshTokenState(
                 namespace,
                 accountId,
                 identity.familyId(),
@@ -45,7 +53,10 @@ public class RefreshTokenManager {
                 RefreshTokenHash.sha256(refreshToken),
                 now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds()),
                 now,
-                RefreshTokenState.Status.ACTIVE));
+                RefreshTokenState.Status.ACTIVE), expectedSessionEpoch);
+        if (result.status() != RefreshTokenCreationResult.Status.CREATED) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
         return new TokenPair(accessToken, refreshToken);
     }
 
@@ -78,6 +89,11 @@ public class RefreshTokenManager {
 
     /** 계정 정지·권한 회수·전체 로그인 종료 흐름에서 모든 family를 폐기한다. */
     public void revokeAll(TokenNamespace namespace, Long accountId) {
-        refreshTokenStore.revokeAll(namespace, accountId, clock.instant());
+        Instant now = clock.instant();
+        refreshTokenStore.revokeAll(
+                namespace,
+                accountId,
+                now,
+                now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds()));
     }
 }

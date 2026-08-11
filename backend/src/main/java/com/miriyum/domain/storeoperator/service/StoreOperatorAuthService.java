@@ -107,6 +107,7 @@ public class StoreOperatorAuthService {
 
         boolean completed = false;
         try {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, account.getId());
             boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
@@ -119,7 +120,7 @@ public class StoreOperatorAuthService {
             if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId());
+            return issueTokenPair(account.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.STORE_OPERATOR, account.getId(), attempt);
@@ -160,8 +161,8 @@ public class StoreOperatorAuthService {
         refreshTokenManager.revoke(TokenNamespace.STORE_OPERATOR, parsed);
     }
 
-    private TokenPair issueTokenPair(Long accountId) {
-        return refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, accountId);
+    private TokenPair issueTokenPair(Long accountId, long sessionEpoch) {
+        return refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, accountId, sessionEpoch);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {

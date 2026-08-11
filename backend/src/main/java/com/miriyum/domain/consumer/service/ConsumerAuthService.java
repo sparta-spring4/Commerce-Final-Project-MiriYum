@@ -119,6 +119,7 @@ public class ConsumerAuthService {
 
         boolean completed = false;
         try {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, account.getId());
             boolean passwordMatches = matchesPassword(
                     passwordPolicy.toNfc(request.password()), account.getPasswordHash());
             boolean attemptCompleted = loginDelayGuard.completeAttempt(
@@ -131,7 +132,7 @@ public class ConsumerAuthService {
             if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId());
+            return issueTokenPair(account.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.CONSUMER, account.getId(), attempt);
@@ -172,8 +173,8 @@ public class ConsumerAuthService {
         refreshTokenManager.revoke(TokenNamespace.CONSUMER, parsed);
     }
 
-    private TokenPair issueTokenPair(Long accountId) {
-        return refreshTokenManager.issue(TokenNamespace.CONSUMER, accountId);
+    private TokenPair issueTokenPair(Long accountId, long sessionEpoch) {
+        return refreshTokenManager.issue(TokenNamespace.CONSUMER, accountId, sessionEpoch);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {

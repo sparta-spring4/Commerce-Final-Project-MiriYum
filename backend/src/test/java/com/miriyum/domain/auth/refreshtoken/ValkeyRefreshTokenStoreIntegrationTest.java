@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Instant;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +14,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -46,6 +48,10 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         redisTemplate.afterPropertiesSet();
         store = new ValkeyRefreshTokenStore(redisTemplate);
         markerStore = new ValkeyRefreshTokenRiskEventMarkerStore(redisTemplate);
+        // 정적 Testcontainers 인스턴스를 공유하므로 이전 테스트의 family·marker·세대를 남기지 않는다.
+        try (RedisConnection connection = connectionFactory.getConnection()) {
+            connection.serverCommands().flushDb();
+        }
     }
 
     @AfterEach
@@ -60,7 +66,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         String familyId = "family-integration";
         String firstTokenId = "token-1";
         String firstTokenHash = RefreshTokenHash.sha256("refresh-token-1");
-        store.create(new RefreshTokenState(
+        create(new RefreshTokenState(
                 TokenNamespace.CONSUMER,
                 7L,
                 familyId,
@@ -104,7 +110,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     void refreshesFamilyTtlOnRotation() {
         Instant now = Instant.now();
         String familyId = "family-ttl";
-        store.create(new RefreshTokenState(
+        create(new RefreshTokenState(
                 TokenNamespace.CONSUMER,
                 7L,
                 familyId,
@@ -157,15 +163,15 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         Instant now = Instant.now();
         RefreshTokenState first = state("family-first", "token-first", now);
         RefreshTokenState second = state("family-second", "token-second", now);
-        store.create(first);
-        store.create(second);
+        create(first);
+        create(second);
 
-        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(1));
+        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(1), now.plusSeconds(1_209_600));
 
         assertThat(rotate(first, now.plusSeconds(2)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
         assertThat(rotate(second, now.plusSeconds(2)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REVOKED);
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
     }
 
     @Test
@@ -173,7 +179,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     void createsOnePendingRiskEventForRepeatedReuse() {
         Instant now = Instant.now();
         RefreshTokenState state = state("family-risk", "token-first", now);
-        store.create(state);
+        create(state);
 
         assertThat(rotate(state, now.plusSeconds(1)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
@@ -195,6 +201,47 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 });
     }
 
+    @Test
+    @DisplayName("로그아웃으로 폐기된 현재 Refresh Token을 다시 사용하면 위험 사건을 남긴다")
+    void createsPendingRiskEventWhenRevokedCurrentTokenIsReused() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-revoked-risk", "token-current", now);
+        create(state);
+        store.revoke(state.namespace(), state.familyId(), state.accountId(), now.plusSeconds(1));
+
+        RefreshTokenRotationResult result = rotate(state, now.plusSeconds(2));
+
+        assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.familyId()).isEqualTo(state.familyId());
+                    assertThat(event.tokenHash()).isEqualTo(state.currentTokenHash());
+                });
+    }
+
+    @Test
+    @DisplayName("전체 세션 폐기와 경합한 이전 로그인은 Refresh Token family를 만들지 못한다")
+    void rejectsStaleSessionEpochWhenCreatingFamily() {
+        Instant now = Instant.now();
+        RefreshTokenState first = state("family-before-revoke", "token-before-revoke", now);
+        assertThat(store.create(first, 0L).status()).isEqualTo(RefreshTokenCreationResult.Status.CREATED);
+        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(1), now.plusSeconds(1_209_600));
+
+        Long epochTtl = redisTemplate.getExpire(
+                RefreshTokenKey.forAccountSessionEpoch(TokenNamespace.CONSUMER, 7L), TimeUnit.SECONDS);
+        assertThat(epochTtl).isBetween(1_209_590L, 1_209_600L);
+
+        RefreshTokenState staleLogin = state("family-stale-login", "token-stale-login", now.plusSeconds(2));
+        assertThat(store.create(staleLogin, 0L).status())
+                .isEqualTo(RefreshTokenCreationResult.Status.SESSION_EPOCH_CHANGED);
+
+        long currentEpoch = store.currentSessionEpoch(TokenNamespace.CONSUMER, 7L);
+        RefreshTokenState freshLogin = state("family-after-revoke", "token-after-revoke", now.plusSeconds(3));
+        assertThat(store.create(freshLogin, currentEpoch).status())
+                .isEqualTo(RefreshTokenCreationResult.Status.CREATED);
+    }
+
     private RefreshTokenState state(String familyId, String tokenId, Instant now) {
         return new RefreshTokenState(
                 TokenNamespace.CONSUMER,
@@ -205,6 +252,12 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 now.plusSeconds(1_209_600),
                 now,
                 RefreshTokenState.Status.ACTIVE);
+    }
+
+    private void create(RefreshTokenState state) {
+        long sessionEpoch = store.currentSessionEpoch(state.namespace(), state.accountId());
+        assertThat(store.create(state, sessionEpoch).status())
+                .isEqualTo(RefreshTokenCreationResult.Status.CREATED);
     }
 
     private RefreshTokenRotationResult rotate(RefreshTokenState state, Instant now) {

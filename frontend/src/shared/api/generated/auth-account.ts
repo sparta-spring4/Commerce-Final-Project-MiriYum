@@ -815,7 +815,6 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
@@ -923,7 +922,6 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };

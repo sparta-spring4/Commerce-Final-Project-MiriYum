@@ -56,11 +56,14 @@ class RefreshTokenManagerTest {
                 .willReturn("refresh-token");
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 7L)).willReturn("access-token");
         given(jwtTokenProvider.getRefreshTokenValiditySeconds()).willReturn(1_209_600L);
+        given(refreshTokenStore.currentSessionEpoch(TokenNamespace.CONSUMER, 7L)).willReturn(0L);
+        given(refreshTokenStore.create(any(), eq(0L)))
+                .willReturn(new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED));
 
         TokenPair pair = manager.issue(TokenNamespace.CONSUMER, 7L);
 
         ArgumentCaptor<RefreshTokenState> captor = ArgumentCaptor.forClass(RefreshTokenState.class);
-        verify(refreshTokenStore).create(captor.capture());
+        verify(refreshTokenStore).create(captor.capture(), eq(0L));
         assertThat(captor.getValue().familyId()).isEqualTo("family-1");
         assertThat(captor.getValue().currentTokenId()).isEqualTo("token-1");
         assertThat(captor.getValue().currentTokenHash()).isEqualTo(RefreshTokenHash.sha256("refresh-token"));
@@ -130,6 +133,6 @@ class RefreshTokenManagerTest {
     void revokesAllRefreshTokenFamiliesForAccount() {
         manager.revokeAll(TokenNamespace.CONSUMER, 7L);
 
-        verify(refreshTokenStore).revokeAll(eq(TokenNamespace.CONSUMER), eq(7L), any());
+        verify(refreshTokenStore).revokeAll(eq(TokenNamespace.CONSUMER), eq(7L), any(), any());
     }
 }

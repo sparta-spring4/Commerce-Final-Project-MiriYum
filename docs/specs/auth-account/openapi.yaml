@@ -152,8 +152,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NoDataSuccessResponse"
-        "401":
-          $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
         "503":
@@ -290,8 +288,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NoDataSuccessResponse"
-        "401":
-          $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
         "503":

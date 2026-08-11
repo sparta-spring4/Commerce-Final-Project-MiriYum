@@ -23,4 +23,11 @@ public final class RefreshTokenKey {
         }
         return "auth:refresh:" + namespace.value() + ":account:" + accountId + ":families";
     }
+
+    public static String forAccountSessionEpoch(TokenNamespace namespace, Long accountId) {
+        if (namespace == null || accountId == null || accountId <= 0) {
+            throw new IllegalArgumentException("namespace and accountId are required");
+        }
+        return "auth:refresh:" + namespace.value() + ":account:" + accountId + ":epoch";
+    }
 }

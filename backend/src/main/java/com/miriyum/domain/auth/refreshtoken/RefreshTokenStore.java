@@ -6,7 +6,10 @@ import java.time.Instant;
 /** Refresh Token 상태를 저장소에 원자적으로 생성·회전·폐기하는 포트다. */
 public interface RefreshTokenStore {
 
-    void create(RefreshTokenState state);
+    RefreshTokenCreationResult create(RefreshTokenState state, long expectedSessionEpoch);
+
+
+    long currentSessionEpoch(TokenNamespace namespace, Long accountId);
 
     RefreshTokenRotationResult rotate(
             TokenNamespace namespace,
@@ -22,5 +25,5 @@ public interface RefreshTokenStore {
 
     void revoke(TokenNamespace namespace, String familyId, Long accountId, Instant now);
 
-    void revokeAll(TokenNamespace namespace, Long accountId, Instant now);
+    void revokeAll(TokenNamespace namespace, Long accountId, Instant now, Instant sessionEpochExpiresAt);
 }

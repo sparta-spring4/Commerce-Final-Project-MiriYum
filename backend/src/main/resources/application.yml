@@ -25,6 +25,10 @@ server:
 
 # Docker 배포 확인은 백엔드 127.0.0.1(EC2 내부 전용) 포트의 이 엔드포인트만 사용한다.
 management:
+  health:
+    # Valkey 장애는 Refresh Token 기능만 503으로 닫고, 배포용 앱 health 전체를 DOWN으로 만들지 않는다.
+    redis:
+      enabled: false
   endpoints:
     web:
       exposure:

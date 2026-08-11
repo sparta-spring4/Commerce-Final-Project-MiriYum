@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -226,6 +228,25 @@ class StoreOperatorAuthServiceTest {
     }
 
     @Test
+    @DisplayName("로그인 시작 시점의 세션 세대를 토큰 발급까지 유지한다")
+    void loginIssuesTokenPairWithCapturedSessionEpoch() {
+        StoreOperatorAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(4L);
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 4L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
+
+        storeOperatorAuthService.login(request);
+
+        InOrder order = inOrder(refreshTokenManager, passwordEncoder);
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+        order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 4L);
+    }
+    @Test
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
@@ -234,7 +255,8 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID))
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 0L))
                 .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
@@ -257,7 +279,8 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID))
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 0L))
                 .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when

@@ -89,10 +89,11 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - **1차 MVP와 2차 MVP:** Access Token과 Refresh Token 모두 서버 저장소 없는 JWT다. 서명, 만료, 발급자, audience, 계정 유형별 토큰 namespace를 검증하며 정상 토큰 저장소·폐기 목록·Valkey 의존성을 두지 않는다.
 - **고도화:** Valkey에 Refresh Token family의 회전, 폐기, 재사용 탐지와 로그인 단위 종료 상태를 둔다. Access Token은 짧은 수명의 stateless JWT를 유지하며 권한·계정 상태는 요청 경계에서 검증한다.
 - 일반 사용자, 매장 운영자, 플랫폼 운영자는 계정 테이블·PK·principal·토큰 namespace가 다르다. 다른 계정 유형의 Refresh Token을 교환하거나 같은 subject 문자열로 결합하지 않는다.
+- 전체 로그인 종료는 계정별 세션 세대를 증가시키고 Refresh Token 최대 만료 시각까지 보관한다. 로그인 시작 시 읽은 세대와 생성 시점 세대가 다르면 늦게 끝난 로그인은 Refresh Token을 발급받지 못한다.
 - 단계가 바뀌어도 브라우저는 Access Token을 shell별 메모리, Refresh Token을 namespace별 `HttpOnly` 쿠키로 다룬다. 고도화 전환은 브라우저 저장 위치를 바꾸지 않고 Refresh Token의 서버 검증에 Valkey 회전·폐기·재사용 탐지를 추가한다.
 
 ### 전환과 검증
 
-- 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 정해진 짧은 호환 기간 뒤 자연 만료시키며 Valkey 상태가 없는 과거 토큰을 무기한 승인하지 않는다.
+- 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 family·token 식별자가 없으므로 재발급에 사용하지 않으며, 기존 Access Token은 원래 만료 시각까지 유지하고 사용자는 한 번 다시 로그인한다.
 - 1차 MVP는 서명 변조, 만료, audience·계정 유형 불일치, Access/Refresh 용도 교차, 동시 재발급의 계약을 검증한다. 고도화는 회전 경쟁, 이전 토큰 재사용, 전체 family 폐기, Valkey 지연·중단과 복구를 추가 검증한다.
 - 초기 단계에는 즉시 세션 폐기와 재사용 탐지가 제한된다는 단점이 있고, 고도화에는 Valkey 가용성·상태 마이그레이션·실패 폐쇄 운영 비용이 추가된다. 이 절은 그 비용을 기능·운영 요구가 생기는 단계로 미룬다.
