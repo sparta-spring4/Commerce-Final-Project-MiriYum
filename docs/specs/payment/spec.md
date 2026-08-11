@@ -92,7 +92,7 @@ PaymentPreparation prepareReservationDeposit(PrepareReservationDepositCommand co
 PaymentResult confirmPayment(ConfirmPaymentCommand command)
 ```
 
-`ConfirmPaymentCommand`는 `paymentId`, `portOnePaymentId`, 인증된 `consumerAccountId`, `idempotencyKey`만 가진다. Payment는 원장의 owner·source·amount·currency·PortOne 매핑을 조회하고 중앙 `CONFIRMING` 임대를 조건부 선점한 뒤 PortOne V2 결제를 조회한다.
+`ConfirmPaymentCommand`는 `paymentId`, `portOnePaymentId`, 인증된 `consumerAccountId`, `idempotencyKey`만 가진다. Payment는 `paymentId + consumerAccountId` 소유 범위에서 결제를 먼저 조회해 실제 부재와 타인 소유를 모두 `PAYMENT_001` 404로 숨긴다. 그 뒤 원장의 source·amount·currency·PortOne 매핑을 검증하고 중앙 `CONFIRMING` 임대를 조건부 선점한 뒤 PortOne V2 결제를 조회한다.
 
 - 인증된 조회가 `PAID`이고 금액·통화·내부 매핑이 모두 일치할 때만 `PAID`를 확정한다.
 - 명시적인 실패·취소·결제 없음은 시도 원장에 종결 결과를 기록하고 결제를 `READY`로 복원할 수 있다.
@@ -173,7 +173,7 @@ Webhook은 PortOne V2 최신 `2024-04-25` body를 수신하고 Standard Webhooks
 | --- | --- | --- |
 | `PAYMENT_001` | 404 | 본인 범위에서 결제를 찾을 수 없음 |
 | `PAYMENT_002` | 409 | 현재 결제·환불 상태에서 요청한 전이 불가 |
-| `PAYMENT_003` | 409 | source, 소유자, 금액, 통화 또는 PortOne 매핑 불일치 |
+| `PAYMENT_003` | 409 | 서버 조회로 확인한 source, 금액, 통화 또는 PortOne 매핑 불일치 |
 | `PAYMENT_004` | 409 | 같은 source에 다른 활성 결제가 존재함 |
 | `PAYMENT_005` | 400 | 이력 cursor가 잘못됐거나 현재 필터와 일치하지 않음 |
 | `PAYMENT_006` | 401 | PortOne Webhook 서명·timestamp 검증 실패 |
