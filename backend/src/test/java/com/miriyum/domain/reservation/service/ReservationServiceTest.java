@@ -3781,6 +3781,16 @@ class ReservationServiceTest {
                         "serviceDate,asc",
                         "timeSnapshot.serviceDate",
                         Sort.Direction.ASC
+                ),
+                Arguments.of(
+                        "startAt,desc",
+                        "timeSnapshot.startAt",
+                        Sort.Direction.DESC
+                ),
+                Arguments.of(
+                        "startAt,asc",
+                        "timeSnapshot.startAt",
+                        Sort.Direction.ASC
                 )
         );
     }

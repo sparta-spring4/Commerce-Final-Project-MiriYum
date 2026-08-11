@@ -1,9 +1,11 @@
 package com.miriyum.domain.store.entity;
 
 import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.store.enums.VerificationStatus;
+import com.miriyum.domain.store.model.VerifiedStoreGeocoding;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.entity.BaseEntity;
 import com.miriyum.global.exception.ServiceException;
@@ -19,9 +21,12 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -37,6 +42,13 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Store extends BaseEntity {
+
+    private static final BigDecimal MIN_LATITUDE = new BigDecimal("-90");
+    private static final BigDecimal MAX_LATITUDE = new BigDecimal("90");
+    private static final BigDecimal MIN_LONGITUDE = new BigDecimal("-180");
+    private static final BigDecimal MAX_LONGITUDE = new BigDecimal("180");
+    private static final int COORDINATE_PRECISION = 18;
+    private static final int COORDINATE_SCALE = 15;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -65,6 +77,28 @@ public class Store extends BaseEntity {
 
     @Column(name = "address", nullable = false, length = 300)
     private String address;
+
+    @Column(name = "address_version", nullable = false)
+    private long addressVersion;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "geocoding_status", nullable = false, length = 20)
+    private GeocodingStatus geocodingStatus;
+
+    @Column(name = "latitude", precision = 18, scale = 15)
+    private BigDecimal latitude;
+
+    @Column(name = "longitude", precision = 18, scale = 15)
+    private BigDecimal longitude;
+
+    @Column(name = "verified_address", length = 300)
+    private String verifiedAddress;
+
+    @Column(name = "geocoding_verified_at")
+    private Instant geocodingVerifiedAt;
+
+    @Column(name = "geocoding_address_version")
+    private Long geocodingAddressVersion;
 
     @Column(name = "time_zone_id", nullable = false, length = 64)
     private String timeZoneId;
@@ -129,6 +163,8 @@ public class Store extends BaseEntity {
         this.description = description;
         this.region = region;
         this.address = address;
+        this.addressVersion = 1L;
+        this.geocodingStatus = GeocodingStatus.UNVERIFIED;
         this.storeCategoryCode = storeCategoryCode;
         this.tagCodes = new LinkedHashSet<>(tagCodes);
         this.reservationEnabled = reservationEnabled;
@@ -181,6 +217,51 @@ public class Store extends BaseEntity {
         return store;
     }
 
+    /**
+     * 주소 검증을 마친 신규 매장을 현재 주소 버전에 결합된 좌표와 함께 생성한다.
+     *
+     * @param geocoding 검증을 통과한 좌표와 최소 추적 정보
+     * @return 좌표 검증 완료 상태의 신규 매장
+     * @throws NullPointerException 검증 좌표의 필수 값이 누락된 경우
+     */
+    public static Store createVerified(
+            long storeOperatorAccountId,
+            String businessRegistrationNumber,
+            BusinessType businessType,
+            String name,
+            String description,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            Set<String> tagCodes,
+            boolean reservationEnabled,
+            boolean menuHoldEnabled,
+            boolean pickupEnabled,
+            String timeZoneId,
+            LocalDateTime onboardingAcceptedAt,
+            String requiredTermsVersion,
+            VerifiedStoreGeocoding geocoding
+    ) {
+        Store store = create(
+                storeOperatorAccountId,
+                businessRegistrationNumber,
+                businessType,
+                name,
+                description,
+                region,
+                address,
+                storeCategoryCode,
+                tagCodes,
+                reservationEnabled,
+                menuHoldEnabled,
+                pickupEnabled,
+                timeZoneId,
+                onboardingAcceptedAt,
+                requiredTermsVersion);
+        store.applyVerifiedGeocoding(geocoding);
+        return store;
+    }
+
     public void update(
             String name,
             String description,
@@ -193,19 +274,125 @@ public class Store extends BaseEntity {
             Boolean pickupEnabled,
             OperationStatus operationStatus
     ) {
+        update(
+                name,
+                description,
+                region,
+                address,
+                storeCategoryCode,
+                tagCodes,
+                reservationEnabled,
+                menuHoldEnabled,
+                pickupEnabled,
+                operationStatus,
+                null);
+    }
+
+    /**
+     * 일반 필드와 위치를 변경하며, 위치 변경 시 새 검증 좌표를 같은 주소 버전에 결합한다.
+     *
+     * @param geocoding 위치 변경에 대응하는 검증 좌표. 위치를 바꾸지 않으면 {@code null}
+     * @throws IllegalArgumentException 위치 변경에 검증 좌표가 없는 경우
+     */
+    public void update(
+            String name,
+            String description,
+            Region region,
+            String address,
+            String storeCategoryCode,
+            Set<String> tagCodes,
+            Boolean reservationEnabled,
+            Boolean menuHoldEnabled,
+            Boolean pickupEnabled,
+            OperationStatus operationStatus,
+            VerifiedStoreGeocoding geocoding
+    ) {
         requireGeneralUpdateStatus(operationStatus);
         boolean nextPickupEnabled = pickupEnabled == null ? this.pickupEnabled : pickupEnabled;
+        boolean locationTouched = region != null || address != null;
+        if (locationTouched && geocoding == null) {
+            throw new IllegalArgumentException(
+                    "verified geocoding is required for a location update");
+        }
+        if (locationTouched) {
+            requireVerifiedGeocoding(geocoding);
+        }
 
         this.name = name == null ? this.name : name;
         this.description = description == null ? this.description : description;
-        this.region = region == null ? this.region : region;
-        this.address = address == null ? this.address : address;
         this.storeCategoryCode = storeCategoryCode == null ? this.storeCategoryCode : storeCategoryCode;
         this.tagCodes = tagCodes == null ? this.tagCodes : new LinkedHashSet<>(tagCodes);
         this.reservationEnabled = reservationEnabled == null ? this.reservationEnabled : reservationEnabled;
         this.menuHoldEnabled = menuHoldEnabled == null ? this.menuHoldEnabled : menuHoldEnabled;
         this.pickupEnabled = nextPickupEnabled;
         this.operationStatus = operationStatus == null ? this.operationStatus : operationStatus;
+        if (locationTouched) {
+            this.region = region == null ? this.region : region;
+            this.address = address == null ? this.address : address;
+            this.addressVersion++;
+            applyVerifiedGeocoding(geocoding);
+        }
+    }
+
+    private void applyVerifiedGeocoding(VerifiedStoreGeocoding geocoding) {
+        VerifiedStoreGeocoding required = requireVerifiedGeocoding(geocoding);
+        this.latitude = required.latitude();
+        this.longitude = required.longitude();
+        this.verifiedAddress = required.verifiedAddress();
+        this.geocodingVerifiedAt = required.verifiedAt();
+        this.geocodingAddressVersion = addressVersion;
+        this.geocodingStatus = GeocodingStatus.VERIFIED;
+    }
+
+    private static VerifiedStoreGeocoding requireVerifiedGeocoding(
+            VerifiedStoreGeocoding geocoding
+    ) {
+        VerifiedStoreGeocoding required = Objects.requireNonNull(
+                geocoding,
+                "verified geocoding is required");
+        requireCoordinate(
+                required.latitude(),
+                MIN_LATITUDE,
+                MAX_LATITUDE,
+                "latitude");
+        requireCoordinate(
+                required.longitude(),
+                MIN_LONGITUDE,
+                MAX_LONGITUDE,
+                "longitude");
+        requireNonBlank(
+                required.verifiedAddress(),
+                "verified address is required");
+        Objects.requireNonNull(
+                required.verifiedAt(),
+                "geocoding verified time is required");
+        return required;
+    }
+
+    private static void requireCoordinate(
+            BigDecimal value,
+            BigDecimal minimum,
+            BigDecimal maximum,
+            String fieldName
+    ) {
+        BigDecimal required = Objects.requireNonNull(
+                value,
+                fieldName + " is required");
+        BigDecimal normalized = required.stripTrailingZeros();
+        if (required.compareTo(minimum) < 0
+                || required.compareTo(maximum) > 0
+                || normalized.precision() > COORDINATE_PRECISION
+                || normalized.scale() > COORDINATE_SCALE) {
+            throw new IllegalArgumentException(
+                    fieldName + " is outside the supported coordinate range or precision");
+        }
+    }
+
+    private static String requireNonBlank(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value;
     }
 
     /**

@@ -33,6 +33,18 @@ public final class RuleInterpreter {
      * @throws IllegalArgumentException 원문이 {@code null}인 경우
      */
     public InterpretationResult interpret(InterpretationRequest request) {
+        return interpret(request, false);
+    }
+
+    /** 통합 검색에서 날짜·시각·인원이 모두 있을 때만 예약 조건으로 승인한다. */
+    public InterpretationResult interpretCompleteReservation(InterpretationRequest request) {
+        return interpret(request, true);
+    }
+
+    private InterpretationResult interpret(
+            InterpretationRequest request,
+            boolean requireCompleteReservation
+    ) {
         Objects.requireNonNull(request, "request must not be null");
         String normalized = SearchInputNormalizer.normalize(request.rawInput());
         List<MatchedToken<String>> regionTokens =
@@ -77,15 +89,24 @@ public final class RuleInterpreter {
         time = TimeParser.parse(maskOverlappingCandidates(
                 normalized, time.recognizedSpans(), allDictionaryTokens));
 
+        boolean hasPartySize = partySize.value() != null;
+        boolean hasDate = date.value() != null;
+        boolean hasTime = time.value() != null;
+        boolean incompleteReservation = requireCompleteReservation
+                && (hasPartySize || hasDate || hasTime)
+                && !(hasPartySize && hasDate && hasTime);
+
         List<TextSpan> acceptedSpans = new ArrayList<>();
         acceptedSpans.addAll(spansOf(dictionary.regions()));
         acceptedSpans.addAll(spansOf(dictionary.storeCategories()));
         acceptedSpans.addAll(spansOf(dictionary.menuCategories()));
         acceptedSpans.addAll(spansOf(dictionary.tags()));
         acceptedSpans.addAll(price.acceptedSpans());
-        acceptedSpans.addAll(partySize.acceptedSpans());
-        acceptedSpans.addAll(date.acceptedSpans());
-        acceptedSpans.addAll(time.acceptedSpans());
+        if (!incompleteReservation) {
+            acceptedSpans.addAll(partySize.acceptedSpans());
+            acceptedSpans.addAll(date.acceptedSpans());
+            acceptedSpans.addAll(time.acceptedSpans());
+        }
         List<LocatedWarning> locatedWarnings = new ArrayList<>();
         if (dictionary.ambiguous() || cross.ambiguous()) {
             locatedWarnings.add(new LocatedWarning(
@@ -98,6 +119,13 @@ public final class RuleInterpreter {
         locatedWarnings.addAll(partySize.warnings());
         locatedWarnings.addAll(date.warnings());
         locatedWarnings.addAll(time.warnings());
+        if (incompleteReservation) {
+            locatedWarnings.add(new LocatedWarning(
+                    new InterpretationWarning(
+                            WarningCode.INCOMPLETE_RESERVATION_CONDITION,
+                            WarningField.RESERVATION),
+                    earliestReservationStart(partySize, date, time)));
+        }
         List<InterpretationWarning> warnings = locatedWarnings.stream()
                 .sorted(Comparator.comparingInt(LocatedWarning::sourceStart)
                         .thenComparingInt(located -> located.warning().code().ordinal()))
@@ -109,9 +137,9 @@ public final class RuleInterpreter {
                 codesOf(dictionary.menuCategories()),
                 codesOf(dictionary.tags()),
                 price.value(),
-                partySize.value(),
-                date.value(),
-                time.value(),
+                incompleteReservation ? null : partySize.value(),
+                incompleteReservation ? null : date.value(),
+                incompleteReservation ? null : time.value(),
                 removeAcceptedSpans(normalized, acceptedSpans));
         return new InterpretationResult(
                 RULE_VERSION,
@@ -254,6 +282,21 @@ public final class RuleInterpreter {
             return right == null ? 0 : right;
         }
         return right == null ? left : Math.min(left, right);
+    }
+
+    private static int earliestReservationStart(
+            PartySizeParser.Result partySize,
+            DateParser.Result date,
+            TimeParser.Result time
+    ) {
+        return java.util.stream.Stream.of(
+                        partySize.acceptedSpans(),
+                        date.acceptedSpans(),
+                        time.acceptedSpans())
+                .flatMap(List::stream)
+                .mapToInt(TextSpan::startInclusive)
+                .min()
+                .orElse(0);
     }
 
     private record DictionaryResolution(

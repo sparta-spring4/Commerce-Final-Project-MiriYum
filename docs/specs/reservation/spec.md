@@ -77,6 +77,7 @@
 - 정책·시간대가 없거나 비활성이고, 슬롯이 맞지 않거나 현지 시각이 존재하지 않으며, 중복 현지 시각에 유효 offset이 없으면 해당 매장은 실패 폐쇄한다.
 - 저장·비교는 `Instant`를 사용한다. `serviceDate`는 매장 현지 시작 날짜이고 실제 `startAt`, `serviceEndAt`, `occupancyEndAt`, IANA 시간대, 각 계산 offset과 duration·정책 소유 매장·버전을 거래 스냅샷으로 보존한다. 정책 소유 매장은 예약 매장과 같아야 한다.
 - 고객 응답은 `serviceDate`, `timeStatus`, offset 포함 `startAt`, offset 포함 `serviceEndAt`, `timeZoneId`만 공개한다. 내부 `occupancyEndAt`은 고객 응답에 포함하지 않는다. V15 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 응답해 임의 offset 변환이나 예외 누출을 막는다.
+- 소비자 예약 이력은 `createdAt`, `serviceDate`, `startAt`의 오름차순·내림차순 정렬을 공개하며, 각 정렬은 같은 방향의 예약 ID를 보조 키로 사용한다. 추천의 최근 방문 이력은 `FULFILLED`, `startAt,desc`, 최대 20건 계약을 사용한다.
 - `[startAt, serviceEndAt)`의 영업시간·브레이크·휴무·휴점·폐점 충돌은 Store 소유의 contract-first Issue #104 / PR #106 batch 계약으로 검증한다. PR #84의 시작 접수 window만으로 이 전체 구간 검증을 완료했다고 간주하지 않는다.
 - Reservation은 시간 계산에 성공한 항목만 입력 순서·개수·중복을 보존해 PR #106의 Store batch 계약에 전달한다. Store 검증 범위에는 `[serviceEndAt, occupancyEndAt)` turnover 구간을 포함하지 않는다. Store의 `NOT_ACCEPTING`은 해당 Reservation 결과의 `UNAVAILABLE`로 변환하고, batch 응답의 개수·순서·매장·구간이 요청과 일치하지 않거나 응답 상태가 없으면 입력 전체를 실패 폐쇄한다.
 
