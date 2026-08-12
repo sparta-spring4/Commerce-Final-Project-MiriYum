@@ -2,6 +2,7 @@ package com.miriyum.domain.consumer.controller.auth;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
@@ -33,7 +34,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.kakao.enabled=true",
+            "miriyum.kakao.rest-api-key=test-kakao-rest-api-key",
+            "miriyum.kakao.client-secret=test-kakao-client-secret",
+            "miriyum.kakao.redirect-uris=https://app.example.com/auth/kakao/callback"
         })
 @AutoConfigureMockMvc
 class ConsumerAuthControllerTest {
@@ -72,5 +77,37 @@ class ConsumerAuthControllerTest {
                         .content(requestBody))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.accountType").value("CONSUMER"));
+    }
+
+    @Test
+    @DisplayName("카카오 인가 주소를 발급하면 같은 브라우저 검증용 state 쿠키를 설정한다")
+    void createsKakaoAuthorizationWithStateCookie() throws Exception {
+        // when & then
+        mockMvc.perform(post("/api/v1/consumer-auth/kakao/authorizations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "redirectUri": "https://app.example.com/auth/kakao/callback" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString(
+                        "MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE=")))
+                .andExpect(jsonPath("$.data.authorizationUrl").exists());
+    }
+
+    @Test
+    @DisplayName("카카오 state 쿠키 없이 콜백을 보내면 외부 카카오 호출 전에 거절한다")
+    void rejectsKakaoCallbackWithoutStateCookie() throws Exception {
+        // when & then
+        mockMvc.perform(post("/api/v1/consumer-auth/kakao/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "authorizationCode": "unused-code",
+                                  "state": "untrusted-state",
+                                  "redirectUri": "https://app.example.com/auth/kakao/callback"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_013"));
     }
 }

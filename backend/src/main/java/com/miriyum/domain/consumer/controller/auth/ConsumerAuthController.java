@@ -3,18 +3,29 @@ package com.miriyum.domain.consumer.controller.auth;
 import com.miriyum.domain.auth.cookie.AuthCookieFactory;
 import com.miriyum.domain.auth.cookie.CookieExtractor;
 import com.miriyum.domain.auth.cookie.CsrfTokenGenerator;
+import com.miriyum.domain.auth.cookie.KakaoOAuthStateCookieFactory;
 import com.miriyum.domain.auth.cookie.OriginValidator;
 import com.miriyum.domain.auth.dto.request.EmptyJsonRequest;
+import com.miriyum.domain.auth.dto.request.KakaoAuthorizationRequest;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.dto.response.AccountCreatedResponse;
 import com.miriyum.domain.auth.dto.response.CsrfTokenResponse;
+import com.miriyum.domain.auth.dto.response.KakaoAuthorizationResponse;
+import com.miriyum.domain.auth.dto.response.KakaoLoginResponse;
 import com.miriyum.domain.auth.dto.response.TokenResponse;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
+import com.miriyum.domain.auth.social.dto.KakaoAuthorization;
+import com.miriyum.domain.auth.social.dto.KakaoLoginResult;
+import com.miriyum.domain.auth.social.enums.KakaoLoginStatus;
+import com.miriyum.domain.auth.social.enums.KakaoOAuthPurpose;
+import com.miriyum.domain.consumer.dto.auth.ConsumerKakaoSignUpRequest;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
+import com.miriyum.domain.consumer.service.ConsumerKakaoAuthService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,8 +54,10 @@ public class ConsumerAuthController {
     private static final TokenNamespace NAMESPACE = TokenNamespace.CONSUMER;
 
     private final ConsumerAuthService consumerAuthService;
+    private final ConsumerKakaoAuthService consumerKakaoAuthService;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthCookieFactory authCookieFactory;
+    private final KakaoOAuthStateCookieFactory kakaoOAuthStateCookieFactory;
     private final CsrfTokenGenerator csrfTokenGenerator;
     private final OriginValidator originValidator;
 
@@ -52,6 +65,44 @@ public class ConsumerAuthController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AccountCreatedResponse> signUp(@Valid @RequestBody ConsumerSignUpRequest request) {
         return ApiResponse.success("가입이 완료됐습니다.", consumerAuthService.signUp(request));
+    }
+
+    @PostMapping("/kakao/authorizations")
+    public ApiResponse<KakaoAuthorizationResponse> createKakaoAuthorization(
+            @Valid @RequestBody KakaoAuthorizationRequest request,
+            HttpServletResponse response
+    ) {
+        KakaoAuthorization authorization = consumerKakaoAuthService.createLoginAuthorization(request.redirectUri());
+        setKakaoStateCookie(response, KakaoOAuthPurpose.LOGIN, authorization.state());
+        return ApiResponse.success("카카오 로그인 주소를 발급했습니다.", new KakaoAuthorizationResponse(
+                authorization.authorizationUrl()));
+    }
+
+    @PostMapping("/kakao/sessions")
+    public ApiResponse<KakaoLoginResponse> loginWithKakao(
+            @Valid @RequestBody KakaoAuthenticationRequest request,
+            HttpServletRequest httpRequest,
+            HttpServletResponse response
+    ) {
+        try {
+            requireKakaoState(httpRequest, KakaoOAuthPurpose.LOGIN, request.state());
+            KakaoLoginResult result = consumerKakaoAuthService.authenticate(request);
+            setRefreshCookieWhenAuthenticated(response, result);
+            return ApiResponse.success("카카오 로그인 결과를 확인했습니다.", toKakaoLoginResponse(result));
+        } finally {
+            expireKakaoStateCookie(response, KakaoOAuthPurpose.LOGIN);
+        }
+    }
+
+    @PostMapping("/kakao/accounts")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<KakaoLoginResponse> signUpWithKakao(
+            @Valid @RequestBody ConsumerKakaoSignUpRequest request,
+            HttpServletResponse response
+    ) {
+        KakaoLoginResult result = consumerKakaoAuthService.signUp(request);
+        setRefreshCookieWhenAuthenticated(response, result);
+        return ApiResponse.success("카카오 가입이 완료됐습니다.", toKakaoLoginResponse(result));
     }
 
     @PostMapping("/sessions")
@@ -114,7 +165,35 @@ public class ConsumerAuthController {
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieFactory.refreshCookie(NAMESPACE, refreshToken).toString());
     }
 
+    private void setKakaoStateCookie(HttpServletResponse response, KakaoOAuthPurpose purpose, String state) {
+        response.addHeader(HttpHeaders.SET_COOKIE,
+                kakaoOAuthStateCookieFactory.activeCookie(NAMESPACE, purpose, state).toString());
+    }
+
+    private void expireKakaoStateCookie(HttpServletResponse response, KakaoOAuthPurpose purpose) {
+        response.addHeader(HttpHeaders.SET_COOKIE,
+                kakaoOAuthStateCookieFactory.expiredCookie(NAMESPACE, purpose).toString());
+    }
+
+    private void requireKakaoState(HttpServletRequest request, KakaoOAuthPurpose purpose, String state) {
+        String cookieState = CookieExtractor.extract(
+                request, kakaoOAuthStateCookieFactory.cookieName(NAMESPACE, purpose));
+        if (!kakaoOAuthStateCookieFactory.matchesRequestState(cookieState, state)) {
+            throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
+        }
+    }
+
     private TokenResponse toTokenResponse(TokenPair tokenPair) {
         return TokenResponse.of(tokenPair.accessToken(), jwtTokenProvider.getAccessTokenValiditySeconds());
+    }
+
+    private void setRefreshCookieWhenAuthenticated(HttpServletResponse response, KakaoLoginResult result) {
+        if (result.status() == KakaoLoginStatus.AUTHENTICATED) {
+            setRefreshCookie(response, result.tokenPair().refreshToken());
+        }
+    }
+
+    private KakaoLoginResponse toKakaoLoginResponse(KakaoLoginResult result) {
+        return KakaoLoginResponse.from(result, jwtTokenProvider.getAccessTokenValiditySeconds());
     }
 }
