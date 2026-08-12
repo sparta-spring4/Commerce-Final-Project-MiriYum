@@ -6,6 +6,7 @@ import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
 import com.miriyum.domain.menu.repository.MenuRepository;
 import java.util.List;
+import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,15 +25,20 @@ public class RepresentativeMenuQueryService {
             return RepresentativeMenuSnapshot.unconfigured(storeId);
         }
         MenuRepository.RepresentativeMenuRow setting = rows.getFirst();
-        List<RepresentativeMenuItem> items = rows.stream()
+        List<MenuRepository.RepresentativeMenuRow> eligibleRows = rows.stream()
                 .filter(row -> row.getMenuId() != null && row.getName() != null)
-                .map(row -> new RepresentativeMenuItem(
+                .toList();
+        List<RepresentativeMenuItem> items = IntStream.range(0, eligibleRows.size())
+                .mapToObj(index -> {
+                    MenuRepository.RepresentativeMenuRow row = eligibleRows.get(index);
+                    return new RepresentativeMenuItem(
                         String.valueOf(row.getMenuId()),
-                        row.getDisplayOrder(),
+                        index + 1,
                         row.getPublishedVersionNumber(),
                         row.getName(),
                         row.getPrice(),
-                        MenuSellingStatus.valueOf(row.getSellingStatus())))
+                        MenuSellingStatus.valueOf(row.getSellingStatus()));
+                })
                 .toList();
         return new RepresentativeMenuSnapshot(
                 String.valueOf(setting.getStoreId()),

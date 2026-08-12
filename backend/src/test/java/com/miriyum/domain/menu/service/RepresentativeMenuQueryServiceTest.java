@@ -27,7 +27,7 @@ class RepresentativeMenuQueryServiceTest {
                 7L, 4L, "CONFIGURED", 13L, 1,
                 2, "latte", 6_000, "SOLD_OUT");
         MenuRepository.RepresentativeMenuRow second = row(
-                7L, 4L, "CONFIGURED", 11L, 2,
+                7L, 4L, "CONFIGURED", 11L, 3,
                 1, "americano", 5_000, "SELLING");
         given(menuRepository.findRepresentativeMenuRows(7L))
                 .willReturn(List.of(first, second));
@@ -40,6 +40,8 @@ class RepresentativeMenuQueryServiceTest {
         assertThat(snapshot.version()).isEqualTo(4L);
         assertThat(snapshot.items()).extracting(item -> item.menuId())
                 .containsExactly("13", "11");
+        assertThat(snapshot.items()).extracting(item -> item.displayOrder())
+                .containsExactly(1, 2);
         assertThat(snapshot.items().getFirst().sellingStatus())
                 .isEqualTo(MenuSellingStatus.SOLD_OUT);
         verify(menuRepository).findRepresentativeMenuRows(7L);
@@ -76,7 +78,7 @@ class RepresentativeMenuQueryServiceTest {
         lenient().when(row.getVersion()).thenReturn(version);
         lenient().when(row.getStatus()).thenReturn(status);
         given(row.getMenuId()).willReturn(menuId);
-        given(row.getDisplayOrder()).willReturn(displayOrder);
+        lenient().when(row.getDisplayOrder()).thenReturn(displayOrder);
         given(row.getPublishedVersionNumber()).willReturn(publishedVersionNumber);
         given(row.getName()).willReturn(name);
         given(row.getPrice()).willReturn(price);

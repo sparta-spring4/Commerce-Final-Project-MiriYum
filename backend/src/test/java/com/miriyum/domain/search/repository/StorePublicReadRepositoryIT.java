@@ -121,6 +121,9 @@ class StorePublicReadRepositoryIT {
                 .containsExactly(
                         String.valueOf(soldOut.getId()),
                         String.valueOf(selling.getId()));
+        assertThat(snapshot.items())
+                .extracting(item -> item.displayOrder())
+                .containsExactly(1, 2);
         assertThat(snapshot.items().getFirst().sellingStatus())
                 .isEqualTo(MenuSellingStatus.SOLD_OUT);
         assertThat(snapshot.version()).isEqualTo(1L);
