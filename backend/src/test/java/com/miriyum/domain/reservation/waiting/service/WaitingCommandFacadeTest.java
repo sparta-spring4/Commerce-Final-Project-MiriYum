@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -16,17 +17,29 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.RequestFingerprint;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.transaction.TransactionTimedOutException;
 
 @ExtendWith(MockitoExtension.class)
 class WaitingCommandFacadeTest {
@@ -65,8 +78,13 @@ class WaitingCommandFacadeTest {
         ));
     }
 
+    @AfterEach
+    void clearInterruptFlag() {
+        Thread.interrupted();
+    }
+
     @Test
-    @DisplayName("호출 지문은 method route storeId teamId expectedVersion을 정확히 포함한다")
+    @DisplayName("call fingerprint contains only the canonical request fields")
     void callFingerprintContainsOnlyCanonicalRequestFields() {
         given(ledgerService.call(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
@@ -102,7 +120,7 @@ class WaitingCommandFacadeTest {
     }
 
     @Test
-    @DisplayName("도착 지문은 arrive route와 expectedVersion을 포함한다")
+    @DisplayName("arrive fingerprint uses the canonical route and version")
     void arriveFingerprintUsesCanonicalRouteAndVersion() {
         given(ledgerService.arrive(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
@@ -126,7 +144,7 @@ class WaitingCommandFacadeTest {
     }
 
     @Test
-    @DisplayName("입장 지문은 check-in route와 expectedVersion을 포함한다")
+    @DisplayName("check-in fingerprint uses the canonical route and version")
     void checkInFingerprintUsesCanonicalRouteAndVersion() {
         given(ledgerService.checkIn(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
@@ -150,7 +168,7 @@ class WaitingCommandFacadeTest {
     }
 
     @Test
-    @DisplayName("취소 지문은 cancel route와 expectedVersion을 포함한다")
+    @DisplayName("cancel fingerprint uses the canonical route and version")
     void cancelFingerprintUsesCanonicalRouteAndVersion() {
         given(ledgerService.cancel(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
@@ -174,74 +192,141 @@ class WaitingCommandFacadeTest {
     }
 
     @Test
-    @DisplayName("동일 키와 동일 expectedVersion 재요청은 최초 응답을 재생한다")
-    void sameKeySameExpectedVersionReplaysFirstResponse() {
-        AtomicReference<String> firstFingerprint = new AtomicReference<>();
+    @DisplayName("a deadlock retry reuses the exact command and occurredAt")
+    void retriesMysqlDeadlockWithSameCommandAndOccurredAt() {
+        RecordingClock clock = new RecordingClock(REQUESTED_AT);
+        List<Long> delays = new ArrayList<>();
+        facade = new WaitingCommandFacade(
+                ledgerService, clock, attempt -> attempt * 100L, delays::add);
         given(ledgerService.call(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
-                .willAnswer(invocation -> {
-                    IdempotencyCommand command = invocation.getArgument(4);
-                    String known = firstFingerprint.get();
-                    if (known == null) {
-                        firstFingerprint.set(command.requestFingerprint());
-                    } else if (!known.equals(command.requestFingerprint())) {
-                        throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-                    }
-                    return firstResult;
-                });
-        WaitingTeamTransitionRequest request = new WaitingTeamTransitionRequest(0L);
+                .willThrow(mysqlLockFailure(1213))
+                .willThrow(mysqlLockFailure(1213))
+                .willReturn(firstResult);
 
-        WaitingCommandResult first = facade.call(
-                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, request);
-        WaitingCommandResult replay = facade.call(
-                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, request);
+        WaitingCommandResult result = facade.call(
+                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, new WaitingTeamTransitionRequest(0L));
 
-        assertThat(replay).isSameAs(first);
-        then(ledgerService).should(times(2)).call(
+        assertThat(result).isSameAs(firstResult);
+        assertThat(delays).containsExactly(100L, 200L);
+        assertThat(clock.instantCalls()).isOne();
+        ArgumentCaptor<IdempotencyCommand> commands =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        ArgumentCaptor<Instant> occurredAt = ArgumentCaptor.forClass(Instant.class);
+        then(ledgerService).should(times(3)).call(
                 org.mockito.ArgumentMatchers.eq(OPERATOR_ID),
                 org.mockito.ArgumentMatchers.eq(STORE_ID),
                 org.mockito.ArgumentMatchers.eq(TEAM_ID),
                 org.mockito.ArgumentMatchers.eq(0L),
-                any(),
-                org.mockito.ArgumentMatchers.eq(REQUESTED_AT)
-        );
+                commands.capture(),
+                occurredAt.capture());
+        assertThat(commands.getAllValues())
+                .allSatisfy(command -> assertThat(command).isSameAs(commands.getValue()));
+        assertThat(occurredAt.getAllValues()).containsOnly(REQUESTED_AT);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("retryableFailures")
+    @DisplayName("exhausted technical concurrency failures map to COMMON_008")
+    void exhaustedTechnicalConcurrencyFailuresMapToCommon008(
+            String description,
+            RuntimeException failure
+    ) {
+        List<Long> delays = new ArrayList<>();
+        facade = new WaitingCommandFacade(
+                ledgerService,
+                Clock.fixed(REQUESTED_AT, ZoneOffset.UTC),
+                attempt -> attempt,
+                delays::add);
+        given(ledgerService.call(
+                any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
+                .willThrow(failure);
+
+        assertThatThrownBy(() -> facade.call(
+                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, new WaitingTeamTransitionRequest(0L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                    assertThat(exception.getCause()).isSameAs(failure);
+                });
+        assertThat(delays).containsExactly(1L, 2L);
+        then(ledgerService).should(times(3)).call(
+                any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonRetryableFailures")
+    @DisplayName("semantic, validation, idempotency, and generic database failures are not retried")
+    void doesNotRetryNonTechnicalFailures(String description, RuntimeException failure) {
+        List<Long> delays = new ArrayList<>();
+        facade = new WaitingCommandFacade(
+                ledgerService,
+                Clock.fixed(REQUESTED_AT, ZoneOffset.UTC),
+                attempt -> attempt,
+                delays::add);
+        given(ledgerService.call(
+                any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
+                .willThrow(failure);
+
+        Throwable thrown = catchThrowable(() -> facade.call(
+                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, new WaitingTeamTransitionRequest(0L)));
+
+        assertThat(thrown).isSameAs(failure);
+        assertThat(delays).isEmpty();
+        then(ledgerService).should(times(1)).call(
+                any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any());
     }
 
     @Test
-    @DisplayName("동일 키를 다른 expectedVersion으로 재사용하면 COMMON_007이다")
-    void sameKeyDifferentExpectedVersionConflicts() {
-        AtomicReference<String> firstFingerprint = new AtomicReference<>();
+    @DisplayName("an interrupted retry restores interruption and maps to COMMON_008")
+    void interruptedRetryMapsToCommon008() {
+        RuntimeException failure = mysqlLockFailure(1213);
+        facade = new WaitingCommandFacade(
+                ledgerService,
+                Clock.fixed(REQUESTED_AT, ZoneOffset.UTC),
+                attempt -> 0L,
+                millis -> {
+                    throw new InterruptedException("stop");
+                });
         given(ledgerService.call(
                 any(Long.class), any(Long.class), any(Long.class), any(Long.class), any(), any()))
-                .willAnswer(invocation -> {
-                    IdempotencyCommand command = invocation.getArgument(4);
-                    String known = firstFingerprint.get();
-                    if (known == null) {
-                        firstFingerprint.set(command.requestFingerprint());
-                        return firstResult;
-                    }
-                    if (!known.equals(command.requestFingerprint())) {
-                        throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-                    }
-                    return firstResult;
-                });
-        facade.call(
-                OPERATOR_ID,
-                STORE_ID,
-                TEAM_ID,
-                KEY,
-                new WaitingTeamTransitionRequest(0L)
-        );
+                .willThrow(failure);
 
         assertThatThrownBy(() -> facade.call(
-                OPERATOR_ID,
-                STORE_ID,
-                TEAM_ID,
-                KEY,
-                new WaitingTeamTransitionRequest(1L)
-        )).isInstanceOfSatisfying(ServiceException.class, exception ->
-                assertThat(exception.getErrorCode())
-                        .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+                OPERATOR_ID, STORE_ID, TEAM_ID, KEY, new WaitingTeamTransitionRequest(0L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                    assertThat(exception.getCause()).isInstanceOf(InterruptedException.class);
+                    assertThat(exception.getCause().getSuppressed()).containsExactly(failure);
+                });
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    }
+
+    private static Stream<Arguments> retryableFailures() {
+        return Stream.of(
+                Arguments.of("MySQL deadlock", mysqlLockFailure(1213)),
+                Arguments.of("MySQL lock timeout", mysqlLockFailure(1205)),
+                Arguments.of("query timeout", new QueryTimeoutException("timed out")),
+                Arguments.of("transaction timeout", new TransactionTimedOutException("timed out"))
+        );
+    }
+
+    private static Stream<Arguments> nonRetryableFailures() {
+        return Stream.of(
+                Arguments.of("domain service error",
+                        new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED)),
+                Arguments.of("validation error", new IllegalArgumentException("invalid")),
+                Arguments.of("generic constraint failure",
+                        new DataIntegrityViolationException("constraint")),
+                Arguments.of("unknown lock failure",
+                        new CannotAcquireLockException("unknown lock"))
+        );
+    }
+
+    private static CannotAcquireLockException mysqlLockFailure(int errorCode) {
+        return new CannotAcquireLockException(
+                "lock conflict", new SQLException("mysql lock", "40001", errorCode));
     }
 
     private static String canonical(String action, int routeLength, long expectedVersion) {
@@ -252,5 +337,34 @@ class WaitingCommandFacadeTest {
                 + "storeId=2:21|"
                 + "waitingTeamId=2:31|"
                 + "expectedVersion=1:" + expectedVersion + "|";
+    }
+
+    private static final class RecordingClock extends Clock {
+        private final Instant instant;
+        private int instantCalls;
+
+        private RecordingClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            instantCalls++;
+            return instant;
+        }
+
+        private int instantCalls() {
+            return instantCalls;
+        }
     }
 }
