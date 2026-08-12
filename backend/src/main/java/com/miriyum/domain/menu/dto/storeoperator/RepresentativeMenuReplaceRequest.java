@@ -1,6 +1,7 @@
 package com.miriyum.domain.menu.dto.storeoperator;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -16,5 +17,11 @@ public record RepresentativeMenuReplaceRequest(
         if (menuIds != null) {
             menuIds = List.copyOf(menuIds);
         }
+    }
+
+    @AssertTrue
+    public boolean isMenuIdsUnique() {
+        return menuIds == null
+                || menuIds.stream().distinct().count() == menuIds.size();
     }
 }
