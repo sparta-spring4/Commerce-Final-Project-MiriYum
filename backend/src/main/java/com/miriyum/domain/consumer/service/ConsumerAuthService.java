@@ -158,7 +158,7 @@ public class ConsumerAuthService {
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
         RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
                 TokenNamespace.CONSUMER, parsed, refreshToken);
-        if (attempt.reused()) {
+        if (attempt.reused() && account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
         }
         if (!attempt.rotated()) {

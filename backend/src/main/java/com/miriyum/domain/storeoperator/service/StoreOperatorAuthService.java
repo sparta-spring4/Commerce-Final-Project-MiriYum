@@ -146,7 +146,7 @@ public class StoreOperatorAuthService {
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
         RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
                 TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
-        if (attempt.reused()) {
+        if (attempt.reused() && account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
         }
         if (!attempt.rotated()) {

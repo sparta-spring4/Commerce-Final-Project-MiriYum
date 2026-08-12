@@ -350,6 +350,7 @@ class ConsumerAuthServiceTest {
     @DisplayName("정지 일반 사용자도 재사용 Refresh Token은 먼저 탐지한다")
     void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
         ConsumerAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
         given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
@@ -363,6 +364,25 @@ class ConsumerAuthServiceTest {
         InOrder order = inOrder(refreshTokenManager);
         order.verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
         order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("활성 일반 사용자의 재사용 Refresh Token은 해당 family만 폐기한다")
+    void doesNotRevokeAllFamiliesWhenActiveAccountReusesRefreshToken() {
+        ConsumerAccount account = persistedAccount();
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> consumerAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
     }
 
     @Test

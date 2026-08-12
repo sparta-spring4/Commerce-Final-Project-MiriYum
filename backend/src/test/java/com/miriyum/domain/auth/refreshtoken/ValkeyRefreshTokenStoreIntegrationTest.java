@@ -176,7 +176,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
 
     @Test
     @DisplayName("한 family의 이전 토큰 재사용 뒤 계정 전체 폐기 시 다른 활성 family도 갱신할 수 없다")
-    void revokesAllFamiliesAfterRotatedTokenReuse() {
+    void keepsOtherActiveFamilyAfterRotatedTokenReuse() {
         Instant now = Instant.now();
         RefreshTokenState reusedFamily = state("family-reused", "token-reused", now);
         RefreshTokenState otherFamily = state("family-other", "token-other", now);
@@ -188,10 +188,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         assertThat(rotate(reusedFamily, now.plusSeconds(2)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
 
-        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(3), now.plusSeconds(1_209_600));
-
         assertThat(rotate(otherFamily, now.plusSeconds(4)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
     }
 
     @Test

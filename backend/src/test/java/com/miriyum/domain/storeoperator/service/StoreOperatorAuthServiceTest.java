@@ -331,6 +331,7 @@ class StoreOperatorAuthServiceTest {
     @DisplayName("정지 매장 운영자도 재사용 Refresh Token은 먼저 탐지한다")
     void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
         StoreOperatorAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
         given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
@@ -344,6 +345,25 @@ class StoreOperatorAuthServiceTest {
         InOrder order = inOrder(refreshTokenManager);
         order.verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
         order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("활성 매장 운영자의 재사용 Refresh Token은 해당 family만 폐기한다")
+    void doesNotRevokeAllFamiliesWhenActiveAccountReusesRefreshToken() {
+        StoreOperatorAccount account = persistedAccount();
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
     }
 
     @Test
