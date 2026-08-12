@@ -55,7 +55,9 @@ class ReservationHistorySearchRequestTest {
         "'createdAt,desc', CREATED_AT_DESC",
         "'createdAt,asc', CREATED_AT_ASC",
         "'serviceDate,desc', SERVICE_DATE_DESC",
-        "'serviceDate,asc', SERVICE_DATE_ASC"
+        "'serviceDate,asc', SERVICE_DATE_ASC",
+        "'startAt,desc', START_AT_DESC",
+        "'startAt,asc', START_AT_ASC"
     })
     @DisplayName("OpenAPI가 승인한 네 가지 예약 내역 정렬만 허용한다")
     void acceptsApprovedSorts(

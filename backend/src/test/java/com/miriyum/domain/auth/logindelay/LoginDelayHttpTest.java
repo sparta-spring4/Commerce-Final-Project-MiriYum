@@ -147,7 +147,7 @@ class LoginDelayHttpTest {
                   "password": "%s"
                 }
                 """.formatted(EMAIL, password);
-        return mockMvc.perform(post("/api/v1/consumer-auth/sessions")
+        return mockMvc.perform(post("/api/v1/consumers/auth/sessions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(requestBody));
     }

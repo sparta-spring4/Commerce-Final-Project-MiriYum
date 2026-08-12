@@ -6,7 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
@@ -14,10 +14,10 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.service.StoreScheduledActivationDecision;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import java.time.Clock;
 import java.time.Instant;
@@ -66,7 +66,10 @@ class ReservationTimePolicyActivationServiceTest {
     private ConsumerAccountService consumerAccountService;
 
     @Mock
-    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private ReservationMenuHoldPort menuHoldPort;
+
+    @Mock
+    private ReservationTimeResolutionService timeResolutionService;
 
     private ReservationService reservationService;
 
@@ -84,7 +87,8 @@ class ReservationTimePolicyActivationServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService
+                menuHoldPort,
+                timeResolutionService
         );
     }
 

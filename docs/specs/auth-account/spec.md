@@ -29,7 +29,7 @@
 
 ## API 경로 결정과 이유
 
-일반 사용자와 매장 운영자의 인증 경로를 각각 `/consumer-auth`와 `/store-operator-auth`로 분리한다. 요청 본문의 `role`로 계정 유형을 선택하는 단일 로그인 API는 사용하지 않는다.
+일반 사용자와 매장 운영자의 인증 경로를 각각 `/api/v1/consumers/auth`와 `/api/v1/store-operators/auth`로 분리한다. 계정·인증·거래 경로는 같은 plural audience namespace 아래에 두며, 요청 본문의 `role`로 계정 유형을 선택하는 단일 로그인 API는 사용하지 않는다.
 
 | 결정 | 채택안 | 대안 | 선택 이유 |
 | --- | --- | --- | --- |
@@ -37,8 +37,8 @@
 | 로그인 | `POST .../sessions` | `/login` 동사 경로 | 현재 브라우저 인증 상태 생성으로 표현한다. |
 | 재발급 | `POST .../token-refreshes` | `/refresh` 동사 경로 | 재발급 명령의 결과가 새 토큰이라는 의미를 명시한다. |
 | 로그아웃 | `DELETE .../sessions/current` | `/logout` 동사 경로 | 현재 브라우저 shell의 인증 상태 제거로 표현한다. |
-| 내 정보 | `GET/PATCH ...-accounts/me` | 요청에 accountId 전달 | JWT subject가 소유자를 결정해 수평 권한 상승을 막는다. |
-| 내 예약 내역 | `GET /consumer-accounts/me/reservations` | 예약과 마이페이지가 각각 API 제공 | O-009에 따라 1번이 공개 경로를 관리하고 3번의 조회 계약을 사용한다. |
+| 내 정보 | `GET/PATCH .../me` | 요청에 accountId 전달 | JWT subject가 소유자를 결정해 수평 권한 상승을 막는다. |
+| 내 예약 내역 | `GET /api/v1/consumers/me/reservations` | 예약 도메인이 API 제공 | 예약 HTTP 경계와 조회 계약을 예약 도메인이 함께 소유한다. |
 
 이 경로는 C-008의 소문자·kebab-case·리소스 중심 원칙을 적용한다. 클라이언트가 계정 유형, 역할이나 accountId를 본문으로 보내 인증 주체를 바꾸지 못한다.
 
@@ -57,8 +57,8 @@
 ### 1차 MVP 계정 연락처 경계
 
 - “입력값을 인증된 것으로 간주한다”는 말은 원문 형식을 그대로 저장한다는 뜻이 아니다. 전화번호는 숫자 정규화 값만 저장하고 응답·운영 화면에는 `010-****-5678`처럼 마스킹(일부를 가려 표시)한다.
-- 기존 `phone=null` 일반 사용자는 `/api/v1/consumer-accounts/me/contact`에서 번호를 한 번 등록할 수 있다. 같은 정규화 번호의 반복 요청은 멱등(같은 요청을 반복해도 한 번 처리한 것과 결과가 같음)하게 처리하고, 다른 번호로 변경하는 기능은 1차 MVP에서 제공하지 않는다.
-- 기존 `phone=null` 매장 운영자는 `/api/v1/store-operator-accounts/me/contact`에서 번호를 한 번 등록할 수 있다. 매장 운영자도 같은 정규화·중복·변경 금지 규칙을 적용하지만, 예약 알림 대상이 아니므로 이 등록으로 예약용 opaque reference를 생성하지 않는다.
+- 기존 `phone=null` 일반 사용자는 `/api/v1/consumers/me/contact`에서 번호를 한 번 등록할 수 있다. 같은 정규화 번호의 반복 요청은 멱등(같은 요청을 반복해도 한 번 처리한 것과 결과가 같음)하게 처리하고, 다른 번호로 변경하는 기능은 1차 MVP에서 제공하지 않는다.
+- 기존 `phone=null` 매장 운영자는 `/api/v1/store-operators/me/contact`에서 번호를 한 번 등록할 수 있다. 매장 운영자도 같은 정규화·중복·변경 금지 규칙을 적용하지만, 예약 알림 대상이 아니므로 이 등록으로 예약용 opaque reference를 생성하지 않는다.
 - 기존 DB에 전화번호 값은 있지만 새 알림 대상 참조가 없는 계정은 자동으로 신뢰 연락처로 승격하지 않는다. 마이페이지에서 기존 번호와 같은 정규화 값을 한 번 다시 제출하면 참조를 함께 확정하고, 다른 번호를 제출하면 변경 요청으로 보아 `ACCOUNT_007`로 거절한다.
 - 정규화 번호 중복은 `ACCOUNT_002`, 활성 계정의 예약 연락처 미등록은 `ACCOUNT_006`, 최초 등록 뒤 다른 번호로 변경하려는 요청은 `ACCOUNT_007`, 가입·최초 등록 요청의 누락·형식 오류는 `COMMON_001`을 사용한다.
 - 일반 사용자의 자동 비밀번호 재설정과 보안 알림은 이메일 소유 인증이 도입되기 전까지 해당 이메일을 “확인된 채널”로 사용하지 않는다. 현재 로그인 수단을 잃은 계정은 정책에 승인된 별도 복구 경계가 없으면 자동 복구하지 않는다.
@@ -98,9 +98,9 @@
 | Access JWT 수명 | 1시간 | 1시간 |
 | Refresh JWT 수명 | 14일 | 14일 |
 | Refresh 쿠키 | `MIRIYUM_CONSUMER_REFRESH` | `MIRIYUM_STORE_OPERATOR_REFRESH` |
-| Refresh 쿠키 Path | `/api/v1/consumer-auth` | `/api/v1/store-operator-auth` |
+| Refresh 쿠키 Path | `/api/v1/consumers/auth` | `/api/v1/store-operators/auth` |
 | CSRF 쿠키 | `MIRIYUM_CONSUMER_XSRF_TOKEN` | `MIRIYUM_STORE_OPERATOR_XSRF_TOKEN` |
-| CSRF 쿠키 Path | `/api/v1/consumer-auth` | `/api/v1/store-operator-auth` |
+| CSRF 쿠키 Path | `/api/v1/consumers/auth` | `/api/v1/store-operators/auth` |
 | CSRF 헤더 | `X-CSRF-TOKEN` | `X-CSRF-TOKEN` |
 
 - Access JWT는 로그인·재발급 성공 응답의 `data.accessToken`으로 전달하며 프론트엔드는 계정 shell 메모리에만 보관한다.
@@ -160,13 +160,13 @@
 - 일반 사용자는 이메일, 휴대전화, 공개 닉네임과 계정 상태를 조회한다.
 - 1차 MVP의 일반 사용자 수정은 닉네임만 지원한다. 닉네임은 NFC 정규화 후 2~20자, 허용 문자·예약어·7일 변경 제한을 적용한다.
 - 매장 운영자는 이메일, 휴대전화, 표시 이름과 계정 상태를 조회하고 표시 이름만 수정한다.
-- 이메일·비밀번호 변경과 이미 등록된 휴대전화의 교체는 이번 팀 분담의 명시적인 1차 API에 포함하지 않는다. 다만 기존 `phone=null` 일반 사용자는 `/api/v1/consumer-accounts/me/contact`, 매장 운영자는 `/api/v1/store-operator-accounts/me/contact`에서 각각 최초 1회 등록을 별도 목적 API로 제공하며, 범용 PATCH로 임의 변경을 열지 않는다.
+- 이메일·비밀번호 변경과 이미 등록된 휴대전화의 교체는 이번 팀 분담의 명시적인 1차 API에 포함하지 않는다. 다만 기존 `phone=null` 일반 사용자는 `/api/v1/consumers/me/contact`, 매장 운영자는 `/api/v1/store-operators/me/contact`에서 각각 최초 1회 등록을 별도 목적 API로 제공하며, 범용 PATCH로 임의 변경을 열지 않는다.
 - 프로필 응답의 accountId는 문자열이며 다른 계정 유형의 ID로 변환하지 않는다.
 
 ## 마이페이지 예약 내역
 
-- `auth-account`가 `GET /api/v1/consumer-accounts/me/reservations` 경로와 페이지 응답을 관리한다.
-- 인증된 `consumer_account_id`를 예약 도메인의 `ReservationService`가 제공하는 예약 내역 조회 공개 메서드에 전달한다.
+- `GET /api/v1/consumers/me/reservations` 경로와 페이지 응답은 `reservation.controller.consumer`가 관리한다.
+- `auth-account`는 인증 principal과 계정 상태를 제공하며 예약 내역 HTTP DTO나 조회 흐름을 소유하지 않는다.
 - 예약 도메인은 상태·날짜 필터, 정렬, 예약 스냅샷 DTO와 개인 자원 404 규칙을 소유한다.
 - 다른 사용자의 예약이나 매장 전체 예약을 이 경로로 조회할 수 없다.
 - 결과가 없으면 `200 OK`, `items: []`와 페이지 메타데이터를 반환한다.

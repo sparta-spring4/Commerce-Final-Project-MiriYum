@@ -2,8 +2,8 @@ package com.miriyum.domain.menuhold.service;
 
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketView;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.service.MenuQueryService;
 import java.time.LocalDate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;

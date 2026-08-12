@@ -33,14 +33,14 @@
 
 | 사용자 목적 | 공개 API | 선택 이유 |
 | --- | --- | --- |
-| 예약 생성 | `POST /api/v1/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
-| 본인 상세 | `GET /api/v1/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
+| 예약 생성 | `POST /api/v1/consumers/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
+| 본인 상세 | `GET /api/v1/consumers/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
-| 운영자 목록·상세 | `/store-operator/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
+| 운영자 목록·상세 | `/api/v1/store-operators/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
-| 시간 정책 초안 | `PUT /api/v1/store-operator/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
+| 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
 | 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
 | 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellation` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
@@ -77,12 +77,13 @@
 - 정책·시간대가 없거나 비활성이고, 슬롯이 맞지 않거나 현지 시각이 존재하지 않으며, 중복 현지 시각에 유효 offset이 없으면 해당 매장은 실패 폐쇄한다.
 - 저장·비교는 `Instant`를 사용한다. `serviceDate`는 매장 현지 시작 날짜이고 실제 `startAt`, `serviceEndAt`, `occupancyEndAt`, IANA 시간대, 각 계산 offset과 duration·정책 소유 매장·버전을 거래 스냅샷으로 보존한다. 정책 소유 매장은 예약 매장과 같아야 한다.
 - 고객 응답은 `serviceDate`, `timeStatus`, offset 포함 `startAt`, offset 포함 `serviceEndAt`, `timeZoneId`만 공개한다. 내부 `occupancyEndAt`은 고객 응답에 포함하지 않는다. V15 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 응답해 임의 offset 변환이나 예외 누출을 막는다.
+- 소비자 예약 이력은 `createdAt`, `serviceDate`, `startAt`의 오름차순·내림차순 정렬을 공개하며, 각 정렬은 같은 방향의 예약 ID를 보조 키로 사용한다. 추천의 최근 방문 이력은 `FULFILLED`, `startAt,desc`, 최대 20건 계약을 사용한다.
 - `[startAt, serviceEndAt)`의 영업시간·브레이크·휴무·휴점·폐점 충돌은 Store 소유의 contract-first Issue #104 / PR #106 batch 계약으로 검증한다. PR #84의 시작 접수 window만으로 이 전체 구간 검증을 완료했다고 간주하지 않는다.
 - Reservation은 시간 계산에 성공한 항목만 입력 순서·개수·중복을 보존해 PR #106의 Store batch 계약에 전달한다. Store 검증 범위에는 `[serviceEndAt, occupancyEndAt)` turnover 구간을 포함하지 않는다. Store의 `NOT_ACCEPTING`은 해당 Reservation 결과의 `UNAVAILABLE`로 변환하고, batch 응답의 개수·순서·매장·구간이 요청과 일치하지 않거나 응답 상태가 없으면 입력 전체를 실패 폐쇄한다.
 
 ### 운영자 시간 정책 lifecycle
 
-- 공개 경로는 공통 정본 C-008에 따라 모두 `/api/v1/store-operator/stores/{storeId}/reservation-time-policies` 아래에 둔다. 세 쓰기 명령은 bearer 인증과 `Idempotency-Key`를 필수로 사용하고 요청 본문에서 계정 ID·역할을 받지 않는다.
+- 공개 경로는 공통 정본 C-008에 따라 모두 `/api/v1/store-operators/stores/{storeId}/reservation-time-policies` 아래에 둔다. 세 쓰기 명령은 bearer 인증과 `Idempotency-Key`를 필수로 사용하고 요청 본문에서 계정 ID·역할을 받지 않는다.
 - 초안 요청은 분 단위 `slotInterval`, `serviceDuration`, `turnoverDuration`만 받는다. 게시 요청은 `publicationMode: IMMEDIATE | SCHEDULED`, 조건부 `effectiveAt`, 1~500자의 `changeReason`을 받고 철회 요청은 `changeReason`만 받는다. 알 수 없는 필드는 거부한다.
 - 응답은 문자열 `storeId`, 숫자 `version`, 세 duration, 상태, nullable `effectiveAt`만 공개한다. Entity·내부 PK·감사 필드는 공개하지 않는다.
 - 멱등 기록을 선점한 뒤 Store 공개 계약 `StoreService.requireSchedulePublicationAuthority()`로 Store 행을 잠그고 계정·대표 운영자 소유권·입점 승인·폐점 상태를 검증한다. Reservation은 Store Entity·Repository를 직접 참조하지 않는다.
@@ -111,6 +112,21 @@
 1차 MVP의 `REQUESTED`와 `CAPACITY_HELD`는 같은 생성 트랜잭션 안의 전이 단계다. 사용자에게 별도 확정 API나 10분 카운트다운을 제공하지 않으며 성공 응답은 `CONFIRMED`만 반환한다.
 
 메뉴 수량 하나라도 부족하면 예약만 성공시키거나 가능한 메뉴만 남기지 않는다. 메뉴를 원하지 않는 사용자는 처음부터 `menuSelections`를 생략해 예약만 생성한다.
+
+## 고도화 임시 선점 영속 계약
+
+> 활성화 단계: Issue #264 — 계약·영속 모델만 활성, runtime과 HTTP 비활성
+
+- 고도화의 10분 임시 선점은 기존 `Reservation`에 중간 상태를 추가하지 않고 별도 `ReservationHold` aggregate로 저장한다. 따라서 1차 MVP의 즉시 확정 `ReservationStatus`와 예약 조회·취소 응답은 바뀌지 않는다.
+- 영속 상태 계약은 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED`, `RELEASED`, `EXPIRED`다. Issue #264에는 상태 변경 service를 두지 않고 후속 #265가 승인된 명령 전이를 구현한다.
+- 루트는 선점 소유 계정, 매장·시간·인원·연락 대상 스냅샷, 시간·수용량·취소 정책 버전, 생성 명령 ID, 상태 버전, 중앙 `createdAt`과 `expiresAt`을 보존한다. 클라이언트 멱등 키인 생성 명령 ID의 유일성과 replay 조회는 반드시 `(consumerAccountId, creationCommandId)` 소비자 범위로 제한한다.
+- `contactAvailableAtConfirmation`은 향후 `false`를 허용하기 위한 상태가 아니라 선점 생성 시점의 연락 가능 근거 스냅샷이다. 연락할 수 없으면 hold를 만들지 않으므로 영속 행에서는 항상 `true`이고, 컬럼과 CHECK는 이 불변식의 감사 근거를 보존한다.
+- `expiresAt`은 서버 중앙 `createdAt`에서 정확히 10분 뒤로만 계산하며 사용자 입력·setter·연장 필드를 제공하지 않는다.
+- `reservation_hold_capacity_allocations`는 관련 서비스 구간별 버킷 ID, 점유 인원, 팀 1건과 수용량 정책 버전을 보존한다. 실제 원자 점유는 후속 #265가 담당한다.
+- `reservation_hold_transition_audits`는 전이 전후 상태, 행위자, 요청·발생 시각, 시간·수용량 정책 버전과 명령 ID를 append-only로 보존하며 repository에는 삭제 API를 노출하지 않는다. 감사 명령 ID는 서버가 생성하는 전역 고유 내부 식별자이고 클라이언트 입력을 그대로 저장하지 않는다.
+- `reservation_hold_warning_tasks`는 선점별 최대 한 건으로 `expiresAt - 2분` 경고 의무만 기록한다. `(reservationHoldId, createdAt)` 복합 FK로 실제 선점의 10분 시각창에 결합하며, Notification 계약이 준비되기 전에는 채널·본문·provider·발송 재시도 상태를 소유하지 않는다.
+- V31은 네 영속 테이블의 FK, 허용 상태, 정책·수량 양수, 명령 멱등성, 정확한 10분/8분 시각식을 MySQL 제약으로 검증한다.
+- MenuHold와 같은 만료 시각으로 묶는 원자 선점은 #266, 중복 worker·명령 시점 만료·대사 runtime은 #267, Payment 준비와 최종 예약 확정은 #238에서 순서대로 활성화한다.
 
 ## 수용량
 
@@ -156,6 +172,7 @@
 
 ## 방문 완료
 
+- 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 CONFIRMED인 예약의 방문 완료는 허용한다. Reservation과 연결 MenuHold, reservation_fulfillment_audits 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback하며 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
 - 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이할 수 있다.
 - 연결된 `MenuHold`가 있으면 같은 트랜잭션에서 `FULFILLED`로 전이한다.
 - 방문 완료는 메뉴 수량을 복구하지 않는다.
@@ -183,6 +200,7 @@
 
 - 생성·취소·방문 완료·수용량 게시·시간 정책 lifecycle 명령은 모두 `Idempotency-Key`를 요구한다.
 - 조정하는 `ReservationService`가 C-007의 5초 트랜잭션 경계와 `READ_COMMITTED`를 사용한다.
+- 메뉴 홀드 생성·해제는 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`를 통하며, MenuHold의 예약 시간 조회는 좁은 `ReservationTimeResolutionService`를 사용한다.
 - 시간 정책 명령의 잠금 순서는 멱등 기록 → Store 행 → 대상 정책 → 현재 ACTIVE다.
 - 잠금은 E-005에 따라 멱등 기록 → 예약 aggregate → 수용량 버킷 → 메뉴 재고 풀 순서와 각 PK 오름차순을 지킨다.
 - 교착·일시 잠금·낙관 버전 충돌만 최초 실행 포함 최대 총 3회 새 트랜잭션으로 재시도한다. 첫 실패 뒤 100~200ms, 두 번째 실패 뒤 300~500ms 지터를 트랜잭션 밖에서 기다린다.
@@ -222,6 +240,7 @@
 
 | 날짜 | 결정 | 선택 이유 |
 | --- | --- | --- |
+| 2026-08-12 | 10분 임시 선점은 기존 예약과 분리된 `ReservationHold` aggregate와 V31 영속 계약으로 단계 도입 | 1차 MVP 즉시 확정 조회·취소 의미를 보존하고 #265~#267의 수용량·MenuHold·worker 검토를 작은 PR로 분리 |
 | 2026-08-04 | Store 전체 서비스 구간 검증은 Issue #104 / PR #106 선행 계약을 소비 | Store 일정 원본·충돌 판정을 Reservation에 복제하지 않고 `[startAt, serviceEndAt)`과 turnover 책임 경계를 유지 |
 | 2026-08-03 | 서비스 종료와 실제 점유 종료를 `serviceEndAt`·`occupancyEndAt`으로 분리 | 고객 표시 의미와 수용량 점유 의미를 섞지 않고 매장별 duration 적용 |
 | 2026-08-03 | 실제 시각은 Instant와 IANA 시간대·offset 스냅샷으로 보존 | 자정 넘김과 DST 중복·누락 시각을 LocalTime 비교로 손실하지 않음 |

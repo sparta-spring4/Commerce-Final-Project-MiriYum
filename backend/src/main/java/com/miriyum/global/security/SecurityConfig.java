@@ -74,14 +74,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(1)
+    @Order(2)
     public SecurityFilterChain consumerAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/consumer-accounts/**")
+                .securityMatcher("/api/v1/consumers/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
@@ -95,14 +95,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(2)
+    @Order(3)
     public SecurityFilterChain storeOperatorAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/store-operator-accounts/**")
+                .securityMatcher("/api/v1/store-operators/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
@@ -116,14 +116,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(3)
+    @Order(1)
     public SecurityFilterChain publicAuthFilterChain(
             HttpSecurity http,
             RateLimiter rateLimiter,
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/consumer-auth/**", "/api/v1/store-operator-auth/**")
+                .securityMatcher("/api/v1/consumers/auth/**", "/api/v1/store-operators/auth/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())

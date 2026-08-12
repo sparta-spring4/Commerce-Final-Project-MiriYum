@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,10 @@ RESOURCE_SCRIPT_PATH = ROOT / "deploy" / "monitoring" / "create-cloudwatch-resou
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
+DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
+OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
+GIT_BASH_EXECUTABLE = Path(r"C:\Program Files\Git\bin\bash.exe")
+BASH_EXECUTABLE = str(GIT_BASH_EXECUTABLE) if GIT_BASH_EXECUTABLE.exists() else shutil.which("bash")
 
 
 class CloudWatchObservabilityConfigTest(unittest.TestCase):
@@ -21,6 +26,8 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
+        cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
     @staticmethod
@@ -81,6 +88,9 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("awslogs-group: /miriyum/staging/docker", self.compose)
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
+
+    def test_observability_document_lists_all_docker_log_streams(self):
+        self.assertIn("`mysql`, `backend`, `nginx`, `valkey`", self.observability_document)
 
     def test_valkey_uses_a_backend_only_internal_network(self):
         services = self.compose_config["services"]
@@ -170,6 +180,158 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             ],
             healthcheck,
         )
+
+    def test_deployment_waits_for_valkey_startup_before_runtime_verification(self):
+        self.assertIn(
+            'VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-60}"',
+            self.deploy_script,
+        )
+        self.assertIn("wait_for_valkey_health()", self.deploy_script)
+        self.assertIn('ps -q valkey', self.deploy_script)
+        self.assertIn('"${health}" == "healthy"', self.deploy_script)
+        self.assertIn("while :; do", self.deploy_script)
+        self.assertIn("sleep 2", self.deploy_script)
+
+    def test_deployment_fails_when_valkey_health_wait_times_out(self):
+        self.assertIn("verify_valkey()", self.deploy_script)
+        self.assertIn("Valkey health check timed out after", self.deploy_script)
+        self.assertIn("last status:", self.deploy_script)
+        self.assertIn("publish_deployment_health 0", self.deploy_script)
+        self.assertIn("Unauthenticated Valkey ping did not return NOAUTH.", self.deploy_script)
+        self.assertIn('grep -qx PONG', self.deploy_script)
+        self.assertIn('port valkey 6379', self.deploy_script)
+        self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+
+    def test_valkey_health_wait_accepts_starting_then_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            state_path = temporary_path / "inspect-count"
+            result = self.run_deploy_script(
+                """
+docker() {
+  if [[ "$1" == "compose" ]]; then
+    echo valkey-container
+    return 0
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    local count=0
+    [[ -f "$VALKEY_TEST_STATE" ]] && count=$(cat "$VALKEY_TEST_STATE")
+    count=$((count + 1))
+    echo "$count" > "$VALKEY_TEST_STATE"
+    [[ "$count" -eq 1 ]] && echo starting || echo healthy
+    return 0
+  fi
+  return 1
+}
+sleep() { :; }
+wait_for_valkey_health
+""",
+                {
+                    "VALKEY_HEALTH_TIMEOUT_SECONDS": "5",
+                    "VALKEY_TEST_STATE": self.to_bash_path(state_path),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("2", state_path.read_text(encoding="utf-8").strip())
+
+    def test_valkey_verification_fails_when_authenticated_ping_does_not_return_pong(self):
+        result = self.run_deploy_script(
+            """
+docker() {
+  if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps -q valkey"* ]]; then
+      echo valkey-container
+    elif [[ "$*" == *"sh -ec"* ]]; then
+      echo "simulated authenticated ping failure" >&2
+      return 1
+    elif [[ "$*" == *"valkey-cli ping"* ]]; then
+      echo "NOAUTH Authentication required."
+    fi
+    return 0
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    echo healthy
+    return 0
+  fi
+  return 1
+}
+if verify_valkey; then
+  exit 0
+fi
+exit 1
+""",
+            {"VALKEY_HEALTH_TIMEOUT_SECONDS": "0"},
+        )
+
+        self.assertNotEqual(0, result.returncode)
+
+    def test_main_publishes_failed_health_when_valkey_never_starts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$VALKEY_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+  fi
+  return 0
+}
+curl() { return 1; }
+sleep() { :; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "VALKEY_HEALTH_TIMEOUT_SECONDS": "0",
+                    "VALKEY_TEST_METRIC": self.to_bash_path(metric_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def run_deploy_script(script, extra_environment):
+        environment = os.environ.copy()
+        environment.update(extra_environment)
+        return subprocess.run(
+            [
+                BASH_EXECUTABLE,
+                "-c",
+                f"source <(tr -d '\\r' < deploy/deploy.sh); {script}",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            env=environment,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    @staticmethod
+    def to_bash_path(path):
+        normalized = Path(path).resolve().as_posix()
+        if len(normalized) >= 3 and normalized[1:3] == ":/":
+            return f"/{normalized[0].lower()}{normalized[2:]}"
+        return normalized
+
 
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)

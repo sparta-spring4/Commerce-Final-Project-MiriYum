@@ -18,14 +18,17 @@ class AuthOpenApiContractTest {
     void logoutDoesNotRequireRefreshCookie() throws IOException {
         String openApi = Files.readString(AUTH_OPEN_API).replace("\r\n", "\n");
 
-        assertThat(operation(openApi, "/api/v1/consumer-auth/sessions/current:"))
+        assertThat(operation(openApi, "/api/v1/consumers/auth/sessions/current:"))
                 .doesNotContain("security:\n        - consumerRefreshCookie: []");
-        assertThat(operation(openApi, "/api/v1/store-operator-auth/sessions/current:"))
+        assertThat(operation(openApi, "/api/v1/store-operators/auth/sessions/current:"))
                 .doesNotContain("security:\n        - storeOperatorRefreshCookie: []");
     }
 
     private String operation(String openApi, String path) {
         int start = openApi.indexOf("  " + path);
+        assertThat(start)
+                .as("OpenAPI path %s must exist", path)
+                .isGreaterThanOrEqualTo(0);
         int end = openApi.indexOf("\n  /", start + 1);
         return openApi.substring(start, end == -1 ? openApi.length() : end);
     }

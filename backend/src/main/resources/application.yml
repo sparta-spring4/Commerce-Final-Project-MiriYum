@@ -49,10 +49,26 @@ miriyum:
   auth:
     # 30초 주기 전달이 10회 연속 실패하면 CloudWatch 로그 기반 운영 알람을 발생시킨다.
     refresh-risk-event-delivery-alert-threshold: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ALERT_THRESHOLD:10}
+  payment:
+    enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
+    cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
+    portone:
+      api-secret: ${MIRIYUM_PORTONE_API_SECRET:}
+      webhook-secret: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:}
+      store-id: ${MIRIYUM_PORTONE_STORE_ID:}
+      base-url: ${MIRIYUM_PORTONE_BASE_URL:https://api.portone.io}
+      timeout-policy-version: ${MIRIYUM_PORTONE_TIMEOUT_POLICY_VERSION:portone-v2-v1}
+    connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
+    read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
       activation-delay-ms: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_DELAY_MS:1000}
+    geocoding:
+      base-url: ${MIRIYUM_STORE_GEOCODING_BASE_URL:https://dapi.kakao.com}
+      rest-api-key: ${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}
+      connect-timeout-ms: ${MIRIYUM_STORE_GEOCODING_CONNECT_TIMEOUT_MS:1000}
+      response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:
     available-candidate-limit: ${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}
   rate-limit:
