@@ -181,19 +181,68 @@ class ReservationHoldServiceTest {
         );
     }
 
-    @Test
-    @DisplayName("같은 생성 명령을 다른 사용자 입력 의미로 재사용하면 COMMON_007이고 부작용이 없다")
-    void differentMeaningReplayRejectsIdempotencyReuseWithoutSideEffects() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("differentMeaningReplayCommands")
+    @DisplayName("같은 생성 명령의 사용자 입력 지문이 하나라도 다르면 COMMON_007이고 부작용이 없다")
+    void differentMeaningReplayRejectsEveryFingerprintMismatchWithoutSideEffects(
+            String ignoredDescription,
+            ReservationHoldContracts.CreateCommand mismatchingCommand
+    ) {
         ReservationHold existing = existingHold(CREATION_COMMAND_ID);
         given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
                 CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> service.create(
-                command(STORE_ID + 1, null, CREATION_COMMAND_ID)))
+        assertThatThrownBy(() -> service.create(mismatchingCommand))
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
 
+        then(holdRepository).should().findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID);
+        then(holdRepository).shouldHaveNoMoreInteractions();
+        verifyNoFreshInteractions();
+        assertThat(auditIdGenerationCount).hasValue(0);
+    }
+
+    private static Stream<Arguments> differentMeaningReplayCommands() {
+        return Stream.of(
+                Arguments.of("store differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID + 1, SERVICE_DATE, START_TIME,
+                        null, 2, 1, 0, CREATION_COMMAND_ID)),
+                Arguments.of("service date differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID, SERVICE_DATE.plusDays(1), START_TIME,
+                        null, 2, 1, 0, CREATION_COMMAND_ID)),
+                Arguments.of("local start differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID, SERVICE_DATE, LocalTime.of(18, 30),
+                        null, 2, 1, 0, CREATION_COMMAND_ID)),
+                Arguments.of("explicit offset differs from resolved offset",
+                        new ReservationHoldContracts.CreateCommand(
+                                CONSUMER_ID, STORE_ID, SERVICE_DATE, START_TIME,
+                                ZoneOffset.UTC, 2, 1, 0, CREATION_COMMAND_ID)),
+                Arguments.of("adult count differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID, SERVICE_DATE, START_TIME,
+                        null, 3, 1, 0, CREATION_COMMAND_ID)),
+                Arguments.of("child count differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID, SERVICE_DATE, START_TIME,
+                        null, 2, 2, 0, CREATION_COMMAND_ID)),
+                Arguments.of("infant count differs", new ReservationHoldContracts.CreateCommand(
+                        CONSUMER_ID, STORE_ID, SERVICE_DATE, START_TIME,
+                        null, 2, 1, 1, CREATION_COMMAND_ID))
+        );
+    }
+
+    @Test
+    @DisplayName("공백을 제거한 같은 생성 명령 ID는 소비자 범위 replay를 조회하고 같은 결과를 반환한다")
+    void normalizedCreationCommandIdUsesScopedReplayLookupWithoutFreshSideEffects() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
+
+        ReservationHoldContracts.Result result = service.create(
+                command(STORE_ID, null, "  " + CREATION_COMMAND_ID + "  "));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.ACTIVE);
         then(holdRepository).should().findByConsumerAccountIdAndCreationCommandId(
                 CONSUMER_ID, CREATION_COMMAND_ID);
         then(holdRepository).shouldHaveNoMoreInteractions();
