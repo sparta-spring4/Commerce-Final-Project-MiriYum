@@ -56,8 +56,11 @@ verify_valkey() {
     return 1
   fi
 
-  "${compose[@]}" exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping' \
-    | grep -qx PONG
+  if ! "${compose[@]}" exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping' \
+    | grep -qx PONG; then
+    echo "Authenticated Valkey ping did not return PONG." >&2
+    return 1
+  fi
 
   host_port="$("${compose[@]}" port valkey 6379 2>/dev/null || true)"
   if [[ -n "${host_port}" ]]; then

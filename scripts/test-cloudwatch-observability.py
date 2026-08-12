@@ -235,6 +235,37 @@ wait_for_valkey_health
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual("2", state_path.read_text(encoding="utf-8").strip())
 
+    def test_valkey_verification_fails_when_authenticated_ping_does_not_return_pong(self):
+        result = self.run_deploy_script(
+            """
+docker() {
+  if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps -q valkey"* ]]; then
+      echo valkey-container
+    elif [[ "$*" == *"sh -ec"* ]]; then
+      echo "simulated authenticated ping failure" >&2
+      return 1
+    elif [[ "$*" == *"valkey-cli ping"* ]]; then
+      echo "NOAUTH Authentication required."
+    fi
+    return 0
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    echo healthy
+    return 0
+  fi
+  return 1
+}
+if verify_valkey; then
+  exit 0
+fi
+exit 1
+""",
+            {"VALKEY_HEALTH_TIMEOUT_SECONDS": "0"},
+        )
+
+        self.assertNotEqual(0, result.returncode)
+
     def test_main_publishes_failed_health_when_valkey_never_starts(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
