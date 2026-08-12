@@ -128,6 +128,25 @@
 - V31은 네 영속 테이블의 FK, 허용 상태, 정책·수량 양수, 명령 멱등성, 정확한 10분/8분 시각식을 MySQL 제약으로 검증한다.
 - MenuHold와 같은 만료 시각으로 묶는 원자 선점은 #266, 중복 worker·명령 시점 만료·대사 runtime은 #267, Payment 준비와 최종 예약 확정은 #238에서 순서대로 활성화한다.
 
+### 수용량 선점·종결 명령 계약
+
+> 활성화 단계: Issue #265 — 수용량 선점·명시적 종결만 활성, HTTP·MenuHold·명령 시점 자동 만료 비활성
+
+- 명령 진입점은 기술적 MySQL deadlock·lock timeout만 트랜잭션 바깥에서 제한 재시도하는 얇은 facade와, 각 시도마다 새 트랜잭션을 소유하는 service로 분리한다. 업무 충돌·입력 오류·일반 무결성 오류는 재시도하지 않는다.
+- 생성 명령은 버킷 ID·정책 버전·만료 시각을 입력받지 않는다. 서버가 사용자 입력인 매장·업무 날짜·시작 시각·offset·인원을 정규화하고, 인증된 소비자 계약에서 연락 대상 참조와 시간·취소 정책을 해석한 뒤 최신 수용량 정책에서 `[startAt, occupancyEndAt)` 전체를 연속해서 덮는 버킷을 결정한다. 서버가 해석한 연락 대상은 생성 요청 지문에 넣지 않고 거래 스냅샷으로만 보존한다.
+- 생성 replay는 신규 거래 자격보다 먼저 판정한다. replay가 아닌 새 Hold 생성과 수용량 정책 재게시는 기존 Store 공개 계약으로 같은 Store 행을 먼저 잠가 직렬화한다. 종결은 매장의 CLOSED·예약 기능 비활성 여부와 무관하게 Hold 행을 먼저 잠그고 계속한다. 정책 재게시는 확정 Reservation과 보호 상태 Hold를 각각 PK 오름차순으로 잠근 뒤 관련 수용량 버킷으로 진행하며, 모든 경로는 aggregate-before-bucket과 버킷 PK 오름차순을 지킨다.
+- 생성은 모든 관련 버킷에서 양의 전체 인원과 팀 1건을 확보한 뒤 `ReservationHold`, 구간별 allocation, `null → ACTIVE` 생성 감사, `expiresAt - 2분` 경고 의무를 한 트랜잭션에 기록한다. 구간 누락·수용량 부족·저장 실패가 하나라도 있으면 점유를 포함해 전부 롤백한다.
+- `(consumerAccountId, creationCommandId)`가 이미 존재하면 최초 요청에서 사용자가 통제한 정규 입력 의미를 영속 스냅샷과 비교한다. 같은 의미면 정책 재게시 여부와 관계없이 현재 Hold 결과를 replay하고, 다른 의미면 `COMMON_007`로 거절한다. 생략한 offset과 서버가 해석한 값과 같은 명시 offset은 같은 의미이며, 파생된 현재 정책 버전·현재 버킷 구성은 비교 지문에 넣지 않는다.
+- 생성 replay 판정 뒤 같은 소비자·매장·겹치는 서비스 구간의 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED` Hold와 확정 Reservation을 잠금 조회한다. 기존 유효 거래가 있으면 새 선점을 만들지 않고 `RESERVATION_004`로 거절하며 `RELEASED`, `EXPIRED` Hold는 중복 후보에서 제외한다.
+- 생성은 `uk_reservation_holds_creation_command`, 종결은 `uk_reservation_hold_transition_audits_command` 충돌만 식별해 실패한 트랜잭션이 끝난 뒤 새 트랜잭션에서 기존 결과를 조회한다. 같은 명령 의미면 replay하고 다른 의미면 `COMMON_007`로 거절하며, 그 밖의 unique·FK·CHECK 위반은 replay로 숨기지 않는다.
+- 일반 종결은 `ACTIVE → CONFIRMED|RELEASED|EXPIRED|RECONCILIATION_REQUIRED`만 허용한다. 대사 복구는 `RECONCILIATION_REQUIRED → CONFIRMED|RELEASED`만 허용하며 그 밖의 전이는 `RESERVATION_005`로 거절한다.
+- `CONFIRMED`와 `RECONCILIATION_REQUIRED`는 수용량 점유를 유지한다. `RELEASED`와 `EXPIRED`만 allocation의 인원·팀을 정확히 한 번 반환하며, 상태 전이·수용량 변경·감사 기록은 함께 커밋한다.
+- #265의 만료 판정은 명시적 EXPIRED 명령에만 적용한다. 중앙 `Clock`에서 `now < expiresAt`이면 거절하고 `now >= expiresAt`이면 단일 만료를 허용한다. 확정·해제·대사 명령 진입 시 만료를 우선하는 지연 만료와 scheduler/worker 자동 만료는 #267이 소유한다.
+- 종결 명령은 상위 서버 조정자가 발급하고 재전송에서도 재사용하는 전역 고유 operation ID를 사용한다. 감사에는 raw 클라이언트 키가 아니라 이 내부 ID를 저장하며, 같은 ID·같은 Hold·같은 목표 상태 replay는 추가 전이·감사·수용량 반환 없이 현재 최신 Hold 결과를 반환한다. 같은 ID를 다른 Hold나 다른 목표 상태에 재사용하면 `COMMON_007`로 거절한다.
+- 수용량 정책 재게시는 잠근 aggregate의 최신 상태를 기준으로 기존 확정 Reservation 점유와 아직 최종 Reservation으로 전환되지 않은 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED` Hold 점유를 각각 한 번만 새 정책 버킷에 합산한다. 예약 취소·Hold 종결과 경합해도 잠금 뒤 확정된 상태만 이월한다. `RELEASED`, `EXPIRED` Hold는 이월하지 않으며, 분할·병합된 새 버킷에서도 각 Hold의 전체 겹침 구간에 인원과 팀 1건을 반영한다. #238의 최종 전환은 점유 소유권을 원자적으로 이전해 같은 거래의 Hold와 Reservation을 동시에 계산하지 않는다.
+- 정책 재게시 뒤 Hold를 해제하거나 명시적으로 만료할 때는 최초 allocation 버킷과 현재 최신 정책의 겹치는 버킷을 합친 PK 정렬 집합을 잠그고 각 버킷에서 한 번만 복구한다. 같은 ID는 중복 제거하고 과거 중간 정책 버킷은 감사용 이력으로 남겨 수정하지 않는다.
+- Hold 부재는 `RESERVATION_001`, 수용량 부족은 `RESERVATION_003`, 중복 유효 거래는 `RESERVATION_004`, 허용되지 않은 전이는 `RESERVATION_005`, allocation·최신 버킷 불일치는 `RESERVATION_008`, 인원 정책 위반은 `RESERVATION_009`, 멱등 재사용은 `COMMON_007`, 기술적 잠금 재시도 소진은 `COMMON_008`을 사용하며 #265에서 새 공개 오류 코드를 추가하지 않는다.
+
 ## 수용량
 
 - 자원은 개별 테이블·좌석이 아니라 매장·업무 날짜·시간 구간별 전체 예약 가능 인원과 팀 수다.
