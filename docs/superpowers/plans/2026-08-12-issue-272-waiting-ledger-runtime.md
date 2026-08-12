@@ -6,7 +6,7 @@
 
 **Architecture:** `com.miriyum.domain.reservation.waiting` capability가 원장 Entity·Repository·Service를 소유한다. 기존 Store 공개 Service와 DTO만 감싼 `WaitingStoreAuthorityPort` adapter로 권한을 확인하고, 기존 `IdempotencyExecutor`와 MySQL 행 잠금·unique constraint로 명령·순번 경합을 해결한다. 일반 사용자 HTTP 등록과 #271 설정 PUT 연결은 이 PR에서 만들지 않는다.
 
-**Tech Stack:** Java 21, Spring Boot 4.1.0, Spring Data JPA, MySQL 8, Flyway V32, JUnit 5, Mockito, MockMvc, Testcontainers, OpenAPI 3.1.
+**Tech Stack:** Java 21, Spring Boot 4.1.0, Spring Data JPA, MySQL 8, Flyway V36, JUnit 5, Mockito, MockMvc, Testcontainers, OpenAPI 3.1.
 
 ## Global Constraints
 
@@ -33,7 +33,7 @@
 
 **Persistence**
 
-- Create: `backend/src/main/resources/db/migration/V32__create_waiting_ledger.sql`
+- Create: `backend/src/main/resources/db/migration/V36__create_waiting_ledger.sql`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/entity/WaitingTeam.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/entity/WaitingQueueSequence.java`
 - Create: `backend/src/main/java/com/miriyum/domain/reservation/waiting/entity/WaitingActiveMembership.java`
@@ -144,7 +144,7 @@ git add docs/specs/waiting docs/specs/store-operator-openapi.yaml backend/src/te
 git commit -m "docs(reservation): 웨이팅 원장 API 계약 정의"
 ```
 
-### Task 2: V32 persistence and aggregate state machine
+### Task 2: V36 persistence and aggregate state machine
 
 **Files:** all Persistence files and `WaitingTeamTest`, `WaitingMigrationTest`.
 
@@ -175,7 +175,7 @@ Cover every allowed transition, stale version, 10-minute boundary, terminal immu
 
 - [ ] **Step 2: Write RED migration tests**
 
-Verify V32 exact table set, FK targets, active membership unique key, store/date/sequence unique key, audit command unique key, closure job/item unique keys, status checks, and required indexes.
+Verify V36 exact table set, FK targets, active membership unique key, store/date/sequence unique key, audit command unique key, closure job/item unique keys, status checks, and required indexes.
 
 - [ ] **Step 3: Run RED tests**
 
@@ -183,9 +183,9 @@ Verify V32 exact table set, FK targets, active membership unique key, store/date
 .\gradlew.bat test --tests "*WaitingTeamTest" --tests "*WaitingMigrationTest" --rerun-tasks
 ```
 
-Expected: FAIL because V32 and production types are absent.
+Expected: FAIL because V36 and production types are absent.
 
-- [ ] **Step 4: Implement V32, enums, entities, and repositories**
+- [ ] **Step 4: Implement V36, enums, entities, and repositories**
 
 Use `waiting_active_memberships(store_id, consumer_account_id)` as the active duplicate lock. `WaitingQueueSequence.allocate()` returns current `nextSequence` and increments it. Store timestamps as UTC-compatible `DATETIME(6)` and preserve `business_date` separately.
 
@@ -199,7 +199,7 @@ Use `waiting_active_memberships(store_id, consumer_account_id)` as the active du
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add backend/src/main/resources/db/migration/V32__create_waiting_ledger.sql backend/src/main/java/com/miriyum/domain/reservation/waiting/entity backend/src/main/java/com/miriyum/domain/reservation/waiting/repository backend/src/test/java/com/miriyum/domain/reservation/waiting/entity backend/src/test/java/com/miriyum/domain/reservation/waiting/repository backend/src/main/java/com/miriyum/domain/reservation/exception/ReservationErrorCode.java
+git add backend/src/main/resources/db/migration/V36__create_waiting_ledger.sql backend/src/main/java/com/miriyum/domain/reservation/waiting/entity backend/src/main/java/com/miriyum/domain/reservation/waiting/repository backend/src/test/java/com/miriyum/domain/reservation/waiting/entity backend/src/test/java/com/miriyum/domain/reservation/waiting/repository backend/src/main/java/com/miriyum/domain/reservation/exception/ReservationErrorCode.java
 git commit -m "feat(reservation): 웨이팅 원장 영속 모델 구현"
 ```
 

@@ -75,7 +75,7 @@ WaitingClosureJobSnapshot getClosureJob(
 
 ## 데이터 모델과 마이그레이션
 
-최신 `dev` migration이 `V31`이므로 #272는 `V32__create_waiting_ledger.sql` 하나에서 다음 테이블과 제약을 만든다.
+선행 작성 PR들의 병합 순서를 반영해 #272는 `V36__create_waiting_ledger.sql` 하나에서 다음 테이블과 제약을 만든다.
 
 - `waiting_teams`: public id, store id, representative consumer id, business date, party size, source, sequence, status, version, call/arrival timestamps.
 - `waiting_active_memberships`: store id와 consumer id 복합 unique key 및 team id. 팀 생성과 같은 트랜잭션에서 점유하고 종결 전이와 같은 트랜잭션에서 제거한다.
@@ -123,7 +123,7 @@ job은 `PENDING`, `RUNNING`, `COMPLETED`, `COMPLETED_WITH_RECONCILIATION` 상태
 - Entity 단위 테스트: 모든 허용·거부 전이, version 증가, 10분 경계, 종결 상태 불변성.
 - Service 단위 테스트: 권한 검증 순서, 멱등 fingerprint, FIFO 선두, privacy-safe not-found, closure 집계.
 - Controller MockMvc: 매장 운영자 principal, header/body 검증, HTTP/error code, 타 매장 접근, 민감 필드 부재.
-- Migration 테스트: V32 테이블·FK·unique/index·check constraint.
+- Migration 테스트: V36 테이블·FK·unique/index·check constraint.
 - MySQL 통합 테스트: 병렬 sequence 할당, 중복 생성, 동일 version 명령 경합, 호출/취소 경합, closure 재시도와 부분 실패 대사.
 - OpenAPI 계약 테스트: 정확한 path·verb·response set, schema enum/range, audience aggregate, 향후 기능 필드·경로 부재.
 - 전체 gate: `test`, `integrationTest`, `build`, OpenAPI lint/bundle, `git diff --check`.
@@ -131,7 +131,7 @@ job은 `PENDING`, `RUNNING`, `COMPLETED`, `COMPLETED_WITH_RECONCILIATION` 상태
 ## 구현 순서와 완료 조건
 
 1. Canonical Waiting spec·OpenAPI와 Issue #272 allowlist를 확정한다.
-2. V32 migration과 persistence model을 TDD로 구현한다.
+2. V36 migration과 persistence model을 TDD로 구현한다.
 3. 상태기계·FIFO·권한 port·원장 service를 TDD로 구현한다.
 4. 운영자 조회·명령 HTTP를 계약대로 구현한다.
 5. closure job runtime과 공개 Service 계약을 구현한다.
