@@ -136,8 +136,6 @@ paths:
       tags: [Consumer Auth]
       summary: 일반 사용자 현재 shell 로그아웃
       operationId: deleteConsumerCurrentSession
-      security:
-        - consumerRefreshCookie: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
       responses:
@@ -272,8 +270,6 @@ paths:
       tags: [Store Operator Auth]
       summary: 매장 운영자 현재 shell 로그아웃
       operationId: deleteStoreOperatorCurrentSession
-      security:
-        - storeOperatorRefreshCookie: []
       parameters:
         - $ref: "#/components/parameters/CsrfToken"
       responses:
