@@ -50,11 +50,16 @@ public record NotificationSourceEventV1(
         if (timingPolicyVersion != null && timingPolicyVersion <= 0) {
             throw new IllegalArgumentException("timingPolicyVersion must be positive");
         }
-        if (purpose == NotificationPurpose.RESERVATION_VISIT_REMINDER
-                && (expiresAt == null || timingPolicyVersion == null
-                || !scheduledAt.isBefore(expiresAt))) {
+        if (purpose == NotificationPurpose.RESERVATION_VISIT_REMINDER) {
+            if (expiresAt == null || timingPolicyVersion == null
+                    || !scheduledAt.isBefore(expiresAt)) {
+                throw new IllegalArgumentException(
+                        "scheduled notification requires scheduledAt before expiresAt and timingPolicyVersion"
+                );
+            }
+        } else if (!scheduledAt.isEqual(occurredAt) || timingPolicyVersion != null) {
             throw new IllegalArgumentException(
-                    "scheduled notification requires scheduledAt before expiresAt and timingPolicyVersion"
+                    "immediate notification requires scheduledAt equal to occurredAt and no timingPolicyVersion"
             );
         }
         requireText(correlationId, 100, "correlationId");

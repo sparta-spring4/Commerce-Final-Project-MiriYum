@@ -82,6 +82,41 @@ class NotificationPayloadFingerprintTest {
     }
 
     @Test
+    void rejectsFutureScheduledAtForImmediatePurpose() {
+        OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T10:02:03+09:00");
+
+        assertThatThrownBy(() -> new NotificationSourceEventV1(
+                "pickup-confirmed-1",
+                NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
+                "11",
+                7L,
+                NotificationResourceType.PICKUP_RESERVATION,
+                "21",
+                3L,
+                "CONFIRMED",
+                occurredAt,
+                occurredAt.plusMinutes(5),
+                null,
+                null,
+                "correlation-1"
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("immediate notification");
+    }
+
+    @Test
+    void rejectsTimingPolicyVersionForImmediatePurpose() {
+        assertThatThrownBy(() -> event(
+                "correlation-first",
+                7L,
+                "CONFIRMED",
+                null,
+                1L
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("immediate notification");
+    }
+
+    @Test
     void rejectsUnpairedSurrogatesThatCannotBeCanonicalJcsStrings() {
         NotificationSourceEventV1 event = event(
                 "correlation-first",
