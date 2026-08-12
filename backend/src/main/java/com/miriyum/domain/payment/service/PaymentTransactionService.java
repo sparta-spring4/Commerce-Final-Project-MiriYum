@@ -127,6 +127,7 @@ public class PaymentTransactionService {
     }
 
     private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
+    private static final Duration CONFIRMATION_PROCESSING_LEASE = Duration.ofMinutes(5);
     private static final Duration REFUND_PROCESSING_LEASE = Duration.ofMinutes(5);
 
     private final PaymentRepository payments;
@@ -237,6 +238,14 @@ public class PaymentTransactionService {
                 throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
             if (idempotentAttempt.getStatus() == Payment.AttemptStatus.PENDING) {
+                Payment payment = ownedPaymentForUpdate(
+                        command.paymentId(), command.consumerAccountId());
+                if (payment.getStatus() != Payment.Status.CONFIRMING) {
+                    return ConfirmationClaim.completed(toResult(payment));
+                }
+                if (confirmationLeaseExpired(idempotentAttempt, now)) {
+                    return isolateStaleConfirmation(payment, idempotentAttempt, now);
+                }
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }
             return ConfirmationClaim.completed(toResult(idempotentAttempt.getPayment()));
@@ -245,7 +254,7 @@ public class PaymentTransactionService {
         if (!payment.getPortOnePaymentId().equals(command.portOnePaymentId())) {
             throw new ServiceException(PaymentErrorCode.PROVIDER_MAPPING_MISMATCH);
         }
-        if (isRefundReconciliationRequired(payment)) {
+        if (payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED) {
             return ConfirmationClaim.completed(toResult(payment));
         }
         if (payment.getStatus() == Payment.Status.PAID
@@ -254,6 +263,11 @@ public class PaymentTransactionService {
             return ConfirmationClaim.completed(toResult(payment));
         }
         if (payment.getStatus() == Payment.Status.CONFIRMING) {
+            PaymentAttempt pendingAttempt = latestAttempt(payment);
+            if (pendingAttempt.getStatus() == Payment.AttemptStatus.PENDING
+                    && confirmationLeaseExpired(pendingAttempt, now)) {
+                return isolateStaleConfirmation(payment, pendingAttempt, now);
+            }
             throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
         }
         if (!now.isBefore(payment.getSourceExpiresAt())) {
@@ -620,6 +634,21 @@ public class PaymentTransactionService {
     private PaymentAttempt latestAttempt(Payment payment) {
         return attempts.findFirstByPayment_IdOrderByAttemptNoDesc(payment.getId())
                 .orElseThrow(() -> new IllegalStateException("confirmation attempt is missing"));
+    }
+
+    private boolean confirmationLeaseExpired(PaymentAttempt attempt, Instant now) {
+        return !now.isBefore(attempt.getStartedAt().plus(CONFIRMATION_PROCESSING_LEASE));
+    }
+
+    private ConfirmationClaim isolateStaleConfirmation(
+            Payment payment,
+            PaymentAttempt attempt,
+            Instant now
+    ) {
+        payment.markReconciliationRequired(now);
+        attempt.finish(Payment.AttemptStatus.UNKNOWN, null, now);
+        recordPaymentReconciliation(payment, attempt, now);
+        return ConfirmationClaim.completed(toResult(payment));
     }
 
     private boolean hasUnresolvedRefund(Payment payment) {

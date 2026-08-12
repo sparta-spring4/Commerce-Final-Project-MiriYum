@@ -29,9 +29,11 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.exception.CommonErrorCode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -270,6 +272,69 @@ class PaymentPersistenceIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM payment_attempts WHERE status = 'UNKNOWN'", Long.class))
                 .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payments WHERE status = 'CONFIRMING'", Long.class))
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("외부 결과 저장 전에 중단된 confirmation claim은 lease 만료 후 재조회 없이 대사 상태로 격리한다")
+    void isolatesStaleConfirmationClaimWithoutProviderRecall() {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("134", 30_000L));
+        ConfirmPaymentCommand original = new ConfirmPaymentCommand(
+                preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                "550e8400-e29b-41d4-a716-446655440134");
+        ConfirmPaymentCommand differentKey = new ConfirmPaymentCommand(
+                preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                "550e8400-e29b-41d4-a716-446655440135");
+        ConfirmPaymentCommand thirdKey = new ConfirmPaymentCommand(
+                preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                "550e8400-e29b-41d4-a716-446655440136");
+        Instant claimedAt = Instant.now();
+
+        PaymentTransactionService.ConfirmationClaim claim =
+                transactions.claimConfirmation(original, claimedAt);
+
+        assertThat(claim.requiresProviderLookup()).isTrue();
+        assertThatThrownBy(() -> transactions.claimConfirmation(
+                original, claimedAt.plus(Duration.ofMinutes(4))))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+        assertThatThrownBy(() -> transactions.claimConfirmation(
+                differentKey, claimedAt.plus(Duration.ofMinutes(4))))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        PaymentTransactionService.ConfirmationClaim isolated = transactions.claimConfirmation(
+                differentKey, claimedAt.plus(Duration.ofMinutes(5)));
+        PaymentTransactionService.ConfirmationClaim originalReplay = transactions.claimConfirmation(
+                original, claimedAt.plus(Duration.ofMinutes(6)));
+        PaymentTransactionService.ConfirmationClaim isolatingKeyReplay =
+                transactions.claimConfirmation(
+                        differentKey, claimedAt.plus(Duration.ofMinutes(6)));
+        PaymentTransactionService.ConfirmationClaim newKeyReplay = transactions.claimConfirmation(
+                thirdKey, claimedAt.plus(Duration.ofMinutes(6)));
+
+        assertThat(isolated.requiresProviderLookup()).isFalse();
+        assertThat(isolated.completedResult().status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(List.of(originalReplay, isolatingKeyReplay, newKeyReplay))
+                .allSatisfy(replay -> {
+                    assertThat(replay.requiresProviderLookup()).isFalse();
+                    assertThat(replay.completedResult().status())
+                            .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+                });
+        verify(providerClient, never()).getPayment(anyString());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_attempts WHERE status = 'UNKNOWN'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'PAYMENT_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM payments WHERE status = 'CONFIRMING'", Long.class))
                 .isZero();

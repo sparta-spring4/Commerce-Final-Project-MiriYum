@@ -119,4 +119,8 @@ public class PaymentAttempt {
     public String getRequestFingerprint() {
         return requestFingerprint;
     }
+
+    public Instant getStartedAt() {
+        return startedAt;
+    }
 }
