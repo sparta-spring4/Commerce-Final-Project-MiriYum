@@ -85,9 +85,6 @@ components:
     NotificationResourceType:
       type: string
       enum: [RESERVATION, MENU_HOLD, PICKUP_RESERVATION, MENU_SUBSTITUTION_PROPOSAL]
-    NotificationActionType:
-      type: string
-      enum: [RESERVATION_DETAIL, PICKUP_RESERVATION_DETAIL, MENU_SUBSTITUTION_REVIEW]
     NotificationActionAvailability:
       type: string
       enum: [AVAILABLE, EXPIRED, SUPERSEDED, UNAVAILABLE]
@@ -101,14 +98,78 @@ components:
         id:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
     NotificationAction:
+      oneOf:
+        - $ref: "#/components/schemas/ReservationDetailNotificationAction"
+        - $ref: "#/components/schemas/PickupReservationDetailNotificationAction"
+        - $ref: "#/components/schemas/MenuSubstitutionReviewNotificationAction"
+    ReservationDetailNotificationAction:
       type: object
       additionalProperties: false
       required: [type, resource, availability, expiresAt]
       properties:
         type:
-          $ref: "#/components/schemas/NotificationActionType"
+          type: string
+          const: RESERVATION_DETAIL
         resource:
-          $ref: "#/components/schemas/NotificationResourceRef"
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: RESERVATION
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        availability:
+          $ref: "#/components/schemas/NotificationActionAvailability"
+        expiresAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다.
+    PickupReservationDetailNotificationAction:
+      type: object
+      additionalProperties: false
+      required: [type, resource, availability, expiresAt]
+      properties:
+        type:
+          type: string
+          const: PICKUP_RESERVATION_DETAIL
+        resource:
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: PICKUP_RESERVATION
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        availability:
+          $ref: "#/components/schemas/NotificationActionAvailability"
+        expiresAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다.
+    MenuSubstitutionReviewNotificationAction:
+      type: object
+      additionalProperties: false
+      required: [type, resource, availability, expiresAt]
+      properties:
+        type:
+          type: string
+          const: MENU_SUBSTITUTION_REVIEW
+        resource:
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: MENU_SUBSTITUTION_PROPOSAL
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         availability:
           $ref: "#/components/schemas/NotificationActionAvailability"
         expiresAt:

@@ -55,7 +55,7 @@ NotificationTaskRecorder.record(NotificationSourceEventV1 event)
   -> NotificationTaskReceipt(notificationId, duplicate)
 ```
 
-- 같은 멱등 식별의 재호출은 기존 `notificationId`와 `duplicate=true`를 반환한다.
+- 같은 멱등 식별의 재호출은 아래 canonical payload fingerprint까지 같을 때만 기존 `notificationId`와 `duplicate=true`를 반환한다. fingerprint가 다르면 최초 작업을 유지하고 `NotificationSourceConflictException(NOTIFICATION_002)`으로 거절하며 일부 필드만 덮어쓰거나 새 작업으로 만들지 않는다.
 - 새 작업의 내구성 기록 실패는 원 업무 트랜잭션도 성공시키지 않는다. 작업이 기록된 뒤의 전달·렌더링·재시도 실패는 원 상태를 되돌리지 않는다.
 - producer는 Notification Entity·Repository를 직접 접근하지 않고 이 Service만 사용한다.
 
@@ -89,6 +89,14 @@ sourceEventId + recipientAccountId + purpose + resourceType + resourceId + resou
 ```
 
 `correlationId`, 주소, title, worker instance와 채널 시도 ID는 논리 멱등 식별에 참여하지 않는다. 채널 시도는 같은 논리 알림 아래 별도 식별자를 사용한다.
+
+멱등 키가 같을 때 비교할 canonical payload fingerprint는 다음 필드를 RFC 8785 JSON Canonicalization Scheme(JCS)으로 직렬화한 UTF-8 bytes의 SHA-256 lowercase hex다. RFC 8785가 정한 object property 정렬, ECMAScript 문자열 직렬화와 escape 형식을 그대로 사용하며 별도의 pretty-print, `/` escape, 임의 `\uXXXX` 변환이나 escape hex 대소문자 선택을 허용하지 않는다.
+
+- JSON object는 `contractVersion`, `recipientRelationVersion`, `sourceState`, `occurredAt`, `scheduledAt`, `expiresAt`, `timingPolicyVersion`, `correlationId` key를 모두 포함하며 실제 byte 순서는 RFC 8785 property sorting을 따른다.
+- `contractVersion`은 문자열 `notification-source-event-v1`이다. `sourceState`와 `correlationId`는 입력 검증을 통과한 원문을 JSON escaping만 적용해 사용하며 trim·대소문자 변경·Unicode 재정규화를 하지 않는다.
+- date-time은 UTC로 변환한 뒤 초 단위 `yyyy-MM-dd'T'HH:mm:ss'Z'`로 직렬화한다. 입력에 0이 아닌 초 미만 정밀도가 있으면 기록을 거절해 반올림·절삭 차이를 허용하지 않는다.
+- nullable `scheduledAt`, `expiresAt`, `timingPolicyVersion`은 key를 생략하지 않고 JSON `null`로 직렬화한다. 64-bit 값인 `recipientRelationVersion`과 값이 있는 `timingPolicyVersion`은 IEEE-754 정밀도 손실을 피하기 위해 JSON number가 아니라 leading zero 없는 부호 없는 10진 JSON string으로 직렬화한다.
+- fingerprint 원문은 위 필드 외 값을 포함하지 않으며 공급자 payload, 완성된 메시지 본문이나 수신 주소를 추가하지 않는다. 작업에는 fingerprint와 `contractVersion`을 함께 저장하고 다른 계약 버전의 fingerprint를 같은 값으로 간주하지 않는다.
 
 ## 원 도메인 공개 조회 계약
 
@@ -178,13 +186,24 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - `PICKUP_RESERVATION_DETAIL`
 - `MENU_SUBSTITUTION_REVIEW`
 
+`action.type`과 `action.resource.type`의 허용 조합은 다음 세 가지뿐이다.
+
+| `action.type` | `action.resource.type` |
+|---|---|
+| `RESERVATION_DETAIL` | `RESERVATION` |
+| `PICKUP_RESERVATION_DETAIL` | `PICKUP_RESERVATION` |
+| `MENU_SUBSTITUTION_REVIEW` | `MENU_SUBSTITUTION_PROPOSAL` |
+
+목록에 없는 교차 조합은 생성·저장·공개하지 않는다.
+
 `availability`는 `AVAILABLE`, `EXPIRED`, `SUPERSEDED`, `UNAVAILABLE` 중 하나다. frontend는 `AVAILABLE`만 실행하고 나머지는 비활성화한다. 실행 시 대상 API의 현재 권한과 상태를 다시 검증하며 알림 응답만으로 변경·수락을 확정하지 않는다.
 
 ## 오류 계약
 
-| 코드 | HTTP | 의미 |
+| 코드 | 공개 HTTP 또는 내부 결과 | 의미 |
 |---|---:|---|
 | `NOTIFICATION_001` | 400 | cursor 형식·버전·무결성이 유효하지 않음 |
+| `NOTIFICATION_002` | `NotificationSourceConflictException` | 같은 논리 멱등 식별에 저장된 canonical payload와 다른 payload가 기록됨. 공개 이력 HTTP 오류로 노출하지 않음 |
 | `COMMON_001` | 400 | `size` 등 요청 값 검증 실패 |
 | `AUTH_001` | 401 | 사용할 수 있는 일반 사용자 인증이 없음 |
 | `AUTH_011` | 403 | 현재 계정 상태가 조회를 허용하지 않음 |
