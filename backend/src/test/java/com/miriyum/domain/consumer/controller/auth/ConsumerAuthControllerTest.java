@@ -81,7 +81,7 @@ class ConsumerAuthControllerTest {
     void logoutSucceedsWithoutRefreshCookie() throws Exception {
         String csrfToken = "consumer-logout-csrf-token";
 
-        mockMvc.perform(delete("/api/v1/consumer-auth/sessions/current")
+        mockMvc.perform(delete("/api/v1/consumers/auth/sessions/current")
                         .cookie(new Cookie("MIRIYUM_CONSUMER_XSRF_TOKEN", csrfToken))
                         .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isOk());

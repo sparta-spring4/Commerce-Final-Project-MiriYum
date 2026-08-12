@@ -80,7 +80,7 @@ class StoreOperatorAuthControllerTest {
     void logoutSucceedsWithoutRefreshCookie() throws Exception {
         String csrfToken = "store-operator-logout-csrf-token";
 
-        mockMvc.perform(delete("/api/v1/store-operator-auth/sessions/current")
+        mockMvc.perform(delete("/api/v1/store-operators/auth/sessions/current")
                         .cookie(new Cookie("MIRIYUM_STORE_OPERATOR_XSRF_TOKEN", csrfToken))
                         .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isOk());

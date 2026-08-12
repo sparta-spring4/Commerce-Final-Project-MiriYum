@@ -1,4 +1,4 @@
- package com.miriyum.domain.auth.refreshtoken;
+package com.miriyum.domain.auth.refreshtoken;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.global.exception.CommonErrorCode;
