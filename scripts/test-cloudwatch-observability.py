@@ -12,6 +12,8 @@ RESOURCE_SCRIPT_PATH = ROOT / "deploy" / "monitoring" / "create-cloudwatch-resou
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "backend-cd.yml"
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
+DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
+OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 
 
 class CloudWatchObservabilityConfigTest(unittest.TestCase):
@@ -21,6 +23,8 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
+        cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
     @staticmethod
@@ -81,6 +85,9 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("awslogs-group: /miriyum/staging/docker", self.compose)
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
+
+    def test_observability_document_lists_all_docker_log_streams(self):
+        self.assertIn("`mysql`, `backend`, `nginx`, `valkey`", self.observability_document)
 
     def test_valkey_uses_a_backend_only_internal_network(self):
         services = self.compose_config["services"]
@@ -170,6 +177,15 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             ],
             healthcheck,
         )
+
+    def test_deployment_fails_when_valkey_runtime_verification_fails(self):
+        self.assertIn("verify_valkey()", self.deploy_script)
+        self.assertIn('ps -q valkey', self.deploy_script)
+        self.assertIn("Valkey health check is", self.deploy_script)
+        self.assertIn("Unauthenticated Valkey ping did not return NOAUTH.", self.deploy_script)
+        self.assertIn('grep -qx PONG', self.deploy_script)
+        self.assertIn('port valkey 6379', self.deploy_script)
+        self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
 
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)

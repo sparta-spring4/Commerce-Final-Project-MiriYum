@@ -14,7 +14,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`
 - 로그 보존: 7일
 
-CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
+CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
 
 디스크 원본 지표에는 `path`·`device`·`fstype` 차원이 붙을 수 있다. 설정의 `aggregation_dimensions: [["InstanceId"]]`가 InstanceId-only 집계 시계열을 만들고, `drop_original_metrics`가 원본 차원별 `used_percent` 시계열을 제외한다. CloudWatch에 게시되는 이름은 `disk_used_percent`이므로 알람과 Dashboard도 이 이름을 사용한다. 따라서 알람·Dashboard가 사용하는 `InstanceId` 차원과 정확히 일치하면서 불필요한 custom metric 수도 줄인다.
 
@@ -68,7 +68,7 @@ SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링�
 
 ## 배포 health 지표
 
-`deploy.sh`는 기존처럼 `http://127.0.0.1:8080/actuator/health`를 확인한다.
+`deploy.sh`는 `http://127.0.0.1:8080/actuator/health`와 Valkey의 `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개를 모두 확인한다. 어느 하나라도 실패하면 `DeploymentHealth=0`을 기록하고 배포를 실패 처리한다.
 
 - health 성공: `DeploymentHealth=1`
 - health timeout: `DeploymentHealth=0`
@@ -94,7 +94,7 @@ CloudWatch Agent는 임의의 비밀값을 자동으로 마스킹해 주는 기�
 
 1. EC2 역할에 `CloudWatchAgentServerPolicy`를 추가한다.
 2. Agent를 설치하고 `systemctl status`가 `active (running)`인지 확인한다.
-3. CloudWatch Logs에서 `/miriyum/staging/docker` 로그 그룹의 `backend` 스트림과 `mysql`, `nginx` 스트림을 확인한다.
+3. CloudWatch Logs에서 `/miriyum/staging/docker` 로그 그룹의 `backend`, `mysql`, `nginx`, `valkey` 스트림을 확인한다.
 4. CloudWatch Metrics에서 `MiriYum/Staging`의 `mem_used_percent`, `disk_used_percent`를 `InstanceId` 차원으로 확인한다.
 5. 알람 생성 스크립트를 실행하고 SNS 이메일을 승인한다.
 6. 테스트 임계치를 임시로 낮춰 이메일 수신을 확인한 뒤 원래 임계치로 되돌린다.

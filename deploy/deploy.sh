@@ -29,6 +29,38 @@ publish_deployment_health() {
     >/dev/null || echo "Warning: CloudWatch deployment health metric was not published." >&2
 }
 
+verify_valkey() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local container_id health unauthenticated_result host_port
+
+  container_id="$("${compose[@]}" ps -q valkey)"
+  if [[ -z "${container_id}" ]]; then
+    echo "Valkey container is not running." >&2
+    return 1
+  fi
+
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${container_id}")"
+  if [[ "${health}" != "healthy" ]]; then
+    echo "Valkey health check is ${health}, expected healthy." >&2
+    return 1
+  fi
+
+  unauthenticated_result="$("${compose[@]}" exec -T valkey valkey-cli ping 2>&1 || true)"
+  if ! grep -qx 'NOAUTH Authentication required\.' <<<"${unauthenticated_result}"; then
+    echo "Unauthenticated Valkey ping did not return NOAUTH." >&2
+    return 1
+  fi
+
+  "${compose[@]}" exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping' \
+    | grep -qx PONG
+
+  host_port="$("${compose[@]}" port valkey 6379 2>/dev/null || true)"
+  if [[ -n "${host_port}" ]]; then
+    echo "Valkey host port must not be published: ${host_port}" >&2
+    return 1
+  fi
+}
+
 # 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 account_id=$(aws sts get-caller-identity --query Account --output text)
 registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -41,6 +73,13 @@ export BACKEND_IMAGE
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+
+if ! verify_valkey; then
+  publish_deployment_health 0
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
+  exit 1
+fi
 
 deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
 until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do
