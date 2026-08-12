@@ -3,6 +3,7 @@ package com.miriyum.domain.reservation.repository;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -59,5 +60,30 @@ public interface ReservationHoldRepository extends JpaRepository<ReservationHold
             @Param("storeId") long storeId,
             @Param("requestedStart") Instant requestedStart,
             @Param("requestedEnd") Instant requestedEnd
+    );
+
+    /**
+     * 수용량 정책 재게시가 이월할 보호 상태 선점을 PK 순서로 잠근다.
+     *
+     * @param storeId 대상 매장 식별자
+     * @param serviceDate 매장 현지 업무 날짜
+     * @return ACTIVE, RECONCILIATION_REQUIRED, CONFIRMED 선점의 PK 오름차순 목록
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select hold
+            from ReservationHold hold
+            where hold.storeId = :storeId
+              and hold.timeSnapshot.serviceDate = :serviceDate
+              and hold.status in (
+                  :#{T(com.miriyum.domain.reservation.entity.ReservationHoldStatus).ACTIVE},
+                  :#{T(com.miriyum.domain.reservation.entity.ReservationHoldStatus).RECONCILIATION_REQUIRED},
+                  :#{T(com.miriyum.domain.reservation.entity.ReservationHoldStatus).CONFIRMED}
+              )
+            order by hold.id asc
+            """)
+    List<ReservationHold> findProtectedByStoreIdAndServiceDateForUpdateOrderByIdAsc(
+            @Param("storeId") long storeId,
+            @Param("serviceDate") LocalDate serviceDate
     );
 }

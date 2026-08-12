@@ -5,8 +5,11 @@ import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationCapacitiesResponse;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationHold;
+import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
 import com.miriyum.domain.store.service.StoreService;
@@ -47,6 +50,7 @@ public class ReservationCapacityPublicationService {
     private final ReservationCapacityPolicy capacityPolicy;
     private final ReservationCapacityBucketRepository capacityBucketRepository;
     private final ReservationRepository reservationRepository;
+    private final ReservationHoldRepository reservationHoldRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
 
@@ -56,6 +60,7 @@ public class ReservationCapacityPublicationService {
             ReservationCapacityPolicy capacityPolicy,
             ReservationCapacityBucketRepository capacityBucketRepository,
             ReservationRepository reservationRepository,
+            ReservationHoldRepository reservationHoldRepository,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper
     ) {
@@ -64,6 +69,7 @@ public class ReservationCapacityPublicationService {
         this.capacityPolicy = capacityPolicy;
         this.capacityBucketRepository = capacityBucketRepository;
         this.reservationRepository = reservationRepository;
+        this.reservationHoldRepository = reservationHoldRepository;
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
     }
@@ -100,6 +106,12 @@ public class ReservationCapacityPublicationService {
                             storeId,
                             serviceDate
                     );
+            List<ReservationHold> protectedHolds =
+                    reservationHoldRepository
+                            .findProtectedByStoreIdAndServiceDateForUpdateOrderByIdAsc(
+                            storeId,
+                            serviceDate
+                    );
             List<ReservationCapacityBucket> current =
                     capacityBucketRepository.findLatestPolicyBucketsForUpdate(
                             storeId,
@@ -111,7 +123,8 @@ public class ReservationCapacityPublicationService {
                     serviceDate,
                     nextVersion,
                     resolved,
-                    confirmed
+                    confirmed,
+                    protectedHolds
             );
             List<ReservationCapacityBucket> saved =
                     capacityBucketRepository.saveAllAndFlush(next);
@@ -231,11 +244,13 @@ public class ReservationCapacityPublicationService {
             LocalDate serviceDate,
             long policyVersion,
             List<ResolvedBucket> buckets,
-            List<Reservation> confirmed
+            List<Reservation> confirmed,
+            List<ReservationHold> protectedHolds
     ) {
-        if (confirmed == null) {
+        if (confirmed == null || protectedHolds == null) {
             throw conflict();
         }
+        protectedHolds.forEach(hold -> validateProtectedHold(hold, storeId, serviceDate));
         List<ReservationCapacityBucket> created = new ArrayList<>(buckets.size());
         for (ResolvedBucket resolved : buckets) {
             int occupiedPeople = 0;
@@ -252,6 +267,20 @@ public class ReservationCapacityPublicationService {
                         occupiedPeople = Math.addExact(
                                 occupiedPeople,
                                 reservation.getParty().totalCount()
+                        );
+                        occupiedTeams = Math.addExact(occupiedTeams, 1);
+                    } catch (ArithmeticException exception) {
+                        throw conflict(exception);
+                    }
+                }
+            }
+            for (ReservationHold hold : protectedHolds) {
+                if (hold.getStartAt().isBefore(resolved.endAt())
+                        && hold.getOccupancyEndAt().isAfter(resolved.startAt())) {
+                    try {
+                        occupiedPeople = Math.addExact(
+                                occupiedPeople,
+                                hold.getParty().totalCount()
                         );
                         occupiedTeams = Math.addExact(occupiedTeams, 1);
                     } catch (ArithmeticException exception) {
@@ -276,6 +305,33 @@ public class ReservationCapacityPublicationService {
             ));
         }
         return List.copyOf(created);
+    }
+
+    private static void validateProtectedHold(
+            ReservationHold hold,
+            long storeId,
+            LocalDate serviceDate
+    ) {
+        if (hold == null
+                || !isProtected(hold.getStatus())
+                || !Long.valueOf(storeId).equals(hold.getStoreId())
+                || hold.getTimeSnapshot() == null
+                || !hold.getTimeSnapshot().hasResolvedTime()
+                || !serviceDate.equals(hold.getServiceDate())
+                || !Long.valueOf(storeId).equals(
+                        hold.getTimeSnapshot().getReservationTimePolicyStoreId()
+                )
+                || hold.getParty() == null
+                || hold.getParty().totalCount() <= 0
+                || !hold.getStartAt().isBefore(hold.getOccupancyEndAt())) {
+            throw conflict();
+        }
+    }
+
+    private static boolean isProtected(ReservationHoldStatus status) {
+        return status == ReservationHoldStatus.ACTIVE
+                || status == ReservationHoldStatus.RECONCILIATION_REQUIRED
+                || status == ReservationHoldStatus.CONFIRMED;
     }
 
     private static String fingerprint(
