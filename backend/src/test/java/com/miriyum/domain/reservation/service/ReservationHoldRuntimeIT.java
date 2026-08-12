@@ -9,14 +9,23 @@ import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
+import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
+import com.miriyum.domain.reservation.entity.PartyComposition;
+import com.miriyum.domain.reservation.entity.Reservation;
+import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
+import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
+import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.schedule.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.schedule.closure.repository.RegularClosureVersionRepository;
@@ -131,7 +140,16 @@ class ReservationHoldRuntimeIT {
     private ReservationCapacityCommandFacade capacityFacade;
 
     @Autowired
+    private ReservationCancellationCommandFacade cancellationFacade;
+
+    @Autowired
     private ReservationHoldRepository holdRepository;
+
+    @Autowired
+    private ReservationRepository reservationRepository;
+
+    @Autowired
+    private ReservationCapacityAllocationRepository capacityAllocationRepository;
 
     @Autowired
     private ReservationCapacityBucketRepository capacityBucketRepository;
@@ -536,6 +554,206 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("재게시와 fresh Hold 생성 경합은 최신 정책에 점유를 정확히 한 번 보존한다")
+    void publicationAndFreshHoldCreationConvergeWithoutLostOrDuplicateOccupancy()
+            throws Exception {
+        Scenario scenario = createScenario(2, 1, twoBuckets());
+        long consumerId = createConsumer();
+        ReservationHoldContracts.CreateCommand createCommand = createCommand(
+                scenario, consumerId, "publication-create-race");
+
+        RacePair<ReservationCapacityCommandResult, ReservationHoldContracts.Result> workers =
+                invokePairWhileRowLocked(
+                        "stores",
+                        "store_id",
+                        scenario.storeId(),
+                        () -> capacityFacade.replace(
+                                scenario.operatorId(),
+                                scenario.storeId(),
+                                SERVICE_DATE,
+                                key(101),
+                                capacities(List.of(bucket(
+                                        LocalTime.NOON,
+                                        LocalTime.of(13, 0),
+                                        2,
+                                        1)))),
+                        () -> holdFacade.create(createCommand));
+
+        ReservationCapacityCommandResult publication = workers.first();
+        ReservationHoldContracts.Result created = workers.second();
+        List<Long> latestBucketIds = bucketIdsForVersion(scenario.storeId(), 2L);
+
+        assertThat(publication.httpStatus()).isEqualTo(200);
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(created.status()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        assertThat(latestBucketIds).hasSize(1);
+        assertAllBucketOccupancy(latestBucketIds, 2, 1);
+        assertThat(count("reservation_holds")).isOne();
+        assertThat(countTransitionAudits(created.reservationHoldId())).isOne();
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+        int expectedAllocationCount;
+        if (created.capacityPolicyVersion() == 1L) {
+            expectedAllocationCount = 2;
+            assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+        } else {
+            assertThat(created.capacityPolicyVersion()).isEqualTo(2L);
+            expectedAllocationCount = 1;
+            assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        }
+        assertThat(count("reservation_hold_capacity_allocations"))
+                .isEqualTo(expectedAllocationCount);
+
+        ReservationHoldContracts.Result replay = holdFacade.create(createCommand);
+
+        assertThat(replay).isEqualTo(created);
+        assertThat(count("reservation_holds")).isOne();
+        assertThat(count("reservation_hold_capacity_allocations"))
+                .isEqualTo(expectedAllocationCount);
+        assertThat(countTransitionAudits(created.reservationHoldId())).isOne();
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+        assertAllBucketOccupancy(latestBucketIds, 2, 1);
+    }
+
+    @Test
+    @DisplayName("재게시와 Hold release 경합은 원본과 최신 점유를 한 번만 복구한다")
+    void publicationAndHoldReleaseConvergeWithoutStaleOrDoubleRestoration()
+            throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "publication-release-create");
+        ReservationHoldContracts.TransitionCommand releaseCommand = transitionCommand(
+                active, ReservationHoldStatus.RELEASED, "publication-release-operation");
+
+        RacePair<ReservationCapacityCommandResult, ReservationHoldContracts.Result> workers =
+                invokePairWhileRowLocked(
+                        "reservation_holds",
+                        "reservation_hold_id",
+                        active.reservationHoldId(),
+                        () -> capacityFacade.replace(
+                                scenario.operatorId(),
+                                scenario.storeId(),
+                                SERVICE_DATE,
+                                key(102),
+                                capacities(List.of(bucket(
+                                        LocalTime.NOON,
+                                        LocalTime.of(13, 0),
+                                        10,
+                                        5)))),
+                        () -> holdFacade.transition(releaseCommand));
+
+        ReservationCapacityCommandResult publication = workers.first();
+        ReservationHoldContracts.Result released = workers.second();
+        List<Long> latestBucketIds = bucketIdsForVersion(scenario.storeId(), 2L);
+
+        assertThat(publication.httpStatus()).isEqualTo(200);
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(released.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(released.statusVersion()).isEqualTo(1L);
+        assertThat(currentStatus(active.reservationHoldId())).isEqualTo("RELEASED");
+        assertThat(latestBucketIds).hasSize(1);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertAllBucketOccupancy(latestBucketIds, 0, 0);
+        assertThat(count("reservation_holds")).isOne();
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+
+        ReservationHoldContracts.Result replay = holdFacade.transition(releaseCommand);
+
+        assertThat(replay).isEqualTo(released);
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertAllBucketOccupancy(latestBucketIds, 0, 0);
+    }
+
+    @Test
+    @DisplayName("재게시와 확정 예약 취소 경합은 보호 Hold 점유만 최신 정책에 남긴다")
+    void publicationAndConfirmedReservationCancellationPreserveProtectedHoldOnly()
+            throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ConfirmedReservationFixture confirmed = seedConfirmedReservation(scenario);
+        ReservationHoldContracts.Result protectedHold = createHold(
+                scenario, createConsumer(), "publication-cancellation-hold");
+        IdempotencyKey cancellationKey = key(104);
+        ConsumerCancellationRequest cancellationRequest =
+                new ConsumerCancellationRequest("publication race");
+
+        RacePair<ReservationCapacityCommandResult, ReservationCancellationCommandResult> workers =
+                invokePairWhileRowLocked(
+                        "reservations",
+                        "reservation_id",
+                        confirmed.reservationId(),
+                        () -> capacityFacade.replace(
+                                scenario.operatorId(),
+                                scenario.storeId(),
+                                SERVICE_DATE,
+                                key(103),
+                                capacities(List.of(bucket(
+                                        LocalTime.NOON,
+                                        LocalTime.of(13, 0),
+                                        10,
+                                        5)))),
+                        () -> cancellationFacade.cancelByConsumer(
+                                confirmed.consumerId(),
+                                confirmed.reservationId(),
+                                cancellationKey,
+                                cancellationRequest));
+
+        ReservationCapacityCommandResult publication = workers.first();
+        ReservationCancellationCommandResult cancelled = workers.second();
+        List<Long> latestBucketIds = bucketIdsForVersion(scenario.storeId(), 2L);
+
+        assertThat(publication.httpStatus()).isEqualTo(200);
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(cancelled.httpStatus()).isEqualTo(200);
+        assertThat(cancelled.data().status()).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE reservation_id = ?",
+                String.class,
+                confirmed.reservationId())).isEqualTo("CANCELLED");
+        assertThat(currentStatus(protectedHold.reservationHoldId())).isEqualTo("ACTIVE");
+        assertThat(latestBucketIds).hasSize(1);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+        assertAllBucketOccupancy(latestBucketIds, 2, 1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_capacity_allocations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                confirmed.reservationId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_cancellation_audits "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                confirmed.reservationId())).isOne();
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(countTransitionAudits(protectedHold.reservationHoldId())).isOne();
+
+        ReservationCancellationCommandResult replay = cancellationFacade.cancelByConsumer(
+                confirmed.consumerId(),
+                confirmed.reservationId(),
+                cancellationKey,
+                cancellationRequest);
+
+        assertThat(replay).isEqualTo(cancelled);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_cancellation_audits "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                confirmed.reservationId())).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_capacity_allocations "
+                        + "WHERE reservation_id = ?",
+                Integer.class,
+                confirmed.reservationId())).isEqualTo(2);
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(countTransitionAudits(protectedHold.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+        assertAllBucketOccupancy(latestBucketIds, 2, 1);
+    }
+
+    @Test
     @DisplayName("만료 직전은 RES005이고 정각부터 단 한 번 만료·복구한다")
     void expiryBoundaryRejectsBeforeAndExpiresExactlyOnceAtBoundary() {
         Scenario scenario = createScenario(10, 5, twoBuckets());
@@ -722,6 +940,42 @@ class ReservationHoldRuntimeIT {
         });
     }
 
+    private ConfirmedReservationFixture seedConfirmedReservation(Scenario scenario) {
+        long consumerId = createConsumer();
+        return transactions.execute(status -> {
+            Store store = storeRepository.findById(scenario.storeId()).orElseThrow();
+            ReservationTimePolicyVersion policy = timePolicyRepository
+                    .findByStoreIdAndVersionNumberForUpdate(scenario.storeId(), 1L)
+                    .orElseThrow();
+            ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                    policy,
+                    LocalDateTime.of(SERVICE_DATE, START_TIME),
+                    ZoneId.of(TIME_ZONE_ID),
+                    null);
+            Reservation reservation = reservationRepository.saveAndFlush(Reservation.confirm(
+                    consumerId,
+                    scenario.storeId(),
+                    store.getName(),
+                    timeSnapshot,
+                    PartyComposition.of(PARTY_SIZE, 0, 0),
+                    ReservationContactSnapshot.contactable(
+                            "opaque-confirmed-reservation-" + consumerId),
+                    1L,
+                    new ReservationCancellationPolicyVersion(1L),
+                    BASE_NOW.minusSeconds(3_600)));
+            List<ReservationCapacityBucket> buckets = capacityBucketRepository
+                    .findAllById(scenario.originalBucketIds());
+            assertThat(buckets).hasSize(2);
+            buckets.forEach(bucket -> bucket.occupy(PARTY_SIZE));
+            capacityBucketRepository.flush();
+            capacityAllocationRepository.saveAllAndFlush(buckets.stream()
+                    .map(bucket -> ReservationCapacityAllocation.allocate(
+                            reservation.getId(), bucket.getId(), PARTY_SIZE, 1L))
+                    .toList());
+            return new ConfirmedReservationFixture(consumerId, reservation.getId());
+        });
+    }
+
     private ReservationHoldContracts.Result createHold(
             Scenario scenario,
             long consumerId,
@@ -801,8 +1055,25 @@ class ReservationHoldRuntimeIT {
             java.util.concurrent.Callable<HoldAttempt> firstInvocation,
             java.util.concurrent.Callable<HoldAttempt> secondInvocation
     ) throws Exception {
-        Set<String> allowedTables = Set.of("stores", "reservation_holds");
-        Set<String> allowedColumns = Set.of("store_id", "reservation_hold_id");
+        RacePair<HoldAttempt, HoldAttempt> pair = invokePairWhileRowLocked(
+                tableName,
+                idColumn,
+                rowId,
+                firstInvocation,
+                secondInvocation);
+        return List.of(pair.first(), pair.second());
+    }
+
+    private <F, S> RacePair<F, S> invokePairWhileRowLocked(
+            String tableName,
+            String idColumn,
+            long rowId,
+            java.util.concurrent.Callable<F> firstInvocation,
+            java.util.concurrent.Callable<S> secondInvocation
+    ) throws Exception {
+        Set<String> allowedTables = Set.of("stores", "reservation_holds", "reservations");
+        Set<String> allowedColumns = Set.of(
+                "store_id", "reservation_hold_id", "reservation_id");
         if (!allowedTables.contains(tableName) || !allowedColumns.contains(idColumn)) {
             throw new IllegalArgumentException("unsupported lock target");
         }
@@ -813,8 +1084,8 @@ class ReservationHoldRuntimeIT {
         AtomicLong holderConnectionId = new AtomicLong();
         ExecutorService executor = Executors.newFixedThreadPool(3, workerFactory());
         Future<Long> holder = null;
-        Future<HoldAttempt> first = null;
-        Future<HoldAttempt> second = null;
+        Future<F> first = null;
+        Future<S> second = null;
         try {
             holder = executor.submit(() -> transactions.execute(status -> {
                 jdbcTemplate.queryForObject(
@@ -841,7 +1112,7 @@ class ReservationHoldRuntimeIT {
             awaitBlockingWaits(holderConnectionId.get(), tableName, "PRIMARY", 2);
             releaseHolder.countDown();
             holder.get(10, TimeUnit.SECONDS);
-            return List.of(
+            return new RacePair<>(
                     first.get(30, TimeUnit.SECONDS),
                     second.get(30, TimeUnit.SECONDS));
         } finally {
@@ -857,8 +1128,8 @@ class ReservationHoldRuntimeIT {
         }
     }
 
-    private static HoldAttempt invokeAfterStart(
-            java.util.concurrent.Callable<HoldAttempt> invocation,
+    private static <T> T invokeAfterStart(
+            java.util.concurrent.Callable<T> invocation,
             CountDownLatch workersReady,
             CountDownLatch startWorkers
     ) throws Exception {
@@ -1103,6 +1374,12 @@ class ReservationHoldRuntimeIT {
     }
 
     private record Scenario(long operatorId, long storeId, List<Long> originalBucketIds) {
+    }
+
+    private record ConfirmedReservationFixture(long consumerId, long reservationId) {
+    }
+
+    private record RacePair<F, S>(F first, S second) {
     }
 
     private record HoldAttempt(ReservationHoldContracts.Result result, ErrorCode errorCode) {
