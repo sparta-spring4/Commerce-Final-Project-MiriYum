@@ -152,6 +152,97 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
+  /api/v1/consumers/auth/kakao/authorizations:
+    post:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 카카오 인가 주소 발급
+      operationId: createConsumerKakaoAuthorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthorizationRequest"
+      responses:
+        "200":
+          description: 카카오 인가 주소와 같은 브라우저 콜백 검증용 5분 state 쿠키
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE HttpOnly state 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoAuthorizationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/auth/kakao/sessions:
+    post:
+      tags: [Consumer Auth]
+      summary: 일반 사용자 카카오 로그인
+      description: 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+      operationId: createConsumerKakaoSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthenticationRequest"
+      responses:
+        "200":
+          description: 카카오 로그인 결과
+          headers:
+            Set-Cookie:
+              description: 로그인 완료 상태일 때만 MIRIYUM_CONSUMER_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLoginSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/auth/kakao/accounts:
+    post:
+      tags: [Consumer Auth]
+      summary: 카카오 일반 사용자 가입 완료
+      description: 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 일반 사용자 계정과 카카오 연결을 함께 생성한다.
+      operationId: createConsumerKakaoAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerKakaoSignUpRequest"
+      responses:
+        "201":
+          description: 카카오 일반 사용자 가입과 로그인 완료
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_CONSUMER_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLoginSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "409":
+          $ref: "#/components/responses/AccountConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-operators/auth/accounts:
     post:
       tags: [Store Operator Auth]
@@ -284,6 +375,97 @@ paths:
           $ref: "#/components/responses/InvalidRefreshToken"
         "403":
           $ref: "#/components/responses/CsrfRejected"
+  /api/v1/store-operators/auth/kakao/authorizations:
+    post:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 카카오 인가 주소 발급
+      operationId: createStoreOperatorKakaoAuthorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthorizationRequest"
+      responses:
+        "200":
+          description: 카카오 인가 주소와 같은 브라우저 콜백 검증용 5분 state 쿠키
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_STORE_OPERATOR_KAKAO_LOGIN_STATE HttpOnly state 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoAuthorizationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operators/auth/kakao/sessions:
+    post:
+      tags: [Store Operator Auth]
+      summary: 매장 운영자 카카오 로그인
+      description: 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+      operationId: createStoreOperatorKakaoSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthenticationRequest"
+      responses:
+        "200":
+          description: 카카오 로그인 결과
+          headers:
+            Set-Cookie:
+              description: 로그인 완료 상태일 때만 MIRIYUM_STORE_OPERATOR_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLoginSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operators/auth/kakao/accounts:
+    post:
+      tags: [Store Operator Auth]
+      summary: 카카오 매장 운영자 가입 완료
+      description: 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 매장 운영자 계정과 카카오 연결을 함께 생성한다.
+      operationId: createStoreOperatorKakaoAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreOperatorKakaoSignUpRequest"
+      responses:
+        "201":
+          description: 카카오 매장 운영자 가입과 로그인 완료
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_STORE_OPERATOR_REFRESH Refresh JWT 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLoginSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "409":
+          $ref: "#/components/responses/AccountConflict"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/consumers/me:
     get:
       tags: [Account]
@@ -362,6 +544,68 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "#/components/responses/ContactRegistrationConflict"
+  /api/v1/consumers/me/kakao/authorizations:
+    post:
+      tags: [Account]
+      summary: 일반 사용자 카카오 연결 인가 주소 발급
+      operationId: createConsumerKakaoLinkAuthorization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthorizationRequest"
+      responses:
+        "200":
+          description: 현재 일반 사용자 계정에 묶인 카카오 연결 인가 주소와 5분 state 쿠키
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_CONSUMER_KAKAO_LINK_STATE HttpOnly state 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoAuthorizationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/me/kakao-links:
+    post:
+      tags: [Account]
+      summary: 일반 사용자 계정에 카카오 연결
+      description: Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+      operationId: createConsumerKakaoLink
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthenticationRequest"
+      responses:
+        "200":
+          description: 카카오 연결 완료 또는 같은 계정에 이미 연결됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLinkSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/KakaoAlreadyLinked"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/me/contact:
     put:
       tags: [Account]
@@ -440,6 +684,68 @@ paths:
           $ref: "#/components/responses/AccountRestricted"
         "409":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Conflict"
+  /api/v1/store-operators/me/kakao/authorizations:
+    post:
+      tags: [Account]
+      summary: 매장 운영자 카카오 연결 인가 주소 발급
+      operationId: createStoreOperatorKakaoLinkAuthorization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthorizationRequest"
+      responses:
+        "200":
+          description: 현재 매장 운영자 계정에 묶인 카카오 연결 인가 주소와 5분 state 쿠키
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_STORE_OPERATOR_KAKAO_LINK_STATE HttpOnly state 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoAuthorizationSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operators/me/kakao-links:
+    post:
+      tags: [Account]
+      summary: 매장 운영자 계정에 카카오 연결
+      description: Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+      operationId: createStoreOperatorKakaoLink
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KakaoAuthenticationRequest"
+      responses:
+        "200":
+          description: 카카오 연결 완료 또는 같은 계정에 이미 연결됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KakaoLinkSuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidKakaoOAuth"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/KakaoAlreadyLinked"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -558,6 +864,104 @@ components:
           type: string
           minLength: 2
           maxLength: 50
+    KakaoAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      required: [redirectUri]
+      properties:
+        redirectUri:
+          type: string
+          format: uri
+          minLength: 1
+          description: 카카오 개발자 콘솔과 서버 허용 목록에 모두 등록한 콜백 주소
+    KakaoAuthenticationRequest:
+      type: object
+      additionalProperties: false
+      required: [authorizationCode, state, redirectUri]
+      properties:
+        authorizationCode:
+          type: string
+          minLength: 1
+          description: 카카오가 콜백 주소에 전달한 일회용 인가 코드
+        state:
+          type: string
+          minLength: 1
+          description: 서버가 카카오 인가 주소 발급 시 만든 5분 수명의 서명된 상태값. 같은 브라우저의 HttpOnly state 쿠키와도 일치해야 한다.
+        redirectUri:
+          type: string
+          format: uri
+          minLength: 1
+          description: 인가 주소 발급 때 사용한 동일한 허용 콜백 주소
+    ConsumerKakaoSignUpRequest:
+      type: object
+      additionalProperties: false
+      required: [signUpTicket, email, phoneNumber, ageConfirmed, nickname]
+      properties:
+        signUpTicket:
+          type: string
+          minLength: 1
+          description: 첫 카카오 로그인 결과로 받은 5분 수명의 가입 티켓
+        email:
+          $ref: "#/components/schemas/Email"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+        ageConfirmed:
+          type: boolean
+          const: true
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 20
+          pattern: "^[가-힣A-Za-z0-9 _-]+$"
+    StoreOperatorKakaoSignUpRequest:
+      type: object
+      additionalProperties: false
+      required: [signUpTicket, email, phoneNumber, displayName]
+      properties:
+        signUpTicket:
+          type: string
+          minLength: 1
+          description: 첫 카카오 로그인 결과로 받은 5분 수명의 가입 티켓
+        email:
+          $ref: "#/components/schemas/Email"
+        phoneNumber:
+          $ref: "#/components/schemas/MvpPhoneNumberInput"
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+    KakaoAuthorizationData:
+      type: object
+      additionalProperties: false
+      required: [authorizationUrl]
+      properties:
+        authorizationUrl:
+          type: string
+          format: uri
+    KakaoLoginData:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [AUTHENTICATED, SIGN_UP_REQUIRED]
+          accessToken:
+            type: string
+            description: AUTHENTICATED일 때만 Access JWT를 반환한다.
+          tokenType:
+            type: string
+            const: Bearer
+          expiresIn:
+            type: integer
+            const: 3600
+          signUpTicket:
+            type: string
+            description: SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓
+    KakaoLinkData:
+      type: string
+      enum: [CREATED, ALREADY_LINKED]
+      description: CREATED는 새 연결, ALREADY_LINKED는 같은 계정에 이미 존재한 멱등 결과다.
     ConsumerAccountUpdateRequest:
       type: object
       additionalProperties: false
@@ -693,6 +1097,39 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/TokenData"
+    KakaoAuthorizationSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/KakaoAuthorizationData"
+    KakaoLoginSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/KakaoLoginData"
+    KakaoLinkSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/KakaoLinkData"
     CsrfTokenSuccessResponse:
       type: object
       additionalProperties: false
@@ -756,6 +1193,24 @@ components:
           example:
             code: AUTH_008
             message: 유효한 Refresh Token이 필요합니다.
+    InvalidKakaoOAuth:
+      description: 카카오 인가 코드, state 또는 가입 티켓이 없거나 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_013
+            message: 카카오 로그인 요청이 유효하지 않습니다.
+    KakaoAlreadyLinked:
+      description: 같은 계정 유형의 다른 계정에 이미 연결된 카카오 계정
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_014
+            message: 해당 카카오 계정은 다른 계정에 연결돼 있습니다.
     AccountRestricted:
       description: 현재 계정 상태가 이용을 허용하지 않음
       content:
