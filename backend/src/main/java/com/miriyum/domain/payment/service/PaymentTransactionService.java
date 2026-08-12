@@ -235,7 +235,7 @@ public class PaymentTransactionService {
         throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ConfirmationClaim claimConfirmation(ConfirmPaymentCommand command, Instant now) {
         String fingerprint = confirmationFingerprint(command);
         PaymentAttempt idempotentAttempt = attempts.findByPrincipalIdAndIdempotencyKey(
@@ -298,7 +298,7 @@ public class PaymentTransactionService {
         );
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ConfirmationClaim claimWebhookConfirmation(
             String portOnePaymentId,
             String webhookMessageId,
@@ -340,7 +340,7 @@ public class PaymentTransactionService {
         );
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResult finalizeConfirmation(
             ConfirmationClaim claim,
             ProviderPayment providerPayment,
@@ -390,7 +390,7 @@ public class PaymentTransactionService {
         return toResult(payment);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResult markConfirmationUnknown(ConfirmationClaim claim, Instant now) {
         Payment payment = paymentForUpdate(claim.paymentId());
         if (claim.isCancellationWebhook()) {
@@ -404,7 +404,7 @@ public class PaymentTransactionService {
         return toResult(payment);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResult markConfirmationMismatch(ConfirmationClaim claim, Instant now) {
         Payment payment = paymentForUpdate(claim.paymentId());
         if (claim.isCancellationWebhook()) {
@@ -515,7 +515,7 @@ public class PaymentTransactionService {
         );
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundResult finalizeRefund(
             RefundClaim claim,
             ProviderCancellation cancellation,
@@ -562,7 +562,7 @@ public class PaymentTransactionService {
         return toRefundResult(refund);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundResult markRefundUnknown(RefundClaim claim, Instant now) {
         PaymentRefund refund = refundForUpdate(claim.refundId());
         if (refund.getStatus() != RefundStatus.COMPLETED) {
@@ -572,7 +572,7 @@ public class PaymentTransactionService {
         return toRefundResult(refund);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundResult markRefundMismatch(RefundClaim claim, Instant now) {
         PaymentRefund refund = refundForUpdate(claim.refundId());
         if (refund.getStatus() != RefundStatus.COMPLETED) {

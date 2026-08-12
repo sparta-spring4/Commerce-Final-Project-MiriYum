@@ -260,6 +260,101 @@ class PaymentPersistenceIT {
     }
 
     @Test
+    @DisplayName("PortOne 결제 mapping 불일치 격리는 caller transaction rollback과 독립 커밋한다")
+    void preservesConfirmationMismatchAcrossCallerRollback() {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("148", 30_000L));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-mismatch-148",
+                        ProviderStatus.PAID,
+                        29_999L,
+                        "KRW"
+                )
+        );
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                ignored -> paymentService.confirmPayment(new ConfirmPaymentCommand(
+                        preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                        "550e8400-e29b-41d4-a716-446655440148"))))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.PROVIDER_MAPPING_MISMATCH);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_attempts WHERE status = 'UNKNOWN'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'PAYMENT_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("PortOne 결제 결과 불명 격리는 이후 caller rollback에도 유지한다")
+    void preservesUnknownConfirmationAcrossCallerRollback() {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("149", 30_000L));
+        when(providerClient.getPayment(preparation.portOnePaymentId()))
+                .thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(ignored -> {
+            PaymentResult result = paymentService.confirmPayment(new ConfirmPaymentCommand(
+                    preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                    "550e8400-e29b-41d4-a716-446655440149"));
+            assertThat(result.status()).isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+            throw new IllegalStateException("rollback caller");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_attempts WHERE status = 'UNKNOWN'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'PAYMENT_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("PortOne 결제 확정 결과는 이후 caller rollback에도 유지한다")
+    void preservesFinalizedConfirmationAcrossCallerRollback() {
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                prepareCommand("150", 30_000L));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(),
+                        "transaction-150",
+                        ProviderStatus.PAID,
+                        30_000L,
+                        "KRW"
+                )
+        );
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(ignored -> {
+            PaymentResult result = paymentService.confirmPayment(new ConfirmPaymentCommand(
+                    preparation.paymentId(), 11L, preparation.portOnePaymentId(),
+                    "550e8400-e29b-41d4-a716-446655440150"));
+            assertThat(result.status()).isEqualTo(PaymentStatus.PAID);
+            throw new IllegalStateException("rollback caller");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PAID);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_attempts WHERE status = 'PAID'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'PAYMENT_CONFIRMED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("PortOne PAY_PENDING은 confirmation 임대를 끝내고 UNKNOWN 대사 상태로 격리한다")
     void isolatesPendingProviderPaymentForReconciliation() {
         PaymentPreparation preparation = paymentService.prepareReservationDeposit(
@@ -658,6 +753,108 @@ class PaymentPersistenceIT {
         verify(providerClient, times(1)).cancelPayment(
                 eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
                 eq("KRW"), eq("RESERVATION_CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("PortOne 환불 mapping 불일치 격리는 caller transaction rollback과 독립 커밋한다")
+    void preservesRefundMismatchAcrossCallerRollback() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("151");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenReturn(new ProviderCancellation(
+                "cancellation-mismatch-151",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                9_999L,
+                "KRW"
+        ));
+        RequestRefundCommand command = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:151:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440151");
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                ignored -> paymentService.requestRefund(command)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.PROVIDER_MAPPING_MISMATCH);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_refunds
+                 WHERE status = 'RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("PortOne 환불 결과 불명 격리는 이후 caller rollback에도 유지한다")
+    void preservesUnknownRefundAcrossCallerRollback() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("152");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenThrow(new PaymentProviderClient.ProviderUnavailableException("timeout"));
+        RequestRefundCommand command = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:152:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440152");
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(ignored -> {
+            RefundResult result = paymentService.requestRefund(command);
+            assertThat(result.status()).isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+            throw new IllegalStateException("rollback caller");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_refunds
+                 WHERE status = 'RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("PortOne 환불 완료 결과는 이후 caller rollback에도 유지한다")
+    void preservesFinalizedRefundAcrossCallerRollback() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("153");
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(10_000L),
+                eq("KRW"), eq("RESERVATION_CANCELLED")
+        )).thenReturn(new ProviderCancellation(
+                "cancellation-153",
+                ProviderStatus.PARTIALLY_CANCELLED,
+                10_000L,
+                "KRW"
+        ));
+        RequestRefundCommand command = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:153:cancelled", 10_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440153");
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(ignored -> {
+            RefundResult result = paymentService.requestRefund(command);
+            assertThat(result.status()).isEqualTo(RefundStatus.COMPLETED);
+            throw new IllegalStateException("rollback caller");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds WHERE status = 'COMPLETED'", Long.class))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_COMPLETED'
+                """, Long.class)).isEqualTo(1L);
     }
 
     @Test
