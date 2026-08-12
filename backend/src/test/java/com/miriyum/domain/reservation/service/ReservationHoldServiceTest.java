@@ -70,7 +70,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class ReservationHoldServiceTest {
 
     private static final long CONSUMER_ID = 11L;
-    private static final long STORE_ID = 22L;
+    private static final long STORE_ID = 222L;
     private static final long HOLD_ID = 77L;
     private static final LocalDate SERVICE_DATE = LocalDate.of(2026, 8, 3);
     private static final LocalTime START_TIME = LocalTime.of(18, 0);
@@ -78,6 +78,7 @@ class ReservationHoldServiceTest {
     private static final UUID AUDIT_UUID =
             UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
     private static final String CREATION_COMMAND_ID = "hold-create-1";
+    private static final String TRANSITION_OPERATION_ID = "hold-transition-1";
 
     @Mock
     private ReservationHoldRepository holdRepository;
@@ -248,6 +249,62 @@ class ReservationHoldServiceTest {
         then(holdRepository).shouldHaveNoMoreInteractions();
         verifyNoFreshInteractions();
         assertThat(auditIdGenerationCount).hasValue(0);
+    }
+
+    @Test
+    @DisplayName("동시 생성 replay miss는 Store 잠금 뒤 커밋된 Hold를 다시 확인해 현재 결과로 수렴한다")
+    void concurrentCreateReplayMissConvergesAfterStoreLock() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID))
+                .willReturn(Optional.empty(), Optional.of(existing));
+        given(consumerAccountService.getReservationContact(CONSUMER_ID))
+                .willReturn(new ReservationContactResult("opaque-contact-ref", true));
+        given(storeEligibilityService.requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(STORE_ID, "미리윰 매장"));
+
+        ReservationHoldContracts.Result result = service.create(
+                command(STORE_ID, null, CREATION_COMMAND_ID));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(holdRepository).should(times(2))
+                .findByConsumerAccountIdAndCreationCommandId(
+                        CONSUMER_ID, CREATION_COMMAND_ID);
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(timePolicyRepository).shouldHaveNoInteractions();
+        then(intervalValidationService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(auditRepository).shouldHaveNoInteractions();
+        then(warningTaskRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("Store 잠금 뒤 발견한 생성 replay의 의미가 다르면 COMMON_007이다")
+    void concurrentCreateReplayMissStillRejectsDifferentMeaningAfterStoreLock() {
+        ReservationHold different = existingHold(CREATION_COMMAND_ID);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID))
+                .willReturn(Optional.empty(), Optional.of(different));
+        given(consumerAccountService.getReservationContact(CONSUMER_ID))
+                .willReturn(new ReservationContactResult("opaque-contact-ref", true));
+        given(storeEligibilityService.requireReservationTransactionEligibility(STORE_ID + 1))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        STORE_ID + 1, "다른 매장"));
+
+        assertThatThrownBy(() -> service.create(
+                command(STORE_ID + 1, null, CREATION_COMMAND_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).should(times(2))
+                .findByConsumerAccountIdAndCreationCommandId(
+                        CONSUMER_ID, CREATION_COMMAND_ID);
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -477,6 +534,523 @@ class ReservationHoldServiceTest {
         verifyNoFreshInteractions();
     }
 
+    @Test
+    @DisplayName("같은 operation의 같은 Hold와 목표 상태 replay는 현재 결과만 반환한다")
+    void transitionReplayReturnsCurrentHoldWithoutLockOrMutation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold, ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                "  " + TRANSITION_OPERATION_ID + "  "));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(holdRepository).should().findById(HOLD_ID);
+        then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("transitionReplayConflicts")
+    @DisplayName("operation을 다른 Hold 또는 목표 상태에 재사용하면 COMMON_007이다")
+    void transitionReplayRejectsDifferentMeaning(
+            String ignoredDescription,
+            long requestedHoldId,
+            ReservationHoldStatus requestedTarget
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                requestedHoldId, requestedTarget, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    private static Stream<Arguments> transitionReplayConflicts() {
+        return Stream.of(
+                Arguments.of("different hold", HOLD_ID + 1, ReservationHoldStatus.CONFIRMED),
+                Arguments.of("different target", HOLD_ID, ReservationHoldStatus.RELEASED)
+        );
+    }
+
+    @Test
+    @DisplayName("생성 audit command ID와 충돌한 transition operation은 replay로 인정하지 않는다")
+    void transitionOperationCollisionWithCreationAuditIsRejected() {
+        ReservationHoldTransitionAudit creationAudit = ReservationHoldTransitionAudit.record(
+                HOLD_ID,
+                "SYSTEM",
+                null,
+                NOW,
+                NOW,
+                null,
+                ReservationHoldStatus.ACTIVE,
+                5L,
+                7L,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(creationAudit));
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.ACTIVE,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).should(never()).findById(any());
+        then(holdRepository).should(never()).findByIdForUpdate(any());
+    }
+
+    @Test
+    @DisplayName("동시 transition replay miss는 Hold 잠금 뒤 커밋된 audit를 다시 확인해 현재 결과로 수렴한다")
+    void concurrentTransitionReplayMissConvergesAfterHoldLock() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.confirm();
+        ReservationHoldTransitionAudit committedAudit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty(), Optional.of(committedAudit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(auditRepository).should(times(2)).findByCommandId(TRANSITION_OPERATION_ID);
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Hold 잠금 뒤 발견한 transition replay의 목표가 다르면 COMMON_007이다")
+    void concurrentTransitionReplayMissStillRejectsDifferentMeaningAfterHoldLock() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit committedAudit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty(), Optional.of(committedAudit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(auditRepository).should(times(2)).findByCommandId(TRANSITION_OPERATION_ID);
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Hold가 없으면 RESERVATION_001이고 Store 또는 버킷을 조회하지 않는다")
+    void missingTransitionHoldFailsWithoutStoreOrCapacityLookup() {
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty());
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.RESERVATION_NOT_FOUND));
+
+        then(storeEligibilityService).shouldHaveNoInteractions();
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("capacityRetainingTargets")
+    @DisplayName("점유 유지 상태는 버킷을 읽지 않고 상태와 audit만 변경한다")
+    void retainingTransitionChangesHoldAndAuditWithoutCapacityLookup(
+            String ignoredDescription,
+            ReservationHoldStatus before,
+            ReservationHoldStatus target
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        if (before == ReservationHoldStatus.RECONCILIATION_REQUIRED) {
+            hold.requireReconciliation();
+        }
+        stubFreshTransition(hold);
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, target, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(target);
+        assertThat(hold.getStatus()).isEqualTo(target);
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        assertTransitionAuditSaved(before, target, NOW);
+        then(storeEligibilityService).shouldHaveNoInteractions();
+    }
+
+    private static Stream<Arguments> capacityRetainingTargets() {
+        return Stream.of(
+                Arguments.of("active to confirmed",
+                        ReservationHoldStatus.ACTIVE,
+                        ReservationHoldStatus.CONFIRMED),
+                Arguments.of("active to reconciliation required",
+                        ReservationHoldStatus.ACTIVE,
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED),
+                Arguments.of("reconciliation required to confirmed",
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        ReservationHoldStatus.CONFIRMED)
+        );
+    }
+
+    @Test
+    @DisplayName("정책 재게시 없는 해제는 같은 original/latest 버킷을 한 번만 복구한다")
+    void releaseRestoresDeduplicatedOriginalAndLatestBucketsExactlyOnce() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket first = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 0), 7L, 3, 1);
+        ReservationCapacityBucket second = bucketWithOccupancy(
+                302L, LocalTime.of(19, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L), allocation(302L)),
+                List.of(301L, 302L),
+                List.of(first, second));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(first.getOccupiedPeople()).isZero();
+        assertThat(first.getOccupiedTeams()).isZero();
+        assertThat(second.getOccupiedPeople()).isZero();
+        assertThat(second.getOccupiedTeams()).isZero();
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(List.of(301L, 302L));
+        assertTransitionAuditSaved(
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RELEASED,
+                NOW);
+    }
+
+    @Test
+    @DisplayName("한 번 재게시된 split 정책은 original과 latest 합집합만 복구한다")
+    void releaseAfterPolicySplitRestoresOriginalAndLatestUnion() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationCapacityBucket original = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        ReservationCapacityBucket latestFirst = bucketWithOccupancy(
+                401L, LocalTime.of(18, 0), LocalTime.of(18, 30), 9L, 3, 1);
+        ReservationCapacityBucket latestSecond = bucketWithOccupancy(
+                402L, LocalTime.of(18, 30), LocalTime.of(19, 15), 9L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L)),
+                List.of(401L, 402L),
+                List.of(original, latestFirst, latestSecond));
+
+        service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(List.of(original, latestFirst, latestSecond))
+                .allSatisfy(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(
+                List.of(301L, 401L, 402L));
+    }
+
+    @Test
+    @DisplayName("여러 번 재게시돼도 과거 중간 정책 버킷은 조회하거나 복구하지 않는다")
+    void releaseAfterMultiplePublicationsExcludesIntermediateBuckets() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket original = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        ReservationCapacityBucket intermediate = bucketWithOccupancy(
+                401L, LocalTime.of(18, 0), LocalTime.of(19, 15), 8L, 3, 1);
+        ReservationCapacityBucket latest = bucketWithOccupancy(
+                501L, LocalTime.of(18, 0), LocalTime.of(19, 15), 9L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L)),
+                List.of(501L),
+                List.of(original, latest));
+
+        service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(original.getOccupiedPeople()).isZero();
+        assertThat(latest.getOccupiedPeople()).isZero();
+        assertThat(intermediate.getOccupiedPeople()).isEqualTo(3);
+        assertThat(intermediate.getOccupiedTeams()).isEqualTo(1);
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(List.of(301L, 501L));
+    }
+
+    @Test
+    @DisplayName("만료 정각에는 EXPIRED 전이와 용량 복구가 같은 중앙 시각으로 기록된다")
+    void expiryAtBoundaryRestoresCapacityAndUsesOneClockInstant() {
+        Instant createdAt = NOW.minusSeconds(600);
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, createdAt);
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.EXPIRED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(bucket.getOccupiedPeople()).isZero();
+        assertTransitionAuditSaved(
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.EXPIRED,
+                NOW);
+    }
+
+    @Test
+    @DisplayName("만료 직전 EXPIRED는 RESERVATION_005이고 allocation과 audit를 건드리지 않는다")
+    void expiryBeforeBoundaryRejectsWithoutCapacityOrAudit() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(599));
+        stubFreshTransition(hold);
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.EXPIRED, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION));
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidCapacityReleaseFixtures")
+    @DisplayName("allocation 또는 latest union 불일치는 RESERVATION_008이고 audit를 저장하지 않는다")
+    void invalidCapacityReleaseFailsClosedWithoutAudit(
+            String ignoredDescription,
+            List<ReservationHoldCapacityAllocation> allocations,
+            List<Long> latestIds,
+            List<ReservationCapacityBucket> lockedBuckets
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, allocations, latestIds, lockedBuckets);
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT));
+
+        then(auditRepository).should(never()).save(any());
+    }
+
+    private static Stream<Arguments> invalidCapacityReleaseFixtures() {
+        return Stream.of(
+                Arguments.of("allocation absent", List.of(), List.of(301L),
+                        List.of(bucketWithOccupancy(
+                                301L, LocalTime.of(18, 0), LocalTime.of(19, 15),
+                                7L, 3, 1))),
+                Arguments.of("partial original allocation omitted",
+                        List.of(allocation(301L)),
+                        List.of(401L),
+                        List.of(
+                                bucketWithOccupancy(301L, LocalTime.of(18, 0),
+                                        LocalTime.of(18, 30), 7L, 3, 1),
+                                bucketWithOccupancy(401L, LocalTime.of(18, 0),
+                                        LocalTime.of(19, 15), 9L, 3, 1))),
+                Arguments.of("latest coverage gap", List.of(allocation(301L)),
+                        List.of(401L, 402L),
+                        List.of(
+                                bucketWithOccupancy(301L, LocalTime.of(18, 0),
+                                        LocalTime.of(19, 15), 7L, 3, 1),
+                                bucketWithOccupancy(401L, LocalTime.of(18, 0),
+                                        LocalTime.of(18, 30), 9L, 3, 1),
+                                bucketWithOccupancy(402L, LocalTime.of(19, 0),
+                                        LocalTime.of(19, 15), 9L, 3, 1))),
+                Arguments.of("latest coverage overlap", List.of(allocation(301L)),
+                        List.of(401L, 402L),
+                        List.of(
+                                bucketWithOccupancy(301L, LocalTime.of(18, 0),
+                                        LocalTime.of(19, 15), 7L, 3, 1),
+                                bucketWithOccupancy(401L, LocalTime.of(18, 0),
+                                        LocalTime.of(18, 45), 9L, 3, 1),
+                                bucketWithOccupancy(402L, LocalTime.of(18, 30),
+                                        LocalTime.of(19, 15), 9L, 3, 1))),
+                Arguments.of("latest mixed version", List.of(allocation(301L)),
+                        List.of(401L, 402L),
+                        List.of(
+                                bucketWithOccupancy(301L, LocalTime.of(18, 0),
+                                        LocalTime.of(19, 15), 7L, 3, 1),
+                                bucketWithOccupancy(401L, LocalTime.of(18, 0),
+                                        LocalTime.of(18, 30), 9L, 3, 1),
+                                bucketWithOccupancy(402L, LocalTime.of(18, 30),
+                                        LocalTime.of(19, 15), 10L, 3, 1))),
+                Arguments.of("union row missing", List.of(allocation(301L)),
+                        List.of(401L),
+                        List.of(bucketWithOccupancy(
+                                301L, LocalTime.of(18, 0), LocalTime.of(19, 15),
+                                7L, 3, 1)))
+        );
+    }
+
+    private void stubFreshTransition(ReservationHold hold) {
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty());
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+    }
+
+    private void stubCapacityRelease(
+            ReservationHold hold,
+            List<ReservationHoldCapacityAllocation> allocations,
+            List<Long> latestBucketIds,
+            List<ReservationCapacityBucket> lockedBuckets
+    ) {
+        given(allocationRepository.findAllByReservationHoldIdOrderByCapacityBucketIdAsc(
+                HOLD_ID)).willReturn(allocations);
+        if (allocations.isEmpty()) {
+            return;
+        }
+        given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
+                List.of(STORE_ID),
+                SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 15))).willReturn(latestBucketIds);
+        List<Long> unionIds = Stream.concat(
+                        allocations.stream().map(
+                                ReservationHoldCapacityAllocation::getCapacityBucketId),
+                        latestBucketIds.stream())
+                .distinct()
+                .sorted()
+                .toList();
+        given(capacityBucketRepository.findAllByIdInForUpdate(unionIds))
+                .willReturn(lockedBuckets);
+    }
+
+    private void assertTransitionAuditSaved(
+            ReservationHoldStatus before,
+            ReservationHoldStatus after,
+            Instant occurredAt
+    ) {
+        ArgumentCaptor<ReservationHoldTransitionAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationHoldTransitionAudit.class);
+        then(auditRepository).should().save(auditCaptor.capture());
+        ReservationHoldTransitionAudit audit = auditCaptor.getValue();
+        assertThat(audit.getReservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(audit.getBeforeStatus()).isEqualTo(before);
+        assertThat(audit.getAfterStatus()).isEqualTo(after);
+        assertThat(audit.getActorType()).isEqualTo("SYSTEM");
+        assertThat(audit.getActorId()).isNull();
+        assertThat(audit.getRequestedAt()).isEqualTo(NOW.minusSeconds(1));
+        assertThat(audit.getOccurredAt()).isEqualTo(occurredAt);
+        assertThat(audit.getReservationTimePolicyVersion()).isEqualTo(5L);
+        assertThat(audit.getCapacityPolicyVersion()).isEqualTo(7L);
+        assertThat(audit.getCommandId()).isEqualTo(TRANSITION_OPERATION_ID);
+    }
+
+    private static ReservationHoldContracts.TransitionCommand transitionCommand(
+            long holdId,
+            ReservationHoldStatus target,
+            String operationId
+    ) {
+        return new ReservationHoldContracts.TransitionCommand(
+                holdId,
+                target,
+                operationId,
+                "SYSTEM",
+                null,
+                NOW.minusSeconds(1));
+    }
+
+    private static ReservationHoldTransitionAudit transitionAudit(
+            ReservationHold hold,
+            ReservationHoldStatus before,
+            ReservationHoldStatus after,
+            String operationId
+    ) {
+        return ReservationHoldTransitionAudit.record(
+                HOLD_ID,
+                "SYSTEM",
+                null,
+                NOW.minusSeconds(1),
+                NOW,
+                before,
+                after,
+                hold.getReservationTimePolicyVersion(),
+                hold.getCapacityPolicyVersion(),
+                operationId);
+    }
+
+    private static ReservationHoldCapacityAllocation allocation(long bucketId) {
+        return ReservationHoldCapacityAllocation.allocate(HOLD_ID, bucketId, 3, 7L);
+    }
+
+    private static ReservationCapacityBucket bucketWithOccupancy(
+            long id,
+            LocalTime startTime,
+            LocalTime endTime,
+            long policyVersion,
+            int occupiedPeople,
+            int occupiedTeams
+    ) {
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                STORE_ID,
+                SERVICE_DATE,
+                startTime,
+                endTime,
+                10,
+                5,
+                occupiedPeople,
+                occupiedTeams,
+                1,
+                6,
+                true,
+                policyVersion);
+        ReflectionTestUtils.setField(bucket, "id", id);
+        return bucket;
+    }
+
     private static Stream<Arguments> invalidCommands() {
         return Stream.of(
                 Arguments.of("command missing", null),
@@ -603,6 +1177,13 @@ class ReservationHoldServiceTest {
     }
 
     private static ReservationHold existingHold(String creationCommandId) {
+        return existingHold(creationCommandId, NOW);
+    }
+
+    private static ReservationHold existingHold(
+            String creationCommandId,
+            Instant createdAt
+    ) {
         ReservationHold hold = ReservationHold.active(
                 CONSUMER_ID,
                 STORE_ID,
@@ -613,7 +1194,7 @@ class ReservationHoldServiceTest {
                 7L,
                 new ReservationCancellationPolicyVersion(1L),
                 creationCommandId,
-                NOW);
+                createdAt);
         ReflectionTestUtils.setField(hold, "id", HOLD_ID);
         return hold;
     }

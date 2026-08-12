@@ -33,7 +33,13 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -152,6 +158,17 @@ public class ReservationHoldService {
         StoreReservationTransactionEligibility store =
                 storeEligibilityService.requireReservationTransactionEligibility(
                         normalized.storeId());
+        ReservationHold concurrentReplay = holdRepository
+                .findByConsumerAccountIdAndCreationCommandId(
+                        normalized.consumerAccountId(),
+                        normalized.creationCommandId())
+                .orElse(null);
+        if (concurrentReplay != null) {
+            if (!sameUserControlledMeaning(concurrentReplay, normalized)) {
+                throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+            }
+            return resultOf(concurrentReplay);
+        }
         ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
                 normalized.storeId(),
                 new ReservationTimeRequest(
@@ -243,6 +260,279 @@ public class ReservationHoldService {
         return resultOf(saved);
     }
 
+    /**
+     * 검증된 목표 상태를 적용하고 반환 상태의 수용량을 정확히 한 번 복구한다.
+     *
+     * @param command 상위 서버 조정자가 발급한 전역 operation 명령
+     * @return 현재 선점 결과
+     * @throws IllegalArgumentException 명령 구조가 유효하지 않은 경우
+     * @throws ServiceException replay 의미, Hold 상태 또는 수용량 스냅샷이 충돌한 경우
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationHoldContracts.Result transition(
+            ReservationHoldContracts.TransitionCommand command
+    ) {
+        NormalizedTransitionCommand normalized = normalizeTransition(command);
+        ReservationHoldTransitionAudit replay = auditRepository
+                .findByCommandId(normalized.operationId())
+                .orElse(null);
+        if (replay != null) {
+            requireSameTransitionMeaning(replay, normalized);
+            ReservationHold current = holdRepository
+                    .findById(normalized.reservationHoldId())
+                    .orElseThrow(ReservationHoldService::holdNotFound);
+            return resultOf(current);
+        }
+
+        ReservationHold hold = holdRepository
+                .findByIdForUpdate(normalized.reservationHoldId())
+                .orElseThrow(ReservationHoldService::holdNotFound);
+        ReservationHoldTransitionAudit concurrentReplay = auditRepository
+                .findByCommandId(normalized.operationId())
+                .orElse(null);
+        if (concurrentReplay != null) {
+            requireSameTransitionMeaning(concurrentReplay, normalized);
+            return resultOf(hold);
+        }
+        Instant occurredAt = clock.instant();
+        ReservationHoldStatus beforeStatus = hold.getStatus();
+        applyTransition(hold, normalized.targetStatus(), occurredAt);
+        if (normalized.targetStatus().requiresCapacityRelease()) {
+            restoreCapacity(hold);
+        }
+        auditRepository.save(ReservationHoldTransitionAudit.record(
+                normalized.reservationHoldId(),
+                normalized.actorType(),
+                normalized.actorId(),
+                normalized.requestedAt(),
+                occurredAt,
+                beforeStatus,
+                normalized.targetStatus(),
+                hold.getReservationTimePolicyVersion(),
+                hold.getCapacityPolicyVersion(),
+                normalized.operationId()));
+        return resultOf(hold);
+    }
+
+    private static void requireSameTransitionMeaning(
+            ReservationHoldTransitionAudit replay,
+            NormalizedTransitionCommand command
+    ) {
+        if (replay.getBeforeStatus() == null
+                || replay.getReservationHoldId() != command.reservationHoldId()
+                || replay.getAfterStatus() != command.targetStatus()) {
+            throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        }
+    }
+
+    private void restoreCapacity(ReservationHold hold) {
+        long holdId = requirePersistedId(hold);
+        int partySize = hold.getParty().totalCount();
+        List<ReservationHoldCapacityAllocation> allocations = allocationRepository
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(holdId);
+        if (allocations == null || allocations.isEmpty()) {
+            throw capacityConfigurationConflict();
+        }
+
+        Map<Long, ReservationHoldCapacityAllocation> allocationByBucketId =
+                new LinkedHashMap<>();
+        long previousBucketId = 0L;
+        for (ReservationHoldCapacityAllocation allocation : allocations) {
+            if (allocation == null
+                    || allocation.getReservationHoldId() == null
+                    || allocation.getReservationHoldId() != holdId
+                    || allocation.getCapacityBucketId() == null
+                    || allocation.getCapacityBucketId() <= previousBucketId
+                    || allocation.getOccupiedPeople() != partySize
+                    || allocation.getOccupiedTeams() != 1
+                    || allocation.getCapacityPolicyVersion()
+                    != hold.getCapacityPolicyVersion()) {
+                throw capacityConfigurationConflict();
+            }
+            previousBucketId = allocation.getCapacityBucketId();
+            allocationByBucketId.put(allocation.getCapacityBucketId(), allocation);
+        }
+
+        ZoneId timeZone = ZoneId.of(hold.getTimeZoneId());
+        LocalTime localStart = hold.getStartAt().atZone(timeZone).toLocalTime();
+        LocalTime localOccupancyEnd = hold.getOccupancyEndAt()
+                .atZone(timeZone)
+                .toLocalTime();
+        List<Long> latestBucketIds = capacityBucketRepository
+                .findLatestPolicyBucketIdsOverlapping(
+                        List.of(hold.getStoreId()),
+                        hold.getServiceDate(),
+                        localStart,
+                        localOccupancyEnd);
+        if (latestBucketIds == null || latestBucketIds.isEmpty()) {
+            throw capacityConfigurationConflict();
+        }
+
+        Set<Long> latestIdSet = new LinkedHashSet<>();
+        for (Long latestBucketId : latestBucketIds) {
+            if (latestBucketId == null
+                    || latestBucketId <= 0
+                    || !latestIdSet.add(latestBucketId)) {
+                throw capacityConfigurationConflict();
+            }
+        }
+        Set<Long> unionIdSet = new TreeSet<>();
+        unionIdSet.addAll(allocationByBucketId.keySet());
+        unionIdSet.addAll(latestIdSet);
+        List<Long> unionIds = List.copyOf(unionIdSet);
+        List<ReservationCapacityBucket> lockedBuckets =
+                capacityBucketRepository.findAllByIdInForUpdate(unionIds);
+        Map<Long, ReservationCapacityBucket> bucketById = validateLockedUnion(
+                hold,
+                unionIds,
+                lockedBuckets);
+        validateOriginalAllocations(
+                allocationByBucketId,
+                bucketById,
+                localStart,
+                localOccupancyEnd);
+        validateLatestCoverage(
+                latestIdSet,
+                bucketById,
+                localStart,
+                localOccupancyEnd);
+
+        for (Long bucketId : unionIds) {
+            ReservationHoldCapacityAllocation allocation = allocationByBucketId.get(bucketId);
+            if (allocation == null) {
+                bucketById.get(bucketId).restore(partySize, 1);
+            } else {
+                bucketById.get(bucketId).restore(
+                        allocation.getOccupiedPeople(),
+                        allocation.getOccupiedTeams());
+            }
+        }
+    }
+
+    private static Map<Long, ReservationCapacityBucket> validateLockedUnion(
+            ReservationHold hold,
+            List<Long> unionIds,
+            List<ReservationCapacityBucket> lockedBuckets
+    ) {
+        if (lockedBuckets == null || lockedBuckets.size() != unionIds.size()) {
+            throw capacityConfigurationConflict();
+        }
+        Map<Long, ReservationCapacityBucket> bucketById = new LinkedHashMap<>();
+        for (ReservationCapacityBucket bucket : lockedBuckets) {
+            if (bucket == null
+                    || bucket.getId() == null
+                    || !unionIds.contains(bucket.getId())
+                    || bucketById.put(bucket.getId(), bucket) != null
+                    || !bucket.getStoreId().equals(hold.getStoreId())
+                    || !bucket.getServiceDate().equals(hold.getServiceDate())) {
+                throw capacityConfigurationConflict();
+            }
+        }
+        if (!bucketById.keySet().equals(new LinkedHashSet<>(unionIds))) {
+            throw capacityConfigurationConflict();
+        }
+        return bucketById;
+    }
+
+    private static void validateOriginalAllocations(
+            Map<Long, ReservationHoldCapacityAllocation> allocationByBucketId,
+            Map<Long, ReservationCapacityBucket> bucketById,
+            LocalTime requestedStart,
+            LocalTime requestedEnd
+    ) {
+        List<ReservationCapacityBucket> originalBuckets = new java.util.ArrayList<>();
+        for (Map.Entry<Long, ReservationHoldCapacityAllocation> entry
+                : allocationByBucketId.entrySet()) {
+            ReservationCapacityBucket bucket = bucketById.get(entry.getKey());
+            if (bucket == null
+                    || bucket.getPolicyVersion()
+                    != entry.getValue().getCapacityPolicyVersion()) {
+                throw capacityConfigurationConflict();
+            }
+            originalBuckets.add(bucket);
+        }
+        validateContinuousCoverage(originalBuckets, requestedStart, requestedEnd);
+    }
+
+    private static void validateLatestCoverage(
+            Set<Long> latestBucketIds,
+            Map<Long, ReservationCapacityBucket> bucketById,
+            LocalTime requestedStart,
+            LocalTime requestedEnd
+    ) {
+        List<ReservationCapacityBucket> latestBuckets = latestBucketIds.stream()
+                .map(bucketId -> {
+                    ReservationCapacityBucket bucket = bucketById.get(bucketId);
+                    if (bucket == null) {
+                        throw capacityConfigurationConflict();
+                    }
+                    return bucket;
+                })
+                .toList();
+        long latestVersion = latestBuckets.getFirst().getPolicyVersion();
+        for (ReservationCapacityBucket bucket : latestBuckets) {
+            if (bucket.getPolicyVersion() != latestVersion) {
+                throw capacityConfigurationConflict();
+            }
+        }
+        validateContinuousCoverage(latestBuckets, requestedStart, requestedEnd);
+    }
+
+    private static void validateContinuousCoverage(
+            List<ReservationCapacityBucket> buckets,
+            LocalTime requestedStart,
+            LocalTime requestedEnd
+    ) {
+        List<ReservationCapacityBucket> ordered = buckets.stream()
+                .sorted(Comparator.comparing(ReservationCapacityBucket::getStartTime)
+                        .thenComparing(ReservationCapacityBucket::getEndTime))
+                .toList();
+        LocalTime coveredUntil = requestedStart;
+        for (ReservationCapacityBucket bucket : ordered) {
+            LocalTime coveredStart = laterOf(bucket.getStartTime(), requestedStart);
+            LocalTime coveredEnd = earlierOf(bucket.getEndTime(), requestedEnd);
+            if (!coveredStart.equals(coveredUntil) || !coveredEnd.isAfter(coveredStart)) {
+                throw capacityConfigurationConflict();
+            }
+            coveredUntil = coveredEnd;
+        }
+        if (!coveredUntil.equals(requestedEnd)) {
+            throw capacityConfigurationConflict();
+        }
+    }
+
+    private static void applyTransition(
+            ReservationHold hold,
+            ReservationHoldStatus targetStatus,
+            Instant occurredAt
+    ) {
+        switch (targetStatus) {
+            case CONFIRMED -> hold.confirm();
+            case RELEASED -> hold.release();
+            case EXPIRED -> hold.expire(occurredAt);
+            case RECONCILIATION_REQUIRED -> hold.requireReconciliation();
+            case ACTIVE -> throw new ServiceException(
+                    ReservationErrorCode.INVALID_STATE_TRANSITION);
+        }
+    }
+
+    private static LocalTime laterOf(LocalTime left, LocalTime right) {
+        return left.isAfter(right) ? left : right;
+    }
+
+    private static LocalTime earlierOf(LocalTime left, LocalTime right) {
+        return left.isBefore(right) ? left : right;
+    }
+
+    private static ServiceException capacityConfigurationConflict() {
+        return new ServiceException(
+                ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT);
+    }
+
+    private static ServiceException holdNotFound() {
+        return new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND);
+    }
+
     private static NormalizedCommand normalize(
             ReservationHoldContracts.CreateCommand command
     ) {
@@ -271,6 +561,52 @@ public class ReservationHoldService {
                 command.startOffset(),
                 party,
                 creationCommandId);
+    }
+
+    private static NormalizedTransitionCommand normalizeTransition(
+            ReservationHoldContracts.TransitionCommand command
+    ) {
+        if (command == null) {
+            throw new IllegalArgumentException("command is required");
+        }
+        if (command.reservationHoldId() <= 0) {
+            throw new IllegalArgumentException("reservationHoldId must be positive");
+        }
+        if (command.targetStatus() == null) {
+            throw new IllegalArgumentException("targetStatus is required");
+        }
+        String operationId = normalizeText(command.operationId(), 100, "operationId");
+        String actorType = normalizeText(command.actorType(), 32, "actorType");
+        if (SYSTEM_ACTOR.equals(actorType)) {
+            if (command.actorId() != null && command.actorId() <= 0) {
+                throw new IllegalArgumentException("actorId must be positive when present");
+            }
+        } else if (command.actorId() == null || command.actorId() <= 0) {
+            throw new IllegalArgumentException("non-system actorId must be positive");
+        }
+        if (command.requestedAt() == null) {
+            throw new IllegalArgumentException("requestedAt is required");
+        }
+        return new NormalizedTransitionCommand(
+                command.reservationHoldId(),
+                command.targetStatus(),
+                operationId,
+                actorType,
+                command.actorId(),
+                command.requestedAt());
+    }
+
+    private static String normalizeText(String value, int maxLength, String fieldName) {
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    fieldName + " must be 1 to " + maxLength + " characters");
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty() || normalized.length() > maxLength) {
+            throw new IllegalArgumentException(
+                    fieldName + " must be 1 to " + maxLength + " characters");
+        }
+        return normalized;
     }
 
     private static String normalizeCreationCommandId(String value) {
@@ -378,6 +714,16 @@ public class ReservationHoldService {
             ZoneOffset startOffset,
             PartyComposition party,
             String creationCommandId
+    ) {
+    }
+
+    private record NormalizedTransitionCommand(
+            long reservationHoldId,
+            ReservationHoldStatus targetStatus,
+            String operationId,
+            String actorType,
+            Long actorId,
+            Instant requestedAt
     ) {
     }
 }
