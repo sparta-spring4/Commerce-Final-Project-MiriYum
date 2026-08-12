@@ -82,6 +82,7 @@
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingClosureServiceTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/controller/storeoperator/WaitingStoreOperatorControllerTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/WaitingLedgerConcurrencyIT.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/exception/ReservationErrorCodeTest.java`
 - Modify: `backend/src/test/java/com/miriyum/domain/reservation/ReservationProductionDependencyTest.java`
 
 ---
@@ -199,7 +200,7 @@ Use `waiting_active_memberships(store_id, consumer_account_id)` as the active du
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add backend/src/main/resources/db/migration/V36__create_waiting_ledger.sql backend/src/main/java/com/miriyum/domain/reservation/waiting/entity backend/src/main/java/com/miriyum/domain/reservation/waiting/repository backend/src/test/java/com/miriyum/domain/reservation/waiting/entity backend/src/test/java/com/miriyum/domain/reservation/waiting/repository backend/src/main/java/com/miriyum/domain/reservation/exception/ReservationErrorCode.java
+git add backend/src/main/resources/db/migration/V36__create_waiting_ledger.sql backend/src/main/java/com/miriyum/domain/reservation/waiting/entity backend/src/main/java/com/miriyum/domain/reservation/waiting/repository backend/src/test/java/com/miriyum/domain/reservation/waiting/entity backend/src/test/java/com/miriyum/domain/reservation/waiting/repository backend/src/main/java/com/miriyum/domain/reservation/exception/ReservationErrorCode.java backend/src/test/java/com/miriyum/domain/reservation/exception/ReservationErrorCodeTest.java
 git commit -m "feat(reservation): 웨이팅 원장 영속 모델 구현"
 ```
 
