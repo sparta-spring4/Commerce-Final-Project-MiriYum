@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Route, Routes } from 'react-router'
+import { BrowserRouter, Outlet, Route, Routes } from 'react-router'
 import { createQueryClient } from '../shared/api/queryClient'
 import {
   ConsumerAccountMenu,
@@ -22,6 +22,28 @@ import {
   ReservationDetailPage,
 } from '../features/reservations'
 import {
+  ClosuresPage,
+  CurrentStoreProvider,
+  MenuEditorPage,
+  MenuListPage,
+  OperatingHoursPage,
+  RequireStoreOperatorAuth,
+  ReservationTimeSlotsPage,
+  StoreCreatePage,
+  StoreInfoPage,
+  StoreOperatorAuthProvider,
+  StoreOperatorHomePage,
+  StoreOperatorLayout,
+  StoreOperatorSignInPage,
+  StoreOperatorSignUpPage,
+} from '../features/store-operator'
+import {
+  ReservationCapacityPage,
+  ReservationTimePolicyPage,
+  StoreReservationDetailPage,
+  StoreReservationsPage,
+} from '../features/store-reservation-ops'
+import {
   HomePage,
   StoreDetailPage,
   StoreSearchPage,
@@ -33,6 +55,22 @@ import { NotFoundPage } from './NotFoundPage'
 import { ROUTES } from './routes'
 
 const queryClient = createQueryClient()
+
+/**
+ * 매장 운영자 셸의 provider 경계.
+ *
+ * 인증 상태와 현재 매장 선택을 이 안에서만 들고 있다. 소비자 화면은 이 provider를
+ * 지나가지 않으므로 두 셸의 상태가 섞이지 않는다.
+ */
+function StoreOperatorShell() {
+  return (
+    <StoreOperatorAuthProvider>
+      <CurrentStoreProvider>
+        <Outlet />
+      </CurrentStoreProvider>
+    </StoreOperatorAuthProvider>
+  )
+}
 
 /**
  * 앱 셸. 화면 Issue는 routes.ts에 자기 route를 등록하고 여기에 element를 붙인다.
@@ -118,6 +156,81 @@ export default function App() {
                     path={ROUTES.pickupComplete}
                     element={<PickupCompletePage />}
                   />
+                </Route>
+              </Route>
+
+              {/*
+                매장 운영자 셸.
+
+                일반 사용자 provider 밖에 두지 않는 이유는 라우터가 하나이기
+                때문이며, 인증 상태·토큰·쿠키는 이 안의 별도 provider가 소유한다.
+                두 셸은 서로의 상태를 읽지 않는다.
+              */}
+              <Route element={<StoreOperatorShell />}>
+                <Route
+                  path={ROUTES.storeOperatorSignIn}
+                  element={<StoreOperatorSignInPage />}
+                />
+                <Route
+                  path={ROUTES.storeOperatorSignUp}
+                  element={<StoreOperatorSignUpPage />}
+                />
+
+                <Route element={<RequireStoreOperatorAuth />}>
+                  <Route element={<StoreOperatorLayout />}>
+                    <Route
+                      path={ROUTES.storeOperatorHome}
+                      element={<StoreOperatorHomePage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorStoreCreate}
+                      element={<StoreCreatePage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorStore}
+                      element={<StoreInfoPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorOperatingHours}
+                      element={<OperatingHoursPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorReservationTimeSlots}
+                      element={<ReservationTimeSlotsPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorClosures}
+                      element={<ClosuresPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorMenus}
+                      element={<MenuListPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorMenuCreate}
+                      element={<MenuEditorPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorMenu}
+                      element={<MenuEditorPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorReservationCapacities}
+                      element={<ReservationCapacityPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorReservationTimePolicy}
+                      element={<ReservationTimePolicyPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorReservations}
+                      element={<StoreReservationsPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorReservation}
+                      element={<StoreReservationDetailPage />}
+                    />
+                  </Route>
                 </Route>
               </Route>
             </Routes>
