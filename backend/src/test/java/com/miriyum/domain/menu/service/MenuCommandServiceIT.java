@@ -14,17 +14,24 @@ import com.miriyum.domain.menu.dto.storeoperator.OriginDisclosureRequest;
 import com.miriyum.domain.menu.dto.storeoperator.MenuPublicationRequest;
 import com.miriyum.domain.menu.dto.storeoperator.MenuSellingStatusRequest;
 import com.miriyum.domain.menu.dto.storeoperator.MenuVisibilityRequest;
+import com.miriyum.domain.menu.dto.storeoperator.RepresentativeMenuReplaceRequest;
 import com.miriyum.domain.menu.entity.MenuPublicationEvent;
+import com.miriyum.domain.menu.entity.RepresentativeMenuAudit;
 import com.miriyum.domain.menu.enums.MenuPublicationEventType;
 import com.miriyum.domain.menu.enums.MenuPublicationMode;
 import com.miriyum.domain.menu.enums.MenuSellingStatus;
 import com.miriyum.domain.menu.enums.MenuVersionStatus;
 import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.enums.RepresentativeMenuAuditActorType;
+import com.miriyum.domain.menu.enums.RepresentativeMenuAuditEventType;
+import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
 import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
 import com.miriyum.domain.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.repository.MenuPublicationEventRepository;
 import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.repository.RepresentativeMenuAuditRepository;
+import com.miriyum.domain.menu.repository.RepresentativeMenuSettingRepository;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -69,10 +76,19 @@ class MenuCommandServiceIT {
     private MenuCommandService service;
 
     @Autowired
+    private RepresentativeMenuService representativeMenuService;
+
+    @Autowired
     private MenuRepository menuRepository;
 
     @Autowired
     private MenuPublicationEventRepository eventRepository;
+
+    @Autowired
+    private RepresentativeMenuAuditRepository representativeAuditRepository;
+
+    @Autowired
+    private RepresentativeMenuSettingRepository representativeSettingRepository;
 
     @Autowired
     private StoreRepository storeRepository;
@@ -85,6 +101,9 @@ class MenuCommandServiceIT {
 
     @BeforeEach
     void cleanRows() {
+        jdbcTemplate.execute("DELETE FROM representative_menu_audits");
+        jdbcTemplate.execute("DELETE FROM representative_menu_entries");
+        jdbcTemplate.execute("DELETE FROM representative_menu_settings");
         jdbcTemplate.execute("DELETE FROM menu_publication_events");
         jdbcTemplate.execute("DELETE FROM menu_version_origin_disclosures");
         jdbcTemplate.execute("DELETE FROM menu_version_allergen_disclosures");
@@ -250,6 +269,85 @@ class MenuCommandServiceIT {
         assertThat(events.get(6).getNewSellingStatus())
                 .isEqualTo(MenuSellingStatus.valueOf("SOLD_OUT"));
         assertThat(events.get(7).getNewVersionNumber()).isNull();
+    }
+
+    @Test
+    void ineligibleStatesAutoRemoveWhileSoldOutAndReplayKeepSelectionStable() {
+        long operatorId = operatorRepository.saveAndFlush(
+                StoreOperatorAccount.create("auto-remove@example.com", "hashed", "owner"))
+                .getId();
+        long storeId = storeRepository.saveAndFlush(Store.create(
+                operatorId, "4455667788", BusinessType.CAFE, "store", "",
+                Region.SEOUL, "address", "CAFE_BAKERY", Set.of(),
+                true, true, true, "Asia/Seoul",
+                LocalDateTime.of(2026, 8, 13, 9, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
+        List<Long> menuIds = new java.util.ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            long menuId = Long.parseLong(service.create(
+                    operatorId, storeId, key(100 + index), content("menu-" + index))
+                    .data().menuId());
+            service.publish(operatorId, storeId, menuId, key(110 + index),
+                    new MenuPublicationRequest(
+                            MenuPublicationMode.IMMEDIATE, null, "publish"));
+            menuIds.add(menuId);
+        }
+        representativeMenuService.replace(
+                operatorId,
+                storeId,
+                key(120),
+                new RepresentativeMenuReplaceRequest(
+                        0L, menuIds.stream().map(String::valueOf).toList()));
+
+        service.changeSellingStatus(operatorId, storeId, menuIds.get(0), key(121),
+                new MenuSellingStatusRequest(MenuSellingStatus.SOLD_OUT, "sold out"));
+        assertSetting(storeId, 1L, RepresentativeMenuSettingStatus.CONFIGURED, menuIds);
+
+        service.changeVisibility(operatorId, storeId, menuIds.get(1), key(122),
+                new MenuVisibilityRequest(MenuVisibility.HIDDEN, "hidden"));
+        assertSetting(storeId, 2L, RepresentativeMenuSettingStatus.CONFIGURED,
+                List.of(menuIds.get(0), menuIds.get(2), menuIds.get(3), menuIds.get(4)));
+
+        service.changeSellingStatus(operatorId, storeId, menuIds.get(2), key(123),
+                new MenuSellingStatusRequest(MenuSellingStatus.PAUSED, "paused"));
+        assertSetting(storeId, 3L, RepresentativeMenuSettingStatus.CONFIGURED,
+                List.of(menuIds.get(0), menuIds.get(3), menuIds.get(4)));
+
+        IdempotencyKey retireKey = key(124);
+        service.retire(operatorId, storeId, menuIds.get(3), retireKey,
+                new MenuChangeReasonRequest("retired"));
+        service.retire(operatorId, storeId, menuIds.get(3), retireKey,
+                new MenuChangeReasonRequest("retired"));
+        assertSetting(storeId, 4L, RepresentativeMenuSettingStatus.REQUIRES_ATTENTION,
+                List.of(menuIds.get(0), menuIds.get(4)));
+
+        List<RepresentativeMenuAudit> audits =
+                representativeAuditRepository.findByStoreIdOrderById(storeId);
+        assertThat(audits).extracting(RepresentativeMenuAudit::getEventType)
+                .containsExactly(
+                        RepresentativeMenuAuditEventType.REPLACED,
+                        RepresentativeMenuAuditEventType.AUTO_REMOVED,
+                        RepresentativeMenuAuditEventType.AUTO_REMOVED,
+                        RepresentativeMenuAuditEventType.AUTO_REMOVED);
+        assertThat(audits.subList(1, audits.size()))
+                .extracting(RepresentativeMenuAudit::getActorType)
+                .containsOnly(RepresentativeMenuAuditActorType.SYSTEM);
+        assertThat(audits.subList(1, audits.size()))
+                .extracting(RepresentativeMenuAudit::getTriggerMenuId)
+                .containsExactly(menuIds.get(1), menuIds.get(2), menuIds.get(3));
+    }
+
+    private void assertSetting(
+            long storeId,
+            long version,
+            RepresentativeMenuSettingStatus status,
+            List<Long> menuIds
+    ) {
+        var setting = representativeSettingRepository.findDetailedByStoreId(storeId)
+                .orElseThrow();
+        assertThat(setting.getVersion()).isEqualTo(version);
+        assertThat(setting.getStatus()).isEqualTo(status);
+        assertThat(setting.orderedMenuIds()).containsExactlyElementsOf(menuIds);
     }
 
     private IdempotencyKey key(int suffix) {

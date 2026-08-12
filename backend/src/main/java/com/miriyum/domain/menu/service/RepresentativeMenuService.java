@@ -35,6 +35,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -90,10 +91,9 @@ public class RepresentativeMenuService {
             long storeId,
             IdempotencyKey key,
             RepresentativeMenuReplaceRequest request,
-            List<Long> orderedMenuIds
+        List<Long> orderedMenuIds
     ) {
         return () -> {
-            settingRepository.ensureExists(storeId);
             RepresentativeMenuSetting locked = lockSetting(storeId);
             if (locked.getVersion() != request.expectedVersion()) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
@@ -139,9 +139,40 @@ public class RepresentativeMenuService {
         };
     }
 
-    private RepresentativeMenuSetting lockSetting(long storeId) {
+    @Transactional(propagation = Propagation.MANDATORY)
+    public RepresentativeMenuSetting lockSetting(long storeId) {
+        settingRepository.ensureExists(storeId);
         return settingRepository.findByStoreIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean autoRemoveLocked(
+            RepresentativeMenuSetting lockedSetting,
+            long menuId,
+            Instant now,
+            String requestId
+    ) {
+        long beforeVersion = lockedSetting.getVersion();
+        RepresentativeMenuSettingStatus beforeStatus = lockedSetting.getStatus();
+        if (!lockedSetting.remove(menuId)) {
+            return false;
+        }
+        settingRepository.saveAndFlush(lockedSetting);
+        auditRepository.save(RepresentativeMenuAudit.create(
+                lockedSetting.getStoreId(),
+                beforeVersion,
+                lockedSetting.getVersion(),
+                beforeStatus,
+                lockedSetting.getStatus(),
+                RepresentativeMenuAuditActorType.SYSTEM,
+                null,
+                RepresentativeMenuAuditEventType.AUTO_REMOVED,
+                menuId,
+                objectMapper.writeValueAsString(lockedSetting.orderedMenuIds()),
+                requestId,
+                now));
+        return true;
     }
 
     private Map<Long, Menu> requireEligibleMenus(
