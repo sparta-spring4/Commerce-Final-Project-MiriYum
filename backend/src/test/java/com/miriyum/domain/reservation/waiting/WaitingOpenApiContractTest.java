@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -29,14 +30,26 @@ class WaitingOpenApiContractTest {
         assertThat(paths).containsOnlyKeys(SETTINGS_PATH, DISABLE_IMPACT_PATH);
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
-        assertThat(settingsPath).containsKeys("get", "put");
+        assertThat(settingsPath).containsOnlyKeys("get", "put");
+
+        Map<String, Object> settingsQuery = map(settingsPath.get("get"));
+        assertThat(map(settingsQuery.get("responses")).keySet())
+                .containsExactlyInAnyOrder(
+                        "200", "400", "401", "403", "404", "409", "429");
+
+        Map<String, Object> disableImpactPath = map(paths.get(DISABLE_IMPACT_PATH));
+        assertThat(disableImpactPath).containsOnlyKeys("get");
+        Map<String, Object> disableImpactQuery = map(disableImpactPath.get("get"));
+        assertThat(map(disableImpactQuery.get("responses")).keySet())
+                .containsExactlyInAnyOrder(
+                        "200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> updateOperation = map(settingsPath.get("put"));
         assertThat(list(updateOperation.get("security"))).isNotEmpty();
         assertThat(list(updateOperation.get("parameters"))).anySatisfy(parameter ->
                 assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
-        assertThat(map(updateOperation.get("responses")))
-                .containsKeys("200", "400", "403", "404", "409", "429");
+        assertThat(map(updateOperation.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> waitingSettingProperties =
@@ -77,6 +90,125 @@ class WaitingOpenApiContractTest {
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void waitingSettingSchemasEnforceEnabledModeAndDisableActionInvariants() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+
+        Map<String, Object> waitingSetting = map(schemas.get("WaitingSetting"));
+        assertThat(list(waitingSetting.get("allOf")))
+                .hasSize(1)
+                .anySatisfy(rule -> assertConditionalConst(
+                        map(rule), "enabled", false, "receptionMode", "PAUSED"));
+
+        Map<String, Object> updateRequest = map(schemas.get("WaitingSettingUpdateRequest"));
+        List<Object> updateRules = list(updateRequest.get("allOf"));
+        assertThat(updateRules)
+                .hasSize(2)
+                .anySatisfy(rule -> assertConditionalConst(
+                        map(rule), "enabled", false, "receptionMode", "PAUSED"))
+                .anySatisfy(rule -> {
+                    Map<String, Object> condition = map(map(rule).get("if"));
+                    assertThat(map(condition.get("properties")))
+                            .containsKey("disableAction");
+                    assertThat(list(condition.get("required")))
+                            .containsExactly("disableAction");
+                    Map<String, Object> consequence = map(map(rule).get("then"));
+                    Map<String, Object> enabled = map(
+                            map(consequence.get("properties")).get("enabled"));
+                    assertThat(enabled).containsEntry("const", false);
+                });
+    }
+
+    @Test
+    void waitingOperationsExposeCanonicalValidationAuthorityAndStoreStateFailures()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+
+        Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
+        assertResponseReference(
+                map(settingsPath.get("get")),
+                "400",
+                "#/components/responses/WaitingStoreIdBadRequest");
+        assertResponseReference(
+                map(settingsPath.get("get")),
+                "409",
+                "#/components/responses/WaitingStoreStateConflict");
+        assertResponseReference(
+                map(map(paths.get(DISABLE_IMPACT_PATH)).get("get")),
+                "400",
+                "#/components/responses/WaitingStoreIdBadRequest");
+        assertResponseReference(
+                map(map(paths.get(DISABLE_IMPACT_PATH)).get("get")),
+                "409",
+                "#/components/responses/WaitingStoreStateConflict");
+
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> parameters = map(components.get("parameters"));
+        Map<String, Object> storeId = map(parameters.get("StoreId"));
+        assertThat(map(storeId.get("schema"))).containsEntry(
+                "$ref", "../mvp1-common/openapi.yaml#/components/schemas/PublicId");
+
+        Map<String, Object> responses = map(components.get("responses"));
+        assertThat(responseExampleCodes(map(responses.get("WaitingStoreIdBadRequest"))))
+                .containsExactly("COMMON_001");
+        assertThat(responseExampleCodes(map(responses.get("WaitingStoreForbidden"))))
+                .containsExactlyInAnyOrder("AUTH_011", "STORE_003");
+        assertThat(responseExampleCodes(map(responses.get("WaitingStoreStateConflict"))))
+                .containsExactly("STORE_007");
+        assertThat(responseExampleCodes(map(responses.get("WaitingSettingConflict"))))
+                .containsExactlyInAnyOrder(
+                        "WAITING_001",
+                        "WAITING_002",
+                        "COMMON_007",
+                        "COMMON_008",
+                        "STORE_005",
+                        "STORE_007");
+    }
+
+    private static void assertConditionalConst(
+            Map<String, Object> rule,
+            String conditionProperty,
+            Object conditionValue,
+            String consequenceProperty,
+            Object consequenceValue
+    ) {
+        Map<String, Object> condition = map(map(rule.get("if")).get("properties"));
+        assertThat(map(condition.get(conditionProperty)))
+                .containsEntry("const", conditionValue);
+        assertThat(list(map(rule.get("if")).get("required")))
+                .containsExactly(conditionProperty);
+
+        Map<String, Object> consequence = map(map(rule.get("then")).get("properties"));
+        assertThat(map(consequence.get(consequenceProperty)))
+                .containsEntry("const", consequenceValue);
+    }
+
+    private static void assertResponseReference(
+            Map<String, Object> operation,
+            String status,
+            String reference
+    ) {
+        assertThat(map(map(operation.get("responses")).get(status)))
+                .containsEntry("$ref", reference);
+    }
+
+    private static List<String> responseExampleCodes(Map<String, Object> response) {
+        Map<String, Object> json = map(map(response.get("content")).get("application/json"));
+        List<String> codes = new ArrayList<>();
+
+        if (json.containsKey("example")) {
+            codes.add((String) map(json.get("example")).get("code"));
+        }
+        if (json.containsKey("examples")) {
+            for (Object example : map(json.get("examples")).values()) {
+                codes.add((String) map(map(example).get("value")).get("code"));
+            }
+        }
+        return List.copyOf(codes);
     }
 
     @SuppressWarnings("unchecked")

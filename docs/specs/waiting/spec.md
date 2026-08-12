@@ -31,8 +31,9 @@ HTTP 형상은 같은 디렉터리의 [OpenAPI](openapi.yaml)가 소유한다.
 - 웨이팅 등록용 현장 증명 QR
 
 Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메인이나 별도 배포 단위를
-만들지 않는다. 이 계약은 production Java, migration, audience OpenAPI 진입점, frontend 또는
-생성 클라이언트를 추가하지 않는다.
+만들지 않는다. 이 계약은 store-operator audience 진입점에 고도화 path를 조합하지만 1차 MVP
+aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
+추가하지 않는다.
 
 ## 안전한 기본값과 조회
 
@@ -112,6 +113,22 @@ Waiting은 인증된 매장 운영자 ID와 `StoreId`를 Store 도메인의 최�
 검증한다. Reservation/Waiting 코드는 Store의 Entity나 Repository를 직접 참조하거나
 Store 테이블을 우회 조회하지 않는다.
 
+판정 순서와 허용 상태는 다음과 같다.
+
+1. 유효한 `store-operator` Access JWT와 현재 계정을 확인한다. 계정이 존재하지만 현재 상태가
+   이용을 허용하지 않으면 `403 AUTH_011`이다.
+2. 대상 매장의 현재 대표 운영자 소유권을 확인한다.
+3. 두 GET은 `verificationStatus=APPROVED`인 매장의 `operationStatus=OPEN`,
+   `TEMPORARILY_CLOSED`, `CLOSED`를 모두 허용한다. 폐점 뒤에도 저장된 설정과 남은 활성 팀
+   영향을 안전하게 확인할 수 있지만 변경하지는 않는다.
+4. PUT은 `verificationStatus=APPROVED`이면서 `operationStatus=OPEN` 또는
+   `TEMPORARILY_CLOSED`일 때만 허용한다. `CLOSED`이면 `409 STORE_005`이며 설정과 버전을
+   바꾸지 않는다.
+
+입점 검증 상태를 `APPROVED`로 확인할 수 없으면 GET과 PUT 모두 `409 STORE_007`로 실패
+폐쇄한다. 이는 Store 정본의 두 상태 축과 기존 오류를 사용하며 Waiting 전용 Store 상태나
+오류 코드를 만들지 않는다.
+
 매장은 공개 탐색으로 존재를 확인할 수 있는 자원이므로 [공통 인증·오류 계약](../mvp1-common/spec.md)의
 authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 운영자가 현재 대표 운영자가
 아니면 거짓 `404`로 숨기지 않고 `403 STORE_003`을 반환한다. `404 STORE_001`은 실제 매장을
@@ -127,8 +144,11 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 | `400` | `COMMON_003` | 필수 `Idempotency-Key` 헤더 누락 |
 | `400` | `COMMON_004` | `Idempotency-Key` UUID 형식 또는 길이 오류 |
 | `401` | `AUTH_001` | 유효한 store-operator Access JWT가 없음 |
+| `403` | `AUTH_011` | 현재 매장 운영자 계정 상태가 이용을 허용하지 않음 |
 | `403` | `STORE_003` | 존재하는 대상 매장의 현재 대표 운영자가 아님 |
 | `404` | `STORE_001` | 대상 매장이 실제로 존재하지 않음 |
+| `409` | `STORE_005` | `CLOSED` 매장에서 설정 교체를 요청함 |
+| `409` | `STORE_007` | 대상 매장의 입점 검증 상태를 `APPROVED`로 확인할 수 없음 |
 | `409` | `WAITING_001` | `expectedVersion`이 현재 설정 버전과 다름 |
 | `409` | `WAITING_002` | 활성 팀이 있어 비활성화 action이 필요함 |
 | `409` | `COMMON_007` | 멱등 키를 다른 요청 지문에 재사용함 |
@@ -150,10 +170,15 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 - `COMMON_001`은 필드 검증 안내, `COMMON_002`는 요청 직렬화 오류로 처리한다.
   `COMMON_003`·`COMMON_004`는 client 요청 구성 오류이므로 새 멱등 키를 임의 생성해 자동
   재시도하지 않는다.
+- `AUTH_011`은 계정 제한 상태, `STORE_003`은 현재 대표 운영자 소유권 실패로 구분한다.
+- `STORE_005`이면 폐점 매장의 설정 변경 UI를 비활성화하고, `STORE_007`이면 입점 검증 상태를
+  새로 확인하기 전 설정 조회·변경 성공을 추측하지 않는다.
 - `KEEP_ACTIVE` 성공은 기존 팀이 유지되고 신규 등록만 차단된 상태로 표시한다.
 - `CLOSE_ACTIVE_TEAMS`의 팀별 진행·결과 UI는 Issue #272의 실행 계약을 받은 뒤 구현한다.
 - Client는 `message` 문자열이 아니라 HTTP 상태와 `code`로 분기하고 `401`, `403`, `404`,
   `409`, `429`를 서로 다른 상태로 처리한다.
 
-현재 작업에서는 audience 진입점에 path를 연결하지 않는다. Frontend와 생성 클라이언트는
-후속 contract-first 작업에서 이 OpenAPI를 소비한다.
+두 path는 `store-operator-openapi.yaml`에 post-MVP1/high-level audience 계약으로 연결되고
+`mvp1-openapi.yaml`에서는 제외된다. 현재 작업은 frontend나 생성 클라이언트를 만들지 않는다.
+후속 contract-first 구현은 audience 진입점으로 노출 범위를 확인하되 TypeScript 생성 입력은
+기능 원본인 이 디렉터리의 `openapi.yaml`을 사용하고, 1차 MVP aggregate에서 생성하지 않는다.

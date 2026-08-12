@@ -101,7 +101,33 @@ class AudienceOpenApiContractTest {
             assertThat(paths.values())
                     .allSatisfy(item -> assertThat(map(item))
                             .containsOnlyKeys("$ref"));
+            for (Map.Entry<String, Object> entry : paths.entrySet()) {
+                assertPathReferenceResolves(file, entry.getKey(), map(entry.getValue()));
+            }
         }
+    }
+
+    private static void assertPathReferenceResolves(
+            String entrypointFile,
+            String exposedPath,
+            Map<String, Object> pathItem
+    ) throws IOException {
+        String reference = (String) pathItem.get("$ref");
+        String pathFragmentPrefix = "#/paths/";
+        int fragmentStart = reference.indexOf(pathFragmentPrefix);
+        assertThat(fragmentStart).isPositive();
+
+        String targetFile = reference.substring(0, fragmentStart);
+        String escapedTargetPath = reference.substring(
+                fragmentStart + pathFragmentPrefix.length());
+        String targetPath = escapedTargetPath.replace("~1", "/").replace("~0", "~");
+        assertThat(targetPath).isEqualTo(exposedPath);
+
+        Path targetContract = SPECS.resolve(entrypointFile)
+                .resolveSibling(targetFile)
+                .normalize();
+        assertThat(targetContract).startsWith(SPECS.normalize());
+        assertThat(paths(targetContract)).containsKey(targetPath);
     }
 
     private static Set<String> intersection(Set<String> left, Set<String> right) {
@@ -124,7 +150,11 @@ class AudienceOpenApiContractTest {
     }
 
     private static Map<String, Object> paths(String file) throws IOException {
-        try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
+        return paths(SPECS.resolve(file));
+    }
+
+    private static Map<String, Object> paths(Path file) throws IOException {
+        try (InputStream input = Files.newInputStream(file)) {
             return map(map(new Yaml().load(input)).get("paths"));
         }
     }

@@ -17,6 +17,9 @@ paths:
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 운영 설정 조회
+      description: >-
+        APPROVED 매장의 대표 운영자가 조회한다. OPEN, TEMPORARILY_CLOSED, CLOSED 운영 상태를
+        모두 허용하며 입점 검증 상태를 APPROVED로 확인할 수 없으면 STORE_007로 거절한다.
       operationId: getWaitingSettings
       security:
         - bearerAuth: []
@@ -29,17 +32,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitingSettingSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingStoreIdBadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/WaitingStoreForbidden"
         "404":
           $ref: "#/components/responses/WaitingStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingStoreStateConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
     put:
       tags: [Waiting Settings]
       summary: 웨이팅 운영 설정 전체 교체
+      description: >-
+        APPROVED 매장의 대표 운영자가 OPEN 또는 TEMPORARILY_CLOSED 운영 상태에서만 교체한다.
+        CLOSED는 STORE_005, APPROVED로 확인할 수 없는 입점 검증 상태는 STORE_007로 거절한다.
       operationId: updateWaitingSettings
       security:
         - bearerAuth: []
@@ -75,6 +85,9 @@ paths:
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 기능 비활성화 영향 조회
+      description: >-
+        APPROVED 매장의 대표 운영자가 조회한다. OPEN, TEMPORARILY_CLOSED, CLOSED 운영 상태를
+        모두 허용하며 입점 검증 상태를 APPROVED로 확인할 수 없으면 STORE_007로 거절한다.
       operationId: getWaitingDisableImpact
       security:
         - bearerAuth: []
@@ -87,12 +100,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitingDisableImpactSuccessResponse"
+        "400":
+          $ref: "#/components/responses/WaitingStoreIdBadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/WaitingStoreForbidden"
         "404":
           $ref: "#/components/responses/WaitingStoreNotFound"
+        "409":
+          $ref: "#/components/responses/WaitingStoreStateConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
 components:
@@ -148,6 +165,16 @@ components:
           minimum: 0
           default: 0
           description: 설정이 없으면 0이며 성공한 새 교체마다 단조 증가한다.
+      allOf:
+        - if:
+            properties:
+              enabled:
+                const: false
+            required: [enabled]
+          then:
+            properties:
+              receptionMode:
+                const: PAUSED
     WaitingSettingUpdateRequest:
       type: object
       additionalProperties: false
@@ -177,6 +204,24 @@ components:
           type: string
           enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
           description: 비활성화 명령에서만 허용하며 활성 팀이 있으면 필수다.
+      allOf:
+        - if:
+            properties:
+              enabled:
+                const: false
+            required: [enabled]
+          then:
+            properties:
+              receptionMode:
+                const: PAUSED
+        - if:
+            properties:
+              disableAction: {}
+            required: [disableAction]
+          then:
+            properties:
+              enabled:
+                const: false
     WaitingDisableImpact:
       type: object
       additionalProperties: false
@@ -222,13 +267,32 @@ components:
         data:
           $ref: "#/components/schemas/WaitingDisableImpact"
   responses:
+    WaitingStoreIdBadRequest:
+      description: storeId가 양의 정수 문자열 PublicId 형식이 아님
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_001
+            message: 입력값이 올바르지 않습니다.
+            details:
+              - field: storeId
+                reason: 양의 정수 문자열이어야 합니다.
     WaitingBadRequest:
-      description: 요청 검증, JSON 역직렬화 또는 필수 멱등성 헤더가 올바르지 않음
+      description: storeId·본문 검증, JSON 역직렬화 또는 필수 멱등성 헤더가 올바르지 않음
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
           examples:
+            invalidStoreId:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+                details:
+                  - field: storeId
+                    reason: 양의 정수 문자열이어야 합니다.
             validationFailed:
               value:
                 code: COMMON_001
@@ -249,14 +313,20 @@ components:
                 code: COMMON_004
                 message: Idempotency-Key 형식이 올바르지 않습니다.
     WaitingStoreForbidden:
-      description: 존재하는 대상 매장의 현재 대표 운영자가 아니어서 웨이팅 설정 작업 권한이 없음
+      description: 현재 계정 상태가 제한됐거나 대상 매장의 현재 대표 운영자가 아님
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: STORE_003
-            message: 대상 매장의 운영 권한이 없습니다.
+          examples:
+            accountRestricted:
+              value:
+                code: AUTH_011
+                message: 현재 계정 상태로 이용할 수 없습니다.
+            storeAccessDenied:
+              value:
+                code: STORE_003
+                message: 대상 매장의 운영 권한이 없습니다.
     WaitingStoreNotFound:
       description: 대상 매장이 실제로 존재하지 않음
       content:
@@ -266,8 +336,17 @@ components:
           example:
             code: STORE_001
             message: 매장을 찾을 수 없습니다.
+    WaitingStoreStateConflict:
+      description: 조회 시 대상 매장의 입점 검증 상태를 APPROVED로 확인할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: STORE_007
+            message: 현재 입점 검증 상태에서 운영할 수 없습니다.
     WaitingSettingConflict:
-      description: 설정 버전, 비활성화 action, 멱등성 또는 동시 요청 충돌
+      description: 설정 버전, 비활성화 action, Store 상태, 멱등성 또는 동시 요청 충돌
       content:
         application/json:
           schema:
@@ -289,3 +368,11 @@ components:
               value:
                 code: COMMON_008
                 message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+            invalidStoreState:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            invalidVerificationState:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
