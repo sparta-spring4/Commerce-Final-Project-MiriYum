@@ -139,17 +139,19 @@ Authorization: Bearer {consumerAccessToken}
 
 - `cursor`는 선택이며 없으면 최신 발생 시각부터 조회한다.
 - `size` 기본값은 20, 최대값은 50이다.
-- 정렬은 `occurredAt DESC, notificationHistoryId DESC`로 고정한다.
+- 정렬은 `occurredAt DESC, notificationId DESC`로 고정한다.
 - cursor는 정렬 tuple과 계약 버전을 포함하는 무결성 보호 opaque 값이다. client는 해석·수정하지 않는다.
 - cursor가 가리킨 행이 보관 정책으로 삭제돼도 tuple 경계로 다음 페이지를 조회한다. 형식·버전·무결성이 잘못된 cursor만 `NOTIFICATION_001`로 거절한다.
 - 빈 이력은 `200`과 빈 `items`, `hasNext=false`, `nextCursor=null`이다.
 
+`notificationId`는 논리 알림과 `IN_APP` 이력 레코드가 공유하는 공개 식별자다. `NotificationTaskReceipt`와 이력 응답은 같은 값을 사용하며 별도의 `notificationHistoryId`를 만들지 않는다. 외부 채널 시도는 공개하지 않는 독립 시도 식별자를 사용하므로 이 정렬 키를 바꾸지 않는다.
+
 ### 공개 항목
 
-- `notificationId`, `purpose`, `title`, `relatedStatus`
-- `resourceType`, `resourceId`
+- `notificationId`, `purpose`, `title`
+- `resource`의 `type`, `id`
 - `occurredAt`, `createdAt`, nullable `deliveredAt`, `deliveryStatus`
-- nullable `action`의 `type`, `resourceType`, `resourceId`, `availability`, nullable `expiresAt`
+- nullable `action`이 있으면 `type`, `resource`의 `type`·`id`, `availability`, nullable `expiresAt`
 
 `title`은 승인된 template field allowlist로 렌더링한 최대 100자의 안전한 제목이다. 원문 주소·전체 메시지 본문·provider payload·내부 재시도 횟수·감사 메모는 반환하지 않는다.
 
@@ -189,7 +191,7 @@ Authorization: Bearer {consumerAccessToken}
 - `#248`이 migration 번호, table·index와 runtime package의 정확한 allowlist를 최신 `dev` 기준으로 확정한다. 이 Issue는 migration 파일을 만들지 않는다.
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
-- 외부 채널 추가는 논리 알림과 `IN_APP` 이력 ID를 바꾸지 않고 같은 논리 알림 아래 채널 시도만 추가한다.
+- 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
 
 ## 인수 조건
 

@@ -26,7 +26,7 @@ paths:
         - $ref: "#/components/parameters/Size"
       responses:
         "200":
-          description: 발생 시각·알림 이력 ID 역순의 본인 알림 이력
+          description: 발생 시각·notificationId 역순의 본인 알림 이력
           content:
             application/json:
               schema:
@@ -48,7 +48,7 @@ components:
       name: cursor
       in: query
       required: false
-      description: occurredAt·notificationHistoryId 정렬 경계와 계약 버전을 담은 무결성 보호 opaque cursor
+      description: occurredAt·notificationId 정렬 경계와 계약 버전을 담은 무결성 보호 opaque cursor
       schema:
         type: string
         minLength: 1
@@ -80,21 +80,6 @@ components:
         - MENU_SUBSTITUTION_ACCEPTED
         - MENU_SUBSTITUTION_REJECTED
         - MENU_SUBSTITUTION_EXPIRED
-    NotificationRelatedStatus:
-      type: string
-      enum:
-        - CONFIRMED
-        - CHANGED
-        - REJECTED
-        - CANCELLED
-        - EXPIRED
-        - VISIT_UPCOMING
-        - COORDINATION_REQUIRED
-        - FULFILLMENT_AT_RISK
-        - SUBSTITUTION_PROPOSED
-        - SUBSTITUTION_ACCEPTED
-        - SUBSTITUTION_REJECTED
-        - SUBSTITUTION_EXPIRED
     NotificationDeliveryStatus:
       type: string
       enum: [PENDING, DELIVERED, FAILED, CANCELLED]
@@ -139,7 +124,6 @@ components:
         - notificationId
         - purpose
         - title
-        - relatedStatus
         - resource
         - occurredAt
         - createdAt
@@ -156,8 +140,6 @@ components:
           minLength: 1
           maxLength: 100
           description: 승인된 field allowlist로 렌더링한 안전한 제목
-        relatedStatus:
-          $ref: "#/components/schemas/NotificationRelatedStatus"
         resource:
           $ref: "#/components/schemas/NotificationResourceRef"
         occurredAt:
