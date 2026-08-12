@@ -9,7 +9,7 @@ import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -79,7 +79,7 @@ class FileMetadataTransactionExecutorIntegrationTest {
                 "e".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 14, 0));
+                Instant.parse("2026-08-10T05:00:00Z"));
         TransactionTemplate outerTransaction = new TransactionTemplate(transactionManager);
 
         // when
@@ -112,7 +112,7 @@ class FileMetadataTransactionExecutorIntegrationTest {
                 "f".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 14, 30)));
+                Instant.parse("2026-08-10T05:30:00Z")));
 
         // when
         transactionExecutor.confirm(fileId);
@@ -239,6 +239,6 @@ class FileMetadataTransactionExecutorIntegrationTest {
                 "a".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 15, 0));
+                Instant.parse("2026-08-10T06:00:00Z"));
     }
 }

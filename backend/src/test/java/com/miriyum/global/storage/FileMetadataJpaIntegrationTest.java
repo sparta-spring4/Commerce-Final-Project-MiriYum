@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.global.storage.entity.FileMetadata;
 import jakarta.persistence.EntityManager;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -50,7 +50,7 @@ class FileMetadataJpaIntegrationTest {
     void persistsMetadataWithPurposeVisibilityAndStatus() {
         // given
         String fileId = UUID.randomUUID().toString();
-        LocalDateTime createdAt = LocalDateTime.of(2026, 8, 10, 12, 0);
+        Instant createdAt = Instant.parse("2026-08-10T03:00:00Z");
         FileMetadata metadata = FileMetadata.createPending(
                 fileId,
                 "STORE",
@@ -76,5 +76,6 @@ class FileMetadataJpaIntegrationTest {
         assertThat(persisted.getVisibility()).isEqualTo(FileStorageVisibility.PUBLIC);
         assertThat(persisted.getStorageStatus()).isEqualTo(FileStorageStatus.CONFIRMED);
         assertThat(persisted.getObjectKey()).isEqualTo("public/store/11/store-image/object-2");
+        assertThat(persisted.getCreatedAt()).isEqualTo(createdAt);
     }
 }

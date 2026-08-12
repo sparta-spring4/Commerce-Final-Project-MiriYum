@@ -24,6 +24,10 @@ public record FileStorageMetadata(
         Instant deletedAt
 ) {
 
+    private static final int MAX_OBJECT_KEY_LENGTH = 512;
+    private static final int MAX_CONTENT_TYPE_LENGTH = 128;
+    private static final int MAX_RETENTION_POLICY_LENGTH = 64;
+
     public FileStorageMetadata {
         if (fileId == null) {
             throw new IllegalArgumentException("file id must not be null");
@@ -32,11 +36,11 @@ public record FileStorageMetadata(
             throw new IllegalArgumentException("file metadata enum values must not be null");
         }
         purpose.validateVisibility(visibility);
-        if (objectKey == null || objectKey.isBlank()) {
-            throw new IllegalArgumentException("object key must not be blank");
+        if (objectKey == null || objectKey.isBlank() || objectKey.length() > MAX_OBJECT_KEY_LENGTH) {
+            throw new IllegalArgumentException("object key must not be blank or exceed 512 characters");
         }
-        if (contentType == null || contentType.isBlank()) {
-            throw new IllegalArgumentException("content type must not be blank");
+        if (contentType == null || contentType.isBlank() || contentType.length() > MAX_CONTENT_TYPE_LENGTH) {
+            throw new IllegalArgumentException("content type must not be blank or exceed 128 characters");
         }
         if (sizeBytes < 0) {
             throw new IllegalArgumentException("file size must not be negative");
@@ -44,8 +48,10 @@ public record FileStorageMetadata(
         if (checksum == null || !checksum.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException("checksum must be a lowercase SHA-256 hex value");
         }
-        if (retentionPolicy == null || retentionPolicy.isBlank()) {
-            throw new IllegalArgumentException("retention policy must not be blank");
+        if (retentionPolicy == null
+                || retentionPolicy.isBlank()
+                || retentionPolicy.length() > MAX_RETENTION_POLICY_LENGTH) {
+            throw new IllegalArgumentException("retention policy must not be blank or exceed 64 characters");
         }
         if (createdAt == null) {
             throw new IllegalArgumentException("created at must not be null");

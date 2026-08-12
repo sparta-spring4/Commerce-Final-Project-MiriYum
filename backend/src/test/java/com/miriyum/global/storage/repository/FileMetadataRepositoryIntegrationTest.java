@@ -7,7 +7,7 @@ import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.entity.FileMetadata;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -63,7 +63,7 @@ class FileMetadataRepositoryIntegrationTest {
                 "c".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 13, 0));
+                Instant.parse("2026-08-10T04:00:00Z"));
 
         // when
         fileMetadataRepository.saveAndFlush(metadata);

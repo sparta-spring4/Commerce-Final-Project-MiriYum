@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.miriyum.global.storage.entity.FileMetadata;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +26,7 @@ class FileMetadataTest {
                 "a".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 16, 30));
+                Instant.parse("2026-08-10T07:30:00Z"));
 
         // then
         assertThat(metadata.getStorageStatus()).isEqualTo(FileStorageStatus.PENDING);
@@ -52,7 +52,24 @@ class FileMetadataTest {
                 "a".repeat(64),
                 FileStorageVisibility.PUBLIC,
                 "BUSINESS_LICENSE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 13, 30)));
+                Instant.parse("2026-08-10T04:30:00Z")));
+    }
+
+    @Test
+    @DisplayName("내부 영속 모델도 잘못된 소유자와 저장 경로를 생성 전에 거절한다")
+    void rejectsInvalidRequiredFieldsBeforePersistence() {
+        assertThatIllegalArgumentException().isThrownBy(() -> FileMetadata.createPending(
+                "c686bf5e-7965-4caf-b8a3-17964f89dc2e",
+                "STORE",
+                0L,
+                FileStoragePurpose.STORE_IMAGE,
+                "a".repeat(513),
+                "image/jpeg",
+                -1L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                "STORE_IMAGE_DEFAULT",
+                Instant.parse("2026-08-10T04:30:00Z")));
     }
 
     @Test
@@ -106,6 +123,6 @@ class FileMetadataTest {
                 checksum,
                 FileStorageVisibility.PUBLIC,
                 "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 13, 30));
+                Instant.parse("2026-08-10T04:30:00Z"));
     }
 }

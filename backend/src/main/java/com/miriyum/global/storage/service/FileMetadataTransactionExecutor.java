@@ -2,8 +2,10 @@ package com.miriyum.global.storage.service;
 
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
+import java.sql.SQLIntegrityConstraintViolationException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -25,7 +27,10 @@ public class FileMetadataTransactionExecutor {
         try {
             return fileMetadataRepository.saveAndFlush(metadata);
         } catch (DataIntegrityViolationException exception) {
-            throw new FileMetadataConflictException("파일 메타데이터 식별자 또는 객체 키가 이미 존재합니다.", exception);
+            if (isDuplicateKey(exception)) {
+                throw new FileMetadataConflictException("파일 메타데이터 식별자 또는 객체 키가 이미 존재합니다.", exception);
+            }
+            throw exception;
         }
     }
 
@@ -56,5 +61,21 @@ public class FileMetadataTransactionExecutor {
     private FileMetadata findMetadata(String fileId) {
         return fileMetadataRepository.findById(fileId)
                 .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+    }
+
+    private boolean isDuplicateKey(DataIntegrityViolationException exception) {
+        if (exception instanceof DuplicateKeyException) {
+            return true;
+        }
+
+        Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof SQLIntegrityConstraintViolationException sqlException
+                    && sqlException.getErrorCode() == 1062) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 }

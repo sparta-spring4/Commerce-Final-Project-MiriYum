@@ -8,10 +8,12 @@ package com.miriyum.global.storage;
  */
 public record FileStorageOwner(String type, long id) {
 
+    private static final int MAX_OWNER_TYPE_LENGTH = 32;
+
     public FileStorageOwner {
         // 소유자 종류
-        if (type == null || type.isBlank()) {
-            throw new IllegalArgumentException("owner type must not be blank");
+        if (type == null || type.isBlank() || type.length() > MAX_OWNER_TYPE_LENGTH) {
+            throw new IllegalArgumentException("owner type must not be blank or exceed 32 characters");
         }
         // 소유자 식별자
         if (id <= 0) {

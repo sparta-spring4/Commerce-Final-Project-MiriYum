@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -49,7 +49,7 @@ class FileStorageMetadataSchemaIntegrationTest {
     void storesAndReadsFileMetadataWithoutFileBytes() {
         // given
         UUID fileId = UUID.randomUUID();
-        LocalDateTime createdAt = LocalDateTime.of(2026, 8, 10, 12, 0);
+        Instant createdAt = Instant.parse("2026-08-10T03:00:00Z");
 
         // when
         jdbcTemplate.update(
@@ -99,7 +99,7 @@ class FileStorageMetadataSchemaIntegrationTest {
                 "PUBLIC",
                 "PENDING",
                 "BUSINESS_LICENSE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 12, 30)))
+                Instant.parse("2026-08-10T03:30:00Z")))
                 .isInstanceOf(UncategorizedSQLException.class)
                 .hasMessageContaining("ck_file_metadata_purpose_visibility");
     }

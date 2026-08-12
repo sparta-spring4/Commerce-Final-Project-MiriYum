@@ -8,6 +8,10 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  jpa:
+    properties:
+      # Instant 값을 DATETIME(6)에 UTC 기준으로 바인딩해 서버 기본 시간대 영향을 없앤다.
+      hibernate.jdbc.time_zone: UTC
 
 server:
   forward-headers-strategy: native

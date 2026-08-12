@@ -17,7 +17,15 @@ CREATE TABLE file_metadata (
     PRIMARY KEY (file_id),
     CONSTRAINT uk_file_metadata_object_key UNIQUE (object_key),
     CONSTRAINT ck_file_metadata_owner_id CHECK (owner_id > 0),
+    CONSTRAINT ck_file_metadata_owner_type
+        CHECK (CHAR_LENGTH(TRIM(owner_type)) BETWEEN 1 AND 32),
     CONSTRAINT ck_file_metadata_size_bytes CHECK (size_bytes >= 0),
+    CONSTRAINT ck_file_metadata_object_key
+        CHECK (CHAR_LENGTH(TRIM(object_key)) BETWEEN 1 AND 512),
+    CONSTRAINT ck_file_metadata_content_type
+        CHECK (CHAR_LENGTH(TRIM(content_type)) BETWEEN 1 AND 128),
+    CONSTRAINT ck_file_metadata_retention_policy
+        CHECK (CHAR_LENGTH(TRIM(retention_policy)) BETWEEN 1 AND 64),
     CONSTRAINT ck_file_metadata_purpose
         CHECK (purpose IN ('BUSINESS_LICENSE', 'STORE_IMAGE', 'MENU_IMAGE')),
     CONSTRAINT ck_file_metadata_visibility

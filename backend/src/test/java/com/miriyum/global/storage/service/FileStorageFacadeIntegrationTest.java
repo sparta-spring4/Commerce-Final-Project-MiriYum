@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.global.storage.FileStorageObject;
+import com.miriyum.global.storage.FileStorageMetadata;
+import com.miriyum.global.storage.FileStorageOwner;
 import com.miriyum.global.storage.FileStoragePort;
 import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageRequest;
@@ -15,7 +17,7 @@ import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -67,18 +69,8 @@ class FileStorageFacadeIntegrationTest {
         // given
         String fileId = UUID.randomUUID().toString();
         String objectKey = "public/store/11/store-image/object-7";
-        FileMetadata metadata = FileMetadata.createPending(
-                fileId,
-                "STORE",
-                11L,
-                FileStoragePurpose.STORE_IMAGE,
-                objectKey,
-                "image/jpeg",
-                4L,
-                FILE_CHECKSUM,
-                FileStorageVisibility.PUBLIC,
-                "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 15, 0));
+        FileStorageMetadata metadata = pendingMetadata(fileId, objectKey, FILE_CHECKSUM,
+                Instant.parse("2026-08-10T06:00:00Z"));
         RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
         FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
         FileStorageRequest request = new FileStorageRequest(
@@ -105,18 +97,8 @@ class FileStorageFacadeIntegrationTest {
         // given
         String fileId = UUID.randomUUID().toString();
         String objectKey = "public/store/11/store-image/object-8";
-        FileMetadata metadata = FileMetadata.createPending(
-                fileId,
-                "STORE",
-                11L,
-                FileStoragePurpose.STORE_IMAGE,
-                objectKey,
-                "image/jpeg",
-                4L,
-                "b".repeat(64),
-                FileStorageVisibility.PUBLIC,
-                "STORE_IMAGE_DEFAULT",
-                LocalDateTime.of(2026, 8, 10, 15, 30));
+        FileStorageMetadata metadata = pendingMetadata(fileId, objectKey, "b".repeat(64),
+                Instant.parse("2026-08-10T06:30:00Z"));
         IllegalStateException storageFailure = new IllegalStateException("파일 저장소에 연결할 수 없습니다.");
         FileStorageFacade facade = new FileStorageFacade(
                 new FailingFileStoragePort(storageFailure), transactionExecutor);
@@ -133,6 +115,22 @@ class FileStorageFacadeIntegrationTest {
                 .get()
                 .extracting(FileMetadata::getStorageStatus)
                 .isEqualTo(FileStorageStatus.FAILED);
+    }
+
+    private FileStorageMetadata pendingMetadata(String fileId, String objectKey, String checksum, Instant createdAt) {
+        return new FileStorageMetadata(
+                UUID.fromString(fileId),
+                new FileStorageOwner("STORE", 11L),
+                FileStoragePurpose.STORE_IMAGE,
+                objectKey,
+                "image/jpeg",
+                4L,
+                checksum,
+                FileStorageVisibility.PUBLIC,
+                FileStorageStatus.PENDING,
+                "STORE_IMAGE_DEFAULT",
+                createdAt,
+                null);
     }
 
     private static final class RecordingFileStoragePort implements FileStoragePort {

@@ -57,6 +57,30 @@ class FileStorageMetadataTest {
     }
 
     @Test
+    @DisplayName("소유자 식별자가 0 이하이면 파일 메타데이터를 만들지 않는다")
+    void rejectsNonPositiveOwnerId() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageOwner("STORE", 0L));
+    }
+
+    @Test
+    @DisplayName("제한 길이를 넘는 저장 경로는 파일 메타데이터로 만들지 않는다")
+    void rejectsObjectKeyLongerThanDatabaseColumn() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
+                UUID.randomUUID(),
+                new FileStorageOwner("STORE", 10L),
+                FileStoragePurpose.STORE_IMAGE,
+                "a".repeat(513),
+                "image/jpeg",
+                5L,
+                "a".repeat(64),
+                FileStorageVisibility.PUBLIC,
+                FileStorageStatus.PENDING,
+                "STORE_DEFAULT",
+                Instant.parse("2026-08-09T00:00:00Z"),
+                null));
+    }
+
+    @Test
     @DisplayName("사업자등록증은 공개 메타데이터로 만들지 않는다")
     void rejectsPublicBusinessLicense() {
         assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
