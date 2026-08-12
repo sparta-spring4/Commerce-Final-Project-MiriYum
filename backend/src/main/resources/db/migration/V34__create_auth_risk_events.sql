@@ -1,3 +1,4 @@
+-- Refresh Token 재사용 위험 사건을 중앙에서 기록한다.
 CREATE TABLE auth_risk_events (
     auth_risk_event_id BIGINT NOT NULL AUTO_INCREMENT,
     event_key VARCHAR(255) NOT NULL,
