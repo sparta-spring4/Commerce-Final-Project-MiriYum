@@ -140,6 +140,7 @@
 - 생성 replay 판정 뒤 같은 소비자·매장·겹치는 서비스 구간의 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED` Hold와 확정 Reservation을 잠금 조회한다. 기존 유효 거래가 있으면 새 선점을 만들지 않고 `RESERVATION_004`로 거절하며 `RELEASED`, `EXPIRED` Hold는 중복 후보에서 제외한다.
 - 생성은 `uk_reservation_holds_creation_command`, 종결은 `uk_reservation_hold_transition_audits_command` 충돌만 식별해 실패한 트랜잭션이 끝난 뒤 새 트랜잭션에서 기존 결과를 조회한다. 같은 명령 의미면 replay하고 다른 의미면 `COMMON_007`로 거절하며, 그 밖의 unique·FK·CHECK 위반은 replay로 숨기지 않는다.
 - 일반 종결은 `ACTIVE → CONFIRMED|RELEASED|EXPIRED|RECONCILIATION_REQUIRED`만 허용한다. 대사 복구는 `RECONCILIATION_REQUIRED → CONFIRMED|RELEASED`만 허용하며 그 밖의 전이는 `RESERVATION_005`로 거절한다.
+- #265는 검증된 목표 상태를 적용하는 수용량 전이 명령, 정확히 한 번의 점유 유지·반환, append-only 전이 감사와 replay 판정만 소유한다. 결과 불명확 여부나 금전 결과를 스스로 판단하지 않는다. #267은 #265·#266 명령을 worker·명령 시점 만료·그룹 경합에서 호출하는 runtime을 소유하고, #238은 Payment/PG 원본을 검증해 적용할 목표 상태를 결정한다.
 - `CONFIRMED`와 `RECONCILIATION_REQUIRED`는 수용량 점유를 유지한다. `RELEASED`와 `EXPIRED`만 allocation의 인원·팀을 정확히 한 번 반환하며, 상태 전이·수용량 변경·감사 기록은 함께 커밋한다.
 - #265의 만료 판정은 명시적 EXPIRED 명령에만 적용한다. 중앙 `Clock`에서 `now < expiresAt`이면 거절하고 `now >= expiresAt`이면 단일 만료를 허용한다. 확정·해제·대사 명령 진입 시 만료를 우선하는 지연 만료와 scheduler/worker 자동 만료는 #267이 소유한다.
 - 종결 명령은 상위 서버 조정자가 발급하고 재전송에서도 재사용하는 전역 고유 operation ID를 사용한다. 감사에는 raw 클라이언트 키가 아니라 이 내부 ID를 저장하며, 같은 ID·같은 Hold·같은 목표 상태 replay는 추가 전이·감사·수용량 반환 없이 현재 최신 Hold 결과를 반환한다. 같은 ID를 다른 Hold나 다른 목표 상태에 재사용하면 `COMMON_007`로 거절한다.
