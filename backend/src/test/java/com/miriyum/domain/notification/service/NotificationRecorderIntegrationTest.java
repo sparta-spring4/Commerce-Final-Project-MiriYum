@@ -14,6 +14,7 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
@@ -133,6 +134,35 @@ class NotificationRecorderIntegrationTest {
         }
     }
 
+    @Test
+    void concurrentReplaysConvergeAfterProducerTransactionsCreateSnapshots() throws Exception {
+        CyclicBarrier snapshotsCreated = new CyclicBarrier(2);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<NotificationTaskReceipt> call = () -> transactions.execute(status -> {
+                assertThat(count("notification_tasks")).isZero();
+                await(snapshotsCreated);
+                return recorder.record(event("correlation-snapshot", "CONFIRMED"));
+            });
+            List<NotificationTaskReceipt> receipts = executor.invokeAll(List.of(call, call)).stream()
+                    .map(future -> {
+                        try {
+                            return future.get(10, TimeUnit.SECONDS);
+                        } catch (Exception exception) {
+                            throw new AssertionError(exception);
+                        }
+                    })
+                    .toList();
+
+            assertThat(receipts).extracting(NotificationTaskReceipt::notificationId)
+                    .containsOnly(receipts.getFirst().notificationId());
+            assertThat(receipts).extracting(NotificationTaskReceipt::duplicate)
+                    .containsExactlyInAnyOrder(false, true);
+            assertThat(count("notification_tasks")).isEqualTo(1);
+            assertThat(count("notification_channel_attempts")).isEqualTo(1);
+        }
+    }
+
     private NotificationTaskReceipt record(NotificationSourceEventV1 event) {
         return transactions.execute(status -> recorder.record(event));
     }
@@ -159,5 +189,13 @@ class NotificationRecorderIntegrationTest {
 
     private int count(String table) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+    }
+
+    private static void await(CyclicBarrier barrier) {
+        try {
+            barrier.await(10, TimeUnit.SECONDS);
+        } catch (Exception exception) {
+            throw new IllegalStateException("concurrent snapshot barrier failed", exception);
+        }
     }
 }

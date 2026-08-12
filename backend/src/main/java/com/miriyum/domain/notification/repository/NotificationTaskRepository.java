@@ -57,11 +57,11 @@ public class NotificationTaskRepository {
         } catch (DuplicateKeyException duplicateLogicalIdentity) {
             inserted = false;
         }
-        StoredTask stored = findByLogicalIdentity(event);
+        StoredTask stored = findByLogicalIdentityForShare(event);
         return new StoredTask(stored.notificationId(), stored.payloadFingerprint(), inserted);
     }
 
-    private StoredTask findByLogicalIdentity(NotificationSourceEventV1 event) {
+    private StoredTask findByLogicalIdentityForShare(NotificationSourceEventV1 event) {
         List<StoredTask> rows = jdbcTemplate.query("""
                         SELECT notification_id, payload_fingerprint
                           FROM notification_tasks
@@ -72,6 +72,7 @@ public class NotificationTaskRepository {
                            AND resource_type = ?
                            AND resource_id = ?
                            AND resource_version = ?
+                           FOR SHARE
                         """,
                 (resultSet, rowNumber) -> new StoredTask(
                         resultSet.getLong("notification_id"),
