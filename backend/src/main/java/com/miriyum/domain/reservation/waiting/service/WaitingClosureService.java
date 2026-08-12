@@ -21,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class WaitingClosureService {
+    static final int MAX_ITEM_ATTEMPTS = 3;
     private static final List<WaitingTeamStatus> ACTIVE = List.of(
             WaitingTeamStatus.WAITING, WaitingTeamStatus.CALLED, WaitingTeamStatus.ARRIVED);
 
@@ -126,10 +127,17 @@ public class WaitingClosureService {
     /** Single-worker topology startup recovery; invoked once before the first scheduler claim. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     void recoverStrandedWork() {
+        Instant now = clock.instant();
         itemRepository.findAllByStatusForUpdate(WaitingClosureItemStatus.PROCESSING)
-                .forEach(WaitingClosureJobItem::requeue);
+                .forEach(item -> {
+                    if (item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue();
+                    else item.requireReconciliation(now);
+                });
         jobRepository.findAllByStatusForUpdate(WaitingClosureJobStatus.PROCESSING)
-                .forEach(WaitingClosureJob::resumePending);
+                .forEach(job -> {
+                    reconcile(job, now);
+                    if (job.getStatus() == WaitingClosureJobStatus.PROCESSING) job.resumePending();
+                });
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -164,7 +172,7 @@ public class WaitingClosureService {
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
-        if (retryable && item.getAttemptCount() < 3) item.requeue();
+        if (retryable && item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue();
         else item.requireReconciliation(now);
         reconcile(job, now);
     }

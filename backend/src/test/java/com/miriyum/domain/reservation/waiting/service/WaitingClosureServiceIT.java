@@ -169,6 +169,37 @@ class WaitingClosureServiceIT {
                 .isEqualTo("COMPLETED");
     }
 
+    @Test
+    void recoveryReconcilesExhaustedProcessingItemWithoutFourthClaim() {
+        Fixture fixture = fixture();
+        service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        long itemId = service.claimPendingItems(100).getFirst();
+        service.recordFailure(itemId, true);
+        service.claimPendingItems(100);
+        service.recordFailure(itemId, true);
+        service.claimPendingItems(100);
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
+                .isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
+                .isEqualTo("PROCESSING");
+
+        service.recoverStrandedWork();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
+                .isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(jdbc.queryForObject("SELECT completed_at IS NOT NULL FROM waiting_closure_job_items", Boolean.class))
+                .isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))
+                .isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(jdbc.queryForObject(
+                "SELECT reconciliation_required_team_count FROM waiting_closure_jobs", Long.class)).isOne();
+        assertThat(jdbc.queryForObject("SELECT completed_at IS NOT NULL FROM waiting_closure_jobs", Boolean.class))
+                .isTrue();
+        assertThat(service.claimPendingItems(100)).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
+                .isEqualTo(3);
+    }
+
     private Fixture fixture() {
         long operatorId = operators.saveAndFlush(
                 StoreOperatorAccount.create("closure@example.com", "hashed", "owner")).getId();
