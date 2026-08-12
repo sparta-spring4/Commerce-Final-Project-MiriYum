@@ -26,6 +26,10 @@ public interface WaitingClosureJobItemRepository
             @Param("status") WaitingClosureItemStatus status, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select item from WaitingClosureJobItem item where item.status = :status order by item.id")
+    List<WaitingClosureJobItem> findAllByStatusForUpdate(@Param("status") WaitingClosureItemStatus status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select item
             from WaitingClosureJobItem item

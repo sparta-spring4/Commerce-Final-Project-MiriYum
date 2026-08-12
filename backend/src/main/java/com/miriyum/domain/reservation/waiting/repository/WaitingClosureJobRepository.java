@@ -20,6 +20,10 @@ public interface WaitingClosureJobRepository extends JpaRepository<WaitingClosur
     @Query("select job from WaitingClosureJob job where job.id = :id")
     Optional<WaitingClosureJob> findByIdForUpdate(@Param("id") long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select job from WaitingClosureJob job where job.status = :status order by job.id")
+    List<WaitingClosureJob> findAllByStatusForUpdate(@Param("status") WaitingClosureJobStatus status);
+
     Optional<WaitingClosureJob> findByStoreIdAndSettingsVersion(
             long storeId,
             long settingsVersion

@@ -130,6 +130,32 @@ class WaitingStoreOperatorControllerTest {
     }
 
     @Test
+    void closureJobCrossStoreIsPrivacySafeNotFound() throws Exception {
+        authenticateStoreOperator();
+        given(closureService.getClosureJob(33L, 22L, 91L))
+                .willThrow(new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-close-jobs/91")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("WAITING_004"));
+    }
+
+    @Test
+    void closureJobRouteRejectsMissingWrongTokenAndUnsupportedMethod() throws Exception {
+        String route = "/api/v1/store-operators/stores/22/waiting-close-jobs/91";
+        mockMvc.perform(get(route)).andExpect(status().isUnauthorized());
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 33L));
+        mockMvc.perform(get(route).header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+        authenticateStoreOperator();
+        mockMvc.perform(patch(route).header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_006"));
+    }
+
+    @Test
     @DisplayName("네 운영자 명령은 멱등 키와 expectedVersion을 전달한다")
     void executesAllTransitionEndpoints() throws Exception {
         authenticateStoreOperator();

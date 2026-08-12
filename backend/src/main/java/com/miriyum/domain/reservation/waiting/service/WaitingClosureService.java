@@ -9,22 +9,14 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.*;
 import java.time.Clock;
 import java.time.Instant;
-import java.sql.SQLException;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.dao.CannotAcquireLockException;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.TransactionTimedOutException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -99,7 +91,7 @@ public class WaitingClosureService {
             try {
                 return transactionExecutor.execute(work);
             } catch (RuntimeException failure) {
-                if (!retryable(failure)) throw failure;
+                if (!WaitingClosureFailureClassifier.isRetryable(failure)) throw failure;
                 if (attempt == 3) {
                     ServiceException conflict = new ServiceException(
                             com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
@@ -109,21 +101,6 @@ public class WaitingClosureService {
             }
         }
         throw new IllegalStateException("unreachable retry state");
-    }
-
-    private static boolean retryable(RuntimeException failure) {
-        if (failure instanceof ServiceException || failure instanceof IllegalArgumentException
-                || failure instanceof DataIntegrityViolationException) return false;
-        if (failure instanceof QueryTimeoutException || failure instanceof TransactionTimedOutException) return true;
-        if (!(failure instanceof CannotAcquireLockException)) return false;
-        Throwable current = failure;
-        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current != null && visited.add(current)) {
-            if (current instanceof SQLException sql && (sql.getErrorCode() == 1213 || sql.getErrorCode() == 1205))
-                return true;
-            current = current.getCause();
-        }
-        return false;
     }
 
     @Transactional(readOnly = true)
@@ -144,6 +121,15 @@ public class WaitingClosureService {
             jobRepository.findByIdForUpdate(item.getWaitingClosureJobId()).ifPresent(WaitingClosureJob::markProcessing);
         });
         return items.stream().map(WaitingClosureJobItem::getId).toList();
+    }
+
+    /** Single-worker topology startup recovery; invoked once before the first scheduler claim. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    void recoverStrandedWork() {
+        itemRepository.findAllByStatusForUpdate(WaitingClosureItemStatus.PROCESSING)
+                .forEach(WaitingClosureJobItem::requeue);
+        jobRepository.findAllByStatusForUpdate(WaitingClosureJobStatus.PROCESSING)
+                .forEach(WaitingClosureJob::resumePending);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

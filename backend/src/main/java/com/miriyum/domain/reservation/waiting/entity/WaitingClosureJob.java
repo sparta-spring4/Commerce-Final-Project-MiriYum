@@ -74,6 +74,7 @@ public class WaitingClosureJob {
     }
 
     public void markProcessing() { if (status == WaitingClosureJobStatus.PENDING) status = WaitingClosureJobStatus.PROCESSING; }
+    public void resumePending() { if (status == WaitingClosureJobStatus.PROCESSING) status = WaitingClosureJobStatus.PENDING; }
 
     public void reconcile(long completed, long failed, long reconciliation, Instant now) {
         completedTeamCount = completed;
