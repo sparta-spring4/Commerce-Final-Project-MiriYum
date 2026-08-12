@@ -166,11 +166,16 @@ public class ReservationHold {
      * @throws ServiceException 현재 상태에서 해제할 수 없는 경우
      */
     public void release() {
+        validateRelease();
+        status = ReservationHoldStatus.RELEASED;
+    }
+
+    /** 수용량 복구 전에 현재 상태가 명시적 해제를 허용하는지 변경 없이 검증한다. */
+    public void validateRelease() {
         requireStatus(
                 ReservationHoldStatus.ACTIVE,
                 ReservationHoldStatus.RECONCILIATION_REQUIRED
         );
-        status = ReservationHoldStatus.RELEASED;
     }
 
     /**
@@ -181,12 +186,17 @@ public class ReservationHold {
      * @throws ServiceException 활성 상태가 아니거나 아직 만료 경계 전인 경우
      */
     public void expire(Instant now) {
+        validateExpiry(now);
+        status = ReservationHoldStatus.EXPIRED;
+    }
+
+    /** 수용량 복구 전에 중앙 만료 경계와 현재 상태를 변경 없이 검증한다. */
+    public void validateExpiry(Instant now) {
         requireStatus(ReservationHoldStatus.ACTIVE);
         Instant validatedNow = requireNonNull(now, "now");
         if (validatedNow.isBefore(expiresAt)) {
             throw invalidTransition();
         }
-        status = ReservationHoldStatus.EXPIRED;
     }
 
     /**

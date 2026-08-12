@@ -296,10 +296,12 @@ public class ReservationHoldService {
         }
         Instant occurredAt = clock.instant();
         ReservationHoldStatus beforeStatus = hold.getStatus();
-        applyTransition(hold, normalized.targetStatus(), occurredAt);
         if (normalized.targetStatus().requiresCapacityRelease()) {
+            validateCapacityReleasingTransition(
+                    hold, normalized.targetStatus(), occurredAt);
             restoreCapacity(hold);
         }
+        applyTransition(hold, normalized.targetStatus(), occurredAt);
         auditRepository.save(ReservationHoldTransitionAudit.record(
                 normalized.reservationHoldId(),
                 normalized.actorType(),
@@ -311,6 +313,7 @@ public class ReservationHoldService {
                 hold.getReservationTimePolicyVersion(),
                 hold.getCapacityPolicyVersion(),
                 normalized.operationId()));
+        holdRepository.flush();
         return resultOf(hold);
     }
 
@@ -358,6 +361,10 @@ public class ReservationHoldService {
         LocalTime localOccupancyEnd = hold.getOccupancyEndAt()
                 .atZone(timeZone)
                 .toLocalTime();
+        long observedLatestVersion = capacityBucketRepository
+                .findLatestPolicyVersion(hold.getStoreId(), hold.getServiceDate())
+                .filter(version -> version > 0)
+                .orElseThrow(ReservationHoldService::capacityConfigurationConflict);
         List<Long> latestBucketIds = capacityBucketRepository
                 .findLatestPolicyBucketIdsOverlapping(
                         List.of(hold.getStoreId()),
@@ -368,13 +375,11 @@ public class ReservationHoldService {
             throw capacityConfigurationConflict();
         }
 
-        Set<Long> latestIdSet = new LinkedHashSet<>();
-        for (Long latestBucketId : latestBucketIds) {
-            if (latestBucketId == null
-                    || latestBucketId <= 0
-                    || !latestIdSet.add(latestBucketId)) {
-                throw capacityConfigurationConflict();
-            }
+        Set<Long> latestIdSet = validateLatestBucketIds(latestBucketIds);
+        if (observedLatestVersion < hold.getCapacityPolicyVersion()
+                || (observedLatestVersion == hold.getCapacityPolicyVersion()
+                && !latestIdSet.equals(allocationByBucketId.keySet()))) {
+            throw capacityConfigurationConflict();
         }
         Set<Long> unionIdSet = new TreeSet<>();
         unionIdSet.addAll(allocationByBucketId.keySet());
@@ -386,6 +391,21 @@ public class ReservationHoldService {
                 hold,
                 unionIds,
                 lockedBuckets);
+        long recheckedLatestVersion = capacityBucketRepository
+                .findLatestPolicyVersion(hold.getStoreId(), hold.getServiceDate())
+                .filter(version -> version > 0)
+                .orElseThrow(ReservationHoldService::capacityConfigurationConflict);
+        List<Long> recheckedLatestBucketIds = capacityBucketRepository
+                .findLatestPolicyBucketIdsOverlapping(
+                        List.of(hold.getStoreId()),
+                        hold.getServiceDate(),
+                        localStart,
+                        localOccupancyEnd);
+        if (recheckedLatestVersion != observedLatestVersion
+                || !latestIdSet.equals(validateLatestBucketIds(
+                        recheckedLatestBucketIds))) {
+            throw capacityConfigurationConflict();
+        }
         validateOriginalAllocations(
                 allocationByBucketId,
                 bucketById,
@@ -395,7 +415,8 @@ public class ReservationHoldService {
                 latestIdSet,
                 bucketById,
                 localStart,
-                localOccupancyEnd);
+                localOccupancyEnd,
+                observedLatestVersion);
 
         for (Long bucketId : unionIds) {
             ReservationHoldCapacityAllocation allocation = allocationByBucketId.get(bucketId);
@@ -407,6 +428,19 @@ public class ReservationHoldService {
                         allocation.getOccupiedTeams());
             }
         }
+    }
+
+    private static Set<Long> validateLatestBucketIds(List<Long> latestBucketIds) {
+        if (latestBucketIds == null || latestBucketIds.isEmpty()) {
+            throw capacityConfigurationConflict();
+        }
+        Set<Long> validated = new LinkedHashSet<>();
+        for (Long bucketId : latestBucketIds) {
+            if (bucketId == null || bucketId <= 0 || !validated.add(bucketId)) {
+                throw capacityConfigurationConflict();
+            }
+        }
+        return validated;
     }
 
     private static Map<Long, ReservationCapacityBucket> validateLockedUnion(
@@ -458,7 +492,8 @@ public class ReservationHoldService {
             Set<Long> latestBucketIds,
             Map<Long, ReservationCapacityBucket> bucketById,
             LocalTime requestedStart,
-            LocalTime requestedEnd
+            LocalTime requestedEnd,
+            long expectedPolicyVersion
     ) {
         List<ReservationCapacityBucket> latestBuckets = latestBucketIds.stream()
                 .map(bucketId -> {
@@ -469,9 +504,8 @@ public class ReservationHoldService {
                     return bucket;
                 })
                 .toList();
-        long latestVersion = latestBuckets.getFirst().getPolicyVersion();
         for (ReservationCapacityBucket bucket : latestBuckets) {
-            if (bucket.getPolicyVersion() != latestVersion) {
+            if (bucket.getPolicyVersion() != expectedPolicyVersion) {
                 throw capacityConfigurationConflict();
             }
         }
@@ -513,6 +547,19 @@ public class ReservationHoldService {
             case RECONCILIATION_REQUIRED -> hold.requireReconciliation();
             case ACTIVE -> throw new ServiceException(
                     ReservationErrorCode.INVALID_STATE_TRANSITION);
+        }
+    }
+
+    private static void validateCapacityReleasingTransition(
+            ReservationHold hold,
+            ReservationHoldStatus targetStatus,
+            Instant occurredAt
+    ) {
+        switch (targetStatus) {
+            case RELEASED -> hold.validateRelease();
+            case EXPIRED -> hold.validateExpiry(occurredAt);
+            default -> throw new IllegalArgumentException(
+                    "targetStatus must release capacity");
         }
     }
 

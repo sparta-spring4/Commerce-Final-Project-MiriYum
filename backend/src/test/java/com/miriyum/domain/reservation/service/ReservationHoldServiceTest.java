@@ -799,6 +799,43 @@ class ReservationHoldServiceTest {
     }
 
     @Test
+    @DisplayName("merge 재게시 해제는 여러 original과 단일 latest 합집합을 정렬해 각각 한 번 복구한다")
+    void releaseAfterPolicyMergeRestoresEveryOriginalAndLatestBucketOnce() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket originalFirst = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(18, 30), 7L, 3, 1);
+        ReservationCapacityBucket originalSecond = bucketWithOccupancy(
+                302L, LocalTime.of(18, 30), LocalTime.of(19, 15), 7L, 3, 1);
+        ReservationCapacityBucket latest = bucketWithOccupancy(
+                401L, LocalTime.of(18, 0), LocalTime.of(19, 15), 9L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L), allocation(302L)),
+                List.of(401L),
+                List.of(originalFirst, originalSecond, latest));
+
+        service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(List.of(originalFirst, originalSecond, latest))
+                .allSatisfy(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(
+                List.of(301L, 302L, 401L));
+        then(capacityBucketRepository).should(times(2)).findLatestPolicyVersion(
+                STORE_ID, SERVICE_DATE);
+        then(capacityBucketRepository).should(times(2))
+                .findLatestPolicyBucketIdsOverlapping(
+                        List.of(STORE_ID),
+                        SERVICE_DATE,
+                        START_TIME,
+                        LocalTime.of(19, 15));
+    }
+
+    @Test
     @DisplayName("여러 번 재게시돼도 과거 중간 정책 버킷은 조회하거나 복구하지 않는다")
     void releaseAfterMultiplePublicationsExcludesIntermediateBuckets() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID);
@@ -862,6 +899,62 @@ class ReservationHoldServiceTest {
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("union 잠금 뒤 최신 정책 version과 IDs가 바뀌면 복구와 상태 audit 없이 RESERVATION_008이다")
+    void publicationChangeAfterUnionLockFailsClosedBeforeAnyMutation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket original = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        ReservationCapacityBucket observedLatest = bucketWithOccupancy(
+                401L, LocalTime.of(18, 0), LocalTime.of(19, 15), 9L, 3, 1);
+        stubFreshTransition(hold);
+        given(allocationRepository.findAllByReservationHoldIdOrderByCapacityBucketIdAsc(
+                HOLD_ID)).willReturn(List.of(allocation(301L)));
+        given(capacityBucketRepository.findLatestPolicyVersion(STORE_ID, SERVICE_DATE))
+                .willReturn(Optional.of(9L), Optional.of(10L));
+        given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
+                List.of(STORE_ID),
+                SERVICE_DATE,
+                START_TIME,
+                LocalTime.of(19, 15)))
+                .willReturn(List.of(401L), List.of(501L));
+        given(capacityBucketRepository.findAllByIdInForUpdate(List.of(301L, 401L)))
+                .willReturn(List.of(original, observedLatest));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(
+                                        ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT));
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        assertThat(original.getOccupiedPeople()).isEqualTo(3);
+        assertThat(original.getOccupiedTeams()).isEqualTo(1);
+        assertThat(observedLatest.getOccupiedPeople()).isEqualTo(3);
+        assertThat(observedLatest.getOccupiedTeams()).isEqualTo(1);
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("fresh transition은 audit 저장 뒤 Hold를 flush하고 갱신된 statusVersion을 반환한다")
+    void freshTransitionFlushesManagedHoldBeforeResultExtraction() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ReflectionTestUtils.setField(hold, "statusVersion", 1L);
+            return null;
+        }).when(holdRepository).flush();
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.CONFIRMED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.statusVersion()).isEqualTo(1L);
+        InOrder order = inOrder(auditRepository, holdRepository);
+        order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
+        order.verify(holdRepository).flush();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -952,6 +1045,15 @@ class ReservationHoldServiceTest {
         if (allocations.isEmpty()) {
             return;
         }
+        long latestVersion = lockedBuckets.stream()
+                .filter(bucket -> latestBucketIds.contains(bucket.getId()))
+                .mapToLong(ReservationCapacityBucket::getPolicyVersion)
+                .findFirst()
+                .orElseGet(() -> latestBucketIds.equals(allocations.stream()
+                        .map(ReservationHoldCapacityAllocation::getCapacityBucketId)
+                        .toList()) ? 7L : 9L);
+        given(capacityBucketRepository.findLatestPolicyVersion(STORE_ID, SERVICE_DATE))
+                .willReturn(Optional.of(latestVersion));
         given(capacityBucketRepository.findLatestPolicyBucketIdsOverlapping(
                 List.of(STORE_ID),
                 SERVICE_DATE,
