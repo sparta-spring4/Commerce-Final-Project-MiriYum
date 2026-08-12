@@ -122,7 +122,7 @@ describe('KakaoMap', () => {
   })
 
   it('loads the SDK and creates markers only for stores with valid coordinates', async () => {
-    const { maps, Map, LatLng } = createMaps()
+    const { maps, LatLng } = createMaps()
     mocks.load.mockResolvedValue(maps)
     const onSelectStore = vi.fn()
 
@@ -141,14 +141,15 @@ describe('KakaoMap', () => {
       />,
     )
 
-    await waitFor(() => expect(Map).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(mocks.markerConstruct).toHaveBeenCalledTimes(2),
+    )
     expect(mocks.load).toHaveBeenCalledWith('test-key')
     expect(screen.getByLabelText('검색 결과 지도')).toHaveStyle({
       width: '100%',
       minHeight: '320px',
     })
     expect(LatLng).toHaveBeenCalledWith(37.5007, 127.0365)
-    expect(mocks.markerConstruct).toHaveBeenCalledTimes(2)
     expect(screen.getByText('좌표를 확인할 수 없는 매장 1곳')).toBeVisible()
   })
 

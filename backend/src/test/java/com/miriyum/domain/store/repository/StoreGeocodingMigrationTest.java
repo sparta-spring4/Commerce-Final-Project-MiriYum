@@ -26,7 +26,7 @@ class StoreGeocodingMigrationTest {
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
 
     @Test
-    @DisplayName("V23은 레거시 매장을 주소 버전 1의 좌표 없는 미검증 상태로 이관한다")
+    @DisplayName("V29는 레거시 매장을 주소 버전 1의 좌표 없는 미검증 상태로 이관한다")
     void migratesLegacyStoreToUnverifiedAddressVersionOne() throws Exception {
         cleanDatabase();
         migrateToVersion19();
@@ -63,7 +63,7 @@ class StoreGeocodingMigrationTest {
     }
 
     @Test
-    @DisplayName("V23은 불완전하거나 현재 주소 버전과 불일치한 검증 좌표를 거부한다")
+    @DisplayName("V29는 불완전하거나 현재 주소 버전과 불일치한 검증 좌표를 거부한다")
     void rejectsInvalidVerifiedCoordinateShapes() throws Exception {
         cleanDatabase();
         migrateToVersion19();
