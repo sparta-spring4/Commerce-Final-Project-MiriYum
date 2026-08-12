@@ -612,6 +612,12 @@ class ReservationHoldRuntimeIT {
         assertThat(countTransitionAudits(created.reservationHoldId())).isOne();
         assertThat(count("reservation_hold_warning_tasks")).isOne();
         assertAllBucketOccupancy(latestBucketIds, 2, 1);
+        if (created.capacityPolicyVersion() == 1L) {
+            assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+        } else {
+            assertThat(created.capacityPolicyVersion()).isEqualTo(2L);
+            assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        }
     }
 
     @Test
@@ -656,6 +662,7 @@ class ReservationHoldRuntimeIT {
         assertThat(count("reservation_holds")).isOne();
         assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
         assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(countReleaseTransitionAudits(active.reservationHoldId())).isOne();
         assertThat(count("reservation_hold_warning_tasks")).isOne();
 
         ReservationHoldContracts.Result replay = holdFacade.transition(releaseCommand);
@@ -663,6 +670,7 @@ class ReservationHoldRuntimeIT {
         assertThat(replay).isEqualTo(released);
         assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
         assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(countReleaseTransitionAudits(active.reservationHoldId())).isOne();
         assertThat(count("reservation_hold_warning_tasks")).isOne();
         assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
         assertAllBucketOccupancy(latestBucketIds, 0, 0);
@@ -1222,6 +1230,16 @@ class ReservationHoldRuntimeIT {
                         + "WHERE reservation_hold_id = ?",
                 Integer.class,
                 holdId);
+    }
+
+    private int countReleaseTransitionAudits(long holdId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND before_status = 'ACTIVE'
+                   AND after_status = 'RELEASED'
+                """, Integer.class, holdId);
     }
 
     private int count(String tableName) {
