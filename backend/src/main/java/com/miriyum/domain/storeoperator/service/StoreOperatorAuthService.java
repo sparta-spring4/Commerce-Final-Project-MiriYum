@@ -92,6 +92,9 @@ public class StoreOperatorAuthService {
     public TokenPair login(LoginRequest request) {
         StoreOperatorAccount account = storeOperatorAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+        if (account.getPasswordHash() == null) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
 
         LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.STORE_OPERATOR, account.getId());
         if (attempt.status() == LoginAttempt.Status.DELAYED) {
