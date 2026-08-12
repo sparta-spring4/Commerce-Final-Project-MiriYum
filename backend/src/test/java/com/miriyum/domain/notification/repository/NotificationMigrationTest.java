@@ -31,7 +31,7 @@ class NotificationMigrationTest {
 
             assertThat(flyway.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V34__create_notification_runtime.sql");
+                    .contains("V33__create_notification_runtime.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(tableExists(connection, "notification_tasks")).isTrue();
                 assertThat(tableExists(connection, "notification_channel_attempts")).isTrue();
