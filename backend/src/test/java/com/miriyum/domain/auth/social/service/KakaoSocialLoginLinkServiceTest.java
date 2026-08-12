@@ -145,6 +145,37 @@ class KakaoSocialLoginLinkServiceTest {
                 ACTIVE.value());
     }
 
+    @Test
+    @DisplayName("이전 키로 찾은 로그인 연결은 현재 키 fingerprint로 갱신한다")
+    void migratesPreviousFingerprintOnLogin() {
+        KakaoIdentityFingerprint previous = new KakaoIdentityFingerprint("v1", "previous-fingerprint");
+        SocialLoginLink legacyLink = link(10L, previous);
+        ReflectionTestUtils.setField(legacyLink, "id", 1L);
+        SocialLoginLink migratedLink = link(10L, ACTIVE);
+
+        given(fingerprintGenerator.generateActive("kakao-subject")).willReturn(ACTIVE);
+        given(fingerprintGenerator.generatePrevious("kakao-subject")).willReturn(Optional.of(previous));
+        givenFindLink(ACTIVE, Optional.empty(), Optional.of(migratedLink));
+        givenFindLink(previous, Optional.of(legacyLink));
+        given(socialLoginLinkRepository.migrateFingerprint(
+                1L,
+                ACTIVE.keyVersion(),
+                ACTIVE.value(),
+                previous.keyVersion(),
+                previous.value()))
+                .willReturn(1);
+
+        Long accountId = linkService.findLinkedAccountId(TokenNamespace.CONSUMER, "kakao-subject");
+
+        assertThat(accountId).isEqualTo(10L);
+        then(socialLoginLinkRepository).should().migrateFingerprint(
+                1L,
+                ACTIVE.keyVersion(),
+                ACTIVE.value(),
+                previous.keyVersion(),
+                previous.value());
+    }
+
     @SafeVarargs
     private final void givenFindLink(KakaoIdentityFingerprint fingerprint, Optional<SocialLoginLink>... results) {
         var stubbing = given(socialLoginLinkRepository.findLink(

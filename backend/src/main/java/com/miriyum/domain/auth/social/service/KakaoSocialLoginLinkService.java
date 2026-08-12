@@ -9,6 +9,7 @@ import com.miriyum.domain.auth.social.enums.SocialLoginProvider;
 import com.miriyum.domain.auth.social.repository.SocialLoginLinkRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +39,7 @@ public class KakaoSocialLoginLinkService {
 
         SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
         if (previousLink != null) {
-            return resultForExisting(previousLink, accountId);
+            return resultForExisting(migratePreviousLink(namespace, kakaoSubject, previousLink, active), accountId);
         }
         return findOrCreate(namespace, accountId, active);
     }
@@ -52,7 +53,7 @@ public class KakaoSocialLoginLinkService {
         return findOrCreate(namespace, accountId, fingerprint);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long findLinkedAccountId(TokenNamespace namespace, String kakaoSubject) {
         KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
         SocialLoginLink activeLink = findLink(namespace, active);
@@ -64,13 +65,39 @@ public class KakaoSocialLoginLinkService {
         if (previousLink == null) {
             return null;
         }
-        return previousLink.getAccountId();
+        SocialLoginLink migratedLink = migratePreviousLink(namespace, kakaoSubject, previousLink, active);
+        if (!migratedLink.getAccountId().equals(previousLink.getAccountId())) {
+            throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
+        }
+        return migratedLink.getAccountId();
     }
 
     private SocialLoginLink findPreviousLink(TokenNamespace namespace, String kakaoSubject) {
         return fingerprintGenerator.generatePrevious(kakaoSubject)
                 .map(previous -> findLink(namespace, previous))
                 .orElse(null);
+    }
+
+    private SocialLoginLink migratePreviousLink(
+            TokenNamespace namespace,
+            String kakaoSubject,
+            SocialLoginLink previousLink,
+            KakaoIdentityFingerprint active
+    ) {
+        KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
+        try {
+            socialLoginLinkRepository.migrateFingerprint(
+                    previousLink.getId(),
+                    active.keyVersion(),
+                    active.value(),
+                    previous.keyVersion(),
+                    previous.value());
+        } catch (DataIntegrityViolationException ignored) {
+            // 동시 요청이 이미 현재 키 fingerprint로 갱신했을 수 있다.
+        }
+
+        SocialLoginLink activeLink = findLink(namespace, active);
+        return activeLink != null ? activeLink : findLink(namespace, previous);
     }
 
     private KakaoLinkResult findOrCreate(

@@ -71,4 +71,23 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
             @Param("fingerprint") String fingerprint
     );
 
+    /** 이전 키로 조회한 동일 연결만 현재 키 fingerprint로 바꾼다. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE social_login_links
+            SET fingerprint_key_version = :activeKeyVersion,
+                provider_subject_fingerprint = :activeFingerprint,
+                updated_at = CURRENT_TIMESTAMP(6)
+            WHERE social_login_link_id = :linkId
+              AND fingerprint_key_version = :previousKeyVersion
+              AND provider_subject_fingerprint = :previousFingerprint
+            """, nativeQuery = true)
+    int migrateFingerprint(
+            @Param("linkId") Long linkId,
+            @Param("activeKeyVersion") String activeKeyVersion,
+            @Param("activeFingerprint") String activeFingerprint,
+            @Param("previousKeyVersion") String previousKeyVersion,
+            @Param("previousFingerprint") String previousFingerprint
+    );
+
 }

@@ -6,7 +6,10 @@ import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
+import com.miriyum.domain.auth.social.entity.SocialLoginLink;
 import com.miriyum.domain.auth.social.enums.KakaoLinkResult;
+import com.miriyum.domain.auth.social.enums.SocialLoginProvider;
+import com.miriyum.domain.auth.social.repository.SocialLoginLinkRepository;
 import com.miriyum.domain.consumer.dto.auth.ConsumerKakaoSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -40,8 +43,10 @@ import org.testcontainers.mysql.MySQLContainer;
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.kakao.identity-fingerprint-active-key-version=v1",
-            "miriyum.kakao.identity-fingerprint-active-secret=test-only-fingerprint-secret"
+            "miriyum.kakao.identity-fingerprint-active-key-version=v2",
+            "miriyum.kakao.identity-fingerprint-active-secret=test-only-active-fingerprint-secret",
+            "miriyum.kakao.identity-fingerprint-previous-key-version=v1",
+            "miriyum.kakao.identity-fingerprint-previous-secret=test-only-previous-fingerprint-secret"
         })
 class KakaoSocialLoginLinkIntegrationTest {
 
@@ -57,6 +62,12 @@ class KakaoSocialLoginLinkIntegrationTest {
 
     @Autowired
     private KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
+
+    @Autowired
+    private KakaoIdentityFingerprintGenerator fingerprintGenerator;
+
+    @Autowired
+    private SocialLoginLinkRepository socialLoginLinkRepository;
 
     @Autowired
     private ConsumerKakaoLinkTransactionService consumerKakaoLinkTransactionService;
@@ -152,6 +163,34 @@ class KakaoSocialLoginLinkIntegrationTest {
         assertThat(consumerAccountRepository.count()).isOne();
         assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
         assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("이전 fingerprint 키로 찾은 로그인 연결은 현재 키 값으로 갱신한다")
+    void migratesPreviousFingerprintToActiveKeyOnLogin() {
+        String kakaoSubject = "legacy-kakao-subject";
+        KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
+        KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
+        socialLoginLinkRepository.saveAndFlush(SocialLoginLink.create(
+                TokenNamespace.CONSUMER,
+                101L,
+                SocialLoginProvider.KAKAO,
+                previous.keyVersion(),
+                previous.value()));
+
+        Long accountId = kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.CONSUMER, kakaoSubject);
+
+        assertThat(accountId).isEqualTo(101L);
+        assertThat(socialLoginLinkRepository.findLink(
+                TokenNamespace.CONSUMER,
+                SocialLoginProvider.KAKAO,
+                active.keyVersion(),
+                active.value())).isPresent();
+        assertThat(socialLoginLinkRepository.findLink(
+                TokenNamespace.CONSUMER,
+                SocialLoginProvider.KAKAO,
+                previous.keyVersion(),
+                previous.value())).isEmpty();
     }
 
     private KakaoLinkResult signUp(String ticket, String email, String phoneNumber, String nickname) {
