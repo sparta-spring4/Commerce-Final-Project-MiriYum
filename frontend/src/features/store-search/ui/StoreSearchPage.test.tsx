@@ -186,6 +186,35 @@ describe('매장 찾기 결과 화면', () => {
     ).toBeInTheDocument()
   })
 
+  it('cursor 모드 응답이 오면 빈 결과로 넘기지 않고 계약 위반으로 다룬다', async () => {
+    // 2차 MVP 통합 검색 응답 모양. 1차 MVP는 searchInput을 보내지 않으므로
+    // 이 응답이 오면 안 된다. 조용히 "결과 없음"으로 보여 주면 사용자가
+    // 검색이 정상 동작했다고 오해한다.
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', () =>
+        successResponse({
+          items: [],
+          normalizedCondition: {},
+          warnings: [],
+          ruleVersion: 'rule-v1',
+          vocabularyVersion: 'vocab-v1',
+          rankingRuleVersion: null,
+          nextCursor: null,
+        }),
+      ),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(
+      await screen.findByText('서비스를 일시적으로 이용할 수 없습니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('조건에 맞는 매장이 없습니다.'),
+    ).not.toBeInTheDocument()
+  })
+
   it('검증 오류는 입력을 고치도록 안내한다', async () => {
     server.use(
       ...catalogHandlers,

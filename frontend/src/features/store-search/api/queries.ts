@@ -1,10 +1,37 @@
 import { useQuery } from '@tanstack/react-query'
+import { ApiContractError } from '../../../shared/api/apiError'
 import { publicApiClient } from '../../../shared/api/publicApiClient'
+import type { components } from '../../../shared/api/generated/store-search'
 import type {
   CatalogItem,
   StoreDetail,
   StoreSearchQuery,
 } from '../model/searchParams'
+
+/** `searchStores` 200 응답의 data. 2차 MVP에서 union이 됐다. */
+type StoreSearchResponseData =
+  components['schemas']['StoreSearchSuccessResponse']['data']
+
+/**
+ * 2차 MVP가 `searchStores` 응답을 union으로 넓혔다.
+ *
+ * - `searchInput`을 보내면 cursor 모드(`IntegratedStoreSearchData`)
+ * - 보내지 않으면 page 모드(`StorePageData`)
+ *
+ * 1차 MVP 검색은 `searchInput`을 만들지 않으므로 언제나 page 모드다. 그 사실을
+ * 여기서 한 번 좁혀 두면 화면은 `page`가 있는 타입만 다루면 된다.
+ * 통합 검색 화면은 2차 MVP #112가 자기 query로 따로 소유한다.
+ */
+function toPageData(
+  data: StoreSearchResponseData,
+): Extract<StoreSearchResponseData, { page: unknown }> {
+  if (!('page' in data)) {
+    // searchInput을 보내지 않았는데 cursor 모드가 왔다. 조용히 빈 목록으로
+    // 넘기면 사용자에게 결과 없음을 잘못 보여 주므로 계약 위반으로 올린다.
+    throw new ApiContractError(200, 'expectedPagedStoreSearch')
+  }
+  return data
+}
 
 /**
  * 공개 매장 조회 query.
@@ -68,7 +95,7 @@ export function useStoreSearch(query: StoreSearchQuery, enabled = true) {
         query,
         signal,
       })
-      return response.data
+      return toPageData(response.data)
     },
     enabled,
     // 페이지를 넘길 때 목록이 빈 화면으로 깜빡이지 않게 이전 결과를 유지한다.
