@@ -178,10 +178,19 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             healthcheck,
         )
 
-    def test_deployment_fails_when_valkey_runtime_verification_fails(self):
-        self.assertIn("verify_valkey()", self.deploy_script)
+    def test_deployment_waits_for_valkey_startup_before_runtime_verification(self):
+        self.assertIn("VALKEY_HEALTH_TIMEOUT_SECONDS=60", self.deploy_script)
+        self.assertIn("wait_for_valkey_health()", self.deploy_script)
         self.assertIn('ps -q valkey', self.deploy_script)
-        self.assertIn("Valkey health check is", self.deploy_script)
+        self.assertIn('"${health}" == "healthy"', self.deploy_script)
+        self.assertIn("while :; do", self.deploy_script)
+        self.assertIn("sleep 2", self.deploy_script)
+
+    def test_deployment_fails_when_valkey_health_wait_times_out(self):
+        self.assertIn("verify_valkey()", self.deploy_script)
+        self.assertIn("Valkey health check timed out after", self.deploy_script)
+        self.assertIn("last status:", self.deploy_script)
+        self.assertIn("publish_deployment_health 0", self.deploy_script)
         self.assertIn("Unauthenticated Valkey ping did not return NOAUTH.", self.deploy_script)
         self.assertIn('grep -qx PONG', self.deploy_script)
         self.assertIn('port valkey 6379', self.deploy_script)

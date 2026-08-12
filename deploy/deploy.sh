@@ -7,6 +7,7 @@ COMPOSE_FILE="${APP_DIR}/docker-compose.prod.yml"
 ENV_FILE="${APP_DIR}/.env"
 HEALTH_URL=http://127.0.0.1:8080/actuator/health
 HEALTH_TIMEOUT_SECONDS=90
+VALKEY_HEALTH_TIMEOUT_SECONDS=60
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
 
 : "${AWS_REGION:?AWS_REGION must be set}"
@@ -29,19 +30,35 @@ publish_deployment_health() {
     >/dev/null || echo "Warning: CloudWatch deployment health metric was not published." >&2
 }
 
+wait_for_valkey_health() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local deadline container_id health
+
+  deadline=$((SECONDS + VALKEY_HEALTH_TIMEOUT_SECONDS))
+  while :; do
+    container_id="$("${compose[@]}" ps -q valkey)"
+    if [[ -n "${container_id}" ]]; then
+      health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${container_id}" 2>/dev/null || echo missing)"
+      if [[ "${health}" == "healthy" ]]; then
+        return 0
+      fi
+    else
+      health="not-running"
+    fi
+
+    if (( SECONDS >= deadline )); then
+      echo "Valkey health check timed out after ${VALKEY_HEALTH_TIMEOUT_SECONDS}s (last status: ${health})." >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 verify_valkey() {
   local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
-  local container_id health unauthenticated_result host_port
+  local unauthenticated_result host_port
 
-  container_id="$("${compose[@]}" ps -q valkey)"
-  if [[ -z "${container_id}" ]]; then
-    echo "Valkey container is not running." >&2
-    return 1
-  fi
-
-  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${container_id}")"
-  if [[ "${health}" != "healthy" ]]; then
-    echo "Valkey health check is ${health}, expected healthy." >&2
+  if ! wait_for_valkey_health; then
     return 1
   fi
 
