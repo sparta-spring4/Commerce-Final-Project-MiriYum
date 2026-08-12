@@ -103,6 +103,7 @@ class ReservationHoldRuntimeIT {
 
     private static final String TIME_ZONE_ID = "Asia/Seoul";
     private static final LocalDate SERVICE_DATE = LocalDate.of(2026, 8, 10);
+    private static final LocalDate OTHER_SERVICE_DATE = LocalDate.of(2026, 8, 17);
     private static final LocalTime START_TIME = LocalTime.NOON;
     private static final Instant ACTIVATED_AT = Instant.parse("2026-08-01T00:00:00Z");
     private static final Instant BASE_NOW = Instant.parse("2026-08-10T01:00:00Z");
@@ -214,11 +215,25 @@ class ReservationHoldRuntimeIT {
         transition(results.get(3), ReservationHoldStatus.RELEASED, "scope-release");
         clock.set(results.get(4).expiresAt());
         transition(results.get(4), ReservationHoldStatus.EXPIRED, "scope-expire");
+        Scenario otherStore = createScenario(20, 10, twoBuckets());
+        ReservationHoldContracts.Result otherStoreHold = createHold(
+                otherStore, createConsumer(), "scope-other-store");
+        List<Long> otherDateBucketIds = seedCapacityBuckets(
+                scenario.storeId(), OTHER_SERVICE_DATE, 20, 10, twoBuckets(), 1L);
+        ReservationHoldContracts.Result otherDateHold = holdFacade.create(createCommand(
+                scenario,
+                createConsumer(),
+                OTHER_SERVICE_DATE,
+                "scope-other-date"));
 
         List<ReservationHold> protectedHolds = transactions.execute(status ->
                 holdRepository.findProtectedByStoreIdAndServiceDateForUpdateOrderByIdAsc(
                         scenario.storeId(), SERVICE_DATE));
 
+        assertThat(count("reservation_holds")).isEqualTo(7);
+        assertThat(otherStoreHold.storeId()).isEqualTo(otherStore.storeId());
+        assertThat(otherDateHold.serviceDate()).isEqualTo(OTHER_SERVICE_DATE);
+        assertAllBucketOccupancy(otherDateBucketIds, 2, 1);
         assertThat(protectedHolds)
                 .extracting(ReservationHold::getId)
                 .containsExactly(
@@ -284,9 +299,11 @@ class ReservationHoldRuntimeIT {
     @DisplayName("다중 구간 fresh 생성은 Hold·배정·감사·경고와 10분·2분 시각을 원자 확정한다")
     void multiBucketFreshCreationCommitsAllAtomicSnapshots() {
         Scenario scenario = createScenario(10, 5, twoBuckets());
+        long consumerId = createConsumer();
+        String creationCommandId = "atomic-create";
 
         ReservationHoldContracts.Result result = createHold(
-                scenario, createConsumer(), "atomic-create");
+                scenario, consumerId, creationCommandId);
 
         assertThat(jdbcTemplate.queryForObject("SELECT VERSION()", String.class))
                 .startsWith("8.0.40");
@@ -297,6 +314,50 @@ class ReservationHoldRuntimeIT {
         assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
         assertThat(countTransitionAudits(result.reservationHoldId())).isOne();
         assertThat(count("reservation_hold_warning_tasks")).isOne();
+        Map<String, Object> persistedHold = jdbcTemplate.queryForMap("""
+                SELECT consumer_account_id, store_id, service_date,
+                       start_at, service_end_at, occupancy_end_at,
+                       reservation_policy_version, capacity_policy_version,
+                       cancellation_policy_version, status, status_version,
+                       creation_command_id, created_at, expires_at
+                  FROM reservation_holds
+                 WHERE reservation_hold_id = ?
+                """, result.reservationHoldId());
+        assertThat(persistedHold)
+                .containsEntry("consumer_account_id", consumerId)
+                .containsEntry("store_id", scenario.storeId())
+                .containsEntry("service_date", java.sql.Date.valueOf(SERVICE_DATE))
+                .containsEntry("start_at", LocalDateTime.of(2026, 8, 10, 3, 0))
+                .containsEntry("service_end_at", LocalDateTime.of(2026, 8, 10, 4, 0))
+                .containsEntry("occupancy_end_at", LocalDateTime.of(2026, 8, 10, 4, 0))
+                .containsEntry("reservation_policy_version", 1L)
+                .containsEntry("capacity_policy_version", 1L)
+                .containsEntry("cancellation_policy_version", 1L)
+                .containsEntry("status", "ACTIVE")
+                .containsEntry("status_version", 0L)
+                .containsEntry("creation_command_id", creationCommandId)
+                .containsEntry("created_at", LocalDateTime.of(2026, 8, 10, 1, 0))
+                .containsEntry("expires_at", LocalDateTime.of(2026, 8, 10, 1, 10));
+        Map<String, Object> creationAudit = jdbcTemplate.queryForMap("""
+                SELECT actor_type, actor_id, requested_at, occurred_at,
+                       before_status, after_status,
+                       reservation_time_policy_version, capacity_policy_version,
+                       command_id
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                """, result.reservationHoldId());
+        assertThat(creationAudit)
+                .containsEntry("actor_type", "SYSTEM")
+                .containsEntry("requested_at", LocalDateTime.of(2026, 8, 10, 1, 0))
+                .containsEntry("occurred_at", LocalDateTime.of(2026, 8, 10, 1, 0))
+                .containsEntry("after_status", "ACTIVE")
+                .containsEntry("reservation_time_policy_version", 1L)
+                .containsEntry("capacity_policy_version", 1L);
+        assertThat(creationAudit.get("actor_id")).isNull();
+        assertThat(creationAudit.get("before_status")).isNull();
+        assertThat((String) creationAudit.get("command_id"))
+                .isNotBlank()
+                .isNotEqualTo(creationCommandId);
         assertThat(jdbcTemplate.queryForMap("""
                 SELECT created_at, warning_due_at
                   FROM reservation_hold_warning_tasks
@@ -500,6 +561,32 @@ class ReservationHoldRuntimeIT {
         assertThat(replay).isEqualTo(expired);
         assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
         assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+
+        clock.set(active.expiresAt().plusSeconds(1));
+        ReservationHoldContracts.Result afterBoundary = createHold(
+                scenario, createConsumer(), "after-expiry-create");
+        clock.set(afterBoundary.expiresAt().plusNanos(1));
+        ReservationHoldContracts.TransitionCommand afterBoundaryCommand = transitionCommand(
+                afterBoundary,
+                ReservationHoldStatus.EXPIRED,
+                "after-expiry-fresh-operation");
+
+        ReservationHoldContracts.Result afterBoundaryExpired =
+                holdFacade.transition(afterBoundaryCommand);
+        ReservationHoldContracts.Result afterBoundaryReplay =
+                holdFacade.transition(afterBoundaryCommand);
+
+        assertThat(afterBoundaryExpired.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(afterBoundaryExpired.statusVersion()).isEqualTo(1L);
+        assertThat(afterBoundaryReplay).isEqualTo(afterBoundaryExpired);
+        assertThat(countTransitionAudits(afterBoundary.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, Long.class, afterBoundary.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
     }
 
     private Scenario createScenario(
@@ -576,25 +663,49 @@ class ReservationHoldRuntimeIT {
             timePolicy.activate(ACTIVATED_AT, "hold runtime fixture");
             timePolicyRepository.saveAndFlush(timePolicy);
 
-            List<Long> capacityBucketIds = buckets.stream()
-                    .map(request -> capacityBucketRepository.saveAndFlush(
-                            ReservationCapacityBucket.create(
-                                    store.getId(),
-                                    SERVICE_DATE,
-                                    request.startTime(),
-                                    request.endTime(),
-                                    maxPeople,
-                                    maxTeams,
-                                    0,
-                                    0,
-                                    1,
-                                    maxPeople,
-                                    true,
-                                    1L)))
-                    .map(ReservationCapacityBucket::getId)
-                    .toList();
+            List<Long> capacityBucketIds = saveCapacityBuckets(
+                    store.getId(), SERVICE_DATE, maxPeople, maxTeams, buckets, 1L);
             return new Scenario(operator.getId(), store.getId(), capacityBucketIds);
         });
+    }
+
+    private List<Long> seedCapacityBuckets(
+            long storeId,
+            LocalDate serviceDate,
+            int maxPeople,
+            int maxTeams,
+            List<CapacityBucketRequest> buckets,
+            long policyVersion
+    ) {
+        return transactions.execute(status -> saveCapacityBuckets(
+                storeId, serviceDate, maxPeople, maxTeams, buckets, policyVersion));
+    }
+
+    private List<Long> saveCapacityBuckets(
+            long storeId,
+            LocalDate serviceDate,
+            int maxPeople,
+            int maxTeams,
+            List<CapacityBucketRequest> buckets,
+            long policyVersion
+    ) {
+        return buckets.stream()
+                .map(request -> capacityBucketRepository.saveAndFlush(
+                        ReservationCapacityBucket.create(
+                                storeId,
+                                serviceDate,
+                                request.startTime(),
+                                request.endTime(),
+                                maxPeople,
+                                maxTeams,
+                                0,
+                                0,
+                                1,
+                                maxPeople,
+                                true,
+                                policyVersion)))
+                .map(ReservationCapacityBucket::getId)
+                .toList();
     }
 
     private long createConsumer() {
@@ -624,10 +735,19 @@ class ReservationHoldRuntimeIT {
             long consumerId,
             String commandId
     ) {
+        return createCommand(scenario, consumerId, SERVICE_DATE, commandId);
+    }
+
+    private static ReservationHoldContracts.CreateCommand createCommand(
+            Scenario scenario,
+            long consumerId,
+            LocalDate serviceDate,
+            String commandId
+    ) {
         return new ReservationHoldContracts.CreateCommand(
                 consumerId,
                 scenario.storeId(),
-                SERVICE_DATE,
+                serviceDate,
                 START_TIME,
                 null,
                 PARTY_SIZE,
