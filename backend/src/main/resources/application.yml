@@ -8,7 +8,6 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-
 server:
   forward-headers-strategy: native
   tomcat:
@@ -47,6 +46,17 @@ miriyum:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  payment:
+    enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
+    cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
+    portone:
+      api-secret: ${MIRIYUM_PORTONE_API_SECRET:}
+      webhook-secret: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:}
+      store-id: ${MIRIYUM_PORTONE_STORE_ID:}
+      base-url: ${MIRIYUM_PORTONE_BASE_URL:https://api.portone.io}
+      timeout-policy-version: ${MIRIYUM_PORTONE_TIMEOUT_POLICY_VERSION:portone-v2-v1}
+      connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
+      read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}

@@ -11,7 +11,7 @@
 - 인수 조건
 - 검증 계획과 알려진 위험
 
-Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
+Issue 제목은 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Payment]`, `[Global]`, `[Docs]` 중 하나의 도메인 접두어로 시작한다. 사소한 문구 변경도 저장소 변경이면 예외가 아니다.
 
 둘 이상의 도메인 계약이 필요한 작업은 Issue에 `contract-first`, `blocks`, `blocked by` 관계를 기록한다. 소유자는 동작하는 최소 공개 Service 메서드·DTO·오류·테스트 계약을 먼저 제공하고 선행 PR을 `dev`에 병합한다. 소비자는 최신 `dev`를 반영한 뒤 그 계약을 사용한다. 준비되지 않은 계약은 `return null`, 가짜 성공 응답, 빈 구현 또는 `UnsupportedOperationException`으로 대신하지 않고 `BLOCKED`로 보고한다.
 
@@ -48,7 +48,7 @@ Pull Request는 변경 요약과 구현 과정에서 생성된 증거를 소유�
 커밋과 PR 제목은 `<type>(<scope>): <한글 요약>` 형식을 사용한다.
 
 - type: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`
-- 선택 scope: `auth`, `store`, `reservation`, `menu-hold`, `pickup`, `global`, `frontend`, `api`, `docs`
+- 선택 scope: `auth`, `store`, `reservation`, `menu-hold`, `pickup`, `payment`, `global`, `frontend`, `api`, `docs`
 - `update`, `add`, `bugfix`, `gitfix`, `script` 같은 임의 분류와 emoji 접두어는 사용하지 않는다.
 
 ### 검토와 승인

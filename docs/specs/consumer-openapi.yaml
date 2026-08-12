@@ -31,6 +31,8 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao~1authorizations"
   /api/v1/consumers/me/kakao-links:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao-links"
+  /api/v1/consumers/me/notifications:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/reservations:

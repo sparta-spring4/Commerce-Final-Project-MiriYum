@@ -148,6 +148,7 @@ class DomainPackageArchitectureTest {
                         "consumer",
                         "menu",
                         "menuhold",
+                        "payment",
                         "pickup",
                         "recommendation",
                         "reservation",

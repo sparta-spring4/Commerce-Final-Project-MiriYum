@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
+import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
 import com.miriyum.domain.store.service.StoreService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -12,8 +13,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 class ReservationProductionDependencyTest {
 
@@ -48,6 +51,25 @@ class ReservationProductionDependencyTest {
 
             assertThat(forbiddenImports).isEmpty();
         }
+    }
+
+    @Test
+    void reservationHoldAuditRepositoryDoesNotExposeMutationOrDeletionApis() {
+        Set<String> methods = Stream.of(
+                        ReservationHoldTransitionAuditRepository.class.getMethods())
+                .map(method -> method.getName())
+                .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(JpaRepository.class.isAssignableFrom(
+                ReservationHoldTransitionAuditRepository.class)).isFalse();
+        assertThat(methods).doesNotContain(
+                "delete",
+                "deleteAll",
+                "deleteAllById",
+                "deleteById",
+                "deleteAllInBatch",
+                "deleteAllByIdInBatch"
+        );
     }
 
     private static Stream<String> linesUnchecked(Path path) {
