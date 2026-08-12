@@ -5,6 +5,7 @@ import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -31,7 +32,7 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
     public KakaoRestOAuthClient(
             KakaoOAuthProperties properties,
             ObjectMapper objectMapper,
-            RestClient restClient
+            @Qualifier("kakaoRestClient") RestClient restClient
     ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
