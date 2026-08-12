@@ -53,4 +53,25 @@ public class WaitingClosureJobItem {
 
     protected WaitingClosureJobItem() {
     }
+
+    public static WaitingClosureJobItem pending(long jobId, long teamId, long version, Instant now) {
+        WaitingClosureJobItem item = new WaitingClosureJobItem();
+        item.waitingClosureJobId = jobId;
+        item.waitingTeamId = teamId;
+        item.expectedVersion = version;
+        item.status = WaitingClosureItemStatus.PENDING;
+        item.createdAt = now;
+        return item;
+    }
+
+    public void claim(Instant now) { status = WaitingClosureItemStatus.PROCESSING; attemptCount++; lastAttemptedAt = now; }
+    public void complete(Instant now) { status = WaitingClosureItemStatus.COMPLETED; completedAt = now; }
+    public void requeue() { status = WaitingClosureItemStatus.PENDING; }
+    public void requireReconciliation(Instant now) { status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; }
+    public Long getId() { return id; }
+    public Long getWaitingClosureJobId() { return waitingClosureJobId; }
+    public Long getWaitingTeamId() { return waitingTeamId; }
+    public long getExpectedVersion() { return expectedVersion; }
+    public WaitingClosureItemStatus getStatus() { return status; }
+    public int getAttemptCount() { return attemptCount; }
 }

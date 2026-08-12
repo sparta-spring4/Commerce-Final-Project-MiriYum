@@ -61,4 +61,38 @@ public class WaitingClosureJob {
 
     protected WaitingClosureJob() {
     }
+
+    public static WaitingClosureJob create(long storeId, long settingsVersion, long targetCount, Instant now) {
+        WaitingClosureJob job = new WaitingClosureJob();
+        job.storeId = storeId;
+        job.settingsVersion = settingsVersion;
+        job.status = targetCount == 0 ? WaitingClosureJobStatus.COMPLETED : WaitingClosureJobStatus.PENDING;
+        job.targetTeamCount = targetCount;
+        job.createdAt = now;
+        job.completedAt = targetCount == 0 ? now : null;
+        return job;
+    }
+
+    public void markProcessing() { if (status == WaitingClosureJobStatus.PENDING) status = WaitingClosureJobStatus.PROCESSING; }
+
+    public void reconcile(long completed, long failed, long reconciliation, Instant now) {
+        completedTeamCount = completed;
+        failedTeamCount = failed;
+        reconciliationRequiredTeamCount = reconciliation;
+        if (completed + failed + reconciliation == targetTeamCount) {
+            status = reconciliation > 0 || failed > 0
+                    ? WaitingClosureJobStatus.RECONCILIATION_REQUIRED : WaitingClosureJobStatus.COMPLETED;
+            completedAt = now;
+        }
+    }
+
+    public Long getId() { return id; }
+    public Long getStoreId() { return storeId; }
+    public WaitingClosureJobStatus getStatus() { return status; }
+    public long getTargetTeamCount() { return targetTeamCount; }
+    public long getCompletedTeamCount() { return completedTeamCount; }
+    public long getFailedTeamCount() { return failedTeamCount; }
+    public long getReconciliationRequiredTeamCount() { return reconciliationRequiredTeamCount; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Instant getCompletedAt() { return completedAt; }
 }

@@ -15,6 +15,17 @@ public interface WaitingClosureJobItemRepository
         extends JpaRepository<WaitingClosureJobItem, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select item from WaitingClosureJobItem item where item.id = :id")
+    java.util.Optional<WaitingClosureJobItem> findByIdForUpdate(@Param("id") long id);
+
+    long countByWaitingClosureJobIdAndStatus(long jobId, WaitingClosureItemStatus status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select item from WaitingClosureJobItem item where item.status = :status order by item.id")
+    List<WaitingClosureJobItem> findClaimableBatchForUpdate(
+            @Param("status") WaitingClosureItemStatus status, Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select item
             from WaitingClosureJobItem item

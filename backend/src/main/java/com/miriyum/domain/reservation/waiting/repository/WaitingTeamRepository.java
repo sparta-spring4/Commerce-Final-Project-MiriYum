@@ -96,4 +96,7 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             long storeId,
             Collection<WaitingTeamStatus> activeStatuses
     );
+
+    @Query("select team from WaitingTeam team where team.storeId = :storeId and team.status in ('WAITING','CALLED','ARRIVED') order by team.id")
+    List<WaitingTeam> findActiveClosureTargets(@Param("storeId") long storeId);
 }

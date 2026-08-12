@@ -17,11 +17,14 @@ import com.miriyum.domain.reservation.config.ReservationSecurityConfig;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.controller.storeoperator.WaitingStoreOperatorController;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingClosureJobSnapshot;
+import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJobStatus;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamListItem;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamPage;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.service.WaitingCommandFacade;
+import com.miriyum.domain.reservation.waiting.service.WaitingClosureService;
 import com.miriyum.domain.reservation.waiting.service.WaitingTeamQueryService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ErrorCode;
@@ -59,6 +62,9 @@ class WaitingStoreOperatorControllerTest {
 
     @MockitoBean
     private WaitingCommandFacade commandFacade;
+
+    @MockitoBean
+    private WaitingClosureService closureService;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -101,6 +107,24 @@ class WaitingStoreOperatorControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.waitingTeamId").value("77"))
                 .andExpect(jsonPath("$.data.storeId").value("22"))
+                .andExpect(jsonPath("$.data.consumerAccountId").doesNotExist())
+                .andExpect(jsonPath("$.data.idempotencyKey").doesNotExist());
+    }
+
+    @Test
+    void returnsPrivacySafeClosureJobWithoutIdempotencyHeader() throws Exception {
+        authenticateStoreOperator();
+        given(closureService.getClosureJob(33L, 22L, 91L)).willReturn(new WaitingClosureJobSnapshot(
+                "91", "22", WaitingClosureJobStatus.PROCESSING, 3, 1, 0, 0,
+                Instant.parse("2026-08-12T08:00:00Z"), null));
+
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-close-jobs/91")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.jobId").value("91"))
+                .andExpect(jsonPath("$.data.storeId").value("22"))
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.totalTeamCount").value(3))
                 .andExpect(jsonPath("$.data.consumerAccountId").doesNotExist())
                 .andExpect(jsonPath("$.data.idempotencyKey").doesNotExist());
     }

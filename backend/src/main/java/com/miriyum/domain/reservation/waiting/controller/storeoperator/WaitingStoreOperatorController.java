@@ -2,11 +2,13 @@ package com.miriyum.domain.reservation.waiting.controller.storeoperator;
 
 import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
+import com.miriyum.domain.reservation.waiting.dto.WaitingClosureJobSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamListQuery;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamPage;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.service.WaitingCommandFacade;
+import com.miriyum.domain.reservation.waiting.service.WaitingClosureService;
 import com.miriyum.domain.reservation.waiting.service.WaitingTeamQueryService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
@@ -26,15 +28,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 인증된 대표 매장 운영자의 웨이팅 원장 조회와 전이 HTTP 경계다. */
 @RestController
-@RequestMapping("/api/v1/store-operators/stores/{storeId}/waiting-teams")
+@RequestMapping("/api/v1/store-operators/stores/{storeId}")
 @RequiredArgsConstructor
 public class WaitingStoreOperatorController {
 
     private final WaitingTeamQueryService queryService;
     private final WaitingCommandFacade commandFacade;
+    private final WaitingClosureService closureService;
 
     /** 선택 상태와 opaque cursor로 안정적인 FIFO 목록을 조회한다. */
-    @GetMapping
+    @GetMapping("/waiting-teams")
     public ApiResponse<WaitingTeamPage> getTeams(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -49,7 +52,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 해당 매장 범위의 개인정보 안전한 팀 상세를 조회한다. */
-    @GetMapping("/{waitingTeamId}")
+    @GetMapping("/waiting-teams/{waitingTeamId}")
     public ApiResponse<WaitingTeamSnapshot> getTeam(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -61,7 +64,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** FIFO 선두 WAITING 팀을 호출한다. */
-    @PostMapping("/{waitingTeamId}/call")
+    @PostMapping("/waiting-teams/{waitingTeamId}/call")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> call(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -75,7 +78,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 호출된 팀의 현장 도착을 확인한다. */
-    @PostMapping("/{waitingTeamId}/arrive")
+    @PostMapping("/waiting-teams/{waitingTeamId}/arrive")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> arrive(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -89,7 +92,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 도착 확인된 팀의 입장을 완료한다. */
-    @PostMapping("/{waitingTeamId}/check-in")
+    @PostMapping("/waiting-teams/{waitingTeamId}/check-in")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> checkIn(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -103,7 +106,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 활성 팀을 매장 운영자 요청으로 취소한다. */
-    @PostMapping("/{waitingTeamId}/cancel")
+    @PostMapping("/waiting-teams/{waitingTeamId}/cancel")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> cancel(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -114,6 +117,16 @@ public class WaitingStoreOperatorController {
         return response(commandFacade.cancel(
                 principal.accountId(), storeId, waitingTeamId,
                 IdempotencyKey.parse(rawKey), request), "웨이팅 팀을 취소했습니다.");
+    }
+
+    @GetMapping("/waiting-close-jobs/{jobId}")
+    public ApiResponse<WaitingClosureJobSnapshot> getClosureJob(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable @Positive long storeId,
+            @PathVariable @Positive long jobId
+    ) {
+        return ApiResponse.success("웨이팅 종료 작업을 조회했습니다.",
+                closureService.getClosureJob(principal.accountId(), storeId, jobId));
     }
 
     private ResponseEntity<ApiResponse<WaitingTeamSnapshot>> response(

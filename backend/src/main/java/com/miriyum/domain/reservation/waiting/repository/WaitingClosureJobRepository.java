@@ -14,6 +14,12 @@ import org.springframework.data.repository.query.Param;
 /** 활성 팀 종결 작업의 조회와 worker claim 잠금을 제공한다. */
 public interface WaitingClosureJobRepository extends JpaRepository<WaitingClosureJob, Long> {
 
+    Optional<WaitingClosureJob> findByIdAndStoreId(long id, long storeId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select job from WaitingClosureJob job where job.id = :id")
+    Optional<WaitingClosureJob> findByIdForUpdate(@Param("id") long id);
+
     Optional<WaitingClosureJob> findByStoreIdAndSettingsVersion(
             long storeId,
             long settingsVersion
