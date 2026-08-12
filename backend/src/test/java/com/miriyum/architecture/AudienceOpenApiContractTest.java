@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -26,10 +27,16 @@ class AudienceOpenApiContractTest {
     );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+    private static final Set<String> WAITING_SETTINGS_PATHS = Set.of(
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings",
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
-            Set.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH);
+            Stream.concat(
+                    Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH),
+                    WAITING_SETTINGS_PATHS.stream())
+                    .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -96,7 +103,33 @@ class AudienceOpenApiContractTest {
             assertThat(paths.values())
                     .allSatisfy(item -> assertThat(map(item))
                             .containsOnlyKeys("$ref"));
+            for (Map.Entry<String, Object> entry : paths.entrySet()) {
+                assertPathReferenceResolves(file, entry.getKey(), map(entry.getValue()));
+            }
         }
+    }
+
+    private static void assertPathReferenceResolves(
+            String entrypointFile,
+            String exposedPath,
+            Map<String, Object> pathItem
+    ) throws IOException {
+        String reference = (String) pathItem.get("$ref");
+        String pathFragmentPrefix = "#/paths/";
+        int fragmentStart = reference.indexOf(pathFragmentPrefix);
+        assertThat(fragmentStart).isPositive();
+
+        String targetFile = reference.substring(0, fragmentStart);
+        String escapedTargetPath = reference.substring(
+                fragmentStart + pathFragmentPrefix.length());
+        String targetPath = escapedTargetPath.replace("~1", "/").replace("~0", "~");
+        assertThat(targetPath).isEqualTo(exposedPath);
+
+        Path targetContract = SPECS.resolve(entrypointFile)
+                .resolveSibling(targetFile)
+                .normalize();
+        assertThat(targetContract).startsWith(SPECS.normalize());
+        assertThat(paths(targetContract)).containsKey(targetPath);
     }
 
     @Test
@@ -168,7 +201,11 @@ class AudienceOpenApiContractTest {
     }
 
     private static Map<String, Object> paths(String file) throws IOException {
-        try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
+        return paths(SPECS.resolve(file));
+    }
+
+    private static Map<String, Object> paths(Path file) throws IOException {
+        try (InputStream input = Files.newInputStream(file)) {
             return map(map(new Yaml().load(input)).get("paths"));
         }
     }
