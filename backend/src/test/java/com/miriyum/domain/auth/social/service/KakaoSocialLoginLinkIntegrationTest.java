@@ -7,6 +7,11 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.enums.KakaoLinkResult;
+import com.miriyum.domain.consumer.dto.auth.ConsumerKakaoSignUpRequest;
+import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.consumer.service.ConsumerKakaoAuthService;
+import com.miriyum.domain.consumer.service.ConsumerKakaoLinkTransactionService;
 import com.miriyum.global.exception.ServiceException;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -54,11 +59,24 @@ class KakaoSocialLoginLinkIntegrationTest {
     private KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
 
     @Autowired
+    private ConsumerKakaoLinkTransactionService consumerKakaoLinkTransactionService;
+
+    @Autowired
+    private ConsumerKakaoAuthService consumerKakaoAuthService;
+
+    @Autowired
+    private KakaoSignUpTicketService kakaoSignUpTicketService;
+
+    @Autowired
+    private ConsumerAccountRepository consumerAccountRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUp() {
         jdbcTemplate.update("DELETE FROM social_login_links");
+        jdbcTemplate.update("DELETE FROM consumer_accounts");
     }
 
     @Test
@@ -87,6 +105,58 @@ class KakaoSocialLoginLinkIntegrationTest {
         assertThat(rowCount()).isOne();
         assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
         assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("소비자 카카오 연결 진입 경로도 같은 식별자를 한 계정에만 연결한다")
+    void allowsOnlyOneAccountThroughConsumerLinkTransactionBoundary() throws Exception {
+        ConsumerAccount first = consumerAccountRepository.saveAndFlush(
+                ConsumerAccount.create("first@example.com", "{sha256-bcrypt}hash", "첫번째"));
+        ConsumerAccount second = consumerAccountRepository.saveAndFlush(
+                ConsumerAccount.create("second@example.com", "{sha256-bcrypt}hash", "두번째"));
+
+        List<Attempt> attempts = runConcurrently(
+                () -> consumerKakaoLinkTransactionService.linkActiveAccount(first.getId(), "same-kakao-subject"),
+                () -> consumerKakaoLinkTransactionService.linkActiveAccount(second.getId(), "same-kakao-subject"));
+
+        assertThat(rowCount()).isOne();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
+        assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("소비자 카카오 연결 진입 경로는 한 계정에 서로 다른 식별자를 하나만 연결한다")
+    void allowsOnlyOneKakaoIdentityThroughConsumerLinkTransactionBoundary() throws Exception {
+        ConsumerAccount account = consumerAccountRepository.saveAndFlush(
+                ConsumerAccount.create("user@example.com", "{sha256-bcrypt}hash", "사용자"));
+
+        List<Attempt> attempts = runConcurrently(
+                () -> consumerKakaoLinkTransactionService.linkActiveAccount(account.getId(), "first-kakao-subject"),
+                () -> consumerKakaoLinkTransactionService.linkActiveAccount(account.getId(), "second-kakao-subject"));
+
+        assertThat(rowCount()).isOne();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
+        assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("소비자 카카오 가입 진입 경로도 같은 티켓으로 계정과 연결을 하나만 만든다")
+    void createsOnlyOneAccountThroughConsumerSignUpTransactionBoundary() throws Exception {
+        String ticket = kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, "v1", "c".repeat(64));
+
+        List<Attempt> attempts = runConcurrently(
+                () -> signUp(ticket, "first@example.com", "010-1111-1111", "첫번째"),
+                () -> signUp(ticket, "second@example.com", "010-2222-2222", "두번째"));
+
+        assertThat(rowCount()).isOne();
+        assertThat(consumerAccountRepository.count()).isOne();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
+        assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    private KakaoLinkResult signUp(String ticket, String email, String phoneNumber, String nickname) {
+        consumerKakaoAuthService.signUp(new ConsumerKakaoSignUpRequest(ticket, email, phoneNumber, true, nickname));
+        return KakaoLinkResult.CREATED;
     }
 
     private List<Attempt> runConcurrently(ThrowingSupplier first, ThrowingSupplier second) throws Exception {

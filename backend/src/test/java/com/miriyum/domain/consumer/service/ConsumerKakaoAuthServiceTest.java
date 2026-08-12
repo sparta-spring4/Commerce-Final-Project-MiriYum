@@ -1,6 +1,7 @@
 package com.miriyum.domain.consumer.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -25,9 +26,11 @@ import com.miriyum.domain.auth.social.service.KakaoSignUpTicketService;
 import com.miriyum.domain.auth.social.service.KakaoSocialLoginLinkService;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.consumer.dto.auth.ConsumerKakaoSignUpRequest;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -129,6 +132,7 @@ class ConsumerKakaoAuthServiceTest {
                 "sign-up-ticket", "user@example.com", "010-1234-5678", true, "닉네임");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
                 .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v1"));
+        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(true);
         given(nicknamePolicy.normalize("닉네임")).willReturn("닉네임");
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(contactReferenceGenerator.generate()).willReturn("contact-reference");
@@ -149,6 +153,21 @@ class ConsumerKakaoAuthServiceTest {
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
         then(consumerAccountRepository).should().saveAndFlush(any(ConsumerAccount.class));
+    }
+
+    @Test
+    @DisplayName("전환 기간이 끝난 이전 fingerprint 키의 카카오 가입 티켓은 거절한다")
+    void rejectsSignUpTicketWithRetiredFingerprintKeyVersion() {
+        ConsumerKakaoSignUpRequest request = new ConsumerKakaoSignUpRequest(
+                "sign-up-ticket", "user@example.com", "010-1234-5678", true, "닉네임");
+        given(kakaoSignUpTicketService.parse("sign-up-ticket"))
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v1"));
+        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(false);
+
+        assertThatThrownBy(() -> consumerKakaoAuthService.signUp(request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID));
+        then(consumerAccountRepository).shouldHaveNoInteractions();
     }
 
     @Test

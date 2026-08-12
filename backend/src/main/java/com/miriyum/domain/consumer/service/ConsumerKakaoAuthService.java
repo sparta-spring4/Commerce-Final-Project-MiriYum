@@ -29,6 +29,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import org.springframework.dao.DataIntegrityViolationException;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 일반 사용자 카카오 인증을 기존 연결 로그인 또는 카카오 가입 준비 단계로 분기한다. */
@@ -130,10 +131,13 @@ public class ConsumerKakaoAuthService {
         return consumerKakaoLinkTransactionService.linkActiveAccount(accountId, user.providerSubject());
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public KakaoLoginResult signUp(ConsumerKakaoSignUpRequest request) {
         KakaoSignUpTicket ticket = kakaoSignUpTicketService.parse(request.signUpTicket());
         if (ticket.namespace() != TokenNamespace.CONSUMER) {
+            throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
+        }
+        if (!fingerprintGenerator.isAllowedKeyVersion(ticket.fingerprintKeyVersion())) {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
         if (!request.ageConfirmed()) {

@@ -78,6 +78,7 @@ class StoreOperatorKakaoAuthServiceTest {
                 "sign-up-ticket", "operator@example.com", "010-1234-5678", "운영자 이름");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
                 .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint", "v1"));
+        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(true);
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
                 .willAnswer(invocation -> {

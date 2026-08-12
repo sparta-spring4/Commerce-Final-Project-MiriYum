@@ -9,6 +9,7 @@ import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -25,7 +26,7 @@ public class StoreOperatorKakaoLinkTransactionService {
         this.kakaoSocialLoginLinkService = kakaoSocialLoginLinkService;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public KakaoLinkResult linkActiveAccount(Long accountId, String kakaoSubject) {
         StoreOperatorAccount account = storeOperatorAccountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID));

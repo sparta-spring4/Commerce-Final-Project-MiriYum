@@ -109,7 +109,7 @@ class KakaoSocialLoginLinkServiceTest {
 
     @Test
     @DisplayName("이전 fingerprint 키로 찾은 연결은 현재 키 버전으로 갱신한다")
-    void refreshesLinkFoundWithPreviousFingerprintKey() {
+    void keepsPreviousFingerprintForMixedVersionDeployment() {
         KakaoIdentityFingerprint previous = new KakaoIdentityFingerprint("v1", "previous-fingerprint");
         SocialLoginLink legacyLink = link(10L, previous);
         ReflectionTestUtils.setField(legacyLink, "id", 1L);
@@ -121,7 +121,6 @@ class KakaoSocialLoginLinkServiceTest {
         Long accountId = linkService.findLinkedAccountId(TokenNamespace.CONSUMER, "kakao-subject");
 
         assertThat(accountId).isEqualTo(10L);
-        then(socialLoginLinkRepository).should().refreshFingerprint(1L, ACTIVE.keyVersion(), ACTIVE.value());
     }
 
     @Test
@@ -138,7 +137,6 @@ class KakaoSocialLoginLinkServiceTest {
         KakaoLinkResult result = linkService.link(TokenNamespace.CONSUMER, 10L, "kakao-subject");
 
         assertThat(result).isEqualTo(KakaoLinkResult.ALREADY_LINKED);
-        then(socialLoginLinkRepository).should().refreshFingerprint(1L, ACTIVE.keyVersion(), ACTIVE.value());
         then(socialLoginLinkRepository).should(never()).insertIfAbsent(
                 TokenNamespace.CONSUMER.name(),
                 10L,

@@ -27,19 +27,25 @@ public class KakaoOAuthConfiguration {
 
     @Bean
     public KakaoOAuthStateService kakaoOAuthStateService(
-            @Value("${miriyum.kakao.state-secret:${miriyum.jwt.secret}}") String stateSecret,
+            @Value("${miriyum.kakao.state-secret:}") String stateSecret,
+            @Value("${miriyum.jwt.secret}") String jwtSecret,
             @Value("${miriyum.jwt.issuer}") String issuer,
             Clock clock
     ) {
-        return new KakaoOAuthStateService(stateSecret, issuer, clock);
+        return new KakaoOAuthStateService(secretOrFallback(stateSecret, jwtSecret), issuer, clock);
     }
 
     @Bean
     public KakaoSignUpTicketService kakaoSignUpTicketService(
-            @Value("${miriyum.kakao.sign-up-ticket-secret:${miriyum.jwt.secret}}") String ticketSecret,
+            @Value("${miriyum.kakao.sign-up-ticket-secret:}") String ticketSecret,
+            @Value("${miriyum.jwt.secret}") String jwtSecret,
             @Value("${miriyum.jwt.issuer}") String issuer,
             Clock clock
     ) {
-        return new KakaoSignUpTicketService(ticketSecret, issuer, clock);
+        return new KakaoSignUpTicketService(secretOrFallback(ticketSecret, jwtSecret), issuer, clock);
+    }
+
+    private String secretOrFallback(String configuredSecret, String jwtSecret) {
+        return configuredSecret == null || configuredSecret.isBlank() ? jwtSecret : configuredSecret;
     }
 }

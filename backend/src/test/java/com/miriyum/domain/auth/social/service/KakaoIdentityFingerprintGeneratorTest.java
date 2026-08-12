@@ -12,6 +12,17 @@ import org.junit.jupiter.api.Test;
 class KakaoIdentityFingerprintGeneratorTest {
 
     @Test
+    @DisplayName("가입 티켓은 현재 또는 전환 기간의 이전 fingerprint 키 버전만 사용할 수 있다")
+    void allowsOnlyConfiguredFingerprintKeyVersions() {
+        KakaoIdentityFingerprintGenerator generator = new KakaoIdentityFingerprintGenerator(
+                "v2", "active-fingerprint-secret", "v1", "previous-fingerprint-secret");
+
+        assertThat(generator.isAllowedKeyVersion("v2")).isTrue();
+        assertThat(generator.isAllowedKeyVersion("v1")).isTrue();
+        assertThat(generator.isAllowedKeyVersion("v0")).isFalse();
+    }
+
+    @Test
     @DisplayName("현재 키와 이전 키로 카카오 식별자 fingerprint를 각각 생성한다")
     void generatesFingerprintsForActiveAndPreviousKeys() {
         KakaoIdentityFingerprintGenerator generator = new KakaoIdentityFingerprintGenerator(

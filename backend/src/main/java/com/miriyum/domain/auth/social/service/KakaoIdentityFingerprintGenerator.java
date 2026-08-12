@@ -38,6 +38,16 @@ public class KakaoIdentityFingerprintGenerator {
         return previousKey.optional().map(key -> generate(key, providerSubject));
     }
 
+    public boolean isAllowedKeyVersion(String keyVersion) {
+        if (keyVersion == null || keyVersion.isBlank()) {
+            return false;
+        }
+        if (activeKey.requireConfigured().version().equals(keyVersion)) {
+            return true;
+        }
+        return previousKey.optional().map(FingerprintKey::version).filter(keyVersion::equals).isPresent();
+    }
+
     private KakaoIdentityFingerprint generate(FingerprintKey key, String providerSubject) {
         if (providerSubject == null || providerSubject.isBlank()) {
             throw new IllegalArgumentException("providerSubject must not be blank");

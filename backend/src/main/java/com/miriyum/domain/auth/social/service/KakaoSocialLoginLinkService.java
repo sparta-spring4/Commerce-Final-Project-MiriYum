@@ -38,7 +38,6 @@ public class KakaoSocialLoginLinkService {
 
         SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
         if (previousLink != null) {
-            refreshFingerprint(previousLink, active);
             return resultForExisting(previousLink, accountId);
         }
         return findOrCreate(namespace, accountId, active);
@@ -65,7 +64,6 @@ public class KakaoSocialLoginLinkService {
         if (previousLink == null) {
             return null;
         }
-        refreshFingerprint(previousLink, active);
         return previousLink.getAccountId();
     }
 
@@ -73,10 +71,6 @@ public class KakaoSocialLoginLinkService {
         return fingerprintGenerator.generatePrevious(kakaoSubject)
                 .map(previous -> findLink(namespace, previous))
                 .orElse(null);
-    }
-
-    private void refreshFingerprint(SocialLoginLink link, KakaoIdentityFingerprint active) {
-        socialLoginLinkRepository.refreshFingerprint(link.getId(), active.keyVersion(), active.value());
     }
 
     private KakaoLinkResult findOrCreate(

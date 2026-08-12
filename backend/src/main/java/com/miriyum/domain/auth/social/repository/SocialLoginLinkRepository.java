@@ -71,16 +71,4 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
             @Param("fingerprint") String fingerprint
     );
 
-    @Modifying
-    @Query("""
-            update SocialLoginLink link
-            set link.fingerprintKeyVersion = :fingerprintKeyVersion,
-                link.providerSubjectFingerprint = :fingerprint
-            where link.id = :linkId
-            """)
-    void refreshFingerprint(
-            @Param("linkId") Long linkId,
-            @Param("fingerprintKeyVersion") String fingerprintKeyVersion,
-            @Param("fingerprint") String fingerprint
-    );
 }
