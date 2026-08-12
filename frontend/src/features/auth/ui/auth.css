@@ -45,6 +45,54 @@
   color: var(--color-on-surface-variant);
 }
 
+/* 비밀번호 폼과 나란히 놓는 다른 로그인 수단. */
+.auth-social {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* 가로선 사이에 문구를 둔다. 축을 나눠 쓰지 않으면 단축 속성이 세로 여백을 지운다. */
+.auth-social__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block: 0;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.auth-social__divider::before,
+.auth-social__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-outline-variant);
+}
+
+/*
+  카카오 지정 색이라 디자인 토큰을 쓰지 않는다. 배경 #FEE500과 글자
+  rgba(0, 0, 0, 0.85)는 카카오 로그인 버튼 가이드가 고정한 값이다.
+  변형 클래스는 이중 클래스로 명시도를 올려 .mi-button--ghost를 확실히 덮는다.
+*/
+.mi-button.auth-social__kakao {
+  background-color: #fee500;
+  border-color: #fee500;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.mi-button.auth-social__kakao:not(:disabled):hover {
+  background-color: #f2dc00;
+  border-color: #f2dc00;
+}
+
+/* 노란 바탕에서 기본 스피너 색은 거의 보이지 않는다. */
+.auth-social__kakao .mi-spinner {
+  border-color: rgba(0, 0, 0, 0.25);
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+
 /* 헤더의 계정 영역. 두 shell의 상태를 합치지 않고 소비자 shell만 표시한다. */
 .app-header__account {
   display: flex;

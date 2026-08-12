@@ -15,6 +15,8 @@ export type ConsumerSignUpRequest =
 export type LoginRequest = components['schemas']['LoginRequest']
 export type TokenData = components['schemas']['TokenData']
 export type ConsumerAccount = components['schemas']['ConsumerAccount']
+export type KakaoAuthorizationRequest =
+  components['schemas']['KakaoAuthorizationRequest']
 
 export async function signUpConsumer(
   body: ConsumerSignUpRequest,
@@ -32,6 +34,22 @@ export async function signInConsumer(body: LoginRequest): Promise<TokenData> {
     body,
   })
   return response.data
+}
+
+/**
+ * 카카오 인가 주소를 발급받는다.
+ *
+ * 응답과 함께 서버가 5분 수명의 HttpOnly state 쿠키를 심는다. 콜백 검증이
+ * 그 쿠키에 걸려 있으므로 이 호출을 건너뛰고 인가 주소를 직접 만들면 안 된다.
+ */
+export async function createConsumerKakaoAuthorization(
+  body: KakaoAuthorizationRequest,
+): Promise<string> {
+  const response = await authClient(
+    '/api/v1/consumers/auth/kakao/authorizations',
+    { method: 'post', body },
+  )
+  return response.data.authorizationUrl
 }
 
 /**

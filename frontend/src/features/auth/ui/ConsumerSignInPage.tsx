@@ -7,8 +7,10 @@ import { readReturnTo } from '../../../app/returnTo'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { createConsumerKakaoAuthorization } from '../api/consumerAuthApi'
 import { useConsumerAuth } from '../ConsumerAuthProvider'
 import { AuthErrorCode } from '../model/authErrors'
+import { browserRedirect, kakaoRedirectUri } from '../model/kakaoOAuth'
 import { collectErrors, validateEmail } from '../model/validation'
 
 /**
@@ -27,6 +29,10 @@ export function ConsumerSignInPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // 비밀번호 폼과 별개의 수단이므로 오류도 따로 둔다. 한 칸을 공유하면
+  // 어느 쪽을 고치라는 안내인지 사용자가 알 수 없다.
+  const [kakaoError, setKakaoError] = useState<string | null>(null)
+  const [startingKakao, setStartingKakao] = useState(false)
 
   const destination = readReturnTo(location.search) ?? ROUTES.home
 
@@ -60,6 +66,27 @@ export function ConsumerSignInPage() {
       setFormError(signInErrorMessage(error))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  /**
+   * 카카오 인가 화면으로 나간다.
+   *
+   * 이메일 폼 검증을 거치지 않는다. 카카오 로그인에는 이 화면의 입력이 쓰이지 않는다.
+   */
+  async function handleKakaoSignIn() {
+    setStartingKakao(true)
+    setKakaoError(null)
+    try {
+      const authorizationUrl = await createConsumerKakaoAuthorization({
+        redirectUri: kakaoRedirectUri(),
+      })
+      browserRedirect.assign(authorizationUrl)
+      // 이동이 시작됐으므로 진행 상태를 되돌리지 않는다. 되돌리면 화면이 사라지기
+      // 전에 다시 눌러 인가 요청이 두 번 나가고 state 쿠키가 덮어써진다.
+    } catch (error) {
+      setKakaoError(kakaoErrorMessage(error))
+      setStartingKakao(false)
     }
   }
 
@@ -110,6 +137,30 @@ export function ConsumerSignInPage() {
         </Button>
       </form>
 
+      {/*
+        form 밖에 둔다. 안에 두면 카카오 버튼이 폼의 제출 대상으로 묶여
+        Enter 키 동작과 검증 흐름이 두 수단에 섞인다.
+      */}
+      <section className="auth-social" aria-label="다른 방법으로 로그인">
+        <p className="auth-social__divider">
+          <span>또는</span>
+        </p>
+
+        {kakaoError !== null && <Alert tone="error" title={kakaoError} />}
+
+        <Button
+          variant="ghost"
+          block
+          className="auth-social__kakao"
+          loading={startingKakao}
+          onClick={() => {
+            void handleKakaoSignIn()
+          }}
+        >
+          카카오 로그인
+        </Button>
+      </section>
+
       <p className="auth-page__switch">
         아직 계정이 없으신가요? <Link to={ROUTES.consumerSignUp}>회원가입</Link>
       </p>
@@ -147,5 +198,29 @@ function signInErrorMessage(error: unknown): string {
       return '서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.'
     default:
       return '로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.'
+  }
+}
+
+/**
+ * 인가 주소 발급 실패를 안내한다.
+ *
+ * `COMMON_012`는 일시 장애만이 아니다. 서버에서 카카오 연동을 끄거나 콜백 주소가
+ * 허용 목록에 없을 때도 같은 코드가 온다. 두 경우 모두 사용자가 기다린다고
+ * 풀리지 않으므로 "잠시 후 다시"가 아니라 다른 수단을 안내한다.
+ */
+function kakaoErrorMessage(error: unknown): string {
+  if (isNetworkError(error)) {
+    return '서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  }
+  if (!isApiError(error)) {
+    return '카카오 로그인을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  }
+  switch (error.code) {
+    case CommonErrorCode.SERVICE_UNAVAILABLE:
+      return '카카오 로그인을 지금 이용할 수 없습니다. 다른 방법으로 로그인해 주세요.'
+    case CommonErrorCode.TOO_MANY_REQUESTS:
+      return '요청이 많습니다. 잠시 후 다시 시도해 주세요.'
+    default:
+      return '카카오 로그인을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'
   }
 }

@@ -15,6 +15,8 @@ export const CONSUMER_SESSION_CURRENT_PATH =
   '/api/v1/consumers/auth/sessions/current'
 export const CONSUMER_CSRF_PATH = '/api/v1/consumers/auth/csrf-tokens/current'
 export const CONSUMER_ACCOUNTS_PATH = '/api/v1/consumers/auth/accounts'
+export const CONSUMER_KAKAO_AUTHORIZATIONS_PATH =
+  '/api/v1/consumers/auth/kakao/authorizations'
 
 export function tokenData(accessToken = 'consumer-access-token') {
   return { accessToken, tokenType: 'Bearer', expiresIn: 3600 }

@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ROUTES } from '../../../app/routes'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
 import { ConsumerAuthProvider } from '../ConsumerAuthProvider'
 import { AuthErrorCode } from '../model/authErrors'
+import { browserRedirect, KAKAO_CALLBACK_PATH } from '../model/kakaoOAuth'
 import {
+  CONSUMER_KAKAO_AUTHORIZATIONS_PATH,
   CONSUMER_SESSIONS_PATH,
   tokenData,
   unauthenticatedConsumer,
@@ -206,5 +208,112 @@ describe('일반 사용자 로그인 화면', () => {
     ).toHaveAttribute('href', ROUTES.storeOperatorSignIn)
     // 한 폼에서 역할을 골라 다른 shell 권한을 열지 않는다.
     expect(screen.queryByLabelText('계정 유형')).not.toBeInTheDocument()
+  })
+})
+
+describe('일반 사용자 카카오 로그인 시작', () => {
+  // jsdom에는 전체 이동 구현이 없다. 이 이음새만 대체하고 API 호출은 실제로 보낸다.
+  function stubRedirect() {
+    return vi.spyOn(browserRedirect, 'assign').mockImplementation(() => {})
+  }
+
+  function clickKakao() {
+    fireEvent.click(screen.getByRole('button', { name: '카카오 로그인' }))
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('서버가 발급한 인가 주소로 이동하고 콜백 주소를 함께 보낸다', async () => {
+    const assign = stubRedirect()
+    const authorizationUrl =
+      'https://kauth.kakao.com/oauth/authorize?client_id=rest-key&redirect_uri=x&response_type=code&state=signed-state'
+    let requestBody: unknown = null
+    server.use(
+      unauthenticatedConsumer,
+      http.post(CONSUMER_KAKAO_AUTHORIZATIONS_PATH, async ({ request }) => {
+        requestBody = await request.json()
+        return successResponse({ authorizationUrl })
+      }),
+    )
+
+    renderSignInAt()
+    await screen.findByLabelText('이메일')
+
+    clickKakao()
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(authorizationUrl))
+    // 인가 주소는 서버가 만든다. client_id·state를 프론트가 조립하지 않는다.
+    expect(requestBody).toEqual({
+      redirectUri: `${window.location.origin}${KAKAO_CALLBACK_PATH}`,
+    })
+  })
+
+  it('이메일·비밀번호를 비워 둬도 카카오 로그인을 시작한다', async () => {
+    const assign = stubRedirect()
+    server.use(
+      unauthenticatedConsumer,
+      http.post(CONSUMER_KAKAO_AUTHORIZATIONS_PATH, () =>
+        successResponse({ authorizationUrl: 'https://kauth.kakao.com/x' }),
+      ),
+    )
+
+    renderSignInAt()
+    await screen.findByLabelText('이메일')
+
+    // 비밀번호 폼 검증이 다른 로그인 수단을 막으면 안 된다.
+    clickKakao()
+
+    await waitFor(() => expect(assign).toHaveBeenCalled())
+    expect(
+      screen.queryByText('이메일 형식으로 입력해 주세요.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('카카오 로그인을 쓸 수 없는 상태면 이동하지 않고 안내한다', async () => {
+    const assign = stubRedirect()
+    server.use(
+      unauthenticatedConsumer,
+      // 서버는 카카오 연동이 꺼져 있거나 콜백 주소가 허용 목록에 없으면 COMMON_012로 막는다.
+      http.post(CONSUMER_KAKAO_AUTHORIZATIONS_PATH, () =>
+        errorResponse(503, 'COMMON_012', '서비스를 이용할 수 없습니다.'),
+      ),
+    )
+
+    renderSignInAt()
+    await screen.findByLabelText('이메일')
+
+    clickKakao()
+
+    expect(
+      await screen.findByText(
+        '카카오 로그인을 지금 이용할 수 없습니다. 다른 방법으로 로그인해 주세요.',
+      ),
+    ).toBeInTheDocument()
+    expect(assign).not.toHaveBeenCalled()
+    // 실패한 뒤에는 다시 누를 수 있어야 한다.
+    expect(screen.getByRole('button', { name: '카카오 로그인' })).toBeEnabled()
+  })
+
+  it('요청 제한은 이용 불가와 다른 문구로 안내한다', async () => {
+    stubRedirect()
+    server.use(
+      unauthenticatedConsumer,
+      http.post(CONSUMER_KAKAO_AUTHORIZATIONS_PATH, () =>
+        errorResponse(429, 'COMMON_010', '요청이 많습니다.'),
+      ),
+    )
+
+    renderSignInAt()
+    await screen.findByLabelText('이메일')
+
+    clickKakao()
+
+    expect(
+      await screen.findByText(
+        '요청이 많습니다. 잠시 후 다시 시도해 주세요.',
+      ),
+    ).toBeInTheDocument()
   })
 })
