@@ -83,7 +83,7 @@ class ConsumerAuthControllerTest {
     @DisplayName("카카오 인가 주소를 발급하면 같은 브라우저 검증용 state 쿠키를 설정한다")
     void createsKakaoAuthorizationWithStateCookie() throws Exception {
         // when & then
-        mockMvc.perform(post("/api/v1/consumer-auth/kakao/authorizations")
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/authorizations")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 { "redirectUri": "https://app.example.com/auth/kakao/callback" }
@@ -98,7 +98,7 @@ class ConsumerAuthControllerTest {
     @DisplayName("카카오 state 쿠키 없이 콜백을 보내면 외부 카카오 호출 전에 거절한다")
     void rejectsKakaoCallbackWithoutStateCookie() throws Exception {
         // when & then
-        mockMvc.perform(post("/api/v1/consumer-auth/kakao/sessions")
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/sessions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
