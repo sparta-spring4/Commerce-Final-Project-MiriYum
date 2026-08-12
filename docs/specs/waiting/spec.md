@@ -6,7 +6,8 @@
 >
 > 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회
 >
-> 후속 의존성: 활성 대기 팀 종결의 상태 전이와 실행은 Issue #272가 소유한다.
+> 구현 순서: `#271 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
+> 활성 대기 팀 판정과 종결의 상태 전이·실행 결과는 Issue #272가 소유한다.
 
 이 문서는 [현장·원격 웨이팅 정책](../../service-policies/05-waiting.md),
 [사용자와 권한](../../02-users-and-permissions.md),
@@ -47,7 +48,7 @@ aggregate에는 넣지 않는다. production Java, migration, frontend 또는 �
 | `advanceOpenMinutes` | `60` |
 | `version` | `0` |
 
-비활성화 영향 조회도 설정 행이 없으면 `settingVersion=0`을 사용한다. `activeTeamCount`는 조회
+비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
 시점의 활성 팀 수이고, `canCloseActiveTeams`는 Issue #272가 정의하는 종결 가능성 판정 결과다.
 설정 행의 부재를 매장 부재로 해석하지 않는다.
 
@@ -87,7 +88,8 @@ Frontend는 비활성화 전에 `GET .../disable-impact`로 현재 버전과 활
   있어야 한다.
 - `CLOSE_ACTIVE_TEAMS`는 운영자가 활성 팀 종결을 명시적으로 선택했다는 intent다. 어떤
   팀이 영향을 받는지, 상태 전이, 원자성, 알림과 실행 결과는 Issue #272가 소유하며 이
-  계약은 그 세부 동작을 중복 정의하지 않는다.
+  계약은 그 세부 동작을 중복 정의하지 않는다. #271 설정 runtime은 #272가 공개 실행
+  계약과 runtime을 `dev`에 먼저 제공하기 전에는 이 action의 성공을 구현하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
 서버는 명령 시점의 활성 팀과 권한을 다시 확인한다.

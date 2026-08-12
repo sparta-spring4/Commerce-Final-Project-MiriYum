@@ -56,19 +56,9 @@ class WaitingOpenApiContractTest {
                 map(map(schemas.get("WaitingSetting")).get("properties"));
         assertThat(waitingSettingProperties).containsOnlyKeys(
                 "storeId", "enabled", "receptionMode", "advanceOpenMinutes", "version");
-        assertThat(map(waitingSettingProperties.get("enabled")))
-                .containsEntry("default", false);
-        assertThat(map(waitingSettingProperties.get("receptionMode")))
-                .containsEntry("default", "PAUSED");
         assertThat(map(waitingSettingProperties.get("advanceOpenMinutes")))
                 .containsEntry("minimum", 0)
-                .containsEntry("maximum", 180)
-                .containsEntry("default", 60);
-        assertThat(map(waitingSettingProperties.get("version")))
-                .containsEntry("default", 0);
-
-        assertThat(list(map(waitingSettingProperties.get("receptionMode")).get("enum")))
-                .containsExactly("AUTO", "MANUAL", "PAUSED");
+                .containsEntry("maximum", 180);
 
         Map<String, Object> updateProperties =
                 map(map(schemas.get("WaitingSettingUpdateRequest")).get("properties"));
@@ -78,18 +68,73 @@ class WaitingOpenApiContractTest {
                 "receptionMode",
                 "advanceOpenMinutes",
                 "disableAction");
-        assertThat(list(map(updateProperties.get("receptionMode")).get("enum")))
-                .containsExactly("AUTO", "MANUAL", "PAUSED");
         assertThat(map(updateProperties.get("advanceOpenMinutes")))
                 .containsEntry("minimum", 0)
                 .containsEntry("maximum", 180);
 
-        assertThat(list(map(updateProperties.get("disableAction")).get("enum")))
-                .containsExactly("KEEP_ACTIVE", "CLOSE_ACTIVE_TEAMS");
-
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void waitingSchemasReferenceCanonicalEnumsWithoutInlineCopies() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+
+        assertThat(list(map(schemas.get("WaitingReceptionMode")).get("enum")))
+                .containsExactly("AUTO", "MANUAL", "PAUSED");
+        assertThat(list(map(schemas.get("WaitingDisableAction")).get("enum")))
+                .containsExactly("KEEP_ACTIVE", "CLOSE_ACTIVE_TEAMS");
+
+        Map<String, Object> settingProperties =
+                map(map(schemas.get("WaitingSetting")).get("properties"));
+        assertThat(map(settingProperties.get("receptionMode")))
+                .containsOnlyKeys("$ref")
+                .containsEntry("$ref", "#/components/schemas/WaitingReceptionMode");
+
+        Map<String, Object> updateProperties =
+                map(map(schemas.get("WaitingSettingUpdateRequest")).get("properties"));
+        assertThat(map(updateProperties.get("receptionMode")))
+                .containsOnlyKeys("$ref")
+                .containsEntry("$ref", "#/components/schemas/WaitingReceptionMode");
+        assertThat(map(updateProperties.get("disableAction")))
+                .containsOnlyKeys("$ref")
+                .containsEntry("$ref", "#/components/schemas/WaitingDisableAction");
+    }
+
+    @Test
+    void waitingResponsesExposeTheCurrentSettingVersionUnderOneName() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+
+        Map<String, Object> settingProperties =
+                map(map(schemas.get("WaitingSetting")).get("properties"));
+        Map<String, Object> impactProperties =
+                map(map(schemas.get("WaitingDisableImpact")).get("properties"));
+
+        assertThat(settingProperties).containsKey("version");
+        assertThat(impactProperties)
+                .containsKey("version")
+                .doesNotContainKey("settingVersion");
+        assertThat(map(impactProperties.get("version")))
+                .containsEntry("type", "integer")
+                .containsEntry("format", "int64")
+                .containsEntry("minimum", 0);
+    }
+
+    @Test
+    void requiredWaitingSettingResponseFieldsDoNotDeclareDefaults() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> setting = map(schemas.get("WaitingSetting"));
+        Map<String, Object> properties = map(setting.get("properties"));
+
+        assertThat(list(setting.get("required")))
+                .contains("enabled", "receptionMode", "advanceOpenMinutes", "version");
+        assertThat(List.of("enabled", "receptionMode", "advanceOpenMinutes", "version"))
+                .allSatisfy(property ->
+                        assertThat(map(properties.get(property))).doesNotContainKey("default"));
     }
 
     @Test

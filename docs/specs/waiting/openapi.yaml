@@ -132,7 +132,9 @@ components:
     WaitingDisableAction:
       type: string
       enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
-      description: 비활성화 시 기존 활성 팀을 유지하거나 종결하도록 요청하는 명시적 intent
+      description: >-
+        비활성화 시 기존 활성 팀을 유지하거나 종결하도록 요청하는 명시적 intent.
+        enabled=false인 요청에서만 허용하며 활성 팀이 있으면 필수다.
     WaitingSetting:
       type: object
       additionalProperties: false
@@ -147,23 +149,17 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
         enabled:
           type: boolean
-          default: false
         receptionMode:
           $ref: "#/components/schemas/WaitingReceptionMode"
-          type: string
-          enum: [AUTO, MANUAL, PAUSED]
-          default: PAUSED
         advanceOpenMinutes:
           type: integer
           minimum: 0
           maximum: 180
-          default: 60
           description: 자동 접수를 영업 시작보다 먼저 여는 시간(분)
         version:
           type: integer
           format: int64
           minimum: 0
-          default: 0
           description: 설정이 없으면 0이며 성공한 새 교체마다 단조 증가한다.
       allOf:
         - if:
@@ -193,17 +189,12 @@ components:
           type: boolean
         receptionMode:
           $ref: "#/components/schemas/WaitingReceptionMode"
-          type: string
-          enum: [AUTO, MANUAL, PAUSED]
         advanceOpenMinutes:
           type: integer
           minimum: 0
           maximum: 180
         disableAction:
           $ref: "#/components/schemas/WaitingDisableAction"
-          type: string
-          enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
-          description: 비활성화 명령에서만 허용하며 활성 팀이 있으면 필수다.
       allOf:
         - if:
             properties:
@@ -227,16 +218,17 @@ components:
       additionalProperties: false
       required:
         - storeId
-        - settingVersion
+        - version
         - activeTeamCount
         - canCloseActiveTeams
       properties:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
-        settingVersion:
+        version:
           type: integer
           format: int64
           minimum: 0
+          description: 설정 조회·수정 응답과 같은 현재 설정 버전
         activeTeamCount:
           type: integer
           format: int64
