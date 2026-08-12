@@ -1,5 +1,6 @@
 import { isApiError, isNetworkError } from '../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../shared/api/envelope'
+import { AuthErrorCode } from '../../auth/model/authErrors'
 import { StoreErrorCode } from '../../store-operator/model/storeErrors'
 
 /**
@@ -46,7 +47,11 @@ export function reservationOpsErrorMessage(error: unknown): string {
     case ReservationErrorCode.POLICY_VERSION_CHANGED:
       return '조회 후 정책·수용량 버전이 바뀌었습니다. 최신 상태를 다시 확인해 주세요.'
     case ReservationErrorCode.INVALID_STATE:
-      return '현재 예약 상태에서는 처리할 수 없습니다.'
+      return '현재 예약 상태에서는 처리할 수 없습니다. 목록을 새로 조회해 주세요.'
+    case ReservationErrorCode.CANCELLATION_NOT_ALLOWED:
+      return '지금은 취소 정책상 이 예약을 취소할 수 없습니다.'
+    case AuthErrorCode.ACCOUNT_RESTRICTED:
+      return '현재 계정 상태로는 예약을 처리할 수 없습니다. 고객센터에 문의해 주세요.'
     case StoreErrorCode.NOT_FOUND:
       return '매장을 찾을 수 없습니다.'
     case StoreErrorCode.ACCESS_DENIED:

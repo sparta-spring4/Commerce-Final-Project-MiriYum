@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { storeOperatorKeys, useStoreOperatorAuth } from '../../store-operator'
 import type {
   CapacityBucketRequest,
@@ -73,6 +74,95 @@ export function useStoreReservation(storeId: string, reservationId: string) {
       )
       return response.data
     },
+  })
+}
+
+/**
+ * 예약 상태를 바꾼 뒤 화면들을 맞춘다.
+ *
+ * 응답이 곧 확정된 예약이므로 상세 캐시는 그 값으로 바로 채운다. 목록은 조건별
+ * 페이지가 여러 개라 어느 페이지에 있었는지 알 수 없으므로 전부 무효화한다.
+ * 취소는 자리를 되돌리므로 공개 예약 가용성도 바뀐다.
+ */
+function refreshAfterReservationChange(
+  queryClient: QueryClient,
+  storeId: string,
+  reservation: ReservationDetail,
+): void {
+  queryClient.setQueryData(
+    storeOperatorKeys.reservation(storeId, reservation.reservationId),
+    reservation,
+  )
+  void queryClient.invalidateQueries({
+    queryKey: storeOperatorKeys.reservationPages(storeId),
+  })
+  void queryClient.invalidateQueries({ queryKey: ['store-search'] })
+}
+
+/**
+ * 매장 사유 예약 취소.
+ *
+ * 사유가 필수다. 계약이 `minLength: 1`을 요구하고, 취소 이력에 남아 고객에게도
+ * 설명되는 값이라 화면이 임의 문구로 채우지 않는다.
+ */
+export function useCancelStoreReservation(
+  storeId: string,
+  reservationId: string,
+) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      reason: string
+      idempotencyKey: string
+    }): Promise<ReservationDetail> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations',
+        {
+          method: 'post',
+          pathParams: { storeId, reservationId },
+          body: { reason: variables.reason },
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (reservation) =>
+      refreshAfterReservationChange(queryClient, storeId, reservation),
+  })
+}
+
+/**
+ * 예약 방문 완료.
+ *
+ * 계약의 본문은 필드가 없는 명령이다. 빈 객체를 보낸다. 본문을 생략하면
+ * Content-Type이 붙지 않아 서버가 415로 거절한다.
+ */
+export function useFulfillStoreReservation(
+  storeId: string,
+  reservationId: string,
+) {
+  const { apiClient } = useStoreOperatorAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (variables: {
+      idempotencyKey: string
+    }): Promise<ReservationDetail> => {
+      const response = await apiClient(
+        '/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments',
+        {
+          method: 'post',
+          pathParams: { storeId, reservationId },
+          body: {},
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
+      return response.data
+    },
+    onSuccess: (reservation) =>
+      refreshAfterReservationChange(queryClient, storeId, reservation),
   })
 }
 

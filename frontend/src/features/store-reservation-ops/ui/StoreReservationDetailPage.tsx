@@ -10,6 +10,7 @@ import {
 } from '../../store-operator'
 import { useStoreReservation } from '../api/queries'
 import { reservationOpsErrorMessage } from '../model/errors'
+import { ReservationCommandPanel } from './ReservationCommandPanel'
 import {
   CANCELLED_BY_LABEL,
   RESERVATION_STATUS_LABEL,
@@ -17,11 +18,11 @@ import {
 } from '../model/types'
 
 /**
- * 매장 예약 상세.
+ * 매장 예약 상세와 처리.
  *
- * 조회 전용이다. 취소·방문 완료 명령은 이 Issue(#193) 범위 밖이므로 버튼을
- * 만들지 않는다. 상태별로 허용되는 명령을 화면이 추측해 노출하면, 실제로 서버가
- * 거절하는 행동을 운영자에게 약속하게 된다.
+ * 조회에 이어 취소·방문 완료까지 여기서 끝낸다. 상태별로 실제 성립하는 명령만
+ * 열어 둔다. 화면이 서버 규칙을 추측해 버튼을 열면, 눌러도 거절되는 행동을
+ * 운영자에게 약속하게 된다.
  */
 export function StoreReservationDetailPage() {
   const { storeId = '', reservationId = '' } = useParams<{
@@ -57,14 +58,18 @@ export function StoreReservationDetailPage() {
         />
       )}
 
-      {query.isSuccess && <ReservationFacts reservation={query.data} />}
+      {query.isSuccess && (
+        <ReservationFacts storeId={storeId} reservation={query.data} />
+      )}
     </>
   )
 }
 
 function ReservationFacts({
+  storeId,
   reservation,
 }: {
+  storeId: string
   reservation: ReservationDetail
 }) {
   /**
@@ -169,6 +174,8 @@ function ReservationFacts({
           </div>
         )}
       </SectionCard>
+
+      <ReservationCommandPanel storeId={storeId} reservation={reservation} />
 
       {reservation.status === 'CANCELLED' && (
         <SectionCard title="취소 정보">

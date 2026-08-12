@@ -29,8 +29,9 @@ const SORTS: readonly ReservationSort[] = [
 /**
  * 매장 예약 목록.
  *
- * 이 Issue(#193)는 조회까지만 확정한다. 취소·방문 완료 명령은 예약 도메인이
- * 소유하며 목록에 행동 버튼을 미리 만들어 두지 않는다.
+ * 취소·방문 완료는 되돌릴 수 없고 취소는 사유까지 요구한다. 목록 행에서 한 번의
+ * 클릭으로 실행하지 않고 상세에서 처리한다. 대신 처리할 수 있는 예약은 행에서
+ * 바로 알아볼 수 있게 링크 문구를 "처리"로 둔다.
  *
  * 계약의 목록 항목에는 고객 이름·연락처가 없다. 시안에 있더라도 없는 필드를
  * 만들어 표시하지 않는다.
@@ -194,8 +195,9 @@ function ReservationTable({
                     storeId,
                     reservationId: item.reservationId,
                   })}
+                  aria-label={`예약 ${item.reservationId} ${item.status === 'CONFIRMED' ? '처리' : '상세'}`}
                 >
-                  상세
+                  {item.status === 'CONFIRMED' ? '처리' : '상세'}
                 </Link>
               </td>
             </tr>

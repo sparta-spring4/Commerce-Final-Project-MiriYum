@@ -28,9 +28,17 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.menus(storeId), menuId] as const,
   reservations: (storeId: string) =>
     [...storeOperatorKeys.store(storeId), 'reservations'] as const,
+  /**
+   * 목록 페이지 전체를 가리키는 키.
+   *
+   * 상세를 함께 무효화하지 않으려고 한 단계를 더 둔다. `reservations`로 무효화하면
+   * 방금 응답으로 채운 상세까지 다시 불러 화면이 잠깐 이전 상태로 돌아간다.
+   */
+  reservationPages: (storeId: string) =>
+    [...storeOperatorKeys.reservations(storeId), 'page'] as const,
   /** 조회 조건은 키에 그대로 담는다. 조건이 다르면 다른 캐시 항목이다. */
   reservationPage: (storeId: string, query: object) =>
-    [...storeOperatorKeys.reservations(storeId), 'page', query] as const,
+    [...storeOperatorKeys.reservationPages(storeId), query] as const,
   reservation: (storeId: string, reservationId: string) =>
     [...storeOperatorKeys.reservations(storeId), reservationId] as const,
 }

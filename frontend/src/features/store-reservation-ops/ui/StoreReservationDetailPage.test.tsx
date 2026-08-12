@@ -141,7 +141,7 @@ describe('매장 예약 상세 화면', () => {
     expect(await screen.findByText('예약을 찾을 수 없습니다.')).toBeInTheDocument()
   })
 
-  it('이번 범위에 없는 취소·방문 완료 버튼을 만들지 않는다', async () => {
+  it('확정 예약에는 취소·방문 완료 처리를 함께 연다', async () => {
     server.use(
       authenticatedOperator(),
       http.get(DETAIL_PATH, () => successResponse(detail())),
@@ -150,9 +150,9 @@ describe('매장 예약 상세 화면', () => {
     renderPage()
     await screen.findByText('2026-09-01 18:30')
 
-    expect(screen.queryByRole('button', { name: /취소/ })).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: /방문 완료/ }),
-    ).not.toBeInTheDocument()
+      screen.getByRole('button', { name: '방문 완료 처리' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '예약 취소' })).toBeInTheDocument()
   })
 })
