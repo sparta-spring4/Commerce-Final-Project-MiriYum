@@ -159,7 +159,8 @@ public class WaitingClosureService {
             String commandId = "waiting-closure:" + job.getId() + ':' + item.getId();
             auditRepository.save(WaitingTransitionAudit.record(team.getId(), WaitingActorType.SYSTEM, null,
                     before, team.getStatus(), expected, "CLOSED_BY_STORE", commandId, now, now));
-            eventRepository.save(WaitingStatusEvent.pending(team.getId(), team.getVersion(), team.getStatus(), now));
+            eventRepository.save(WaitingStatusEvent.pending(
+                    team.getId(), team.getVersion() + 1L, team.getStatus(), now));
         }
         item.complete(now);
         reconcile(job, now);

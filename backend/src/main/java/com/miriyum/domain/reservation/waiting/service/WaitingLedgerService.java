@@ -254,7 +254,7 @@ public class WaitingLedgerService {
         ));
         eventRepository.save(WaitingStatusEvent.pending(
                 team.getId(),
-                team.getVersion(),
+                team.getVersion() + 1L,
                 team.getStatus(),
                 occurredAt
         ));
