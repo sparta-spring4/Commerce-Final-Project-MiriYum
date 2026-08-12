@@ -33,8 +33,8 @@ class WaitingTransitionAuditTest {
     }
 
     @Test
-    @DisplayName("일반 전이 감사는 현재 버전에서 정확히 하나 증가한다")
-    void recordsTransitionWithSingleVersionIncrement() {
+    @DisplayName("지연 생성된 일반 전이 감사도 현재 버전에서 정확히 하나 증가한다")
+    void recordsDelayedTransitionWithSingleVersionIncrement() {
         WaitingTransitionAudit audit = WaitingTransitionAudit.record(
                 11L,
                 WaitingActorType.STORE_OPERATOR,
@@ -44,8 +44,8 @@ class WaitingTransitionAuditTest {
                 0L,
                 "CALL",
                 "call-command",
-                CREATED_AT.plusSeconds(60),
-                CREATED_AT
+                CREATED_AT,
+                CREATED_AT.plusSeconds(60)
         );
 
         assertThat(audit)
@@ -88,8 +88,8 @@ class WaitingTransitionAuditTest {
     }
 
     @Test
-    @DisplayName("감사 발생 시각은 저장 생성 시각보다 이를 수 없다")
-    void rejectsOccurredAtBeforeCreatedAt() {
+    @DisplayName("감사 발생 시각은 저장 생성 시각보다 늦을 수 없다")
+    void rejectsOccurredAtAfterCreatedAt() {
         assertThatThrownBy(() -> WaitingTransitionAudit.record(
                 11L,
                 WaitingActorType.SYSTEM,
@@ -99,7 +99,7 @@ class WaitingTransitionAuditTest {
                 1L,
                 "NO_SHOW",
                 "rollback-time-command",
-                CREATED_AT.minusNanos(1),
+                CREATED_AT.plusNanos(1),
                 CREATED_AT
         )).isInstanceOf(IllegalArgumentException.class);
     }

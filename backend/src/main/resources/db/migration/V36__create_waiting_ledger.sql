@@ -273,7 +273,7 @@ CREATE TABLE waiting_transition_audits (
     CONSTRAINT ck_waiting_transition_audits_reason
         CHECK (CHAR_LENGTH(TRIM(reason)) BETWEEN 1 AND 255),
     CONSTRAINT ck_waiting_transition_audits_time
-        CHECK (occurred_at >= created_at),
+        CHECK (occurred_at <= created_at),
     INDEX idx_waiting_transition_audits_team (
         waiting_team_id,
         waiting_transition_audit_id

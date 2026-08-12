@@ -98,8 +98,8 @@ public class WaitingTransitionAudit {
         if (beforeStatus != null && expectedVersion < 0L) {
             throw new IllegalArgumentException("transition expectedVersion must not be negative");
         }
-        if (occurredAt.isBefore(createdAt)) {
-            throw new IllegalArgumentException("occurredAt must not be before createdAt");
+        if (occurredAt.isAfter(createdAt)) {
+            throw new IllegalArgumentException("occurredAt must not be after createdAt");
         }
         this.waitingTeamId = waitingTeamId;
         this.actorType = actorType;

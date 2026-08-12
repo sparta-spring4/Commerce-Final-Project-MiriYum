@@ -251,7 +251,7 @@ class WaitingMigrationTest {
             insertAudit(connection, "creation-audit", null, "WAITING", -1L, 0L,
                     createdAt, createdAt);
             insertAudit(connection, "transition-audit", "WAITING", "CALLED", 0L, 1L,
-                    createdAt.plusSeconds(60), createdAt);
+                    createdAt, createdAt.plusSeconds(60));
 
             assertThatThrownBy(() -> insertAudit(
                     connection, "invalid-creation-audit", null, "WAITING", 0L, 1L,
@@ -260,12 +260,12 @@ class WaitingMigrationTest {
                     .hasMessageContaining("ck_waiting_transition_audits_versions");
             assertThatThrownBy(() -> insertAudit(
                     connection, "invalid-transition-audit", "WAITING", "CALLED", -1L, 0L,
-                    createdAt.plusSeconds(60), createdAt
+                    createdAt, createdAt.plusSeconds(60)
             )).isInstanceOf(SQLException.class)
                     .hasMessageContaining("ck_waiting_transition_audits_versions");
             assertThatThrownBy(() -> insertAudit(
-                    connection, "rollback-audit-time", "WAITING", "CALLED", 0L, 1L,
-                    createdAt.minusSeconds(1), createdAt
+                    connection, "future-audit-time", "WAITING", "CALLED", 0L, 1L,
+                    createdAt.plusSeconds(1), createdAt
             )).isInstanceOf(SQLException.class)
                     .hasMessageContaining("ck_waiting_transition_audits_time");
         }
