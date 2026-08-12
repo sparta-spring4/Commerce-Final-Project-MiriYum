@@ -21,6 +21,8 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me"
   /api/v1/consumers/me/contact:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
+  /api/v1/consumers/me/notifications:
+    $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/reservations:
