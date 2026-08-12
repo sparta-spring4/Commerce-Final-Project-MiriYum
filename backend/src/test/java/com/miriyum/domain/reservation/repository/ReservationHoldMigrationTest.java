@@ -295,6 +295,48 @@ class ReservationHoldMigrationTest {
     }
 
     @Test
+    void rejectsTimeSnapshotOffsetsOutsideZoneOffsetRange() {
+        ReservationHold hold = holdRepository.saveAndFlush(hold());
+
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET start_offset_seconds = 64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET start_offset_seconds = -64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET service_end_offset_seconds = 64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET service_end_offset_seconds = -64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET occupancy_end_offset_seconds = 64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+        assertConstraintViolation(
+                "UPDATE reservation_holds SET occupancy_end_offset_seconds = -64801 "
+                        + "WHERE reservation_hold_id = ?",
+                "ck_reservation_holds_time_snapshot",
+                hold.getId()
+        );
+    }
+
+    @Test
     void rejectsMissingActorIdForNonSystemTransitionAudit() {
         ReservationHold hold = holdRepository.saveAndFlush(hold());
 

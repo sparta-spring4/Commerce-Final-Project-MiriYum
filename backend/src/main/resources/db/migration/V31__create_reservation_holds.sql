@@ -49,6 +49,9 @@ CREATE TABLE reservation_holds (
             CHAR_LENGTH(TRIM(time_zone_id_snapshot)) BETWEEN 1 AND 64
             AND reservation_time_policy_store_id = store_id
             AND reservation_policy_version > 0
+            AND start_offset_seconds BETWEEN -64800 AND 64800
+            AND service_end_offset_seconds BETWEEN -64800 AND 64800
+            AND occupancy_end_offset_seconds BETWEEN -64800 AND 64800
             AND slot_interval_minutes BETWEEN 1 AND 1440
             AND service_duration_minutes BETWEEN 1 AND 1440
             AND turnover_duration_minutes BETWEEN 0 AND 1440
