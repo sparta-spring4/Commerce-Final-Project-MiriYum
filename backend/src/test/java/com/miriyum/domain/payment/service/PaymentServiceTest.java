@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
@@ -50,6 +51,36 @@ class PaymentServiceTest {
                 providerClient,
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
+    }
+
+    @Test
+    @DisplayName("caller transaction이 없는 준비 경합은 저장된 동일 결과를 재생한다")
+    void replaysPreparationRaceWithoutCallerTransaction() {
+        PrepareReservationDepositCommand command = new PrepareReservationDepositCommand(
+                "123",
+                11L,
+                30_000L,
+                "KRW",
+                NOW.plusSeconds(600),
+                7L,
+                "550e8400-e29b-41d4-a716-446655440123"
+        );
+        PaymentPreparation expected = new PaymentPreparation(
+                PAYMENT_ID,
+                PORTONE_PAYMENT_ID,
+                "MiriYum 예약금 123",
+                30_000L,
+                "KRW",
+                command.sourceExpiresAt(),
+                PaymentStatus.READY
+        );
+        when(transactions.prepare(command, NOW))
+                .thenThrow(new DataIntegrityViolationException("uk_payments_source"));
+        when(transactions.replayPreparation(command)).thenReturn(expected);
+
+        PaymentPreparation result = paymentService.prepareReservationDeposit(command);
+
+        assertThat(result).isEqualTo(expected);
     }
 
     @Test

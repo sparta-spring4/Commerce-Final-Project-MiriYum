@@ -2,9 +2,12 @@ package com.miriyum.domain.payment.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,10 +53,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -90,7 +95,7 @@ class PaymentPersistenceIT {
     @Autowired
     private PaymentService paymentService;
 
-    @Autowired
+    @MockitoSpyBean
     private PaymentTransactionService transactions;
 
     @Autowired
@@ -225,6 +230,34 @@ class PaymentPersistenceIT {
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(PaymentErrorCode.SOURCE_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("caller transaction의 준비 경합은 로컬 replay 없이 전체 재시도로 넘긴다")
+    void failsPreparationRaceWithCallerTransactionWithoutLocalReplay() {
+        PrepareReservationDepositCommand command = prepareCommand("154", 30_000L);
+        PaymentPreparation misleadingReplay = new PaymentPreparation(
+                "900000000000000154",
+                "payment-reservation-900000000000000154",
+                "MiriYum 예약금 154",
+                30_000L,
+                "KRW",
+                command.sourceExpiresAt(),
+                PaymentStatus.READY
+        );
+        doThrow(new DataIntegrityViolationException("uk_payments_source"))
+                .when(transactions).prepare(eq(command), any(Instant.class));
+        doReturn(misleadingReplay).when(transactions).replayPreparation(command);
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                ignored -> paymentService.prepareReservationDeposit(command)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM payments", Long.class))
+                .isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_ledger_entries", Long.class)).isZero();
     }
 
     @Test

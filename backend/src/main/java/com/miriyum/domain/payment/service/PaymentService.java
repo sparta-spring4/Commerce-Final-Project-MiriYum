@@ -12,12 +12,14 @@ import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Payment의 유일한 공개 use-case Service이며 외부 호출을 DB transaction 밖에서 수행한다. */
 @Service
@@ -38,9 +40,14 @@ public class PaymentService {
     }
 
     public PaymentPreparation prepareReservationDeposit(PrepareReservationDepositCommand command) {
+        boolean callerTransactionActive =
+                TransactionSynchronizationManager.isActualTransactionActive();
         try {
             return transactions.prepare(command, now());
         } catch (DataIntegrityViolationException race) {
+            if (callerTransactionActive) {
+                throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
             return transactions.replayPreparation(command);
         }
     }
