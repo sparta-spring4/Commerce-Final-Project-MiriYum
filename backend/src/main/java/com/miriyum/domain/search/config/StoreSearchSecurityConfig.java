@@ -4,6 +4,9 @@ import com.miriyum.domain.auth.ratelimit.RateLimiter;
 import tools.jackson.databind.ObjectMapper;
 import com.miriyum.domain.auth.jwt.JwtAccessDeniedHandler;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
+import com.miriyum.domain.auth.jwt.JwtAuthenticationFilter;
+import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -24,8 +27,14 @@ public class StoreSearchSecurityConfig {
     public SecurityFilterChain storeSearchFilterChain(
             HttpSecurity http,
             ObjectMapper objectMapper,
-            RateLimiter rateLimiter
+            RateLimiter rateLimiter,
+            JwtTokenProvider jwtTokenProvider
     ) throws Exception {
+        JwtAuthenticationFilter jwtAuthenticationFilter =
+                new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.CONSUMER);
+        OptionalConsumerAuthenticationFilter optionalAuthenticationFilter =
+                new OptionalConsumerAuthenticationFilter(
+                        new JwtAuthenticationEntryPoint(objectMapper));
         http
                 .securityMatcher("/api/v1/stores", "/api/v1/stores/**")
                 .csrf(AbstractHttpConfigurer::disable)
@@ -41,10 +50,19 @@ public class StoreSearchSecurityConfig {
                                 "/api/v1/stores/{storeId}/menus",
                                 "/api/v1/stores/{storeId}/menu-hold-availability")
                         .permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search")
+                        .permitAll()
                         .anyRequest().denyAll())
                 .addFilterBefore(
                         new StoreSearchRateLimitFilter(rateLimiter, objectMapper),
-                        UsernamePasswordAuthenticationFilter.class);
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(
+                        jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(
+                        optionalAuthenticationFilter,
+                        JwtAuthenticationFilter.class);
         return http.build();
     }
 }

@@ -1862,10 +1862,11 @@ public class ReservationService {
         String primaryProperty = switch (order) {
             case CREATED_AT_DESC, CREATED_AT_ASC -> "createdAt";
             case SERVICE_DATE_DESC, SERVICE_DATE_ASC -> "timeSnapshot.serviceDate";
+            case START_AT_DESC, START_AT_ASC -> "timeSnapshot.startAt";
         };
         Sort.Direction direction = switch (order) {
-            case CREATED_AT_DESC, SERVICE_DATE_DESC -> Sort.Direction.DESC;
-            case CREATED_AT_ASC, SERVICE_DATE_ASC -> Sort.Direction.ASC;
+            case CREATED_AT_DESC, SERVICE_DATE_DESC, START_AT_DESC -> Sort.Direction.DESC;
+            case CREATED_AT_ASC, SERVICE_DATE_ASC, START_AT_ASC -> Sort.Direction.ASC;
         };
 
         return Sort.by(

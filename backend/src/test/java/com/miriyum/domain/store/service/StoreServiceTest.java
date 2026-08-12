@@ -6,16 +6,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 
+import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreUpdateRequest;
-import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.GeocodingStatus;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.model.StoreGeocodingCandidate;
+import com.miriyum.domain.store.model.StoreGeocodingResult;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
@@ -87,7 +92,14 @@ class StoreServiceTest {
     @Mock
     private IdempotencyExecutor idempotencyExecutor;
 
+    @Mock
+    private StoreGeocodingPort geocodingPort;
+
+    @Mock
+    private StoreCommandTransactionExecutor transactionExecutor;
+
     private ObjectMapper objectMapper;
+    private StoreGeocodingValidator geocodingValidator;
     private StoreService storeService;
     private MenuTransactionFacade menuTransactionFacade;
 
@@ -96,12 +108,26 @@ class StoreServiceTest {
         objectMapper = JsonMapper.builder()
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
+        geocodingValidator = new StoreGeocodingValidator();
+        lenient().when(geocodingPort.geocode(any())).thenAnswer(invocation ->
+                geocodingResult(invocation.getArgument(0), "서울"));
+        lenient().when(transactionExecutor.execute(any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(0);
+            return work.get();
+        });
+        storeService = new StoreService(
+                operatorAccountService,
+                storeRepository,
+                catalogPolicy,
+                geocodingPort,
+                geocodingValidator,
+                transactionExecutor,
+                idempotencyExecutor,
+                objectMapper,
+                FIXED_CLOCK);
         menuTransactionFacade = new MenuTransactionFacade(
                 new StoreTransactionEligibilityService(storeRepository),
                 menuRepository);
-        storeService = new StoreService(
-                operatorAccountService, storeRepository, catalogPolicy,
-                idempotencyExecutor, objectMapper, FIXED_CLOCK);
     }
 
     @Test
@@ -128,9 +154,20 @@ class StoreServiceTest {
                 .isEqualTo(LocalDateTime.of(2026, 7, 31, 12, 0));
         assertThat(savedStore.get().getRequiredTermsVersion())
                 .isEqualTo("STORE_ONBOARDING_REQUIRED_TERMS_V1");
+        assertThat(savedStore.get().getGeocodingStatus())
+                .isEqualTo(GeocodingStatus.VERIFIED);
+        assertThat(savedStore.get().getAddressVersion()).isEqualTo(1L);
+        assertThat(savedStore.get().getGeocodingAddressVersion()).isEqualTo(1L);
         then(operatorAccountService).should().getMe(OPERATOR_ID);
         then(catalogPolicy).should().validate("CAFE_BAKERY", List.of("DATE"));
         then(storeRepository).should().saveAndFlush(any(Store.class));
+        InOrder callOrder = inOrder(
+                geocodingPort,
+                transactionExecutor,
+                idempotencyExecutor);
+        callOrder.verify(geocodingPort).geocode("서울시 중구");
+        callOrder.verify(transactionExecutor).execute(any());
+        callOrder.verify(idempotencyExecutor).execute(any(), any());
     }
 
     @Test
@@ -516,6 +553,160 @@ class StoreServiceTest {
         assertThat(store.getTagCodes()).containsExactly("QUIET");
         assertThat(store.isReservationEnabled()).isFalse();
         then(catalogPolicy).should().validate("CAFE_BAKERY", List.of("QUIET"));
+        then(geocodingPort).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void addressOnlyUpdateGeocodesWithCurrentRegion() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, null, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.saveAndFlush(store)).willReturn(store);
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request);
+
+        assertThat(store.getRegion()).isEqualTo(Region.SEOUL);
+        assertThat(store.getAddress()).isEqualTo("서울 중구 세종대로 110");
+        assertThat(store.getAddressVersion()).isEqualTo(2L);
+        assertThat(store.getGeocodingStatus()).isEqualTo(GeocodingStatus.VERIFIED);
+    }
+
+    @Test
+    void regionOnlyUpdateGeocodesCurrentAddressWithRequestedRegion() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, Region.BUSAN, null,
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.saveAndFlush(store)).willReturn(store);
+        given(geocodingPort.geocode("서울시 중구"))
+                .willReturn(geocodingResult("서울시 중구", "부산"));
+        runBusinessWorkOnExecute();
+
+        storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request);
+
+        assertThat(store.getRegion()).isEqualTo(Region.BUSAN);
+        assertThat(store.getAddress()).isEqualTo("서울시 중구");
+        assertThat(store.getAddressVersion()).isEqualTo(2L);
+        assertThat(store.getGeocodingStatus()).isEqualTo(GeocodingStatus.VERIFIED);
+    }
+
+    @Test
+    void staleLocationPreflightIsRejectedBeforeMutation() {
+        Store snapshot = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(snapshot, "id", STORE_ID);
+        Store locked = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(locked, "id", STORE_ID);
+        ReflectionTestUtils.setField(locked, "region", Region.BUSAN);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, null, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(snapshot));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(locked));
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        assertThat(locked.getAddress()).isEqualTo("서울시 중구");
+        assertThat(locked.getAddressVersion()).isEqualTo(1L);
+        then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void bothLocationFieldsRejectInterveningAddressVersionChange() {
+        Store snapshot = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(snapshot, "id", STORE_ID);
+        Store locked = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(locked, "id", STORE_ID);
+        ReflectionTestUtils.setField(locked, "addressVersion", 2L);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, Region.SEOUL, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        lenient().when(storeRepository.findById(STORE_ID)).thenReturn(Optional.of(snapshot));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(locked));
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        assertThat(locked.getAddress()).isEqualTo("서울시 중구");
+        assertThat(locked.getAddressVersion()).isEqualTo(2L);
+        then(storeRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    void explicitAddressRejectsInterveningAddressChangeWithSameRegion() {
+        Store snapshot = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(snapshot, "id", STORE_ID);
+        Store locked = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(locked, "id", STORE_ID);
+        ReflectionTestUtils.setField(locked, "address", "서울 중구 을지로 100");
+        ReflectionTestUtils.setField(locked, "addressVersion", 2L);
+        StoreUpdateRequest request = new StoreUpdateRequest(
+                null, null, null, "서울 중구 세종대로 110",
+                null, null, null, null);
+        given(storeRepository.findOperatorAccountIdById(STORE_ID))
+                .willReturn(Optional.of(OPERATOR_ID));
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(snapshot));
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(locked));
+        given(geocodingPort.geocode("서울 중구 세종대로 110"))
+                .willReturn(geocodingResult("서울 중구 세종대로 110", "서울"));
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.update(
+                OPERATOR_ID,
+                STORE_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                request))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+
+        assertThat(locked.getAddress()).isEqualTo("서울 중구 을지로 100");
+        assertThat(locked.getAddressVersion()).isEqualTo(2L);
+        then(storeRepository).should(never()).saveAndFlush(any());
     }
 
     @Test
@@ -535,10 +726,30 @@ class StoreServiceTest {
     }
 
     @Test
+    void replayedCreateReturnsStoredSuccessDespiteCurrentProviderFailure() {
+        ServiceException providerFailure =
+                new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        given(geocodingPort.geocode("서울시 중구")).willThrow(providerFailure);
+        given(idempotencyExecutor.execute(any(), any()))
+                .willReturn(storedOutcome(201));
+
+        StoreCommandResult result = storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest());
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
+        then(storeRepository).shouldHaveNoInteractions();
+        then(catalogPolicy).shouldHaveNoInteractions();
+    }
+
+    @Test
     void replayedCreateAcceptsLegacyPickupEligibilityPayload() {
         Store store = storeOwnedBy(OPERATOR_ID);
         ReflectionTestUtils.setField(store, "id", STORE_ID);
         ObjectNode legacyPayload = objectMapper.valueToTree(ManagedStoreResponse.from(store));
+        legacyPayload.remove("geocoding");
         legacyPayload.put("pickupEligibility", "ELIGIBLE");
         given(idempotencyExecutor.execute(any(), any()))
                 .willReturn(new IdempotentOutcome(
@@ -555,7 +766,30 @@ class StoreServiceTest {
                 validCreateRequest());
 
         assertThat(result.data().storeId()).isEqualTo(Long.toString(STORE_ID));
+        assertThat(result.data().geocoding().status()).isEqualTo(GeocodingStatus.UNVERIFIED);
+        assertThat(result.data().geocoding().addressVersion()).isEqualTo(1L);
+        assertThat(result.data().geocoding().latitude()).isNull();
+        assertThat(result.data().geocoding().longitude()).isNull();
         then(storeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void newCreateProviderFailureDoesNotSaveStore() {
+        ServiceException providerFailure =
+                new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        given(geocodingPort.geocode("서울시 중구")).willThrow(providerFailure);
+        runBusinessWorkOnExecute();
+
+        assertThatThrownBy(() -> storeService.create(
+                OPERATOR_ID,
+                IdempotencyKey.parse(IDEMPOTENCY_KEY),
+                validCreateRequest()))
+                .isSameAs(providerFailure);
+
+        then(storeRepository).shouldHaveNoInteractions();
+        then(catalogPolicy).shouldHaveNoInteractions();
+        then(transactionExecutor).should().execute(any());
+        then(idempotencyExecutor).should().execute(any(), any());
     }
 
     @Test
@@ -661,6 +895,19 @@ class StoreServiceTest {
             return outcome(result, (ManagedStoreResponse) result.data());
         });
         return captured;
+    }
+
+    private StoreGeocodingResult geocodingResult(String address, String region1DepthName) {
+        return new StoreGeocodingResult(
+                1,
+                List.of(new StoreGeocodingCandidate(
+                        address,
+                        null,
+                        region1DepthName,
+                        "126.978656700000000",
+                        "37.566826000000000")),
+                "KAKAO_LOCAL",
+                "v2");
     }
 
     private IdempotentOutcome outcome(

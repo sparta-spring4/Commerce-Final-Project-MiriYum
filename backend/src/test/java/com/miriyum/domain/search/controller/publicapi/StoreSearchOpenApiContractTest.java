@@ -14,6 +14,8 @@ class StoreSearchOpenApiContractTest {
 
     private static final String TOO_MANY_REQUESTS_RESPONSE =
             "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests";
+    private static final String RESERVATION_CONFLICT_RESPONSE =
+            "../reservation/openapi.yaml#/components/responses/ReservationConflict";
 
     @Test
     void publicRoutesParametersAndResponseFieldsMatchRuntimeContract() throws Exception {
@@ -26,7 +28,17 @@ class StoreSearchOpenApiContractTest {
         assertThat(paths).containsKeys(
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
-                "/api/v1/stores/{storeId}/menus");
+                "/api/v1/stores/{storeId}/menus",
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search");
+        Map<String, Object> alternativePath = map(paths.get(
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search"));
+        assertThat(alternativePath).containsOnlyKeys("post");
+        Map<String, Object> alternativePost = map(alternativePath.get("post"));
+        assertThat(map(map(map(alternativePost.get("requestBody")).get("content"))
+                .get("application/json"))).containsEntry("schema",
+                Map.of("$ref", "#/components/schemas/MenuAlternativeSearchRequest"));
+        assertThat((String) map(map(alternativePost.get("responses")).get("409")).get("$ref"))
+                .isEqualTo(RESERVATION_CONFLICT_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores", "429"))
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(responseReference(paths, "/api/v1/stores/{storeId}", "429"))
@@ -35,8 +47,12 @@ class StoreSearchOpenApiContractTest {
                 .isEqualTo(TOO_MANY_REQUESTS_RESPONSE);
         assertThat(parameterNames(map(map(paths.get("/api/v1/stores")).get("get"))))
                 .contains("serviceDate", "startTime", "partySize", "includesInfants",
-                        "availableOnly", "sort");
+                        "availableOnly", "sort", "searchInput", "cursor");
         Map<String, Object> searchOperation = map(map(paths.get("/api/v1/stores")).get("get"));
+        assertThat(listOfMaps(searchOperation.get("security")))
+                .anySatisfy(requirement -> assertThat(requirement).isEmpty())
+                .anySatisfy(requirement -> assertThat(requirement).containsKey("bearerAuth"));
+        assertThat(map(searchOperation.get("responses"))).containsKey("401");
         List<Map<String, Object>> searchParameters =
                 listOfMaps(searchOperation.get("parameters"));
         Map<String, Object> keyword = searchParameters
@@ -45,11 +61,23 @@ class StoreSearchOpenApiContractTest {
         assertThat(map(keyword.get("schema")))
                 .containsEntry("minLength", 1)
                 .containsEntry("pattern", ".*\\S.*");
+        Map<String, Object> searchInput = searchParameters
+                .stream().filter(parameter -> "searchInput".equals(parameter.get("name")))
+                .findFirst().orElseThrow();
+        assertThat(map(searchInput.get("schema")))
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", 100)
+                .containsEntry("pattern", ".*\\S.*");
         Map<String, Object> availableOnly = searchParameters.stream()
                 .filter(parameter -> "availableOnly".equals(parameter.get("name")))
                 .findFirst().orElseThrow();
         assertThat((String) availableOnly.get("description"))
                 .contains("5,000");
+        Map<String, Object> sort = searchParameters.stream()
+                .filter(parameter -> "sort".equals(parameter.get("name")))
+                .findFirst().orElseThrow();
+        assertThat(list(map(sort.get("schema")).get("enum")))
+                .contains("recommendation,desc");
         Map<String, Object> successResponse = map(
                 map(searchOperation.get("responses")).get("200"));
         assertThat((String) successResponse.get("description"))
@@ -58,6 +86,11 @@ class StoreSearchOpenApiContractTest {
                 .contains("serviceDate", "startTime", "partySize", "includesInfants");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        assertThat(list(map(schemas.get("MenuAlternativeMode")).get("enum")))
+                .containsExactly("SAME_STORE", "NEARBY_STORE", "NO_ALTERNATIVE",
+                        "REGION_SELECTION_REQUIRED");
+        assertThat(list(map(schemas.get("MenuAlternativeSearchRequest")).get("required")))
+                .containsExactlyInAnyOrder("quantity", "serviceDate", "startTime", "partySize");
         assertThat(list(map(schemas.get("StoreSummary")).get("required")))
                 .containsExactlyInAnyOrder(
                         "storeId", "name", "region", "address", "storeCategoryCode",
@@ -66,6 +99,16 @@ class StoreSearchOpenApiContractTest {
                 .contains("menuId", "name", "description", "price", "representative",
                         "primaryCategoryCode", "secondaryCategoryCodes", "localTags",
                         "holdEnabled", "pickupEnabled", "saleStatus");
+        assertThat(list(map(schemas.get("IntegratedStoreSearchData")).get("required")))
+                .containsExactlyInAnyOrder(
+                        "items", "normalizedCondition", "warnings", "ruleVersion",
+                        "vocabularyVersion", "rankingRuleVersion", "nextCursor");
+        assertThat(list(map(schemas.get("IntegratedStoreSearchItem")).get("required")))
+                .contains("coordinates", "reservationAvailability", "recommendationReason");
+        assertThat(list(map(schemas.get("RecommendationReason")).get("required")))
+                .containsExactlyInAnyOrder("code", "message");
+        assertThat(list(map(schemas.get("InterpretationWarning")).get("required")))
+                .containsExactlyInAnyOrder("code", "field");
     }
 
     private static List<String> parameterNames(Map<String, Object> operation) {

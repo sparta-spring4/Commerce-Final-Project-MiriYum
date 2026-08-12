@@ -300,6 +300,20 @@ class ReservationOpenApiContractTest {
                 "$ref",
                 "#/components/schemas/ReservationHistoryStatus"
         );
+        Map<String, Object> sortParameter = list(operation.get("parameters")).stream()
+                .map(ReservationOpenApiContractTest::map)
+                .filter(parameter -> "sort".equals(parameter.get("name")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(list(map(sortParameter.get("schema")).get("enum")))
+                .containsExactly(
+                        "createdAt,desc",
+                        "createdAt,asc",
+                        "serviceDate,desc",
+                        "serviceDate,asc",
+                        "startAt,desc",
+                        "startAt,asc"
+                );
     }
 
     @Test
