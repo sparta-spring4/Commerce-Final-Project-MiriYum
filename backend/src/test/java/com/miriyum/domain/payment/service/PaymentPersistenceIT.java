@@ -31,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -291,7 +292,7 @@ class PaymentPersistenceIT {
         ConfirmPaymentCommand thirdKey = new ConfirmPaymentCommand(
                 preparation.paymentId(), 11L, preparation.portOnePaymentId(),
                 "550e8400-e29b-41d4-a716-446655440136");
-        Instant claimedAt = Instant.now();
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
         PaymentTransactionService.ConfirmationClaim claim =
                 transactions.claimConfirmation(original, claimedAt);
@@ -779,7 +780,7 @@ class PaymentPersistenceIT {
                 preparation.paymentId(), "reservation:140:cancelled", 10_000L,
                 "RESERVATION_CANCELLED", 7L,
                 "550e8400-e29b-41d4-a716-446655440141");
-        Instant claimedAt = Instant.now();
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
         PaymentTransactionService.RefundClaim claim = transactions.claimRefund(command, claimedAt);
         PaymentTransactionService.RefundClaim activeLeaseReplay = transactions.claimRefund(
@@ -800,6 +801,42 @@ class PaymentPersistenceIT {
                 """, Long.class, "refund-reconciliation:" + claim.refundId())).isEqualTo(1L);
         verify(providerClient, never()).cancelPayment(
                 anyString(), anyString(), anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("다른 키 요청도 만료된 refund claim을 새 외부 호출 없이 대사 상태로 격리한다")
+    void isolatesStaleRefundClaimDiscoveredByDifferentKey() {
+        PaymentPreparation preparation = prepareAndConfirmPaidPayment("147");
+        Instant claimedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        RequestRefundCommand abandoned = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:147:cancelled", 30_000L,
+                "RESERVATION_CANCELLED", 7L,
+                "550e8400-e29b-41d4-a716-446655440147");
+        RequestRefundCommand differentKey = new RequestRefundCommand(
+                preparation.paymentId(), "reservation:147:adjusted", 10_000L,
+                "RESERVATION_ADJUSTED", 7L,
+                "550e8400-e29b-41d4-a716-446655440148");
+
+        PaymentTransactionService.RefundClaim claim =
+                transactions.claimRefund(abandoned, claimedAt);
+        PaymentTransactionService.RefundClaim isolated = transactions.claimRefund(
+                differentKey, claimedAt.plus(Duration.ofMinutes(5)));
+
+        assertThat(claim.requiresProviderCall()).isTrue();
+        assertThat(isolated.requiresProviderCall()).isFalse();
+        assertThat(isolated.refundId()).isEqualTo(claim.refundId());
+        assertThat(isolated.completedResult().status())
+                .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
+                .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        verify(providerClient, never()).cancelPayment(
+                anyString(), anyString(), anyLong(), anyString(), anyString());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds", Long.class)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_RECONCILIATION_REQUIRED'
+                """, Long.class)).isEqualTo(1L);
     }
 
     @Test

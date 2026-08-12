@@ -43,11 +43,14 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                             "PortOne " + settings.getPortone().requireApiSecret())
                     .retrieve()
                     .body(String.class);
-            JsonNode payment = objectMapper.readTree(body);
+            JsonNode payment = requiredContent(objectMapper.readTree(body));
+            ProviderStatus status = mapPaymentStatus(requiredText(payment, "status"));
             return new ProviderPayment(
                     requiredText(payment, "id"),
-                    optionalText(payment, "transactionId"),
-                    mapPaymentStatus(requiredText(payment, "status")),
+                    status == ProviderStatus.PAID
+                            ? requiredText(payment, "transactionId")
+                            : optionalText(payment, "transactionId"),
+                    status,
                     requiredLong(payment.path("amount"), "total"),
                     requiredText(payment, "currency")
             );
@@ -79,7 +82,8 @@ public class PortOnePaymentClient implements PaymentProviderClient {
                     .body(request)
                     .retrieve()
                     .body(String.class);
-            JsonNode cancellation = objectMapper.readTree(body).path("cancellation");
+            JsonNode cancellation = requiredContent(objectMapper.readTree(body))
+                    .path("cancellation");
             String status = requiredText(cancellation, "status");
             ProviderStatus mappedStatus = switch (status) {
                 case "SUCCEEDED" -> ProviderStatus.PARTIALLY_CANCELLED;
@@ -107,6 +111,13 @@ public class PortOnePaymentClient implements PaymentProviderClient {
             case "PARTIAL_CANCELLED" -> ProviderStatus.PARTIALLY_CANCELLED;
             default -> ProviderStatus.UNKNOWN;
         };
+    }
+
+    private static JsonNode requiredContent(JsonNode node) {
+        if (node == null) {
+            throw new IllegalArgumentException("PortOne response body has no JSON content");
+        }
+        return node;
     }
 
     private static String requiredText(JsonNode node, String fieldName) {

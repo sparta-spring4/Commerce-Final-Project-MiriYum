@@ -2,6 +2,7 @@ package com.miriyum.domain.payment.repository;
 
 import com.miriyum.domain.payment.entity.PaymentRefund;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -14,6 +15,11 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     Optional<PaymentRefund> findByPayment_IdAndIdempotencyKey(Long paymentId, String idempotencyKey);
     Optional<PaymentRefund> findByPayment_IdAndSourceEventId(Long paymentId, String sourceEventId);
     List<PaymentRefund> findByPayment_IdOrderByRequestedAtAsc(Long paymentId);
+    List<PaymentRefund> findByPayment_IdAndStatusAndRequestedAtLessThanEqualOrderByRequestedAtAsc(
+            Long paymentId,
+            com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus status,
+            Instant requestedAt
+    );
     boolean existsByPayment_IdAndProviderCancellationIdAndStatus(
             Long paymentId,
             String providerCancellationId,

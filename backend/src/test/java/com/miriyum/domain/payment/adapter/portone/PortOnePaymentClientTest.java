@@ -132,7 +132,7 @@ class PortOnePaymentClientTest {
     }
 
     @ParameterizedTest(name = "lookup body={0}")
-    @ValueSource(strings = {"{", ""})
+    @ValueSource(strings = {"{", "", "   \r\n"})
     @DisplayName("PortOne 결제 조회의 malformed 또는 빈 2xx 응답은 결과 불명으로 변환한다")
     void mapsInvalidPaymentResponseToUnavailableResult(String responseBody) {
         server.expect(requestTo(
@@ -146,7 +146,7 @@ class PortOnePaymentClientTest {
     }
 
     @ParameterizedTest(name = "cancel body={0}")
-    @ValueSource(strings = {"{", ""})
+    @ValueSource(strings = {"{", "", "   \r\n"})
     @DisplayName("PortOne 취소의 malformed 또는 빈 2xx 응답은 결과 불명으로 변환한다")
     void mapsInvalidCancellationResponseToUnavailableResult(String responseBody) {
         server.expect(requestTo(
@@ -159,6 +159,28 @@ class PortOnePaymentClientTest {
                 10_000L,
                 "KRW",
                 "RESERVATION_CANCELLED"))
+                .isInstanceOf(ProviderUnavailableException.class);
+        server.verify();
+    }
+
+    @ParameterizedTest(name = "transaction field={0}")
+    @ValueSource(strings = {"", "\"transactionId\": \"   \","})
+    @DisplayName("PAID 응답의 transactionId 누락 또는 공백은 결과 불명으로 변환한다")
+    void requiresTransactionIdForPaidPayment(String transactionField) {
+        server.expect(requestTo(
+                        "https://api.portone.test/payments/payment-reservation-900000000000000001"))
+                .andRespond(withSuccess("""
+                        {
+                          "status": "PAID",
+                          "id": "payment-reservation-900000000000000001",
+                          %s
+                          "amount": {"total": 30000},
+                          "currency": "KRW"
+                        }
+                        """.formatted(transactionField), MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.getPayment(
+                "payment-reservation-900000000000000001"))
                 .isInstanceOf(ProviderUnavailableException.class);
         server.verify();
     }

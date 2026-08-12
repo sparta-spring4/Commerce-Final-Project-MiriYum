@@ -449,11 +449,19 @@ public class PaymentTransactionService {
             if (!existing.getRequestFingerprint().equals(fingerprint)) {
                 throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
-            if (existing.getStatus() == RefundStatus.PROCESSING
-                    && existing.getRequestedAt().isBefore(now.minus(REFUND_PROCESSING_LEASE))) {
-                markRefundReconciliation(existing, payment, now);
-            }
+        }
+        List<PaymentRefund> expiredProcessing =
+                refunds.findByPayment_IdAndStatusAndRequestedAtLessThanEqualOrderByRequestedAtAsc(
+                        payment.getId(),
+                        RefundStatus.PROCESSING,
+                        now.minus(REFUND_PROCESSING_LEASE)
+                );
+        expiredProcessing.forEach(refund -> markRefundReconciliation(refund, payment, now));
+        if (existing != null) {
             return RefundClaim.completed(toRefundResult(existing));
+        }
+        if (!expiredProcessing.isEmpty()) {
+            return RefundClaim.completed(toRefundResult(expiredProcessing.getFirst()));
         }
         if (refunds.findByPayment_IdAndSourceEventId(
                 payment.getId(), command.sourceEventId()).isPresent()) {
