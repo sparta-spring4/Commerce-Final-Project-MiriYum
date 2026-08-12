@@ -79,6 +79,7 @@
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/repository/WaitingMigrationTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingLedgerServiceTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingCommandFacadeTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingCommandFacadeIT.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingClosureServiceTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/controller/storeoperator/WaitingStoreOperatorControllerTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/reservation/waiting/WaitingLedgerConcurrencyIT.java`
