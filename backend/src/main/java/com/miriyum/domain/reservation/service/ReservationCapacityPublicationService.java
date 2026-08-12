@@ -339,7 +339,11 @@ public class ReservationCapacityPublicationService {
         Instant startAt = snapshot.getStartAt();
         Instant serviceEndAt = snapshot.getServiceEndAt();
         Instant occupancyEndAt = snapshot.getOccupancyEndAt();
-        if (!startAt.isBefore(serviceEndAt) || serviceEndAt.isAfter(occupancyEndAt)) {
+        if (!hasMinutePrecision(startAt)
+                || !hasMinutePrecision(serviceEndAt)
+                || !hasMinutePrecision(occupancyEndAt)
+                || !startAt.isBefore(serviceEndAt)
+                || serviceEndAt.isAfter(occupancyEndAt)) {
             return false;
         }
         try {
@@ -354,6 +358,11 @@ public class ReservationCapacityPublicationService {
         } catch (DateTimeException exception) {
             return false;
         }
+    }
+
+    private static boolean hasMinutePrecision(Instant instant) {
+        return Math.floorMod(instant.getEpochSecond(), 60L) == 0
+                && instant.getNano() == 0;
     }
 
     private static boolean hasValidParty(ReservationHold hold) {

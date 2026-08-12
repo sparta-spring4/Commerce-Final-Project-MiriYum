@@ -360,7 +360,9 @@ class ReservationCapacityPublicationServiceTest {
             "startOffset",
             "serviceEndOffset",
             "occupancyEndOffset",
-            "localServiceDate"
+            "localServiceDate",
+            "timeSecondPrecision",
+            "timeNanoPrecision"
     })
     @DisplayName("선점 거래 스냅샷이 오염되면 실패 폐쇄하고 게시하지 않는다")
     void rejectsCorruptedHoldSnapshot(String corruptedField) {
@@ -634,6 +636,40 @@ class ReservationCapacityPublicationServiceTest {
                         hold.getTimeSnapshot(),
                         "occupancyEndAt",
                         hold.getOccupancyEndAt().plusSeconds(86_400)
+                );
+            }
+            case "timeSecondPrecision" -> {
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "startAt",
+                        hold.getStartAt().plusSeconds(1)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "serviceEndAt",
+                        hold.getServiceEndAt().plusSeconds(1)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "occupancyEndAt",
+                        hold.getOccupancyEndAt().plusSeconds(1)
+                );
+            }
+            case "timeNanoPrecision" -> {
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "startAt",
+                        hold.getStartAt().plusNanos(1)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "serviceEndAt",
+                        hold.getServiceEndAt().plusNanos(1)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "occupancyEndAt",
+                        hold.getOccupancyEndAt().plusNanos(1)
                 );
             }
             default -> throw new IllegalArgumentException("unknown corrupted field");
