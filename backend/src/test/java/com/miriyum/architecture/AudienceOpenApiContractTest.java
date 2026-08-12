@@ -21,8 +21,10 @@ class AudienceOpenApiContractTest {
     private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+    private static final String NOTIFICATION_HISTORY_PATH =
+            "/api/v1/consumers/me/notifications";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
-            Set.of(MENU_ALTERNATIVE_SEARCH_PATH);
+            Set.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH);
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
