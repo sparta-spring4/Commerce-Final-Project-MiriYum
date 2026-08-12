@@ -8,49 +8,53 @@
 type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
 export interface paths {
-  "/api/v1/reservations": {
+  "/api/v1/consumers/reservations": {
     /** 일반 예약과 선택 메뉴 홀드 생성 */
     post: operations["createReservation"];
   };
-  "/api/v1/reservations/{reservationId}": {
+  "/api/v1/consumers/reservations/{reservationId}": {
     /** 본인 예약 상세 조회 */
     get: operations["getReservation"];
   };
-  "/api/v1/reservations/{reservationId}/cancellations": {
+  "/api/v1/consumers/reservations/{reservationId}/cancellations": {
     /** 본인 예약 취소 */
     post: operations["cancelReservationByConsumer"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations": {
+  "/api/v1/store-operators/stores/{storeId}/reservations": {
     /** 매장 예약 목록 조회 */
     get: operations["getStoreReservations"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}": {
     /** 매장 예약 상세 조회 */
     get: operations["getStoreReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/cancellations": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/cancellations": {
     /** 매장 사유 예약 취소 */
     post: operations["cancelReservationByStoreOperator"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservations/{reservationId}/fulfillments": {
+  "/api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments": {
     /** 예약 방문 완료 */
     post: operations["fulfillReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-capacities/{serviceDate}": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-capacities/{serviceDate}": {
     /** 날짜별 예약 수용량 전체 게시 */
     put: operations["replaceReservationCapacities"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies": {
     /** 매장별 예약 시간 정책 초안 저장 */
     put: operations["createReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication": {
     /** 예약 시간 정책 초안 즉시 또는 예약 게시 */
     post: operations["publishReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operator/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
     /** 예약 시간 정책 예약 게시 철회 */
     post: operations["cancelReservationTimePolicyPublication"];
+  };
+  "/api/v1/consumers/me/reservations": {
+    /** 내 예약 내역 조회 */
+    get: operations["getCurrentConsumerReservations"];
   };
 }
 
@@ -58,6 +62,28 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /** @enum {string} */
+    ReservationHistoryStatus: "CONFIRMED" | "CANCELLED" | "FULFILLED";
+    ReservationHistoryItem: {
+      reservationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      storeName: string;
+      serviceDate: components["schemas"]["StoreLocalDate"];
+      timeStatus: components["schemas"]["ReservationTimeStatus"];
+      /** @description LEGACY_UNRESOLVED이면 null */
+      startAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+      /** @description LEGACY_UNRESOLVED이면 null */
+      serviceEndAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+      /** @description 예약 계산에 사용한 매장 IANA 시간대. LEGACY_UNRESOLVED이면 null */
+      timeZoneId: string | null;
+      partySize: number;
+      status: components["schemas"]["ReservationHistoryStatus"];
+      createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+    };
+    ReservationHistoryPageData: {
+      items: components["schemas"]["ReservationHistoryItem"][];
+      page: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PageMetadata"];
+    };
     /**
      * Format: date
      * @description 대상 매장의 IANA 시간대 기준 업무 날짜
@@ -162,8 +188,8 @@ export interface components {
       status: components["schemas"]["ReservationStatus"];
       menuSelections: components["schemas"]["MenuHoldItem"][];
       /** @enum {string|null} */
-      cancelledBy?: "CONSUMER" | "STORE_OPERATOR" | null;
-      cancellationReason?: string | null;
+      cancelledBy: "CONSUMER" | "STORE_OPERATOR" | null;
+      cancellationReason: string | null;
       createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
     };
     ReservationSummary: {
@@ -232,10 +258,33 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["ReservationTimePolicyResponse"];
     };
+    ReservationHistoryPageSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["ReservationHistoryPageData"];
+    };
   };
   responses: {
+    /** @description 현재 계정 상태가 이용을 허용하지 않음 */
+    AccountRestricted: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 본인 또는 대상 매장 범위에서 예약을 찾을 수 없음 */
     ReservationNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장, 선택 메뉴 또는 해당 시간대 메뉴 수량 버킷을 찾을 수 없음 */
+    ReservationCreationNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 대상 매장 또는 대상 매장 범위의 예약을 찾을 수 없음 */
+    StoreReservationNotFound: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -248,6 +297,18 @@ export interface components {
     };
     /** @description 현재 상태 또는 취소 정책에서 명령 불가 */
     ReservationStateConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음 */
+    ReservationFulfillmentForbidden: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 방문 완료 상태·MenuHold·멱등·동시 요청 충돌 */
+    ReservationFulfillmentConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -443,6 +504,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: components["responses"]["ReservationCreationNotFound"];
       409: components["responses"]["ReservationConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
@@ -520,6 +582,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
     };
   };
   /** 매장 예약 상세 조회 */
@@ -537,9 +600,10 @@ export interface operations {
           "application/json": components["schemas"]["ReservationSuccessResponse"];
         };
       };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["ReservationNotFound"];
+      404: components["responses"]["StoreReservationNotFound"];
     };
   };
   /** 매장 사유 예약 취소 */
@@ -568,7 +632,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["ReservationNotFound"];
+      404: components["responses"]["StoreReservationNotFound"];
       409: components["responses"]["ReservationStateConflict"];
     };
   };
@@ -597,9 +661,9 @@ export interface operations {
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["ReservationNotFound"];
-      409: components["responses"]["ReservationStateConflict"];
+      403: components["responses"]["ReservationFulfillmentForbidden"];
+      404: components["responses"]["StoreReservationNotFound"];
+      409: components["responses"]["ReservationFulfillmentConflict"];
     };
   };
   /** 날짜별 예약 수용량 전체 게시 */
@@ -719,6 +783,29 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];
       409: components["responses"]["ReservationTimePolicyConflict"];
+    };
+  };
+  /** 내 예약 내역 조회 */
+  getCurrentConsumerReservations: {
+    parameters: {
+      query?: {
+        status?: components["schemas"]["ReservationHistoryStatus"];
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다. */
+        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
+      };
+    };
+    responses: {
+      /** @description 본인 예약 내역 페이지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReservationHistoryPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
     };
   };
 }

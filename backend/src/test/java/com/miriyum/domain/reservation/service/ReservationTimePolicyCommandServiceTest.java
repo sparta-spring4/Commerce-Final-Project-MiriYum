@@ -8,7 +8,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
-import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyDraftRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationTimePolicyPublicationRequest;
@@ -22,9 +22,9 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -85,7 +85,10 @@ class ReservationTimePolicyCommandServiceTest {
     private ConsumerAccountService consumerAccountService;
 
     @Mock
-    private MenuHoldSnapshotQueryService menuHoldSnapshotQueryService;
+    private ReservationMenuHoldPort menuHoldPort;
+
+    @Mock
+    private ReservationTimeResolutionService timeResolutionService;
 
     private ObjectMapper objectMapper;
     private ReservationService reservationService;
@@ -105,7 +108,8 @@ class ReservationTimePolicyCommandServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 consumerAccountService,
-                menuHoldSnapshotQueryService
+                menuHoldPort,
+                timeResolutionService
         );
         given(idempotencyExecutor.execute(any(), any()))
                 .willAnswer(invocation -> executeWork(invocation.getArgument(1)));

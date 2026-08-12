@@ -13,41 +13,41 @@ export interface paths {
     /** 픽업 가능 시간과 메뉴 수량 조회 */
     get: operations["getPickupAvailability"];
   };
-  "/api/v1/pickup-reservations": {
+  "/api/v1/consumers/pickup-reservations": {
     /** 픽업 예약 생성 */
     post: operations["createPickupReservation"];
   };
-  "/api/v1/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/consumers/pickup-reservations/{pickupReservationId}": {
     /** 본인 픽업 예약 상세 조회 */
     get: operations["getPickupReservation"];
   };
-  "/api/v1/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 본인 픽업 예약 취소 */
     post: operations["cancelPickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations": {
     /** 매장 픽업 예약 목록 조회 */
     get: operations["getStorePickupReservations"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}": {
     /** 매장 픽업 예약 상세 조회 */
     get: operations["getStorePickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments": {
     /** 픽업 수령 완료 */
     post: operations["fulfillPickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 운영자 픽업 예약 취소 */
     post: operations["cancelStorePickupReservation"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets": {
+  "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets": {
     /** 운영자 메뉴 재고 버킷 목록 조회 */
     get: operations["getMenuInventoryBuckets"];
     /** 메뉴 재고 버킷 생성 */
     post: operations["createMenuInventoryBucket"];
   };
-  "/api/v1/store-operator/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}": {
+  "/api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}": {
     /** 메뉴 재고 수량·풀·품절 상태 수정 */
     patch: operations["updateMenuInventoryBucket"];
   };
@@ -59,6 +59,25 @@ export interface components {
   schemas: {
     /** @enum {string} */
     InventoryAvailabilityStatus: "AVAILABLE" | "SOLD_OUT";
+    MenuHoldAvailabilityItem: {
+      menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      menuName: string;
+      unitPrice: number;
+      availableOnlineQuantity: number;
+      availabilityStatus: components["schemas"]["InventoryAvailabilityStatus"];
+    };
+    MenuHoldAvailabilityData: {
+      serviceDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
+      startAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      serviceEndAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+      timeZoneId: string;
+      items: components["schemas"]["MenuHoldAvailabilityItem"][];
+    };
+    MenuHoldAvailabilitySuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["MenuHoldAvailabilityData"];
+    };
     InventoryPools: {
       onlineHold: number;
       onsite: number;
@@ -98,6 +117,7 @@ export interface components {
       pickupDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
       /** @description 잠금 검증한 Store IANA 시간대와 같은 현재 재고 버킷 제공 구간에 정확히 일치해야 하는 startTime. 구간 부재·시간대 불일치·DST 누락 또는 중복은 PICKUP_003이다. */
       pickupTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
+      /** @description 동일 menuId가 반복되면 수량을 합산하며, 합산한 메뉴별 수량도 1 이상 100 이하여야 한다. */
       menuSelections: components["schemas"]["MenuSelectionRequest"][];
     };
     PickupCancellationRequest: {
@@ -201,6 +221,12 @@ export interface components {
     };
   };
   responses: {
+    /** @description 요청한 시작 시각에 예약 서비스를 제공할 수 없음 */
+    ReservationUnavailable: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 매장을 찾을 수 없음 */
     StoreNotFound: {
       content: {
@@ -225,8 +251,14 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 픽업 기능·제공 구간·메뉴 수량 충돌 */
+    /** @description 픽업 기능·메뉴 상태·제공 구간·메뉴 수량 충돌 */
     PickupConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 또는 대상 매장의 메뉴를 찾을 수 없음 */
+    PickupCreationNotFound: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -237,7 +269,19 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 현재 픽업 상태 또는 취소 정책에서 명령 불가 */
+    /** @description 매장 또는 대상 매장 범위에서 픽업 예약을 찾을 수 없음 */
+    StorePickupNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 픽업 상태 또는 소비자 취소 정책에서 취소 불가 */
+    PickupCancellationConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 픽업 상태에서 명령 불가 */
     PickupStateConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
@@ -405,7 +449,8 @@ export interface operations {
       query: {
         serviceDate: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalDate"];
         startTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
-        endTime: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["LocalTime"];
+        /** @description DST 중복 시각을 구분할 선택 offset */
+        startOffset?: string;
       };
       path: {
         storeId: components["parameters"]["StoreId"];
@@ -415,11 +460,13 @@ export interface operations {
       /** @description 메뉴별 온라인 홀드 가용량 */
       200: {
         content: {
-          "application/json": components["schemas"]["MenuAvailabilityListSuccessResponse"];
+          "application/json": components["schemas"]["MenuHoldAvailabilitySuccessResponse"];
         };
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["ReservationUnavailable"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 픽업 가능 시간과 메뉴 수량 조회 */
@@ -467,6 +514,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: components["responses"]["PickupCreationNotFound"];
       409: components["responses"]["PickupConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
@@ -516,7 +564,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
       404: components["responses"]["PickupNotFound"];
-      409: components["responses"]["PickupStateConflict"];
+      409: components["responses"]["PickupCancellationConflict"];
     };
   };
   /** 매장 픽업 예약 목록 조회 */
@@ -543,6 +591,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
     };
   };
   /** 매장 픽업 예약 상세 조회 */
@@ -562,7 +611,7 @@ export interface operations {
       };
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
     };
   };
   /** 픽업 수령 완료 */
@@ -591,7 +640,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
       409: components["responses"]["PickupStateConflict"];
     };
   };
@@ -621,7 +670,7 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PickupNotFound"];
+      404: components["responses"]["StorePickupNotFound"];
       409: components["responses"]["PickupStateConflict"];
     };
   };

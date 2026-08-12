@@ -5,10 +5,10 @@ import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.service.MenuQueryService;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;

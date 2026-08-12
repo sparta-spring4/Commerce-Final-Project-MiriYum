@@ -11,13 +11,13 @@ public enum TokenNamespace {
             "consumer",
             "MIRIYUM_CONSUMER_REFRESH",
             "MIRIYUM_CONSUMER_XSRF_TOKEN",
-            "/api/v1/consumer-auth"
+            "/api/v1/consumers/auth"
     ),
     STORE_OPERATOR(
             "store-operator",
             "MIRIYUM_STORE_OPERATOR_REFRESH",
             "MIRIYUM_STORE_OPERATOR_XSRF_TOKEN",
-            "/api/v1/store-operator-auth"
+            "/api/v1/store-operators/auth"
     );
 
     private final String value;

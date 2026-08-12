@@ -20,12 +20,12 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.schedule.dto.StoreReservationWindowResult;
-import com.miriyum.domain.store.schedule.service.StoreScheduleService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
+import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -95,6 +95,9 @@ class ReservationTimePolicyPublicationIT {
 
     @Autowired
     private ReservationService reservationService;
+
+    @Autowired
+    private ReservationTimeResolutionService timeResolutionService;
 
     @Autowired
     private ReservationTimePolicyVersionRepository policyRepository;
@@ -440,7 +443,7 @@ class ReservationTimePolicyPublicationIT {
                 requestedAt.plusHours(1)
         )));
 
-        ReservationTimeResolutionResult result = reservationService
+        ReservationTimeResolutionResult result = timeResolutionService
                 .resolveReservationTimes(
                         List.of(owner.storeId()),
                         new ReservationTimeRequest(serviceDate, startTime, null)

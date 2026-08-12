@@ -25,24 +25,25 @@ import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryLedgerRepos
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryPolicyChange;
 import com.miriyum.domain.menuhold.inventory.dto.InventoryBucketCreateCommand;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.menu.entity.Menu;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.model.AllergenDisclosure;
-import com.miriyum.domain.store.menu.model.AllergenDisclosureStatus;
-import com.miriyum.domain.store.menu.model.AllergenIngredientCode;
-import com.miriyum.domain.store.menu.model.DisclosureRegistrationStatus;
-import com.miriyum.domain.store.menu.model.MenuContent;
-import com.miriyum.domain.store.menu.repository.MenuRepository;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.menu.entity.Menu;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.model.AllergenDisclosure;
+import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -69,6 +70,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
@@ -119,6 +121,9 @@ class MenuInventoryRuntimeIT {
 
     @MockitoSpyBean
     private StoreService storeService;
+
+    @MockitoBean
+    private MenuTransactionFacade menuTransactionFacade;
 
     @MockitoSpyBean
     private MenuQueryService menuQueryService;
@@ -944,8 +949,8 @@ class MenuInventoryRuntimeIT {
                 .requireSchedulePublicationAuthority(operatorId, storeId);
         willReturn(new MenuTransactionEligibility(
                 storeId, menuId, 1, "Americano", 5_000, true, false))
-                .given(storeService)
-                .requireMenuTransactionEligibility(storeId, menuId);
+                .given(menuTransactionFacade)
+                .requireTransactionEligibility(storeId, menuId);
     }
 
     private InventoryBucketCreateCommand createCommand(int totalSupply) {

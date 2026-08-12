@@ -30,11 +30,11 @@ export function allowedCalls() {
   expectTypeOf<Data['items'][number]>().toHaveProperty('displayName')
 
   // 경로 변수와 필수 본문·멱등 키를 갖춘 호출
-  void api('/api/v1/reservations/{reservationId}', {
+  void api('/api/v1/consumers/reservations/{reservationId}', {
     method: 'get',
     pathParams: { reservationId: 1 },
   })
-  void api('/api/v1/consumer-accounts/me', {
+  void api('/api/v1/consumers/me', {
     method: 'patch',
     body: { nickname: '미리' },
     idempotencyKey: 'key-1',
@@ -53,19 +53,19 @@ export function rejectedCalls() {
   void api('/api/v1/store-categories', { method: 'get', body: { any: true } })
 
   // @ts-expect-error 로그인은 requestBody가 필수다
-  void api('/api/v1/consumer-auth/sessions', { method: 'post' })
+  void api('/api/v1/consumers/auth/sessions', { method: 'post' })
 
-  void api('/api/v1/consumer-auth/sessions', {
+  void api('/api/v1/consumers/auth/sessions', {
     method: 'post',
     // @ts-expect-error 생성 타입에 없는 필드는 허용하지 않는다
     body: { email: 'a@b.com', password: 'x', notInContract: true },
   })
 
   // @ts-expect-error reservationId가 필요하다
-  void api('/api/v1/reservations/{reservationId}', { method: 'get' })
+  void api('/api/v1/consumers/reservations/{reservationId}', { method: 'get' })
 
-  // @ts-expect-error PATCH /consumer-accounts/me는 Idempotency-Key가 필수다
-  void api('/api/v1/consumer-accounts/me', { method: 'patch', body: { nickname: '미리' } })
+  // @ts-expect-error PATCH /consumers/me는 Idempotency-Key가 필수다
+  void api('/api/v1/consumers/me', { method: 'patch', body: { nickname: '미리' } })
 
   // @ts-expect-error 계약이 요구하지 않는 곳에는 멱등 키를 넣을 수 없다
   void api('/api/v1/store-categories', { method: 'get', idempotencyKey: 'k' })

@@ -60,6 +60,19 @@ public class MenuInventoryTransactionServiceRuntime
 
     @Override
     @Transactional(readOnly = true)
+    public List<MenuInventoryAvailability> findExistingOnlineAvailability(
+            MenuInventoryAvailabilityQuery query
+    ) {
+        return bucketRepository.findCurrentOnlineAvailability(
+                        query.menuIds(), query.serviceDate(), query.startTime(),
+                        query.endDate(), query.endTime()).stream()
+                .sorted(Comparator.comparingLong(OnlineInventoryAvailabilityView::getMenuId))
+                .map(MenuInventoryTransactionServiceRuntime::toAvailability)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<MenuInventoryAvailability> findOnlineAvailabilityByDate(
             MenuInventoryAvailabilityDateQuery query
     ) {
