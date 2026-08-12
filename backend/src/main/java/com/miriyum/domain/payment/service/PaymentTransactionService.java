@@ -41,6 +41,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 외부 PG 호출 전후의 짧은 DB transaction 경계를 정의한다. */
@@ -104,7 +105,8 @@ public class PaymentTransactionService {
             long amountMinor,
             String currency,
             String reasonCode,
-            RefundResult completedResult
+            RefundResult completedResult,
+            PaymentErrorCode rejectionError
     ) {
         public static RefundClaim requiresCall(
                 String refundId,
@@ -116,13 +118,18 @@ public class PaymentTransactionService {
         ) {
             return new RefundClaim(
                     true, refundId, paymentId, portOnePaymentId,
-                    amountMinor, currency, reasonCode, null);
+                    amountMinor, currency, reasonCode, null, null);
         }
 
         public static RefundClaim completed(RefundResult result) {
             return new RefundClaim(
                     false, result.refundId(), result.paymentId(), null,
-                    result.requestedAmountMinor(), result.currency(), null, result);
+                    result.requestedAmountMinor(), result.currency(), null, result, null);
+        }
+
+        public static RefundClaim rejected(PaymentErrorCode errorCode) {
+            return new RefundClaim(
+                    false, null, null, null, 0L, null, null, null, errorCode);
         }
     }
 
@@ -439,7 +446,7 @@ public class PaymentTransactionService {
         ));
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RefundClaim claimRefund(RequestRefundCommand command, Instant now) {
         Payment payment = paymentForUpdate(command.paymentId());
         String fingerprint = refundFingerprint(command);
@@ -461,7 +468,7 @@ public class PaymentTransactionService {
             return RefundClaim.completed(toRefundResult(existing));
         }
         if (!expiredProcessing.isEmpty()) {
-            return RefundClaim.completed(toRefundResult(expiredProcessing.getFirst()));
+            return RefundClaim.rejected(PaymentErrorCode.INVALID_STATE_TRANSITION);
         }
         if (refunds.findByPayment_IdAndSourceEventId(
                 payment.getId(), command.sourceEventId()).isPresent()) {

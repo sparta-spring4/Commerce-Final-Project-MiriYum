@@ -88,6 +88,9 @@ public class PaymentService {
     public RefundResult requestRefund(RequestRefundCommand command) {
         PaymentTransactionService.RefundClaim claim =
                 transactions.claimRefund(command, now());
+        if (claim.rejectionError() != null) {
+            throw new ServiceException(claim.rejectionError());
+        }
         if (!claim.requiresProviderCall()) {
             return claim.completedResult();
         }

@@ -54,6 +54,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -97,6 +98,9 @@ class PaymentPersistenceIT {
 
     @Autowired
     private PaymentWebhookService webhookService;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @MockitoBean
     private PaymentProviderClient providerClient;
@@ -819,16 +823,28 @@ class PaymentPersistenceIT {
 
         PaymentTransactionService.RefundClaim claim =
                 transactions.claimRefund(abandoned, claimedAt);
-        PaymentTransactionService.RefundClaim isolated = transactions.claimRefund(
-                differentKey, claimedAt.plus(Duration.ofMinutes(5)));
+        jdbcTemplate.update("""
+                UPDATE payment_refunds
+                   SET requested_at = DATE_SUB(NOW(6), INTERVAL 5 MINUTE)
+                 WHERE refund_id = ?
+                """, claim.refundId());
 
         assertThat(claim.requiresProviderCall()).isTrue();
-        assertThat(isolated.requiresProviderCall()).isFalse();
-        assertThat(isolated.refundId()).isEqualTo(claim.refundId());
-        assertThat(isolated.completedResult().status())
-                .isEqualTo(RefundStatus.RECONCILIATION_REQUIRED);
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
+                ignored -> paymentService.requestRefund(differentKey)))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.INVALID_STATE_TRANSITION);
         assertThat(paymentService.getOwnedPayment(preparation.paymentId(), "11").status())
                 .isEqualTo(PaymentStatus.RECONCILIATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payment_refunds
+                 WHERE refund_id = ? AND status = 'RECONCILIATION_REQUIRED'
+                """, Long.class, claim.refundId())).isEqualTo(1L);
+        assertThatThrownBy(() -> paymentService.requestRefund(differentKey))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.INVALID_STATE_TRANSITION);
         verify(providerClient, never()).cancelPayment(
                 anyString(), anyString(), anyLong(), anyString(), anyString());
         assertThat(jdbcTemplate.queryForObject(
