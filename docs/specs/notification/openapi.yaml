@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Notification API
+  version: 1.0.0
+  description: Reservation·MenuHold·Pickup 기반 소비자 본인 알림 이력 계약
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
+servers:
+  - url: /
+    description: 배포 환경의 동일 origin
+security: []
+tags:
+  - name: Notification
+    description: 일반 사용자 본인 알림 이력
+paths:
+  /api/v1/consumers/me/notifications:
+    get:
+      tags: [Notification]
+      summary: 본인 알림 이력 조회
+      operationId: getMyNotificationHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 발생 시각·notificationId 역순의 본인 알림 이력
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationHistorySuccessResponse"
+        "400":
+          $ref: "#/components/responses/InvalidQuery"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: occurredAt·notificationId 정렬 경계와 계약 버전을 담은 무결성 보호 opaque cursor
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+        pattern: "^[A-Za-z0-9_-]+$"
+    Size:
+      name: size
+      in: query
+      required: false
+      description: 반환할 최대 항목 수
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+  schemas:
+    NotificationPurpose:
+      type: string
+      enum:
+        - RESERVATION_CONFIRMED
+        - RESERVATION_CHANGED
+        - RESERVATION_REJECTED
+        - RESERVATION_CANCELLED
+        - RESERVATION_EXPIRED
+        - RESERVATION_VISIT_REMINDER
+        - RESERVATION_COORDINATION_REQUIRED
+        - PICKUP_RESERVATION_CONFIRMED
+        - PICKUP_RESERVATION_CANCELLED
+        - MENU_HOLD_FULFILLMENT_AT_RISK
+        - MENU_SUBSTITUTION_PROPOSED
+        - MENU_SUBSTITUTION_ACCEPTED
+        - MENU_SUBSTITUTION_REJECTED
+        - MENU_SUBSTITUTION_EXPIRED
+    NotificationResourceType:
+      type: string
+      enum: [RESERVATION, MENU_HOLD, PICKUP_RESERVATION, MENU_SUBSTITUTION_PROPOSAL]
+    NotificationActionAvailability:
+      type: string
+      enum: [AVAILABLE, EXPIRED, SUPERSEDED, UNAVAILABLE]
+    NotificationResourceRef:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          $ref: "#/components/schemas/NotificationResourceType"
+        id:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    NotificationAction:
+      oneOf:
+        - $ref: "#/components/schemas/ReservationDetailNotificationAction"
+        - $ref: "#/components/schemas/PickupReservationDetailNotificationAction"
+        - $ref: "#/components/schemas/MenuSubstitutionReviewNotificationAction"
+    ReservationDetailNotificationAction:
+      type: object
+      additionalProperties: false
+      required: [type, resource, availability, expiresAt]
+      properties:
+        type:
+          type: string
+          const: RESERVATION_DETAIL
+        resource:
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: RESERVATION
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        availability:
+          $ref: "#/components/schemas/NotificationActionAvailability"
+        expiresAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다.
+    PickupReservationDetailNotificationAction:
+      type: object
+      additionalProperties: false
+      required: [type, resource, availability, expiresAt]
+      properties:
+        type:
+          type: string
+          const: PICKUP_RESERVATION_DETAIL
+        resource:
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: PICKUP_RESERVATION
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        availability:
+          $ref: "#/components/schemas/NotificationActionAvailability"
+        expiresAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다.
+    MenuSubstitutionReviewNotificationAction:
+      type: object
+      additionalProperties: false
+      required: [type, resource, availability, expiresAt]
+      properties:
+        type:
+          type: string
+          const: MENU_SUBSTITUTION_REVIEW
+        resource:
+          type: object
+          additionalProperties: false
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              const: MENU_SUBSTITUTION_PROPOSAL
+            id:
+              $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        availability:
+          $ref: "#/components/schemas/NotificationActionAvailability"
+        expiresAt:
+          oneOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+            - type: "null"
+          description: 행동 자체의 중앙 만료 시각. null은 별도 시간 만료가 없음을 뜻한다.
+    NotificationHistoryItem:
+      type: object
+      additionalProperties: false
+      required:
+        - notificationId
+        - purpose
+        - title
+        - resource
+        - occurredAt
+        - createdAt
+        - deliveredAt
+        - action
+      properties:
+        notificationId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        purpose:
+          $ref: "#/components/schemas/NotificationPurpose"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 승인된 field allowlist로 렌더링한 안전한 제목
+        resource:
+          $ref: "#/components/schemas/NotificationResourceRef"
+        occurredAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        createdAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        deliveredAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+          description: IN_APP 전달 성공이 중앙 기록된 필수 시각
+        action:
+          oneOf:
+            - $ref: "#/components/schemas/NotificationAction"
+            - type: "null"
+          description: 안전한 행동 대상이 없으면 null
+    NotificationHistoryPageData:
+      type: object
+      additionalProperties: false
+      required: [items, hasNext, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/NotificationHistoryItem"
+        hasNext:
+          type: boolean
+        nextCursor:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 512
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: 다음 페이지가 없으면 null
+    NotificationHistorySuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/NotificationHistoryPageData"
+  responses:
+    InvalidQuery:
+      description: cursor 또는 size가 조회 계약에 맞지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidCursor:
+              value:
+                code: NOTIFICATION_001
+                message: 알림 이력 커서가 올바르지 않습니다.
+            invalidSize:
+              value:
+                code: COMMON_001
+                message: 입력값이 올바르지 않습니다.
+    AccountRestricted:
+      description: 현재 일반 사용자 계정 상태가 이력 조회를 허용하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로 이용할 수 없습니다.
