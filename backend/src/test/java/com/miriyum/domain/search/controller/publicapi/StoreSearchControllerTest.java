@@ -12,15 +12,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.ParsedToken;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.search.config.StoreSearchSecurityConfig;
+import com.miriyum.domain.search.dto.publicapi.IntegratedStoreSearchData;
+import com.miriyum.domain.search.dto.publicapi.IntegratedStoreSearchItem;
+import com.miriyum.domain.search.dto.publicapi.NormalizedSearchCondition;
 import com.miriyum.domain.search.dto.publicapi.PublicMenu;
+import com.miriyum.domain.search.dto.publicapi.PublicStoreCoordinates;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreModes;
 import com.miriyum.domain.search.dto.publicapi.PublicStoreSummary;
 import com.miriyum.domain.search.dto.publicapi.ReservationAvailability;
+import com.miriyum.domain.search.service.IntegratedStoreSearchService;
 import com.miriyum.domain.search.service.StorePublicQueryService;
 import com.miriyum.domain.search.service.StoreSearchCoreService;
+import com.miriyum.domain.recommendation.ranking.RecommendationReason;
 import com.miriyum.global.exception.GlobalExceptionHandler;
+import com.miriyum.global.exception.ServiceException;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import java.util.List;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,8 +49,10 @@ class StoreSearchControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean StoreSearchCoreService searchService;
+    @MockitoBean IntegratedStoreSearchService integratedSearchService;
     @MockitoBean StorePublicQueryService publicQueryService;
     @MockitoBean RateLimiter rateLimiter;
+    @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @BeforeEach
     void allowPublicStoreRequestsInControllerSlice() {
@@ -69,6 +83,105 @@ class StoreSearchControllerTest {
     }
 
     @Test
+    void integratedSearchReturnsInterpretationCursorAndVerifiedCoordinates() throws Exception {
+        given(integratedSearchService.search(
+                null, "서울 라멘", false, false, null, null, 20))
+                .willReturn(new IntegratedStoreSearchData(
+                        List.of(new IntegratedStoreSearchItem(
+                                "7", "라멘집", Region.SEOUL, "서울 중구", "KOREAN",
+                                OperationStatus.OPEN,
+                                new PublicStoreModes(true, true, false),
+                                ReservationAvailability.NOT_REQUESTED,
+                                new PublicStoreCoordinates(
+                                        new BigDecimal("37.5665"),
+                                        new BigDecimal("126.9780")),
+                                RecommendationReason.KEYWORD)),
+                        new NormalizedSearchCondition(
+                                List.of("SEOUL"), List.of(), List.of(), List.of(),
+                                null, null, null, null, null, "라멘"),
+                        List.of(), "rule-v1", "catalog-v1", "history-v1", "next-cursor"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "서울 라멘")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].storeId").value("7"))
+                .andExpect(jsonPath("$.data.items[0].coordinates.latitude")
+                        .value(37.5665))
+                .andExpect(jsonPath("$.data.normalizedCondition.regionCodes[0]")
+                        .value("SEOUL"))
+                .andExpect(jsonPath("$.data.ruleVersion").value("rule-v1"))
+                .andExpect(jsonPath("$.data.rankingRuleVersion").value("history-v1"))
+                .andExpect(jsonPath("$.data.items[0].recommendationReason.code")
+                        .value("KEYWORD_MATCH"))
+                .andExpect(jsonPath("$.data.nextCursor").value("next-cursor"));
+        then(searchService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void validConsumerBearerPassesAccountIdToIntegratedSearch() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("consumer-token"))
+                .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 41L));
+        given(integratedSearchService.search(
+                41L, "라멘", false, false, "recommendation,desc", null, 20))
+                .willReturn(new IntegratedStoreSearchData(
+                        List.of(),
+                        new NormalizedSearchCondition(
+                                List.of(), List.of(), List.of(), List.of(),
+                                null, null, null, null, null, "라멘"),
+                        List.of(), "rule-v1", "catalog-v1", "history-v1", null));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .header("Authorization", "Bearer consumer-token")
+                        .queryParam("searchInput", "라멘")
+                        .queryParam("sort", "recommendation,desc"))
+                .andExpect(status().isOk());
+
+        then(integratedSearchService).should().search(
+                41L, "라멘", false, false, "recommendation,desc", null, 20);
+    }
+
+    @Test
+    void malformedOrWrongNamespaceBearerIsRejectedInsteadOfFallingBackToAnonymous()
+            throws Exception {
+        given(jwtTokenProvider.parseAccessToken("operator-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 9L));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .header("Authorization", "Basic invalid")
+                        .queryParam("searchInput", "라멘"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_001"));
+        mockMvc.perform(get("/api/v1/stores")
+                        .header("Authorization", "Bearer operator-token")
+                        .queryParam("searchInput", "라멘"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_004"));
+
+        then(integratedSearchService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void integratedSearchRejectsLegacyParametersAndInvalidRawInput() throws Exception {
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "서울 라멘")
+                        .queryParam("keyword", "라멘"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(get("/api/v1/stores")
+                        .queryParam("searchInput", "가".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        then(integratedSearchService).shouldHaveNoInteractions();
+    }
+
+    @Test
     void detailRejectsPartialReservationConditionBeforeService() throws Exception {
         mockMvc.perform(get("/api/v1/stores/7")
                         .queryParam("serviceDate", "2026-08-03"))
@@ -89,6 +202,18 @@ class StoreSearchControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.items[0].menuId").value("11"))
                 .andExpect(jsonPath("$.data.items[0].saleStatus").value("SELLING"));
+    }
+
+    @Test
+    void invalidBearerDoesNotChangePublicMenuContract() throws Exception {
+        given(jwtTokenProvider.parseAccessToken("invalid-token"))
+                .willThrow(new ServiceException(AuthErrorCode.ACCESS_TOKEN_INVALID));
+        given(publicQueryService.getMenus(7L)).willReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/stores/7/menus")
+                        .header("Authorization", "Bearer invalid-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
     }
 
     @Test

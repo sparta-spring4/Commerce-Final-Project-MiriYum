@@ -9,12 +9,20 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 class AudienceOpenApiContractTest {
 
     private static final Path SPECS = Path.of("..", "docs", "specs");
+    private static final Set<String> NON_FEATURE_OPENAPI_FILES =
+            Set.of("mvp1-common/openapi.yaml");
+    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
+    private static final String MENU_ALTERNATIVE_SEARCH_PATH =
+            "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+    private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
+            Set.of(MENU_ALTERNATIVE_SEARCH_PATH);
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -25,7 +33,7 @@ class AudienceOpenApiContractTest {
             "/api/v1/pickup-reservations");
 
     @Test
-    void audienceEntrypointsPartitionTheAggregatePaths() throws IOException {
+    void audienceEntrypointsMatchTheMvp1AggregateAndLaterStagePaths() throws IOException {
         Set<String> publicPaths = paths("public-openapi.yaml").keySet();
         Set<String> consumerPaths = paths("consumer-openapi.yaml").keySet();
         Set<String> operatorPaths = paths("store-operator-openapi.yaml").keySet();
@@ -44,7 +52,27 @@ class AudienceOpenApiContractTest {
         Set<String> allAudiencePaths = new HashSet<>(publicPaths);
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
-        assertThat(allAudiencePaths).isEqualTo(aggregatePaths);
+        assertThat(intersection(aggregatePaths, POST_MVP1_AUDIENCE_PATHS)).isEmpty();
+        Set<String> mvp1AndLaterStagePaths = new HashSet<>(aggregatePaths);
+        mvp1AndLaterStagePaths.addAll(POST_MVP1_AUDIENCE_PATHS);
+        assertThat(mvp1AndLaterStagePaths).isEqualTo(allAudiencePaths);
+    }
+
+    @Test
+    void audienceEntrypointsExposeEveryFeaturePathUnlessExplicitlyExcluded() throws IOException {
+        Set<String> featurePaths = new HashSet<>();
+        for (String file : featureOpenApiFiles()) {
+            featurePaths.addAll(paths(file).keySet());
+        }
+
+        Set<String> audiencePaths = new HashSet<>(paths("public-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("consumer-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("store-operator-openapi.yaml").keySet());
+
+        assertThat(intersection(audiencePaths, APPROVED_UNEXPOSED_FEATURE_PATHS)).isEmpty();
+        Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
+        exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
+        assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
     }
 
     @Test
@@ -68,6 +96,19 @@ class AudienceOpenApiContractTest {
         Set<String> result = new HashSet<>(left);
         result.retainAll(right);
         return result;
+    }
+
+    private static Set<String> featureOpenApiFiles() throws IOException {
+        try (var entries = Files.list(SPECS)) {
+            return entries
+                    .filter(Files::isDirectory)
+                    .map(directory -> directory.resolve("openapi.yaml"))
+                    .filter(Files::isRegularFile)
+                    .map(SPECS::relativize)
+                    .map(path -> path.toString().replace('\\', '/'))
+                    .filter(file -> !NON_FEATURE_OPENAPI_FILES.contains(file))
+                    .collect(Collectors.toUnmodifiableSet());
+        }
     }
 
     private static Map<String, Object> paths(String file) throws IOException {
