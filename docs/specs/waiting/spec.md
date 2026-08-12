@@ -49,8 +49,9 @@ aggregate에는 넣지 않는다. production Java, migration, frontend 또는 �
 | `version` | `0` |
 
 비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
-시점의 활성 팀 수이고, `canCloseActiveTeams`는 Issue #272가 정의하는 종결 가능성 판정 결과다.
-설정 행의 부재를 매장 부재로 해석하지 않는다.
+시점의 활성 팀 수다. 종결 가능성 판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태
+조회 계약/runtime을 `dev`에 제공할 때 일괄 종결 action과 함께 추가한다. 그 전에는 응답에
+노출하지 않는다. 설정 행의 부재를 매장 부재로 해석하지 않는다.
 
 ## 전체 교체와 버전
 

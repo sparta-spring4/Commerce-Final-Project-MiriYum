@@ -112,11 +112,16 @@ class WaitingOpenApiContractTest {
                 map(map(schemas.get("WaitingSetting")).get("properties"));
         Map<String, Object> impactProperties =
                 map(map(schemas.get("WaitingDisableImpact")).get("properties"));
+        Map<String, Object> impact = map(schemas.get("WaitingDisableImpact"));
 
         assertThat(settingProperties).containsKey("version");
         assertThat(impactProperties)
                 .containsKey("version")
-                .doesNotContainKey("settingVersion");
+                .doesNotContainKeys("settingVersion", "canCloseActiveTeams");
+        assertThat(impactProperties)
+                .containsOnlyKeys("storeId", "version", "activeTeamCount");
+        assertThat(list(impact.get("required")))
+                .containsExactly("storeId", "version", "activeTeamCount");
         assertThat(map(impactProperties.get("version")))
                 .containsEntry("type", "integer")
                 .containsEntry("format", "int64")

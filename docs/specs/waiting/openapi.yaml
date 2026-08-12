@@ -220,7 +220,6 @@ components:
         - storeId
         - version
         - activeTeamCount
-        - canCloseActiveTeams
       properties:
         storeId:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
@@ -233,9 +232,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-        canCloseActiveTeams:
-          type: boolean
-          description: "Issue #272가 소유하는 활성 팀 종결 가능성 판정"
     WaitingSettingSuccessResponse:
       type: object
       additionalProperties: false
