@@ -9,17 +9,15 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 class AudienceOpenApiContractTest {
 
     private static final Path SPECS = Path.of("..", "docs", "specs");
-    private static final Set<String> FEATURE_OPENAPI_FILES = Set.of(
-            "auth-account/openapi.yaml",
-            "store-search/openapi.yaml",
-            "reservation/openapi.yaml",
-            "menu-hold-pickup/openapi.yaml");
+    private static final Set<String> NON_FEATURE_OPENAPI_FILES =
+            Set.of("mvp1-common/openapi.yaml");
     private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
@@ -63,7 +61,7 @@ class AudienceOpenApiContractTest {
     @Test
     void audienceEntrypointsExposeEveryFeaturePathUnlessExplicitlyExcluded() throws IOException {
         Set<String> featurePaths = new HashSet<>();
-        for (String file : FEATURE_OPENAPI_FILES) {
+        for (String file : featureOpenApiFiles()) {
             featurePaths.addAll(paths(file).keySet());
         }
 
@@ -98,6 +96,19 @@ class AudienceOpenApiContractTest {
         Set<String> result = new HashSet<>(left);
         result.retainAll(right);
         return result;
+    }
+
+    private static Set<String> featureOpenApiFiles() throws IOException {
+        try (var entries = Files.list(SPECS)) {
+            return entries
+                    .filter(Files::isDirectory)
+                    .map(directory -> directory.resolve("openapi.yaml"))
+                    .filter(Files::isRegularFile)
+                    .map(SPECS::relativize)
+                    .map(path -> path.toString().replace('\\', '/'))
+                    .filter(file -> !NON_FEATURE_OPENAPI_FILES.contains(file))
+                    .collect(Collectors.toUnmodifiableSet());
+        }
     }
 
     private static Map<String, Object> paths(String file) throws IOException {
