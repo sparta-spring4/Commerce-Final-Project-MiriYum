@@ -77,17 +77,29 @@ public class WaitingTransitionAudit {
             Instant occurredAt,
             Instant createdAt
     ) {
-        if (waitingTeamId <= 0 || expectedVersion < 0) {
-            throw new IllegalArgumentException("team and version must be valid");
+        if (waitingTeamId <= 0) {
+            throw new IllegalArgumentException("waitingTeamId must be positive");
         }
         if (actorType == null || afterStatus == null || occurredAt == null || createdAt == null) {
             throw new IllegalArgumentException("audit fields must not be null");
+        }
+        if (actorType == WaitingActorType.SYSTEM && actorId != null && actorId <= 0) {
+            throw new IllegalArgumentException("system actorId must be positive when present");
         }
         if (actorType != WaitingActorType.SYSTEM && (actorId == null || actorId <= 0)) {
             throw new IllegalArgumentException("non-system actorId must be positive");
         }
         if (beforeStatus == afterStatus || (beforeStatus == null && afterStatus != WaitingTeamStatus.WAITING)) {
             throw new IllegalArgumentException("audit must describe an allowed state change");
+        }
+        if (beforeStatus == null && expectedVersion != -1L) {
+            throw new IllegalArgumentException("creation audit expectedVersion must be -1");
+        }
+        if (beforeStatus != null && expectedVersion < 0L) {
+            throw new IllegalArgumentException("transition expectedVersion must not be negative");
+        }
+        if (occurredAt.isBefore(createdAt)) {
+            throw new IllegalArgumentException("occurredAt must not be before createdAt");
         }
         this.waitingTeamId = waitingTeamId;
         this.actorType = actorType;

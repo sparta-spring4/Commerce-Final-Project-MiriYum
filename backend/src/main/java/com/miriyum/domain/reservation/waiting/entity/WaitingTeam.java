@@ -166,7 +166,7 @@ public class WaitingTeam {
                 && status != WaitingTeamStatus.ARRIVED) {
             throw invalidTransition();
         }
-        cancelledAt = requireNotBefore(occurredAt, createdAt);
+        cancelledAt = requireNotBefore(occurredAt, latestStateTimestamp());
         status = WaitingTeamStatus.CANCELLED;
         version++;
     }
@@ -192,7 +192,7 @@ public class WaitingTeam {
                 && status != WaitingTeamStatus.ARRIVED) {
             throw invalidTransition();
         }
-        closedByStoreAt = requireNotBefore(occurredAt, createdAt);
+        closedByStoreAt = requireNotBefore(occurredAt, latestStateTimestamp());
         status = WaitingTeamStatus.CLOSED_BY_STORE;
         version++;
     }
@@ -211,6 +211,16 @@ public class WaitingTeam {
 
     private ServiceException invalidTransition() {
         return new ServiceException(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+    }
+
+    private Instant latestStateTimestamp() {
+        if (arrivedAt != null) {
+            return arrivedAt;
+        }
+        if (calledAt != null) {
+            return calledAt;
+        }
+        return createdAt;
     }
 
     private static Instant requireNotBefore(Instant occurredAt, Instant lowerBound) {

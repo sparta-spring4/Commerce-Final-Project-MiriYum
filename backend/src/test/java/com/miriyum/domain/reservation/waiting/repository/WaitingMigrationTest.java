@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import java.sql.Connection;
@@ -8,8 +9,14 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -37,6 +44,16 @@ class WaitingMigrationTest {
 
     private static final DockerImageName MYSQL_IMAGE =
             DockerImageName.parse("mysql:8.0.40");
+    private static final Set<String> TEAM_STATUSES = Set.of(
+            "WAITING",
+            "CALLED",
+            "ARRIVED",
+            "CHECKED_IN",
+            "CANCELLED",
+            "NO_SHOW",
+            "CLOSED_BY_STORE",
+            "RESERVATION_CONVERTING"
+    );
 
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE);
@@ -122,21 +139,136 @@ class WaitingMigrationTest {
     }
 
     @Test
+    @DisplayName("순번 행의 기본 키는 매장과 영업일 복합 키다")
+    void createsStoreBusinessDateCompositeSequencePrimaryKey() throws SQLException {
+        migrate();
+
+        assertThat(primaryKeyColumns("waiting_queue_sequences"))
+                .containsExactly("store_id", "business_date");
+    }
+
+    @Test
     @DisplayName("팀과 종결 작업 상태는 승인된 값으로 DB에서도 제한한다")
     void createsExactStatusChecks() throws SQLException {
         migrate();
 
-        assertThat(checkClause("ck_waiting_teams_status"))
-                .contains("WAITING", "CALLED", "ARRIVED", "CHECKED_IN", "CANCELLED")
-                .contains("NO_SHOW", "CLOSED_BY_STORE", "RESERVATION_CONVERTING");
-        assertThat(checkClause("ck_waiting_closure_jobs_status"))
-                .contains("PENDING", "PROCESSING", "COMPLETED", "RECONCILIATION_REQUIRED");
-        assertThat(checkClause("ck_waiting_closure_job_items_status"))
-                .contains("PENDING", "PROCESSING", "COMPLETED", "FAILED")
-                .contains("RECONCILIATION_REQUIRED");
-        assertThat(checkClause("ck_waiting_status_events_public_status"))
-                .contains("WAITING", "CALLED", "ARRIVED", "CHECKED_IN", "CANCELLED")
-                .contains("NO_SHOW", "CLOSED_BY_STORE", "RESERVATION_CONVERTING");
+        assertThat(quotedValues(checkClause("ck_waiting_teams_status")))
+                .containsExactlyInAnyOrderElementsOf(TEAM_STATUSES);
+        assertThat(quotedValues(checkClause("ck_waiting_closure_jobs_status")))
+                .containsExactlyInAnyOrder(
+                        "PENDING", "PROCESSING", "COMPLETED", "RECONCILIATION_REQUIRED"
+                );
+        assertThat(quotedValues(checkClause("ck_waiting_closure_job_items_status")))
+                .containsExactlyInAnyOrder(
+                        "PENDING", "PROCESSING", "COMPLETED", "FAILED",
+                        "RECONCILIATION_REQUIRED"
+                );
+        assertThat(quotedValues(checkClause("ck_waiting_status_events_public_status")))
+                .containsExactlyInAnyOrderElementsOf(TEAM_STATUSES);
+    }
+
+    @Test
+    @DisplayName("팀 상태는 호출과 도착 시각 snapshot의 정확한 시간 순서를 강제한다")
+    void bindsTeamStatusToChronologicalCallSnapshot() throws SQLException {
+        migrate();
+        Instant createdAt = Instant.parse("2026-08-12T03:00:00Z");
+        Instant calledAt = Instant.parse("2026-08-12T03:01:00Z");
+        Instant deadline = Instant.parse("2026-08-12T03:11:00Z");
+        Instant arrivedAt = Instant.parse("2026-08-12T03:02:00Z");
+
+        try (Connection connection = connection()) {
+            connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+            connection.createStatement().execute(
+                    "DELETE FROM waiting_teams WHERE store_id = 99001"
+            );
+
+            insertTeam(connection, 1L, "WAITING", createdAt, null, null, null,
+                    null, null, null, null);
+            insertTeam(connection, 2L, "CALLED", createdAt, calledAt, deadline, null,
+                    null, null, null, null);
+            insertTeam(connection, 3L, "ARRIVED", createdAt, calledAt, deadline, arrivedAt,
+                    null, null, null, null);
+            insertTeam(connection, 4L, "CANCELLED", createdAt, null, null, null,
+                    null, createdAt.plusSeconds(30), null, null);
+            insertTeam(connection, 5L, "CANCELLED", createdAt, calledAt, deadline, null,
+                    null, calledAt.plusSeconds(30), null, null);
+            insertTeam(connection, 6L, "CANCELLED", createdAt, calledAt, deadline, arrivedAt,
+                    null, arrivedAt.plusSeconds(30), null, null);
+            insertTeam(connection, 11L, "CHECKED_IN", createdAt, calledAt, deadline, arrivedAt,
+                    arrivedAt.plusSeconds(30), null, null, null);
+            insertTeam(connection, 12L, "NO_SHOW", createdAt, calledAt, deadline, null,
+                    null, null, deadline, null);
+            insertTeam(connection, 13L, "CLOSED_BY_STORE", createdAt, null, null, null,
+                    null, null, null, createdAt.plusSeconds(30));
+            insertTeam(connection, 14L, "CLOSED_BY_STORE", createdAt, calledAt, deadline, null,
+                    null, null, null, calledAt.plusSeconds(30));
+            insertTeam(connection, 15L, "CLOSED_BY_STORE", createdAt, calledAt, deadline, arrivedAt,
+                    null, null, null, arrivedAt.plusSeconds(30));
+            insertTeam(connection, 16L, "RESERVATION_CONVERTING", createdAt, null, null, null,
+                    null, null, null, null);
+
+            assertTeamSnapshotRejected(connection, 7L, "WAITING", createdAt,
+                    calledAt, deadline, null);
+            assertTeamSnapshotRejected(connection, 8L, "CALLED", createdAt,
+                    null, null, null);
+            assertTeamSnapshotRejected(connection, 9L, "ARRIVED", createdAt,
+                    calledAt, deadline, calledAt.minusSeconds(1));
+            assertTeamSnapshotRejected(connection, 10L, "ARRIVED", createdAt,
+                    calledAt, deadline, deadline.plusSeconds(1));
+            assertThatThrownBy(() -> insertTeam(
+                    connection, 17L, "CHECKED_IN", createdAt, calledAt, deadline, null,
+                    calledAt.plusSeconds(30), null, null, null
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_teams_call_window");
+            assertThatThrownBy(() -> insertTeam(
+                    connection, 18L, "CANCELLED", createdAt, calledAt, deadline, null,
+                    null, calledAt.minusSeconds(1), null, null
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_teams_call_window");
+            assertThatThrownBy(() -> insertTeam(
+                    connection, 19L, "NO_SHOW", createdAt, calledAt, deadline, null,
+                    null, null, deadline.minusSeconds(1), null
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_teams_call_window");
+            assertThatThrownBy(() -> insertTeam(
+                    connection, 20L, "CLOSED_BY_STORE", createdAt, calledAt, deadline, arrivedAt,
+                    null, null, null, arrivedAt.minusSeconds(1)
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_teams_call_window");
+            assertTeamSnapshotRejected(connection, 21L, "RESERVATION_CONVERTING", createdAt,
+                    calledAt, deadline, null);
+        }
+    }
+
+    @Test
+    @DisplayName("감사 원장은 생성 -1에서 0과 일반 전이의 단일 버전 증가를 구분한다")
+    void enforcesCreationAndTransitionAuditVersionConventions() throws SQLException {
+        migrate();
+        Instant createdAt = Instant.parse("2026-08-12T03:00:00Z");
+
+        try (Connection connection = connection()) {
+            connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+            insertAudit(connection, "creation-audit", null, "WAITING", -1L, 0L,
+                    createdAt, createdAt);
+            insertAudit(connection, "transition-audit", "WAITING", "CALLED", 0L, 1L,
+                    createdAt.plusSeconds(60), createdAt);
+
+            assertThatThrownBy(() -> insertAudit(
+                    connection, "invalid-creation-audit", null, "WAITING", 0L, 1L,
+                    createdAt, createdAt
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_transition_audits_versions");
+            assertThatThrownBy(() -> insertAudit(
+                    connection, "invalid-transition-audit", "WAITING", "CALLED", -1L, 0L,
+                    createdAt.plusSeconds(60), createdAt
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_transition_audits_versions");
+            assertThatThrownBy(() -> insertAudit(
+                    connection, "rollback-audit-time", "WAITING", "CALLED", 0L, 1L,
+                    createdAt.minusSeconds(1), createdAt
+            )).isInstanceOf(SQLException.class)
+                    .hasMessageContaining("ck_waiting_transition_audits_time");
+        }
     }
 
     @Test
@@ -224,6 +356,27 @@ class WaitingMigrationTest {
                 """);
     }
 
+    private List<String> primaryKeyColumns(String tableName) throws SQLException {
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT column_name
+                     FROM information_schema.key_column_usage
+                     WHERE constraint_schema = DATABASE()
+                       AND table_name = ?
+                       AND constraint_name = 'PRIMARY'
+                     ORDER BY ordinal_position
+                     """)) {
+            statement.setString(1, tableName);
+            try (ResultSet rows = statement.executeQuery()) {
+                List<String> columns = new ArrayList<>();
+                while (rows.next()) {
+                    columns.add(rows.getString(1));
+                }
+                return columns;
+            }
+        }
+    }
+
     private String checkClause(String constraintName) throws SQLException {
         try (Connection connection = connection();
              PreparedStatement statement = connection.prepareStatement("""
@@ -237,6 +390,109 @@ class WaitingMigrationTest {
                 assertThat(rows.next()).as("check constraint %s", constraintName).isTrue();
                 return rows.getString("check_clause");
             }
+        }
+    }
+
+    private Set<String> quotedValues(String checkClause) {
+        Matcher matcher = Pattern.compile("'([^']+)'").matcher(checkClause);
+        Set<String> values = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            values.add(matcher.group(1).replace("\\", ""));
+        }
+        return values;
+    }
+
+    private void assertTeamSnapshotRejected(
+            Connection connection,
+            long queueSequence,
+            String status,
+            Instant createdAt,
+            Instant calledAt,
+            Instant deadline,
+            Instant arrivedAt
+    ) {
+        assertThatThrownBy(() -> insertTeam(
+                connection,
+                queueSequence,
+                status,
+                createdAt,
+                calledAt,
+                deadline,
+                arrivedAt,
+                null,
+                null,
+                null,
+                null
+        ))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("ck_waiting_teams_call_window");
+    }
+
+    private void insertTeam(
+            Connection connection,
+            long queueSequence,
+            String status,
+            Instant createdAt,
+            Instant calledAt,
+            Instant deadline,
+            Instant arrivedAt,
+            Instant checkedInAt,
+            Instant cancelledAt,
+            Instant noShowAt,
+            Instant closedByStoreAt
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO waiting_teams (
+                    store_id, consumer_account_id, business_date, party_size, source,
+                    queue_sequence, status, version, created_at, called_at,
+                    arrival_deadline, arrived_at, checked_in_at, cancelled_at,
+                    no_show_at, closed_by_store_at
+                ) VALUES (99001, 99002, ?, 2, 'REMOTE', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            statement.setObject(1, LocalDate.of(2026, 8, 12));
+            statement.setLong(2, queueSequence);
+            statement.setString(3, status);
+            setInstant(statement, 4, createdAt);
+            setInstant(statement, 5, calledAt);
+            setInstant(statement, 6, deadline);
+            setInstant(statement, 7, arrivedAt);
+            setInstant(statement, 8, checkedInAt);
+            setInstant(statement, 9, cancelledAt);
+            setInstant(statement, 10, noShowAt);
+            setInstant(statement, 11, closedByStoreAt);
+            statement.executeUpdate();
+        }
+    }
+
+    private void setInstant(PreparedStatement statement, int index, Instant value)
+            throws SQLException {
+        statement.setTimestamp(index, value == null ? null : Timestamp.from(value));
+    }
+
+    private void insertAudit(
+            Connection connection,
+            String commandId,
+            String beforeStatus,
+            String afterStatus,
+            long expectedVersion,
+            long resultVersion,
+            Instant occurredAt,
+            Instant createdAt
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO waiting_transition_audits (
+                    waiting_team_id, actor_type, actor_id, before_status, after_status,
+                    expected_version, result_version, reason, command_id, occurred_at, created_at
+                ) VALUES (999999, 'SYSTEM', NULL, ?, ?, ?, ?, 'TEST', ?, ?, ?)
+                """)) {
+            statement.setString(1, beforeStatus);
+            statement.setString(2, afterStatus);
+            statement.setLong(3, expectedVersion);
+            statement.setLong(4, resultVersion);
+            statement.setString(5, commandId);
+            setInstant(statement, 6, occurredAt);
+            setInstant(statement, 7, createdAt);
+            statement.executeUpdate();
         }
     }
 

@@ -62,8 +62,115 @@ CREATE TABLE waiting_teams (
         CHECK (version >= 0),
     CONSTRAINT ck_waiting_teams_call_window
         CHECK (
-            (called_at IS NULL AND arrival_deadline IS NULL)
-            OR arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+            COALESCE((CASE status
+                WHEN 'WAITING' THEN
+                    called_at IS NULL
+                    AND arrival_deadline IS NULL
+                    AND arrived_at IS NULL
+                    AND checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                WHEN 'CALLED' THEN
+                    called_at IS NOT NULL
+                    AND called_at >= created_at
+                    AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                    AND arrived_at IS NULL
+                    AND checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                WHEN 'ARRIVED' THEN
+                    called_at IS NOT NULL
+                    AND called_at >= created_at
+                    AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                    AND arrived_at BETWEEN called_at AND arrival_deadline
+                    AND checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                WHEN 'CHECKED_IN' THEN
+                    called_at IS NOT NULL
+                    AND called_at >= created_at
+                    AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                    AND arrived_at BETWEEN called_at AND arrival_deadline
+                    AND checked_in_at >= arrived_at
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                WHEN 'CANCELLED' THEN
+                    checked_in_at IS NULL
+                    AND cancelled_at IS NOT NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                    AND (
+                        (
+                            called_at IS NULL
+                            AND arrival_deadline IS NULL
+                            AND arrived_at IS NULL
+                            AND cancelled_at >= created_at
+                        )
+                        OR (
+                            called_at IS NOT NULL
+                            AND called_at >= created_at
+                            AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                            AND arrived_at IS NULL
+                            AND cancelled_at >= called_at
+                        )
+                        OR (
+                            called_at IS NOT NULL
+                            AND called_at >= created_at
+                            AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                            AND arrived_at BETWEEN called_at AND arrival_deadline
+                            AND cancelled_at >= arrived_at
+                        )
+                    )
+                WHEN 'NO_SHOW' THEN
+                    called_at IS NOT NULL
+                    AND called_at >= created_at
+                    AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                    AND arrived_at IS NULL
+                    AND checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at >= arrival_deadline
+                    AND closed_by_store_at IS NULL
+                WHEN 'CLOSED_BY_STORE' THEN
+                    checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NOT NULL
+                    AND (
+                        (
+                            called_at IS NULL
+                            AND arrival_deadline IS NULL
+                            AND arrived_at IS NULL
+                            AND closed_by_store_at >= created_at
+                        )
+                        OR (
+                            called_at IS NOT NULL
+                            AND called_at >= created_at
+                            AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                            AND arrived_at IS NULL
+                            AND closed_by_store_at >= called_at
+                        )
+                        OR (
+                            called_at IS NOT NULL
+                            AND called_at >= created_at
+                            AND arrival_deadline = TIMESTAMPADD(MINUTE, 10, called_at)
+                            AND arrived_at BETWEEN called_at AND arrival_deadline
+                            AND closed_by_store_at >= arrived_at
+                        )
+                    )
+                WHEN 'RESERVATION_CONVERTING' THEN
+                    called_at IS NULL
+                    AND arrival_deadline IS NULL
+                    AND arrived_at IS NULL
+                    AND checked_in_at IS NULL
+                    AND cancelled_at IS NULL
+                    AND no_show_at IS NULL
+                    AND closed_by_store_at IS NULL
+                ELSE FALSE
+            END), FALSE) = TRUE
         ),
     INDEX idx_waiting_teams_fifo (
         store_id,
@@ -148,13 +255,25 @@ CREATE TABLE waiting_transition_audits (
             )
         ),
     CONSTRAINT ck_waiting_transition_audits_versions
-        CHECK (expected_version >= 0 AND result_version = expected_version + 1),
+        CHECK (
+            (
+                before_status IS NULL
+                AND after_status = 'WAITING'
+                AND expected_version = -1
+                AND result_version = 0
+            )
+            OR (
+                before_status IS NOT NULL
+                AND expected_version >= 0
+                AND result_version = expected_version + 1
+            )
+        ),
     CONSTRAINT ck_waiting_transition_audits_command
         CHECK (CHAR_LENGTH(TRIM(command_id)) BETWEEN 1 AND 100),
     CONSTRAINT ck_waiting_transition_audits_reason
         CHECK (CHAR_LENGTH(TRIM(reason)) BETWEEN 1 AND 255),
     CONSTRAINT ck_waiting_transition_audits_time
-        CHECK (occurred_at <= created_at),
+        CHECK (occurred_at >= created_at),
     INDEX idx_waiting_transition_audits_team (
         waiting_team_id,
         waiting_transition_audit_id

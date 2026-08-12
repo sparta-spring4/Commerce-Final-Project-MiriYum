@@ -10,7 +10,9 @@ import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -181,6 +183,28 @@ class WaitingTeamTest {
     }
 
     @Test
+    @DisplayName("호출 이전 시각으로 취소 시각을 되돌릴 수 없다")
+    void rejectsCalledCancellationTimestampRollback() {
+        WaitingTeam team = calledTeam();
+
+        assertThatThrownBy(() -> team.cancel(1L, CALLED_AT.minusNanos(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.CALLED);
+        assertThat(team.getVersion()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("도착 이전 시각으로 취소 시각을 되돌릴 수 없다")
+    void rejectsArrivedCancellationTimestampRollback() {
+        WaitingTeam team = arrivedTeam();
+
+        assertThatThrownBy(() -> team.cancel(2L, Instant.parse("2026-08-12T03:01:59.999999999Z")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.ARRIVED);
+        assertThat(team.getVersion()).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("호출 팀은 도착 제한 시각부터 미응답 종료할 수 있다")
     void marksCalledTeamNoShowAtDeadline() {
         // given
@@ -232,6 +256,30 @@ class WaitingTeamTest {
     }
 
     @Test
+    @DisplayName("호출 이전 시각으로 매장 종료 시각을 되돌릴 수 없다")
+    void rejectsCalledStoreClosureTimestampRollback() {
+        WaitingTeam team = calledTeam();
+
+        assertThatThrownBy(() -> team.closeByStore(1L, CALLED_AT.minusNanos(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.CALLED);
+        assertThat(team.getVersion()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("도착 이전 시각으로 매장 종료 시각을 되돌릴 수 없다")
+    void rejectsArrivedStoreClosureTimestampRollback() {
+        WaitingTeam team = arrivedTeam();
+
+        assertThatThrownBy(() -> team.closeByStore(
+                2L,
+                Instant.parse("2026-08-12T03:01:59.999999999Z")
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.ARRIVED);
+        assertThat(team.getVersion()).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("오래된 expectedVersion 명령은 상태와 버전을 변경하지 않는다")
     void rejectsStaleVersionWithoutMutation() {
         // given
@@ -263,8 +311,8 @@ class WaitingTeamTest {
     }
 
     @Test
-    @DisplayName("종결 상태에서는 후속 운영자 전이를 허용하지 않는다")
-    void keepsTerminalStatesImmutable() {
+    @DisplayName("모든 도달 가능한 종결 상태는 모든 공개 전이를 거부한다")
+    void keepsTerminalStatesImmutableAcrossEveryPublicTransition() {
         // given
         WaitingTeam checkedIn = arrivedTeam();
         checkedIn.checkIn(2L, Instant.parse("2026-08-12T03:03:00Z"));
@@ -276,10 +324,10 @@ class WaitingTeamTest {
         closed.closeByStore(0L, Instant.parse("2026-08-12T03:01:00Z"));
 
         // when & then
-        assertTerminalRejectsCancellation(checkedIn, 3L);
-        assertTerminalRejectsCancellation(cancelled, 1L);
-        assertTerminalRejectsCancellation(noShow, 2L);
-        assertTerminalRejectsCancellation(closed, 1L);
+        assertTerminalRejectsEveryTransition(checkedIn, 3L);
+        assertTerminalRejectsEveryTransition(cancelled, 1L);
+        assertTerminalRejectsEveryTransition(noShow, 2L);
+        assertTerminalRejectsEveryTransition(closed, 1L);
     }
 
     @Test
@@ -330,18 +378,26 @@ class WaitingTeamTest {
         return team;
     }
 
-    private static void assertTerminalRejectsCancellation(WaitingTeam team, long expectedVersion) {
+    private static void assertTerminalRejectsEveryTransition(WaitingTeam team, long expectedVersion) {
         WaitingTeamStatus beforeStatus = team.getStatus();
+        Instant occurredAt = Instant.parse("2026-08-12T03:12:00Z");
+        List<BiConsumer<Long, Instant>> transitions = List.of(
+                team::call,
+                team::arrive,
+                team::checkIn,
+                team::cancel,
+                team::markNoShow,
+                team::closeByStore
+        );
 
-        assertThatThrownBy(() -> team.cancel(
-                expectedVersion,
-                Instant.parse("2026-08-12T03:12:00Z")
-        ))
-                .isInstanceOf(ServiceException.class)
-                .extracting(error -> ((ServiceException) error).getErrorCode())
-                .isEqualTo(ReservationErrorCode.WAITING_INVALID_TRANSITION);
-        assertThat(team.getStatus()).isEqualTo(beforeStatus);
-        assertThat(team.getVersion()).isEqualTo(expectedVersion);
+        for (BiConsumer<Long, Instant> transition : transitions) {
+            assertThatThrownBy(() -> transition.accept(expectedVersion, occurredAt))
+                    .isInstanceOf(ServiceException.class)
+                    .extracting(error -> ((ServiceException) error).getErrorCode())
+                    .isEqualTo(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+            assertThat(team.getStatus()).isEqualTo(beforeStatus);
+            assertThat(team.getVersion()).isEqualTo(expectedVersion);
+        }
     }
 
     private static boolean acceptsVersionAndOccurrence(Method method) {
