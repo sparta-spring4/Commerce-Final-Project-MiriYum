@@ -127,7 +127,7 @@ public class StoreOperatorKakaoAuthService {
         if (ticket.namespace() != TokenNamespace.STORE_OPERATOR) {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
-        if (!fingerprintGenerator.isAllowedKeyVersion(ticket.fingerprintKeyVersion())) {
+        if (!fingerprintGenerator.isActiveKeyVersion(ticket.fingerprintKeyVersion())) {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
 

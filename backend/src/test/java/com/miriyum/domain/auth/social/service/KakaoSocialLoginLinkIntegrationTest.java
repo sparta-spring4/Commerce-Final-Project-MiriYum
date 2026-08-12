@@ -1,6 +1,7 @@
 package com.miriyum.domain.auth.social.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -153,7 +154,7 @@ class KakaoSocialLoginLinkIntegrationTest {
     @Test
     @DisplayName("소비자 카카오 가입 진입 경로도 같은 티켓으로 계정과 연결을 하나만 만든다")
     void createsOnlyOneAccountThroughConsumerSignUpTransactionBoundary() throws Exception {
-        String ticket = kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, "v1", "c".repeat(64));
+        String ticket = kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, "v2", "c".repeat(64));
 
         List<Attempt> attempts = runConcurrently(
                 () -> signUp(ticket, "first@example.com", "010-1111-1111", "첫번째"),
@@ -163,6 +164,48 @@ class KakaoSocialLoginLinkIntegrationTest {
         assertThat(consumerAccountRepository.count()).isOne();
         assertThat(attempts).filteredOn(attempt -> attempt.result() == KakaoLinkResult.CREATED).hasSize(1);
         assertThat(attempts).filteredOn(Attempt::isKakaoConflict).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("키 교체 전 가입 티켓은 현재 키 연결이 생겨도 새 계정을 만들지 못한다")
+    void rejectsPreviousKeyTicketBeforeCreatingAnotherAccount() {
+        String kakaoSubject = "rotated-kakao-subject";
+        KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
+        KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
+        ConsumerAccount linkedAccount = consumerAccountRepository.saveAndFlush(
+                ConsumerAccount.create("linked@example.com", "{sha256-bcrypt}hash", "기존 사용자"));
+        kakaoSocialLoginLinkService.linkFingerprint(TokenNamespace.CONSUMER, linkedAccount.getId(), active);
+        String previousTicket = kakaoSignUpTicketService.create(
+                TokenNamespace.CONSUMER, previous.keyVersion(), previous.value());
+
+        assertThatThrownBy(() -> signUp(previousTicket, "new@example.com", "010-3333-3333", "새 사용자"))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID));
+
+        assertThat(consumerAccountRepository.count()).isEqualTo(1);
+        assertThat(rowCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("현재 fingerprint 충돌 시 이전 fingerprint 조회는 현재 연결로 수렴하고 기존 행을 유지한다")
+    void keepsPreviousFingerprintWhenActiveFingerprintAlreadyExists() {
+        String kakaoSubject = "fingerprint-collision-subject";
+        KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
+        KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
+        SocialLoginLink previousLink = socialLoginLinkRepository.saveAndFlush(SocialLoginLink.create(
+                TokenNamespace.CONSUMER, 101L, SocialLoginProvider.KAKAO, previous.keyVersion(), previous.value()));
+        socialLoginLinkRepository.saveAndFlush(SocialLoginLink.create(
+                TokenNamespace.CONSUMER, 202L, SocialLoginProvider.KAKAO, active.keyVersion(), active.value()));
+
+        Long accountId = kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.CONSUMER, kakaoSubject);
+
+        assertThat(accountId).isEqualTo(202L);
+        assertThat(socialLoginLinkRepository.findLink(
+                TokenNamespace.CONSUMER, SocialLoginProvider.KAKAO, previous.keyVersion(), previous.value()))
+                .hasValueSatisfying(link -> assertThat(link.getAccountId()).isEqualTo(101L));
+        assertThat(socialLoginLinkRepository.findLink(
+                TokenNamespace.CONSUMER, SocialLoginProvider.KAKAO, active.keyVersion(), active.value()))
+                .hasValueSatisfying(link -> assertThat(link.getAccountId()).isEqualTo(202L));
     }
 
     @Test

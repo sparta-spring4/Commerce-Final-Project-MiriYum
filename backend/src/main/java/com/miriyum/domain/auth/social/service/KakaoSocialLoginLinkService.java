@@ -9,7 +9,6 @@ import com.miriyum.domain.auth.social.enums.SocialLoginProvider;
 import com.miriyum.domain.auth.social.repository.SocialLoginLinkRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,16 +84,12 @@ public class KakaoSocialLoginLinkService {
             KakaoIdentityFingerprint active
     ) {
         KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
-        try {
-            socialLoginLinkRepository.migrateFingerprint(
-                    previousLink.getId(),
-                    active.keyVersion(),
-                    active.value(),
-                    previous.keyVersion(),
-                    previous.value());
-        } catch (DataIntegrityViolationException ignored) {
-            // 동시 요청이 이미 현재 키 fingerprint로 갱신했을 수 있다.
-        }
+        socialLoginLinkRepository.migrateFingerprint(
+                previousLink.getId(),
+                active.keyVersion(),
+                active.value(),
+                previous.keyVersion(),
+                previous.value());
 
         SocialLoginLink activeLink = findLink(namespace, active);
         return activeLink != null ? activeLink : findLink(namespace, previous);

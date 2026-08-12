@@ -38,14 +38,12 @@ public class KakaoIdentityFingerprintGenerator {
         return previousKey.optional().map(key -> generate(key, providerSubject));
     }
 
-    public boolean isAllowedKeyVersion(String keyVersion) {
+    /** 새 계정을 만드는 가입 티켓은 현재 fingerprint 키 버전으로만 허용한다. */
+    public boolean isActiveKeyVersion(String keyVersion) {
         if (keyVersion == null || keyVersion.isBlank()) {
             return false;
         }
-        if (activeKey.requireConfigured().version().equals(keyVersion)) {
-            return true;
-        }
-        return previousKey.optional().map(FingerprintKey::version).filter(keyVersion::equals).isPresent();
+        return activeKey.requireConfigured().version().equals(keyVersion);
     }
 
     private KakaoIdentityFingerprint generate(FingerprintKey key, String providerSubject) {

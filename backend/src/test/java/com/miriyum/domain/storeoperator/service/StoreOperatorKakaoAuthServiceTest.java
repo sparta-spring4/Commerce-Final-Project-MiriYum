@@ -1,12 +1,14 @@
 package com.miriyum.domain.storeoperator.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
@@ -28,6 +30,7 @@ import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorKakaoSignUpRequest
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
+import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -77,8 +80,8 @@ class StoreOperatorKakaoAuthServiceTest {
         StoreOperatorKakaoSignUpRequest request = new StoreOperatorKakaoSignUpRequest(
                 "sign-up-ticket", "operator@example.com", "010-1234-5678", "운영자 이름");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
-                .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint", "v1"));
-        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(true);
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint", "v2"));
+        given(fingerprintGenerator.isActiveKeyVersion("v2")).willReturn(true);
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
                 .willAnswer(invocation -> {
@@ -87,7 +90,7 @@ class StoreOperatorKakaoAuthServiceTest {
                     return account;
                 });
         given(kakaoSocialLoginLinkService.linkFingerprint(
-                TokenNamespace.STORE_OPERATOR, 20L, new KakaoIdentityFingerprint("v1", "fingerprint")))
+                TokenNamespace.STORE_OPERATOR, 20L, new KakaoIdentityFingerprint("v2", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("access-token");
         given(jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("refresh-token");
@@ -97,6 +100,21 @@ class StoreOperatorKakaoAuthServiceTest {
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
         then(storeOperatorAccountRepository).should().saveAndFlush(any(StoreOperatorAccount.class));
+    }
+
+    @Test
+    @DisplayName("전환 기간에도 이전 fingerprint 키의 카카오 가입 티켓은 거절한다")
+    void rejectsSignUpTicketWithPreviousFingerprintKeyVersion() {
+        StoreOperatorKakaoSignUpRequest request = new StoreOperatorKakaoSignUpRequest(
+                "sign-up-ticket", "operator@example.com", "010-1234-5678", "운영자 이름");
+        given(kakaoSignUpTicketService.parse("sign-up-ticket"))
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint", "v1"));
+        given(fingerprintGenerator.isActiveKeyVersion("v1")).willReturn(false);
+
+        assertThatThrownBy(() -> storeOperatorKakaoAuthService.signUp(request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID));
+        then(storeOperatorAccountRepository).shouldHaveNoInteractions();
     }
 
     @Test

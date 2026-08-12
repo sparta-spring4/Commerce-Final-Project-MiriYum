@@ -137,7 +137,7 @@ public class ConsumerKakaoAuthService {
         if (ticket.namespace() != TokenNamespace.CONSUMER) {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
-        if (!fingerprintGenerator.isAllowedKeyVersion(ticket.fingerprintKeyVersion())) {
+        if (!fingerprintGenerator.isActiveKeyVersion(ticket.fingerprintKeyVersion())) {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
         if (!request.ageConfirmed()) {

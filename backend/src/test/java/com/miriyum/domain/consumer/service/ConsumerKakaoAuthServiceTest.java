@@ -131,8 +131,8 @@ class ConsumerKakaoAuthServiceTest {
         ConsumerKakaoSignUpRequest request = new ConsumerKakaoSignUpRequest(
                 "sign-up-ticket", "user@example.com", "010-1234-5678", true, "닉네임");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
-                .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v1"));
-        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(true);
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v2"));
+        given(fingerprintGenerator.isActiveKeyVersion("v2")).willReturn(true);
         given(nicknamePolicy.normalize("닉네임")).willReturn("닉네임");
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(contactReferenceGenerator.generate()).willReturn("contact-reference");
@@ -143,7 +143,7 @@ class ConsumerKakaoAuthServiceTest {
                     return account;
                 });
         given(kakaoSocialLoginLinkService.linkFingerprint(
-                TokenNamespace.CONSUMER, 10L, new KakaoIdentityFingerprint("v1", "fingerprint")))
+                TokenNamespace.CONSUMER, 10L, new KakaoIdentityFingerprint("v2", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 10L)).willReturn("access-token");
         given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 10L)).willReturn("refresh-token");
@@ -156,13 +156,13 @@ class ConsumerKakaoAuthServiceTest {
     }
 
     @Test
-    @DisplayName("전환 기간이 끝난 이전 fingerprint 키의 카카오 가입 티켓은 거절한다")
-    void rejectsSignUpTicketWithRetiredFingerprintKeyVersion() {
+    @DisplayName("전환 기간에도 이전 fingerprint 키의 카카오 가입 티켓은 거절한다")
+    void rejectsSignUpTicketWithPreviousFingerprintKeyVersion() {
         ConsumerKakaoSignUpRequest request = new ConsumerKakaoSignUpRequest(
                 "sign-up-ticket", "user@example.com", "010-1234-5678", true, "닉네임");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
                 .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v1"));
-        given(fingerprintGenerator.isAllowedKeyVersion("v1")).willReturn(false);
+        given(fingerprintGenerator.isActiveKeyVersion("v1")).willReturn(false);
 
         assertThatThrownBy(() -> consumerKakaoAuthService.signUp(request))
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
