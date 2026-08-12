@@ -279,6 +279,8 @@ class WaitingMigrationTest {
         assertThat(nonUniqueIndexColumns()).contains(
                 "waiting_closure_job_items.idx_waiting_closure_job_items_claim="
                         + "waiting_closure_job_id,status,waiting_closure_job_item_id",
+                "waiting_closure_job_items.idx_waiting_closure_job_items_global_claim="
+                        + "status,lease_until,waiting_closure_job_item_id",
                 "waiting_closure_jobs.idx_waiting_closure_jobs_store="
                         + "store_id,created_at,waiting_closure_job_id",
                 "waiting_closure_jobs.idx_waiting_closure_jobs_worker="
@@ -292,6 +294,22 @@ class WaitingMigrationTest {
                 "waiting_transition_audits.idx_waiting_transition_audits_team="
                         + "waiting_team_id,waiting_transition_audit_id"
         );
+    }
+
+    @Test
+    void closureItemsHaveDurableLeaseAndFencingColumns() throws SQLException {
+        migrate();
+        assertThat(queryStrings("""
+                SELECT CONCAT(column_name, ':', is_nullable, ':', data_type)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'waiting_closure_job_items'
+                  AND column_name IN ('lease_owner','lease_until','claim_token')
+                ORDER BY column_name
+                """)).containsExactly(
+                "claim_token:NO:bigint", "lease_owner:YES:varchar", "lease_until:YES:datetime");
+        assertThat(checkClause("ck_waiting_closure_job_items_claim_token"))
+                .contains("claim_token").contains(">= 0");
     }
 
     private void migrate() {

@@ -343,6 +343,9 @@ CREATE TABLE waiting_closure_job_items (
     expected_version BIGINT NOT NULL,
     status VARCHAR(32) NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
+    lease_owner VARCHAR(64) NULL,
+    lease_until DATETIME(6) NULL,
+    claim_token BIGINT NOT NULL DEFAULT 0,
     last_attempted_at DATETIME(6) NULL,
     completed_at DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL,
@@ -369,9 +372,19 @@ CREATE TABLE waiting_closure_job_items (
         CHECK (expected_version >= 0),
     CONSTRAINT ck_waiting_closure_job_items_attempts
         CHECK (attempt_count >= 0),
+    CONSTRAINT ck_waiting_closure_job_items_claim_token
+        CHECK (claim_token >= 0),
+    CONSTRAINT ck_waiting_closure_job_items_lease
+        CHECK ((lease_owner IS NULL AND lease_until IS NULL)
+            OR (lease_owner IS NOT NULL AND lease_until IS NOT NULL)),
     INDEX idx_waiting_closure_job_items_claim (
         waiting_closure_job_id,
         status,
+        waiting_closure_job_item_id
+    ),
+    INDEX idx_waiting_closure_job_items_global_claim (
+        status,
+        lease_until,
         waiting_closure_job_item_id
     )
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;

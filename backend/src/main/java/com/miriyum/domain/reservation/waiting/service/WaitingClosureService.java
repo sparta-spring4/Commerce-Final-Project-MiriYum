@@ -9,6 +9,7 @@ import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.*;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,7 +33,6 @@ public class WaitingClosureService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
-    private final WaitingClosureTransactionExecutor transactionExecutor;
     private WaitingActiveMembershipRepository membershipRepository;
     private WaitingTransitionAuditRepository auditRepository;
     private WaitingStatusEventRepository eventRepository;
@@ -42,8 +42,7 @@ public class WaitingClosureService {
             WaitingClosureJobRepository jobRepository, WaitingClosureJobItemRepository itemRepository,
             IdempotencyExecutor idempotencyExecutor, ObjectMapper objectMapper, Clock clock,
             WaitingActiveMembershipRepository membershipRepository,
-            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
-            WaitingClosureTransactionExecutor transactionExecutor) {
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository) {
         this.authorityPort = Objects.requireNonNull(authorityPort);
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.jobRepository = Objects.requireNonNull(jobRepository);
@@ -54,7 +53,6 @@ public class WaitingClosureService {
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
         this.eventRepository = Objects.requireNonNull(eventRepository);
-        this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
     }
 
     @Transactional(readOnly = true)
@@ -64,6 +62,7 @@ public class WaitingClosureService {
                 storeId, teamRepository.countByStoreIdAndStatusIn(storeId, ACTIVE));
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
     public WaitingClosureCommandResult startClosure(long operatorId, long storeId, IdempotencyKey key,
             long expectedSettingsVersion) {
         authorityPort.requireMutation(operatorId, storeId);
@@ -71,7 +70,7 @@ public class WaitingClosureService {
                 "WAITING_CLOSE_ACTIVE_TEAMS", key.value(),
                 RequestFingerprint.of("storeId=" + storeId + "|expectedSettingsVersion=" + expectedSettingsVersion));
         Instant now = clock.instant();
-        IdempotentOutcome outcome = executeWithRetry(() -> idempotencyExecutor.execute(command, () -> {
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
             List<WaitingTeam> targets = teamRepository.findActiveClosureTargets(storeId);
             WaitingClosureJob job = jobRepository.saveAndFlush(
                     WaitingClosureJob.create(storeId, expectedSettingsVersion, targets.size(), now));
@@ -82,26 +81,9 @@ public class WaitingClosureService {
             WaitingClosureJobSnapshot snapshot = WaitingClosureJobSnapshot.from(job);
             return new BusinessResult<>(HttpStatus.ACCEPTED.value(), "SUCCESS",
                     "WAITING_CLOSURE_JOB", Long.toString(job.getId()), snapshot);
-        }));
+        });
         return new WaitingClosureCommandResult(outcome.httpStatus(),
                 objectMapper.treeToValue(outcome.data(), WaitingClosureJobSnapshot.class));
-    }
-
-    private <T> T executeWithRetry(java.util.function.Supplier<T> work) {
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                return transactionExecutor.execute(work);
-            } catch (RuntimeException failure) {
-                if (!WaitingClosureFailureClassifier.isRetryable(failure)) throw failure;
-                if (attempt == 3) {
-                    ServiceException conflict = new ServiceException(
-                            com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
-                    conflict.initCause(failure);
-                    throw conflict;
-                }
-            }
-        }
-        throw new IllegalStateException("unreachable retry state");
     }
 
     @Transactional(readOnly = true)
@@ -113,38 +95,31 @@ public class WaitingClosureService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    List<Long> claimPendingItems(int limit) {
+    List<WaitingClosureClaim> claimPendingItems(String owner, int limit, Duration leaseDuration) {
         Instant now = clock.instant();
-        List<WaitingClosureJobItem> items = itemRepository.findClaimableBatchForUpdate(
-                WaitingClosureItemStatus.PENDING, PageRequest.of(0, limit));
-        items.forEach(item -> {
-            item.claim(now);
-            jobRepository.findByIdForUpdate(item.getWaitingClosureJobId()).ifPresent(WaitingClosureJob::markProcessing);
-        });
-        return items.stream().map(WaitingClosureJobItem::getId).toList();
-    }
-
-    /** Single-worker topology startup recovery; invoked once before the first scheduler claim. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    void recoverStrandedWork() {
-        Instant now = clock.instant();
-        itemRepository.findAllByStatusForUpdate(WaitingClosureItemStatus.PROCESSING)
-                .forEach(item -> {
-                    if (item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue();
-                    else item.requireReconciliation(now);
-                });
-        jobRepository.findAllByStatusForUpdate(WaitingClosureJobStatus.PROCESSING)
-                .forEach(job -> {
-                    reconcile(job, now);
-                    if (job.getStatus() == WaitingClosureJobStatus.PROCESSING) job.resumePending();
-                });
+        List<WaitingClosureJobItem> items = itemRepository.findGloballyClaimableForUpdate(
+                WaitingClosureItemStatus.PENDING, WaitingClosureItemStatus.PROCESSING,
+                now, PageRequest.of(0, Math.min(limit, 100)));
+        java.util.ArrayList<WaitingClosureClaim> claimed = new java.util.ArrayList<>();
+        for (WaitingClosureJobItem item : items) {
+            WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId()).orElseThrow();
+            if (item.getStatus() == WaitingClosureItemStatus.PROCESSING
+                    && item.getAttemptCount() >= MAX_ITEM_ATTEMPTS) {
+                item.reconcileExpired(now); reconcile(job, now); continue;
+            }
+            item.claim(owner, now, now.plus(leaseDuration));
+            job.markProcessing();
+            claimed.add(new WaitingClosureClaim(item.getId(), owner, item.getClaimToken()));
+        }
+        return List.copyOf(claimed);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    void processClaimedItem(long itemId) {
+    boolean processClaimedItem(WaitingClosureClaim claim) {
         Instant now = clock.instant();
-        WaitingClosureJobItem item = itemRepository.findByIdForUpdate(itemId)
+        WaitingClosureJobItem item = itemRepository.findByIdForUpdate(claim.itemId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
+        if (!item.isOwnedBy(claim.owner(), claim.token())) return false;
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
         WaitingTeam team = teamRepository.findByIdForUpdate(item.getWaitingTeamId())
@@ -162,20 +137,23 @@ public class WaitingClosureService {
             eventRepository.save(WaitingStatusEvent.pending(
                     team.getId(), team.getVersion() + 1L, team.getStatus(), now));
         }
-        item.complete(now);
+        item.complete(claim.owner(), claim.token(), now);
         reconcile(job, now);
+        return true;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    void recordFailure(long itemId, boolean retryable) {
+    boolean recordFailure(WaitingClosureClaim claim, boolean retryable) {
         Instant now = clock.instant();
-        WaitingClosureJobItem item = itemRepository.findByIdForUpdate(itemId)
+        WaitingClosureJobItem item = itemRepository.findByIdForUpdate(claim.itemId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
+        if (!item.isOwnedBy(claim.owner(), claim.token())) return false;
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
-        if (retryable && item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue();
-        else item.requireReconciliation(now);
+        if (retryable && item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue(claim.owner(), claim.token());
+        else item.requireReconciliation(claim.owner(), claim.token(), now);
         reconcile(job, now);
+        return true;
     }
 
     private void reconcile(WaitingClosureJob job, Instant now) {

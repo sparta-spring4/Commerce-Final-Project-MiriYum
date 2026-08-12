@@ -59,7 +59,6 @@ class WaitingClosureServiceTest {
     @Mock WaitingActiveMembershipRepository membershipRepository;
     @Mock WaitingTransitionAuditRepository auditRepository;
     @Mock WaitingStatusEventRepository eventRepository;
-    @Mock WaitingClosureTransactionExecutor transactionExecutor;
 
     WaitingClosureService service;
     ObjectMapper objectMapper;
@@ -70,11 +69,7 @@ class WaitingClosureServiceTest {
         service = new WaitingClosureService(authorityPort, teamRepository, jobRepository,
                 itemRepository, idempotencyExecutor, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC), membershipRepository,
-                auditRepository, eventRepository, transactionExecutor);
-        org.mockito.Mockito.lenient().when(transactionExecutor.execute(any())).thenAnswer(invocation -> {
-            @SuppressWarnings("unchecked") Supplier<Object> work = invocation.getArgument(0);
-            return work.get();
-        });
+                auditRepository, eventRepository);
     }
 
     @Test
@@ -153,7 +148,7 @@ class WaitingClosureServiceTest {
         setId(job, 91L);
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
-        item.claim(NOW.minusSeconds(5));
+        item.claim("owner", NOW.minusSeconds(5), NOW.plusSeconds(30));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
@@ -161,7 +156,7 @@ class WaitingClosureServiceTest {
         given(itemRepository.countByWaitingClosureJobIdAndStatus(91L,
                 com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.COMPLETED)).willReturn(1L);
 
-        service.processClaimedItem(101L);
+        service.processClaimedItem(new WaitingClosureClaim(101L, "owner", 1L));
 
         assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.CLOSED_BY_STORE);
         assertThat(item.getStatus()).isEqualTo(
@@ -180,12 +175,12 @@ class WaitingClosureServiceTest {
         setId(job, 91L);
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
-        item.claim(NOW.minusSeconds(5));
+        item.claim("owner", NOW.minusSeconds(5), NOW.plusSeconds(30));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
 
-        service.processClaimedItem(101L);
+        service.processClaimedItem(new WaitingClosureClaim(101L, "owner", 1L));
 
         then(membershipRepository).shouldHaveNoInteractions();
         then(auditRepository).shouldHaveNoInteractions();
@@ -200,11 +195,11 @@ class WaitingClosureServiceTest {
         setId(job, 91L);
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
-        item.claim(NOW.minusSeconds(3));
-        item.requeue();
-        item.claim(NOW.minusSeconds(2));
-        item.requeue();
-        item.claim(NOW.minusSeconds(1));
+        item.claim("owner", NOW.minusSeconds(3), NOW.plusSeconds(1));
+        item.requeue("owner", 1L);
+        item.claim("owner", NOW.minusSeconds(2), NOW.plusSeconds(1));
+        item.requeue("owner", 2L);
+        item.claim("owner", NOW.minusSeconds(1), NOW.plusSeconds(1));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));
         given(itemRepository.countByWaitingClosureJobIdAndStatus(eq(91L), any()))
@@ -212,7 +207,7 @@ class WaitingClosureServiceTest {
                         == com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.RECONCILIATION_REQUIRED
                         ? 1L : 0L);
 
-        service.recordFailure(101L, true);
+        service.recordFailure(new WaitingClosureClaim(101L, "owner", 3L), true);
 
         assertThat(item.getStatus()).isEqualTo(
                 com.miriyum.domain.reservation.waiting.entity.WaitingClosureItemStatus.RECONCILIATION_REQUIRED);
@@ -220,19 +215,6 @@ class WaitingClosureServiceTest {
         assertThat(job.getStatus()).isEqualTo(WaitingClosureJobStatus.RECONCILIATION_REQUIRED);
     }
 
-    @Test
-    void exhaustedTechnicalStartConflictsMapToCommon008AfterThreeAttempts() {
-        CannotAcquireLockException conflict = new CannotAcquireLockException(
-                "deadlock", new SQLException("deadlock", "40001", 1213));
-        given(idempotencyExecutor.execute(any(), any())).willThrow(conflict);
-
-        assertThatThrownBy(() -> service.startClosure(33L, 22L, KEY, 7L))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
-
-        then(idempotencyExecutor).should(org.mockito.Mockito.times(3)).execute(any(), any());
-    }
 
     private void replayBusinessWork() {
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {

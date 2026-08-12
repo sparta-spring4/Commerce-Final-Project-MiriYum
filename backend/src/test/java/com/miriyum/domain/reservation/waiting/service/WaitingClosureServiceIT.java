@@ -31,6 +31,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -68,6 +71,7 @@ class WaitingClosureServiceIT {
     @Autowired JdbcTemplate jdbc;
     @Autowired WaitingClosureJobItemRepository items;
     @Autowired WaitingClosureJobRepository jobs;
+    @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void clean() {
@@ -83,9 +87,9 @@ class WaitingClosureServiceIT {
     void realTransactionReplaysSameJobAndFixedItemsWithoutDuplicates() {
         Fixture fixture = fixture();
 
-        WaitingClosureCommandResult first = service.startClosure(
+        WaitingClosureCommandResult first = startClosure(
                 fixture.operatorId, fixture.storeId, KEY, 7L);
-        WaitingClosureCommandResult replay = service.startClosure(
+        WaitingClosureCommandResult replay = startClosure(
                 fixture.operatorId, fixture.storeId, KEY, 7L);
 
         assertThat(first.httpStatus()).isEqualTo(202);
@@ -94,7 +98,7 @@ class WaitingClosureServiceIT {
         assertThat(count("waiting_closure_job_items")).isOne();
         assertThat(count("idempotency_commands")).isOne();
 
-        assertThatThrownBy(() -> service.startClosure(
+        assertThatThrownBy(() -> startClosure(
                 fixture.operatorId, fixture.storeId, KEY, 8L))
                 .isInstanceOfSatisfying(ServiceException.class, exception ->
                         assertThat(exception.getErrorCode()).isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
@@ -102,10 +106,27 @@ class WaitingClosureServiceIT {
     }
 
     @Test
+    void publicHandoffRequiresOuterTransactionAndRollsBackAtomically() {
+        Fixture fixture = fixture();
+        assertThatThrownBy(() -> service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L))
+                .isInstanceOf(IllegalTransactionStateException.class);
+
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.executeWithoutResult(status -> {
+            service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+            status.setRollbackOnly();
+        });
+
+        assertThat(count("waiting_closure_jobs")).isZero();
+        assertThat(count("waiting_closure_job_items")).isZero();
+        assertThat(count("idempotency_commands")).isZero();
+    }
+
+    @Test
     void workerClosesActiveTeamAtomicallyExactlyOnceAndCompletesJob() {
         Fixture fixture = fixture();
-        service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
-        long itemId = service.claimPendingItems(100).getFirst();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim itemId = claim("owner-a").getFirst();
 
         service.processClaimedItem(itemId);
 
@@ -125,8 +146,8 @@ class WaitingClosureServiceIT {
     @Test
     void failedItemRollsBackThenRestartRecoveryRequeuesAndCompletes() {
         Fixture fixture = fixture();
-        service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
-        long itemId = service.claimPendingItems(100).getFirst();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim itemId = claim("owner-a").getFirst();
         jdbc.execute("DELETE FROM waiting_active_memberships");
 
         assertThatThrownBy(() -> service.processClaimedItem(itemId))
@@ -143,10 +164,10 @@ class WaitingClosureServiceIT {
                 fixture.storeId, consumerId, teamId, Instant.now()));
         int attemptsBeforeRecovery = jdbc.queryForObject(
                 "SELECT attempt_count FROM waiting_closure_job_items", Integer.class);
-        service.recoverStrandedWork();
+        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        WaitingClosureClaim reclaimed = claim("owner-b").getFirst();
         assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
-                .isEqualTo(attemptsBeforeRecovery);
-        long reclaimed = service.claimPendingItems(100).getFirst();
+                .isEqualTo(attemptsBeforeRecovery + 1);
         service.processClaimedItem(reclaimed);
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))
                 .isEqualTo("COMPLETED");
@@ -155,8 +176,8 @@ class WaitingClosureServiceIT {
     @Test
     void workerSkipsTeamThatBecameTerminalAfterSnapshot() {
         Fixture fixture = fixture();
-        service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
-        long itemId = service.claimPendingItems(100).getFirst();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim itemId = claim("owner-a").getFirst();
         jdbc.execute("DELETE FROM waiting_active_memberships");
         jdbc.update("UPDATE waiting_teams SET status='CANCELLED', cancelled_at=NOW(6), version=version+1");
 
@@ -172,18 +193,19 @@ class WaitingClosureServiceIT {
     @Test
     void recoveryReconcilesExhaustedProcessingItemWithoutFourthClaim() {
         Fixture fixture = fixture();
-        service.startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
-        long itemId = service.claimPendingItems(100).getFirst();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim itemId = claim("owner-a").getFirst();
         service.recordFailure(itemId, true);
-        service.claimPendingItems(100);
+        itemId = claim("owner-a").getFirst();
         service.recordFailure(itemId, true);
-        service.claimPendingItems(100);
+        itemId = claim("owner-a").getFirst();
         assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
                 .isEqualTo(3);
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
                 .isEqualTo("PROCESSING");
 
-        service.recoverStrandedWork();
+        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        assertThat(claim("owner-b")).isEmpty();
 
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
                 .isEqualTo("RECONCILIATION_REQUIRED");
@@ -195,9 +217,30 @@ class WaitingClosureServiceIT {
                 "SELECT reconciliation_required_team_count FROM waiting_closure_jobs", Long.class)).isOne();
         assertThat(jdbc.queryForObject("SELECT completed_at IS NOT NULL FROM waiting_closure_jobs", Boolean.class))
                 .isTrue();
-        assertThat(service.claimPendingItems(100)).isEmpty();
+        assertThat(claim("owner-c")).isEmpty();
         assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
                 .isEqualTo(3);
+    }
+
+    @Test
+    void durableLeasePreventsLiveStealAndFencesExpiredOwner() {
+        Fixture fixture = fixture();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim first = claim("runner-a").getFirst();
+
+        assertThat(claim("runner-b")).isEmpty();
+        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        WaitingClosureClaim reclaimed = claim("runner-b").getFirst();
+        assertThat(reclaimed.token()).isGreaterThan(first.token());
+        assertThat(service.processClaimedItem(first)).isFalse();
+        assertThat(service.recordFailure(first, false)).isFalse();
+
+        assertThat(service.processClaimedItem(reclaimed)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))
+                .isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT completed_team_count FROM waiting_closure_jobs", Long.class)).isOne();
+        assertThat(count("waiting_transition_audits")).isOne();
+        assertThat(count("waiting_status_events")).isOne();
     }
 
     private Fixture fixture() {
@@ -217,6 +260,16 @@ class WaitingClosureServiceIT {
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 storeId, consumerId, team.getId(), Instant.now().minusSeconds(60)));
         return new Fixture(operatorId, storeId);
+    }
+
+    private WaitingClosureCommandResult startClosure(
+            long operatorId, long storeId, IdempotencyKey key, long version) {
+        return new TransactionTemplate(transactionManager).execute(status ->
+                service.startClosure(operatorId, storeId, key, version));
+    }
+
+    private java.util.List<WaitingClosureClaim> claim(String owner) {
+        return service.claimPendingItems(owner, 100, java.time.Duration.ofSeconds(30));
     }
 
     private int count(String table) {

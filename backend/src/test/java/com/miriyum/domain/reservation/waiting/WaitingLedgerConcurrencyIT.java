@@ -43,6 +43,8 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -85,6 +87,7 @@ class WaitingLedgerConcurrencyIT {
     @Autowired StoreRepository stores;
     @Autowired StoreOperatorAccountRepository operators;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void clean() {
@@ -169,7 +172,8 @@ class WaitingLedgerConcurrencyIT {
         IdempotencyKey closureKey = key(410);
 
         List<Attempt<WaitingClosureCommandResult>> attempts = runTogether(2, ignored ->
-                closureService.startClosure(fixture.operatorId(), fixture.storeId(), closureKey, 7L));
+                new TransactionTemplate(transactionManager).execute(status ->
+                        closureService.startClosure(fixture.operatorId(), fixture.storeId(), closureKey, 7L)));
 
         assertThat(attempts).allMatch(Attempt::succeeded);
         assertThat(attempts.get(0).result()).isEqualTo(attempts.get(1).result());
@@ -182,14 +186,16 @@ class WaitingLedgerConcurrencyIT {
     void committedPartialBatchRetryResumesWithoutDuplicateEffects() {
         Fixture fixture = fixture(2);
         createTeams(fixture, 500);
-        closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(510), 8L);
-        List<Long> claimed = closureService.claimPendingItems(100);
+        new TransactionTemplate(transactionManager).execute(status ->
+                closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(510), 8L));
+        List<WaitingClosureClaim> claimed = closureService.claimPendingItems(
+                "concurrency", 100, Duration.ofSeconds(30));
         assertThat(claimed).hasSize(2);
 
         closureService.processClaimedItem(claimed.getFirst());
         long secondTeamId = jdbc.queryForObject(
                 "SELECT waiting_team_id FROM waiting_closure_job_items WHERE waiting_closure_job_item_id=?",
-                Long.class, claimed.get(1));
+                Long.class, claimed.get(1).itemId());
         long secondConsumerId = jdbc.queryForObject(
                 "SELECT consumer_account_id FROM waiting_teams WHERE waiting_team_id=?", Long.class, secondTeamId);
         jdbc.update("DELETE FROM waiting_active_memberships WHERE waiting_team_id=?", secondTeamId);
@@ -199,7 +205,8 @@ class WaitingLedgerConcurrencyIT {
         closureService.recordFailure(claimed.get(1), true);
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 fixture.storeId(), secondConsumerId, secondTeamId, Instant.now()));
-        long retried = closureService.claimPendingItems(100).getFirst();
+        WaitingClosureClaim retried = closureService.claimPendingItems(
+                "concurrency", 100, Duration.ofSeconds(30)).getFirst();
         closureService.processClaimedItem(retried);
 
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))

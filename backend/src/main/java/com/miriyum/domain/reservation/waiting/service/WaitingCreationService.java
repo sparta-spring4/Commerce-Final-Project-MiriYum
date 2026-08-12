@@ -28,6 +28,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.function.IntToLongFunction;
+import java.util.concurrent.ThreadLocalRandom;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -48,7 +51,12 @@ public class WaitingCreationService {
     private final WaitingCreationTransactionExecutor transactionExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final IntToLongFunction retryDelayMillis;
+    private final RetrySleeper retrySleeper;
 
+    @FunctionalInterface interface RetrySleeper { void sleep(long millis) throws InterruptedException; }
+
+    @Autowired
     public WaitingCreationService(
             WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository,
@@ -60,6 +68,17 @@ public class WaitingCreationService {
             ObjectMapper objectMapper,
             Clock clock
     ) {
+        this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
+                eventRepository, idempotencyExecutor, transactionExecutor, objectMapper, clock,
+                WaitingCreationService::defaultDelayMillis, Thread::sleep);
+    }
+
+    WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
+            WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
+            WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
+            ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
+            RetrySleeper retrySleeper) {
         this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
@@ -69,6 +88,8 @@ public class WaitingCreationService {
         this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
+        this.retryDelayMillis = Objects.requireNonNull(retryDelayMillis);
+        this.retrySleeper = Objects.requireNonNull(retrySleeper);
     }
 
     public WaitingCommandResult create(
@@ -156,17 +177,18 @@ public class WaitingCreationService {
             try {
                 return work.get();
             } catch (DataIntegrityViolationException failure) {
-                if (containsConstraint(failure,
-                        "uk_waiting_active_memberships_store_consumer")) {
+                if (WaitingCreationFailureClassifier.isMembershipConflict(failure)) {
                     throw membershipConflict();
                 }
+                if (!WaitingCreationFailureClassifier.isRetryable(failure)) throw failure;
                 last = failure;
             } catch (RuntimeException failure) {
-                if (!WaitingClosureFailureClassifier.isRetryable(failure)) {
+                if (!WaitingCreationFailureClassifier.isRetryable(failure)) {
                     throw failure;
                 }
                 last = failure;
             }
+            if (attempt < MAX_ATTEMPTS) sleepBeforeRetry(attempt, last);
         }
         ServiceException conflict = new ServiceException(
                 com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
@@ -174,13 +196,22 @@ public class WaitingCreationService {
         throw conflict;
     }
 
-    private static boolean containsConstraint(Throwable failure, String constraint) {
-        for (Throwable current = failure; current != null; current = current.getCause()) {
-            if (current.getMessage() != null && current.getMessage().contains(constraint)) {
-                return true;
-            }
+    private void sleepBeforeRetry(int attempt, RuntimeException failure) {
+        try { retrySleeper.sleep(retryDelayMillis.applyAsLong(attempt)); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); interrupted.addSuppressed(failure);
+            ServiceException conflict = new ServiceException(
+                    com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
+            conflict.initCause(interrupted); throw conflict;
         }
-        return false;
+    }
+
+    static long defaultDelayMillis(int attempt) {
+        return switch (attempt) {
+            case 1 -> ThreadLocalRandom.current().nextLong(100, 201);
+            case 2 -> ThreadLocalRandom.current().nextLong(300, 501);
+            default -> throw new IllegalArgumentException("unsupported retry attempt");
+        };
     }
 
     private static ServiceException membershipConflict() {

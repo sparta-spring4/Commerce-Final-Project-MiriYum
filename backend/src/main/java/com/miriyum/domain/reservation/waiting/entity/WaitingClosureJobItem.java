@@ -42,6 +42,15 @@ public class WaitingClosureJobItem {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
 
+    @Column(name = "lease_owner", length = 64)
+    private String leaseOwner;
+
+    @Column(name = "lease_until")
+    private Instant leaseUntil;
+
+    @Column(name = "claim_token", nullable = false)
+    private long claimToken;
+
     @Column(name = "last_attempted_at")
     private Instant lastAttemptedAt;
 
@@ -64,14 +73,36 @@ public class WaitingClosureJobItem {
         return item;
     }
 
-    public void claim(Instant now) { status = WaitingClosureItemStatus.PROCESSING; attemptCount++; lastAttemptedAt = now; }
-    public void complete(Instant now) { status = WaitingClosureItemStatus.COMPLETED; completedAt = now; }
-    public void requeue() { status = WaitingClosureItemStatus.PENDING; }
-    public void requireReconciliation(Instant now) { status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; }
+    public void claim(String owner, Instant now, Instant until) {
+        if (owner == null || owner.isBlank() || owner.length() > 64 || !until.isAfter(now))
+            throw new IllegalArgumentException("lease fields must be valid");
+        status = WaitingClosureItemStatus.PROCESSING; attemptCount++; lastAttemptedAt = now;
+        leaseOwner = owner; leaseUntil = until; claimToken++;
+    }
+    public boolean isOwnedBy(String owner, long token) {
+        return status == WaitingClosureItemStatus.PROCESSING && claimToken == token && owner.equals(leaseOwner);
+    }
+    public boolean isExpiredAt(Instant now) { return leaseUntil != null && !leaseUntil.isAfter(now); }
+    public void complete(String owner, long token, Instant now) {
+        requireFence(owner, token); status = WaitingClosureItemStatus.COMPLETED; completedAt = now; clearLease();
+    }
+    public void requeue(String owner, long token) { requireFence(owner, token); status = WaitingClosureItemStatus.PENDING; clearLease(); }
+    public void requireReconciliation(String owner, long token, Instant now) {
+        requireFence(owner, token); status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; clearLease();
+    }
+    public void reconcileExpired(Instant now) {
+        if (status != WaitingClosureItemStatus.PROCESSING || !isExpiredAt(now)) throw new IllegalStateException("lease is not expired");
+        status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; clearLease();
+    }
+    private void requireFence(String owner, long token) { if (!isOwnedBy(owner, token)) throw new IllegalStateException("stale closure claim"); }
+    private void clearLease() { leaseOwner = null; leaseUntil = null; }
     public Long getId() { return id; }
     public Long getWaitingClosureJobId() { return waitingClosureJobId; }
     public Long getWaitingTeamId() { return waitingTeamId; }
     public long getExpectedVersion() { return expectedVersion; }
     public WaitingClosureItemStatus getStatus() { return status; }
     public int getAttemptCount() { return attemptCount; }
+    public String getLeaseOwner() { return leaseOwner; }
+    public Instant getLeaseUntil() { return leaseUntil; }
+    public long getClaimToken() { return claimToken; }
 }
