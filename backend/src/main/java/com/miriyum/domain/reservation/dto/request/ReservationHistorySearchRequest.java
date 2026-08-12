@@ -82,7 +82,9 @@ public record ReservationHistorySearchRequest(
         CREATED_AT_DESC("createdAt,desc"),
         CREATED_AT_ASC("createdAt,asc"),
         SERVICE_DATE_DESC("serviceDate,desc"),
-        SERVICE_DATE_ASC("serviceDate,asc");
+        SERVICE_DATE_ASC("serviceDate,asc"),
+        START_AT_DESC("startAt,desc"),
+        START_AT_ASC("startAt,asc");
 
         private final String externalValue;
 

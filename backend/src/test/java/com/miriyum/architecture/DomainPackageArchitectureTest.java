@@ -30,6 +30,16 @@ class DomainPackageArchitectureTest {
             "core", "schedule", "closure", "menu", "search", "recommendation");
     private static final Set<String> HTTP_BOUNDARIES = Set.of(
             "publicapi", "consumer", "storeoperator", "auth", "account");
+    private static final Map<String, Set<String>> APPROVED_CROSS_DOMAIN_QUERY_READERS = Map.of(
+            "recommendation/repository/RecommendationSignalRepository.java",
+            Set.of("menu", "store"),
+            "search/repository/IntegratedStoreSearchPredicates.java",
+            Set.of("menu", "store"),
+            "search/repository/IntegratedStoreSearchRepository.java",
+            Set.of("store"),
+            "search/repository/MenuAlternativeCandidateRepository.java",
+            Set.of("menu", "store")
+    );
     private static final Pattern PACKAGE_PATTERN =
             Pattern.compile("(?m)^package\\s+([\\w.]+);");
     private static final Pattern IMPORT_PATTERN =
@@ -85,7 +95,8 @@ class DomainPackageArchitectureTest {
                         .filter(imported -> importsPersistentType(
                                 imported, persistentTypes))
                         .noneMatch(imported -> !source.topLevelDomain()
-                                .equals(topLevelDomain(imported))));
+                                .equals(topLevelDomain(imported))
+                                && !isApprovedCrossDomainQueryRead(source, imported)));
     }
 
     @Test
@@ -95,6 +106,56 @@ class DomainPackageArchitectureTest {
                         "com.miriyum.domain.auth.ratelimit.RateLimitWindow",
                         "com.miriyum.domain.auth.ratelimit.RateLimitWindowRepository",
                         "com.miriyum.domain.auth.logindelay.LoginFailureDelayRepository");
+    }
+
+    @Test
+    void generatedQueryTypesCannotBypassPersistentDomainDetection() {
+        Set<String> persistentTypes = persistentTypeNames(javaSources());
+
+        assertThat(importsPersistentType(
+                "com.miriyum.domain.store.entity.QStore",
+                persistentTypes)).isTrue();
+        assertThat(importsPersistentType(
+                "com.miriyum.domain.menu.entity.QMenu",
+                persistentTypes)).isTrue();
+    }
+
+    @Test
+    void crossDomainQueryReadersRemainAnExactReadOnlyException() {
+        Map<String, SourceFile> sources = javaSources().stream()
+                .collect(Collectors.toMap(SourceFile::relativePath, source -> source));
+
+        assertThat(APPROVED_CROSS_DOMAIN_QUERY_READERS.keySet())
+                .allMatch(sources::containsKey);
+        APPROVED_CROSS_DOMAIN_QUERY_READERS.forEach((path, domains) ->
+                assertThat(sources.get(path).imports().stream()
+                        .filter(imported -> imported.startsWith(DOMAIN_PREFIX))
+                        .filter(imported -> domains.contains(topLevelDomain(imported)))
+                        .filter(DomainPackageArchitectureTest::isGeneratedQueryType))
+                        .isNotEmpty());
+    }
+
+    @Test
+    void topLevelDomainsMatchTheApprovedPackageTree() {
+        Set<String> domains = javaSources().stream()
+                .map(SourceFile::topLevelDomain)
+                .collect(Collectors.toCollection(TreeSet::new));
+
+        assertThat(domains)
+                .containsExactly(
+                        "alternative",
+                        "auth",
+                        "consumer",
+                        "menu",
+                        "menuhold",
+                        "pickup",
+                        "recommendation",
+                        "reservation",
+                        "schedule",
+                        "search",
+                        "store",
+                        "storeoperator"
+                );
     }
 
     @Test
@@ -146,11 +207,40 @@ class DomainPackageArchitectureTest {
         if (persistentTypes.contains(imported)) {
             return true;
         }
+        if (persistentTypes.stream()
+                .map(DomainPackageArchitectureTest::queryTypeName)
+                .anyMatch(imported::equals)) {
+            return true;
+        }
         if (!imported.endsWith(".*")) {
             return false;
         }
         String packagePrefix = imported.substring(0, imported.length() - 1);
         return persistentTypes.stream().anyMatch(type -> type.startsWith(packagePrefix));
+    }
+
+    private static String queryTypeName(String persistentType) {
+        int separator = persistentType.lastIndexOf('.');
+        return persistentType.substring(0, separator + 1)
+                + "Q"
+                + persistentType.substring(separator + 1);
+    }
+
+    private static boolean isGeneratedQueryType(String imported) {
+        int separator = imported.lastIndexOf('.');
+        return separator >= 0
+                && separator + 2 < imported.length()
+                && imported.charAt(separator + 1) == 'Q';
+    }
+
+    private static boolean isApprovedCrossDomainQueryRead(
+            SourceFile source,
+            String imported
+    ) {
+        return isGeneratedQueryType(imported)
+                && APPROVED_CROSS_DOMAIN_QUERY_READERS
+                        .getOrDefault(source.relativePath(), Set.of())
+                        .contains(topLevelDomain(imported));
     }
 
     private static Map<String, Set<String>> domainDependencies(List<SourceFile> sources) {
