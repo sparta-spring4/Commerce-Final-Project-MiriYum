@@ -6,5 +6,14 @@ public enum ReservationHoldStatus {
     RECONCILIATION_REQUIRED,
     CONFIRMED,
     RELEASED,
-    EXPIRED
+    EXPIRED;
+
+    /**
+     * 이 상태로 성공 전이한 뒤 수용량 점유를 반환해야 하는지 나타낸다.
+     *
+     * @return 해제 또는 만료 상태이면 {@code true}
+     */
+    public boolean requiresCapacityRelease() {
+        return this == RELEASED || this == EXPIRED;
+    }
 }
