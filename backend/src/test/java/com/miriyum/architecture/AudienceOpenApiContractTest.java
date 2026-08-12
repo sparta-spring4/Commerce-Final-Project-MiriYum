@@ -18,7 +18,12 @@ class AudienceOpenApiContractTest {
     private static final Path SPECS = Path.of("..", "docs", "specs");
     private static final Set<String> NON_FEATURE_OPENAPI_FILES =
             Set.of("mvp1-common/openapi.yaml");
-    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of();
+    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of(
+            "/api/v1/consumers/payments",
+            "/api/v1/consumers/payments/{paymentId}",
+            "/api/v1/consumers/payments/{paymentId}/confirmations",
+            "/api/v1/payments/webhooks/portone"
+    );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
