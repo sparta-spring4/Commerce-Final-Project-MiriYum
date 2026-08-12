@@ -31,7 +31,7 @@ CREATE TABLE reservation_holds (
     expires_at DATETIME(6) NOT NULL,
     PRIMARY KEY (reservation_hold_id),
     CONSTRAINT uk_reservation_holds_creation_command
-        UNIQUE (creation_command_id),
+        UNIQUE (consumer_account_id, creation_command_id),
     CONSTRAINT uk_reservation_holds_id_created
         UNIQUE (reservation_hold_id, created_at),
     CONSTRAINT fk_reservation_holds_consumer_account

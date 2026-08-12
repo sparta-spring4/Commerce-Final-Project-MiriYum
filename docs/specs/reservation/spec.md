@@ -119,10 +119,11 @@
 
 - 고도화의 10분 임시 선점은 기존 `Reservation`에 중간 상태를 추가하지 않고 별도 `ReservationHold` aggregate로 저장한다. 따라서 1차 MVP의 즉시 확정 `ReservationStatus`와 예약 조회·취소 응답은 바뀌지 않는다.
 - 영속 상태 계약은 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED`, `RELEASED`, `EXPIRED`다. Issue #264에는 상태 변경 service를 두지 않고 후속 #265가 승인된 명령 전이를 구현한다.
-- 루트는 선점 소유 계정, 매장·시간·인원·연락 대상 스냅샷, 시간·수용량·취소 정책 버전, 생성 명령 ID, 상태 버전, 중앙 `createdAt`과 `expiresAt`을 보존한다.
+- 루트는 선점 소유 계정, 매장·시간·인원·연락 대상 스냅샷, 시간·수용량·취소 정책 버전, 생성 명령 ID, 상태 버전, 중앙 `createdAt`과 `expiresAt`을 보존한다. 클라이언트 멱등 키인 생성 명령 ID의 유일성과 replay 조회는 반드시 `(consumerAccountId, creationCommandId)` 소비자 범위로 제한한다.
+- `contactAvailableAtConfirmation`은 향후 `false`를 허용하기 위한 상태가 아니라 선점 생성 시점의 연락 가능 근거 스냅샷이다. 연락할 수 없으면 hold를 만들지 않으므로 영속 행에서는 항상 `true`이고, 컬럼과 CHECK는 이 불변식의 감사 근거를 보존한다.
 - `expiresAt`은 서버 중앙 `createdAt`에서 정확히 10분 뒤로만 계산하며 사용자 입력·setter·연장 필드를 제공하지 않는다.
 - `reservation_hold_capacity_allocations`는 관련 서비스 구간별 버킷 ID, 점유 인원, 팀 1건과 수용량 정책 버전을 보존한다. 실제 원자 점유는 후속 #265가 담당한다.
-- `reservation_hold_transition_audits`는 전이 전후 상태, 행위자, 요청·발생 시각, 시간·수용량 정책 버전과 명령 ID를 append-only로 보존하며 repository에는 삭제 API를 노출하지 않는다.
+- `reservation_hold_transition_audits`는 전이 전후 상태, 행위자, 요청·발생 시각, 시간·수용량 정책 버전과 명령 ID를 append-only로 보존하며 repository에는 삭제 API를 노출하지 않는다. 감사 명령 ID는 서버가 생성하는 전역 고유 내부 식별자이고 클라이언트 입력을 그대로 저장하지 않는다.
 - `reservation_hold_warning_tasks`는 선점별 최대 한 건으로 `expiresAt - 2분` 경고 의무만 기록한다. `(reservationHoldId, createdAt)` 복합 FK로 실제 선점의 10분 시각창에 결합하며, Notification 계약이 준비되기 전에는 채널·본문·provider·발송 재시도 상태를 소유하지 않는다.
 - V31은 네 영속 테이블의 FK, 허용 상태, 정책·수량 양수, 명령 멱등성, 정확한 10분/8분 시각식을 MySQL 제약으로 검증한다.
 - MenuHold와 같은 만료 시각으로 묶는 원자 선점은 #266, 중복 worker·명령 시점 만료·대사 runtime은 #267, Payment 준비와 최종 예약 확정은 #238에서 순서대로 활성화한다.

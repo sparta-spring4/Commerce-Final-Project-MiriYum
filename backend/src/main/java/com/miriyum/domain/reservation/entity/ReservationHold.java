@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,7 +17,13 @@ import java.time.LocalDate;
 
 /** 기존 확정 예약과 분리해 10분 임시 선점의 거래 스냅샷을 소유한다. */
 @Entity
-@Table(name = "reservation_holds")
+@Table(
+        name = "reservation_holds",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_reservation_holds_creation_command",
+                columnNames = {"consumer_account_id", "creation_command_id"}
+        )
+)
 public class ReservationHold {
 
     private static final Duration HOLD_DURATION = Duration.ofMinutes(10);
@@ -58,7 +65,7 @@ public class ReservationHold {
     @Column(name = "status_version", nullable = false)
     private long statusVersion;
 
-    @Column(name = "creation_command_id", nullable = false, length = 100, unique = true)
+    @Column(name = "creation_command_id", nullable = false, length = 100)
     private String creationCommandId;
 
     @Column(name = "created_at", nullable = false)

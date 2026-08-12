@@ -59,6 +59,7 @@ import org.testcontainers.utility.DockerImageName;
 class ReservationHoldMigrationTest {
 
     private static final long CONSUMER_ACCOUNT_ID = 41_001L;
+    private static final long SECOND_CONSUMER_ACCOUNT_ID = 41_002L;
     private static final long STORE_OPERATOR_ACCOUNT_ID = 42_001L;
     private static final long STORE_ID = 43_001L;
     private static final Instant CREATED_AT = Instant.parse("2026-08-12T01:00:00Z");
@@ -115,6 +116,15 @@ class ReservationHoldMigrationTest {
                                   'ACTIVE', NOW(6), NOW(6))
                         """,
                 CONSUMER_ACCOUNT_ID
+        );
+        jdbcTemplate.update(
+                """
+                        INSERT INTO consumer_accounts (
+                            consumer_account_id, email, password_hash, name, status, created_at, updated_at
+                        ) VALUES (?, 'second-hold-consumer@example.com', 'hashed', '두 번째 선점 사용자',
+                                  'ACTIVE', NOW(6), NOW(6))
+                        """,
+                SECOND_CONSUMER_ACCOUNT_ID
         );
         jdbcTemplate.update(
                 """
@@ -306,6 +316,28 @@ class ReservationHoldMigrationTest {
     }
 
     @Test
+    void scopesCreationCommandUniquenessToConsumerAccount() {
+        String sharedCommandId = "reservation-hold:create:shared-client-key";
+
+        ReservationHold first = holdRepository.saveAndFlush(
+                hold(CONSUMER_ACCOUNT_ID, sharedCommandId)
+        );
+        ReservationHold second = holdRepository.saveAndFlush(
+                hold(SECOND_CONSUMER_ACCOUNT_ID, sharedCommandId)
+        );
+
+        assertThat(first.getId()).isNotEqualTo(second.getId());
+        assertThat(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ACCOUNT_ID,
+                sharedCommandId
+        )).get().extracting(ReservationHold::getId).isEqualTo(first.getId());
+        assertThat(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                SECOND_CONSUMER_ACCOUNT_ID,
+                sharedCommandId
+        )).get().extracting(ReservationHold::getId).isEqualTo(second.getId());
+    }
+
+    @Test
     void rejectsInvalidRootAllocationAndWarningPersistenceValues() {
         ReservationCapacityBucket bucket = capacityBucketRepository.saveAndFlush(
                 ReservationCapacityBucket.create(
@@ -483,6 +515,10 @@ class ReservationHoldMigrationTest {
     }
 
     private ReservationHold hold(String commandId) {
+        return hold(CONSUMER_ACCOUNT_ID, commandId);
+    }
+
+    private ReservationHold hold(long consumerAccountId, String commandId) {
         ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
                 STORE_ID, 5L, 30, 90, 15);
         policy.activate(CREATED_AT.minusSeconds(3600), "활성 정책");
@@ -493,12 +529,13 @@ class ReservationHoldMigrationTest {
                 null
         );
         return ReservationHold.active(
-                CONSUMER_ACCOUNT_ID,
+                consumerAccountId,
                 STORE_ID,
                 "선점 매장",
                 timeSnapshot,
                 PartyComposition.of(2, 1, 0),
-                ReservationContactSnapshot.contactable("consumer:41001:channel:primary"),
+                ReservationContactSnapshot.contactable(
+                        "consumer:" + consumerAccountId + ":channel:primary"),
                 3L,
                 new ReservationCancellationPolicyVersion(1L),
                 commandId,
