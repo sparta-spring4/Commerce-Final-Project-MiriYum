@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -26,8 +27,14 @@ class AudienceOpenApiContractTest {
     );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+    private static final Set<String> WAITING_SETTINGS_PATHS = Set.of(
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings",
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
-            Set.of(MENU_ALTERNATIVE_SEARCH_PATH);
+            Stream.concat(
+                    Stream.of(MENU_ALTERNATIVE_SEARCH_PATH),
+                    WAITING_SETTINGS_PATHS.stream())
+                    .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
