@@ -86,10 +86,9 @@ Frontend는 비활성화 전에 `GET .../disable-impact`로 현재 버전과 활
 - `KEEP_ACTIVE`는 설정을 `enabled=false`, `receptionMode=PAUSED`로 교체해 신규 등록을 막되
   기존 활성 팀을 그대로 유지한다. 기존 팀의 조회·호출·정상 종결 경로는 계속 사용할 수
   있어야 한다.
-- `CLOSE_ACTIVE_TEAMS`는 운영자가 활성 팀 종결을 명시적으로 선택했다는 intent다. 어떤
-  팀이 영향을 받는지, 상태 전이, 원자성, 알림과 실행 결과는 Issue #272가 소유하며 이
-  계약은 그 세부 동작을 중복 정의하지 않는다. #271 설정 runtime은 #272가 공개 실행
-  계약과 runtime을 `dev`에 먼저 제공하기 전에는 이 action의 성공을 구현하지 않는다.
+- 현재 공개 계약에서 `disableAction`은 `KEEP_ACTIVE`만 허용한다. 활성 팀 일괄 종결은
+  Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공한 뒤
+  이 요청 계약에 추가한다. 그 전에는 일괄 종결 action을 공개 입력으로 노출하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
 서버는 명령 시점의 활성 팀과 권한을 다시 확인한다.
@@ -165,8 +164,9 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 
 - 화면 진입 시 설정 GET을 호출하고 받은 `version`을 다음 PUT의 `expectedVersion`으로
   사용한다.
-- 비활성화 전에 영향 GET을 호출한다. `activeTeamCount>0`이면 `KEEP_ACTIVE`와
-  `CLOSE_ACTIVE_TEAMS` 중 명시적 선택을 받는다.
+- 비활성화 전에 영향 GET을 호출한다. `activeTeamCount>0`이면 기존 팀 유지에 동의한 경우에만
+  `KEEP_ACTIVE`를 명시한다. 일괄 종결 선택은 Issue #272의 실행 계약이 제공되기 전에는
+  노출하지 않는다.
 - `WAITING_001`이면 최신 설정을 다시 조회하고 사용자 입력을 보존한 채 재확인을 요청한다.
 - `WAITING_002`이면 비활성화 영향을 다시 조회하고 action 선택 화면으로 돌아간다.
 - `COMMON_001`은 필드 검증 안내, `COMMON_002`는 요청 직렬화 오류로 처리한다.
@@ -176,7 +176,7 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 - `STORE_005`이면 폐점 매장의 설정 변경 UI를 비활성화하고, `STORE_007`이면 입점 검증 상태를
   새로 확인하기 전 설정 조회·변경 성공을 추측하지 않는다.
 - `KEEP_ACTIVE` 성공은 기존 팀이 유지되고 신규 등록만 차단된 상태로 표시한다.
-- `CLOSE_ACTIVE_TEAMS`의 팀별 진행·결과 UI는 Issue #272의 실행 계약을 받은 뒤 구현한다.
+- 활성 팀 일괄 종결의 팀별 진행·결과 UI는 Issue #272의 실행 계약을 받은 뒤 구현한다.
 - Client는 `message` 문자열이 아니라 HTTP 상태와 `code`로 분기하고 `401`, `403`, `404`,
   `409`, `429`를 서로 다른 상태로 처리한다.
 

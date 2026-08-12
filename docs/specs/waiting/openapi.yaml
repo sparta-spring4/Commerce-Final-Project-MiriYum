@@ -131,9 +131,9 @@ components:
       description: 자동 접수, 수동 접수 또는 신규 접수 일시중지
     WaitingDisableAction:
       type: string
-      enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
+      enum: [KEEP_ACTIVE]
       description: >-
-        비활성화 시 기존 활성 팀을 유지하거나 종결하도록 요청하는 명시적 intent.
+        비활성화 시 기존 활성 팀을 유지하도록 요청하는 명시적 intent.
         enabled=false인 요청에서만 허용하며 활성 팀이 있으면 필수다.
     WaitingSetting:
       type: object

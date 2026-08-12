@@ -85,7 +85,7 @@ class WaitingOpenApiContractTest {
         assertThat(list(map(schemas.get("WaitingReceptionMode")).get("enum")))
                 .containsExactly("AUTO", "MANUAL", "PAUSED");
         assertThat(list(map(schemas.get("WaitingDisableAction")).get("enum")))
-                .containsExactly("KEEP_ACTIVE", "CLOSE_ACTIVE_TEAMS");
+                .containsExactly("KEEP_ACTIVE");
 
         Map<String, Object> settingProperties =
                 map(map(schemas.get("WaitingSetting")).get("properties"));
