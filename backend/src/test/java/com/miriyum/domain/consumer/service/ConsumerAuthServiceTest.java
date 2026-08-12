@@ -12,6 +12,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
@@ -327,6 +328,8 @@ class ConsumerAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token"))
+                .willReturn(new TokenPair("access-token", "refresh-token-next"));
         lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> consumerAuthService.refresh("refresh-token"))
@@ -334,7 +337,28 @@ class ConsumerAuthServiceTest {
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
 
-        verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).rotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("정지 일반 사용자도 재사용 Refresh Token은 먼저 탐지한다")
+    void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
+        ConsumerAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
+                .willThrow(new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+
+        assertThatThrownBy(() -> consumerAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).rotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
     }
 
     @Test

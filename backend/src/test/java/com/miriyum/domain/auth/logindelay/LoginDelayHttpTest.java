@@ -1,10 +1,14 @@
 package com.miriyum.domain.auth.logindelay;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenCreationResult;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenStore;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -89,6 +93,9 @@ class LoginDelayHttpTest {
         consumerAccountRepository.flush();
         consumerAccountRepository.saveAndFlush(
                 ConsumerAccount.create(EMAIL, passwordEncoder.encode(RAW_PASSWORD), "지연테스트"));
+        given(refreshTokenStore.currentSessionEpoch(any(), anyLong())).willReturn(0L);
+        given(refreshTokenStore.create(any(), anyLong()))
+                .willReturn(new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED));
     }
 
     @Test

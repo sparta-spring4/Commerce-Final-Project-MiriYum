@@ -143,12 +143,13 @@ public class StoreOperatorAuthService {
 
         StoreOperatorAccount account = storeOperatorAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        TokenPair tokenPair = refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
+        return tokenPair;
     }
 
     public void logout(String refreshToken) {

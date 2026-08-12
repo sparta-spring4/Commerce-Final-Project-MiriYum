@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 
@@ -308,6 +309,8 @@ class StoreOperatorAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token"))
+                .willReturn(new TokenPair("access-token", "refresh-token-next"));
         lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> storeOperatorAuthService.refresh("refresh-token"))
@@ -315,7 +318,28 @@ class StoreOperatorAuthServiceTest {
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
 
-        verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("정지 매장 운영자도 재사용 Refresh Token은 먼저 탐지한다")
+    void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
+        StoreOperatorAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
+                .willThrow(new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
     }
 
     @Test

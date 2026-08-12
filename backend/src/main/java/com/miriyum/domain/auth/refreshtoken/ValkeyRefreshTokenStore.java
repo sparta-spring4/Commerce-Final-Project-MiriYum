@@ -61,7 +61,6 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'originEvent', 'ROTATION',
                         'policyVersion', 'AUTH-012-v1',
                         'occurredAt', ARGV[6])
-                    redis.call('EXPIREAT', KEYS[3], ARGV[7])
                 end
                 return 3
             end
@@ -76,7 +75,6 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'originEvent', 'REVOCATION',
                         'policyVersion', 'AUTH-012-v1',
                         'occurredAt', ARGV[6])
-                    redis.call('EXPIREAT', KEYS[3], ARGV[7])
                 end
                 return 3
             end

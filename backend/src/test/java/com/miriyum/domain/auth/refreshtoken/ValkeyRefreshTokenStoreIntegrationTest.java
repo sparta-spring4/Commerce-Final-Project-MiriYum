@@ -202,6 +202,23 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("재사용 위험 marker는 MySQL 전달 성공 전까지 family 만료와 무관하게 보존한다")
+    void keepsPendingRiskEventUntilDeliverySucceeds() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-retention", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(
+                state.namespace(), state.familyId(), state.currentTokenHash());
+        assertThat(redisTemplate.getExpire(markerKey, TimeUnit.SECONDS)).isEqualTo(-1L);
+    }
+
+    @Test
     @DisplayName("로그아웃으로 폐기된 현재 Refresh Token을 다시 사용하면 위험 사건을 남긴다")
     void createsPendingRiskEventWhenRevokedCurrentTokenIsReused() {
         Instant now = Instant.now();

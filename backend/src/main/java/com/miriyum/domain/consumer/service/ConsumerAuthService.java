@@ -155,12 +155,13 @@ public class ConsumerAuthService {
 
         ConsumerAccount account = consumerAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        TokenPair tokenPair = refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsed, refreshToken);
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsed, refreshToken);
+        return tokenPair;
     }
 
     public void logout(String refreshToken) {
