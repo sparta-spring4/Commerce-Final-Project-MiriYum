@@ -29,6 +29,8 @@ import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
@@ -328,8 +330,10 @@ class ConsumerAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
-        given(refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token"))
-                .willReturn(new TokenPair("access-token", "refresh-token-next"));
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(
+                        RefreshTokenRotationResult.Status.ROTATED,
+                        new TokenPair("access-token", "refresh-token-next")));
         lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> consumerAuthService.refresh("refresh-token"))
@@ -338,7 +342,7 @@ class ConsumerAuthServiceTest {
                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
 
         InOrder order = inOrder(refreshTokenManager);
-        order.verify(refreshTokenManager).rotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token");
         order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
     }
 
@@ -346,19 +350,19 @@ class ConsumerAuthServiceTest {
     @DisplayName("정지 일반 사용자도 재사용 Refresh Token은 먼저 탐지한다")
     void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
         ConsumerAccount account = persistedAccount();
-        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
-        given(refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
-                .willThrow(new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
 
         assertThatThrownBy(() -> consumerAuthService.refresh("reused-refresh-token"))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
 
-        verify(refreshTokenManager).rotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
-        verifyNoMoreInteractions(refreshTokenManager);
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
     }
 
     @Test

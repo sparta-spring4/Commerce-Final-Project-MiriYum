@@ -14,6 +14,7 @@ import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
@@ -143,7 +144,15 @@ public class StoreOperatorAuthService {
 
         StoreOperatorAccount account = storeOperatorAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
-        TokenPair tokenPair = refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
+        RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
+                TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
+        if (attempt.reused()) {
+            refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
+        }
+        if (!attempt.rotated()) {
+            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        }
+        TokenPair tokenPair = attempt.tokenPair();
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);

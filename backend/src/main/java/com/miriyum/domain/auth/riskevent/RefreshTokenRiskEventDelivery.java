@@ -58,8 +58,9 @@ public class RefreshTokenRiskEventDelivery {
                 continue;
             }
             try {
-                markerStore.delete(event.eventKey());
-                delivered++;
+                if (markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())) {
+                    delivered++;
+                }
             } catch (DataAccessException | ServiceException exception) {
                 failureStage = firstFailureStage(failureStage, "valkey_delete");
             }

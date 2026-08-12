@@ -13,6 +13,8 @@ public record PendingRefreshTokenRiskEvent(
         String sourceEvent,
         String originEvent,
         String policyVersion,
-        Instant occurredAt
+        Instant occurredAt,
+        long occurrenceCount,
+        Instant lastOccurredAt
 ) {
 }

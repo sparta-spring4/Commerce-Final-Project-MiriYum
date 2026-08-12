@@ -11,11 +11,21 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 /** Valkey pending marker를 읽고 MySQL 전달 성공 뒤에 제거한다. */
 @Component
 public class ValkeyRefreshTokenRiskEventMarkerStore {
+
+    private static final RedisScript<Long> DELETE_IF_UNCHANGED_SCRIPT = new DefaultRedisScript<>("""
+            local occurrenceCount = redis.call('HGET', KEYS[1], 'occurrenceCount')
+            if occurrenceCount == false or occurrenceCount ~= ARGV[1] then
+                return 0
+            end
+            return redis.call('DEL', KEYS[1])
+            """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
 
@@ -42,10 +52,12 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
         }
     }
 
-    public void delete(String eventKey) {
+    public boolean deleteIfUnchanged(String eventKey, long occurrenceCount) {
         try {
-            redisTemplate.delete(eventKey);
-        } catch (DataAccessException exception) {
+            Long deleted = redisTemplate.execute(
+                    DELETE_IF_UNCHANGED_SCRIPT, List.of(eventKey), Long.toString(occurrenceCount));
+            return deleted != null && deleted > 0;
+        } catch (DataAccessException | IllegalArgumentException exception) {
             throw unavailable();
         }
     }
@@ -60,7 +72,9 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
                 required(values, "sourceEvent"),
                 required(values, "originEvent"),
                 required(values, "policyVersion"),
-                Instant.ofEpochSecond(Long.parseLong(required(values, "occurredAt"))));
+                Instant.ofEpochSecond(Long.parseLong(required(values, "occurredAt"))),
+                Long.parseLong(required(values, "occurrenceCount")),
+                Instant.ofEpochSecond(Long.parseLong(required(values, "lastOccurredAt"))));
     }
 
     private String required(Map<String, String> values, String field) {

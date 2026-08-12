@@ -41,6 +41,25 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             """, Long.class);
 
     private static final RedisScript<Long> ROTATE_SCRIPT = new DefaultRedisScript<>("""
+            local function recordRiskEvent(sourceEvent, originEvent)
+                if redis.call('EXISTS', KEYS[3]) == 0 then
+                    redis.call('HSET', KEYS[3],
+                        'namespace', ARGV[8],
+                        'accountId', ARGV[1],
+                        'familyId', ARGV[9],
+                        'tokenHash', ARGV[3],
+                        'sourceEvent', sourceEvent,
+                        'originEvent', originEvent,
+                        'policyVersion', 'AUTH-012-v1',
+                        'occurredAt', ARGV[6],
+                        'occurrenceCount', '1',
+                        'lastOccurredAt', ARGV[6])
+                    return
+                end
+                redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
+                redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
+            end
+
             if redis.call('EXISTS', KEYS[1]) == 0 then
                 return 0
             end
@@ -51,31 +70,11 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
             if redis.call('HGET', KEYS[1], 'currentTokenId') ~= ARGV[2]
                     or redis.call('HGET', KEYS[1], 'currentTokenHash') ~= ARGV[3] then
                 redis.call('HSET', KEYS[1], 'status', 'REVOKED', 'lastRotatedAt', ARGV[6])
-                if redis.call('EXISTS', KEYS[3]) == 0 then
-                    redis.call('HSET', KEYS[3],
-                        'namespace', ARGV[8],
-                        'accountId', ARGV[1],
-                        'familyId', ARGV[9],
-                        'tokenHash', ARGV[3],
-                        'sourceEvent', 'REUSED_ROTATED_TOKEN',
-                        'originEvent', 'ROTATION',
-                        'policyVersion', 'AUTH-012-v1',
-                        'occurredAt', ARGV[6])
-                end
+                recordRiskEvent('REUSED_ROTATED_TOKEN', 'ROTATION')
                 return 3
             end
             if status ~= 'ACTIVE' then
-                if redis.call('EXISTS', KEYS[3]) == 0 then
-                    redis.call('HSET', KEYS[3],
-                        'namespace', ARGV[8],
-                        'accountId', ARGV[1],
-                        'familyId', ARGV[9],
-                        'tokenHash', ARGV[3],
-                        'sourceEvent', 'REUSED_REVOKED_TOKEN',
-                        'originEvent', 'REVOCATION',
-                        'policyVersion', 'AUTH-012-v1',
-                        'occurredAt', ARGV[6])
-                end
+                recordRiskEvent('REUSED_REVOKED_TOKEN', 'REVOCATION')
                 return 3
             end
             redis.call('SADD', KEYS[2], KEYS[1])

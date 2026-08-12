@@ -90,6 +90,26 @@ class RefreshTokenManagerTest {
     }
 
     @Test
+    @DisplayName("재사용 결과를 호출자에게 전달해 계정 전체 로그인 종료를 결정할 수 있게 한다")
+    void exposesReusedRefreshTokenResultToCaller() {
+        ParsedToken parsed = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
+        given(identityGenerator.generate()).willReturn(new RefreshTokenIdentity("ignored", "token-2"));
+        given(jwtTokenProvider.getRefreshTokenValiditySeconds()).willReturn(1_209_600L);
+        given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-2"))
+                .willReturn("next-refresh-token");
+        given(refreshTokenStore.rotate(
+                eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), eq("token-1"), any(),
+                eq("token-2"), any(), any(), any()))
+                .willReturn(new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REUSED));
+
+        RefreshTokenRotationAttempt attempt = manager.attemptRotate(
+                TokenNamespace.CONSUMER, parsed, "old-refresh-token");
+
+        assertThat(attempt.reused()).isTrue();
+        assertThat(attempt.tokenPair()).isNull();
+    }
+
+    @Test
     @DisplayName("현재 Refresh Token이 일치하면 새 토큰으로 정상 회전한다")
     void rotatesCurrentRefreshToken() {
         ParsedToken parsed = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");

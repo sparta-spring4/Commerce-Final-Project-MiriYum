@@ -61,6 +61,7 @@ class RefreshTokenRiskEventDeliveryTest {
         willThrow(new DataAccessResourceFailureException("mysql unavailable"))
                 .willDoNothing()
                 .given(authRiskEventStore).record(event);
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
 
         int firstDelivered = delivery.deliverPendingEvents();
         int secondDelivered = delivery.deliverPendingEvents();
@@ -68,7 +69,21 @@ class RefreshTokenRiskEventDeliveryTest {
         assertThat(firstDelivered).isZero();
         assertThat(secondDelivered).isEqualTo(1);
         verify(authRiskEventStore, times(2)).record(event);
-        verify(markerStore).delete(event.eventKey());
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+    }
+
+    @Test
+    @DisplayName("전달 중 재사용 횟수가 증가한 marker는 삭제하지 않고 다음 전달에 남긴다")
+    void keepsMarkerWhenOccurrenceCountChangedDuringDelivery() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(false);
+
+        int delivered = delivery.deliverPendingEvents();
+
+        assertThat(delivered).isZero();
+        verify(authRiskEventStore).record(event);
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
     }
 
     @Test
@@ -119,7 +134,7 @@ class RefreshTokenRiskEventDeliveryTest {
         willDoNothing().given(authRiskEventStore).record(event);
         willThrow(new com.miriyum.global.exception.ServiceException(
                 com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE))
-                .given(markerStore).delete(event.eventKey());
+                .given(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
 
         delivery.deliverPendingEvents();
         delivery.deliverPendingEvents();
@@ -162,6 +177,8 @@ class RefreshTokenRiskEventDeliveryTest {
                 "REUSED_ROTATED_TOKEN",
                 "ROTATION",
                 "AUTH-012-v1",
+                Instant.parse("2026-08-10T00:00:00Z"),
+                1L,
                 Instant.parse("2026-08-10T00:00:00Z"));
     }
 }

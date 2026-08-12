@@ -28,6 +28,8 @@ import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
@@ -309,8 +311,10 @@ class StoreOperatorAuthServiceTest {
         ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
-        given(refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token"))
-                .willReturn(new TokenPair("access-token", "refresh-token-next"));
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(
+                        RefreshTokenRotationResult.Status.ROTATED,
+                        new TokenPair("access-token", "refresh-token-next")));
         lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> storeOperatorAuthService.refresh("refresh-token"))
@@ -319,7 +323,7 @@ class StoreOperatorAuthServiceTest {
                 .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
 
         InOrder order = inOrder(refreshTokenManager);
-        order.verify(refreshTokenManager).rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token");
         order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
     }
 
@@ -327,19 +331,19 @@ class StoreOperatorAuthServiceTest {
     @DisplayName("정지 매장 운영자도 재사용 Refresh Token은 먼저 탐지한다")
     void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
         StoreOperatorAccount account = persistedAccount();
-        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
         ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
         given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
-        given(refreshTokenManager.rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
-                .willThrow(new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
 
         assertThatThrownBy(() -> storeOperatorAuthService.refresh("reused-refresh-token"))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
 
-        verify(refreshTokenManager).rotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
-        verifyNoMoreInteractions(refreshTokenManager);
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
     }
 
     @Test

@@ -10,7 +10,10 @@ CREATE TABLE auth_risk_events (
     origin_event VARCHAR(64) NOT NULL,
     policy_version VARCHAR(32) NOT NULL,
     occurred_at DATETIME(6) NOT NULL,
+    occurrence_count BIGINT NOT NULL,
+    last_occurred_at DATETIME(6) NOT NULL,
     created_at DATETIME(6) NOT NULL,
     PRIMARY KEY (auth_risk_event_id),
-    CONSTRAINT uk_auth_risk_events_event_key UNIQUE (event_key)
+    CONSTRAINT uk_auth_risk_events_event_key UNIQUE (event_key),
+    CONSTRAINT ck_auth_risk_events_occurrence_count CHECK (occurrence_count >= 1)
 );

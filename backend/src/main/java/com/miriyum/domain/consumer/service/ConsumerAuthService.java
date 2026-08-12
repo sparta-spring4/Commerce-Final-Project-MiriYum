@@ -15,6 +15,7 @@ import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
@@ -155,7 +156,15 @@ public class ConsumerAuthService {
 
         ConsumerAccount account = consumerAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
-        TokenPair tokenPair = refreshTokenManager.rotate(TokenNamespace.CONSUMER, parsed, refreshToken);
+        RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
+                TokenNamespace.CONSUMER, parsed, refreshToken);
+        if (attempt.reused()) {
+            refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
+        }
+        if (!attempt.rotated()) {
+            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        }
+        TokenPair tokenPair = attempt.tokenPair();
         if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
             refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);

@@ -10,11 +10,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class JdbcAuthRiskEventStore implements AuthRiskEventStore {
 
-    private static final String INSERT_IF_ABSENT = """
-            INSERT IGNORE INTO auth_risk_events (
+    private static final String UPSERT_OCCURRENCE = """
+            INSERT INTO auth_risk_events (
                 event_key, namespace, account_id, family_id, token_hash,
-                source_event, origin_event, policy_version, occurred_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
+                source_event, origin_event, policy_version, occurred_at,
+                occurrence_count, last_occurred_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE
+                occurrence_count = GREATEST(occurrence_count, VALUES(occurrence_count)),
+                last_occurred_at = GREATEST(last_occurred_at, VALUES(last_occurred_at))
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -27,7 +31,7 @@ public class JdbcAuthRiskEventStore implements AuthRiskEventStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(PendingRefreshTokenRiskEvent event) {
         jdbcTemplate.update(
-                INSERT_IF_ABSENT,
+                UPSERT_OCCURRENCE,
                 event.eventKey(),
                 event.namespace().value(),
                 event.accountId(),
@@ -36,6 +40,8 @@ public class JdbcAuthRiskEventStore implements AuthRiskEventStore {
                 event.sourceEvent(),
                 event.originEvent(),
                 event.policyVersion(),
-                event.occurredAt());
+                event.occurredAt(),
+                event.occurrenceCount(),
+                event.lastOccurredAt());
     }
 }

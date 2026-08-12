@@ -61,6 +61,18 @@ public class RefreshTokenManager {
     }
 
     public TokenPair rotate(TokenNamespace namespace, ParsedToken parsedToken, String rawRefreshToken) {
+        RefreshTokenRotationAttempt attempt = attemptRotate(namespace, parsedToken, rawRefreshToken);
+        if (!attempt.rotated()) {
+            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        }
+        return attempt.tokenPair();
+    }
+
+    public RefreshTokenRotationAttempt attemptRotate(
+            TokenNamespace namespace,
+            ParsedToken parsedToken,
+            String rawRefreshToken
+    ) {
         Instant now = clock.instant();
         RefreshTokenIdentity nextIdentity = identityGenerator.generate();
         String nextAccessToken = jwtTokenProvider.generateAccessToken(namespace, parsedToken.accountId());
@@ -77,10 +89,8 @@ public class RefreshTokenManager {
                 RefreshTokenHash.sha256(nextRefreshToken),
                 now,
                 nextFamilyExpiresAt);
-        if (!result.rotated()) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
-        }
-        return new TokenPair(nextAccessToken, nextRefreshToken);
+        TokenPair tokenPair = result.rotated() ? new TokenPair(nextAccessToken, nextRefreshToken) : null;
+        return new RefreshTokenRotationAttempt(result.status(), tokenPair);
     }
 
     public void revoke(TokenNamespace namespace, ParsedToken parsedToken) {

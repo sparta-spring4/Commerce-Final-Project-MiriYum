@@ -175,6 +175,26 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("한 family의 이전 토큰 재사용 뒤 계정 전체 폐기 시 다른 활성 family도 갱신할 수 없다")
+    void revokesAllFamiliesAfterRotatedTokenReuse() {
+        Instant now = Instant.now();
+        RefreshTokenState reusedFamily = state("family-reused", "token-reused", now);
+        RefreshTokenState otherFamily = state("family-other", "token-other", now);
+        create(reusedFamily);
+        create(otherFamily);
+
+        assertThat(rotate(reusedFamily, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(reusedFamily, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(3), now.plusSeconds(1_209_600));
+
+        assertThat(rotate(otherFamily, now.plusSeconds(4)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+    }
+
+    @Test
     @DisplayName("같은 교체 Refresh Token 재사용은 하나의 pending 위험 사건만 남긴다")
     void createsOnePendingRiskEventForRepeatedReuse() {
         Instant now = Instant.now();
@@ -198,7 +218,32 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                     assertThat(event.sourceEvent()).isEqualTo("REUSED_ROTATED_TOKEN");
                     assertThat(event.originEvent()).isEqualTo("ROTATION");
                     assertThat(event.policyVersion()).isEqualTo("AUTH-012-v1");
+                    assertThat(event.occurrenceCount()).isEqualTo(2L);
+                    assertThat(event.lastOccurredAt()).isEqualTo(now.plusSeconds(3).truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
                 });
+    }
+
+    @Test
+    @DisplayName("전달 중 재사용 횟수가 바뀐 위험 marker는 삭제하지 않는다")
+    void keepsRiskMarkerWhenOccurrenceCountChangesDuringDelivery() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-delete", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(
+                state.namespace(), state.familyId(), state.currentTokenHash());
+        assertThat(markerStore.deleteIfUnchanged(markerKey, 1L)).isFalse();
+        assertThat(markerStore.findPendingEvents()).singleElement()
+                .satisfies(event -> assertThat(event.occurrenceCount()).isEqualTo(2L));
+        assertThat(markerStore.deleteIfUnchanged(markerKey, 2L)).isTrue();
+        assertThat(markerStore.findPendingEvents()).isEmpty();
     }
 
     @Test

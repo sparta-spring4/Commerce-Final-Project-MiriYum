@@ -73,6 +73,8 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
                 "REUSED_ROTATED_TOKEN",
                 "ROTATION",
                 "AUTH-012-v1",
+                Instant.parse("2026-08-10T00:00:00Z"),
+                1L,
                 Instant.parse("2026-08-10T00:00:00Z"));
         given(markerStore.findPendingEvents()).willReturn(List.of(event));
 
@@ -83,6 +85,39 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
         assertThat(count).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT origin_event FROM auth_risk_events", String.class)).isEqualTo("ROTATION");
-        verify(markerStore, times(2)).delete(event.eventKey());
+        verify(markerStore, times(2)).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+    }
+
+    @Test
+    @DisplayName("같은 위험 사건의 재사용 횟수와 마지막 발생 시각을 누적한다")
+    void updatesRepeatedReuseOccurrenceDetails() {
+        PendingRefreshTokenRiskEvent first = event(1L, Instant.parse("2026-08-10T00:00:00Z"));
+        PendingRefreshTokenRiskEvent repeated = event(3L, Instant.parse("2026-08-10T00:02:00Z"));
+        given(markerStore.findPendingEvents()).willReturn(List.of(first), List.of(repeated));
+
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT occurrence_count FROM auth_risk_events", Long.class)).isEqualTo(3L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT last_occurred_at FROM auth_risk_events", java.sql.Timestamp.class).toInstant())
+                .isEqualTo(Instant.parse("2026-08-10T00:02:00Z"));
+    }
+
+    private PendingRefreshTokenRiskEvent event(long occurrenceCount, Instant lastOccurredAt) {
+        return new PendingRefreshTokenRiskEvent(
+                "auth:risk:pending:consumer:family-1:"
+                        + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-1",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "REUSED_ROTATED_TOKEN",
+                "ROTATION",
+                "AUTH-012-v1",
+                Instant.parse("2026-08-10T00:00:00Z"),
+                occurrenceCount,
+                lastOccurredAt);
     }
 }
