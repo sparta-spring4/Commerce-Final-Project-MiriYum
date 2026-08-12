@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
@@ -315,17 +316,59 @@ public class ReservationCapacityPublicationService {
         if (hold == null
                 || !isProtected(hold.getStatus())
                 || !Long.valueOf(storeId).equals(hold.getStoreId())
-                || hold.getTimeSnapshot() == null
-                || !hold.getTimeSnapshot().hasResolvedTime()
-                || !serviceDate.equals(hold.getServiceDate())
-                || !Long.valueOf(storeId).equals(
-                        hold.getTimeSnapshot().getReservationTimePolicyStoreId()
-                )
-                || hold.getParty() == null
-                || hold.getParty().totalCount() <= 0
-                || !hold.getStartAt().isBefore(hold.getOccupancyEndAt())) {
+                || !hasValidPublicationTime(hold, storeId, serviceDate)
+                || !hasValidParty(hold)) {
             throw conflict();
         }
+    }
+
+    private static boolean hasValidPublicationTime(
+            ReservationHold hold,
+            long storeId,
+            LocalDate serviceDate
+    ) {
+        ReservationTimeSnapshot snapshot = hold.getTimeSnapshot();
+        if (snapshot == null
+                || !snapshot.hasResolvedTime()
+                || !serviceDate.equals(snapshot.getServiceDate())
+                || !Long.valueOf(storeId).equals(
+                        snapshot.getReservationTimePolicyStoreId()
+                )) {
+            return false;
+        }
+        Instant startAt = snapshot.getStartAt();
+        Instant serviceEndAt = snapshot.getServiceEndAt();
+        Instant occupancyEndAt = snapshot.getOccupancyEndAt();
+        if (!startAt.isBefore(serviceEndAt) || serviceEndAt.isAfter(occupancyEndAt)) {
+            return false;
+        }
+        try {
+            ZoneId zoneId = ZoneId.of(snapshot.getTimeZoneId());
+            return serviceDate.equals(startAt.atZone(zoneId).toLocalDate())
+                    && snapshot.getStartOffsetSeconds()
+                    == zoneId.getRules().getOffset(startAt).getTotalSeconds()
+                    && snapshot.getServiceEndOffsetSeconds()
+                    == zoneId.getRules().getOffset(serviceEndAt).getTotalSeconds()
+                    && snapshot.getOccupancyEndOffsetSeconds()
+                    == zoneId.getRules().getOffset(occupancyEndAt).getTotalSeconds();
+        } catch (DateTimeException exception) {
+            return false;
+        }
+    }
+
+    private static boolean hasValidParty(ReservationHold hold) {
+        if (hold.getParty() == null
+                || hold.getParty().getAdultCount() < 0
+                || hold.getParty().getChildCount() < 0
+                || hold.getParty().getInfantCount() < 0) {
+            return false;
+        }
+        long totalCount = (long) hold.getParty().getAdultCount()
+                + hold.getParty().getChildCount()
+                + hold.getParty().getInfantCount();
+        return totalCount > 0
+                && totalCount <= Integer.MAX_VALUE
+                && hold.getParty().totalCount() == (int) totalCount;
     }
 
     private static boolean isProtected(ReservationHoldStatus status) {

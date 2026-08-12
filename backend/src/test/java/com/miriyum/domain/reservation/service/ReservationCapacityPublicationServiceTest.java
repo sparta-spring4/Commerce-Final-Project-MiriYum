@@ -348,7 +348,20 @@ class ReservationCapacityPublicationServiceTest {
     }
 
     @ParameterizedTest(name = "오염 필드: {0}")
-    @ValueSource(strings = {"store", "date", "time", "party"})
+    @ValueSource(strings = {
+            "store",
+            "date",
+            "time",
+            "party",
+            "negativePartyComponent",
+            "serviceEndBeforeStart",
+            "serviceEndAfterOccupancyEnd",
+            "invalidZone",
+            "startOffset",
+            "serviceEndOffset",
+            "occupancyEndOffset",
+            "localServiceDate"
+    })
     @DisplayName("선점 거래 스냅샷이 오염되면 실패 폐쇄하고 게시하지 않는다")
     void rejectsCorruptedHoldSnapshot(String corruptedField) {
         // given
@@ -439,6 +452,29 @@ class ReservationCapacityPublicationServiceTest {
         assertThat(result.data().buckets())
                 .extracting(bucket -> bucket.occupiedTeams())
                 .containsExactly(1, 1, 1, 0);
+    }
+
+    @Test
+    @DisplayName("여러 구간을 가로지른 선점도 병합된 새 버킷에는 한 번만 이월한다")
+    void carriesHoldRootOnlyOnceIntoMergedBucket() {
+        // given
+        ReservationCapacitiesRequest request = new ReservationCapacitiesRequest(List.of(
+                bucket(18, 0, 20, 0, 10, 3)
+        ));
+        givenReadyPublication(
+                List.of(),
+                List.of(hold(ReservationHoldStatus.ACTIVE, PartyComposition.of(3, 1, 0),
+                        LocalTime.of(18, 15), 45, 15)),
+                request
+        );
+        givenSuccessfulSave();
+
+        // when
+        ReservationCapacityCommandResult result = replace(request);
+
+        // then
+        assertThat(result.data().buckets().getFirst().occupiedPeople()).isEqualTo(4);
+        assertThat(result.data().buckets().getFirst().occupiedTeams()).isEqualTo(1);
     }
 
     @Test
@@ -549,6 +585,57 @@ class ReservationCapacityPublicationServiceTest {
                     null
             );
             case "party" -> ReflectionTestUtils.setField(hold, "party", null);
+            case "negativePartyComponent" -> {
+                ReflectionTestUtils.setField(hold.getParty(), "adultCount", -1);
+                ReflectionTestUtils.setField(hold.getParty(), "childCount", 2);
+            }
+            case "serviceEndBeforeStart" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "serviceEndAt",
+                    hold.getStartAt().minusSeconds(60)
+            );
+            case "serviceEndAfterOccupancyEnd" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "serviceEndAt",
+                    hold.getOccupancyEndAt().plusSeconds(60)
+            );
+            case "invalidZone" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "timeZoneId",
+                    "Invalid/Zone"
+            );
+            case "startOffset" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "startOffsetSeconds",
+                    hold.getTimeSnapshot().getStartOffsetSeconds() + 1
+            );
+            case "serviceEndOffset" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "serviceEndOffsetSeconds",
+                    hold.getTimeSnapshot().getServiceEndOffsetSeconds() + 1
+            );
+            case "occupancyEndOffset" -> ReflectionTestUtils.setField(
+                    hold.getTimeSnapshot(),
+                    "occupancyEndOffsetSeconds",
+                    hold.getTimeSnapshot().getOccupancyEndOffsetSeconds() + 1
+            );
+            case "localServiceDate" -> {
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "startAt",
+                        hold.getStartAt().plusSeconds(86_400)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "serviceEndAt",
+                        hold.getServiceEndAt().plusSeconds(86_400)
+                );
+                ReflectionTestUtils.setField(
+                        hold.getTimeSnapshot(),
+                        "occupancyEndAt",
+                        hold.getOccupancyEndAt().plusSeconds(86_400)
+                );
+            }
             default -> throw new IllegalArgumentException("unknown corrupted field");
         }
     }
