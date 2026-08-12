@@ -19,6 +19,13 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 로그아웃과 개별 기기 종료, 전체 로그인 종료, 계정 정지와 권한 회수는 대상 로그인 단위 또는 토큰 계열의 리프레시 상태를 중앙에서 폐기한다.
 - MySQL은 계정과 권한을 포함한 업무 원장을 맡고, Valkey는 만료와 회전이 잦은 리프레시 토큰 상태를 맡는다.
 
+### Staging Valkey 시험 운영 경계
+
+- #141의 첫 staging 배포에는 단일 `valkey/valkey:8.1-alpine` 컨테이너를 **시험 후보값**으로 사용한다. `8.1-alpine`, 단일 컨테이너, `maxmemory 128mb`는 운영 확정값이 아니며, ARM64 EC2 기동·health·용량·AOF 복구 검증 전에는 변경할 수 있다. 관리형 ElastiCache와 replica는 현재 트래픽·가용성 요구에 비해 비용과 운영 범위가 커서 이번 시험 범위에 도입하지 않는다.
+- Valkey는 호스트 포트를 공개하지 않고, backend와만 공유하는 Docker `backend-valkey` internal network에 둔다. MySQL과 Nginx는 이 네트워크에 연결하지 않는다.
+- 시험 구성에서는 AOF, `appendfsync everysec`, `maxmemory 128mb`, `noeviction`을 적용한다. 인증 상태가 메모리 부족으로 조용히 축출되는 대신 새 쓰기가 명시적으로 실패하는지, 실제 사용량이 128MB 후보값에 적합한지는 측정으로 확인한다.
+- #141은 컨테이너 실행, 비밀번호 인증 healthcheck, staging `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개 확인까지 담당한다. 배포 SHA·ARM64 환경·검증 결과·실패 시 기능 비활성화 또는 이전 Compose로 되돌리는 조건을 기록한 뒤에만 시험 후보값을 유지하거나 변경한다. Spring Data Redis/Lettuce 연결과 Valkey 장애 시 인증 요청 fail-closed 검증은 #140에서 수행한다.
+
 ### 이번 결정에서 확정하지 않는 항목
 
 토큰 유효기간은 2026-07-28 후속 팀 결정으로 Access JWT 1시간·Refresh JWT 14일로 확정했다. 이 수치 결정은 이 ADR의 단계별 저장·회전·폐기 구조를 변경하지 않는다.
