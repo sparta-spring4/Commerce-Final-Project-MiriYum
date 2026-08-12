@@ -11,13 +11,14 @@ import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryPolicyAudit;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.menu.dto.ManagedMenuResponse;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.enums.MenuSellingStatus;
-import com.miriyum.domain.store.menu.enums.MenuVisibility;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.menu.dto.storeoperator.ManagedMenuResponse;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
+import com.miriyum.domain.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
@@ -37,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 class MenuInventoryAdminCommandServiceTest {
 
     @Mock StoreService storeService;
+    @Mock MenuTransactionFacade menuTransactionFacade;
     @Mock MenuQueryService menuQueryService;
     @Mock MenuInventoryBucketRepository bucketRepository;
     @Mock MenuInventoryPolicyAuditRepository auditRepository;
@@ -53,7 +55,7 @@ class MenuInventoryAdminCommandServiceTest {
                 false, null, null, null));
         given(storeService.requireSchedulePublicationAuthority(7L, 3L))
                 .willReturn(new StoreScheduleAuthority(3L, "Asia/Seoul"));
-        given(storeService.requireMenuTransactionEligibility(3L, 11L))
+        given(menuTransactionFacade.requireTransactionEligibility(3L, 11L))
                 .willReturn(new MenuTransactionEligibility(
                         3L, 11L, 2, "아메리카노", 5_000, true, false));
         given(bucketRepository.saveAndFlush(any())).willAnswer(invocation -> {
@@ -75,7 +77,8 @@ class MenuInventoryAdminCommandServiceTest {
                     mapper.valueToTree(result.data()));
         });
         MenuInventoryAdminCommandService service = new MenuInventoryAdminCommandService(
-                storeService, menuQueryService, bucketRepository, auditRepository,
+                storeService, menuQueryService, menuTransactionFacade,
+                bucketRepository, auditRepository,
                 policyService, idempotencyExecutor, mapper);
 
         var result = service.create(
@@ -106,7 +109,7 @@ class MenuInventoryAdminCommandServiceTest {
         given(menuQueryService.get(7L, 3L, 11L)).willReturn(new ManagedMenuResponse(
                 "11", "3", MenuVisibility.VISIBLE, MenuSellingStatus.SELLING,
                 false, null, null, null));
-        given(storeService.requireMenuTransactionEligibility(3L, 11L))
+        given(menuTransactionFacade.requireTransactionEligibility(3L, 11L))
                 .willReturn(new MenuTransactionEligibility(
                         3L, 11L, 2, "아메리카노", 5_000, true, false));
         given(bucketRepository.findById(41L)).willReturn(java.util.Optional.of(current));
@@ -120,7 +123,8 @@ class MenuInventoryAdminCommandServiceTest {
                     result.resourceType(), result.resourceId(), mapper.valueToTree(result.data()));
         });
         MenuInventoryAdminCommandService service = new MenuInventoryAdminCommandService(
-                storeService, menuQueryService, bucketRepository, auditRepository,
+                storeService, menuQueryService, menuTransactionFacade,
+                bucketRepository, auditRepository,
                 policyService, idempotencyExecutor, mapper);
 
         var result = service.update(

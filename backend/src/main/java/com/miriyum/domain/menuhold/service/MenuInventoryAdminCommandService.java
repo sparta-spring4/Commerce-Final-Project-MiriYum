@@ -9,10 +9,11 @@ import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryPolicyAudit;
 import com.miriyum.domain.menuhold.inventory.model.InventoryAvailabilityStatus;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryPolicyAuditRepository;
-import com.miriyum.domain.store.core.service.StoreScheduleAuthority;
-import com.miriyum.domain.store.core.service.StoreService;
-import com.miriyum.domain.store.menu.dto.MenuTransactionEligibility;
-import com.miriyum.domain.store.menu.service.MenuQueryService;
+import com.miriyum.domain.store.service.StoreScheduleAuthority;
+import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.menu.dto.contract.MenuTransactionEligibility;
+import com.miriyum.domain.menu.service.MenuQueryService;
+import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -38,6 +39,7 @@ public class MenuInventoryAdminCommandService {
 
     private final StoreService storeService;
     private final MenuQueryService menuQueryService;
+    private final MenuTransactionFacade menuTransactionFacade;
     private final MenuInventoryBucketRepository bucketRepository;
     private final MenuInventoryPolicyAuditRepository auditRepository;
     private final MenuInventoryPolicyService policyService;
@@ -134,7 +136,7 @@ public class MenuInventoryAdminCommandService {
             return;
         }
         MenuTransactionEligibility eligibility =
-                storeService.requireMenuTransactionEligibility(storeId, menuId);
+                menuTransactionFacade.requireTransactionEligibility(storeId, menuId);
         if (onlineCapacity + (sharedOnlineAllowed ? sharedCapacity : 0) <= 0) {
             throw new ServiceException(
                     MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);

@@ -14,7 +14,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
-import com.miriyum.domain.consumer.dto.request.ConsumerSignUpRequest;
+import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;

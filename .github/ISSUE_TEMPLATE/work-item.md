@@ -10,7 +10,7 @@ assignees: ""
 
 제안한 활동이 아니라 사용자 또는 저장소의 결과를 설명합니다.
 
-> 제목의 `[Domain]`을 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Global]`, `[Docs]` 중 하나로 바꾸세요.
+> 제목의 `[Domain]`을 `[Auth]`, `[Store]`, `[Reservation]`, `[MenuHold]`, `[Pickup]`, `[Payment]`, `[Global]`, `[Docs]` 중 하나로 바꾸세요.
 
 ## 담당과 소유권
 

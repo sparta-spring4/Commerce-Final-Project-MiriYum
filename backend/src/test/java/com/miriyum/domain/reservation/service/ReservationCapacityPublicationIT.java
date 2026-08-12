@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doAnswer;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
+import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
@@ -15,18 +16,19 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
-import com.miriyum.domain.store.core.entity.Store;
-import com.miriyum.domain.store.core.enums.BusinessType;
-import com.miriyum.domain.store.core.enums.Region;
-import com.miriyum.domain.store.core.repository.StoreRepository;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalRequest;
-import com.miriyum.domain.store.schedule.dto.StoreServiceIntervalResult;
-import com.miriyum.domain.store.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.domain.store.entity.Store;
+import com.miriyum.domain.store.enums.BusinessType;
+import com.miriyum.domain.store.enums.Region;
+import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
+import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
+import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -114,6 +116,9 @@ class ReservationCapacityPublicationIT {
     @Autowired
     private ReservationCapacityCommandFacade commandFacade;
 
+    @Autowired
+    private ReservationCancellationCommandFacade cancellationFacade;
+
     @MockitoSpyBean
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
@@ -143,6 +148,7 @@ class ReservationCapacityPublicationIT {
         reservationLockQueryStarted = null;
         RESERVATION_LOCK_QUERY_ATTEMPTS.set(0);
         RESERVATION_LOCK_WAITS_OBSERVED.set(0);
+        jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
@@ -219,6 +225,111 @@ class ReservationCapacityPublicationIT {
             assertThat(allocation.get("capacity_policy_version")).isEqualTo(1L);
         });
         assertThat(count("idempotency_commands")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("실제 완전 비겹침 재게시 뒤 소비자 취소는 원본 점유만 복구한다")
+    void disjointPublicationThenConsumerCancellationRestoresOnlyOriginalOccupancy() {
+        OwnerStore owner = createStore(
+                "capacity-disjoint-cancel@example.com", "1234567896");
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket original = seedOriginalCapacityAllocation(
+                owner.storeId(), reservationId);
+        acceptEveryStoreInterval();
+
+        ReservationCapacityCommandResult publication = commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(40),
+                disjointRequest()
+        );
+        long consumerId = reservationRepository.findById(reservationId)
+                .orElseThrow()
+                .getConsumerAccountId();
+        ReservationCancellationCommandResult cancellation = cancellationFacade.cancelByConsumer(
+                consumerId,
+                reservationId,
+                key(41),
+                new ConsumerCancellationRequest("disjoint publication")
+        );
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(publication.data().buckets()).singleElement().satisfies(bucket -> {
+            assertThat(bucket.occupiedPeople()).isZero();
+            assertThat(bucket.occupiedTeams()).isZero();
+        });
+        assertThat(cancellation.httpStatus()).isEqualTo(200);
+        assertThat(reservationRepository.findById(reservationId).orElseThrow().getStatus())
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(capacityBucketRepository.findById(original.getId()).orElseThrow())
+                .satisfies(bucket -> {
+                    assertThat(bucket.getOccupiedPeople()).isZero();
+                    assertThat(bucket.getOccupiedTeams()).isZero();
+                });
+        assertThat(count("reservation_cancellation_audits")).isOne();
+    }
+
+    @Test
+    @DisplayName("실제 부분 재게시 뒤 소비자 취소는 원본과 겹치는 최신 버킷만 복구한다")
+    void partialPublicationThenConsumerCancellationRestoresOriginalAndOverlappingOccupancy() {
+        OwnerStore owner = createStore(
+                "capacity-partial-cancel@example.com", "1234567897");
+        long reservationId = seedConsumerAndReservation(owner.storeId());
+        ReservationCapacityBucket original = seedOriginalCapacityAllocation(
+                owner.storeId(), reservationId);
+        acceptEveryStoreInterval();
+
+        ReservationCapacityCommandResult publication = commandFacade.replace(
+                owner.operatorId(),
+                owner.storeId(),
+                SERVICE_DATE,
+                key(42),
+                partialRequest()
+        );
+        List<ReservationCapacityBucket> latestBuckets = publication.data().buckets().stream()
+                .map(bucket -> capacityBucketRepository.findById(
+                        Long.parseLong(bucket.capacityBucketId())).orElseThrow())
+                .toList();
+        ReservationCapacityBucket disjoint = latestBuckets.stream()
+                .filter(bucket -> bucket.getStartTime().equals(LocalTime.of(12, 0)))
+                .findFirst()
+                .orElseThrow();
+        ReservationCapacityBucket overlapping = latestBuckets.stream()
+                .filter(bucket -> bucket.getStartTime().equals(LocalTime.of(18, 30)))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(disjoint).satisfies(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+        });
+        assertThat(overlapping).satisfies(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(5);
+            assertThat(bucket.getOccupiedTeams()).isEqualTo(1);
+        });
+
+        long consumerId = reservationRepository.findById(reservationId)
+                .orElseThrow()
+                .getConsumerAccountId();
+        ReservationCancellationCommandResult cancellation = cancellationFacade.cancelByConsumer(
+                consumerId,
+                reservationId,
+                key(43),
+                new ConsumerCancellationRequest("partial publication")
+        );
+
+        assertThat(cancellation.httpStatus()).isEqualTo(200);
+        assertThat(reservationRepository.findById(reservationId).orElseThrow().getStatus())
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(capacityBucketRepository.findAllById(List.of(
+                original.getId(), disjoint.getId(), overlapping.getId()
+        ))).hasSize(3).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+        });
+        assertThat(count("reservation_cancellation_audits")).isOne();
     }
 
     @Test
@@ -804,6 +915,41 @@ class ReservationCapacityPublicationIT {
                 Math.min(maxPeople, 4),
                 true
         )));
+    }
+
+    private static ReservationCapacitiesRequest disjointRequest() {
+        return new ReservationCapacitiesRequest(List.of(new CapacityBucketRequest(
+                LocalTime.of(12, 0),
+                LocalTime.of(13, 0),
+                8,
+                2,
+                1,
+                4,
+                true
+        )));
+    }
+
+    private static ReservationCapacitiesRequest partialRequest() {
+        return new ReservationCapacitiesRequest(List.of(
+                new CapacityBucketRequest(
+                        LocalTime.of(12, 0),
+                        LocalTime.of(13, 0),
+                        8,
+                        2,
+                        1,
+                        4,
+                        true
+                ),
+                new CapacityBucketRequest(
+                        LocalTime.of(18, 30),
+                        LocalTime.of(19, 30),
+                        8,
+                        2,
+                        1,
+                        4,
+                        true
+                )
+        ));
     }
 
     private static ReservationCapacitiesRequest twoBucketRequest() {

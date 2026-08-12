@@ -25,6 +25,16 @@ public interface MenuInventoryTransactionService {
             MenuInventoryAvailabilityQuery query);
 
     /**
+     * 검증된 메뉴 중 정확한 서비스 구간의 현재 온라인 재고 버킷이 존재하는 결과만 조회한다.
+     *
+     * @param query Store 계약으로 검증된 메뉴와 정확한 서비스 구간
+     * @return 버킷이 없는 메뉴를 제외한 메뉴 ID 오름차순의 현재 정책 가용량
+     */
+    @Transactional(readOnly = true)
+    List<MenuInventoryAvailability> findExistingOnlineAvailability(
+            MenuInventoryAvailabilityQuery query);
+
+    /**
      * 검증된 메뉴들의 픽업 날짜에 게시된 현재 온라인 가용 구간을 조회한다.
      *
      * @param query Store 공개 계약으로 검증된 메뉴와 픽업 날짜

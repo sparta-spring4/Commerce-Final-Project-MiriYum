@@ -26,14 +26,14 @@ import tools.jackson.databind.ObjectMapper;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Map<String, RateLimitCategory> LIMITED_REQUESTS = Map.ofEntries(
-            Map.entry("POST /api/v1/consumer-auth/accounts", RateLimitCategory.SIGN_UP),
-            Map.entry("POST /api/v1/consumer-auth/sessions", RateLimitCategory.LOGIN),
-            Map.entry("POST /api/v1/consumer-auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
-            Map.entry("GET /api/v1/consumer-auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
-            Map.entry("POST /api/v1/store-operator-auth/accounts", RateLimitCategory.SIGN_UP),
-            Map.entry("POST /api/v1/store-operator-auth/sessions", RateLimitCategory.LOGIN),
-            Map.entry("POST /api/v1/store-operator-auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
-            Map.entry("GET /api/v1/store-operator-auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
+            Map.entry("POST /api/v1/consumers/auth/accounts", RateLimitCategory.SIGN_UP),
+            Map.entry("POST /api/v1/consumers/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
+            Map.entry("GET /api/v1/consumers/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
+            Map.entry("POST /api/v1/store-operators/auth/accounts", RateLimitCategory.SIGN_UP),
+            Map.entry("POST /api/v1/store-operators/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
+            Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
     );
 
     private final RateLimiter rateLimiter;
