@@ -257,17 +257,18 @@ git commit -m "feat(reservation): 웨이팅 FIFO 명령 서비스 구현"
 
 ### Task 4: Store-operator HTTP boundary and security
 
-**Files:** `WaitingStoreOperatorController`, `ReservationSecurityConfig`, controller test.
+**Files:** `WaitingStoreOperatorController`, list/read query service and DTOs, `WaitingTeamRepository`, `ReservationSecurityConfig`, controller and repository integration tests.
 
 **Interfaces:**
 
 - `GET /waiting-teams` consumes optional `status`, `cursor`, `size`; size range is 1..100 and default 20.
+- The list query uses keyset pagination ordered by `(queueSequence, waitingTeamId)` and fetches `size + 1`; the repository must scope every row to `storeId`, apply the optional status filter, and use the decoded cursor predicate `(queueSequence > afterQueueSequence) OR (queueSequence = afterQueueSequence AND id > afterWaitingTeamId)`.
 - Team commands consume `WaitingTeamTransitionRequest(long expectedVersion)` and return `ApiResponse<WaitingTeamSnapshot>`.
 - No response contains consumer account ID, phone, coordinates, idempotency key, audit actor ID, or internal database IDs beyond the public team ID.
 
 - [ ] **Step 1: Write RED MockMvc tests**
 
-Test authenticated success, missing/wrong namespace JWT, missing/malformed idempotency key, invalid expectedVersion, exact status/code mapping, different store access, unsupported verbs denied, and forbidden response fields.
+Test authenticated success, missing/wrong namespace JWT, missing/malformed idempotency key, invalid expectedVersion, exact status/code mapping, different store access, unsupported verbs denied, and forbidden response fields. Add a MySQL repository integration test for store/status scoping, stable `(queueSequence, id)` ordering, and no duplicate or skipped rows across cursor page boundaries.
 
 - [ ] **Step 2: Run RED controller tests**
 
@@ -288,7 +289,7 @@ Add a dedicated store-operator matcher for `/api/v1/store-operators/stores/*/wai
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add backend/src/main/java/com/miriyum/domain/reservation/waiting/controller backend/src/main/java/com/miriyum/domain/reservation/config/ReservationSecurityConfig.java backend/src/test/java/com/miriyum/domain/reservation/waiting/controller
+git add backend/src/main/java/com/miriyum/domain/reservation/waiting/controller backend/src/main/java/com/miriyum/domain/reservation/waiting/service backend/src/main/java/com/miriyum/domain/reservation/waiting/dto backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java backend/src/main/java/com/miriyum/domain/reservation/config/ReservationSecurityConfig.java backend/src/test/java/com/miriyum/domain/reservation/waiting/controller backend/src/test/java/com/miriyum/domain/reservation/waiting/repository
 git commit -m "feat(reservation): 매장 웨이팅 운영 API 구현"
 ```
 
