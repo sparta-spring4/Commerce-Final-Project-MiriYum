@@ -6,8 +6,8 @@ import com.miriyum.domain.auth.social.entity.SocialLoginLink;
 import com.miriyum.domain.auth.social.enums.KakaoLinkResult;
 import com.miriyum.domain.auth.social.enums.SocialLoginProvider;
 import com.miriyum.domain.auth.social.repository.SocialLoginLinkRepository;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,17 +55,22 @@ public class KakaoSocialLoginLinkService {
             return resultForExisting(existing, accountId);
         }
 
-        try {
-            socialLoginLinkRepository.saveAndFlush(SocialLoginLink.create(
-                    namespace, accountId, SocialLoginProvider.KAKAO, fingerprint));
+        socialLoginLinkRepository.insertIfAbsent(
+                namespace.name(), accountId, SocialLoginProvider.KAKAO.name(), fingerprint);
+        SocialLoginLink linkedSubject = socialLoginLinkRepository
+                .findLink(
+                        namespace, SocialLoginProvider.KAKAO, fingerprint)
+                .orElse(null);
+        if (linkedSubject != null) {
+            if (!linkedSubject.getAccountId().equals(accountId)) {
+                throw new ServiceException(AuthErrorCode.KAKAO_ALREADY_LINKED);
+            }
             return KakaoLinkResult.CREATED;
-        } catch (DataIntegrityViolationException exception) {
-            SocialLoginLink concurrent = socialLoginLinkRepository
-                    .findLink(
-                            namespace, SocialLoginProvider.KAKAO, fingerprint)
-                    .orElseThrow(() -> exception);
-            return resultForExisting(concurrent, accountId);
         }
+
+        return socialLoginLinkRepository.findAccountLink(namespace, accountId, SocialLoginProvider.KAKAO)
+                .map(ignored -> KakaoLinkResult.ALREADY_LINKED)
+                .orElseThrow(() -> new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION));
     }
 
     private KakaoLinkResult resultForExisting(SocialLoginLink existing, Long accountId) {

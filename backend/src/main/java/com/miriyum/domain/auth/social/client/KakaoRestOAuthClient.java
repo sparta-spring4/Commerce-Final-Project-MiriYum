@@ -5,7 +5,6 @@ import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.util.Objects;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -14,6 +13,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -28,10 +28,14 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
-    public KakaoRestOAuthClient(KakaoOAuthProperties properties, ObjectMapper objectMapper) {
+    public KakaoRestOAuthClient(
+            KakaoOAuthProperties properties,
+            ObjectMapper objectMapper,
+            RestClient restClient
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.create();
+        this.restClient = restClient;
     }
 
     @Override
@@ -60,11 +64,12 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
             String kakaoAccessToken = requestAccessToken(authorizationCode, redirectUri);
             return new KakaoOAuthUser(requestProviderSubject(kakaoAccessToken));
         } catch (RestClientResponseException exception) {
-            if (exception.getStatusCode().is4xxClientError()) {
+            if (exception.getStatusCode().is4xxClientError()
+                    && exception.getStatusCode().value() != 429) {
                 throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
             }
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
-        } catch (RestClientException | IllegalArgumentException exception) {
+        } catch (RestClientException | IllegalArgumentException | JacksonException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
     }
@@ -83,7 +88,7 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
                 .body(form)
                 .retrieve()
                 .body(String.class);
-        return requiredText(objectMapper.readTree(Objects.requireNonNull(body)), "access_token");
+        return requiredText(readResponse(body), "access_token");
     }
 
     private String requestProviderSubject(String kakaoAccessToken) {
@@ -92,15 +97,26 @@ public class KakaoRestOAuthClient implements KakaoOAuthClient {
                 .headers(headers -> headers.setBearerAuth(kakaoAccessToken))
                 .retrieve()
                 .body(String.class);
-        return requiredText(objectMapper.readTree(Objects.requireNonNull(body)), "id");
+        return requiredText(readResponse(body), "id");
+    }
+
+    private JsonNode readResponse(String body) {
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("Kakao response body must not be blank");
+        }
+        return objectMapper.readTree(body);
     }
 
     private String requiredText(JsonNode node, String fieldName) {
         JsonNode field = node.get(fieldName);
-        if (field == null || field.asText().isBlank()) {
+        if (field == null) {
             throw new IllegalArgumentException("Kakao response does not contain " + fieldName);
         }
-        return field.asText();
+        String value = field.asString();
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Kakao response does not contain " + fieldName);
+        }
+        return value;
     }
 
     private void requireAvailableConfiguration(String redirectUri) {

@@ -16,7 +16,7 @@ import java.util.Date;
 import java.util.UUID;
 import javax.crypto.SecretKey;
 
-/** 카카오 원문 식별자 없이 첫 가입을 이어갈 수 있는 일회용 가입 티켓을 발급·검증한다. */
+/** 카카오 원문 식별자 없이 첫 가입을 이어갈 수 있는 5분 유효 가입 티켓을 발급·검증한다. */
 public class KakaoSignUpTicketService {
 
     private static final String AUDIENCE = "kakao-sign-up-ticket";
