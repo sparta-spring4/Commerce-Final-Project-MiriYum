@@ -33,6 +33,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -213,7 +214,7 @@ public class ReservationHoldService {
             bucket.occupy(normalized.party().totalCount());
         }
 
-        Instant createdAt = clock.instant();
+        Instant createdAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         ReservationCancellationPolicyVersion cancellationPolicy =
                 requireCancellationPolicy();
         ReservationHold hold = ReservationHold.active(
@@ -321,7 +322,8 @@ public class ReservationHoldService {
             ReservationHoldTransitionAudit replay,
             NormalizedTransitionCommand command
     ) {
-        if (replay.getBeforeStatus() == null
+        if (!command.operationId().equals(replay.getCommandId())
+                || replay.getBeforeStatus() == null
                 || replay.getReservationHoldId() != command.reservationHoldId()
                 || replay.getAfterStatus() != command.targetStatus()) {
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
@@ -371,10 +373,6 @@ public class ReservationHoldService {
                         hold.getServiceDate(),
                         localStart,
                         localOccupancyEnd);
-        if (latestBucketIds == null || latestBucketIds.isEmpty()) {
-            throw capacityConfigurationConflict();
-        }
-
         Set<Long> latestIdSet = validateLatestBucketIds(latestBucketIds);
         if (observedLatestVersion < hold.getCapacityPolicyVersion()
                 || (observedLatestVersion == hold.getCapacityPolicyVersion()
@@ -411,12 +409,18 @@ public class ReservationHoldService {
                 bucketById,
                 localStart,
                 localOccupancyEnd);
-        validateLatestCoverage(
+        validateLatestOverlaps(
                 latestIdSet,
                 bucketById,
                 localStart,
                 localOccupancyEnd,
                 observedLatestVersion);
+
+        validateRestorableOccupancy(
+                unionIds,
+                allocationByBucketId,
+                bucketById,
+                partySize);
 
         for (Long bucketId : unionIds) {
             ReservationHoldCapacityAllocation allocation = allocationByBucketId.get(bucketId);
@@ -431,7 +435,7 @@ public class ReservationHoldService {
     }
 
     private static Set<Long> validateLatestBucketIds(List<Long> latestBucketIds) {
-        if (latestBucketIds == null || latestBucketIds.isEmpty()) {
+        if (latestBucketIds == null) {
             throw capacityConfigurationConflict();
         }
         Set<Long> validated = new LinkedHashSet<>();
@@ -488,7 +492,7 @@ public class ReservationHoldService {
         validateContinuousCoverage(originalBuckets, requestedStart, requestedEnd);
     }
 
-    private static void validateLatestCoverage(
+    private static void validateLatestOverlaps(
             Set<Long> latestBucketIds,
             Map<Long, ReservationCapacityBucket> bucketById,
             LocalTime requestedStart,
@@ -503,13 +507,42 @@ public class ReservationHoldService {
                     }
                     return bucket;
                 })
+                .sorted(Comparator.comparing(ReservationCapacityBucket::getStartTime)
+                        .thenComparing(ReservationCapacityBucket::getEndTime))
                 .toList();
+        LocalTime previousEnd = null;
         for (ReservationCapacityBucket bucket : latestBuckets) {
-            if (bucket.getPolicyVersion() != expectedPolicyVersion) {
+            LocalTime overlapStart = laterOf(bucket.getStartTime(), requestedStart);
+            LocalTime overlapEnd = earlierOf(bucket.getEndTime(), requestedEnd);
+            if (bucket.getPolicyVersion() != expectedPolicyVersion
+                    || !overlapEnd.isAfter(overlapStart)
+                    || (previousEnd != null && bucket.getStartTime().isBefore(previousEnd))) {
+                throw capacityConfigurationConflict();
+            }
+            previousEnd = bucket.getEndTime();
+        }
+    }
+
+    private static void validateRestorableOccupancy(
+            List<Long> unionIds,
+            Map<Long, ReservationHoldCapacityAllocation> allocationByBucketId,
+            Map<Long, ReservationCapacityBucket> bucketById,
+            int partySize
+    ) {
+        for (Long bucketId : unionIds) {
+            ReservationHoldCapacityAllocation allocation = allocationByBucketId.get(bucketId);
+            int occupiedPeople = allocation == null
+                    ? partySize
+                    : allocation.getOccupiedPeople();
+            int occupiedTeams = allocation == null
+                    ? 1
+                    : allocation.getOccupiedTeams();
+            ReservationCapacityBucket bucket = bucketById.get(bucketId);
+            if (bucket.getOccupiedPeople() < occupiedPeople
+                    || bucket.getOccupiedTeams() < occupiedTeams) {
                 throw capacityConfigurationConflict();
             }
         }
-        validateContinuousCoverage(latestBuckets, requestedStart, requestedEnd);
     }
 
     private static void validateContinuousCoverage(
@@ -710,7 +743,8 @@ public class ReservationHoldService {
             ReservationHold hold,
             NormalizedCommand command
     ) {
-        if (hold.getConsumerAccountId() != command.consumerAccountId()
+        if (!command.creationCommandId().equals(hold.getCreationCommandId())
+                || hold.getConsumerAccountId() != command.consumerAccountId()
                 || hold.getStoreId() != command.storeId()
                 || !hold.getServiceDate().equals(command.serviceDate())) {
             return false;

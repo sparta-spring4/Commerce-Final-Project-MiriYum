@@ -17,6 +17,8 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 선점 생성·종결의 기술적 DB lock 충돌만 transaction 바깥에서 제한 재시도한다.
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Service;
  * 실패 transaction 종료 뒤 한 번 replay한다.</p>
  */
 @Service
+@Transactional(propagation = Propagation.NEVER)
 public class ReservationHoldCommandFacade {
 
     private static final int MAX_ATTEMPTS = 3;
@@ -157,7 +160,32 @@ public class ReservationHoldCommandFacade {
     ) {
         return causeChainContains(failure, current ->
                 current instanceof ConstraintViolationException violation
-                        && expectedConstraint.equals(violation.getConstraintName()));
+                        && isMysqlDuplicateKey(violation)
+                        && matchesConstraintName(
+                                violation.getConstraintName(), expectedConstraint));
+    }
+
+    private static boolean isMysqlDuplicateKey(ConstraintViolationException violation) {
+        return violation.getSQLException() != null
+                && violation.getSQLException().getErrorCode() == 1062;
+    }
+
+    private static boolean matchesConstraintName(
+            String actualConstraint,
+            String expectedConstraint
+    ) {
+        return expectedConstraint.equals(actualConstraint)
+                || qualifiedConstraintName(expectedConstraint).equals(actualConstraint);
+    }
+
+    private static String qualifiedConstraintName(String expectedConstraint) {
+        return switch (expectedConstraint) {
+            case CREATION_COMMAND_CONSTRAINT ->
+                    "reservation_holds." + CREATION_COMMAND_CONSTRAINT;
+            case TRANSITION_COMMAND_CONSTRAINT ->
+                    "reservation_hold_transition_audits." + TRANSITION_COMMAND_CONSTRAINT;
+            default -> throw new IllegalArgumentException("unsupported replay constraint");
+        };
     }
 
     private static boolean causeChainContains(

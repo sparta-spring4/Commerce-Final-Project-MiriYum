@@ -130,6 +130,22 @@ class ReservationHoldCommandFacadeTest {
     }
 
     @Test
+    @DisplayName("MySQL이 table-qualified 이름을 반환해도 생성 unique 충돌을 한 번 replay한다")
+    void replaysCreateOnceAfterTableQualifiedUniqueConflict() {
+        ReservationHoldContracts.Result expected = result(ReservationHoldStatus.ACTIVE);
+        ReservationHoldCommandFacade facade = facade(new ArrayList<>());
+        given(holdService.create(CREATE_COMMAND))
+                .willThrow(uniqueConflict(
+                        "reservation_holds.uk_reservation_holds_creation_command"))
+                .willReturn(expected);
+
+        ReservationHoldContracts.Result actual = facade.create(CREATE_COMMAND);
+
+        assertThat(actual).isSameAs(expected);
+        then(holdService).should(times(2)).create(CREATE_COMMAND);
+    }
+
+    @Test
     @DisplayName("종결 승인 unique 충돌은 실패 transaction 뒤 같은 command를 한 번 replay한다")
     void replaysTransitionOnceAfterApprovedUniqueConflict() {
         ReservationHoldContracts.Result expected = result(ReservationHoldStatus.RELEASED);
@@ -143,6 +159,37 @@ class ReservationHoldCommandFacadeTest {
 
         assertThat(actual).isSameAs(expected);
         then(holdService).should(times(2)).transition(TRANSITION_COMMAND);
+    }
+
+    @Test
+    @DisplayName("MySQL이 table-qualified 이름을 반환해도 종결 unique 충돌을 한 번 replay한다")
+    void replaysTransitionOnceAfterTableQualifiedUniqueConflict() {
+        ReservationHoldContracts.Result expected = result(ReservationHoldStatus.RELEASED);
+        ReservationHoldCommandFacade facade = facade(new ArrayList<>());
+        given(holdService.transition(TRANSITION_COMMAND))
+                .willThrow(uniqueConflict(
+                        "reservation_hold_transition_audits."
+                                + "uk_reservation_hold_transition_audits_command"))
+                .willReturn(expected);
+
+        ReservationHoldContracts.Result actual = facade.transition(TRANSITION_COMMAND);
+
+        assertThat(actual).isSameAs(expected);
+        then(holdService).should(times(2)).transition(TRANSITION_COMMAND);
+    }
+
+    @Test
+    @DisplayName("승인 이름이어도 MySQL 1062가 아닌 integrity 오류는 replay하지 않는다")
+    void doesNotReplayApprovedConstraintWithoutMysqlDuplicateCode() {
+        DataIntegrityViolationException failure = uniqueConflict(
+                "reservation_holds.uk_reservation_holds_creation_command",
+                1452);
+        ReservationHoldCommandFacade facade = facade(new ArrayList<>());
+        given(holdService.create(CREATE_COMMAND)).willThrow(failure);
+
+        assertThatThrownBy(() -> facade.create(CREATE_COMMAND)).isSameAs(failure);
+
+        then(holdService).should(times(1)).create(CREATE_COMMAND);
     }
 
     @Test
@@ -223,15 +270,29 @@ class ReservationHoldCommandFacadeTest {
     }
 
     private static DataIntegrityViolationException uniqueConflict(String constraintName) {
+        return uniqueConflict(constraintName, 1062);
+    }
+
+    private static DataIntegrityViolationException uniqueConflict(
+            String constraintName,
+            int mysqlCode
+    ) {
         return new DataIntegrityViolationException(
                 "integrity conflict",
-                hibernateConstraint(constraintName));
+                hibernateConstraint(constraintName, mysqlCode));
     }
 
     private static ConstraintViolationException hibernateConstraint(String constraintName) {
+        return hibernateConstraint(constraintName, 1062);
+    }
+
+    private static ConstraintViolationException hibernateConstraint(
+            String constraintName,
+            int mysqlCode
+    ) {
         return new ConstraintViolationException(
                 "constraint conflict",
-                new SQLException("duplicate", "23000", 1062),
+                new SQLException("duplicate", "23000", mysqlCode),
                 "insert into reservation_holds",
                 constraintName);
     }

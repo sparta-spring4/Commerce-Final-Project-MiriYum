@@ -48,6 +48,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -252,6 +253,27 @@ class ReservationHoldServiceTest {
     }
 
     @Test
+    @DisplayName("DB collation이 찾은 case·accent 변형 생성 command는 exact ID가 아니므로 COMMON_007이다")
+    void creationReplayRejectsCaseAndAccentVariantCommandId() {
+        String storedCommandId = "Hold-Create-É";
+        String requestedCommandId = "hold-create-e";
+        ReservationHold existing = existingHold(storedCommandId);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, requestedCommandId)).willReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.create(
+                command(STORE_ID, null, requestedCommandId)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).should().findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, requestedCommandId);
+        then(holdRepository).shouldHaveNoMoreInteractions();
+        verifyNoFreshInteractions();
+    }
+
+    @Test
     @DisplayName("동시 생성 replay miss는 Store 잠금 뒤 커밋된 Hold를 다시 확인해 현재 결과로 수렴한다")
     void concurrentCreateReplayMissConvergesAfterStoreLock() {
         ReservationHold existing = existingHold(CREATION_COMMAND_ID);
@@ -424,6 +446,37 @@ class ReservationHoldServiceTest {
     }
 
     @Test
+    @DisplayName("fresh 생성은 중앙 시각을 microsecond로 한 번 절삭해 Hold·audit·warning에 공유한다")
+    void freshCreationTruncatesOneCentralInstantToMicrosForEverySnapshot() {
+        Instant nanosecondNow = Instant.parse("2026-08-03T00:00:00.123456789Z");
+        Instant expectedCreatedAt = nanosecondNow.truncatedTo(ChronoUnit.MICROS);
+        service = serviceWithClock(Clock.fixed(nanosecondNow, ZoneOffset.UTC));
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30))
+        );
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+
+        ReservationHoldContracts.Result result = service.create(
+                command(STORE_ID, null, CREATION_COMMAND_ID));
+
+        assertThat(result.createdAt()).isEqualTo(expectedCreatedAt);
+        assertThat(result.expiresAt()).isEqualTo(expectedCreatedAt.plusSeconds(600));
+        ArgumentCaptor<ReservationHoldTransitionAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationHoldTransitionAudit.class);
+        then(auditRepository).should().save(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getRequestedAt()).isEqualTo(expectedCreatedAt);
+        assertThat(auditCaptor.getValue().getOccurredAt()).isEqualTo(expectedCreatedAt);
+        ArgumentCaptor<ReservationHoldWarningTask> warningCaptor =
+                ArgumentCaptor.forClass(ReservationHoldWarningTask.class);
+        then(warningTaskRepository).should().save(warningCaptor.capture());
+        assertThat(warningCaptor.getValue().getCreatedAt()).isEqualTo(expectedCreatedAt);
+        assertThat(warningCaptor.getValue().getWarningDueAt())
+                .isEqualTo(expectedCreatedAt.plusSeconds(480));
+    }
+
+    @Test
     @DisplayName("확정 예약 겹침은 보호 Hold도 잠근 뒤 RESERVATION_004이고 버킷을 점유하지 않는다")
     void confirmedReservationOverlapRejectsAfterBothAggregateLocksWithoutOccupancy() {
         stubFreshBeforeAggregateLocks();
@@ -558,6 +611,34 @@ class ReservationHoldServiceTest {
         assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
         then(holdRepository).should().findById(HOLD_ID);
         then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("DB collation이 찾은 case·accent 변형 transition operation은 exact ID가 아니므로 COMMON_007이다")
+    void transitionReplayRejectsCaseAndAccentVariantOperationId() {
+        String storedOperationId = "Hold-Transition-É";
+        String requestedOperationId = "hold-transition-e";
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                storedOperationId);
+        given(auditRepository.findByCommandId(requestedOperationId))
+                .willReturn(Optional.of(audit));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                requestedOperationId)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).shouldHaveNoInteractions();
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
@@ -863,6 +944,84 @@ class ReservationHoldServiceTest {
     }
 
     @Test
+    @DisplayName("재게시 최신 정책에 겹치는 버킷이 없어도 RELEASED는 original 점유를 복구한다")
+    void releaseAfterPublicationWithNoOverlappingLatestBucketRestoresOriginalOnly() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket original = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L)),
+                List.of(),
+                List.of(original));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(original.getOccupiedPeople()).isZero();
+        assertThat(original.getOccupiedTeams()).isZero();
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(List.of(301L));
+    }
+
+    @Test
+    @DisplayName("재게시 최신 정책이 Hold 일부만 겹쳐도 EXPIRED는 original과 실제 겹침만 복구한다")
+    void expiryAfterPublicationWithPartialLatestOverlapRestoresActualUnion() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket original = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        ReservationCapacityBucket partialLatest = bucketWithOccupancy(
+                401L, LocalTime.of(18, 30), LocalTime.of(19, 15), 9L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L)),
+                List.of(401L),
+                List.of(original, partialLatest));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.EXPIRED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(List.of(original, partialLatest)).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+        });
+        then(capacityBucketRepository).should().findAllByIdInForUpdate(
+                List.of(301L, 401L));
+    }
+
+    @Test
+    @DisplayName("union의 뒤 버킷 점유가 allocation보다 작으면 RESERVATION_008이고 앞 버킷도 변경하지 않는다")
+    void restoreUnderflowFailsAsCapacityConflictBeforeAnyBucketMutation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket restorableFirst = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(18, 30), 7L, 3, 1);
+        ReservationCapacityBucket underflowSecond = bucketWithOccupancy(
+                302L, LocalTime.of(18, 30), LocalTime.of(19, 15), 7L, 2, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold,
+                List.of(allocation(301L), allocation(302L)),
+                List.of(301L, 302L),
+                List.of(restorableFirst, underflowSecond));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(
+                                ReservationErrorCode.CAPACITY_CONFIGURATION_CONFLICT));
+
+        assertThat(restorableFirst.getOccupiedPeople()).isEqualTo(3);
+        assertThat(restorableFirst.getOccupiedTeams()).isOne();
+        assertThat(underflowSecond.getOccupiedPeople()).isEqualTo(2);
+        assertThat(underflowSecond.getOccupiedTeams()).isOne();
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
     @DisplayName("만료 정각에는 EXPIRED 전이와 용량 복구가 같은 중앙 시각으로 기록된다")
     void expiryAtBoundaryRestoresCapacityAndUsesOneClockInstant() {
         Instant createdAt = NOW.minusSeconds(600);
@@ -993,15 +1152,6 @@ class ReservationHoldServiceTest {
                                         LocalTime.of(18, 30), 7L, 3, 1),
                                 bucketWithOccupancy(401L, LocalTime.of(18, 0),
                                         LocalTime.of(19, 15), 9L, 3, 1))),
-                Arguments.of("latest coverage gap", List.of(allocation(301L)),
-                        List.of(401L, 402L),
-                        List.of(
-                                bucketWithOccupancy(301L, LocalTime.of(18, 0),
-                                        LocalTime.of(19, 15), 7L, 3, 1),
-                                bucketWithOccupancy(401L, LocalTime.of(18, 0),
-                                        LocalTime.of(18, 30), 9L, 3, 1),
-                                bucketWithOccupancy(402L, LocalTime.of(19, 0),
-                                        LocalTime.of(19, 15), 9L, 3, 1))),
                 Arguments.of("latest coverage overlap", List.of(allocation(301L)),
                         List.of(401L, 402L),
                         List.of(
@@ -1026,6 +1176,32 @@ class ReservationHoldServiceTest {
                                 301L, LocalTime.of(18, 0), LocalTime.of(19, 15),
                                 7L, 3, 1)))
         );
+    }
+
+    private ReservationHoldService serviceWithClock(Clock serviceClock) {
+        ReservationTimeResolutionService timeResolutionService =
+                new ReservationTimeResolutionService(
+                        storeScheduleService,
+                        intervalValidationService,
+                        timePolicyRepository,
+                        serviceClock);
+        return new ReservationHoldService(
+                holdRepository,
+                reservationRepository,
+                allocationRepository,
+                auditRepository,
+                warningTaskRepository,
+                capacityBucketRepository,
+                consumerAccountService,
+                storeEligibilityService,
+                timeResolutionService,
+                new ReservationCancellationPolicySelector(
+                        new ReservationCancellationPolicyRegistry()),
+                serviceClock,
+                () -> {
+                    auditIdGenerationCount.incrementAndGet();
+                    return AUDIT_UUID;
+                });
     }
 
     private void stubFreshTransition(ReservationHold hold) {

@@ -74,6 +74,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -89,6 +90,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -221,6 +223,17 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("Hold facade는 기존 transaction 안의 호출을 service 위임 전에 거절한다")
+    void facadeRejectsAmbientTransactionBeforeServiceAttempt() {
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status ->
+                holdFacade.create(null)))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status ->
+                holdFacade.transition(null)))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
     @DisplayName("재게시 보호 조회는 보호 상태만 매장·날짜 범위에서 PK 오름차순 반환한다")
     void protectedPublicationQueryReturnsOnlyProtectedStatusesInPrimaryKeyOrder() {
         Scenario scenario = createScenario(20, 10, twoBuckets());
@@ -288,6 +301,38 @@ class ReservationHoldRuntimeIT {
                 .extracting(row -> row.get("creation_command_id"))
                 .containsOnly("consumer-scoped-command");
         assertAllBucketOccupancy(scenario.originalBucketIds(), 4, 2);
+    }
+
+    @Test
+    @DisplayName("MySQL ai_ci가 찾은 case·accent 변형 command IDs는 exact replay가 아니므로 COMMON_007이다")
+    void mysqlCollationVariantsAreRejectedByExactCommandIdMeaning() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        long consumerId = createConsumer();
+        ReservationHoldContracts.Result active = createHold(
+                scenario, consumerId, "Hold-Create-É");
+
+        assertThatThrownBy(() -> createHold(scenario, consumerId, "hold-create-e"))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(
+                                com.miriyum.global.exception.CommonErrorCode
+                                        .IDEMPOTENCY_KEY_REUSED));
+        ReservationHoldContracts.Result confirmed = transition(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "Hold-Transition-É");
+        assertThatThrownBy(() -> transition(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "hold-transition-e"))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(
+                                com.miriyum.global.exception.CommonErrorCode
+                                        .IDEMPOTENCY_KEY_REUSED));
+
+        assertThat(confirmed.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        assertThat(count("reservation_holds")).isOne();
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
     }
 
     @Test
@@ -458,6 +503,95 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("nanosecond Clock 생성은 MySQL microsecond fresh·replay와 만료 경계를 동일하게 만든다")
+    void nanosecondClockUsesPersistedMicrosecondForFreshReplayAndExpiryBoundary() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        long consumerId = createConsumer();
+        String commandId = "microsecond-create";
+        Instant requestedNow = Instant.parse("2026-08-10T01:00:00.123456789Z");
+        Instant expectedCreatedAt = Instant.parse("2026-08-10T01:00:00.123456Z");
+        clock.set(requestedNow);
+
+        ReservationHoldContracts.Result fresh = createHold(scenario, consumerId, commandId);
+        ReservationHoldContracts.Result replay = createHold(scenario, consumerId, commandId);
+
+        assertThat(fresh.createdAt()).isEqualTo(expectedCreatedAt);
+        assertThat(fresh.expiresAt()).isEqualTo(expectedCreatedAt.plusSeconds(600));
+        assertThat(replay).isEqualTo(fresh);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT created_at, expires_at
+                  FROM reservation_holds
+                 WHERE reservation_hold_id = ?
+                """, fresh.reservationHoldId()))
+                .containsEntry(
+                        "created_at",
+                        LocalDateTime.of(2026, 8, 10, 1, 0, 0, 123_456_000))
+                .containsEntry(
+                        "expires_at",
+                        LocalDateTime.of(2026, 8, 10, 1, 10, 0, 123_456_000));
+
+        clock.set(fresh.expiresAt().minusNanos(1));
+        ReservationHoldContracts.TransitionCommand expiry = transitionCommand(
+                fresh, ReservationHoldStatus.EXPIRED, "microsecond-expiry");
+        assertThatThrownBy(() -> holdFacade.transition(expiry))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(
+                                ReservationErrorCode.INVALID_STATE_TRANSITION));
+        clock.set(fresh.expiresAt());
+        ReservationHoldContracts.Result expired = holdFacade.transition(expiry);
+
+        assertThat(expired.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(currentStatus(fresh.reservationHoldId())).isEqualTo("EXPIRED");
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("서로 다른 Store의 같은 생성 command 경합은 qualified 1062 뒤 COMMON_007로 수렴한다")
+    void crossStoreCreationCommandRaceReplaysQualifiedUniqueConflict() throws Exception {
+        Scenario firstScenario = createScenario(10, 5, twoBuckets());
+        Scenario secondScenario = createScenario(10, 5, twoBuckets());
+        long consumerId = createConsumer();
+        String commandId = "cross-store-command-race";
+        ReservationHoldContracts.CreateCommand first = createCommand(
+                firstScenario, consumerId, commandId);
+        ReservationHoldContracts.CreateCommand second = createCommand(
+                secondScenario, consumerId, commandId);
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowsLocked(
+                "reservation_capacity_buckets",
+                "reservation_capacity_bucket_id",
+                Stream.concat(
+                                firstScenario.originalBucketIds().stream(),
+                                secondScenario.originalBucketIds().stream())
+                        .toList(),
+                () -> invokeCreate(first),
+                () -> invokeCreate(second));
+
+        HoldAttempt success = attempts.stream()
+                .filter(attempt -> attempt.result() != null)
+                .findFirst()
+                .orElseThrow();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() != null).hasSize(1);
+        assertThat(attempts)
+                .filteredOn(attempt -> attempt.errorCode() != null)
+                .singleElement()
+                .extracting(HoldAttempt::errorCode)
+                .isEqualTo(com.miriyum.global.exception.CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        assertThat(count("reservation_holds")).isOne();
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(count("reservation_hold_transition_audits")).isOne();
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+        if (success.result().storeId() == firstScenario.storeId()) {
+            assertAllBucketOccupancy(firstScenario.originalBucketIds(), 2, 1);
+            assertAllBucketOccupancy(secondScenario.originalBucketIds(), 0, 0);
+        } else {
+            assertThat(success.result().storeId()).isEqualTo(secondScenario.storeId());
+            assertAllBucketOccupancy(firstScenario.originalBucketIds(), 0, 0);
+            assertAllBucketOccupancy(secondScenario.originalBucketIds(), 2, 1);
+        }
+    }
+
+    @Test
     @DisplayName("마지막 수용량을 다른 소비자가 병렬 선점하면 성공 한 건과 초과 판매 0건이다")
     void concurrentDifferentConsumersCompetingForLastCapacityAllowOneHold() throws Exception {
         Scenario scenario = createScenario(2, 1, twoBuckets());
@@ -512,6 +646,57 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("서로 다른 Hold의 같은 operation 경합은 qualified 1062 뒤 COMMON_007로 수렴한다")
+    void crossHoldTransitionOperationRaceReplaysQualifiedUniqueConflict() throws Exception {
+        Scenario firstScenario = createScenario(10, 5, twoBuckets());
+        Scenario secondScenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result firstHold = createHold(
+                firstScenario, createConsumer(), "cross-hold-first-create");
+        ReservationHoldContracts.Result secondHold = createHold(
+                secondScenario, createConsumer(), "cross-hold-second-create");
+        String operationId = "cross-hold-operation-race";
+        ReservationHoldContracts.TransitionCommand first = transitionCommand(
+                firstHold, ReservationHoldStatus.RELEASED, operationId);
+        ReservationHoldContracts.TransitionCommand second = transitionCommand(
+                secondHold, ReservationHoldStatus.RELEASED, operationId);
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowsLocked(
+                "reservation_capacity_buckets",
+                "reservation_capacity_bucket_id",
+                Stream.concat(
+                                firstScenario.originalBucketIds().stream(),
+                                secondScenario.originalBucketIds().stream())
+                        .toList(),
+                () -> invokeTransition(first),
+                () -> invokeTransition(second));
+
+        HoldAttempt success = attempts.stream()
+                .filter(attempt -> attempt.result() != null)
+                .findFirst()
+                .orElseThrow();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() != null).hasSize(1);
+        assertThat(attempts)
+                .filteredOn(attempt -> attempt.errorCode() != null)
+                .singleElement()
+                .extracting(HoldAttempt::errorCode)
+                .isEqualTo(com.miriyum.global.exception.CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        assertThat(count("reservation_hold_transition_audits")).isEqualTo(3);
+        if (success.result().reservationHoldId() == firstHold.reservationHoldId()) {
+            assertThat(currentStatus(firstHold.reservationHoldId())).isEqualTo("RELEASED");
+            assertThat(currentStatus(secondHold.reservationHoldId())).isEqualTo("ACTIVE");
+            assertAllBucketOccupancy(firstScenario.originalBucketIds(), 0, 0);
+            assertAllBucketOccupancy(secondScenario.originalBucketIds(), 2, 1);
+        } else {
+            assertThat(success.result().reservationHoldId())
+                    .isEqualTo(secondHold.reservationHoldId());
+            assertThat(currentStatus(firstHold.reservationHoldId())).isEqualTo("ACTIVE");
+            assertThat(currentStatus(secondHold.reservationHoldId())).isEqualTo("RELEASED");
+            assertAllBucketOccupancy(firstScenario.originalBucketIds(), 2, 1);
+            assertAllBucketOccupancy(secondScenario.originalBucketIds(), 0, 0);
+        }
+    }
+
+    @Test
     @DisplayName("split·merge 재게시 뒤 release는 원본과 최신 합집합만 복구하고 중간 버전을 보존한다")
     void releaseAfterSplitAndMergeRestoresOriginalAndLatestButNotIntermediate() {
         Scenario scenario = createScenario(10, 5, twoBuckets());
@@ -551,6 +736,61 @@ class ReservationHoldRuntimeIT {
         assertAllBucketOccupancy(latestIds, 0, 0);
         assertAllBucketOccupancy(intermediateIds, 2, 1);
         assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("재게시 최신 정책이 Hold와 겹치지 않아도 RELEASED는 original 점유를 복구한다")
+    void releaseAfterNonOverlappingPublicationRestoresOriginalBuckets() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "non-overlap-release-create");
+
+        ReservationCapacityCommandResult publication = capacityFacade.replace(
+                scenario.operatorId(),
+                scenario.storeId(),
+                SERVICE_DATE,
+                key(201),
+                capacities(List.of(bucket(
+                        LocalTime.of(13, 0), LocalTime.of(14, 0), 10, 5))));
+        List<Long> latestIds = bucketIdsForVersion(scenario.storeId(), 2L);
+        ReservationHoldContracts.Result released = transition(
+                active,
+                ReservationHoldStatus.RELEASED,
+                "non-overlap-release-operation");
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(released.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertAllBucketOccupancy(latestIds, 0, 0);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("재게시 최신 정책이 Hold 일부만 겹쳐도 EXPIRED는 original과 실제 겹침을 복구한다")
+    void expiryAfterPartiallyOverlappingPublicationRestoresActualUnion() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "partial-expiry-create");
+
+        ReservationCapacityCommandResult publication = capacityFacade.replace(
+                scenario.operatorId(),
+                scenario.storeId(),
+                SERVICE_DATE,
+                key(202),
+                capacities(List.of(bucket(
+                        LocalTime.of(12, 30), LocalTime.of(13, 30), 10, 5))));
+        List<Long> latestIds = bucketIdsForVersion(scenario.storeId(), 2L);
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.Result expired = transition(
+                active,
+                ReservationHoldStatus.EXPIRED,
+                "partial-expiry-operation");
+
+        assertThat(publication.data().policyVersion()).isEqualTo(2L);
+        assertThat(expired.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertAllBucketOccupancy(latestIds, 0, 0);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
     }
 
     @Test
@@ -1072,6 +1312,22 @@ class ReservationHoldRuntimeIT {
         return List.of(pair.first(), pair.second());
     }
 
+    private List<HoldAttempt> invokeTwoWhileRowsLocked(
+            String tableName,
+            String idColumn,
+            List<Long> rowIds,
+            java.util.concurrent.Callable<HoldAttempt> firstInvocation,
+            java.util.concurrent.Callable<HoldAttempt> secondInvocation
+    ) throws Exception {
+        RacePair<HoldAttempt, HoldAttempt> pair = invokePairWhileRowsLocked(
+                tableName,
+                idColumn,
+                rowIds,
+                firstInvocation,
+                secondInvocation);
+        return List.of(pair.first(), pair.second());
+    }
+
     private <F, S> RacePair<F, S> invokePairWhileRowLocked(
             String tableName,
             String idColumn,
@@ -1079,12 +1335,40 @@ class ReservationHoldRuntimeIT {
             java.util.concurrent.Callable<F> firstInvocation,
             java.util.concurrent.Callable<S> secondInvocation
     ) throws Exception {
-        Set<String> allowedTables = Set.of("stores", "reservation_holds", "reservations");
+        return invokePairWhileRowsLocked(
+                tableName,
+                idColumn,
+                List.of(rowId),
+                firstInvocation,
+                secondInvocation);
+    }
+
+    private <F, S> RacePair<F, S> invokePairWhileRowsLocked(
+            String tableName,
+            String idColumn,
+            List<Long> rowIds,
+            java.util.concurrent.Callable<F> firstInvocation,
+            java.util.concurrent.Callable<S> secondInvocation
+    ) throws Exception {
+        Set<String> allowedTables = Set.of(
+                "stores",
+                "reservation_holds",
+                "reservations",
+                "reservation_capacity_buckets");
         Set<String> allowedColumns = Set.of(
-                "store_id", "reservation_hold_id", "reservation_id");
-        if (!allowedTables.contains(tableName) || !allowedColumns.contains(idColumn)) {
+                "store_id",
+                "reservation_hold_id",
+                "reservation_id",
+                "reservation_capacity_bucket_id");
+        if (!allowedTables.contains(tableName)
+                || !allowedColumns.contains(idColumn)
+                || rowIds == null
+                || rowIds.isEmpty()
+                || rowIds.stream().anyMatch(id -> id == null || id <= 0)
+                || rowIds.stream().distinct().count() != rowIds.size()) {
             throw new IllegalArgumentException("unsupported lock target");
         }
+        List<Long> orderedRowIds = rowIds.stream().sorted().toList();
         CountDownLatch holderReady = new CountDownLatch(1);
         CountDownLatch releaseHolder = new CountDownLatch(1);
         CountDownLatch workersReady = new CountDownLatch(2);
@@ -1096,11 +1380,14 @@ class ReservationHoldRuntimeIT {
         Future<S> second = null;
         try {
             holder = executor.submit(() -> transactions.execute(status -> {
-                jdbcTemplate.queryForObject(
+                List<Long> lockedIds = jdbcTemplate.queryForList(
                         "SELECT " + idColumn + " FROM " + tableName
-                                + " WHERE " + idColumn + " = ? FOR UPDATE",
+                                + " WHERE " + idColumn + " IN ("
+                                + placeholders(orderedRowIds.size()) + ")"
+                                + " ORDER BY " + idColumn + " FOR UPDATE",
                         Long.class,
-                        rowId);
+                        orderedRowIds.toArray());
+                assertThat(lockedIds).containsExactlyElementsOf(orderedRowIds);
                 long connectionId = jdbcTemplate.queryForObject(
                         "SELECT CONNECTION_ID()", Long.class);
                 holderConnectionId.set(connectionId);
