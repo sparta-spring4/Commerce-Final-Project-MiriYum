@@ -7,6 +7,7 @@ CREATE TABLE social_login_links (
     namespace VARCHAR(30) NOT NULL,
     account_id BIGINT NOT NULL,
     provider VARCHAR(30) NOT NULL,
+    fingerprint_key_version VARCHAR(30) NOT NULL,
     provider_subject_fingerprint CHAR(64) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),

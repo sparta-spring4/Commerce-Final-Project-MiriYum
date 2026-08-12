@@ -2,6 +2,7 @@ package com.miriyum.domain.auth.social.service;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.entity.SocialLoginLink;
 import com.miriyum.domain.auth.social.enums.KakaoLinkResult;
 import com.miriyum.domain.auth.social.enums.SocialLoginProvider;
@@ -9,9 +10,10 @@ import com.miriyum.domain.auth.social.repository.SocialLoginLinkRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 카카오 식별자를 계정 유형별로 한 계정에만 멱등하게 연결한다. */
+/** 카카오 식별자를 계정 유형별 한 계정에만 멱등하게 연결한다. */
 @Service
 public class KakaoSocialLoginLinkService {
 
@@ -26,41 +28,69 @@ public class KakaoSocialLoginLinkService {
         this.fingerprintGenerator = fingerprintGenerator;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public KakaoLinkResult link(TokenNamespace namespace, Long accountId, String kakaoSubject) {
-        String fingerprint = fingerprintGenerator.generate(kakaoSubject);
-        return findOrCreate(namespace, accountId, fingerprint);
-    }
-
-    @Transactional
-    public KakaoLinkResult linkFingerprint(TokenNamespace namespace, Long accountId, String fingerprint) {
-        return findOrCreate(namespace, accountId, fingerprint);
-    }
-
-    @Transactional(readOnly = true)
-    public Long findLinkedAccountId(TokenNamespace namespace, String kakaoSubject) {
-        String fingerprint = fingerprintGenerator.generate(kakaoSubject);
-        return socialLoginLinkRepository.findLink(
-                        namespace, SocialLoginProvider.KAKAO, fingerprint)
-                .map(SocialLoginLink::getAccountId)
-                .orElse(null);
-    }
-
-    private KakaoLinkResult findOrCreate(TokenNamespace namespace, Long accountId, String fingerprint) {
-        SocialLoginLink existing = socialLoginLinkRepository
-                .findLink(
-                        namespace, SocialLoginProvider.KAKAO, fingerprint)
-                .orElse(null);
-        if (existing != null) {
-            return resultForExisting(existing, accountId);
+        KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
+        SocialLoginLink activeLink = findLink(namespace, active);
+        if (activeLink != null) {
+            return resultForExisting(activeLink, accountId);
         }
 
-        socialLoginLinkRepository.insertIfAbsent(
-                namespace.name(), accountId, SocialLoginProvider.KAKAO.name(), fingerprint);
-        SocialLoginLink linkedSubject = socialLoginLinkRepository
-                .findLink(
-                        namespace, SocialLoginProvider.KAKAO, fingerprint)
+        SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
+        if (previousLink != null) {
+            refreshFingerprint(previousLink, active);
+            return resultForExisting(previousLink, accountId);
+        }
+        return findOrCreate(namespace, accountId, active);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public KakaoLinkResult linkFingerprint(
+            TokenNamespace namespace,
+            Long accountId,
+            KakaoIdentityFingerprint fingerprint
+    ) {
+        return findOrCreate(namespace, accountId, fingerprint);
+    }
+
+    @Transactional
+    public Long findLinkedAccountId(TokenNamespace namespace, String kakaoSubject) {
+        KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
+        SocialLoginLink activeLink = findLink(namespace, active);
+        if (activeLink != null) {
+            return activeLink.getAccountId();
+        }
+
+        SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
+        if (previousLink == null) {
+            return null;
+        }
+        refreshFingerprint(previousLink, active);
+        return previousLink.getAccountId();
+    }
+
+    private SocialLoginLink findPreviousLink(TokenNamespace namespace, String kakaoSubject) {
+        return fingerprintGenerator.generatePrevious(kakaoSubject)
+                .map(previous -> findLink(namespace, previous))
                 .orElse(null);
+    }
+
+    private void refreshFingerprint(SocialLoginLink link, KakaoIdentityFingerprint active) {
+        socialLoginLinkRepository.refreshFingerprint(link.getId(), active.keyVersion(), active.value());
+    }
+
+    private KakaoLinkResult findOrCreate(
+            TokenNamespace namespace,
+            Long accountId,
+            KakaoIdentityFingerprint fingerprint
+    ) {
+        socialLoginLinkRepository.insertIfAbsent(
+                namespace.name(),
+                accountId,
+                SocialLoginProvider.KAKAO.name(),
+                fingerprint.keyVersion(),
+                fingerprint.value());
+        SocialLoginLink linkedSubject = findLink(namespace, fingerprint);
         if (linkedSubject != null) {
             if (!linkedSubject.getAccountId().equals(accountId)) {
                 throw new ServiceException(AuthErrorCode.KAKAO_ALREADY_LINKED);
@@ -68,9 +98,21 @@ public class KakaoSocialLoginLinkService {
             return KakaoLinkResult.CREATED;
         }
 
-        return socialLoginLinkRepository.findAccountLink(namespace, accountId, SocialLoginProvider.KAKAO)
-                .map(ignored -> KakaoLinkResult.ALREADY_LINKED)
-                .orElseThrow(() -> new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION));
+        if (socialLoginLinkRepository
+                .findAccountLink(namespace, accountId, SocialLoginProvider.KAKAO)
+                .isPresent()) {
+            throw new ServiceException(AuthErrorCode.KAKAO_ALREADY_LINKED);
+        }
+        throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+    }
+
+    private SocialLoginLink findLink(TokenNamespace namespace, KakaoIdentityFingerprint fingerprint) {
+        return socialLoginLinkRepository.findLink(
+                        namespace,
+                        SocialLoginProvider.KAKAO,
+                        fingerprint.keyVersion(),
+                        fingerprint.value())
+                .orElse(null);
     }
 
     private KakaoLinkResult resultForExisting(SocialLoginLink existing, Long accountId) {

@@ -9,6 +9,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoAuthorization;
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.dto.KakaoLoginResult;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthState;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class StoreOperatorKakaoAuthService {
 
     private final StoreOperatorAccountRepository storeOperatorAccountRepository;
+    private final StoreOperatorKakaoLinkTransactionService storeOperatorKakaoLinkTransactionService;
     private final KakaoOAuthClient kakaoOAuthClient;
     private final KakaoOAuthStateService kakaoOAuthStateService;
     private final KakaoIdentityFingerprintGenerator fingerprintGenerator;
@@ -44,6 +46,7 @@ public class StoreOperatorKakaoAuthService {
 
     public StoreOperatorKakaoAuthService(
             StoreOperatorAccountRepository storeOperatorAccountRepository,
+            StoreOperatorKakaoLinkTransactionService storeOperatorKakaoLinkTransactionService,
             KakaoOAuthClient kakaoOAuthClient,
             KakaoOAuthStateService kakaoOAuthStateService,
             KakaoIdentityFingerprintGenerator fingerprintGenerator,
@@ -53,6 +56,7 @@ public class StoreOperatorKakaoAuthService {
             PhoneNumberPolicy phoneNumberPolicy
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
+        this.storeOperatorKakaoLinkTransactionService = storeOperatorKakaoLinkTransactionService;
         this.kakaoOAuthClient = kakaoOAuthClient;
         this.kakaoOAuthStateService = kakaoOAuthStateService;
         this.fingerprintGenerator = fingerprintGenerator;
@@ -98,12 +102,12 @@ public class StoreOperatorKakaoAuthService {
             return KakaoLoginResult.authenticated(issueTokenPair(account.getId()));
         }
 
-        String fingerprint = fingerprintGenerator.generate(user.providerSubject());
+        KakaoIdentityFingerprint fingerprint = fingerprintGenerator.generateActive(user.providerSubject());
         return KakaoLoginResult.signUpRequired(
-                kakaoSignUpTicketService.create(TokenNamespace.STORE_OPERATOR, fingerprint));
+                kakaoSignUpTicketService.create(
+                        TokenNamespace.STORE_OPERATOR, fingerprint.keyVersion(), fingerprint.value()));
     }
 
-    @Transactional
     public KakaoLinkResult linkKakao(Long accountId, KakaoAuthenticationRequest request) {
         KakaoOAuthState state = kakaoOAuthStateService.parse(request.state());
         if (state.namespace() != TokenNamespace.STORE_OPERATOR
@@ -112,14 +116,8 @@ public class StoreOperatorKakaoAuthService {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
 
-        StoreOperatorAccount account = storeOperatorAccountRepository.findById(accountId)
-                .orElseThrow(() -> new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID));
-        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
-            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
-        }
-
         KakaoOAuthUser user = kakaoOAuthClient.authenticate(request.authorizationCode(), request.redirectUri());
-        return kakaoSocialLoginLinkService.link(TokenNamespace.STORE_OPERATOR, accountId, user.providerSubject());
+        return storeOperatorKakaoLinkTransactionService.linkActiveAccount(accountId, user.providerSubject());
     }
 
     @Transactional
@@ -142,7 +140,10 @@ public class StoreOperatorKakaoAuthService {
         try {
             StoreOperatorAccount saved = storeOperatorAccountRepository.saveAndFlush(account);
             KakaoLinkResult linkResult = kakaoSocialLoginLinkService.linkFingerprint(
-                    TokenNamespace.STORE_OPERATOR, saved.getId(), ticket.providerSubjectFingerprint());
+                    TokenNamespace.STORE_OPERATOR,
+                    saved.getId(),
+                    new KakaoIdentityFingerprint(
+                            ticket.fingerprintKeyVersion(), ticket.providerSubjectFingerprint()));
             if (linkResult != KakaoLinkResult.CREATED && linkResult != KakaoLinkResult.ALREADY_LINKED) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }

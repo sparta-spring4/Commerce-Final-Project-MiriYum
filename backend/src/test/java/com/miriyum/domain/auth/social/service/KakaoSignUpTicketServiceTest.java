@@ -19,11 +19,12 @@ class KakaoSignUpTicketServiceTest {
     @Test
     @DisplayName("카카오 가입 티켓은 계정 유형과 카카오 식별자 fingerprint만 보존한다")
     void createsShortLivedTicketWithoutRawKakaoSubject() {
-        String ticket = ticketService.create(TokenNamespace.CONSUMER, "fingerprint");
+        String ticket = ticketService.create(TokenNamespace.CONSUMER, "v1", "fingerprint");
 
         KakaoSignUpTicket parsed = ticketService.parse(ticket);
 
         assertThat(parsed.namespace()).isEqualTo(TokenNamespace.CONSUMER);
+        assertThat(parsed.fingerprintKeyVersion()).isEqualTo("v1");
         assertThat(parsed.providerSubjectFingerprint()).isEqualTo("fingerprint");
         assertThat(ticket).doesNotContain("kakao-subject");
     }

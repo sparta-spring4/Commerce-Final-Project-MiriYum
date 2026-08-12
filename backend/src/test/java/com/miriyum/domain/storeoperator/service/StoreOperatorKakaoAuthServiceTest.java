@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
@@ -11,6 +12,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.dto.KakaoLoginResult;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthState;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
@@ -31,6 +33,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -40,6 +43,9 @@ class StoreOperatorKakaoAuthServiceTest {
 
     @Mock
     private StoreOperatorAccountRepository storeOperatorAccountRepository;
+
+    @Mock
+    private StoreOperatorKakaoLinkTransactionService storeOperatorKakaoLinkTransactionService;
 
     @Mock
     private KakaoOAuthClient kakaoOAuthClient;
@@ -71,7 +77,7 @@ class StoreOperatorKakaoAuthServiceTest {
         StoreOperatorKakaoSignUpRequest request = new StoreOperatorKakaoSignUpRequest(
                 "sign-up-ticket", "operator@example.com", "010-1234-5678", "운영자 이름");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
-                .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint"));
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.STORE_OPERATOR, "fingerprint", "v1"));
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(storeOperatorAccountRepository.saveAndFlush(any(StoreOperatorAccount.class)))
                 .willAnswer(invocation -> {
@@ -79,7 +85,8 @@ class StoreOperatorKakaoAuthServiceTest {
                     ReflectionTestUtils.setField(account, "id", 20L);
                     return account;
                 });
-        given(kakaoSocialLoginLinkService.linkFingerprint(TokenNamespace.STORE_OPERATOR, 20L, "fingerprint"))
+        given(kakaoSocialLoginLinkService.linkFingerprint(
+                TokenNamespace.STORE_OPERATOR, 20L, new KakaoIdentityFingerprint("v1", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("access-token");
         given(jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("refresh-token");
@@ -101,8 +108,9 @@ class StoreOperatorKakaoAuthServiceTest {
                 .willReturn(new KakaoOAuthUser("kakao-subject"));
         given(kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.STORE_OPERATOR, "kakao-subject"))
                 .willReturn(null);
-        given(fingerprintGenerator.generate("kakao-subject")).willReturn("fingerprint");
-        given(kakaoSignUpTicketService.create(TokenNamespace.STORE_OPERATOR, "fingerprint"))
+        given(fingerprintGenerator.generateActive("kakao-subject"))
+                .willReturn(new KakaoIdentityFingerprint("v1", "fingerprint"));
+        given(kakaoSignUpTicketService.create(TokenNamespace.STORE_OPERATOR, "v1", "fingerprint"))
                 .willReturn("sign-up-ticket");
 
         KakaoLoginResult result = storeOperatorKakaoAuthService.authenticate(request);
@@ -137,19 +145,20 @@ class StoreOperatorKakaoAuthServiceTest {
     @Test
     @DisplayName("로그인한 매장 운영자는 자기 계정에만 카카오 계정을 연결할 수 있다")
     void linksKakaoToAuthenticatedStoreOperator() {
-        StoreOperatorAccount account = StoreOperatorAccount.create(
-                "operator@example.com", "{sha256-bcrypt}hash", "운영자 이름");
         given(kakaoOAuthStateService.parse("link-state"))
                 .willReturn(new KakaoOAuthState(TokenNamespace.STORE_OPERATOR, KakaoOAuthPurpose.LINK, 20L));
         given(kakaoOAuthClient.authenticate("code", "https://app.example/callback"))
                 .willReturn(new KakaoOAuthUser("kakao-subject"));
-        given(storeOperatorAccountRepository.findById(20L)).willReturn(Optional.of(account));
-        given(kakaoSocialLoginLinkService.link(TokenNamespace.STORE_OPERATOR, 20L, "kakao-subject"))
+        given(storeOperatorKakaoLinkTransactionService.linkActiveAccount(20L, "kakao-subject"))
                 .willReturn(KakaoLinkResult.CREATED);
 
         KakaoLinkResult result = storeOperatorKakaoAuthService.linkKakao(
                 20L, new KakaoAuthenticationRequest("code", "link-state", "https://app.example/callback"));
 
         assertThat(result).isEqualTo(KakaoLinkResult.CREATED);
+        then(storeOperatorAccountRepository).shouldHaveNoInteractions();
+        InOrder inOrder = inOrder(kakaoOAuthClient, storeOperatorKakaoLinkTransactionService);
+        inOrder.verify(kakaoOAuthClient).authenticate("code", "https://app.example/callback");
+        inOrder.verify(storeOperatorKakaoLinkTransactionService).linkActiveAccount(20L, "kakao-subject");
     }
 }

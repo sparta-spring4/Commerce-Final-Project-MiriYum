@@ -1,43 +1,79 @@
 package com.miriyum.domain.auth.social.service;
 
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.util.Optional;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/** 카카오 원문 회원번호를 저장하지 않고 조회 가능한 HMAC-SHA-256 fingerprint로 바꾼다. */
+/** 카카오 원문 회원번호를 저장하지 않고, 키 버전별 HMAC fingerprint로 바꾼다. */
 @Component
 public class KakaoIdentityFingerprintGenerator {
 
-    // SHA-SHA-256 : SHA-256에 서버만 아는 비밀키를 추가한 방식
-    // 카카오 회원번호 + 서버 비밀키
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
-    private final SecretKeySpec key;
+    private final FingerprintKey activeKey;
+    private final FingerprintKey previousKey;
 
     public KakaoIdentityFingerprintGenerator(
-            @Value("${miriyum.kakao.identity-fingerprint-secret:${miriyum.jwt.secret}}") String secret
+            @Value("${miriyum.kakao.identity-fingerprint-active-key-version:}") String activeKeyVersion,
+            @Value("${miriyum.kakao.identity-fingerprint-active-secret:}") String activeSecret,
+            @Value("${miriyum.kakao.identity-fingerprint-previous-key-version:}") String previousKeyVersion,
+            @Value("${miriyum.kakao.identity-fingerprint-previous-secret:}") String previousSecret
     ) {
-        this.key = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM);
+        this.activeKey = FingerprintKey.of(activeKeyVersion, activeSecret);
+        this.previousKey = FingerprintKey.of(previousKeyVersion, previousSecret);
     }
 
-    public String generate(String providerSubject) {
+    public KakaoIdentityFingerprint generateActive(String providerSubject) {
+        return generate(activeKey.requireConfigured(), providerSubject);
+    }
+
+    public Optional<KakaoIdentityFingerprint> generatePrevious(String providerSubject) {
+        return previousKey.optional().map(key -> generate(key, providerSubject));
+    }
+
+    private KakaoIdentityFingerprint generate(FingerprintKey key, String providerSubject) {
         if (providerSubject == null || providerSubject.isBlank()) {
             throw new IllegalArgumentException("providerSubject must not be blank");
         }
         try {
             Mac mac = Mac.getInstance(HMAC_ALGORITHM);
-            mac.init(key);
+            mac.init(new SecretKeySpec(key.secret().getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
             byte[] digest = mac.doFinal(providerSubject.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder(digest.length * 2);
+            StringBuilder fingerprint = new StringBuilder(digest.length * 2);
             for (byte value : digest) {
-                builder.append(String.format("%02x", value));  //16진수로 변환
+                fingerprint.append(String.format("%02x", value));
             }
-            return builder.toString();
+            return new KakaoIdentityFingerprint(key.version(), fingerprint.toString());
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("Unable to fingerprint Kakao identity", exception);
+        }
+    }
+
+    private record FingerprintKey(String version, String secret) {
+
+        private static FingerprintKey of(String version, String secret) {
+            return new FingerprintKey(version == null ? "" : version, secret == null ? "" : secret);
+        }
+
+        private FingerprintKey requireConfigured() {
+            if (version.isBlank() || secret.isBlank()) {
+                throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+            }
+            return this;
+        }
+
+        private Optional<FingerprintKey> optional() {
+            if (version.isBlank() && secret.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.of(requireConfigured());
         }
     }
 }

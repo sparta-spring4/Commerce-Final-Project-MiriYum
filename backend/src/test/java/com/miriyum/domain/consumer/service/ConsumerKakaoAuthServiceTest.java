@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.dto.KakaoLoginResult;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthState;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
@@ -31,6 +33,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -40,6 +43,9 @@ class ConsumerKakaoAuthServiceTest {
 
     @Mock
     private ConsumerAccountRepository consumerAccountRepository;
+
+    @Mock
+    private ConsumerKakaoLinkTransactionService consumerKakaoLinkTransactionService;
 
     @Mock
     private KakaoOAuthClient kakaoOAuthClient;
@@ -81,8 +87,9 @@ class ConsumerKakaoAuthServiceTest {
                 .willReturn(new KakaoOAuthUser("kakao-subject"));
         given(kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.CONSUMER, "kakao-subject"))
                 .willReturn(null);
-        given(fingerprintGenerator.generate("kakao-subject")).willReturn("fingerprint");
-        given(kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, "fingerprint"))
+        given(fingerprintGenerator.generateActive("kakao-subject"))
+                .willReturn(new KakaoIdentityFingerprint("v1", "fingerprint"));
+        given(kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, "v1", "fingerprint"))
                 .willReturn("sign-up-ticket");
 
         KakaoLoginResult result = consumerKakaoAuthService.authenticate(request);
@@ -121,7 +128,7 @@ class ConsumerKakaoAuthServiceTest {
         ConsumerKakaoSignUpRequest request = new ConsumerKakaoSignUpRequest(
                 "sign-up-ticket", "user@example.com", "010-1234-5678", true, "닉네임");
         given(kakaoSignUpTicketService.parse("sign-up-ticket"))
-                .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint"));
+                .willReturn(new KakaoSignUpTicket(TokenNamespace.CONSUMER, "fingerprint", "v1"));
         given(nicknamePolicy.normalize("닉네임")).willReturn("닉네임");
         given(phoneNumberPolicy.normalize("010-1234-5678")).willReturn("01012345678");
         given(contactReferenceGenerator.generate()).willReturn("contact-reference");
@@ -131,7 +138,8 @@ class ConsumerKakaoAuthServiceTest {
                     ReflectionTestUtils.setField(account, "id", 10L);
                     return account;
                 });
-        given(kakaoSocialLoginLinkService.linkFingerprint(TokenNamespace.CONSUMER, 10L, "fingerprint"))
+        given(kakaoSocialLoginLinkService.linkFingerprint(
+                TokenNamespace.CONSUMER, 10L, new KakaoIdentityFingerprint("v1", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
         given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 10L)).willReturn("access-token");
         given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 10L)).willReturn("refresh-token");
@@ -159,18 +167,20 @@ class ConsumerKakaoAuthServiceTest {
     @Test
     @DisplayName("로그인한 일반 사용자는 자기 계정에만 카카오 계정을 연결할 수 있다")
     void linksKakaoToAuthenticatedConsumer() {
-        ConsumerAccount account = ConsumerAccount.create("user@example.com", "{sha256-bcrypt}hash", "닉네임");
         given(kakaoOAuthStateService.parse("link-state"))
                 .willReturn(new KakaoOAuthState(TokenNamespace.CONSUMER, KakaoOAuthPurpose.LINK, 10L));
         given(kakaoOAuthClient.authenticate("code", "https://app.example/callback"))
                 .willReturn(new KakaoOAuthUser("kakao-subject"));
-        given(consumerAccountRepository.findById(10L)).willReturn(Optional.of(account));
-        given(kakaoSocialLoginLinkService.link(TokenNamespace.CONSUMER, 10L, "kakao-subject"))
+        given(consumerKakaoLinkTransactionService.linkActiveAccount(10L, "kakao-subject"))
                 .willReturn(KakaoLinkResult.CREATED);
 
         KakaoLinkResult result = consumerKakaoAuthService.linkKakao(
                 10L, new KakaoAuthenticationRequest("code", "link-state", "https://app.example/callback"));
 
         assertThat(result).isEqualTo(KakaoLinkResult.CREATED);
+        then(consumerAccountRepository).shouldHaveNoInteractions();
+        InOrder inOrder = inOrder(kakaoOAuthClient, consumerKakaoLinkTransactionService);
+        inOrder.verify(kakaoOAuthClient).authenticate("code", "https://app.example/callback");
+        inOrder.verify(consumerKakaoLinkTransactionService).linkActiveAccount(10L, "kakao-subject");
     }
 }

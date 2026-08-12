@@ -17,11 +17,13 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
             from SocialLoginLink link
             where link.namespace = :namespace
               and link.provider = :provider
+              and link.fingerprintKeyVersion = :fingerprintKeyVersion
               and link.providerSubjectFingerprint = :fingerprint
             """)
     Optional<SocialLoginLink> findLink(
             @Param("namespace") TokenNamespace namespace,
             @Param("provider") SocialLoginProvider provider,
+            @Param("fingerprintKeyVersion") String fingerprintKeyVersion,
             @Param("fingerprint") String fingerprint
     );
 
@@ -45,6 +47,7 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
                 namespace,
                 account_id,
                 provider,
+                fingerprint_key_version,
                 provider_subject_fingerprint,
                 created_at,
                 updated_at
@@ -52,6 +55,7 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
                 :namespace,
                 :accountId,
                 :provider,
+                :fingerprintKeyVersion,
                 :fingerprint,
                 CURRENT_TIMESTAMP(6),
                 CURRENT_TIMESTAMP(6)
@@ -63,6 +67,20 @@ public interface SocialLoginLinkRepository extends JpaRepository<SocialLoginLink
             @Param("namespace") String namespace,
             @Param("accountId") Long accountId,
             @Param("provider") String provider,
+            @Param("fingerprintKeyVersion") String fingerprintKeyVersion,
+            @Param("fingerprint") String fingerprint
+    );
+
+    @Modifying
+    @Query("""
+            update SocialLoginLink link
+            set link.fingerprintKeyVersion = :fingerprintKeyVersion,
+                link.providerSubjectFingerprint = :fingerprint
+            where link.id = :linkId
+            """)
+    void refreshFingerprint(
+            @Param("linkId") Long linkId,
+            @Param("fingerprintKeyVersion") String fingerprintKeyVersion,
             @Param("fingerprint") String fingerprint
     );
 }

@@ -8,17 +8,32 @@
     {
       "name": "miriyum.kakao.sign-up-ticket-secret",
       "type": "java.lang.String",
-      "description": "카카오 첫 가입 ticket 서명에 사용하는 서버 비밀값입니다."
+      "description": "카카오 최초 가입 ticket 서명에 사용하는 서버 비밀값입니다."
     },
     {
-      "name": "miriyum.kakao.identity-fingerprint-secret",
+      "name": "miriyum.kakao.identity-fingerprint-active-key-version",
       "type": "java.lang.String",
-      "description": "카카오 회원 식별자의 fingerprint 생성에 사용하는 서버 비밀값입니다."
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-active-secret",
+      "type": "java.lang.String",
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-key-version",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-secret",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 비밀값입니다."
     },
     {
       "name": "miriyum.identity-verification.dev-stub-enabled",
       "type": "java.lang.Boolean",
-      "description": "개발 환경의 신원 확인 Stub 사용 여부입니다."
+      "description": "개발 환경의 본인 확인 Stub 사용 여부입니다."
     }
   ]
 }

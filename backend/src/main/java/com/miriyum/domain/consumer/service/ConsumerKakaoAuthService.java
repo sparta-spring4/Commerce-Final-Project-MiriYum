@@ -7,6 +7,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoAuthorization;
+import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.dto.KakaoLoginResult;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthState;
 import com.miriyum.domain.auth.social.dto.KakaoOAuthUser;
@@ -35,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ConsumerKakaoAuthService {
 
     private final ConsumerAccountRepository consumerAccountRepository;
+    private final ConsumerKakaoLinkTransactionService consumerKakaoLinkTransactionService;
     private final KakaoOAuthClient kakaoOAuthClient;
     private final KakaoOAuthStateService kakaoOAuthStateService;
     private final KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
@@ -47,6 +49,7 @@ public class ConsumerKakaoAuthService {
 
     public ConsumerKakaoAuthService(
             ConsumerAccountRepository consumerAccountRepository,
+            ConsumerKakaoLinkTransactionService consumerKakaoLinkTransactionService,
             KakaoOAuthClient kakaoOAuthClient,
             KakaoOAuthStateService kakaoOAuthStateService,
             KakaoSocialLoginLinkService kakaoSocialLoginLinkService,
@@ -58,6 +61,7 @@ public class ConsumerKakaoAuthService {
             ReservationContactReferenceGenerator contactReferenceGenerator
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
+        this.consumerKakaoLinkTransactionService = consumerKakaoLinkTransactionService;
         this.kakaoOAuthClient = kakaoOAuthClient;
         this.kakaoOAuthStateService = kakaoOAuthStateService;
         this.kakaoSocialLoginLinkService = kakaoSocialLoginLinkService;
@@ -108,12 +112,12 @@ public class ConsumerKakaoAuthService {
             return KakaoLoginResult.authenticated(tokenPair);
         }
 
-        String fingerprint = fingerprintGenerator.generate(user.providerSubject());
+        KakaoIdentityFingerprint fingerprint = fingerprintGenerator.generateActive(user.providerSubject());
         return KakaoLoginResult.signUpRequired(
-                kakaoSignUpTicketService.create(TokenNamespace.CONSUMER, fingerprint));
+                kakaoSignUpTicketService.create(
+                        TokenNamespace.CONSUMER, fingerprint.keyVersion(), fingerprint.value()));
     }
 
-    @Transactional
     public KakaoLinkResult linkKakao(Long accountId, KakaoAuthenticationRequest request) {
         KakaoOAuthState state = kakaoOAuthStateService.parse(request.state());
         if (state.namespace() != TokenNamespace.CONSUMER
@@ -122,14 +126,8 @@ public class ConsumerKakaoAuthService {
             throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
         }
 
-        ConsumerAccount account = consumerAccountRepository.findById(accountId)
-                .orElseThrow(() -> new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID));
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
-            throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
-        }
-
         KakaoOAuthUser user = kakaoOAuthClient.authenticate(request.authorizationCode(), request.redirectUri());
-        return kakaoSocialLoginLinkService.link(TokenNamespace.CONSUMER, accountId, user.providerSubject());
+        return consumerKakaoLinkTransactionService.linkActiveAccount(accountId, user.providerSubject());
     }
 
     @Transactional
@@ -156,7 +154,10 @@ public class ConsumerKakaoAuthService {
         try {
             ConsumerAccount saved = consumerAccountRepository.saveAndFlush(account);
             KakaoLinkResult linkResult = kakaoSocialLoginLinkService.linkFingerprint(
-                    TokenNamespace.CONSUMER, saved.getId(), ticket.providerSubjectFingerprint());
+                    TokenNamespace.CONSUMER,
+                    saved.getId(),
+                    new KakaoIdentityFingerprint(
+                            ticket.fingerprintKeyVersion(), ticket.providerSubjectFingerprint()));
             if (linkResult != KakaoLinkResult.CREATED && linkResult != KakaoLinkResult.ALREADY_LINKED) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }

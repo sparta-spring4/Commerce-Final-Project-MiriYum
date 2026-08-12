@@ -44,6 +44,9 @@ public class SocialLoginLink extends BaseEntity {
     @Column(name = "provider", nullable = false, length = 30)
     private SocialLoginProvider provider;
 
+    @Column(name = "fingerprint_key_version", nullable = false, length = 30)
+    private String fingerprintKeyVersion;
+
     @Column(name = "provider_subject_fingerprint", nullable = false, length = 64)
     private String providerSubjectFingerprint;
 
@@ -51,11 +54,13 @@ public class SocialLoginLink extends BaseEntity {
             TokenNamespace namespace,
             Long accountId,
             SocialLoginProvider provider,
+            String fingerprintKeyVersion,
             String providerSubjectFingerprint
     ) {
         this.namespace = Objects.requireNonNull(namespace);
         this.accountId = Objects.requireNonNull(accountId);
         this.provider = Objects.requireNonNull(provider);
+        this.fingerprintKeyVersion = Objects.requireNonNull(fingerprintKeyVersion);
         this.providerSubjectFingerprint = Objects.requireNonNull(providerSubjectFingerprint);
     }
 
@@ -63,8 +68,9 @@ public class SocialLoginLink extends BaseEntity {
             TokenNamespace namespace,
             Long accountId,
             SocialLoginProvider provider,
+            String fingerprintKeyVersion,
             String providerSubjectFingerprint
     ) {
-        return new SocialLoginLink(namespace, accountId, provider, providerSubjectFingerprint);
+        return new SocialLoginLink(namespace, accountId, provider, fingerprintKeyVersion, providerSubjectFingerprint);
     }
 }
