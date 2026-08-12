@@ -4,6 +4,7 @@ import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
 import java.util.List;
 
 public record RepresentativeMenuSnapshot(
+        String storeId,
         long version,
         RepresentativeMenuSettingStatus status,
         List<RepresentativeMenuItem> items
@@ -12,8 +13,9 @@ public record RepresentativeMenuSnapshot(
         items = List.copyOf(items);
     }
 
-    public static RepresentativeMenuSnapshot unconfigured() {
+    public static RepresentativeMenuSnapshot unconfigured(long storeId) {
         return new RepresentativeMenuSnapshot(
-                0L, RepresentativeMenuSettingStatus.UNCONFIGURED, List.of());
+                String.valueOf(storeId), 0L,
+                RepresentativeMenuSettingStatus.UNCONFIGURED, List.of());
     }
 }

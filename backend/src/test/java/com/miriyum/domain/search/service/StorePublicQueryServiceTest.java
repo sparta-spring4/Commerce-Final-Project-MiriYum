@@ -89,7 +89,7 @@ class StorePublicQueryServiceTest {
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
         given(representativeMenuQueryService.getCurrent(7L))
-                .willReturn(RepresentativeMenuSnapshot.unconfigured());
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
                 .willReturn(List.of(new ReservationAvailabilityResult(
@@ -121,7 +121,7 @@ class StorePublicQueryServiceTest {
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
         given(representativeMenuQueryService.getCurrent(7L))
-                .willReturn(RepresentativeMenuSnapshot.unconfigured());
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
@@ -148,7 +148,7 @@ class StorePublicQueryServiceTest {
         given(scheduleQueryService.getPublicSchedules(7L))
                 .willReturn(PublicStoreSchedules.empty());
         given(representativeMenuQueryService.getCurrent(7L))
-                .willReturn(RepresentativeMenuSnapshot.unconfigured());
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(7L));
         given(reservationService.getAvailabilities(
                 org.mockito.ArgumentMatchers.eq(List.of(7L)),
                 org.mockito.ArgumentMatchers.any()))
@@ -181,6 +181,7 @@ class StorePublicQueryServiceTest {
                 .willReturn(PublicStoreSchedules.empty());
         given(representativeMenuQueryService.getCurrent(7L)).willReturn(
                 new RepresentativeMenuSnapshot(
+                        "7",
                         8L,
                         RepresentativeMenuSettingStatus.CONFIGURED,
                         List.of(
