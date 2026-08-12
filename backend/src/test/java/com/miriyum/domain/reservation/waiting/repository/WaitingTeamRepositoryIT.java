@@ -10,7 +10,7 @@ import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import org.junit.jupiter.api.BeforeEach;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,20 +55,28 @@ class WaitingTeamRepositoryIT {
     @Autowired
     private EntityManager entityManager;
 
-    @BeforeEach
-    void disableForeignKeysForOwnedRepositoryFixture() {
-        entityManager.createNativeQuery("SET FOREIGN_KEY_CHECKS = 0").executeUpdate();
+    @Test
+    @DisplayName("repository fixture 삽입이 끝나면 같은 MySQL 연결의 FK 검사를 복원한다")
+    void restoresForeignKeyChecksAfterFixtureInsertion() {
+        insertFixtureWithForeignKeysDisabled(List::of);
+
+        assertThat(foreignKeyChecks()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("keyset 목록은 매장과 선택 상태를 제한하고 순번과 ID로 안정 정렬한다")
     void scopesByStoreAndStatusWithStableTieBreak() {
-        WaitingTeam first = save(22L, LocalDate.of(2026, 8, 12), 1L);
-        WaitingTeam tiedLater = save(22L, LocalDate.of(2026, 8, 13), 1L);
-        WaitingTeam third = save(22L, LocalDate.of(2026, 8, 12), 2L);
-        save(23L, LocalDate.of(2026, 8, 12), 1L);
-        third.call(0L, Instant.parse("2026-08-12T03:01:00Z"));
-        repository.flush();
+        List<WaitingTeam> fixture = insertFixtureWithForeignKeysDisabled(() -> {
+            WaitingTeam first = save(22L, LocalDate.of(2026, 8, 12), 1L);
+            WaitingTeam tiedLater = save(22L, LocalDate.of(2026, 8, 13), 1L);
+            WaitingTeam third = save(22L, LocalDate.of(2026, 8, 12), 2L);
+            save(23L, LocalDate.of(2026, 8, 12), 1L);
+            third.call(0L, Instant.parse("2026-08-12T03:01:00Z"));
+            return List.of(first, tiedLater, third);
+        });
+        WaitingTeam first = fixture.get(0);
+        WaitingTeam tiedLater = fixture.get(1);
+        WaitingTeam third = fixture.get(2);
         entityManager.clear();
 
         List<WaitingTeam> all = repository.findKeysetPage(22L, null, null, null, 10);
@@ -79,15 +87,19 @@ class WaitingTeamRepositoryIT {
                 .containsExactly(first.getId(), tiedLater.getId(), third.getId());
         assertThat(waiting).extracting(WaitingTeam::getId)
                 .containsExactly(first.getId(), tiedLater.getId());
+        assertThat(foreignKeyChecks()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("복합 cursor 페이지 경계는 중복이나 누락 없이 다음 행부터 이어진다")
     void continuesAfterCompositeCursorWithoutDuplicatesOrSkips() {
-        WaitingTeam first = save(22L, LocalDate.of(2026, 8, 12), 1L);
-        WaitingTeam second = save(22L, LocalDate.of(2026, 8, 13), 1L);
-        WaitingTeam third = save(22L, LocalDate.of(2026, 8, 12), 2L);
-        repository.flush();
+        List<WaitingTeam> fixture = insertFixtureWithForeignKeysDisabled(() -> List.of(
+                save(22L, LocalDate.of(2026, 8, 12), 1L),
+                save(22L, LocalDate.of(2026, 8, 13), 1L),
+                save(22L, LocalDate.of(2026, 8, 12), 2L)));
+        WaitingTeam first = fixture.get(0);
+        WaitingTeam second = fixture.get(1);
+        WaitingTeam third = fixture.get(2);
         entityManager.clear();
 
         List<WaitingTeam> pageOne = repository.findKeysetPage(22L, null, null, null, 2);
@@ -99,6 +111,25 @@ class WaitingTeamRepositoryIT {
                 .containsExactly(first.getId(), second.getId());
         assertThat(pageTwo).extracting(WaitingTeam::getId)
                 .containsExactly(third.getId());
+        assertThat(foreignKeyChecks()).isEqualTo(1);
+    }
+
+    private <T> T insertFixtureWithForeignKeysDisabled(Supplier<T> fixture) {
+        entityManager.createNativeQuery("SET FOREIGN_KEY_CHECKS = 0").executeUpdate();
+        try {
+            T result = fixture.get();
+            repository.flush();
+            return result;
+        } finally {
+            entityManager.createNativeQuery("SET FOREIGN_KEY_CHECKS = 1").executeUpdate();
+        }
+    }
+
+    private int foreignKeyChecks() {
+        Number enabled = (Number) entityManager
+                .createNativeQuery("SELECT @@SESSION.FOREIGN_KEY_CHECKS")
+                .getSingleResult();
+        return enabled.intValue();
     }
 
     private WaitingTeam save(long storeId, LocalDate businessDate, long sequence) {
