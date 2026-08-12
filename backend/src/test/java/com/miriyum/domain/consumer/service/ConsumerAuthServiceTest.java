@@ -348,6 +348,17 @@ class ConsumerAuthServiceTest {
         verifyNoInteractions(refreshTokenManager);
     }
 
+    @Test
+    @DisplayName("Refresh Token 쿠키가 없어도 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithoutRefreshTokenIsIdempotent() {
+        assertThatCode(() -> consumerAuthService.logout(null))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> consumerAuthService.logout(" "))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(jwtTokenProvider, refreshTokenManager);
+    }
+
     /**
      * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 지연 여부를 판정한다. 이 단위 테스트는
      * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지

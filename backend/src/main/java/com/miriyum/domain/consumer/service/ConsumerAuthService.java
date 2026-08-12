@@ -165,7 +165,7 @@ public class ConsumerAuthService {
 
     public void logout(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+            return;
         }
 
         ParsedToken parsed = jwtTokenProvider.parseRefreshTokenForLogout(refreshToken);
