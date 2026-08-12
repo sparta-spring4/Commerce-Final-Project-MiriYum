@@ -6,6 +6,7 @@ import com.miriyum.global.storage.FileStorageVisibility;
 import com.miriyum.global.storage.FileStorageMetadata;
 import com.miriyum.global.storage.FileStorageOwner;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -62,9 +63,11 @@ public class FileMetadata {
     @Column(name = "retention_policy", nullable = false, length = 64)
     private String retentionPolicy;
 
+    @Convert(converter = UtcInstantConverter.class)
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Convert(converter = UtcInstantConverter.class)
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
