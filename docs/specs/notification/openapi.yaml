@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: MiriYum Notification API
   version: 1.0.0
-  description: Reservation·MenuHold 기반 소비자 본인 알림 이력 계약
+  description: Reservation·MenuHold·Pickup 기반 소비자 본인 알림 이력 계약
   license:
     name: All rights reserved
     identifier: LicenseRef-All-Rights-Reserved
@@ -75,14 +75,13 @@ components:
         - RESERVATION_EXPIRED
         - RESERVATION_VISIT_REMINDER
         - RESERVATION_COORDINATION_REQUIRED
+        - PICKUP_RESERVATION_CONFIRMED
+        - PICKUP_RESERVATION_CANCELLED
         - MENU_HOLD_FULFILLMENT_AT_RISK
         - MENU_SUBSTITUTION_PROPOSED
         - MENU_SUBSTITUTION_ACCEPTED
         - MENU_SUBSTITUTION_REJECTED
         - MENU_SUBSTITUTION_EXPIRED
-    NotificationDeliveryStatus:
-      type: string
-      enum: [PENDING, DELIVERED, FAILED, CANCELLED]
     NotificationResourceType:
       type: string
       enum: [RESERVATION, MENU_HOLD, PICKUP_RESERVATION, MENU_SUBSTITUTION_PROPOSAL]
@@ -128,7 +127,6 @@ components:
         - occurredAt
         - createdAt
         - deliveredAt
-        - deliveryStatus
         - action
       properties:
         notificationId:
@@ -147,12 +145,8 @@ components:
         createdAt:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
         deliveredAt:
-          oneOf:
-            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
-            - type: "null"
-          description: DELIVERED이면 중앙 전달 성공 시각, 그 외 상태이면 null
-        deliveryStatus:
-          $ref: "#/components/schemas/NotificationDeliveryStatus"
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+          description: IN_APP 전달 성공이 중앙 기록된 필수 시각
         action:
           oneOf:
             - $ref: "#/components/schemas/NotificationAction"

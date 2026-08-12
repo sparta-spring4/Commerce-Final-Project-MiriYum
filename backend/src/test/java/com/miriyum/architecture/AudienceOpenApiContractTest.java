@@ -94,6 +94,26 @@ class AudienceOpenApiContractTest {
         }
     }
 
+    @Test
+    void notificationHistoryExposesOnlyDeliveredInAppRecordsAndPickupPurposes() throws IOException {
+        Map<String, Object> schemas = schemas("notification/openapi.yaml");
+        Map<String, Object> historyItem = map(schemas.get("NotificationHistoryItem"));
+        Map<String, Object> properties = map(historyItem.get("properties"));
+        Set<Object> required = Set.copyOf(list(historyItem.get("required")));
+
+        assertThat(schemas).doesNotContainKey("NotificationDeliveryStatus");
+        assertThat(properties).doesNotContainKey("deliveryStatus");
+        assertThat(required).contains("deliveredAt").doesNotContain("deliveryStatus");
+        assertThat(map(properties.get("deliveredAt")))
+                .containsEntry(
+                        "$ref",
+                        "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime")
+                .doesNotContainKey("oneOf");
+
+        assertThat(list(map(schemas.get("NotificationPurpose")).get("enum")))
+                .contains("PICKUP_RESERVATION_CONFIRMED", "PICKUP_RESERVATION_CANCELLED");
+    }
+
     private static Set<String> intersection(Set<String> left, Set<String> right) {
         Set<String> result = new HashSet<>(left);
         result.retainAll(right);
@@ -117,6 +137,18 @@ class AudienceOpenApiContractTest {
         try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
             return map(map(new Yaml().load(input)).get("paths"));
         }
+    }
+
+    private static Map<String, Object> schemas(String file) throws IOException {
+        try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
+            Map<String, Object> document = map(new Yaml().load(input));
+            return map(map(document.get("components")).get("schemas"));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static java.util.List<Object> list(Object value) {
+        return (java.util.List<Object>) value;
     }
 
     @SuppressWarnings("unchecked")

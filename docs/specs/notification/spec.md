@@ -15,7 +15,7 @@
 
 ### 포함
 
-- Reservation·MenuHold의 확정 사건에서 생성하는 1차 알림 목적 카탈로그
+- Reservation·MenuHold·Pickup의 확정 사건에서 생성하는 1차 알림 목적 카탈로그
 - 원 사건을 Notification에 기록하는 내부 공개 Service·DTO·오류 의미
 - 렌더링과 행동 유효성 재검증을 위한 원 도메인 공개 조회 경계
 - Notification 소유의 소비자 본인 알림 이력 HTTP API와 cursor 계약
@@ -38,9 +38,9 @@
 
 ## 1차 목적 계약
 
-목적 코드, 필수성, 원 사건과 기본 행동의 정본은 `docs/service-policies/16-notification.md`의 `1차 Reservation·MenuHold 알림 목적 카탈로그`다. 이 명세와 OpenAPI는 해당 코드를 그대로 사용하며 별칭이나 frontend 전용 목적을 만들지 않는다.
+목적 코드, 필수성, 원 사건과 기본 행동의 정본은 `docs/service-policies/16-notification.md`의 `1차 Reservation·MenuHold·Pickup 알림 목적 카탈로그`다. 이 명세와 OpenAPI는 해당 코드를 그대로 사용하며 별칭이나 frontend 전용 목적을 만들지 않는다.
 
-- 1차 허용 채널은 `IN_APP` 하나다. 알림 이력에 조회 가능하게 내구성 기록한 시점을 `IN_APP` 전달 성공으로 기록한다.
+- 1차 허용 채널은 `IN_APP` 하나다. 알림 이력에 조회 가능하게 내구성 기록한 시점을 `IN_APP` 전달 성공으로 기록한다. 전달 전 취소·최종 실패·대기 작업은 내부 작업·감사 상태로만 유지하고 공개 이력에 포함하지 않는다.
 - 목적 카탈로그에 대응하는 원 상태·사건이 아직 활성화되지 않았으면 그 목적은 작업을 만들지 않는다. 다른 활성 목적의 구현과 완료를 막지 않는다.
 - 방문 안내는 원 예약의 `startAt`, `timeZoneId`, 활성 `timingPolicyVersion`으로 계산한 `scheduledAt`을 사용한다. 정확한 선행 시간은 정책 버전이 소유하며 이벤트 생산자나 worker가 임의 숫자를 사용하지 않는다.
 
@@ -64,7 +64,7 @@ NotificationTaskRecorder.record(NotificationSourceEventV1 event)
 | 필드 | 형식 | 규칙 |
 |---|---|---|
 | `sourceEventId` | non-blank string, 최대 100 | 원 도메인이 같은 확정 사건 재처리에도 재사용하는 식별자 |
-| `sourceDomain` | `RESERVATION`, `MENU_HOLD` | 원 사건 소유 도메인 |
+| `sourceDomain` | `RESERVATION`, `MENU_HOLD`, `PICKUP` | 원 사건 소유 도메인 |
 | `purpose` | 목적 카탈로그 enum | 원 상태와 일치하지 않으면 기록 거부 |
 | `recipientAccountId` | 양의 public ID string | 대표 일반 사용자 계정 하나 |
 | `recipientRelationVersion` | 양의 64-bit integer | 원 자원과 수신자 관계 버전 |
@@ -97,8 +97,19 @@ Notification은 작업 실행과 이력 행동 계산 시 다음 읽기 경계�
 ```text
 ReservationNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
 MenuHoldNotificationSource.readContext(resourceType, resourceId, expectedVersion, recipientAccountId)
+PickupNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
   -> NotificationSourceContextV1
 ```
+
+조회 포트와 원 사건 자원 소유는 다음과 같이 고정한다.
+
+| 조회 포트 | 처리하는 `resourceType` |
+|---|---|
+| `ReservationNotificationSource` | `RESERVATION` |
+| `MenuHoldNotificationSource` | `MENU_HOLD`, `MENU_SUBSTITUTION_PROPOSAL` |
+| `PickupNotificationSource` | `PICKUP_RESERVATION` |
+
+Pickup은 자신의 픽업 예약 확정·취소 사건을 같은 업무 트랜잭션에서 `NotificationTaskRecorder`에 직접 기록한다. `MenuHoldNotificationSource`는 `PICKUP_RESERVATION`을 처리하지 않으며 MenuHold → Pickup 역방향 의존을 만들지 않는다. 메뉴 이행 위험과 대체 제안·결과의 원 사건은 MenuHold가 소유하고, 연결된 `PICKUP_RESERVATION`은 `actionResourceType`·`actionResourceId`로만 반환할 수 있다.
 
 `NotificationSourceContextV1`은 다음 안전 필드만 반환한다.
 
@@ -117,7 +128,7 @@ MenuHoldNotificationSource.readContext(resourceType, resourceId, expectedVersion
 | `NOT_ELIGIBLE` | 발송 취소·보안 감사, 다른 수신자를 추측하지 않음 |
 | `TEMPORARILY_UNAVAILABLE` | 원 상태를 바꾸지 않고 Notification 작업만 제한 재시도 |
 
-원 자원이 보이지 않는 경우와 수신자 불일치는 외부에 자원 존재 여부를 공개하지 않는다. Reservation·MenuHold 구현 PR은 정상·최신 버전 대체·수신자 불일치·일시 장애 계약 테스트를 각각 제공한다.
+원 자원이 보이지 않는 경우와 수신자 불일치는 외부에 자원 존재 여부를 공개하지 않는다. Reservation·MenuHold·Pickup 구현 PR은 정상·최신 버전 대체·수신자 불일치·일시 장애 계약 테스트를 각각 제공한다.
 
 ## 상태 대체·만료 계약
 
@@ -150,19 +161,14 @@ Authorization: Bearer {consumerAccessToken}
 
 - `notificationId`, `purpose`, `title`
 - `resource`의 `type`, `id`
-- `occurredAt`, `createdAt`, nullable `deliveredAt`, `deliveryStatus`
+- `occurredAt`, `createdAt`, 필수 `deliveredAt`
 - nullable `action`이 있으면 `type`, `resource`의 `type`·`id`, `availability`, nullable `expiresAt`
 
 `title`은 승인된 template field allowlist로 렌더링한 최대 100자의 안전한 제목이다. 원문 주소·전체 메시지 본문·provider payload·내부 재시도 횟수·감사 메모는 반환하지 않는다.
 
-### 공개 전달 상태
+### 내부 작업 상태와 공개 가시성
 
-| 값 | 의미 |
-|---|---|
-| `PENDING` | 논리 알림은 생성됐지만 승인 채널 전달이 아직 확정되지 않음 |
-| `DELIVERED` | `IN_APP`을 포함한 승인 채널 하나 이상의 전달 성공이 중앙 기록됨 |
-| `FAILED` | 허용된 전달 경로가 최종 실패함. 원 거래 실패 의미가 아님 |
-| `CANCELLED` | 최신 상태·동의·대상 검증으로 미전달 작업이 취소됨 |
+Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 유지한다. 소비자 공개 이력에는 `IN_APP` 전달이 성공해 `deliveredAt`이 확정된 `DELIVERED` 작업만 노출한다. `PENDING`, `FAILED`, `CANCELLED`는 내부 작업·시도·감사 기록에만 보존하며 공개 응답에 전달 상태 필드를 만들지 않는다.
 
 ### 행동 계약
 
@@ -199,13 +205,16 @@ Authorization: Bearer {consumerAccessToken}
 - 현재 없는 source 상태는 알림 작업을 만들지 않으며 다른 활성 목적을 막지 않는다.
 - 같은 원 사건을 병렬·반복 기록해도 하나의 논리 알림에 수렴한다.
 - 원 상태 변경·취소·만료와 역순 사건 뒤 최신 유효 작업만 전달 가능하다.
-- 본인 알림 이력은 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력과 금지 필드가 노출되지 않는다.
+- Pickup 확정·취소 사건은 Pickup이 직접 기록하고 Notification은 `PickupNotificationSource`로 최신 상태·수신자 관계를 검증하며 MenuHold → Pickup 역방향 조회를 만들지 않는다.
+- 본인 알림 이력은 `IN_APP` 전달 성공 항목만 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력, 내부 작업 상태와 금지 필드가 노출되지 않는다.
 - 알림 실패·열람·침묵이 예약 변경이나 메뉴 대체 동의로 해석되지 않는다.
 - OpenAPI 단독 파싱, 참조 해석과 consumer entrypoint 조합이 성공한다.
 
 ## 공동 리뷰 게이트
 
 - Reservation 소유자는 목적별 원 상태, `ReservationNotificationSource`의 버전·수신자 결속과 취소·변경·방문 완료 대체 규칙을 검토한다.
+- MenuHold 소유자는 메뉴 이행 위험·대체 제안과 결과 사건, `MenuHoldNotificationSource`의 허용 자원 경계를 검토한다.
+- Pickup 소유자는 픽업 확정·취소 사건, `PickupNotificationSource`의 버전·수신자 결속과 MenuHold 역방향 의존 금지를 검토한다.
 - Consumer/API 검토자는 `/api/v1/consumers/me/notifications`, 공통 인증·오류 envelope와 cursor 실패 의미를 검토한다.
-- Frontend 검토자는 목적·공개 상태·nullable action과 `availability`만으로 오래된 행동을 안전하게 비활성화할 수 있는지 검토한다.
+- Frontend 검토자는 목적·필수 `deliveredAt`·nullable action과 `availability`만으로 전달 성공 이력을 표시하고 오래된 행동을 안전하게 비활성화할 수 있는지 검토한다.
 - 리뷰는 Notification 목적과 MenuHold 정책을 다시 소유하지 않는다. 각 소비·제공 경계의 구현 가능성과 기존 계약 충돌만 확인한다.
