@@ -125,9 +125,17 @@ function CurrentStoreSummary({ storeId }: { storeId: string | null }) {
   )
 }
 
-/** 계정 영역. 로그아웃은 서버 정리 실패와 무관하게 클라이언트 세션을 비운다. */
+/**
+ * 계정 영역.
+ *
+ * 로그아웃은 서버 정리 실패와 무관하게 클라이언트 세션을 비우고, 현재 매장
+ * 선택도 함께 지운다. 매장 ID는 토큰이 아니지만 계정에 묶인 값이다. 남겨 두면
+ * 같은 브라우저에서 다른 대표자가 로그인했을 때 이전 계정의 매장이 현재 매장으로
+ * 잡히고, 그 매장 조회가 `STORE_003`으로 거절되는 화면을 처음 보게 된다.
+ */
 export function StoreOperatorAccountMenu() {
   const { status, signOut } = useStoreOperatorAuth()
+  const { clearStore } = useCurrentStore()
   const navigate = useNavigate()
   const [signingOut, setSigningOut] = useState(false)
 
@@ -139,6 +147,7 @@ export function StoreOperatorAccountMenu() {
     setSigningOut(true)
     try {
       await signOut()
+      clearStore()
       void navigate(ROUTES.storeOperatorSignIn, { replace: true })
     } finally {
       setSigningOut(false)

@@ -64,6 +64,18 @@ export function managedStore(overrides: Partial<ManagedStore> = {}): ManagedStor
       menuHoldEnabled: false,
       pickupEnabled: true,
     },
+    /*
+     * 좌표 검증 상태는 서버가 주소 버전마다 계산해 내려준다.
+     * 기본 fixture는 아직 검증되지 않은 상태로 둔다. 좌표를 지어내지 않는다.
+     */
+    geocoding: {
+      status: 'UNVERIFIED',
+      latitude: null,
+      longitude: null,
+      verifiedAddress: null,
+      verifiedAt: null,
+      addressVersion: 1,
+    },
     ...overrides,
   }
 }

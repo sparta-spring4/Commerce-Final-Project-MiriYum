@@ -8,6 +8,7 @@ import { server } from '../../../test/msw/server'
 import { AuthErrorCode } from '../../auth/model/authErrors'
 import { StoreOperatorAuthProvider } from '../StoreOperatorAuthProvider'
 import {
+  OPERATOR_REFRESH_PATH,
   OPERATOR_SESSIONS_PATH,
   tokenData,
   unauthenticatedOperator,
@@ -174,6 +175,52 @@ describe('식당 대표자 로그인 화면', () => {
       ),
     )
     expect(screen.getByTestId('location')).not.toHaveTextContent('evil.example')
+  })
+
+  it('세션 복구가 끝나기 전에는 로그인을 보내지 않는다', async () => {
+    let sessionCalls = 0
+    let releaseRefresh = () => {}
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+
+    server.use(
+      // 재발급 응답을 붙들어 restoring 상태를 유지한다.
+      http.post(OPERATOR_REFRESH_PATH, async () => {
+        await refreshBlocked
+        return errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+          'Refresh Token 쿠키가 필요합니다.',
+        )
+      }),
+      http.post(OPERATOR_SESSIONS_PATH, () => {
+        sessionCalls += 1
+        return successResponse(tokenData())
+      }),
+    )
+
+    renderSignInAt()
+
+    fillCredentials()
+    submit()
+
+    // 복구 중인 재발급과 로그인이 같은 토큰 자리를 두고 경쟁하지 않게 막는다.
+    expect(sessionCalls).toBe(0)
+    expect(screen.getByRole('button', { name: '로그인' })).toBeDisabled()
+    expect(
+      screen.getByText(
+        '로그인 상태를 확인하는 중입니다. 잠시 후 다시 시도해 주세요.',
+      ),
+    ).toBeInTheDocument()
+
+    releaseRefresh()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '로그인' })).toBeEnabled(),
+    )
+
+    submit()
+    await waitFor(() => expect(sessionCalls).toBe(1))
   })
 
   it('계정 유형을 고르는 입력 없이 셸별 진입점만 제공한다', async () => {

@@ -37,8 +37,22 @@ export function StoreOperatorSignInPage() {
     }
   }, [status, destination, navigate])
 
+  /*
+   * 세션 복구가 끝나기 전에는 로그인을 보내지 않는다.
+   *
+   * 새로고침 직후 shell은 항상 재발급을 시도한다. 그 사이에 로그인이 함께 나가면
+   * 두 응답이 도착 순서와 무관하게 같은 토큰 자리에 쓰이고, 늦게 도착한 재발급
+   * 실패가 방금 성공한 세션을 지울 수 있다. 복구가 끝나면 이 화면은 인증 상태에
+   * 따라 목적지로 이동하거나 제출을 허용한다.
+   */
+  const restoring = status === 'restoring'
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+
+    if (restoring) {
+      return
+    }
 
     // 비밀번호 형식은 로그인에서 검증하지 않는다. 기존 계정이 현재 정책보다
     // 약할 수 있고, 로그인 화면에서 정책을 노출할 이유도 없다.
@@ -120,9 +134,20 @@ export function StoreOperatorSignInPage() {
               onChange={(event) => setPassword(event.target.value)}
             />
 
-            <Button type="submit" variant="primary" block loading={submitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              block
+              disabled={restoring}
+              loading={submitting}
+            >
               로그인
             </Button>
+            {restoring && (
+              <p className="op-auth__switch" role="status">
+                로그인 상태를 확인하는 중입니다. 잠시 후 다시 시도해 주세요.
+              </p>
+            )}
 
             <p className="op-auth__switch">
               대표자 계정이 없으신가요?{' '}
