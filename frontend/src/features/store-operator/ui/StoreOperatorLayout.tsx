@@ -147,10 +147,20 @@ export function StoreOperatorAccountMenu() {
     setSigningOut(true)
     try {
       await signOut()
-      clearStore()
-      void navigate(ROUTES.storeOperatorSignIn, { replace: true })
+    } catch {
+      /*
+       * 서버 정리 실패는 사용자가 할 수 있는 일이 없다.
+       *
+       * provider는 `finally`에서 이미 세션을 비웠고, 남은 것은 서버 쪽 Refresh
+       * 토큰뿐이다. 여기서 예외를 흘리면 아래 `finally`가 실행되더라도 호출부의
+       * `void handleSignOut()`이 처리되지 않은 거부로 남는다.
+       */
     } finally {
+      // 서버 응답과 무관하게 클라이언트 상태를 비우고 로그인으로 보낸다.
+      // 네트워크 실패로 이 단계를 건너뛰면 매장 ID가 sessionStorage에 남는다.
+      clearStore()
       setSigningOut(false)
+      void navigate(ROUTES.storeOperatorSignIn, { replace: true })
     }
   }
 
