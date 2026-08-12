@@ -22,9 +22,16 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -36,6 +43,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -49,7 +60,9 @@ import org.testcontainers.utility.DockerImageName;
         "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
         "miriyum.waiting.closure.initial-delay-ms=600000"
 })
+@Import(WaitingClosureServiceIT.MutableClockConfig.class)
 class WaitingClosureServiceIT {
+    private static final Instant BASE_TIME = Instant.parse("2026-08-13T00:00:00Z");
     private static final IdempotencyKey KEY = IdempotencyKey.parse(
             "550e8400-e29b-41d4-a716-446655440202");
 
@@ -72,14 +85,85 @@ class WaitingClosureServiceIT {
     @Autowired WaitingClosureJobItemRepository items;
     @Autowired WaitingClosureJobRepository jobs;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired MutableClock mutableClock;
 
     @BeforeEach
     void clean() {
+        mutableClock.set(BASE_TIME);
         for (String table : new String[]{"waiting_status_events", "waiting_transition_audits",
                 "waiting_closure_job_items", "waiting_closure_jobs", "waiting_active_memberships",
                 "waiting_teams", "waiting_queue_sequences", "idempotency_commands",
                 "store_tag_assignment", "stores", "store_operator_accounts", "consumer_accounts"}) {
             jdbc.execute("DELETE FROM " + table);
+        }
+    }
+
+    @Test
+    void concurrentTransactionsProveVisibilitySingleClaimAndFencing() throws Exception {
+        Fixture fixture = fixture();
+        CountDownLatch createdButUncommitted = new CountDownLatch(1);
+        CountDownLatch allowCommit = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            Future<WaitingClosureCommandResult> creator = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).execute(status -> {
+                        WaitingClosureCommandResult result = service.startClosure(
+                                fixture.operatorId, fixture.storeId, KEY, 7L);
+                        createdButUncommitted.countDown();
+                        await(allowCommit);
+                        return result;
+                    }));
+            assertThat(createdButUncommitted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<List<WaitingClosureClaim>> invisibleClaim = executor.submit(() ->
+                    service.claimPendingItems("runner-before-commit", 100, Duration.ofSeconds(30)));
+            assertThat(invisibleClaim.get(5, TimeUnit.SECONDS)).isEmpty();
+            allowCommit.countDown();
+            assertThat(creator.get(5, TimeUnit.SECONDS).httpStatus()).isEqualTo(202);
+
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<List<WaitingClosureClaim>> first = concurrentClaim(
+                    executor, ready, release, "runner-a");
+            Future<List<WaitingClosureClaim>> second = concurrentClaim(
+                    executor, ready, release, "runner-b");
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            List<WaitingClosureClaim> firstResult = first.get(5, TimeUnit.SECONDS);
+            List<WaitingClosureClaim> secondResult = second.get(5, TimeUnit.SECONDS);
+            assertThat(List.of(firstResult.size(), secondResult.size())).containsExactlyInAnyOrder(0, 1);
+            WaitingClosureClaim original = firstResult.isEmpty() ? secondResult.getFirst() : firstResult.getFirst();
+            assertThat(jdbc.queryForObject("SELECT lease_owner FROM waiting_closure_job_items", String.class))
+                    .isEqualTo(original.owner());
+            assertThat(jdbc.queryForObject("SELECT claim_token FROM waiting_closure_job_items", Long.class))
+                    .isEqualTo(original.token());
+
+            mutableClock.advance(Duration.ofSeconds(31));
+            String newOwner = original.owner().equals("runner-a") ? "runner-b" : "runner-a";
+            WaitingClosureClaim reclaimed = service.claimPendingItems(
+                    newOwner, 100, Duration.ofSeconds(30)).getFirst();
+            assertThat(reclaimed.token()).isGreaterThan(original.token());
+
+            CountDownLatch staleReady = new CountDownLatch(2);
+            CountDownLatch staleRelease = new CountDownLatch(1);
+            Future<Boolean> staleComplete = executor.submit(() -> {
+                staleReady.countDown(); await(staleRelease); return service.processClaimedItem(original);
+            });
+            Future<Boolean> staleFailure = executor.submit(() -> {
+                staleReady.countDown(); await(staleRelease); return service.recordFailure(original, false);
+            });
+            assertThat(staleReady.await(5, TimeUnit.SECONDS)).isTrue();
+            staleRelease.countDown();
+            assertThat(staleComplete.get(5, TimeUnit.SECONDS)).isFalse();
+            assertThat(staleFailure.get(5, TimeUnit.SECONDS)).isFalse();
+            assertThat(service.processClaimedItem(reclaimed)).isTrue();
+
+            assertThat(count("waiting_active_memberships")).isZero();
+            assertThat(count("waiting_transition_audits")).isOne();
+            assertThat(count("waiting_status_events")).isOne();
+            assertThat(jdbc.queryForObject("SELECT completed_team_count FROM waiting_closure_jobs", Long.class)).isOne();
+            assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class)).isEqualTo("COMPLETED");
+        } finally {
+            allowCommit.countDown();
         }
     }
 
@@ -179,7 +263,8 @@ class WaitingClosureServiceIT {
         startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
         WaitingClosureClaim itemId = claim("owner-a").getFirst();
         jdbc.execute("DELETE FROM waiting_active_memberships");
-        jdbc.update("UPDATE waiting_teams SET status='CANCELLED', cancelled_at=NOW(6), version=version+1");
+        jdbc.update("UPDATE waiting_teams SET status='CANCELLED', cancelled_at=?, version=version+1",
+                java.sql.Timestamp.from(mutableClock.instant()));
 
         service.processClaimedItem(itemId);
 
@@ -256,9 +341,10 @@ class WaitingClosureServiceIT {
                 "SELECT consumer_account_id FROM consumer_accounts WHERE email='closure-consumer@example.com'",
                 Long.class);
         WaitingTeam team = teams.saveAndFlush(WaitingTeam.create(storeId, consumerId,
-                LocalDate.of(2026, 8, 13), 2, WaitingSource.REMOTE, 1L, Instant.now().minusSeconds(60)));
+                LocalDate.of(2026, 8, 13), 2, WaitingSource.REMOTE, 1L,
+                mutableClock.instant().minusSeconds(60)));
         memberships.saveAndFlush(WaitingActiveMembership.create(
-                storeId, consumerId, team.getId(), Instant.now().minusSeconds(60)));
+                storeId, consumerId, team.getId(), mutableClock.instant().minusSeconds(60)));
         return new Fixture(operatorId, storeId);
     }
 
@@ -272,9 +358,40 @@ class WaitingClosureServiceIT {
         return service.claimPendingItems(owner, 100, java.time.Duration.ofSeconds(30));
     }
 
+    private Future<List<WaitingClosureClaim>> concurrentClaim(
+            ExecutorService executor, CountDownLatch ready, CountDownLatch release, String owner) {
+        return executor.submit(() -> {
+            ready.countDown(); await(release);
+            return service.claimPendingItems(owner, 100, Duration.ofSeconds(30));
+        });
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("latch timeout");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted);
+        }
+    }
+
     private int count(String table) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
     }
 
     private record Fixture(long operatorId, long storeId) {}
+
+    @TestConfiguration
+    static class MutableClockConfig {
+        @Bean @Primary MutableClock waitingTestClock() { return new MutableClock(BASE_TIME); }
+    }
+
+    static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> current;
+        MutableClock(Instant initial) { current = new AtomicReference<>(initial); }
+        void set(Instant value) { current.set(value); }
+        void advance(Duration duration) { current.updateAndGet(value -> value.plus(duration)); }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return current.get(); }
+    }
 }

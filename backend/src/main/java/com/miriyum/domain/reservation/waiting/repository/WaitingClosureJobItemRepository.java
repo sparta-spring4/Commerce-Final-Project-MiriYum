@@ -20,18 +20,19 @@ public interface WaitingClosureJobItemRepository
 
     long countByWaitingClosureJobIdAndStatus(long jobId, WaitingClosureItemStatus status);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("""
-            select item from WaitingClosureJobItem item
-            where item.status = :pending
-               or (item.status = :processing and item.leaseUntil <= :now)
-            order by item.id
-            """)
+    @Query(value = """
+            SELECT * FROM waiting_closure_job_items
+            WHERE status = :pending
+               OR (status = :processing AND lease_until <= :now)
+            ORDER BY waiting_closure_job_item_id
+            LIMIT :limit
+            FOR UPDATE SKIP LOCKED
+            """, nativeQuery = true)
     List<WaitingClosureJobItem> findGloballyClaimableForUpdate(
-            @Param("pending") WaitingClosureItemStatus pending,
-            @Param("processing") WaitingClosureItemStatus processing,
+            @Param("pending") String pending,
+            @Param("processing") String processing,
             @Param("now") java.time.Instant now,
-            Pageable pageable);
+            @Param("limit") int limit);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select item from WaitingClosureJobItem item where item.status = :status order by item.id")

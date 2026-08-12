@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -94,12 +93,15 @@ public class WaitingClosureService {
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED,
+            timeout = 5)
     List<WaitingClosureClaim> claimPendingItems(String owner, int limit, Duration leaseDuration) {
         Instant now = clock.instant();
         List<WaitingClosureJobItem> items = itemRepository.findGloballyClaimableForUpdate(
-                WaitingClosureItemStatus.PENDING, WaitingClosureItemStatus.PROCESSING,
-                now, PageRequest.of(0, Math.min(limit, 100)));
+                WaitingClosureItemStatus.PENDING.name(), WaitingClosureItemStatus.PROCESSING.name(),
+                now, Math.min(limit, 100));
         java.util.ArrayList<WaitingClosureClaim> claimed = new java.util.ArrayList<>();
         for (WaitingClosureJobItem item : items) {
             WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId()).orElseThrow();
