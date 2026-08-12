@@ -108,7 +108,8 @@ class WaitingOpenApiContractTest {
             assertThat(pathItem.keySet()).containsExactlyInAnyOrderElementsOf(entry.getValue());
             for (String method : entry.getValue()) {
                 Map<String, Object> operation = map(pathItem.get(method));
-                assertThat(list(operation.get("security"))).isNotEmpty();
+                assertThat(list(operation.get("security")))
+                        .containsExactly(Map.of("bearerAuth", List.of()));
                 assertThat(map(operation.get("responses")).keySet())
                         .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
                 if ("post".equals(method)) {
@@ -118,6 +119,9 @@ class WaitingOpenApiContractTest {
                     Map<String, Object> json = map(content.get("application/json"));
                     assertThat(map(json.get("schema")))
                             .containsEntry("$ref", "#/components/schemas/WaitingTeamTransitionRequest");
+                } else {
+                    assertThat(list(operation.getOrDefault("parameters", List.of()))).noneSatisfy(parameter ->
+                            assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
                 }
             }
         }
