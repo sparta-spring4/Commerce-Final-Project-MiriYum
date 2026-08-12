@@ -27,6 +27,11 @@ public interface RepresentativeMenuSettingRepository
     Optional<RepresentativeMenuSetting> findByStoreIdForUpdate(
             @Param("storeId") long storeId);
 
+    @EntityGraph(attributePaths = "entries")
+    @Query("select s from RepresentativeMenuSetting s where s.storeId = :storeId")
+    Optional<RepresentativeMenuSetting> findDetailedByStoreId(
+            @Param("storeId") long storeId);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """
             DELETE FROM representative_menu_entries WHERE store_id = :storeId

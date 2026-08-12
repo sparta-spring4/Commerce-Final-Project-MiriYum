@@ -14,6 +14,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface MenuRepository extends JpaRepository<Menu, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = "versions")
+    @Query("select distinct m from Menu m where m.id in :menuIds order by m.id")
+    List<Menu> findAllByIdForUpdate(@Param("menuIds") List<Long> menuIds);
+
+    @EntityGraph(attributePaths = "versions")
+    @Query("select distinct m from Menu m where m.id in :menuIds")
+    List<Menu> findAllManagedByIds(@Param("menuIds") List<Long> menuIds);
+
     @Query("select m.storeId from Menu m where m.id = :menuId")
     Optional<Long> findStoreIdById(@Param("menuId") long menuId);
 
