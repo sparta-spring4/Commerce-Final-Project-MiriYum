@@ -225,11 +225,11 @@ public record WaitingActiveTeamImpact(long storeId, long activeTeamCount) {}
 
 - [ ] **Step 1: Write RED authority and ledger tests**
 
-Verify account/ownership checks precede any Waiting lookup, other-store teams return privacy-safe `WAITING_005`, FIFO call rejects non-head with `WAITING_008`, stale version returns `WAITING_006`, and active impact counts only `WAITING/CALLED/ARRIVED`.
+Verify account/ownership checks precede any Waiting lookup, other-store teams return privacy-safe `WAITING_003`, FIFO call rejects non-head with `WAITING_007`, stale version returns `WAITING_005`, and active impact counts only `WAITING/CALLED/ARRIVED`.
 
 - [ ] **Step 2: Write RED facade fingerprint tests**
 
-Assert canonical fingerprint includes method, route template, storeId, teamId, expectedVersion, normalized reason/action, and that retries replay the first response while different payload reuse returns `COMMON_007`.
+Assert canonical fingerprint includes method, route template, storeId, teamId and expectedVersion, and that retries replay the first response while a different expectedVersion with the same key returns `COMMON_007`.
 
 - [ ] **Step 3: Run RED tests**
 
@@ -261,7 +261,7 @@ git commit -m "feat(reservation): 웨이팅 FIFO 명령 서비스 구현"
 **Interfaces:**
 
 - `GET /waiting-teams` consumes optional `status`, `cursor`, `size`; size range is 1..100 and default 20.
-- Team commands consume `WaitingTeamTransitionRequest(long expectedVersion, String reason)` and return `ApiResponse<WaitingTeamSnapshot>`.
+- Team commands consume `WaitingTeamTransitionRequest(long expectedVersion)` and return `ApiResponse<WaitingTeamSnapshot>`.
 - No response contains consumer account ID, phone, coordinates, idempotency key, audit actor ID, or internal database IDs beyond the public team ID.
 
 - [ ] **Step 1: Write RED MockMvc tests**

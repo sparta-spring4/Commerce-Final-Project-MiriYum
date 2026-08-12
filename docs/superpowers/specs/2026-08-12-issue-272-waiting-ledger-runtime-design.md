@@ -101,14 +101,14 @@ WaitingClosureJobSnapshot getClosureJob(
 
 Waiting 전용 오류는 기능 명세와 OpenAPI에서 다음 의미로 고정한다.
 
-- `WAITING_003`: 매장 접수 불가 또는 Waiting 설정 비활성.
-- `WAITING_004`: 같은 사용자·매장의 활성 팀 중복.
-- `WAITING_005`: 대상 팀 없음 또는 사용자에게 숨겨야 하는 팀.
-- `WAITING_006`: expectedVersion 불일치.
-- `WAITING_007`: 현재 상태에서 허용되지 않는 전이.
-- `WAITING_008`: FIFO 선두가 아닌 팀 호출.
-- `WAITING_009`: 호출 후 10분 도착 기한 만료.
-- `WAITING_010`: closure job을 찾을 수 없음.
+- `WAITING_003`: 대상 매장 범위의 웨이팅 팀을 찾을 수 없음.
+- `WAITING_004`: 대상 매장 범위의 웨이팅 종결 작업을 찾을 수 없음.
+- `WAITING_005`: expectedVersion 불일치.
+- `WAITING_006`: 현재 상태에서 허용되지 않는 전이.
+- `WAITING_007`: FIFO 선두가 아닌 팀 호출.
+- `WAITING_008`: 활성 membership의 현재 상태와 요청 전제가 충돌함.
+- `WAITING_009`: 종결 작업이 아직 완료되지 않았거나 대사가 필요함.
+- `WAITING_010`: 종결 작업 대상 처리 중 실패가 발생함.
 
 새 오류 코드는 구현 전에 canonical Waiting spec과 OpenAPI에 먼저 기록하고 계약 테스트를 RED로 만든다.
 
