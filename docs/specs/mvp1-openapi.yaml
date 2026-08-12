@@ -72,6 +72,8 @@ paths:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1me"
   /api/v1/consumers/me/contact:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
+  /api/v1/consumers/me/notifications:
+    $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/reservations:
     $ref: "./consumer-openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
   /api/v1/consumers/reservations:
