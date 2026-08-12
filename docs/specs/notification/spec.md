@@ -92,7 +92,7 @@ sourceEventId + recipientAccountId + purpose + resourceType + resourceId + resou
 
 ## 원 도메인 공개 조회 계약
 
-Notification은 작업 실행과 이력 행동 계산 시 다음 읽기 경계를 사용한다. 구현 언어의 Entity·Repository를 노출하지 않는다.
+Notification은 작업 실행과 이력 행동 계산에 필요한 다음 읽기 경계를 소유하고 각 원 도메인은 해당 구현체를 제공한다. 포트 인터페이스와 공통 DTO는 Notification package에 두며, 원 도메인의 구현체는 Notification의 공개 포트만 의존하고 Entity·Repository를 노출하지 않는다. 따라서 기록 호출과 조회 구현의 package 의존은 모두 Reservation·MenuHold·Pickup → Notification 한 방향으로 유지한다.
 
 ```text
 ReservationNotificationSource.readContext(resourceId, expectedVersion, recipientAccountId)
