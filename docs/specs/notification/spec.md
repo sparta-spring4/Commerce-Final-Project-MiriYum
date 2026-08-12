@@ -94,11 +94,12 @@ sourceDomain + sourceEventId + recipientAccountId + purpose + resourceType + res
 
 멱등 키가 같을 때 비교할 canonical payload fingerprint는 다음 필드를 RFC 8785 JSON Canonicalization Scheme(JCS)으로 직렬화한 UTF-8 bytes의 SHA-256 lowercase hex다. RFC 8785가 정한 object property 정렬, ECMAScript 문자열 직렬화와 escape 형식을 그대로 사용하며 별도의 pretty-print, `/` escape, 임의 `\uXXXX` 변환이나 escape hex 대소문자 선택을 허용하지 않는다.
 
-- JSON object는 `contractVersion`, `recipientRelationVersion`, `sourceState`, `occurredAt`, `scheduledAt`, `expiresAt`, `timingPolicyVersion`, `correlationId` key를 모두 포함하며 실제 byte 순서는 RFC 8785 property sorting을 따른다.
-- `contractVersion`은 문자열 `notification-source-event-v1`이다. `sourceState`와 `correlationId`는 입력 검증을 통과한 원문을 JSON escaping만 적용해 사용하며 trim·대소문자 변경·Unicode 재정규화를 하지 않는다.
+- JSON object는 `contractVersion`, `recipientRelationVersion`, `sourceState`, `occurredAt`, `scheduledAt`, `expiresAt`, `timingPolicyVersion` key를 모두 포함하며 실제 byte 순서는 RFC 8785 property sorting을 따른다.
+- `contractVersion`은 문자열 `notification-source-event-v1`이다. `sourceState`는 입력 검증을 통과한 원문을 JSON escaping만 적용해 사용하며 trim·대소문자 변경·Unicode 재정규화를 하지 않는다.
 - date-time은 UTC로 변환한 뒤 초 단위 `yyyy-MM-dd'T'HH:mm:ss'Z'`로 직렬화한다. 입력에 0이 아닌 초 미만 정밀도가 있으면 기록을 거절해 반올림·절삭 차이를 허용하지 않는다.
 - 필수 `scheduledAt`은 항상 정규화한 date-time string으로 넣는다. nullable `expiresAt`, `timingPolicyVersion`은 key를 생략하지 않고 값이 없을 때 JSON `null`로 직렬화한다. 64-bit 값인 `recipientRelationVersion`과 값이 있는 `timingPolicyVersion`은 IEEE-754 정밀도 손실을 피하기 위해 JSON number가 아니라 leading zero 없는 부호 없는 10진 JSON string으로 직렬화한다.
-- fingerprint 원문은 위 필드 외 값을 포함하지 않으며 공급자 payload, 완성된 메시지 본문이나 수신 주소를 추가하지 않는다. 작업에는 fingerprint와 `contractVersion`을 함께 저장하고 다른 계약 버전의 fingerprint를 같은 값으로 간주하지 않는다.
+- `correlationId`는 호출·감사 추적 메타데이터이므로 fingerprint 원문에 포함하지 않는다. 새 작업은 최초 호출의 `correlationId`를 원인 명령 추적값으로 보존한다. 같은 사건·내용을 다른 `correlationId`로 재호출하면 기존 작업의 값을 덮어쓰지 않고 기존 `notificationId`와 `duplicate=true`를 반환하며, 새 호출의 `correlationId`는 해당 호출 감사·추적에만 사용한다.
+- fingerprint 원문은 위 사건 내용 필드 외 값을 포함하지 않으며 공급자 payload, 완성된 메시지 본문이나 수신 주소를 추가하지 않는다. 작업에는 fingerprint와 `contractVersion`을 함께 저장하고 다른 계약 버전의 fingerprint를 같은 값으로 간주하지 않는다.
 
 ## 원 도메인 공개 조회 계약
 
@@ -227,7 +228,8 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - 목적 카탈로그의 모든 1차 목적이 하나의 확정 원 사건·수신자·자원 버전과 연결된다.
 - 현재 없는 source 상태는 알림 작업을 만들지 않으며 다른 활성 목적을 막지 않는다.
 - 같은 원 사건을 병렬·반복 기록해도 하나의 논리 알림에 수렴한다.
-- 같은 논리 멱등 식별과 다른 fingerprint는 최초 작업을 유지하고 `NOTIFICATION_002`로 거절하며, 동기 producer 명령은 HTTP 409를 반환하고 해당 원 업무 트랜잭션을 rollback한다.
+- 같은 논리 멱등 식별과 다른 사건 내용 fingerprint는 최초 작업을 유지하고 `NOTIFICATION_002`로 거절하며, 동기 producer 명령은 HTTP 409를 반환하고 해당 원 업무 트랜잭션을 rollback한다.
+- 같은 사건·내용을 다른 `correlationId`로 반복 기록하면 기존 작업과 `duplicate=true`로 수렴하며 producer 명령을 rollback하지 않는다.
 - 원 상태 변경·취소·만료와 역순 사건 뒤 최신 유효 작업만 전달 가능하다.
 - Pickup 확정·취소 사건은 Pickup이 직접 기록하고 Notification은 `PickupNotificationSource`로 최신 상태·수신자 관계를 검증하며 MenuHold → Pickup 역방향 조회를 만들지 않는다.
 - 본인 알림 이력은 `IN_APP` 전달 성공 항목만 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력, 내부 작업 상태와 금지 필드가 노출되지 않는다.
