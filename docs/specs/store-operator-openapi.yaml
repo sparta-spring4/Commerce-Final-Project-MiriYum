@@ -11,6 +11,12 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1accounts"
   /api/v1/store-operators/auth/sessions:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1sessions"
+  /api/v1/store-operators/auth/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1kakao~1authorizations"
+  /api/v1/store-operators/auth/kakao/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1kakao~1sessions"
+  /api/v1/store-operators/auth/kakao/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1kakao~1accounts"
   /api/v1/store-operators/auth/token-refreshes:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1token-refreshes"
   /api/v1/store-operators/auth/csrf-tokens/current:
@@ -21,6 +27,10 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me~1contact"
   /api/v1/store-operators/me:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me"
+  /api/v1/store-operators/me/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me~1kakao~1authorizations"
+  /api/v1/store-operators/me/kakao-links:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1me~1kakao-links"
   /api/v1/store-operators/stores:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores"
   /api/v1/store-operators/stores/{storeId}:

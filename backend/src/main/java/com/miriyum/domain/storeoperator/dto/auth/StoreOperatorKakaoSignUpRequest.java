@@ -1,4 +1,4 @@
-package com.miriyum.domain.storeoperator.dto.request;
+package com.miriyum.domain.storeoperator.dto.auth;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

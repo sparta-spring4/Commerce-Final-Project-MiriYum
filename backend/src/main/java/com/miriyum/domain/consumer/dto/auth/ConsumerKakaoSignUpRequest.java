@@ -1,4 +1,4 @@
-package com.miriyum.domain.consumer.dto.request;
+package com.miriyum.domain.consumer.dto.auth;
 
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
