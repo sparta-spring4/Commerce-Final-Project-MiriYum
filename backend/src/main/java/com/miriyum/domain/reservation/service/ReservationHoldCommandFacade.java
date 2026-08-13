@@ -95,28 +95,26 @@ public class ReservationHoldCommandFacade {
     }
 
     private <T> T execute(Supplier<T> command, String replayConstraint) {
-        try {
-            return executeWithLockRetry(command);
-        } catch (DataIntegrityViolationException failure) {
-            if (!hasStructuredConstraintName(failure, replayConstraint)) {
-                throw failure;
-            }
-            return executeWithLockRetry(command);
-        }
-    }
-
-    private <T> T executeWithLockRetry(Supplier<T> command) {
+        boolean uniqueReplayAttempted = false;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
                 return command.get();
             } catch (RuntimeException failure) {
-                if (!isRetryableTechnicalLockFailure(failure)) {
+                boolean retryableLock = isRetryableTechnicalLockFailure(failure);
+                boolean approvedUniqueConflict = !uniqueReplayAttempted
+                        && failure instanceof DataIntegrityViolationException
+                        && hasStructuredConstraintName(failure, replayConstraint);
+                if (!retryableLock && !approvedUniqueConflict) {
                     throw failure;
                 }
                 if (attempt == MAX_ATTEMPTS) {
                     throw concurrentModification(failure);
                 }
-                sleepBeforeRetry(attempt, failure);
+                if (approvedUniqueConflict) {
+                    uniqueReplayAttempted = true;
+                } else {
+                    sleepBeforeRetry(attempt, failure);
+                }
             }
         }
         throw new IllegalStateException("unreachable retry state");

@@ -144,7 +144,7 @@ class ReservationHoldCommandFacadeTest {
         ReservationHoldContracts.Result actual = facade.create(CREATE_COMMAND);
 
         assertThat(actual).isSameAs(expected);
-        assertThat(delays).containsExactly(101L);
+        assertThat(delays).containsExactly(302L);
         then(holdService).should(times(3)).create(CREATE_COMMAND);
     }
 
@@ -157,7 +157,6 @@ class ReservationHoldCommandFacadeTest {
         given(holdService.create(CREATE_COMMAND))
                 .willThrow(uniqueConflict("uk_reservation_holds_creation_command"))
                 .willThrow(lockFailure(mysqlCode))
-                .willThrow(lockFailure(mysqlCode))
                 .willThrow(lockFailure(mysqlCode));
 
         assertThatThrownBy(() -> facade.create(CREATE_COMMAND))
@@ -165,8 +164,28 @@ class ReservationHoldCommandFacadeTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
 
+        assertThat(delays).containsExactly(302L);
+        then(holdService).should(times(3)).create(CREATE_COMMAND);
+    }
+
+    @ParameterizedTest(name = "MySQL {0}")
+    @MethodSource("retryableMysqlCodes")
+    @DisplayName("두 기술 lock 오류 뒤 생성 unique 충돌은 네 번째 replay 없이 COMMON_008이다")
+    void uniqueReplayAfterTwoLockFailuresDoesNotExceedGlobalAttemptBudget(int mysqlCode) {
+        List<Long> delays = new ArrayList<>();
+        ReservationHoldCommandFacade facade = facade(delays);
+        given(holdService.create(CREATE_COMMAND))
+                .willThrow(lockFailure(mysqlCode))
+                .willThrow(lockFailure(mysqlCode))
+                .willThrow(uniqueConflict("uk_reservation_holds_creation_command"));
+
+        assertThatThrownBy(() -> facade.create(CREATE_COMMAND))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
+
         assertThat(delays).containsExactly(101L, 302L);
-        then(holdService).should(times(4)).create(CREATE_COMMAND);
+        then(holdService).should(times(3)).create(CREATE_COMMAND);
     }
 
     @Test
