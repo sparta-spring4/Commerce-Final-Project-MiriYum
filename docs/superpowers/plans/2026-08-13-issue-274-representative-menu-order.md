@@ -51,6 +51,7 @@
 - `backend/src/test/java/com/miriyum/domain/menu/service/RepresentativeMenuConcurrencyIT.java`
 - `backend/src/test/java/com/miriyum/domain/menu/RepresentativeMenuOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/domain/search/repository/StorePublicReadRepositoryIT.java`
+- `frontend/src/shared/api/generated/store-search.ts`: OpenAPI generated contract artifact required by frontend CI
 
 ### Modify
 

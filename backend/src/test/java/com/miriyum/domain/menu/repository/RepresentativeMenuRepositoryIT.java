@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",

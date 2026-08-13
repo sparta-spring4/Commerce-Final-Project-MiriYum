@@ -152,7 +152,7 @@ Store/Menu 소유 Service는 `RepresentativeMenuSnapshot`을 제공한다.
 - 순서가 보존된 현재 공개 가능 항목
 - 항목별 `menuId`, 게시 version, 이름, 기본 가격, 판매 상태
 
-Payment·Reservation은 이 DTO만 소비하며 Menu Entity·Repository를 직접 참조하지 않는다. `REQUIRES_ATTENTION`을 예약금 계산에 허용할지는 Payment 정책 소유자가 후속 계약에서 결정한다. #274는 이를 성공으로 추측하지 않는다.
+Payment·Reservation은 이 DTO만 소비하며 Menu Entity·Repository를 직접 참조하지 않는다. `REQUIRES_ATTENTION`을 예약금 계산에 허용할지는 Payment 정책 소유자가 후속 계약에서 결정한다. #274는 이를 성공으로 추측하지 않는다. OpenAPI 변경으로 생성되는 `frontend/src/shared/api/generated/store-search.ts`는 UI 구현이 아니라 CI가 검증하는 계약 artifact로 함께 갱신한다.
 
 ## 7. 트랜잭션과 동시성
 
