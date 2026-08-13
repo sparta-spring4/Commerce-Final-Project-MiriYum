@@ -23,6 +23,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("io.github.openfeign.querydsl:querydsl-jpa:7.5")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("com.ibm.icu:icu4j:78.3")
@@ -59,9 +60,17 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Gradle 기본 test JVM 힙은 512m이라 통합 테스트에서 부족하다. 한 shard가 여러
+    // Spring ApplicationContext를 캐시한 채 Testcontainers까지 함께 띄우면 힙이 고갈되어
+    // OutOfMemoryError로 실패한다(CI run 31624143460, integration-test-a).
+    maxHeapSize = "2g"
+    // 캐시된 context 수를 제한해 shard가 커져도 힙 사용량이 무한히 늘지 않게 한다.
+    // Spring 기본값은 32이며, context 하나당 애플리케이션 전체가 메모리에 상주한다.
+    systemProperty("spring.test.context.cache.maxSize", "8")
     systemProperty("miriyum.menu.schedule.enabled", "false")
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
+    systemProperty("miriyum.waiting.closure.enabled", "false")
 }
 
 val integrationTag = "integration"
@@ -122,6 +131,7 @@ val integrationTest = tasks.register<Test>("integrationTest") {
     useJUnitPlatform {
         includeTags(integrationTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 
@@ -133,6 +143,7 @@ fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.reg
     useJUnitPlatform {
         includeTags(shardTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 

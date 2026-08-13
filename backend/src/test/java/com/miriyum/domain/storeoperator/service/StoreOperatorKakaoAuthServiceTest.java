@@ -9,9 +9,9 @@ import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
@@ -66,7 +66,7 @@ class StoreOperatorKakaoAuthServiceTest {
     private KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
 
     @Mock
-    private JwtTokenProvider jwtTokenProvider;
+    private RefreshTokenManager refreshTokenManager;
 
     @Mock
     private PhoneNumberPolicy phoneNumberPolicy;
@@ -92,14 +92,15 @@ class StoreOperatorKakaoAuthServiceTest {
         given(kakaoSocialLoginLinkService.linkFingerprint(
                 TokenNamespace.STORE_OPERATOR, 20L, new KakaoIdentityFingerprint("v2", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
-        given(jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("access-token");
-        given(jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("refresh-token");
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, 20L))
+                .willReturn(new TokenPair("access-token", "refresh-token"));
 
         KakaoLoginResult result = storeOperatorKakaoAuthService.signUp(request);
 
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
         then(storeOperatorAccountRepository).should().saveAndFlush(any(StoreOperatorAccount.class));
+        then(refreshTokenManager).should().issue(TokenNamespace.STORE_OPERATOR, 20L);
     }
 
     @Test
@@ -151,14 +152,15 @@ class StoreOperatorKakaoAuthServiceTest {
         given(kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.STORE_OPERATOR, "kakao-subject"))
                 .willReturn(20L);
         given(storeOperatorAccountRepository.findById(20L)).willReturn(Optional.of(account));
-        given(jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("access-token");
-        given(jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, 20L)).willReturn("refresh-token");
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, 20L))
+                .willReturn(new TokenPair("access-token", "refresh-token"));
 
         KakaoLoginResult result = storeOperatorKakaoAuthService.authenticate(request);
 
         assertThat(account.getStatus()).isEqualTo(StoreOperatorAccountStatus.ACTIVE);
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
+        then(refreshTokenManager).should().issue(TokenNamespace.STORE_OPERATOR, 20L);
     }
 
     @Test

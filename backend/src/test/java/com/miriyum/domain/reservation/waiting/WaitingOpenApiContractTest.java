@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -21,13 +22,31 @@ class WaitingOpenApiContractTest {
     private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/disable-impact";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
+    private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams", Set.of("get"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}", Set.of("get"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}", Set.of("get"));
 
     @Test
     void storeOperatorWaitingSettingsKeepTheApprovedContract() throws IOException {
         Map<String, Object> document = load(CONTRACT);
 
         Map<String, Object> paths = map(document.get("paths"));
-        assertThat(paths).containsOnlyKeys(SETTINGS_PATH, DISABLE_IMPACT_PATH);
+        assertThat(paths)
+                .containsOnlyKeys(
+                        SETTINGS_PATH,
+                        DISABLE_IMPACT_PATH,
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
         assertThat(settingsPath).containsOnlyKeys("get", "put");
@@ -75,6 +94,81 @@ class WaitingOpenApiContractTest {
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void waitingLedgerOperationsExposeOnlyTheCanonicalStoreOperatorContract()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        assertThat(paths.keySet()).containsAll(LEDGER_OPERATIONS.keySet());
+
+        for (Map.Entry<String, Set<String>> entry : LEDGER_OPERATIONS.entrySet()) {
+            Map<String, Object> pathItem = map(paths.get(entry.getKey()));
+            assertThat(pathItem.keySet()).containsExactlyInAnyOrderElementsOf(entry.getValue());
+            for (String method : entry.getValue()) {
+                Map<String, Object> operation = map(pathItem.get(method));
+                assertThat(list(operation.get("security")))
+                        .containsExactly(Map.of("bearerAuth", List.of()));
+                assertThat(map(operation.get("responses")).keySet())
+                        .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
+                if ("post".equals(method)) {
+                    assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                            assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+                    Map<String, Object> content = map(map(operation.get("requestBody")).get("content"));
+                    Map<String, Object> json = map(content.get("application/json"));
+                    assertThat(map(json.get("schema")))
+                            .containsEntry("$ref", "#/components/schemas/WaitingTeamTransitionRequest");
+                } else {
+                    assertThat(list(operation.getOrDefault("parameters", List.of()))).noneSatisfy(parameter ->
+                            assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+                }
+            }
+        }
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> transitionRequest = map(schemas.get("WaitingTeamTransitionRequest"));
+        assertThat(list(transitionRequest.get("required"))).containsExactly("expectedVersion");
+        assertThat(map(transitionRequest.get("properties"))).containsOnlyKeys("expectedVersion");
+
+        Map<String, Object> listItem = map(schemas.get("WaitingTeamListItem"));
+        Map<String, Object> listItemProperties = map(listItem.get("properties"));
+        assertThat(listItemProperties).containsOnlyKeys(
+                "waitingTeamId", "status", "queueSequence", "partySize", "createdAt", "version");
+        assertThat(listItemProperties).doesNotContainKeys(
+                "consumerId", "consumerAccountId", "phone", "phoneNumber", "latitude", "longitude",
+                "coordinate", "coordinates", "idempotencyKey");
+    }
+
+    @Test
+    void waitingLedgerSchemasFixStatesErrorsAndCursorOrdering() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        assertThat(schemas.keySet()).containsAll(Set.of(
+                "WaitingTeamStatus",
+                "WaitingClosureJobStatus",
+                "WaitingTeamPage",
+                "WaitingQueueCursor"));
+
+        assertThat(list(map(schemas.get("WaitingTeamStatus")).get("enum")))
+                .containsExactly(
+                        "WAITING", "CALLED", "ARRIVED", "CHECKED_IN", "CANCELLED", "NO_SHOW",
+                        "CLOSED_BY_STORE", "RESERVATION_CONVERTING");
+        assertThat(list(map(schemas.get("WaitingClosureJobStatus")).get("enum")))
+                .containsExactly("PENDING", "PROCESSING", "COMPLETED", "RECONCILIATION_REQUIRED");
+
+        Map<String, Object> page = map(schemas.get("WaitingTeamPage"));
+        assertThat(map(page.get("properties"))).containsOnlyKeys("items", "nextCursor");
+        assertThat(map(schemas.get("WaitingQueueCursor")).get("description").toString())
+                .contains("queueSequence", "waitingTeamId");
+
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        assertThat(responseExampleCodes(map(responses.get("WaitingLedgerNotFound"))))
+                .containsExactlyInAnyOrder("STORE_001", "WAITING_003", "WAITING_004");
+        assertThat(responseExampleCodes(map(responses.get("WaitingLedgerConflict"))))
+                .containsExactlyInAnyOrder(
+                        "WAITING_005", "WAITING_006", "WAITING_007", "WAITING_008", "WAITING_009",
+                        "WAITING_010", "COMMON_007", "COMMON_008");
     }
 
     @Test

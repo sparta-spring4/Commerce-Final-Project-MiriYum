@@ -95,7 +95,7 @@
 | --- | --- | --- |
 | Access JWT namespace | `consumer` | `store-operator` |
 | subject | `consumer:{id}` | `store-operator:{id}` |
-| Access JWT 수명 | 1시간 | 1시간 |
+| Access JWT 수명 | 15분 | 15분 |
 | Refresh JWT 수명 | 14일 | 14일 |
 | Refresh 쿠키 | `MIRIYUM_CONSUMER_REFRESH` | `MIRIYUM_STORE_OPERATOR_REFRESH` |
 | Refresh 쿠키 Path | `/api/v1/consumers/auth` | `/api/v1/store-operators/auth` |

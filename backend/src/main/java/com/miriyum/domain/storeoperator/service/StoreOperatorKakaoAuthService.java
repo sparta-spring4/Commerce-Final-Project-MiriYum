@@ -3,9 +3,9 @@ package com.miriyum.domain.storeoperator.service;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoAuthorization;
@@ -42,7 +42,7 @@ public class StoreOperatorKakaoAuthService {
     private final KakaoIdentityFingerprintGenerator fingerprintGenerator;
     private final KakaoSignUpTicketService kakaoSignUpTicketService;
     private final KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenManager refreshTokenManager;
     private final PhoneNumberPolicy phoneNumberPolicy;
 
     public StoreOperatorKakaoAuthService(
@@ -53,7 +53,7 @@ public class StoreOperatorKakaoAuthService {
             KakaoIdentityFingerprintGenerator fingerprintGenerator,
             KakaoSignUpTicketService kakaoSignUpTicketService,
             KakaoSocialLoginLinkService kakaoSocialLoginLinkService,
-            JwtTokenProvider jwtTokenProvider,
+            RefreshTokenManager refreshTokenManager,
             PhoneNumberPolicy phoneNumberPolicy
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
@@ -63,7 +63,7 @@ public class StoreOperatorKakaoAuthService {
         this.fingerprintGenerator = fingerprintGenerator;
         this.kakaoSignUpTicketService = kakaoSignUpTicketService;
         this.kakaoSocialLoginLinkService = kakaoSocialLoginLinkService;
-        this.jwtTokenProvider = jwtTokenProvider;
+        this.refreshTokenManager = refreshTokenManager;
         this.phoneNumberPolicy = phoneNumberPolicy;
     }
 
@@ -158,9 +158,7 @@ public class StoreOperatorKakaoAuthService {
     }
 
     private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId));
+        return refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, accountId);
     }
 
     private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {

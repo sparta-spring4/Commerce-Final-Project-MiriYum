@@ -8,8 +8,8 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
-import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
@@ -66,7 +66,7 @@ class ConsumerKakaoAuthServiceTest {
     private KakaoSignUpTicketService kakaoSignUpTicketService;
 
     @Mock
-    private JwtTokenProvider jwtTokenProvider;
+    private RefreshTokenManager refreshTokenManager;
 
     @Mock
     private NicknamePolicy nicknamePolicy;
@@ -115,14 +115,15 @@ class ConsumerKakaoAuthServiceTest {
         given(kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.CONSUMER, "kakao-subject"))
                 .willReturn(10L);
         given(consumerAccountRepository.findById(10L)).willReturn(Optional.of(account));
-        given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 10L)).willReturn("access-token");
-        given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 10L)).willReturn("refresh-token");
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, 10L))
+                .willReturn(new TokenPair("access-token", "refresh-token"));
 
         KakaoLoginResult result = consumerKakaoAuthService.authenticate(request);
 
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
         assertThat(result.signUpTicket()).isNull();
+        then(refreshTokenManager).should().issue(TokenNamespace.CONSUMER, 10L);
     }
 
     @Test
@@ -145,14 +146,15 @@ class ConsumerKakaoAuthServiceTest {
         given(kakaoSocialLoginLinkService.linkFingerprint(
                 TokenNamespace.CONSUMER, 10L, new KakaoIdentityFingerprint("v2", "fingerprint")))
                 .willReturn(KakaoLinkResult.CREATED);
-        given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 10L)).willReturn("access-token");
-        given(jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, 10L)).willReturn("refresh-token");
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, 10L))
+                .willReturn(new TokenPair("access-token", "refresh-token"));
 
         KakaoLoginResult result = consumerKakaoAuthService.signUp(request);
 
         assertThat(result.status()).isEqualTo(KakaoLoginStatus.AUTHENTICATED);
         assertThat(result.tokenPair()).isEqualTo(new TokenPair("access-token", "refresh-token"));
         then(consumerAccountRepository).should().saveAndFlush(any(ConsumerAccount.class));
+        then(refreshTokenManager).should().issue(TokenNamespace.CONSUMER, 10L);
     }
 
     @Test

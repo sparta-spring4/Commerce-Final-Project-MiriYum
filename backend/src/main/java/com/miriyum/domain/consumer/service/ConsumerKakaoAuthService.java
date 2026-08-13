@@ -1,9 +1,9 @@
 package com.miriyum.domain.consumer.service;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
-import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.social.client.KakaoOAuthClient;
 import com.miriyum.domain.auth.social.dto.KakaoAuthenticationRequest;
 import com.miriyum.domain.auth.social.dto.KakaoAuthorization;
@@ -43,7 +43,7 @@ public class ConsumerKakaoAuthService {
     private final KakaoSocialLoginLinkService kakaoSocialLoginLinkService;
     private final KakaoIdentityFingerprintGenerator fingerprintGenerator;
     private final KakaoSignUpTicketService kakaoSignUpTicketService;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenManager refreshTokenManager;
     private final NicknamePolicy nicknamePolicy;
     private final PhoneNumberPolicy phoneNumberPolicy;
     private final ReservationContactReferenceGenerator contactReferenceGenerator;
@@ -56,7 +56,7 @@ public class ConsumerKakaoAuthService {
             KakaoSocialLoginLinkService kakaoSocialLoginLinkService,
             KakaoIdentityFingerprintGenerator fingerprintGenerator,
             KakaoSignUpTicketService kakaoSignUpTicketService,
-            JwtTokenProvider jwtTokenProvider,
+            RefreshTokenManager refreshTokenManager,
             NicknamePolicy nicknamePolicy,
             PhoneNumberPolicy phoneNumberPolicy,
             ReservationContactReferenceGenerator contactReferenceGenerator
@@ -68,7 +68,7 @@ public class ConsumerKakaoAuthService {
         this.kakaoSocialLoginLinkService = kakaoSocialLoginLinkService;
         this.fingerprintGenerator = fingerprintGenerator;
         this.kakaoSignUpTicketService = kakaoSignUpTicketService;
-        this.jwtTokenProvider = jwtTokenProvider;
+        this.refreshTokenManager = refreshTokenManager;
         this.nicknamePolicy = nicknamePolicy;
         this.phoneNumberPolicy = phoneNumberPolicy;
         this.contactReferenceGenerator = contactReferenceGenerator;
@@ -107,10 +107,7 @@ public class ConsumerKakaoAuthService {
             if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            TokenPair tokenPair = new TokenPair(
-                    jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, account.getId()),
-                    jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, account.getId()));
-            return KakaoLoginResult.authenticated(tokenPair);
+            return KakaoLoginResult.authenticated(issueTokenPair(account.getId()));
         }
 
         KakaoIdentityFingerprint fingerprint = fingerprintGenerator.generateActive(user.providerSubject());
@@ -172,9 +169,7 @@ public class ConsumerKakaoAuthService {
     }
 
     private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.CONSUMER, accountId));
+        return refreshTokenManager.issue(TokenNamespace.CONSUMER, accountId);
     }
 
     private ServiceException mapDuplicateConstraint(DataIntegrityViolationException exception) {
