@@ -1,7 +1,7 @@
 package com.miriyum.domain.notification.service;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 

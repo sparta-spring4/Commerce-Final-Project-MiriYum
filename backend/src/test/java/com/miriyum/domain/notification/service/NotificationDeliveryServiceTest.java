@@ -9,8 +9,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.notification.config.NotificationSettings;
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.ReservationNotificationSource;

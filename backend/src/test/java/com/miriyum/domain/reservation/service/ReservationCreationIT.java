@@ -172,6 +172,9 @@ class ReservationCreationIT {
         for (CreationFailurePoint point : CreationFailurePoint.values()) {
             dropFailureTrigger(point);
         }
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
         jdbcTemplate.execute("DELETE FROM menu_hold_items");
         jdbcTemplate.execute("DELETE FROM menu_holds");
         jdbcTemplate.execute("DELETE FROM menu_inventory_ledger");
