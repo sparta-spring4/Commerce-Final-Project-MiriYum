@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -143,18 +144,23 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
     }
 
     private boolean scanNextPendingIndexPage() {
-        ValueScanCursor<byte[]> scanResult = redisTemplate.execute(
-                (RedisCallback<ValueScanCursor<byte[]>>) connection -> {
-                    @SuppressWarnings("unchecked")
-                    RedisClusterAsyncCommands<byte[], byte[]> commands =
-                            (RedisClusterAsyncCommands<byte[], byte[]>) connection.getNativeConnection();
-                    return commands.sscan(
-                                    utf8(RefreshTokenRiskEventKey.pendingIndex()),
-                                    ScanCursor.of(pendingIndexScanCursor),
-                                    new ScanArgs().limit(PENDING_EVENT_SCAN_COUNT))
-                            .toCompletableFuture()
-                            .join();
-                });
+        ValueScanCursor<byte[]> scanResult;
+        try {
+            scanResult = redisTemplate.execute(
+                    (RedisCallback<ValueScanCursor<byte[]>>) connection -> {
+                        @SuppressWarnings("unchecked")
+                        RedisClusterAsyncCommands<byte[], byte[]> commands =
+                                (RedisClusterAsyncCommands<byte[], byte[]>) connection.getNativeConnection();
+                        return commands.sscan(
+                                        utf8(RefreshTokenRiskEventKey.pendingIndex()),
+                                        ScanCursor.of(pendingIndexScanCursor),
+                                        new ScanArgs().limit(PENDING_EVENT_SCAN_COUNT))
+                                .toCompletableFuture()
+                                .join();
+                    });
+        } catch (CompletionException exception) {
+            throw unavailable();
+        }
         if (scanResult == null) {
             throw unavailable();
         }
