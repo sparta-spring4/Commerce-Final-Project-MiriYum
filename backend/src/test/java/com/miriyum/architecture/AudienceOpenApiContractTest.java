@@ -30,6 +30,14 @@ class AudienceOpenApiContractTest {
     private static final Set<String> WAITING_SETTINGS_PATHS = Set.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-settings",
             "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
+    private static final Set<String> WAITING_LEDGER_PATHS = Set.of(
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
+            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =
@@ -38,7 +46,7 @@ class AudienceOpenApiContractTest {
             Stream.concat(
                     Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH,
                             REPRESENTATIVE_MENUS_PATH),
-                    WAITING_SETTINGS_PATHS.stream())
+                    Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream()))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",

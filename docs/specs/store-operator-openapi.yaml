@@ -69,6 +69,20 @@ paths:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-settings"
   /api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-settings~1disable-impact"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams~1{waitingTeamId}"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams~1{waitingTeamId}~1call"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams~1{waitingTeamId}~1arrive"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams~1{waitingTeamId}~1check-in"
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-teams~1{waitingTeamId}~1cancel"
+  /api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}:
+    $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-close-jobs~1{jobId}"
   /api/v1/store-operators/stores/{storeId}/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1reservations"
   /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}:
