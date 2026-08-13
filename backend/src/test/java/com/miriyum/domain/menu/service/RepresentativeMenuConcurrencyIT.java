@@ -3,6 +3,7 @@ package com.miriyum.domain.menu.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.doAnswer;
 
 import com.miriyum.domain.menu.dto.storeoperator.MenuVisibilityRequest;
 import com.miriyum.domain.menu.dto.storeoperator.RepresentativeMenuReplaceRequest;
@@ -18,7 +19,9 @@ import com.miriyum.domain.menu.model.MenuContent;
 import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.menu.repository.RepresentativeMenuSettingRepository;
 import com.miriyum.domain.search.dto.publicapi.PublicMenu;
+import com.miriyum.domain.search.dto.publicapi.PublicStoreDetail;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
+import com.miriyum.domain.search.service.StorePublicQueryService;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -35,6 +38,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,7 +53,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -77,8 +85,11 @@ class RepresentativeMenuConcurrencyIT {
     @Autowired
     private RepresentativeMenuSettingRepository settingRepository;
 
-    @Autowired
+    @MockitoSpyBean
     private StorePublicReadRepository publicReadRepository;
+
+    @Autowired
+    private StorePublicQueryService storePublicQueryService;
 
     @Autowired
     private RepresentativeMenuQueryService representativeMenuQueryService;
@@ -94,6 +105,9 @@ class RepresentativeMenuConcurrencyIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Autowired
     private EntityManager entityManager;
@@ -187,6 +201,76 @@ class RepresentativeMenuConcurrencyIT {
         var setting = settingRepository.findDetailedByStoreId(fixture.storeId()).orElseThrow();
         assertThat(menu.getVisibility()).isEqualTo(MenuVisibility.HIDDEN);
         assertThat(setting.orderedMenuIds()).doesNotContain(hiddenMenuId);
+    }
+
+    @Test
+    void publicDetailKeepsOneSnapshotWhenRepresentativeSettingChangesAfterMenuRead()
+            throws Exception {
+        Fixture fixture = fixture("public-detail-snapshot@example.com", "4000000003");
+        representativeMenuService.replace(
+                fixture.operatorId(), fixture.storeId(), key(220),
+                new RepresentativeMenuReplaceRequest(
+                        0L, fixture.menuIds().stream().map(String::valueOf).toList()));
+        long fourthMenuId = savePublished(
+                fixture.storeId(), fixture.operatorId(), "fourth",
+                Instant.parse("2026-08-13T00:00:00Z")).getId();
+        jdbcTemplate.update(
+                "UPDATE menus SET visibility = 'HIDDEN' WHERE menu_id = ?",
+                fourthMenuId);
+
+        CountDownLatch publicMenusRead = new CountDownLatch(1);
+        CountDownLatch replacementCommitted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            List<PublicMenu> menus = (List<PublicMenu>) invocation.callRealMethod();
+            publicMenusRead.countDown();
+            assertThat(replacementCommitted.await(10, TimeUnit.SECONDS)).isTrue();
+            return menus;
+        }).when(publicReadRepository).findPublicMenus(fixture.storeId());
+
+        TransactionTemplate writerTransaction = new TransactionTemplate(transactionManager);
+        writerTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        writerTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<PublicStoreDetail> detailFuture = executor.submit(() ->
+                    storePublicQueryService.getDetail(fixture.storeId(), null, false));
+            Future<?> replacementFuture = executor.submit(() -> {
+                assertThat(publicMenusRead.await(10, TimeUnit.SECONDS)).isTrue();
+                writerTransaction.executeWithoutResult(status -> {
+                    jdbcTemplate.update(
+                            "UPDATE menus SET visibility = 'VISIBLE' WHERE menu_id = ?",
+                            fourthMenuId);
+                    jdbcTemplate.update(
+                            "DELETE FROM representative_menu_entries WHERE store_id = ?",
+                            fixture.storeId());
+                    insertEntry(fixture.storeId(), 1, fixture.menuIds().get(1));
+                    insertEntry(fixture.storeId(), 2, fixture.menuIds().get(2));
+                    insertEntry(fixture.storeId(), 3, fourthMenuId);
+                    jdbcTemplate.update("""
+                            UPDATE representative_menu_settings
+                            SET version = version + 1,
+                                status = 'CONFIGURED',
+                                lock_version = lock_version + 1,
+                                updated_at = UTC_TIMESTAMP(6)
+                            WHERE store_id = ?
+                            """, fixture.storeId());
+                });
+                replacementCommitted.countDown();
+                return null;
+            });
+
+            PublicStoreDetail detail = detailFuture.get(20, TimeUnit.SECONDS);
+            replacementFuture.get(20, TimeUnit.SECONDS);
+
+            assertThat(detail.representativeMenus())
+                    .extracting(PublicMenu::menuId)
+                    .containsExactlyElementsOf(
+                            fixture.menuIds().stream().map(String::valueOf).toList());
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Nested

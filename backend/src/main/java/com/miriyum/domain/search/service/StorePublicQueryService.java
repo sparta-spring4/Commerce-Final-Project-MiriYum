@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class StorePublicQueryService {
@@ -55,6 +57,7 @@ public class StorePublicQueryService {
         return menus;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PublicStoreDetail getDetail(
             long storeId,
             ReservationSearchCondition condition,
