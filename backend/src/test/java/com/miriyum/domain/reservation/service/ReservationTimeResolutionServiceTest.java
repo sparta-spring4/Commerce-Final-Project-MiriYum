@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -11,12 +12,15 @@ import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResu
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -25,6 +29,7 @@ import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -55,6 +60,182 @@ class ReservationTimeResolutionServiceTest {
                 intervalValidationService,
                 timePolicyRepository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @DisplayName("생성 시간 해석은 검증된 서비스·점유 종료 스냅샷을 반환한다")
+    void resolvesCreationSnapshotWithValidatedServiceAndOccupancyEnds() {
+        ReservationTimeRequest request = new ReservationTimeRequest(
+                SERVICE_DATE, START_TIME, null);
+        LocalDateTime requestedAt = LocalDateTime.of(SERVICE_DATE, START_TIME);
+        StoreServiceIntervalRequest interval = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt.minusHours(1),
+                        requestedAt.plusHours(2))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(1L)),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)))
+                .willReturn(List.of(activePolicy(1L, 30, 60, 15)));
+        given(intervalValidationService.validateServiceIntervals(List.of(interval)))
+                .willReturn(List.of(StoreServiceIntervalResult.of(interval, true)));
+
+        ReservationTimeSnapshot result = service.resolveCreationTime(1L, request);
+
+        assertThat(result.getServiceDate()).isEqualTo(SERVICE_DATE);
+        assertThat(result.getStartAt()).isEqualTo(Instant.parse("2026-08-03T09:00:00Z"));
+        assertThat(result.getServiceEndAt()).isEqualTo(Instant.parse("2026-08-03T10:00:00Z"));
+        assertThat(result.getOccupancyEndAt()).isEqualTo(Instant.parse("2026-08-03T10:15:00Z"));
+        assertThat(result.getTimeZoneId()).isEqualTo("Asia/Seoul");
+    }
+
+    @Test
+    @DisplayName("과거 생성 슬롯은 서비스 구간 검증 전에 RESERVATION_002로 거절한다")
+    void rejectsPastCreationSlotBeforeServiceIntervalValidation() {
+        LocalDate pastDate = LocalDate.of(2026, 8, 2);
+        LocalTime pastTime = LocalTime.of(18, 0);
+        LocalDateTime requestedAt = LocalDateTime.of(pastDate, pastTime);
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), pastDate, pastTime))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt.minusHours(1),
+                        requestedAt.plusHours(2))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(1L)),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)))
+                .willReturn(List.of(activePolicy(1L, 30, 60, 0)));
+
+        assertThatThrownBy(() -> service.resolveCreationTime(
+                1L, new ReservationTimeRequest(pastDate, pastTime, null)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        then(intervalValidationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("점유 종료가 업무 날짜를 벗어나면 RESERVATION_002로 거절한다")
+    void rejectsCreationWhenOccupancyEndLeavesTheServiceDate() {
+        LocalTime lateStart = LocalTime.of(23, 30);
+        LocalDateTime requestedAt = LocalDateTime.of(SERVICE_DATE, lateStart);
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), SERVICE_DATE, lateStart))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt.minusMinutes(30),
+                        requestedAt.plusMinutes(29))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(1L)),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)))
+                .willReturn(List.of(activePolicy(1L, 30, 15, 60)));
+
+        assertThatThrownBy(() -> service.resolveCreationTime(
+                1L, new ReservationTimeRequest(SERVICE_DATE, lateStart, null)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        then(intervalValidationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("점유 종료가 DST offset 경계를 넘으면 RESERVATION_002로 거절한다")
+    void rejectsCreationWhenOccupancyEndCrossesDstOffsetBoundary() {
+        LocalDate overlapDate = LocalDate.of(2026, 11, 1);
+        LocalTime overlapStart = LocalTime.of(1, 30);
+        LocalDateTime requestedAt = LocalDateTime.of(overlapDate, overlapStart);
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), overlapDate, overlapStart))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "America/New_York",
+                        requestedAt.minusMinutes(30),
+                        requestedAt.plusHours(3))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(1L)),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)))
+                .willReturn(List.of(activePolicy(1L, 30, 15, 60)));
+
+        assertThatThrownBy(() -> service.resolveCreationTime(
+                1L,
+                new ReservationTimeRequest(
+                        overlapDate, overlapStart, ZoneOffset.of("-04:00"))))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        then(intervalValidationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("매장 예약 window 응답이 요청과 다르면 RESERVATION_002로 실패 폐쇄한다")
+    void rejectsMalformedCreationWindowResponse() {
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.notAccepting(2L)));
+
+        assertThatThrownBy(() -> service.resolveCreationTime(
+                1L, new ReservationTimeRequest(SERVICE_DATE, START_TIME, null)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
+
+        then(timePolicyRepository).shouldHaveNoInteractions();
+        then(intervalValidationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("매장 서비스 구간 응답이 요청과 다르면 RESERVATION_002로 실패 폐쇄한다")
+    void rejectsMalformedCreationServiceIntervalResponse() {
+        ReservationTimeRequest request = new ReservationTimeRequest(
+                SERVICE_DATE, START_TIME, null);
+        LocalDateTime requestedAt = LocalDateTime.of(SERVICE_DATE, START_TIME);
+        StoreServiceIntervalRequest expected = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:00:00Z"));
+        StoreServiceIntervalRequest malformed = new StoreServiceIntervalRequest(
+                1L,
+                Instant.parse("2026-08-03T09:00:00Z"),
+                Instant.parse("2026-08-03T10:01:00Z"));
+        given(storeScheduleService.resolveReservationWindows(
+                List.of(1L), SERVICE_DATE, START_TIME))
+                .willReturn(List.of(StoreReservationWindowResult.accepting(
+                        1L,
+                        "Asia/Seoul",
+                        requestedAt.minusHours(1),
+                        requestedAt.plusHours(2))));
+        given(timePolicyRepository.findResolutionCandidatesByStoreIds(
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of(1L)),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.ACTIVE),
+                org.mockito.ArgumentMatchers.eq(ReservationTimePolicyStatus.SCHEDULED),
+                org.mockito.ArgumentMatchers.eq(NOW)))
+                .willReturn(List.of(activePolicy(1L, 30, 60, 0)));
+        given(intervalValidationService.validateServiceIntervals(List.of(expected)))
+                .willReturn(List.of(StoreServiceIntervalResult.of(malformed, true)));
+
+        assertThatThrownBy(() -> service.resolveCreationTime(1L, request))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
     }
 
     @Test
