@@ -46,6 +46,30 @@ aws logs put-metric-filter \
   --metric-transformations \
     'metricName=RefreshTokenRiskEventPendingCount,metricNamespace='"$NAMESPACE"',metricValue=$pending_count'
 
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-malformed \
+  --filter-pattern '"event=refresh_token_risk_event_marker_malformed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerMalformed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-quarantine-failed \
+  --filter-pattern '"event=refresh_token_risk_event_marker_quarantine_failed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerQuarantineFailed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-stale-index-cleanup-failed \
+  --filter-pattern '"event=refresh_token_risk_event_stale_index_cleanup_failed"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventStaleIndexCleanupFailed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$TOPIC_NAME" \
@@ -203,11 +227,30 @@ dashboard_body=$(cat <<EOF
       "properties": {
         "view": "timeSeries",
         "region": "$AWS_REGION",
-        "title": "MiriYum pending refresh risk events",
+        "title": "MiriYum pending refresh risk event index members",
         "period": 300,
         "stat": "Maximum",
         "metrics": [
           ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 12,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum refresh risk marker integrity failures",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventMarkerMalformed"],
+          [".", "RefreshTokenRiskEventMarkerQuarantineFailed"],
+          [".", "RefreshTokenRiskEventStaleIndexCleanupFailed"]
         ]
       }
     }

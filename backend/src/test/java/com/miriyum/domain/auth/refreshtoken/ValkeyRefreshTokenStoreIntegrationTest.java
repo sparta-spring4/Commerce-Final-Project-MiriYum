@@ -13,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -323,6 +325,31 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         assertThat(redisTemplate.opsForSet().isMember(
                 RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
         assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1.0", " 7", "1e5", "0x1A", "99999999999999999999"})
+    @DisplayName("Java 정수 파싱에서 거부한 숫자 형식 marker는 pending 인덱스와 함께 제거한다")
+    void removesMalformedNumericMarkerRejectedByJava(String malformedAccountId) {
+        String malformedMarkerKey = "auth:risk:pending:malformed-" + malformedAccountId.hashCode();
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey);
+        redisTemplate.<String, String>opsForHash().putAll(malformedMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", malformedAccountId,
+                "familyId", "family-malformed",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
+
+        assertThat(markerStore.findPendingEvents()).isEmpty();
+        assertThat(redisTemplate.opsForSet().isMember(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
+        assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
+        assertThat(markerStore.pendingEventCount()).isZero();
     }
 
     @Test

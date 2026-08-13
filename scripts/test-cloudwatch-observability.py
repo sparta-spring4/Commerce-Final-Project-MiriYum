@@ -130,7 +130,25 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.resource_script,
         )
         self.assertIn("metricValue=$pending_count", self.resource_script)
-        self.assertIn("MiriYum pending refresh risk events", self.resource_script)
+        self.assertIn("MiriYum pending refresh risk event index members", self.resource_script)
+
+    def test_refresh_risk_marker_integrity_failures_become_cloudwatch_metrics(self):
+        expected_events = (
+            "refresh_token_risk_event_marker_malformed",
+            "refresh_token_risk_event_marker_quarantine_failed",
+            "refresh_token_risk_event_stale_index_cleanup_failed",
+        )
+        expected_metrics = (
+            "RefreshTokenRiskEventMarkerMalformed",
+            "RefreshTokenRiskEventMarkerQuarantineFailed",
+            "RefreshTokenRiskEventStaleIndexCleanupFailed",
+        )
+
+        for event in expected_events:
+            self.assertIn(event, self.resource_script)
+        for metric in expected_metrics:
+            self.assertIn(metric, self.resource_script)
+        self.assertIn("MiriYum refresh risk marker integrity failures", self.resource_script)
 
     def test_resource_script_preserves_pending_count_field_reference_for_cloudwatch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -431,6 +449,111 @@ exit 1
 
             self.assertNotEqual(0, result.returncode)
             self.assertIn("simulated SCAN failure", result.stderr)
+
+    def test_deployment_backfill_rejects_an_invalid_scan_cursor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" == "SCAN" ]]; then
+  printf 'invalid-cursor\\nauth:risk:pending:marker\\n'
+  exit 0
+fi
+
+exit 1
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+
+if backfill_pending_risk_event_index; then
+  exit 0
+fi
+exit 1
+""",
+                {"TEST_VALKEY_BIN": self.to_bash_path(bin_path)},
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Invalid SCAN cursor", result.stderr)
+
+    def test_deployment_backfill_stops_after_the_configured_scan_page_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" == "SCAN" ]]; then
+  printf '1\\n'
+  exit 0
+fi
+
+exit 1
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+
+if backfill_pending_risk_event_index; then
+  exit 0
+fi
+exit 1
+""",
+                {
+                    "RISK_EVENT_BACKFILL_MAX_SCAN_PAGES": "2",
+                    "TEST_VALKEY_BIN": self.to_bash_path(bin_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Risk event index backfill exceeded 2 SCAN pages", result.stderr)
 
     def test_deployment_repeats_backfill_after_legacy_rollback(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -30,6 +30,9 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
 
     private static final Logger log = LoggerFactory.getLogger(ValkeyRefreshTokenRiskEventMarkerStore.class);
     private static final long PENDING_EVENT_SCAN_COUNT = 100L;
+    private static final List<String> PENDING_EVENT_FIELDS = List.of(
+            "namespace", "accountId", "familyId", "tokenHash", "sourceEvent",
+            "originEvent", "policyVersion", "occurredAt", "occurrenceCount", "lastOccurredAt");
 
     private static final RedisScript<Long> DELETE_IF_UNCHANGED_SCRIPT = new DefaultRedisScript<>("""
             local occurrenceCount = redis.call('HGET', KEYS[1], 'occurrenceCount')
@@ -49,33 +52,22 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
             """, Long.class);
 
     private static final RedisScript<Long> REMOVE_MALFORMED_PENDING_MARKER_SCRIPT = new DefaultRedisScript<>("""
-            local requiredFields = {
-                'namespace', 'accountId', 'familyId', 'tokenHash', 'sourceEvent',
-                'originEvent', 'policyVersion', 'occurredAt', 'occurrenceCount', 'lastOccurredAt'
-            }
-            for _, field in ipairs(requiredFields) do
-                local value = redis.call('HGET', KEYS[1], field)
-                if value == false or string.match(value, '^%s*$') then
-                    redis.call('DEL', KEYS[1])
-                    redis.call('SREM', KEYS[2], KEYS[1])
-                    return 1
+            for index = 1, #ARGV, 3 do
+                local field = ARGV[index]
+                local expectedPresent = ARGV[index + 1]
+                local expectedValue = ARGV[index + 2]
+                local actualValue = redis.call('HGET', KEYS[1], field)
+                if expectedPresent == '0' then
+                    if actualValue ~= false then
+                        return 0
+                    end
+                elseif actualValue == false or actualValue ~= expectedValue then
+                    return 0
                 end
             end
-            if tonumber(redis.call('HGET', KEYS[1], 'accountId')) == nil
-                    or tonumber(redis.call('HGET', KEYS[1], 'occurredAt')) == nil
-                    or tonumber(redis.call('HGET', KEYS[1], 'occurrenceCount')) == nil
-                    or tonumber(redis.call('HGET', KEYS[1], 'lastOccurredAt')) == nil then
-                redis.call('DEL', KEYS[1])
-                redis.call('SREM', KEYS[2], KEYS[1])
-                return 1
-            end
-            local namespace = redis.call('HGET', KEYS[1], 'namespace')
-            if namespace ~= 'consumer' and namespace ~= 'store-operator' then
-                redis.call('DEL', KEYS[1])
-                redis.call('SREM', KEYS[2], KEYS[1])
-                return 1
-            end
-            return 0
+            redis.call('DEL', KEYS[1])
+            redis.call('SREM', KEYS[2], KEYS[1])
+            return 1
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -96,7 +88,7 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
                     try {
                         events.add(toPendingEvent(eventKey, values));
                     } catch (IllegalArgumentException exception) {
-                        quarantineMalformedPendingMarker(eventKey);
+                        quarantineMalformedPendingMarker(eventKey, values);
                     }
                 } else {
                     try {
@@ -193,15 +185,32 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
         return removed != null && removed > 0;
     }
 
-    private void quarantineMalformedPendingMarker(String eventKey) {
+    private void quarantineMalformedPendingMarker(String eventKey, Map<String, String> values) {
         try {
-            redisTemplate.execute(
+            Long removed = redisTemplate.execute(
                     REMOVE_MALFORMED_PENDING_MARKER_SCRIPT,
-                    List.of(eventKey, RefreshTokenRiskEventKey.pendingIndex()));
-            log.warn("event=refresh_token_risk_event_marker_malformed");
+                    List.of(eventKey, RefreshTokenRiskEventKey.pendingIndex()),
+                    malformedMarkerSnapshot(values));
+            if (removed != null && removed > 0) {
+                log.warn("event=refresh_token_risk_event_marker_malformed");
+            } else {
+                log.warn("event=refresh_token_risk_event_marker_malformed");
+                log.error("event=refresh_token_risk_event_marker_quarantine_mismatch");
+            }
         } catch (DataAccessException | ServiceException exception) {
             log.warn("event=refresh_token_risk_event_marker_quarantine_failed");
         }
+    }
+
+    private Object[] malformedMarkerSnapshot(Map<String, String> values) {
+        List<String> snapshot = new ArrayList<>(PENDING_EVENT_FIELDS.size() * 3);
+        for (String field : PENDING_EVENT_FIELDS) {
+            String value = values.get(field);
+            snapshot.add(field);
+            snapshot.add(value == null ? "0" : "1");
+            snapshot.add(value == null ? "" : value);
+        }
+        return snapshot.toArray();
     }
 
     public boolean deleteIfUnchanged(String eventKey, long occurrenceCount) {
