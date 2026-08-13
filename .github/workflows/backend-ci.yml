@@ -84,7 +84,10 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # 임시 상향(#288 1단계). Valkey Refresh Token 통합 테스트가 추가되면서 실측 소요가
+    # 17분 41초~25분 20초로 벌어졌고, 25분 상한에서 job이 중단된 사례가 있다.
+    # #288 2단계에서 통합 테스트 샤드를 4개로 늘린 뒤 실측값 기준으로 다시 낮춘다.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:

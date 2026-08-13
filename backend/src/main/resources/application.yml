@@ -8,7 +8,6 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-
 server:
   forward-headers-strategy: native
   tomcat:
