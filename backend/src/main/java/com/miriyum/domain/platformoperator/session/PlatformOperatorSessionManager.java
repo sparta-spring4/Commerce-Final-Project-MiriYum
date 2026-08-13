@@ -6,6 +6,9 @@ import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.SessionTokenClaims;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.platformoperator.dto.auth.PlatformOperatorTokenResult;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorAuthEventRecorder;
 import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,16 +27,19 @@ public class PlatformOperatorSessionManager {
     private final PlatformOperatorSessionStore store;
     private final PlatformOperatorSessionPolicy policy;
     private final Clock clock;
+    private final PlatformOperatorAuthEventRecorder events;
 
     public PlatformOperatorSessionManager(
             JwtTokenProvider tokens,
             PlatformOperatorSessionStore store,
             PlatformOperatorSessionPolicy policy,
-            Clock clock) {
+            Clock clock,
+            PlatformOperatorAuthEventRecorder events) {
         this.tokens = tokens;
         this.store = store;
         this.policy = policy;
         this.clock = clock;
+        this.events = events;
     }
 
     public PlatformOperatorTokenResult issue(
@@ -52,6 +58,8 @@ public class PlatformOperatorSessionManager {
                 authorityVersion, sessionVersion, passwordChangeRequired);
         PlatformOperatorSessionResult created = store.replaceActiveSession(state);
         if (created.status() != PlatformOperatorSessionResult.Status.CREATED) throw invalidSession();
+        events.record(accountId, authorityVersion, sessionVersion, PlatformOperatorAuthEventType.SESSION_REVOKED,
+                PlatformOperatorAuthEventOutcome.SUCCESS);
         String access = tokens.generateAccessToken(TokenNamespace.PLATFORM_OPERATOR, accountId, claims);
         return result(access, refresh, passwordChangeRequired, idle, absolute);
     }
@@ -88,15 +96,17 @@ public class PlatformOperatorSessionManager {
         Instant nextIdle = policy.idleExpiresAt(now);
         PlatformOperatorSessionResult rotated = store.rotate(
                 proof(parsed, refreshToken), nextId, sha256(nextRefresh), now, nextIdle);
-        if (rotated.status() != PlatformOperatorSessionResult.Status.ROTATED) {
+        if (rotated.status() != PlatformOperatorSessionResult.Status.ROTATED
+                || rotated.idleExpiresAt() == null || rotated.absoluteExpiresAt() == null) {
+            if (rotated.status() == PlatformOperatorSessionResult.Status.REUSED) {
+                events.record(parsed.accountId(), claims.authorityVersion(), claims.sessionVersion(),
+                        PlatformOperatorAuthEventType.SESSION_REVOKED, PlatformOperatorAuthEventOutcome.SUCCESS);
+            }
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
         String access = tokens.generateAccessToken(TokenNamespace.PLATFORM_OPERATOR, parsed.accountId(), claims);
-        Instant absolute = rotated.state() == null
-                ? nextIdle
-                : rotated.state().absoluteExpiresAt();
-        nextIdle = rotated.state() == null ? nextIdle : rotated.state().idleExpiresAt();
-        return result(access, nextRefresh, claims.passwordChangeRequired(), nextIdle, absolute);
+        return result(access, nextRefresh, claims.passwordChangeRequired(),
+                rotated.idleExpiresAt(), rotated.absoluteExpiresAt());
     }
 
     public void logout(String refreshToken) {
@@ -104,6 +114,9 @@ public class PlatformOperatorSessionManager {
         ParsedToken parsed = tokens.parseRefreshTokenForLogout(refreshToken);
         if (parsed == null || parsed.namespace() != TokenNamespace.PLATFORM_OPERATOR) return;
         store.revoke(parsed.accountId(), sha256(parsed.sessionClaims().sessionId()));
+        SessionTokenClaims claims = parsed.sessionClaims();
+        events.record(parsed.accountId(), claims.authorityVersion(), claims.sessionVersion(),
+                PlatformOperatorAuthEventType.LOGOUT, PlatformOperatorAuthEventOutcome.SUCCESS);
     }
 
     public void revokeAll(Long accountId) {

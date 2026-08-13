@@ -2,7 +2,9 @@ package com.miriyum.domain.platformoperator.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
@@ -51,6 +53,16 @@ class PlatformOperatorFeatureFlagIT {
         mvc.perform(get("/api/v1/platform-operators/future-business"))
                 .andExpect(status().isNotFound());
         mvc.perform(post("/api/v1/platform-operators/auth/accounts"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/platform-operators/auth/token-refreshes")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/platform-operators/auth/csrf-tokens/current"))
+                .andExpect(status().isNotFound());
+        mvc.perform(delete("/api/v1/platform-operators/auth/sessions/current"))
+                .andExpect(status().isNotFound());
+        mvc.perform(put("/api/v1/platform-operators/auth/initial-password")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound());
     }
 }

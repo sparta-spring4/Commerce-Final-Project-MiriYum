@@ -14,6 +14,8 @@ import com.miriyum.domain.platformoperator.dto.auth.PlatformOperatorTokenResult;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPasswordState;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManager;
@@ -33,6 +35,7 @@ public class PlatformOperatorAuthService {
     private final LoginDelayGuard delayGuard;
     private final PlatformOperatorSessionManager sessions;
     private final PlatformOperatorPasswordChangeTransaction passwordChange;
+    private final PlatformOperatorAuthEventRecorder events;
     private final PlatformOperatorAuthProperties properties;
     private final Clock clock;
 
@@ -40,13 +43,14 @@ public class PlatformOperatorAuthService {
             PlatformOperatorAccountRepository accounts, PasswordEncoder passwordEncoder, PasswordPolicy passwordPolicy,
             LoginDelayGuard delayGuard, PlatformOperatorSessionManager sessions,
             PlatformOperatorPasswordChangeTransaction passwordChange,
-            PlatformOperatorAuthProperties properties, Clock clock) {
+            PlatformOperatorAuthEventRecorder events, PlatformOperatorAuthProperties properties, Clock clock) {
         this.accounts = accounts;
         this.passwordEncoder = passwordEncoder;
         this.passwordPolicy = passwordPolicy;
         this.delayGuard = delayGuard;
         this.sessions = sessions;
         this.passwordChange = passwordChange;
+        this.events = events;
         this.properties = properties;
         this.clock = clock;
     }
@@ -54,6 +58,15 @@ public class PlatformOperatorAuthService {
     public PlatformOperatorTokenResult login(LoginRequest request) {
         PlatformOperatorAccount account = accounts.findByEmail(request.email().toLowerCase(Locale.ROOT))
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+        try {
+            return loginKnownAccount(request, account);
+        } catch (ServiceException exception) {
+            events.record(account, PlatformOperatorAuthEventType.LOGIN, PlatformOperatorAuthEventOutcome.FAILURE);
+            throw exception;
+        }
+    }
+
+    private PlatformOperatorTokenResult loginKnownAccount(LoginRequest request, PlatformOperatorAccount account) {
         LoginAttempt attempt = delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId());
         if (attempt.status() != LoginAttempt.Status.ACQUIRED) throw invalidCredentials();
         boolean completed = false;
@@ -63,8 +76,7 @@ public class PlatformOperatorAuthService {
             boolean attemptCompleted = delayGuard.completeAttempt(
                     TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt, matches);
             if (!matches && account.getPasswordState() == PlatformOperatorPasswordState.TEMPORARY) {
-                account.recordTemporaryPasswordFailure();
-                accounts.save(account);
+                accounts.incrementTemporaryPasswordFailure(account.getId());
             }
             if (!attemptCompleted || !matches) throw invalidCredentials();
             PlatformOperatorAccount current = accounts.findById(account.getId()).orElseThrow(this::invalidCredentials);
@@ -75,7 +87,10 @@ public class PlatformOperatorAuthService {
             boolean temporary = current.getPasswordState() == PlatformOperatorPasswordState.TEMPORARY;
             if (temporary && !current.canUseTemporaryPassword(
                     clock.instant(), properties.getTemporaryPassword().getMaxFailures())) throw invalidCredentials();
-            return sessions.issue(current.getId(), current.getAuthorityVersion(), current.getSessionVersion(), temporary);
+            PlatformOperatorTokenResult result = sessions.issue(
+                    current.getId(), current.getAuthorityVersion(), current.getSessionVersion(), temporary);
+            events.record(current, PlatformOperatorAuthEventType.LOGIN, PlatformOperatorAuthEventOutcome.SUCCESS);
+            return result;
         } finally {
             if (!completed) delayGuard.releaseAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt);
         }
@@ -84,7 +99,14 @@ public class PlatformOperatorAuthService {
     public PlatformOperatorTokenResult refresh(String rawRefreshToken) {
         ParsedToken parsed = sessions.parseRefresh(rawRefreshToken);
         PlatformOperatorAccount account = requireCurrentAccount(parsed, AuthErrorCode.REFRESH_TOKEN_INVALID);
-        return sessions.rotate(parsed, rawRefreshToken);
+        try {
+            PlatformOperatorTokenResult result = sessions.rotate(parsed, rawRefreshToken);
+            events.record(account, PlatformOperatorAuthEventType.REFRESH, PlatformOperatorAuthEventOutcome.SUCCESS);
+            return result;
+        } catch (ServiceException exception) {
+            events.record(account, PlatformOperatorAuthEventType.REFRESH, PlatformOperatorAuthEventOutcome.FAILURE);
+            throw exception;
+        }
     }
 
     public void logout(String rawRefreshToken) { sessions.logout(rawRefreshToken); }
@@ -96,6 +118,8 @@ public class PlatformOperatorAuthService {
         }
         var changed = passwordChange.change(principal.accountId(), request);
         sessions.revokeAll(changed.accountId());
+        events.record(changed.accountId(), changed.authorityVersion(), changed.sessionVersion(),
+                PlatformOperatorAuthEventType.SESSION_REVOKED, PlatformOperatorAuthEventOutcome.SUCCESS);
         return sessions.issue(changed.accountId(), changed.authorityVersion(), changed.sessionVersion(), false);
     }
 
@@ -113,6 +137,8 @@ public class PlatformOperatorAuthService {
                 .orElseThrow(() -> new ServiceException(invalidCode));
         if (account.getStatus() != PlatformOperatorAccountStatus.ACTIVE) {
             sessions.revokeAll(parsed.accountId());
+            events.record(account, PlatformOperatorAuthEventType.SESSION_REVOKED,
+                    PlatformOperatorAuthEventOutcome.SUCCESS);
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
         SessionTokenClaims claims = parsed.sessionClaims();
@@ -121,6 +147,8 @@ public class PlatformOperatorAuthService {
                 || claims.passwordChangeRequired()
                 != (account.getPasswordState() == PlatformOperatorPasswordState.TEMPORARY)) {
             sessions.revoke(parsed);
+            events.record(account, PlatformOperatorAuthEventType.SESSION_REVOKED,
+                    PlatformOperatorAuthEventOutcome.SUCCESS);
             throw new ServiceException(invalidCode);
         }
         return account;

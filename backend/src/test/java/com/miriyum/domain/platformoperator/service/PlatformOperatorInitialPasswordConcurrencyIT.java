@@ -48,6 +48,30 @@ class PlatformOperatorInitialPasswordConcurrencyIT {
     @Autowired PasswordEncoder encoder;
 
     @Test
+    void concurrentTemporaryPasswordFailuresAreAllCountedAtomically() throws Exception {
+        events.deleteAll();
+        accounts.deleteAll();
+        PlatformOperatorAccount account = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "failures@example.com", encoder.encode("Password1!"), "failures", Instant.now().plusSeconds(600)));
+        int attempts = 8;
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(attempts)) {
+            var futures = java.util.stream.IntStream.range(0, attempts)
+                    .mapToObj(ignored -> executor.submit(() -> {
+                        ready.countDown();
+                        start.await();
+                        return accounts.incrementTemporaryPasswordFailure(account.getId());
+                    })).toList();
+            ready.await();
+            start.countDown();
+            for (var future : futures) assertThat(future.get()).isEqualTo(1);
+        }
+        assertThat(accounts.findById(account.getId()).orElseThrow().getTemporaryPasswordFailureCount())
+                .isEqualTo(attempts);
+    }
+
+    @Test
     void exactlyOneConcurrentInitialPasswordChangeCommits() throws Exception {
         events.deleteAll();
         accounts.deleteAll();

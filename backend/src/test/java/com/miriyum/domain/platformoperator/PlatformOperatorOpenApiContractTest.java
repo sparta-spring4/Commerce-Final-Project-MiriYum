@@ -7,6 +7,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import com.miriyum.domain.platformoperator.controller.auth.PlatformOperatorAuthController;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -47,6 +53,37 @@ class PlatformOperatorOpenApiContractTest {
             assertThat(ref).startsWith("./platform-operator-auth/openapi.yaml#/paths/");
             assertThat(map(document("platform-operator-auth/openapi.yaml").get("paths"))).containsKey(entry.getKey());
         }
+    }
+
+    @Test
+    void runtimeControllerMethodsCannotDriftFromStaticOperations() throws Exception {
+        Map<String, Object> paths = map(document("platform-operator-auth/openapi.yaml").get("paths"));
+        Map<String, String> runtime = new LinkedHashMap<>();
+        for (var method : PlatformOperatorAuthController.class.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(PostMapping.class))
+                runtime.put("post " + method.getAnnotation(PostMapping.class).value()[0], method.getName());
+            if (method.isAnnotationPresent(GetMapping.class))
+                runtime.put("get " + method.getAnnotation(GetMapping.class).value()[0], method.getName());
+            if (method.isAnnotationPresent(DeleteMapping.class))
+                runtime.put("delete " + method.getAnnotation(DeleteMapping.class).value()[0], method.getName());
+            if (method.isAnnotationPresent(PutMapping.class))
+                runtime.put("put " + method.getAnnotation(PutMapping.class).value()[0], method.getName());
+        }
+        Map<String, String> contract = new LinkedHashMap<>();
+        paths.forEach((path, item) -> map(item).forEach((verb, operation) ->
+                contract.put(verb + " " + path.substring("/api/v1/platform-operators/auth".length()),
+                        (String) map(operation).get("operationId"))));
+
+        assertThat(runtime.keySet()).containsExactlyInAnyOrderElementsOf(contract.keySet());
+        assertThat(contract.values()).containsExactlyInAnyOrder(
+                "createPlatformOperatorSession", "refreshPlatformOperatorToken",
+                "getCurrentPlatformOperatorCsrfToken", "deleteCurrentPlatformOperatorSession",
+                "replacePlatformOperatorInitialPassword");
+        assertThat(runtime).containsEntry("post /sessions", "login")
+                .containsEntry("post /token-refreshes", "refresh")
+                .containsEntry("get /csrf-tokens/current", "csrfToken")
+                .containsEntry("delete /sessions/current", "logout")
+                .containsEntry("put /initial-password", "changeInitialPassword");
     }
 
     private static Map<String, Object> document(String file) throws Exception {

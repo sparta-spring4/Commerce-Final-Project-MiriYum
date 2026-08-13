@@ -45,24 +45,26 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
             return 1
             """, Long.class);
 
-    private static final RedisScript<Long> ROTATE = new DefaultRedisScript<>("""
-            if redis.call('GET', KEYS[1]) ~= KEYS[2] or redis.call('EXISTS', KEYS[2]) == 0 then return 0 end
+    @SuppressWarnings("rawtypes")
+    private static final RedisScript<List> ROTATE = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) ~= KEYS[2] or redis.call('EXISTS', KEYS[2]) == 0 then return {0} end
             if redis.call('HGET', KEYS[2], 'authorityVersion') ~= ARGV[1]
-                    or redis.call('HGET', KEYS[2], 'sessionVersion') ~= ARGV[2] then return 0 end
+                    or redis.call('HGET', KEYS[2], 'sessionVersion') ~= ARGV[2] then return {0} end
             if redis.call('HGET', KEYS[2], 'refreshTokenId') ~= ARGV[3]
                     or redis.call('HGET', KEYS[2], 'refreshTokenHash') ~= ARGV[4] then
-                redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return 3
+                redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return {3}
             end
             if tonumber(ARGV[5]) >= tonumber(redis.call('HGET', KEYS[2], 'idleExpiresAt'))
                     or tonumber(ARGV[5]) >= tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')) then
-                redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return 2
+                redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return {2}
             end
-            local nextExpiry = math.min(tonumber(ARGV[8]), tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')))
+            local absoluteExpiry = tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt'))
+            local nextExpiry = math.min(tonumber(ARGV[8]), absoluteExpiry)
             redis.call('HSET', KEYS[2], 'refreshTokenId', ARGV[6], 'refreshTokenHash', ARGV[7],
                 'lastActivityAt', ARGV[5], 'idleExpiresAt', nextExpiry)
             redis.call('EXPIREAT', KEYS[2], nextExpiry); redis.call('EXPIREAT', KEYS[1], nextExpiry)
-            return 1
-            """, Long.class);
+            return {1, nextExpiry, absoluteExpiry}
+            """, List.class);
 
     private static final RedisScript<Long> REVOKE = new DefaultRedisScript<>("""
             if redis.call('GET', KEYS[1]) == KEYS[2] then redis.call('DEL', KEYS[1]) end
@@ -110,17 +112,22 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
     @Override
     public PlatformOperatorSessionResult rotate(
             PlatformOperatorSessionProof proof, String nextId, String nextHash, Instant now, Instant nextIdle) {
-        long result = execute(ROTATE, keys(proof), Long.toString(proof.authorityVersion()),
+        List<?> result = executeList(ROTATE, keys(proof), Long.toString(proof.authorityVersion()),
                 Long.toString(proof.sessionVersion()), proof.refreshTokenId(), proof.refreshTokenHash(), epoch(now),
                 nextId, nextHash, epoch(nextIdle));
-        PlatformOperatorSessionResult.Status status = switch ((int) result) {
+        long code = ((Number) result.get(0)).longValue();
+        PlatformOperatorSessionResult.Status status = switch ((int) code) {
             case 1 -> PlatformOperatorSessionResult.Status.ROTATED;
             case 2 -> PlatformOperatorSessionResult.Status.EXPIRED;
             case 3 -> PlatformOperatorSessionResult.Status.REUSED;
             default -> PlatformOperatorSessionResult.Status.INVALID;
         };
-        return new PlatformOperatorSessionResult(status,
-                status == PlatformOperatorSessionResult.Status.ROTATED ? readState(proof.sessionHash()) : null);
+        if (status != PlatformOperatorSessionResult.Status.ROTATED || result.size() != 3) {
+            return PlatformOperatorSessionResult.of(status);
+        }
+        return new PlatformOperatorSessionResult(status, null,
+                Instant.ofEpochSecond(((Number) result.get(1)).longValue()),
+                Instant.ofEpochSecond(((Number) result.get(2)).longValue()));
     }
 
     @Override public void revoke(Long accountId, String sessionHash) {
@@ -139,6 +146,17 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
         try {
             Long result = redis.execute(script, keys, (Object[]) args);
             if (result == null) throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+            return result;
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<?> executeList(RedisScript<List> script, List<String> keys, String... args) {
+        try {
+            List<?> result = redis.execute(script, keys, (Object[]) args);
+            if (result == null || result.isEmpty()) throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
             return result;
         } catch (DataAccessException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);

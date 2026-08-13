@@ -193,6 +193,14 @@ public class JwtTokenProvider {
             throw new ServiceException(invalidCode);
         }
 
+        if (!issuer.equals(claims.getIssuer())
+                || claims.getAudience() == null
+                || !claims.getAudience().contains(namespace.value())
+                || claims.getAudience().size() != 1
+                || !subject.startsWith(namespace.value() + ":")) {
+            throw new ServiceException(invalidCode);
+        }
+
         try {
             Long accountId = Long.valueOf(subject.substring(separatorIndex + 1));
             SessionTokenClaims sessionClaims = parseSessionClaims(claims, namespace, invalidCode);

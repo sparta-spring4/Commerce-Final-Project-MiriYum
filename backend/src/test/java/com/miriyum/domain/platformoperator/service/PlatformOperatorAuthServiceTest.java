@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -16,6 +17,8 @@ import com.miriyum.domain.platformoperator.config.PlatformOperatorAuthProperties
 import com.miriyum.domain.platformoperator.dto.auth.PlatformOperatorTokenResult;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManager;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
@@ -35,9 +38,10 @@ class PlatformOperatorAuthServiceTest {
     private final LoginDelayGuard delay = mock(LoginDelayGuard.class);
     private final PlatformOperatorSessionManager sessions = mock(PlatformOperatorSessionManager.class);
     private final PlatformOperatorPasswordChangeTransaction change = mock(PlatformOperatorPasswordChangeTransaction.class);
+    private final PlatformOperatorAuthEventRecorder events = mock(PlatformOperatorAuthEventRecorder.class);
     private final PlatformOperatorAuthProperties properties = properties();
     private final PlatformOperatorAuthService service = new PlatformOperatorAuthService(
-            accounts, encoder, new PasswordPolicy(), delay, sessions, change, properties,
+            accounts, encoder, new PasswordPolicy(), delay, sessions, change, events, properties,
             Clock.fixed(now, ZoneOffset.UTC));
     private PlatformOperatorAccount account;
 
@@ -60,6 +64,22 @@ class PlatformOperatorAuthServiceTest {
         PlatformOperatorTokenResult result = service.login(new LoginRequest("operator@example.com", "Password1!"));
         assertThat(result.passwordChangeRequired()).isTrue();
         verify(sessions).issue(7L, 1L, 1L, true);
+        verify(events).record(account, PlatformOperatorAuthEventType.LOGIN,
+                PlatformOperatorAuthEventOutcome.SUCCESS);
+    }
+
+
+    @Test
+    void failedTemporaryCredentialUsesAtomicCounterAndSanitizedEvent() {
+        when(encoder.matches("Wrong1!", "hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.login(new LoginRequest("operator@example.com", "Wrong1!")))
+                .isInstanceOf(ServiceException.class);
+
+        verify(accounts).incrementTemporaryPasswordFailure(7L);
+        verify(accounts, never()).save(account);
+        verify(events).record(account, PlatformOperatorAuthEventType.LOGIN,
+                PlatformOperatorAuthEventOutcome.FAILURE);
     }
 
     @Test
