@@ -39,8 +39,9 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
                     or tonumber(ARGV[3]) >= tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')) then
                 redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return 2
             end
-            redis.call('HSET', KEYS[2], 'lastActivityAt', ARGV[3], 'idleExpiresAt', ARGV[4])
-            redis.call('EXPIREAT', KEYS[2], ARGV[4]); redis.call('EXPIREAT', KEYS[1], ARGV[4])
+            local nextExpiry = math.min(tonumber(ARGV[4]), tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')))
+            redis.call('HSET', KEYS[2], 'lastActivityAt', ARGV[3], 'idleExpiresAt', nextExpiry)
+            redis.call('EXPIREAT', KEYS[2], nextExpiry); redis.call('EXPIREAT', KEYS[1], nextExpiry)
             return 1
             """, Long.class);
 
@@ -56,9 +57,10 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
                     or tonumber(ARGV[5]) >= tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')) then
                 redis.call('DEL', KEYS[2]); redis.call('DEL', KEYS[1]); return 2
             end
+            local nextExpiry = math.min(tonumber(ARGV[8]), tonumber(redis.call('HGET', KEYS[2], 'absoluteExpiresAt')))
             redis.call('HSET', KEYS[2], 'refreshTokenId', ARGV[6], 'refreshTokenHash', ARGV[7],
-                'lastActivityAt', ARGV[5], 'idleExpiresAt', ARGV[8])
-            redis.call('EXPIREAT', KEYS[2], ARGV[8]); redis.call('EXPIREAT', KEYS[1], ARGV[8])
+                'lastActivityAt', ARGV[5], 'idleExpiresAt', nextExpiry)
+            redis.call('EXPIREAT', KEYS[2], nextExpiry); redis.call('EXPIREAT', KEYS[1], nextExpiry)
             return 1
             """, Long.class);
 
@@ -96,11 +98,13 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
             PlatformOperatorSessionProof proof, Instant now, Instant nextIdleExpiresAt) {
         long result = execute(VALIDATE, keys(proof), Long.toString(proof.authorityVersion()),
                 Long.toString(proof.sessionVersion()), epoch(now), epoch(nextIdleExpiresAt));
-        return PlatformOperatorSessionResult.of(switch ((int) result) {
+        PlatformOperatorSessionResult.Status status = switch ((int) result) {
             case 1 -> PlatformOperatorSessionResult.Status.VALID;
             case 2 -> PlatformOperatorSessionResult.Status.EXPIRED;
             default -> PlatformOperatorSessionResult.Status.INVALID;
-        });
+        };
+        return new PlatformOperatorSessionResult(status,
+                status == PlatformOperatorSessionResult.Status.VALID ? readState(proof.sessionHash()) : null);
     }
 
     @Override
@@ -109,12 +113,14 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
         long result = execute(ROTATE, keys(proof), Long.toString(proof.authorityVersion()),
                 Long.toString(proof.sessionVersion()), proof.refreshTokenId(), proof.refreshTokenHash(), epoch(now),
                 nextId, nextHash, epoch(nextIdle));
-        return PlatformOperatorSessionResult.of(switch ((int) result) {
+        PlatformOperatorSessionResult.Status status = switch ((int) result) {
             case 1 -> PlatformOperatorSessionResult.Status.ROTATED;
             case 2 -> PlatformOperatorSessionResult.Status.EXPIRED;
             case 3 -> PlatformOperatorSessionResult.Status.REUSED;
             default -> PlatformOperatorSessionResult.Status.INVALID;
-        });
+        };
+        return new PlatformOperatorSessionResult(status,
+                status == PlatformOperatorSessionResult.Status.ROTATED ? readState(proof.sessionHash()) : null);
     }
 
     @Override public void revoke(Long accountId, String sessionHash) {
@@ -139,7 +145,24 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
         }
     }
 
+    private PlatformOperatorSessionState readState(String sessionHash) {
+        try {
+            var values = redis.<String, String>opsForHash().entries(sessionKey(sessionHash));
+            if (values.isEmpty()) return null;
+            return new PlatformOperatorSessionState(
+                    Long.valueOf(values.get("accountId")), values.get("sessionHash"), values.get("refreshTokenId"),
+                    values.get("refreshTokenHash"), instant(values.get("loginAt")), instant(values.get("lastActivityAt")),
+                    instant(values.get("idleExpiresAt")), instant(values.get("absoluteExpiresAt")),
+                    Long.parseLong(values.get("authorityVersion")), Long.parseLong(values.get("sessionVersion")),
+                    Boolean.parseBoolean(values.get("passwordChangeRequired")));
+        } catch (RuntimeException exception) {
+            if (exception instanceof ServiceException serviceException) throw serviceException;
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
     private static String accountKey(Long id) { return PREFIX + "account:" + id + ":active-session"; }
     private static String sessionKey(String hash) { return PREFIX + "session:" + hash; }
     private static String epoch(Instant instant) { return Long.toString(instant.getEpochSecond()); }
+    private static Instant instant(String epoch) { return Instant.ofEpochSecond(Long.parseLong(epoch)); }
 }

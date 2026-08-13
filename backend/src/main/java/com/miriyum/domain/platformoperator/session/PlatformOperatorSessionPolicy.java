@@ -3,7 +3,9 @@ package com.miriyum.domain.platformoperator.session;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import org.springframework.stereotype.Component;
 
+@Component
 public final class PlatformOperatorSessionPolicy {
     public static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
     public static final Duration ABSOLUTE_TIMEOUT = Duration.ofHours(8);
