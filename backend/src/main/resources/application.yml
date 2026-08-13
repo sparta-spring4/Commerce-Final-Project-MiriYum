@@ -74,6 +74,8 @@ miriyum:
       connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
       read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
   notification:
+    history:
+      cursor-secret: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:}
     worker:
       enabled: ${MIRIYUM_NOTIFICATION_WORKER_ENABLED:false}
       policy-version: ${MIRIYUM_NOTIFICATION_WORKER_POLICY_VERSION:}
