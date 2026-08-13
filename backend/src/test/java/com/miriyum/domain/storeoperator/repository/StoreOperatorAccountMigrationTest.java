@@ -28,7 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 실제로 적용한 스키마를 {@code ddl-auto=validate}로 확인한다.</p>
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
