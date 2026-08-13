@@ -50,7 +50,7 @@
 > 활성화 단계: Issue #266 — 내부 원자 결합 계약만 활성, 사용자 HTTP·자동 만료·Payment orchestration 비활성
 
 - 기존 즉시 확정 MenuHold는 `reservationId`를 부모로 사용하고 `reservationHoldId`와 `expiresAt`이 없는 현재 계약을 유지한다. 임시 MenuHold는 `reservationHoldId`를 부모로 사용하고 연결 ReservationHold와 정확히 같은 `expiresAt`을 저장한다. 임시 그룹 확정 뒤에는 기존 최종 `reservationId`도 함께 연결한다.
-- V34는 `reservation_holds(reservation_hold_id, expires_at)` 참조 unique와 `menu_holds(reservation_hold_id, expires_at)` 복합 FK를 둔다. 임시 MenuHold의 `reservationHoldId`는 unique이며 하나의 ReservationHold에 MenuHold 루트가 최대 한 건만 존재한다.
+- V37은 `reservation_holds(reservation_hold_id, expires_at)` 참조 unique와 `menu_holds(reservation_hold_id, expires_at)` 복합 FK를 둔다. 임시 MenuHold의 `reservationHoldId`는 unique이며 하나의 ReservationHold에 MenuHold 루트가 최대 한 건만 존재한다.
 - DB CHECK는 기존 행과 임시 행을 구분한다. 기존 행은 `reservationHoldId/expiresAt = NULL`, `reservationId IS NOT NULL`, 상태 `CONFIRMED|RELEASED|FULFILLED`만 허용한다. 최종 Reservation에 연결되지 않은 임시 행은 `reservationHoldId/expiresAt IS NOT NULL`, `reservationId IS NULL`, 상태 `ACTIVE|RECONCILIATION_REQUIRED|RELEASED|EXPIRED`만 허용한다. 연결된 임시 행은 세 식별·시각 필드가 모두 존재하고 상태 `CONFIRMED|RELEASED|FULFILLED`만 허용한다.
 - 선택 메뉴는 Menu ID 오름차순으로 정규화하며 중복 선택 수량을 합산한다. 빈 선택은 임시 MenuHold를 만들지 않는다. replay에서 연결 행 부재는 빈 선택과만 같고, 저장된 항목의 메뉴 ID·수량은 정규 선택 목록과 정확히 같아야 한다.
 - Reservation은 `ReservationTemporaryMenuHoldPort`의 scalar 명령·결과만 사용하고 `ReservationTemporaryMenuHoldAdapter`가 MenuHold 소유 공개 Service에 연결한다. 생성과 종결 Service는 `MANDATORY`로 호출자 트랜잭션에 참여하며 자체 새 트랜잭션을 시작하지 않는다.
