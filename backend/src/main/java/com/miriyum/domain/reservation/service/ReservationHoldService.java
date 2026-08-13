@@ -299,7 +299,8 @@ public class ReservationHoldService {
             ReservationTemporaryMenuHoldResult replayMenuHold =
                     temporaryMenuHoldPort.lockForTransition(
                             normalized.reservationHoldId());
-            requireFinalLinkageMeaning(replayMenuHold, normalized, true);
+            requireFinalLinkageMeaning(
+                    replayMenuHold, normalized, current.getStatus(), true);
             return resultOf(current);
         }
 
@@ -314,12 +315,13 @@ public class ReservationHoldService {
             ReservationTemporaryMenuHoldResult replayMenuHold =
                     temporaryMenuHoldPort.lockForTransition(
                             normalized.reservationHoldId());
-            requireFinalLinkageMeaning(replayMenuHold, normalized, true);
+            requireFinalLinkageMeaning(
+                    replayMenuHold, normalized, hold.getStatus(), true);
             return resultOf(hold);
         }
         ReservationTemporaryMenuHoldResult menuHold =
                 temporaryMenuHoldPort.lockForTransition(normalized.reservationHoldId());
-        requireFinalLinkageMeaning(menuHold, normalized, false);
+        requireFinalLinkageMeaning(menuHold, normalized, hold.getStatus(), false);
         Instant occurredAt = clock.instant();
         ReservationHoldStatus beforeStatus = hold.getStatus();
         validateReservationHoldTransition(
@@ -713,6 +715,7 @@ public class ReservationHoldService {
     private static void requireFinalLinkageMeaning(
             ReservationTemporaryMenuHoldResult menuHold,
             NormalizedTransitionCommand command,
+            ReservationHoldStatus currentHoldStatus,
             boolean replay
     ) {
         if (menuHold == null) {
@@ -723,10 +726,13 @@ public class ReservationHoldService {
                 == ReservationTemporaryMenuHoldResult.Presence.NO_HOLD) {
             matches = command.finalReservationId() == null;
         } else if (replay) {
-            matches = menuHold.state() == expectedMenuHoldState(command.targetStatus())
-                    && Objects.equals(
+            matches = isLegalReplayCurrentStatus(
+                    command.targetStatus(), currentHoldStatus)
+                    && menuHold.state() == expectedMenuHoldState(currentHoldStatus)
+                    && (command.targetStatus() != ReservationHoldStatus.CONFIRMED
+                    || Objects.equals(
                             menuHold.finalReservationId(),
-                            command.finalReservationId());
+                            command.finalReservationId()));
         } else if (command.targetStatus() != ReservationHoldStatus.CONFIRMED) {
             matches = command.finalReservationId() == null;
         } else {
@@ -741,6 +747,20 @@ public class ReservationHoldService {
         }
         throw new IllegalArgumentException(
                 "finalReservationId must match persistent temporary MenuHold presence");
+    }
+
+    private static boolean isLegalReplayCurrentStatus(
+            ReservationHoldStatus auditedTargetStatus,
+            ReservationHoldStatus currentStatus
+    ) {
+        return switch (auditedTargetStatus) {
+            case RECONCILIATION_REQUIRED ->
+                    currentStatus == ReservationHoldStatus.RECONCILIATION_REQUIRED
+                            || currentStatus == ReservationHoldStatus.CONFIRMED
+                            || currentStatus == ReservationHoldStatus.RELEASED;
+            case CONFIRMED, RELEASED, EXPIRED -> currentStatus == auditedTargetStatus;
+            case ACTIVE -> false;
+        };
     }
 
     private static ReservationTemporaryMenuHoldResult.State expectedMenuHoldState(
