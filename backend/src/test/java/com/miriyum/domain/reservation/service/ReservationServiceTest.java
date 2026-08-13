@@ -23,6 +23,9 @@ import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
+import com.miriyum.domain.notification.entity.NotificationPurpose;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -51,6 +54,8 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationEventFactory;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
@@ -91,6 +96,7 @@ import java.time.ZoneOffset;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -202,6 +208,7 @@ class ReservationServiceTest {
 
     private ReservationService reservationService;
     private ReservationTimeResolutionService timeResolutionService;
+    private List<NotificationSourceEventV1> notificationEvents;
 
     @BeforeEach
     void setUp() {
@@ -211,6 +218,17 @@ class ReservationServiceTest {
                 storeServiceIntervalValidationService,
                 timePolicyRepository,
                 clock);
+        notificationEvents = new ArrayList<>();
+        ReservationNotificationPublisher notificationPublisher =
+                new ReservationNotificationPublisher(
+                        new ReservationNotificationEventFactory(),
+                        event -> {
+                            notificationEvents.add(event);
+                            return new NotificationTaskReceipt(
+                                    Long.toString(500L + notificationEvents.size()), false
+                            );
+                        }
+                );
         reservationService = new ReservationService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
@@ -230,7 +248,8 @@ class ReservationServiceTest {
                 cancellationPolicySelector,
                 cancellationAuditRepository,
                 cancellationPolicyEvaluator,
-                fulfillmentAuditRepository
+                fulfillmentAuditRepository,
+                notificationPublisher
         );
     }
 
@@ -389,6 +408,13 @@ class ReservationServiceTest {
         then(capacityAllocationRepository).should().saveAll(any());
         then(menuHoldPort).shouldHaveNoInteractions();
         then(menuHoldPort).shouldHaveNoInteractions();
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CONFIRMED);
+            assertThat(event.resourceId()).isEqualTo("77");
+            assertThat(event.resourceVersion()).isEqualTo(1L);
+            assertThat(event.correlationId())
+                    .isEqualTo("550e8400-e29b-41d4-a716-446655440000");
+        });
     }
 
     @Test
@@ -2764,6 +2790,12 @@ class ReservationServiceTest {
         assertThat(audit.getCapacityPolicyVersion()).isEqualTo(3L);
         assertThat(audit.getCommandId()).isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
         assertThat(fixture.reservation().getCancelledAt()).isSameAs(audit.getOccurredAt());
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CANCELLED);
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+            assertThat(event.occurredAt().toInstant()).isEqualTo(audit.getOccurredAt());
+            assertThat(event.correlationId()).isEqualTo(CONSUMER_CANCELLATION_CORRELATION);
+        });
     }
 
     @Test
@@ -2790,6 +2822,10 @@ class ReservationServiceTest {
                 .isEqualTo(OPERATOR_CANCELLATION_CORRELATION);
         assertThat(cancellationData(result).cancelledBy()).isEqualTo("STORE_OPERATOR");
         assertThat(cancellationData(result).cancellationReason()).isEqualTo(" ");
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose()).isEqualTo(NotificationPurpose.RESERVATION_CANCELLED);
+            assertThat(event.correlationId()).isEqualTo(OPERATOR_CANCELLATION_CORRELATION);
+        });
     }
 
     @Test
@@ -2872,6 +2908,7 @@ class ReservationServiceTest {
 
         assertThat(succeeded).hasNullValue();
         assertThat(fixture.reservation().getCancelledAt()).isEqualTo(NOW);
+        assertThat(notificationEvents).isEmpty();
         then(menuHoldPort).should(never()).findSnapshots(anyLong());
     }
 
@@ -3536,6 +3573,7 @@ class ReservationServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data().status()).isEqualTo("FULFILLED");
+        assertThat(notificationEvents).isEmpty();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(capacityAllocationRepository).shouldHaveNoInteractions();
     }
