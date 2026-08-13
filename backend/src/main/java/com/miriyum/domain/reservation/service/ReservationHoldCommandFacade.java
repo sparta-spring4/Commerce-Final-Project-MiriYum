@@ -101,7 +101,7 @@ public class ReservationHoldCommandFacade {
             if (!hasStructuredConstraintName(failure, replayConstraint)) {
                 throw failure;
             }
-            return command.get();
+            return executeWithLockRetry(command);
         }
     }
 

@@ -129,6 +129,46 @@ class ReservationHoldCommandFacadeTest {
         then(holdService).should(times(2)).create(CREATE_COMMAND);
     }
 
+    @ParameterizedTest(name = "MySQL {0}")
+    @MethodSource("retryableMysqlCodes")
+    @DisplayName("생성 unique 충돌 뒤 replay의 기술 lock 오류도 재시도한다")
+    void retriesApprovedMysqlLockFailureDuringUniqueReplay(int mysqlCode) {
+        ReservationHoldContracts.Result expected = result(ReservationHoldStatus.ACTIVE);
+        List<Long> delays = new ArrayList<>();
+        ReservationHoldCommandFacade facade = facade(delays);
+        given(holdService.create(CREATE_COMMAND))
+                .willThrow(uniqueConflict("uk_reservation_holds_creation_command"))
+                .willThrow(lockFailure(mysqlCode))
+                .willReturn(expected);
+
+        ReservationHoldContracts.Result actual = facade.create(CREATE_COMMAND);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(delays).containsExactly(101L);
+        then(holdService).should(times(3)).create(CREATE_COMMAND);
+    }
+
+    @ParameterizedTest(name = "MySQL {0}")
+    @MethodSource("retryableMysqlCodes")
+    @DisplayName("생성 unique 충돌 뒤 replay의 기술 lock 재시도가 소진되면 COMMON_008이다")
+    void exhaustedReplayLockRetriesReturnConcurrentModification(int mysqlCode) {
+        List<Long> delays = new ArrayList<>();
+        ReservationHoldCommandFacade facade = facade(delays);
+        given(holdService.create(CREATE_COMMAND))
+                .willThrow(uniqueConflict("uk_reservation_holds_creation_command"))
+                .willThrow(lockFailure(mysqlCode))
+                .willThrow(lockFailure(mysqlCode))
+                .willThrow(lockFailure(mysqlCode));
+
+        assertThatThrownBy(() -> facade.create(CREATE_COMMAND))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
+
+        assertThat(delays).containsExactly(101L, 302L);
+        then(holdService).should(times(4)).create(CREATE_COMMAND);
+    }
+
     @Test
     @DisplayName("MySQL이 table-qualified 이름을 반환해도 생성 unique 충돌을 한 번 replay한다")
     void replaysCreateOnceAfterTableQualifiedUniqueConflict() {
