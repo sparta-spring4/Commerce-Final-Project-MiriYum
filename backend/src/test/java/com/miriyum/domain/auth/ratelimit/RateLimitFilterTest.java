@@ -120,7 +120,7 @@ class RateLimitFilterTest {
 
     @ParameterizedTest(name = "{2} {1}은 {0} 등급 한도({3})에서 정확히 허용/거부를 나눈다")
     @MethodSource("limitedRoutes")
-    @DisplayName("8개 제한 대상 경로 각각이 기대한 등급의 한도로 정확히 매핑된다")
+    @DisplayName("14개 제한 대상 경로 각각이 기대한 등급의 한도로 정확히 매핑된다")
     void eachLimitedRouteEnforcesItsOwnCategoryLimit(
             String categoryName, String path, String method, int maxRequests, String uniqueSuffix
     ) throws Exception {
@@ -148,12 +148,18 @@ class RateLimitFilterTest {
         return Stream.of(
                 Arguments.of("SIGN_UP", "/api/v1/consumers/auth/accounts", "POST", 5, "1"),
                 Arguments.of("LOGIN", "/api/v1/consumers/auth/sessions", "POST", 5, "2"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "3"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "4"),
-                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/accounts", "POST", 5, "5"),
-                Arguments.of("LOGIN", "/api/v1/store-operators/auth/sessions", "POST", 5, "6"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "7"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "8")
+                Arguments.of("LOGIN", "/api/v1/consumers/auth/kakao/authorizations", "POST", 5, "3"),
+                Arguments.of("LOGIN", "/api/v1/consumers/auth/kakao/sessions", "POST", 5, "4"),
+                Arguments.of("SIGN_UP", "/api/v1/consumers/auth/kakao/accounts", "POST", 5, "5"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "6"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "7"),
+                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/accounts", "POST", 5, "8"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/sessions", "POST", 5, "9"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/kakao/authorizations", "POST", 5, "10"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/kakao/sessions", "POST", 5, "11"),
+                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/kakao/accounts", "POST", 5, "12"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "13"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "14")
         );
     }
 
