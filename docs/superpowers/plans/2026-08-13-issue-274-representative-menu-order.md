@@ -47,10 +47,9 @@
 - `backend/src/test/java/com/miriyum/domain/menu/entity/RepresentativeMenuSettingTest.java`
 - `backend/src/test/java/com/miriyum/domain/menu/service/RepresentativeMenuServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/menu/controller/storeoperator/RepresentativeMenuControllerTest.java`
-- `backend/src/test/java/com/miriyum/domain/menu/repository/RepresentativeMenuRepositoryIT.java`
 - `backend/src/test/java/com/miriyum/domain/menu/service/RepresentativeMenuConcurrencyIT.java`
 - `backend/src/test/java/com/miriyum/domain/menu/RepresentativeMenuOpenApiContractTest.java`
-- Public representative projection assertions are colocated in `backend/src/test/java/com/miriyum/domain/menu/repository/RepresentativeMenuRepositoryIT.java` so the CI shard creates one MySQL/Spring context for the #274 repository boundary.
+- Repository, public representative projection, and concurrency assertions are colocated in `backend/src/test/java/com/miriyum/domain/menu/service/RepresentativeMenuConcurrencyIT.java`. The persistence assertions use a transactional nested test while sharing the same MySQL/Spring context, preventing an additional CI test context from exhausting the shard JVM heap.
 - `frontend/src/shared/api/generated/store-search.ts`: OpenAPI generated contract artifact required by frontend CI
 
 ### Modify
