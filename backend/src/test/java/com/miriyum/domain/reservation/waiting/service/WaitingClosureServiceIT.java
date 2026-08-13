@@ -248,7 +248,7 @@ class WaitingClosureServiceIT {
                 fixture.storeId, consumerId, teamId, Instant.now()));
         int attemptsBeforeRecovery = jdbc.queryForObject(
                 "SELECT attempt_count FROM waiting_closure_job_items", Integer.class);
-        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        expireLease();
         WaitingClosureClaim reclaimed = claim("owner-b").getFirst();
         assertThat(jdbc.queryForObject("SELECT attempt_count FROM waiting_closure_job_items", Integer.class))
                 .isEqualTo(attemptsBeforeRecovery + 1);
@@ -289,7 +289,7 @@ class WaitingClosureServiceIT {
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
                 .isEqualTo("PROCESSING");
 
-        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        expireLease();
         assertThat(claim("owner-b")).isEmpty();
 
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_job_items", String.class))
@@ -314,7 +314,7 @@ class WaitingClosureServiceIT {
         WaitingClosureClaim first = claim("runner-a").getFirst();
 
         assertThat(claim("runner-b")).isEmpty();
-        jdbc.update("UPDATE waiting_closure_job_items SET lease_until=DATE_SUB(NOW(6), INTERVAL 1 SECOND)");
+        expireLease();
         WaitingClosureClaim reclaimed = claim("runner-b").getFirst();
         assertThat(reclaimed.token()).isGreaterThan(first.token());
         assertThat(service.processClaimedItem(first)).isFalse();
@@ -346,6 +346,10 @@ class WaitingClosureServiceIT {
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 storeId, consumerId, team.getId(), mutableClock.instant().minusSeconds(60)));
         return new Fixture(operatorId, storeId);
+    }
+
+    private void expireLease() {
+        mutableClock.advance(Duration.ofSeconds(31));
     }
 
     private WaitingClosureCommandResult startClosure(

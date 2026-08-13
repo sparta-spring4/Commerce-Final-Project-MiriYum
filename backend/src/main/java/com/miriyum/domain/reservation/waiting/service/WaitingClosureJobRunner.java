@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.global.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import java.time.Duration;
@@ -9,6 +10,10 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 
 @Component
+@ConditionalOnProperty(
+        name = "miriyum.waiting.closure.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 @Slf4j
 public class WaitingClosureJobRunner {
     private final WaitingClosureService closureService;
