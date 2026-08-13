@@ -25,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
             "miriyum.jwt.issuer=miriyum"
         })
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-d")
 @Testcontainers(disabledWithoutDocker = true)
 class ApplicationJacksonConfigurationTest {
 

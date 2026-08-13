@@ -98,6 +98,12 @@ jobs:
           - shard: b
             task: integrationTestShardB
             report_directory: integrationTestShardB
+          - shard: c
+            task: integrationTestShardC
+            report_directory: integrationTestShardC
+          - shard: d
+            task: integrationTestShardD
+            report_directory: integrationTestShardD
     defaults:
       run:
         working-directory: backend

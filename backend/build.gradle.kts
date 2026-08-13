@@ -67,7 +67,14 @@ tasks.withType<Test> {
 val integrationTag = "integration"
 val integrationShardATag = "integration-shard-a"
 val integrationShardBTag = "integration-shard-b"
-val integrationShardTags = listOf(integrationShardATag, integrationShardBTag)
+val integrationShardCTag = "integration-shard-c"
+val integrationShardDTag = "integration-shard-d"
+val integrationShardTags = listOf(
+    integrationShardATag,
+    integrationShardBTag,
+    integrationShardCTag,
+    integrationShardDTag,
+)
 
 val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
     group = "verification"
@@ -130,6 +137,8 @@ fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.reg
 
 val integrationTestShardA = registerIntegrationTestShard("integrationTestShardA", integrationShardATag)
 val integrationTestShardB = registerIntegrationTestShard("integrationTestShardB", integrationShardBTag)
+val integrationTestShardC = registerIntegrationTestShard("integrationTestShardC", integrationShardCTag)
+val integrationTestShardD = registerIntegrationTestShard("integrationTestShardD", integrationShardDTag)
 
 tasks.check {
     dependsOn(integrationTest)
