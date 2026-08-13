@@ -40,6 +40,13 @@ class DomainPackageArchitectureTest {
             "search/repository/MenuAlternativeCandidateRepository.java",
             Set.of("menu", "store")
     );
+    private static final Set<String> APPROVED_NOTIFICATION_CONTRACT_TYPES = Set.of(
+            "com.miriyum.domain.notification.entity.NotificationActionAvailability",
+            "com.miriyum.domain.notification.entity.NotificationActionType",
+            "com.miriyum.domain.notification.entity.NotificationPurpose",
+            "com.miriyum.domain.notification.entity.NotificationResourceType",
+            "com.miriyum.domain.notification.entity.NotificationSourceDomain"
+    );
     private static final Pattern PACKAGE_PATTERN =
             Pattern.compile("(?m)^package\\s+([\\w.]+);");
     private static final Pattern IMPORT_PATTERN =
@@ -96,7 +103,36 @@ class DomainPackageArchitectureTest {
                                 imported, persistentTypes))
                         .noneMatch(imported -> !source.topLevelDomain()
                                 .equals(topLevelDomain(imported))
-                                && !isApprovedCrossDomainQueryRead(source, imported)));
+                                && !isApprovedCrossDomainQueryRead(source, imported)
+                                && !isApprovedNotificationContract(source, imported)));
+    }
+
+    @Test
+    void notificationContractExceptionRemainsLimitedToApprovedProducersAndTypes() {
+        SourceFile reservationSource = sourceInDomain("reservation");
+        SourceFile pickupSource = sourceInDomain("pickup");
+        SourceFile menuHoldSource = sourceInDomain("menuhold");
+
+        assertThat(isApprovedNotificationContract(
+                reservationSource,
+                "com.miriyum.domain.notification.entity.NotificationPurpose"
+        )).isTrue();
+        assertThat(isApprovedNotificationContract(
+                pickupSource,
+                "com.miriyum.domain.notification.entity.NotificationActionType"
+        )).isTrue();
+        assertThat(isApprovedNotificationContract(
+                menuHoldSource,
+                "com.miriyum.domain.notification.entity.NotificationPurpose"
+        )).isFalse();
+        assertThat(isApprovedNotificationContract(
+                reservationSource,
+                "com.miriyum.domain.notification.entity.NotificationTask"
+        )).isFalse();
+        assertThat(isApprovedNotificationContract(
+                pickupSource,
+                "com.miriyum.domain.notification.repository.NotificationTaskRepository"
+        )).isFalse();
     }
 
     @Test
@@ -243,6 +279,23 @@ class DomainPackageArchitectureTest {
                 && APPROVED_CROSS_DOMAIN_QUERY_READERS
                         .getOrDefault(source.relativePath(), Set.of())
                         .contains(topLevelDomain(imported));
+    }
+
+    private static boolean isApprovedNotificationContract(
+            SourceFile source,
+            String imported
+    ) {
+        return Set.of("reservation", "pickup").contains(source.topLevelDomain())
+                && APPROVED_NOTIFICATION_CONTRACT_TYPES.contains(imported);
+    }
+
+    private static SourceFile sourceInDomain(String domain) {
+        return new SourceFile(
+                domain + "/Example.java",
+                DOMAIN_PREFIX + domain,
+                List.of(),
+                ""
+        );
     }
 
     private static Map<String, Set<String>> domainDependencies(List<SourceFile> sources) {
