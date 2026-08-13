@@ -6,6 +6,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 public final class RefreshTokenRiskEventKey {
 
     private static final String PREFIX = "auth:risk:pending:";
+    private static final String PENDING_INDEX_KEY = "auth:risk:pending-index";
 
     private RefreshTokenRiskEventKey() {
     }
@@ -20,5 +21,9 @@ public final class RefreshTokenRiskEventKey {
 
     public static String pendingPattern() {
         return PREFIX + "*";
+    }
+
+    public static String pendingIndex() {
+        return PENDING_INDEX_KEY;
     }
 }

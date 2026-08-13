@@ -245,6 +245,15 @@ class DomainPackageArchitectureTest {
                         .contains(topLevelDomain(imported));
     }
 
+    private static SourceFile sourceInDomain(String domain) {
+        return new SourceFile(
+                domain + "/Example.java",
+                DOMAIN_PREFIX + domain,
+                List.of(),
+                ""
+        );
+    }
+
     private static Map<String, Set<String>> domainDependencies(List<SourceFile> sources) {
         Set<String> domains = sources.stream()
                 .map(SourceFile::topLevelDomain)

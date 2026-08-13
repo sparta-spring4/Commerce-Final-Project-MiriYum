@@ -1106,6 +1106,10 @@ components:
               value:
                 code: MENU_HOLD_002
                 message: 요청한 구간의 온라인 메뉴 수량이 부족합니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     ReservationStateConflict:
       description: 현재 상태 또는 취소 정책에서 명령 불가
       content:
@@ -1121,6 +1125,10 @@ components:
               value:
                 code: RESERVATION_006
                 message: 현재 취소 정책에서 처리할 수 없습니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     ReservationFulfillmentForbidden:
       description: 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음
       content:

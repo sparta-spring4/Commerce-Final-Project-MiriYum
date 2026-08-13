@@ -222,6 +222,24 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("Refresh Token 재사용 marker를 만들면 pending 인덱스에도 marker 키를 등록한다")
+    void indexesPendingRiskEventWhenRotatedTokenIsReused() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-index", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(
+                state.namespace(), state.familyId(), state.currentTokenHash());
+        assertThat(redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex()))
+                .containsExactly(markerKey);
+    }
+
+    @Test
     @DisplayName("전달 중 재사용 횟수가 바뀐 위험 marker는 삭제하지 않는다")
     void keepsRiskMarkerWhenOccurrenceCountChangesDuringDelivery() {
         Instant now = Instant.now();
@@ -242,6 +260,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 .satisfies(event -> assertThat(event.occurrenceCount()).isEqualTo(2L));
         assertThat(markerStore.deleteIfUnchanged(markerKey, 2L)).isTrue();
         assertThat(markerStore.findPendingEvents()).isEmpty();
+        assertThat(redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex())).isEmpty();
     }
 
     @Test

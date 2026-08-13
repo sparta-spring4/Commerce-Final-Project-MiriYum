@@ -1,9 +1,9 @@
 package com.miriyum.domain.notification.repository;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
