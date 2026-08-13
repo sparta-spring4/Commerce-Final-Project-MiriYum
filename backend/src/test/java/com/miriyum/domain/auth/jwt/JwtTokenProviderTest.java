@@ -53,13 +53,39 @@ class JwtTokenProviderTest {
     void rejectsRefreshTokenUsedAsAccessToken() {
         // given
         JwtTokenProvider provider = new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
-        String refreshToken = provider.generateRefreshToken(TokenNamespace.CONSUMER, 7L);
+        String refreshToken = provider.generateRefreshToken(TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
 
         // when & then
         assertThatThrownBy(() -> provider.parseAccessToken(refreshToken))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("Refresh JWT는 Valkey family와 현재 token 식별자를 보존한다")
+    void parsesRefreshIdentityClaims() {
+        JwtTokenProvider provider = new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+
+        String refreshToken = provider.generateRefreshToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
+        ParsedToken parsed = provider.parseRefreshToken(refreshToken);
+
+        assertThat(parsed.familyId()).isEqualTo("family-1");
+        assertThat(parsed.tokenId()).isEqualTo("token-1");
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token은 로그아웃용 파싱에서 없는 상태로 처리한다")
+    void treatsExpiredRefreshTokenAsAbsentForLogout() {
+        JwtTokenProvider issuingProvider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+        String refreshToken = issuingProvider.generateRefreshToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1");
+        JwtTokenProvider verifyingProvider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-08-13T00:00:00Z"));
+
+        assertThat(verifyingProvider.parseRefreshTokenForLogout(refreshToken)).isNull();
     }
 
     @Test

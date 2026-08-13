@@ -94,7 +94,7 @@ class ConsumerAccountControllerTest {
 
     /**
      * C-013은 "subject에 해당하는 현재 계정을 확인할 수 없음"을 401로 정한다. 계정이 사라진 뒤에도
-     * Access Token은 최대 1시간 살아 있으므로 이 경로가 실제로 열린다(이슈 #72).
+     * Access Token은 최대 15분 살아 있으므로 이 경로가 실제로 열린다(이슈 #72).
      *
      * <p>응답이 잘못된 토큰의 401과 완전히 같아야 계정 삭제 여부가 드러나지 않는다. ErrorResponse는
      * {@code code}·{@code message}만 담고 시각·경로 같은 변동 필드가 없어 본문을 그대로 비교한다.</p>
