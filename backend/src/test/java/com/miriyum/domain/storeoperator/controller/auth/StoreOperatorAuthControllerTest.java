@@ -29,7 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * SCALE-014, 이슈 #63).</p>
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-c")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
