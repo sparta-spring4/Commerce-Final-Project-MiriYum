@@ -37,7 +37,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 확인하려는 건 계정 단위 지연이므로, IP 한도만 넉넉히 올려 계정 지연을 격리해서 검증한다.</p>
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

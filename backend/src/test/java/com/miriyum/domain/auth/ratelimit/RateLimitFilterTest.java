@@ -35,7 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014).
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-d")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
