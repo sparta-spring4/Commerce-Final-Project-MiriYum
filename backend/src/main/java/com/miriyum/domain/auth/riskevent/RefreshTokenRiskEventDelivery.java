@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,6 +15,10 @@ import org.springframework.stereotype.Component;
 
 /** Valkey pending 위험 사건을 MySQL에 전달하고 성공한 marker만 제거한다. */
 @Component
+@ConditionalOnProperty(
+        name = "miriyum.auth.refresh-risk-event-delivery.enabled",
+        havingValue = "true"
+)
 public class RefreshTokenRiskEventDelivery {
 
     private static final Logger log = LoggerFactory.getLogger(RefreshTokenRiskEventDelivery.class);

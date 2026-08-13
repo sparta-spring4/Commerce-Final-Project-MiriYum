@@ -34,7 +34,8 @@ import org.testcontainers.mysql.MySQLContainer;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.auth.refresh-risk-event-delivery.enabled=true"
         })
 class RefreshTokenRiskEventDeliveryIntegrationTest {
 

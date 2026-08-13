@@ -102,6 +102,11 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertTrue(self.compose_config["networks"]["backend-valkey"]["internal"])
         self.assertNotIn("ports", services["valkey"])
 
+    def test_staging_enables_refresh_risk_event_delivery_explicitly(self):
+        backend_environment = self.compose_config["services"]["backend"]["environment"]
+
+        self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
+
     def test_valkey_preserves_auth_state_with_aof_and_noeviction(self):
         valkey = self.compose_config["services"]["valkey"]
         self.assertEqual(
