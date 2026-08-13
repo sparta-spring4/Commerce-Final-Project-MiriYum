@@ -319,7 +319,7 @@ components:
                 message: Access Token이 필요합니다.
             SessionInvalid:
               value:
-                code: AUTH_013
+                code: AUTH_015
                 message: 플랫폼 운영자 세션이 더 이상 유효하지 않습니다.
     AccountRestricted:
       description: 플랫폼 운영자 계정이 중지됨

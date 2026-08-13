@@ -28,6 +28,10 @@ public class JwtTokenProvider {
     private static final String CLAIM_TOKEN_TYPE = "tokenType";
     private static final String CLAIM_FAMILY_ID = "familyId";
     private static final String CLAIM_TOKEN_ID = "tokenId";
+    private static final String CLAIM_SESSION_ID = "sessionId";
+    private static final String CLAIM_AUTHORITY_VERSION = "authorityVersion";
+    private static final String CLAIM_SESSION_VERSION = "sessionVersion";
+    private static final String CLAIM_PASSWORD_CHANGE_REQUIRED = "passwordChangeRequired";
 
     // Access Token은 무상태 검증이라 발급 후 서버가 되돌릴 수 없다. revokeAll이 session epoch를
     // 올려도 이미 발급된 Access Token은 만료까지 유효하므로, 그 노출 창을 15분으로 제한한다(AUTH-007).
@@ -57,11 +61,38 @@ public class JwtTokenProvider {
     }
 
     public String generateAccessToken(TokenNamespace namespace, Long accountId) {
-        return generateToken(namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null);
+        return generateToken(namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, null);
+    }
+
+    public String generateAccessToken(
+            TokenNamespace namespace,
+            Long accountId,
+            SessionTokenClaims sessionClaims
+    ) {
+        return generateToken(
+                namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, sessionClaims);
     }
 
     public String generateRefreshToken(TokenNamespace namespace, Long accountId, String familyId, String tokenId) {
-        return generateToken(namespace, accountId, TokenType.REFRESH, REFRESH_TOKEN_VALIDITY, familyId, tokenId);
+        return generateToken(
+                namespace, accountId, TokenType.REFRESH, REFRESH_TOKEN_VALIDITY, familyId, tokenId, null);
+    }
+
+    public String generateRefreshToken(
+            TokenNamespace namespace,
+            Long accountId,
+            String familyId,
+            String tokenId,
+            SessionTokenClaims sessionClaims
+    ) {
+        return generateToken(
+                namespace,
+                accountId,
+                TokenType.REFRESH,
+                REFRESH_TOKEN_VALIDITY,
+                familyId,
+                tokenId,
+                sessionClaims);
     }
 
     public ParsedToken parseAccessToken(String token) {
@@ -99,7 +130,8 @@ public class JwtTokenProvider {
             TokenType tokenType,
             Duration validity,
             String familyId,
-            String tokenId
+            String tokenId,
+            SessionTokenClaims sessionClaims
     ) {
         Instant now = clock.instant();
         String subject = namespace.value() + ":" + accountId;
@@ -112,6 +144,12 @@ public class JwtTokenProvider {
                 .claim(CLAIM_TOKEN_TYPE, tokenType.name())
                 .claim(CLAIM_FAMILY_ID, familyId)
                 .claim(CLAIM_TOKEN_ID, tokenId)
+                .claim(CLAIM_SESSION_ID, sessionClaims == null ? null : sessionClaims.sessionId())
+                .claim(CLAIM_AUTHORITY_VERSION, sessionClaims == null ? null : sessionClaims.authorityVersion())
+                .claim(CLAIM_SESSION_VERSION, sessionClaims == null ? null : sessionClaims.sessionVersion())
+                .claim(
+                        CLAIM_PASSWORD_CHANGE_REQUIRED,
+                        sessionClaims == null ? null : sessionClaims.passwordChangeRequired())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(validity)))
                 .signWith(key)
@@ -157,13 +195,49 @@ public class JwtTokenProvider {
 
         try {
             Long accountId = Long.valueOf(subject.substring(separatorIndex + 1));
+            SessionTokenClaims sessionClaims = parseSessionClaims(claims, namespace, invalidCode);
             return new ParsedToken(
                     namespace,
                     accountId,
                     claims.get(CLAIM_FAMILY_ID, String.class),
-                    claims.get(CLAIM_TOKEN_ID, String.class));
-        } catch (NumberFormatException exception) {
+                    claims.get(CLAIM_TOKEN_ID, String.class),
+                    sessionClaims);
+        } catch (IllegalArgumentException exception) {
             throw new ServiceException(invalidCode);
         }
+    }
+
+    private SessionTokenClaims parseSessionClaims(
+            Claims claims,
+            TokenNamespace namespace,
+            ErrorCode invalidCode
+    ) {
+        String sessionId = claims.get(CLAIM_SESSION_ID, String.class);
+        Number authorityVersion = claims.get(CLAIM_AUTHORITY_VERSION, Number.class);
+        Number sessionVersion = claims.get(CLAIM_SESSION_VERSION, Number.class);
+        Boolean passwordChangeRequired = claims.get(CLAIM_PASSWORD_CHANGE_REQUIRED, Boolean.class);
+        boolean absent = sessionId == null
+                && authorityVersion == null
+                && sessionVersion == null
+                && passwordChangeRequired == null;
+
+        if (namespace != TokenNamespace.PLATFORM_OPERATOR) {
+            if (!absent) {
+                throw new ServiceException(invalidCode);
+            }
+            return null;
+        }
+        if (absent
+                || sessionId == null
+                || authorityVersion == null
+                || sessionVersion == null
+                || passwordChangeRequired == null) {
+            throw new ServiceException(invalidCode);
+        }
+        return new SessionTokenClaims(
+                sessionId,
+                authorityVersion.longValue(),
+                sessionVersion.longValue(),
+                passwordChangeRequired);
     }
 }
