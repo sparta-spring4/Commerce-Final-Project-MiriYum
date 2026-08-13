@@ -250,15 +250,86 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         )
         backfill_function = self.deploy_script[function_start:function_end]
 
-        self.assertIn("auth:risk:pending-index:backfill-v1", backfill_function)
         self.assertIn("auth:risk:pending:*", backfill_function)
         self.assertIn("auth:risk:pending-index", backfill_function)
         self.assertIn("SADD", backfill_function)
-        self.assertIn('SET "$done_key" completed NX', backfill_function)
-        self.assertLess(
-            backfill_function.index('while :; do'),
-            backfill_function.index('SET "$done_key" completed NX'),
-        )
+        self.assertNotIn("backfill-v1", backfill_function)
+
+    def test_deployment_repeats_backfill_after_legacy_rollback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            marker_path = self.to_bash_path(temporary_path / "indexed-markers")
+            scan_count_path = self.to_bash_path(temporary_path / "scan-count")
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+case "$1" in
+  SCAN)
+    count=0
+    [[ -f "$RISK_SCAN_COUNT_PATH" ]] && count=$(cat "$RISK_SCAN_COUNT_PATH")
+    count=$((count + 1))
+    printf '%s\\n' "$count" > "$RISK_SCAN_COUNT_PATH"
+
+    if [[ "$count" -eq 1 ]]; then
+      printf '0\\nauth:risk:pending:before-rollback\\n'
+    else
+      printf '0\\nauth:risk:pending:legacy-rollback\\n'
+    fi
+    ;;
+  SADD)
+    printf '%s\\n' "$3" >> "$RISK_MARKER_TEST_PATH"
+    echo 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+backfill_pending_risk_event_index
+# 구버전으로 롤백된 동안 새 marker가 생긴 뒤 다시 전진 배포한 상황을 재현한다.
+backfill_pending_risk_event_index
+""",
+                {
+                    "RISK_MARKER_TEST_PATH": marker_path,
+                    "RISK_SCAN_COUNT_PATH": scan_count_path,
+                    "TEST_VALKEY_BIN": self.to_bash_path(bin_path),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(
+                [
+                    "auth:risk:pending:before-rollback",
+                    "auth:risk:pending:legacy-rollback",
+                ],
+                Path(directory, "indexed-markers").read_text(encoding="utf-8").splitlines(),
+            )
 
     def test_valkey_health_wait_accepts_starting_then_healthy(self):
         with tempfile.TemporaryDirectory() as directory:

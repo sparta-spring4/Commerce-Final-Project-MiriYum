@@ -104,4 +104,4 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 
 - Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
 - Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
-- pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 한 번 이관한다. 이관 완료 표식은 전체 scan 성공 뒤에만 기록하므로 중간 실패 시 다음 배포에서 다시 시도한다.
+- pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 매 전진 배포마다 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 멱등하게 이관한다. 구버전 롤백 중 생성된 marker도 다음 전진 배포에서 다시 등록되며, `SADD`는 이미 등록된 marker를 중복 생성하지 않는다. 후속 전달 경로는 Set만 조회해 평상시 전 keyspace `SCAN`을 사용하지 않는다.
