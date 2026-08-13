@@ -1,10 +1,12 @@
 package com.miriyum.domain.storeoperator.controller.auth;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -71,5 +73,16 @@ class StoreOperatorAuthControllerTest {
                         .content(requestBody))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.accountType").value("STORE_OPERATOR"));
+    }
+
+    @Test
+    @DisplayName("Refresh 쿠키 없이도 CSRF 검증을 통과하면 로그아웃이 성공한다")
+    void logoutSucceedsWithoutRefreshCookie() throws Exception {
+        String csrfToken = "store-operator-logout-csrf-token";
+
+        mockMvc.perform(delete("/api/v1/store-operators/auth/sessions/current")
+                        .cookie(new Cookie("MIRIYUM_STORE_OPERATOR_XSRF_TOKEN", csrfToken))
+                        .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk());
     }
 }

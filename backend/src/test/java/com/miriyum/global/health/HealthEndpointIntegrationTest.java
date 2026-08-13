@@ -14,6 +14,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -31,9 +35,24 @@ import org.testcontainers.mysql.MySQLContainer;
         properties = "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes")
 class HealthEndpointIntegrationTest {
 
+    private static final String VALKEY_PASSWORD = "test-valkey-password";
+
     @Container
     @ServiceConnection
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+
+    @Container
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(
+            DockerImageName.parse("valkey/valkey:8.1-alpine"))
+            .withExposedPorts(6379)
+            .withCommand("valkey-server", "--requirepass", VALKEY_PASSWORD);
+
+    @DynamicPropertySource
+    static void valkeyProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.data.redis.host", VALKEY::getHost);
+        registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
+        registry.add("spring.data.redis.password", () -> VALKEY_PASSWORD);
+    }
 
     @LocalServerPort
     private int port;
