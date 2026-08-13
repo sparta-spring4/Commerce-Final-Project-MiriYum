@@ -11,6 +11,7 @@ import com.miriyum.domain.auth.cookie.OriginValidator;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.consumer.service.ConsumerKakaoAuthService;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -44,6 +45,9 @@ class ConsumerAuthControllerLogoutTest {
     private JwtTokenProvider jwtTokenProvider;
 
     @Mock
+    private ConsumerKakaoAuthService consumerKakaoAuthService;
+
+    @Mock
     private OriginValidator originValidator;
 
     private ConsumerAuthController controller;
@@ -54,8 +58,10 @@ class ConsumerAuthControllerLogoutTest {
     void setUp() {
         controller = new ConsumerAuthController(
                 consumerAuthService,
+                consumerKakaoAuthService,
                 jwtTokenProvider,
                 new AuthCookieFactory(),
+                null,
                 new CsrfTokenGenerator(),
                 originValidator);
         request = new MockHttpServletRequest();

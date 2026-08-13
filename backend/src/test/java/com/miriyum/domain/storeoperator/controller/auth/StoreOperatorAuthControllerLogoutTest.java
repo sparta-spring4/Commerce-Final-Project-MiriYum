@@ -12,6 +12,7 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
+import com.miriyum.domain.storeoperator.service.StoreOperatorKakaoAuthService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import jakarta.servlet.http.Cookie;
@@ -44,6 +45,9 @@ class StoreOperatorAuthControllerLogoutTest {
     private JwtTokenProvider jwtTokenProvider;
 
     @Mock
+    private StoreOperatorKakaoAuthService storeOperatorKakaoAuthService;
+
+    @Mock
     private OriginValidator originValidator;
 
     private StoreOperatorAuthController controller;
@@ -54,8 +58,10 @@ class StoreOperatorAuthControllerLogoutTest {
     void setUp() {
         controller = new StoreOperatorAuthController(
                 storeOperatorAuthService,
+                storeOperatorKakaoAuthService,
                 jwtTokenProvider,
                 new AuthCookieFactory(),
+                null,
                 new CsrfTokenGenerator(),
                 originValidator);
         request = new MockHttpServletRequest();
