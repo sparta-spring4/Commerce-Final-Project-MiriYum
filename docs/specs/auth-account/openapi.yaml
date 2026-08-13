@@ -624,7 +624,7 @@ components:
           const: Bearer
         expiresIn:
           type: integer
-          const: 3600
+          const: 900
           description: Access JWT 수명(초)
     CsrfTokenData:
       type: object

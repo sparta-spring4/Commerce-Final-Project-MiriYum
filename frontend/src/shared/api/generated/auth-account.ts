@@ -150,7 +150,7 @@ export interface components {
        * @description Access JWT 수명(초)
        * @constant
        */
-      expiresIn: 3600;
+      expiresIn: 900;
     };
     CsrfTokenData: {
       token: string;

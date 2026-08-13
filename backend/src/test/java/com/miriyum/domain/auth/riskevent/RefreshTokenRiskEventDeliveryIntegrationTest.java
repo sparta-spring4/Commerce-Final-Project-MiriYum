@@ -10,6 +10,8 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.refreshtoken.PendingRefreshTokenRiskEvent;
 import com.miriyum.domain.auth.refreshtoken.ValkeyRefreshTokenRiskEventMarkerStore;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -100,9 +102,44 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
 
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT occurrence_count FROM auth_risk_events", Long.class)).isEqualTo(3L);
+        // DATETIME(6)에는 시간대가 없다. UTC로 저장하므로 UTC로 해석해야 한다.
+        // Timestamp.toInstant()는 JVM 기본 시간대로 해석해 KST 환경에서 9시간 어긋난다.
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT last_occurred_at FROM auth_risk_events", java.sql.Timestamp.class).toInstant())
+                "SELECT last_occurred_at FROM auth_risk_events", LocalDateTime.class)
+                .toInstant(ZoneOffset.UTC))
                 .isEqualTo(Instant.parse("2026-08-10T00:02:00Z"));
+    }
+
+    @Test
+    @DisplayName("occurred_at과 created_at을 같은 UTC 기준으로 저장한다")
+    void storesAllTimestampColumnsInUtc() {
+        // given
+        Instant occurredAt = Instant.now().minusSeconds(60);
+        PendingRefreshTokenRiskEvent recentEvent = new PendingRefreshTokenRiskEvent(
+                "auth:risk:pending:consumer:family-utc:"
+                        + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-utc",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "REUSED_ROTATED_TOKEN",
+                "ROTATION",
+                "AUTH-012-v1",
+                occurredAt,
+                1L,
+                occurredAt);
+        given(markerStore.findPendingEvents()).willReturn(List.of(recentEvent));
+
+        // when
+        delivery.deliverPendingEvents();
+
+        // then
+        // created_at은 서버가 UTC_TIMESTAMP(6)으로 채우고 occurred_at은 애플리케이션이 넘긴다.
+        // 두 값의 기준이 다르면 시간대 차이만큼(KST면 9시간) 벌어진다.
+        long gapSeconds = jdbcTemplate.queryForObject(
+                "SELECT ABS(TIMESTAMPDIFF(SECOND, occurred_at, created_at)) FROM auth_risk_events",
+                Long.class);
+        assertThat(gapSeconds).isLessThan(600L);
     }
 
     private PendingRefreshTokenRiskEvent event(long occurrenceCount, Instant lastOccurredAt) {

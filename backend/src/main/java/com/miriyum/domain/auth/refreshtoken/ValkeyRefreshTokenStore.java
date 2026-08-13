@@ -5,6 +5,8 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -14,6 +16,8 @@ import org.springframework.stereotype.Component;
 /** Lua 원자 연산으로 Refresh Token family 상태를 Valkey에 저장한다. */
 @Component
 public class ValkeyRefreshTokenStore implements RefreshTokenStore {
+
+    private static final Logger log = LoggerFactory.getLogger(ValkeyRefreshTokenStore.class);
 
     private static final RedisScript<Long> CREATE_SCRIPT = new DefaultRedisScript<>("""
             local currentSessionEpoch = redis.call('GET', KEYS[3])
@@ -78,7 +82,6 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 return 3
             end
             redis.call('SADD', KEYS[2], KEYS[1])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
             redis.call('HSET', KEYS[1],
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
@@ -141,10 +144,25 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(state.lastRotatedAt()),
                 epochSeconds(state.familyExpiresAt()),
                 Long.toString(expectedSessionEpoch));
-        return switch (result == null ? 0 : result.intValue()) {
+        if (result == null) {
+            log.error("Refresh Token family 생성 스크립트가 결과를 반환하지 않았습니다. namespace={}, accountId={}",
+                    state.namespace().value(), state.accountId());
+            throw unavailable();
+        }
+        return switch (result.intValue()) {
             case 1 -> new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED);
             case 2 -> new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.SESSION_EPOCH_CHANGED);
-            default -> throw unavailable();
+            // familyId는 256bit 난수라 충돌은 사실상 일어나지 않는다. 그래도 스크립트가 아예 실행되지
+            // 않은 경우와 같은 COMMON_012로 묶이면 장애 때 원인을 좁힐 수 없어 따로 기록한다.
+            case 0 -> {
+                log.error("Refresh Token family key가 이미 존재합니다. namespace={}, accountId={}",
+                        state.namespace().value(), state.accountId());
+                throw unavailable();
+            }
+            default -> {
+                log.error("Refresh Token family 생성 스크립트가 예상치 못한 값을 반환했습니다. result={}", result);
+                throw unavailable();
+            }
         };
     }
 
@@ -184,9 +202,10 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(nextFamilyExpiresAt),
                 namespace.value(),
                 familyId);
+        // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 그 밖의 값과 null은
+        // 모두 NOT_FOUND로 모아 재발급을 거부한다.
         return switch (result == null ? 0 : result.intValue()) {
             case 1 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED);
-            case 2 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REVOKED);
             case 3 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REUSED);
             default -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.NOT_FOUND);
         };

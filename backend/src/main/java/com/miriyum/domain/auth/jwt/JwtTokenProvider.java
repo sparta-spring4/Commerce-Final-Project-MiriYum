@@ -29,7 +29,9 @@ public class JwtTokenProvider {
     private static final String CLAIM_FAMILY_ID = "familyId";
     private static final String CLAIM_TOKEN_ID = "tokenId";
 
-    private static final Duration ACCESS_TOKEN_VALIDITY = Duration.ofHours(1);
+    // Access Token은 무상태 검증이라 발급 후 서버가 되돌릴 수 없다. revokeAll이 session epoch를
+    // 올려도 이미 발급된 Access Token은 만료까지 유효하므로, 그 노출 창을 15분으로 제한한다(AUTH-007).
+    private static final Duration ACCESS_TOKEN_VALIDITY = Duration.ofMinutes(15);
     private static final Duration REFRESH_TOKEN_VALIDITY = Duration.ofDays(14);
 
     private final SecretKey key;

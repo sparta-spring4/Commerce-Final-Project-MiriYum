@@ -12,7 +12,6 @@ public record RefreshTokenRotationResult(Status status) {
     public enum Status {
         ROTATED,
         NOT_FOUND,
-        REVOKED,
         REUSED
     }
 
