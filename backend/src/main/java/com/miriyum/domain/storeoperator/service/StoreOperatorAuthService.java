@@ -13,6 +13,8 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
@@ -33,6 +35,7 @@ public class StoreOperatorAuthService {
     private final PasswordPolicy passwordPolicy;
     private final LoginDelayGuard loginDelayGuard;
     private final PhoneNumberPolicy phoneNumberPolicy;
+    private final RefreshTokenManager refreshTokenManager;
 
     public StoreOperatorAuthService(
             StoreOperatorAccountRepository storeOperatorAccountRepository,
@@ -40,7 +43,8 @@ public class StoreOperatorAuthService {
             JwtTokenProvider jwtTokenProvider,
             PasswordPolicy passwordPolicy,
             LoginDelayGuard loginDelayGuard,
-            PhoneNumberPolicy phoneNumberPolicy
+            PhoneNumberPolicy phoneNumberPolicy,
+            RefreshTokenManager refreshTokenManager
     ) {
         this.storeOperatorAccountRepository = storeOperatorAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -48,6 +52,7 @@ public class StoreOperatorAuthService {
         this.passwordPolicy = passwordPolicy;
         this.loginDelayGuard = loginDelayGuard;
         this.phoneNumberPolicy = phoneNumberPolicy;
+        this.refreshTokenManager = refreshTokenManager;
     }
 
     @Transactional
@@ -112,10 +117,13 @@ public class StoreOperatorAuthService {
                 throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
             }
 
-            if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, account.getId());
+            StoreOperatorAccount currentAccount = storeOperatorAccountRepository.findById(account.getId())
+                    .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+            if (currentAccount.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
-            return issueTokenPair(account.getId());
+            return issueTokenPair(currentAccount.getId(), sessionEpoch);
         } finally {
             if (!completed) {
                 loginDelayGuard.releaseAttempt(TokenNamespace.STORE_OPERATOR, account.getId(), attempt);
@@ -136,28 +144,37 @@ public class StoreOperatorAuthService {
 
         StoreOperatorAccount account = storeOperatorAccountRepository.findById(parsed.accountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
+                TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
+        if (attempt.reused() && account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
+        }
+        if (!attempt.rotated()) {
+            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        }
+        TokenPair tokenPair = attempt.tokenPair();
         if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
 
-        return issueTokenPair(account.getId());
+        return tokenPair;
     }
 
     public void logout(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
+            return;
         }
 
-        ParsedToken parsed = jwtTokenProvider.parseRefreshToken(refreshToken);
-        if (parsed.namespace() != TokenNamespace.STORE_OPERATOR) {
-            throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
+        ParsedToken parsed = jwtTokenProvider.parseRefreshTokenForLogout(refreshToken);
+        if (parsed == null || parsed.namespace() != TokenNamespace.STORE_OPERATOR) {
+            return;
         }
+        refreshTokenManager.revoke(TokenNamespace.STORE_OPERATOR, parsed);
     }
 
-    private TokenPair issueTokenPair(Long accountId) {
-        return new TokenPair(
-                jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, accountId),
-                jwtTokenProvider.generateRefreshToken(TokenNamespace.STORE_OPERATOR, accountId));
+    private TokenPair issueTokenPair(Long accountId, long sessionEpoch) {
+        return refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, accountId, sessionEpoch);
     }
 
     private boolean matchesPassword(String rawPassword, String encodedPassword) {
