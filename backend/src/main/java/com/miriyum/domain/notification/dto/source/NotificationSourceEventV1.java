@@ -1,8 +1,5 @@
 package com.miriyum.domain.notification.dto.source;
 
-import com.miriyum.domain.notification.entity.NotificationPurpose;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.entity.NotificationSourceDomain;
 import java.time.OffsetDateTime;
 import java.util.Objects;
 

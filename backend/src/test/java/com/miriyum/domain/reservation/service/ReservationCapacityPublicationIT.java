@@ -148,6 +148,9 @@ class ReservationCapacityPublicationIT {
         reservationLockQueryStarted = null;
         RESERVATION_LOCK_QUERY_ATTEMPTS.set(0);
         RESERVATION_LOCK_WAITS_OBSERVED.set(0);
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
