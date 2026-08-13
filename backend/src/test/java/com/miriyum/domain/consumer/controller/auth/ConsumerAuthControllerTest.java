@@ -3,6 +3,7 @@ package com.miriyum.domain.consumer.controller.auth;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
@@ -35,7 +36,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         classes = MiriyumApplication.class,
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.kakao.enabled=true",
+            "miriyum.kakao.rest-api-key=test-kakao-rest-api-key",
+            "miriyum.kakao.client-secret=test-kakao-client-secret",
+            "miriyum.kakao.redirect-uris=https://app.example.com/auth/kakao/callback"
         })
 @AutoConfigureMockMvc
 class ConsumerAuthControllerTest {
@@ -77,7 +82,67 @@ class ConsumerAuthControllerTest {
     }
 
     @Test
-    @DisplayName("Refresh 쿠키 없이도 CSRF 검증을 통과하면 로그아웃이 성공한다")
+    @DisplayName("카카오 인가 주소를 발급하면 같은 브라우저 검증용 state 쿠키를 설정한다")
+    void createsKakaoAuthorizationWithStateCookie() throws Exception {
+        // when & then
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/authorizations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "redirectUri": "https://app.example.com/auth/kakao/callback" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString(
+                        "MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE=")))
+                .andExpect(jsonPath("$.data.authorizationUrl").exists());
+    }
+
+    @Test
+    @DisplayName("카카오 state 쿠키 없이 콜백을 보내면 외부 카카오 호출 전에 거절한다")
+    void rejectsKakaoCallbackWithoutStateCookie() throws Exception {
+        // when & then
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "authorizationCode": "unused-code",
+                                  "state": "untrusted-state",
+                                  "redirectUri": "https://app.example.com/auth/kakao/callback"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_013"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE="),
+                        org.hamcrest.Matchers.containsString("Max-Age=0"))));
+    }
+
+    @Test
+    @DisplayName("카카오 콜백의 state 검증이 실패하면 기존 state 쿠키를 즉시 만료한다")
+    void expiresKakaoStateCookieWhenCallbackStateDoesNotMatch() throws Exception {
+        // 카카오 화면에서 취소 후 변조되거나 만료된 콜백이 돌아온 경우를 포함한다.
+        Cookie issuedStateCookie = new Cookie(
+                "MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE", "issued-state");
+
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/sessions")
+                        .cookie(issuedStateCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "authorizationCode": "unused-code",
+                                  "state": "cancelled-or-invalid-state",
+                                  "redirectUri": "https://app.example.com/auth/kakao/callback"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_013"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE="),
+                        org.hamcrest.Matchers.containsString("Max-Age=0"))));
+
+    }
+
+    @Test
+    @DisplayName("Refresh cookie가 없어도 CSRF 검증을 통과하면 로그아웃에 성공한다")
     void logoutSucceedsWithoutRefreshCookie() throws Exception {
         String csrfToken = "consumer-logout-csrf-token";
 
@@ -86,4 +151,5 @@ class ConsumerAuthControllerTest {
                         .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isOk());
     }
+
 }

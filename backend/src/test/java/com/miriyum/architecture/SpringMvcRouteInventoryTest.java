@@ -28,6 +28,15 @@ class SpringMvcRouteInventoryTest {
                 .hasMessageContaining("AmbiguousController");
     }
 
+    @Test
+    void includesInheritedMappedHandlerMethods() {
+        assertThat(SpringMvcRouteInventory.routesFor(InheritedController.class))
+                .extracting(ControllerRoute::route)
+                .containsExactly(new ApiRoute(
+                        org.springframework.web.bind.annotation.RequestMethod.POST,
+                        "/api/v1/stores/{storeId}/alternative-searches"));
+    }
+
     @RestController
     @RequestMapping("/api/v1/consumers/me")
     private static class ReservationCancellationController {
@@ -46,5 +55,18 @@ class SpringMvcRouteInventoryTest {
         HttpStatus ambiguous() {
             return HttpStatus.OK;
         }
+    }
+
+    private abstract static class BaseController {
+
+        @PostMapping("/{storeId}/alternative-searches")
+        HttpStatus search() {
+            return HttpStatus.OK;
+        }
+    }
+
+    @RestController
+    @RequestMapping("/api/v1/stores")
+    private static class InheritedController extends BaseController {
     }
 }

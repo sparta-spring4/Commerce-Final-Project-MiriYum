@@ -79,6 +79,26 @@ class OpenApiRouteInventoryTest {
                 .anyMatch(error -> error.contains("/api/v1/c") && error.contains("positive"));
     }
 
+    @Test
+    void rejectsContractOnlyMetadataDeclaredOnAnOperation() throws IOException {
+        write("waiting/openapi.yaml", """
+                openapi: 3.1.0
+                paths:
+                  /api/v1/store-operators/stores/{storeId}/waiting-settings:
+                    put:
+                      x-miriyum-runtime-status: contract-only
+                      x-miriyum-owner-issue: 271
+                      responses: {}
+                """);
+
+        OpenApiRouteInventory inventory = OpenApiRouteInventory.load(specsRoot);
+
+        assertThat(inventory.metadataErrors())
+                .singleElement()
+                .asString()
+                .contains("operation-level", "PUT", "waiting-settings");
+    }
+
     private void write(String relativePath, String content) throws IOException {
         Path file = specsRoot.resolve(relativePath);
         Files.createDirectories(file.getParent());

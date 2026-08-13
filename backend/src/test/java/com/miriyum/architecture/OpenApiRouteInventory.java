@@ -105,6 +105,13 @@ record OpenApiRouteInventory(
                 if (!pathItem.containsKey(operation)) {
                     continue;
                 }
+                Map<String, Object> operationItem = map(pathItem.get(operation));
+                if (operationItem.containsKey(RUNTIME_STATUS)
+                        || operationItem.containsKey(OWNER_ISSUE)) {
+                    errors.add(file + " " + path + " " + operation.toUpperCase()
+                            + ": operation-level contract metadata is forbidden; "
+                            + "declare it on the path item");
+                }
                 ApiRoute route = new ApiRoute(RequestMethod.valueOf(operation.toUpperCase()), path);
                 if (isContractOnly) {
                     contractOnly.add(route);

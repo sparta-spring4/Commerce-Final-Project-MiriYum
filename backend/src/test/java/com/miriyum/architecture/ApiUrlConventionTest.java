@@ -2,108 +2,87 @@ package com.miriyum.architecture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.List;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Set;
-import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.RequestMethod;
 
 class ApiUrlConventionTest {
 
-    private static final Pattern FIXED_SEGMENT = Pattern.compile("[a-z][a-z0-9]*(?:-[a-z0-9]+)*");
-    private static final Set<String> COMMAND_SEGMENTS = Set.of(
-            "call", "arrive", "check-in", "cancel", "search",
-            "publication", "publication-cancellation", "retirement");
-    private static final Set<String> POST_SINGLETON_EXCEPTIONS = Set.of("portone");
-    private static final Set<String> SELF_OWNED_CONSUMER_COLLECTIONS = Set.of(
-            "reservations", "pickup-reservations", "payments");
+    private static final Path SPECS_ROOT = Path.of("..", "docs", "specs");
 
     @Test
-    void controllerPackagesUseTheirCanonicalAudienceNamespace() {
-        Set<ControllerRoute> routes = SpringMvcRouteInventory.routes();
-        List<ControllerRoute> violations = routes.stream()
-                .filter(route -> !usesCanonicalAudienceNamespace(route))
-                .toList();
+    void rejectsMisplacedAudienceScopeAndSingularResources() {
+        Set<ApiRoute> invalid = Set.of(
+                route(RequestMethod.GET, "/api/v1/consumers/reservations"),
+                route(RequestMethod.GET, "/api/v1/consumers/profile/me"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/publication"),
+                route(RequestMethod.GET, "/api/v1/stores/{storeId}/menu"));
 
-        assertThat(routes).isNotEmpty();
-        assertThat(violations).as("controller package and audience namespace mismatches").isEmpty();
-    }
-
-    @Test
-    void fixedSegmentsUseLowercaseKebabCase() {
-        List<ApiRoute> violations = apiRoutes().stream()
-                .filter(route -> segments(route.path()).stream()
-                        .filter(segment -> !segment.startsWith("{"))
-                        .anyMatch(segment -> !FIXED_SEGMENT.matcher(segment).matches()))
-                .toList();
-
-        assertThat(violations).as("non-kebab-case API routes").isEmpty();
+        assertThat(ApiUrlConvention.violations(invalid))
+                .hasSize(4)
+                .anyMatch(message -> message.contains("/consumers/reservations")
+                        && message.contains("scope"))
+                .anyMatch(message -> message.contains("/profile/me")
+                        && message.contains("position"))
+                .anyMatch(message -> message.contains("/publication")
+                        && message.contains("legacy"))
+                .anyMatch(message -> message.contains("/menu")
+                        && message.contains("plural"));
     }
 
     @Test
-    void consumerOwnedResourcesAreNestedUnderMe() {
-        List<ApiRoute> violations = apiRoutes().stream()
-                .filter(route -> SELF_OWNED_CONSUMER_COLLECTIONS.stream()
-                        .anyMatch(resource -> route.path().startsWith(
-                                "/api/v1/consumers/" + resource)))
-                .toList();
+    void rejectsEveryLegacyPathShapeFromTheMigrationTable() {
+        Set<ApiRoute> legacy = Set.of(
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in"),
+                route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel"),
+                route(RequestMethod.GET, "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}"),
+                route(RequestMethod.GET, "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact"),
+                route(RequestMethod.POST, "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search"));
 
-        assertThat(violations).as("consumer-owned routes outside /consumers/me").isEmpty();
+        assertThat(ApiUrlConvention.violations(legacy)).hasSize(legacy.size());
     }
 
     @Test
-    void commandVerbsAreModeledAsPluralEventResources() {
-        List<ApiRoute> commandViolations = apiRoutes().stream()
-                .filter(route -> segments(route.path()).stream().anyMatch(COMMAND_SEGMENTS::contains))
-                .toList();
-        List<ApiRoute> singularPostTargets = apiRoutes().stream()
-                .filter(route -> route.method() == RequestMethod.POST)
-                .filter(route -> {
-                    String target = lastFixedSegment(route.path());
-                    return !target.endsWith("s") && !POST_SINGLETON_EXCEPTIONS.contains(target);
-                })
-                .toList();
+    void acceptsApprovedSingletonAndProviderSegments() {
+        Set<ApiRoute> valid = Set.of(
+                route(RequestMethod.PUT, "/api/v1/consumers/me/contact"),
+                route(RequestMethod.POST, "/api/v1/consumers/auth/kakao/sessions"),
+                route(RequestMethod.PATCH, "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility"),
+                route(RequestMethod.PUT, "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at"),
+                route(RequestMethod.GET, "/api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact"),
+                route(RequestMethod.POST, "/api/v1/payments/webhooks/portone"));
 
-        assertThat(commandViolations).as("verb-style command segments").isEmpty();
-        assertThat(singularPostTargets).as("singular POST resource targets").isEmpty();
+        assertThat(ApiUrlConvention.violations(valid)).isEmpty();
     }
 
-    private static boolean usesCanonicalAudienceNamespace(ControllerRoute route) {
-        String packageName = route.packageName();
-        String path = route.route().path();
-        if (packageName.startsWith("com.miriyum.domain.consumer.controller.")
-                || packageName.contains(".controller.consumer")) {
-            return path.startsWith("/api/v1/consumers/") || path.equals("/api/v1/consumers");
-        }
-        if (packageName.startsWith("com.miriyum.domain.storeoperator.controller.")
-                || packageName.contains(".controller.storeoperator")) {
-            return path.startsWith("/api/v1/store-operators/")
-                    || path.equals("/api/v1/store-operators");
-        }
-        return packageName.contains(".controller.publicapi") && path.startsWith("/api/v1/");
-    }
-
-    private static Set<ApiRoute> apiRoutes() {
-        return SpringMvcRouteInventory.routes().stream()
+    @Test
+    void runtimeAndAllFeatureOpenApiRoutesFollowTheSameConvention() throws IOException {
+        Set<ApiRoute> runtimeRoutes = SpringMvcRouteInventory.routes().stream()
                 .map(ControllerRoute::route)
                 .filter(route -> route.path().startsWith("/api/v1/"))
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
+        OpenApiRouteInventory openApi = OpenApiRouteInventory.load(SPECS_ROOT);
+        Set<ApiRoute> allOpenApiRoutes = new java.util.HashSet<>(openApi.activeRoutes());
+        allOpenApiRoutes.addAll(openApi.contractOnlyRoutes());
+
+        assertThat(ApiUrlConvention.violations(runtimeRoutes))
+                .as("Spring MVC URL convention violations")
+                .isEmpty();
+        assertThat(ApiUrlConvention.violations(allOpenApiRoutes))
+                .as("feature OpenAPI URL convention violations, including contract-only")
+                .isEmpty();
     }
 
-    private static List<String> segments(String path) {
-        return Pattern.compile("/").splitAsStream(path)
-                .filter(segment -> !segment.isBlank())
-                .toList();
-    }
-
-    private static String lastFixedSegment(String path) {
-        List<String> segments = segments(path);
-        for (int index = segments.size() - 1; index >= 0; index--) {
-            String segment = segments.get(index);
-            if (!segment.startsWith("{")) {
-                return segment;
-            }
-        }
-        throw new IllegalArgumentException("Route contains no fixed segment: " + path);
+    private static ApiRoute route(RequestMethod method, String path) {
+        return new ApiRoute(method, path);
     }
 }

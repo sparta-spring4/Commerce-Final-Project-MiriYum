@@ -10,6 +10,7 @@ import org.springframework.context.annotation.ClassPathScanningCandidateComponen
 import org.springframework.core.type.classreading.MetadataReader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.ReflectionUtils;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
@@ -33,7 +34,9 @@ final class SpringMvcRouteInventory {
                     protected boolean isCandidateComponent(MetadataReader metadataReader)
                             throws IOException {
                         return metadataReader.getAnnotationMetadata()
-                                .hasAnnotation(RestController.class.getName());
+                                .hasAnnotation(RestController.class.getName())
+                                || metadataReader.getAnnotationMetadata()
+                                .hasMetaAnnotation(RestController.class.getName());
                     }
                 };
         scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
@@ -56,7 +59,7 @@ final class SpringMvcRouteInventory {
         Set<ControllerRoute> routes = new TreeSet<>(ROUTE_ORDER);
 
         for (Class<?> controller : controllers) {
-            for (Method method : controller.getDeclaredMethods()) {
+            for (Method method : ReflectionUtils.getUniqueDeclaredMethods(controller)) {
                 RequestMappingInfo mapping = inspector.mappingFor(method, controller);
                 if (mapping == null) {
                     continue;

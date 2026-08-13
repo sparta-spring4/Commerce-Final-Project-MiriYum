@@ -11,6 +11,12 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1accounts"
   /api/v1/consumers/auth/sessions:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1sessions"
+  /api/v1/consumers/auth/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1authorizations"
+  /api/v1/consumers/auth/kakao/sessions:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1sessions"
+  /api/v1/consumers/auth/kakao/accounts:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1kakao~1accounts"
   /api/v1/consumers/auth/token-refreshes:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1token-refreshes"
   /api/v1/consumers/auth/csrf-tokens/current:
@@ -21,6 +27,10 @@ paths:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me"
   /api/v1/consumers/me/contact:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1contact"
+  /api/v1/consumers/me/kakao/authorizations:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao~1authorizations"
+  /api/v1/consumers/me/kakao-links:
+    $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1kakao-links"
   /api/v1/consumers/me/notifications:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/reservations:
