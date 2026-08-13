@@ -988,7 +988,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID);
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
 
         service.transition(transitionCommand(
                 HOLD_ID,
@@ -1143,7 +1143,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID);
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
         given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
                 .willReturn(confirmedTemporaryMenuHold(91L));
 
@@ -1201,7 +1201,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID);
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
 
         assertThatThrownBy(() -> service.transition(transitionCommand(
                 HOLD_ID,
@@ -1227,7 +1227,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID);
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
         given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
                 .willReturn(presentTemporaryMenuHold());
 
@@ -1256,7 +1256,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID);
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
         given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
                 .willReturn(presentTemporaryMenuHold());
 
@@ -1286,7 +1286,7 @@ class ReservationHoldServiceTest {
         hold.confirm();
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
 
         ReservationHoldContracts.Result result = service.transition(transitionCommand(
                 HOLD_ID,
@@ -1296,8 +1296,8 @@ class ReservationHoldServiceTest {
         assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
         assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
         assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
-        then(holdRepository).should().findById(HOLD_ID);
-        then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(holdRepository).should().findByIdForUpdate(HOLD_ID);
+        then(holdRepository).should(never()).findById(any());
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
@@ -1316,7 +1316,7 @@ class ReservationHoldServiceTest {
         hold.confirm();
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
         given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
                 .willReturn(confirmedTemporaryMenuHold(91L));
 
@@ -1326,11 +1326,48 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID));
 
         assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
-        then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(holdRepository).should(never()).findById(any());
         then(temporaryMenuHoldPort).should(never()).applyTransition(any());
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("initial replay locks the latest Hold before the MenuHold snapshot")
+    void initialReplayLocksLatestHoldBeforeMenuHoldSnapshot() {
+        ReservationHold staleHold = existingHold(CREATION_COMMAND_ID);
+        staleHold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                staleHold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        ReservationHold latestHold = existingHold(CREATION_COMMAND_ID);
+        latestHold.requireReconciliation();
+        latestHold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(latestHold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        InOrder order = inOrder(auditRepository, holdRepository, temporaryMenuHoldPort);
+        order.verify(auditRepository).findByCommandId(TRANSITION_OPERATION_ID);
+        order.verify(holdRepository).findByIdForUpdate(HOLD_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        then(holdRepository).should(never()).findById(any());
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+        then(holdRepository).should(never()).flush();
     }
 
     @Test
@@ -1346,7 +1383,7 @@ class ReservationHoldServiceTest {
         hold.release();
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
         given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
                 .willReturn(new ReservationTemporaryMenuHoldResult(
                         ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
@@ -1359,7 +1396,7 @@ class ReservationHoldServiceTest {
                 TRANSITION_OPERATION_ID));
 
         assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
-        then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(holdRepository).should(never()).findById(any());
         then(temporaryMenuHoldPort).should(never()).applyTransition(any());
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();

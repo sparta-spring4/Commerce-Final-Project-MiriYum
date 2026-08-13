@@ -294,7 +294,7 @@ public class ReservationHoldService {
         if (replay != null) {
             requireSameTransitionMeaning(replay, normalized);
             ReservationHold current = holdRepository
-                    .findById(normalized.reservationHoldId())
+                    .findByIdForUpdate(normalized.reservationHoldId())
                     .orElseThrow(ReservationHoldService::holdNotFound);
             ReservationTemporaryMenuHoldResult replayMenuHold =
                     temporaryMenuHoldPort.lockForTransition(
