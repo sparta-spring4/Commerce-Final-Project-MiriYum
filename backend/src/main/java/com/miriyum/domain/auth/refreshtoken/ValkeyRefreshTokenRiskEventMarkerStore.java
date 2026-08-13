@@ -8,8 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.Cursor;
-import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -36,16 +34,15 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
     }
 
     public List<PendingRefreshTokenRiskEvent> findPendingEvents() {
-        try (Cursor<String> cursor = redisTemplate.scan(ScanOptions.scanOptions()
-                .match(RefreshTokenRiskEventKey.pendingPattern())
-                .count(100)
-                .build())) {
+        try {
+            var markerKeys = redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex());
             List<PendingRefreshTokenRiskEvent> events = new ArrayList<>();
-            while (cursor.hasNext()) {
-                String eventKey = cursor.next();
+            for (String eventKey : markerKeys) {
                 Map<String, String> values = redisTemplate.<String, String>opsForHash().entries(eventKey);
                 if (!values.isEmpty()) {
                     events.add(toPendingEvent(eventKey, values));
+                } else {
+                    redisTemplate.opsForSet().remove(RefreshTokenRiskEventKey.pendingIndex(), eventKey);
                 }
             }
             return events;
