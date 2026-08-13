@@ -946,18 +946,18 @@ components:
         status:
           type: string
           enum: [AUTHENTICATED, SIGN_UP_REQUIRED]
-          accessToken:
-            type: string
-            description: AUTHENTICATED일 때만 Access JWT를 반환한다.
-          tokenType:
-            type: string
-            const: Bearer
-          expiresIn:
-            type: integer
-            const: 3600
-          signUpTicket:
-            type: string
-            description: SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓
+        accessToken:
+          type: string
+          description: AUTHENTICATED일 때만 Access JWT를 반환한다.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          const: 3600
+        signUpTicket:
+          type: string
+          description: SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓
     KakaoLinkData:
       type: string
       enum: [CREATED, ALREADY_LINKED]

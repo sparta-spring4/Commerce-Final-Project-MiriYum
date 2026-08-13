@@ -56,11 +56,14 @@ public class KakaoSocialLoginLinkService {
     public Long findLinkedAccountId(TokenNamespace namespace, String kakaoSubject) {
         KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
         SocialLoginLink activeLink = findLink(namespace, active);
+        SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
+        if (activeLink != null && previousLink != null
+                && !activeLink.getAccountId().equals(previousLink.getAccountId())) {
+            throw new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID);
+        }
         if (activeLink != null) {
             return activeLink.getAccountId();
         }
-
-        SocialLoginLink previousLink = findPreviousLink(namespace, kakaoSubject);
         if (previousLink == null) {
             return null;
         }

@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -108,6 +109,33 @@ class ConsumerAuthControllerTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("AUTH_013"));
+                .andExpect(jsonPath("$.code").value("AUTH_013"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE="),
+                        org.hamcrest.Matchers.containsString("Max-Age=0"))));
+    }
+
+    @Test
+    @DisplayName("카카오 콜백의 state 검증이 실패하면 기존 state 쿠키를 즉시 만료한다")
+    void expiresKakaoStateCookieWhenCallbackStateDoesNotMatch() throws Exception {
+        // 카카오 화면에서 취소 후 변조되거나 만료된 콜백이 돌아온 경우를 포함한다.
+        Cookie issuedStateCookie = new Cookie(
+                "MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE", "issued-state");
+
+        mockMvc.perform(post("/api/v1/consumers/auth/kakao/sessions")
+                        .cookie(issuedStateCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "authorizationCode": "unused-code",
+                                  "state": "cancelled-or-invalid-state",
+                                  "redirectUri": "https://app.example.com/auth/kakao/callback"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_013"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE="),
+                        org.hamcrest.Matchers.containsString("Max-Age=0"))));
     }
 }

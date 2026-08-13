@@ -102,6 +102,17 @@ class AudienceOpenApiContractTest {
     }
 
     @Test
+    void kakaoLoginDataExposesAuthenticationAndSignUpFieldsAtTheTopLevel() throws IOException {
+        Map<String, Object> schemas = schemas("auth-account/openapi.yaml");
+        Map<String, Object> kakaoLoginData = map(schemas.get("KakaoLoginData"));
+        Map<String, Object> properties = map(kakaoLoginData.get("properties"));
+
+        assertThat(properties).containsKeys("status", "accessToken", "tokenType", "expiresIn", "signUpTicket");
+        assertThat(map(properties.get("status"))).doesNotContainKeys(
+                "accessToken", "tokenType", "expiresIn", "signUpTicket");
+    }
+
+    @Test
     void entrypointPathItemsAreSingleReferencesWithoutLegacyUrls() throws IOException {
         for (String file : Set.of(
                 "public-openapi.yaml",

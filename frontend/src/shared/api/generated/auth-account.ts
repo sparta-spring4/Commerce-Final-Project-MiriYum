@@ -219,6 +219,14 @@ export interface components {
     KakaoLoginData: {
       /** @enum {string} */
       status: "AUTHENTICATED" | "SIGN_UP_REQUIRED";
+      /** @description AUTHENTICATED일 때만 Access JWT를 반환한다. */
+      accessToken?: string;
+      /** @constant */
+      tokenType?: "Bearer";
+      /** @constant */
+      expiresIn?: 3600;
+      /** @description SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓 */
+      signUpTicket?: string;
     };
     /**
      * @description CREATED는 새 연결, ALREADY_LINKED는 같은 계정에 이미 존재한 멱등 결과다.

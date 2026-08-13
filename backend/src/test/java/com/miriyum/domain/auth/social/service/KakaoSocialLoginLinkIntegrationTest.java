@@ -188,7 +188,7 @@ class KakaoSocialLoginLinkIntegrationTest {
 
     @Test
     @DisplayName("현재 fingerprint 충돌 시 이전 fingerprint 조회는 현재 연결로 수렴하고 기존 행을 유지한다")
-    void keepsPreviousFingerprintWhenActiveFingerprintAlreadyExists() {
+    void rejectsLoginWhenActiveAndPreviousFingerprintsPointToDifferentAccounts() {
         String kakaoSubject = "fingerprint-collision-subject";
         KakaoIdentityFingerprint previous = fingerprintGenerator.generatePrevious(kakaoSubject).orElseThrow();
         KakaoIdentityFingerprint active = fingerprintGenerator.generateActive(kakaoSubject);
@@ -197,9 +197,10 @@ class KakaoSocialLoginLinkIntegrationTest {
         socialLoginLinkRepository.saveAndFlush(SocialLoginLink.create(
                 TokenNamespace.CONSUMER, 202L, SocialLoginProvider.KAKAO, active.keyVersion(), active.value()));
 
-        Long accountId = kakaoSocialLoginLinkService.findLinkedAccountId(TokenNamespace.CONSUMER, kakaoSubject);
-
-        assertThat(accountId).isEqualTo(202L);
+        assertThatThrownBy(() -> kakaoSocialLoginLinkService.findLinkedAccountId(
+                        TokenNamespace.CONSUMER, kakaoSubject))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID));
         assertThat(socialLoginLinkRepository.findLink(
                 TokenNamespace.CONSUMER, SocialLoginProvider.KAKAO, previous.keyVersion(), previous.value()))
                 .hasValueSatisfying(link -> assertThat(link.getAccountId()).isEqualTo(101L));
