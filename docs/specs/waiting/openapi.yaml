@@ -2,9 +2,7 @@ openapi: 3.1.0
 info:
   title: MiriYum Waiting API
   version: 1.0.0
-  description: >-
-    매장 운영자의 웨이팅 기능 설정·비활성화 영향 조회, 중앙 원장과 계정당 활성 웨이팅
-    1개 제한 계약
+  description: 매장 운영자의 웨이팅 기능 설정과 비활성화 영향 조회 계약
   license:
     name: All Rights Reserved
     identifier: LicenseRef-All-Rights-Reserved
@@ -15,9 +13,7 @@ tags:
   - name: Waiting Settings
     description: Reservation 도메인이 소유하는 매장별 웨이팅 운영 설정
   - name: Waiting Ledger
-    description: >-
-      Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장, 계정 전체 단일 활성 membership
-      조회와 운영자 전이
+    description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
 paths:
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
     get:
@@ -868,9 +864,8 @@ components:
                 message: 웨이팅 종결 작업을 찾을 수 없습니다.
     WaitingLedgerConflict:
       description: >-
-        계정 전체 단일 활성 membership, 웨이팅 팀의 현재 상태·버전·FIFO 선두 조건·종결 작업
-        결과 또는 Store 상태와 충돌했거나, 멱등 키가 다른 요청 지문에 재사용되었거나 동시
-        변경이 발생했다. 다른 매장의 새 요청도 기존 활성 웨이팅을 자동 취소·교체하지 않는다.
+        웨이팅 팀의 현재 상태·버전·FIFO 선두 조건·활성 membership·종결 작업 결과 또는 Store 상태와
+        충돌했거나, 멱등 키가 다른 요청 지문에 재사용되었거나 동시 변경이 발생했다.
       content:
         application/json:
           schema:
@@ -888,10 +883,10 @@ components:
               value:
                 code: WAITING_007
                 message: FIFO 선두 웨이팅 팀만 호출할 수 있습니다.
-            accountActiveWaitingConflict:
+            activeMembershipConflict:
               value:
                 code: WAITING_008
-                message: 이 계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 뒤 다시 시도해 주세요.
+                message: 활성 웨이팅 멤버십과 요청 전제가 충돌합니다.
             closureJobFailed:
               value:
                 code: WAITING_010

@@ -46,7 +46,9 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
 - 현재 고도화 기본 범위의 대표자 관계를 계정 활성 관계로 계산한다. 향후 구성원 합류를
   활성화할 때도 대표자·구성원 역할과 관계없이 같은 계정 단위 제한을 적용한다.
 - 다른 매장의 새 팀 생성·합류는 기존 활성 관계를 자동 취소·교체·병합하지 않고
-  `409 WAITING_008`로 거부한다.
+  `409 WAITING_011 ACCOUNT_ACTIVE_WAITING_EXISTS`로 거부한다. 이 오류는 사용자가 기존
+  웨이팅을 유효하게 종결해야 하며, 재조회·재시도 가능한 membership 전제 충돌
+  `WAITING_008`과 의미를 공유하지 않는다.
 - 같은 명령의 멱등 재전송은 최초 결과를 반환한다. 다른 멱등 키나 다른 요청 지문은 기존
   활성 웨이팅을 변경할 권한이 아니다.
 - Waiting 원장이 유효한 종결을 확정하고 계정 활성 관계를 한 번 해제한 뒤에만 새 웨이팅을
@@ -58,10 +60,11 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
   예약 허용 계약을 변경하지 않는다.
 
 이 계약 PR은 일반 사용자 웨이팅 생성·합류 HTTP path를 새로 만들지 않는다. 해당 path는
-별도 소유 Issue에서 활성화할 때 이 규칙과 `WAITING_008`을 사용한다. 현재 OpenAPI는 공통
-웨이팅 충돌 의미만 계정 전체 단일 활성 규칙으로 고정하고 기존 store-operator path 집합을
-변경하지 않는다. #272의 production Java·migration은 이 계약 PR이 `dev`에 병합된 뒤 별도
-정확한 허용 목록과 실제 MySQL 동시성 검증으로 정렬한다.
+별도 소유 Issue에서 활성화할 때 계정 중복 전용 `WAITING_011` response를 연결한다. 현재
+OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_011`이나 계정 중복
+예시를 노출하지 않고, `WAITING_008`은 기존 활성 membership 전제 충돌 의미를 유지한다.
+#272의 production Java·forward migration은 이 계약 PR이 `dev`에 병합된 뒤 정확한 허용
+목록과 실제 MySQL 동시성 검증으로 정렬한다.
 
 ## 안전한 기본값과 조회
 
@@ -289,9 +292,13 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 | `409` | `WAITING_005` | 대상 팀 version이 `expectedVersion`과 다름 |
 | `409` | `WAITING_006` | 현재 상태 또는 종결 상태 때문에 요청 전이가 허용되지 않음 |
 | `409` | `WAITING_007` | call 대상이 활성 FIFO의 선두가 아님 |
-| `409` | `WAITING_008` | 계정에 이미 활성 웨이팅이 있거나 활성 membership의 현재 상태와 요청 전제가 충돌함 |
+| `409` | `WAITING_008` | 활성 membership의 현재 상태와 요청 전제가 충돌함 |
 | `409` | `WAITING_009` | 종결 작업이 아직 완료되지 않았거나 대사가 필요함 |
 | `409` | `WAITING_010` | 종결 작업 대상 처리 중 실패가 발생함 |
+
+`409 WAITING_011 ACCOUNT_ACTIVE_WAITING_EXISTS`는 향후 일반 사용자 생성·합류 요청에서
+계정에 이미 활성 웨이팅이 있을 때만 사용한다. 현재 표의 store-operator ledger operation에는
+노출하지 않으며 해당 consumer path를 소유한 Issue가 별도 response로 연결한다.
 
 기존 `COMMON_001`~`COMMON_004`, `AUTH_001`, `AUTH_011`, `STORE_001`, `STORE_003`,
 `STORE_005`, `STORE_007`, `COMMON_007`, `COMMON_008`, `COMMON_010`의 의미는 변경하지

@@ -172,7 +172,7 @@ class WaitingOpenApiContractTest {
     }
 
     @Test
-    void waitingActiveMembershipConflictNamesTheAccountWideSingleActiveRule()
+    void waitingLedgerConflictDoesNotExposeTheAccountActiveWaitingBusinessRule()
             throws IOException {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> responses = map(map(document.get("components")).get("responses"));
@@ -180,17 +180,18 @@ class WaitingOpenApiContractTest {
         Map<String, Object> json = map(map(conflict.get("content")).get("application/json"));
         Map<String, Object> examples = map(json.get("examples"));
 
-        assertThat(examples).containsKey("accountActiveWaitingConflict");
+        assertThat(examples)
+                .containsKey("activeMembershipConflict")
+                .doesNotContainKey("accountActiveWaitingConflict");
 
         Map<String, Object> value = map(
-                map(examples.get("accountActiveWaitingConflict")).get("value"));
+                map(examples.get("activeMembershipConflict")).get("value"));
         assertThat(value)
                 .containsOnlyKeys("code", "message")
-                .containsEntry("code", "WAITING_008");
-        assertThat(value.get("message").toString())
-                .contains("계정", "활성 웨이팅", "종료");
+                .containsEntry("code", "WAITING_008")
+                .containsEntry("message", "활성 웨이팅 멤버십과 요청 전제가 충돌합니다.");
         assertThat(conflict.get("description").toString())
-                .contains("계정 전체", "자동 취소", "교체하지 않는다");
+                .doesNotContain("계정 전체", "자동 취소", "교체하지 않는다");
     }
 
     @Test
