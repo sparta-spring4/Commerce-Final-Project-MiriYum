@@ -1028,7 +1028,7 @@ class ReservationHoldRuntimeIT {
                 .filteredOn(attempt -> attempt.errorCode() != null)
                 .singleElement()
                 .extracting(HoldAttempt::errorCode)
-                .isNotNull();
+                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
         String terminal = winner.result().status().name();
         assertThat(terminal).isIn("RELEASED", "EXPIRED");
         assertThat(currentStatus(active.reservationHoldId())).isEqualTo(terminal);
@@ -2193,6 +2193,9 @@ class ReservationHoldRuntimeIT {
                     .containsEntry("menu_status", terminalCommand.targetStatus().name())
                     .containsEntry("status_version", 2L)
                     .containsEntry("audit_count", 3L);
+            assertThat(terminalAttempt.result().statusVersion())
+                    .isEqualTo(((Number) terminalObservation.get()
+                            .get("status_version")).longValue());
         } finally {
             reconciliationApplied.countDown();
             allowReconciliationCommit.countDown();

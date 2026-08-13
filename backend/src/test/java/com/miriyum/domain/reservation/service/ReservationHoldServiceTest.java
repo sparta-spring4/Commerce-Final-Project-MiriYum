@@ -2009,15 +2009,17 @@ class ReservationHoldServiceTest {
     @DisplayName("fresh transition은 audit 저장 뒤 Hold를 merge하고 영속 statusVersion을 반환한다")
     void freshTransitionMergesHoldAfterAuditBeforeResultExtraction() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHold persisted = existingHold(CREATION_COMMAND_ID);
+        persisted.confirm();
+        ReflectionTestUtils.setField(persisted, "statusVersion", 1L);
         stubFreshTransition(hold);
-        given(holdRepository.saveAndFlush(hold)).willAnswer(invocation -> {
-            ReflectionTestUtils.setField(hold, "statusVersion", 1L);
-            return hold;
-        });
+        given(holdRepository.saveAndFlush(hold)).willReturn(persisted);
 
         ReservationHoldContracts.Result result = service.transition(transitionCommand(
                 HOLD_ID, ReservationHoldStatus.CONFIRMED, TRANSITION_OPERATION_ID));
 
+        assertThat(persisted).isNotSameAs(hold);
+        assertThat(hold.getStatusVersion()).isZero();
         assertThat(result.statusVersion()).isEqualTo(1L);
         InOrder order = inOrder(auditRepository, holdRepository);
         order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
