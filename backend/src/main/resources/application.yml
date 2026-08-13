@@ -5,6 +5,12 @@ spring:
     url: ${MIRIYUM_DB_URL}
     username: ${MIRIYUM_DB_USERNAME}
     password: ${MIRIYUM_DB_PASSWORD}
+  data:
+    redis:
+      host: ${MIRIYUM_VALKEY_HOST:localhost}
+      port: ${MIRIYUM_VALKEY_PORT:6379}
+      password: ${MIRIYUM_VALKEY_PASSWORD:}
+      timeout: ${MIRIYUM_VALKEY_TIMEOUT:2s}
   jackson:
     deserialization:
       fail-on-unknown-properties: true
@@ -18,6 +24,10 @@ server:
 
 # Docker 배포 확인은 백엔드 127.0.0.1(EC2 내부 전용) 포트의 이 엔드포인트만 사용한다.
 management:
+  health:
+    # Valkey 장애는 Refresh Token 기능만 503으로 닫고, 배포용 앱 health 전체를 DOWN으로 만들지 않는다.
+    redis:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -35,6 +45,12 @@ miriyum:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  auth:
+    # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
+    refresh-risk-event-delivery:
+      enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}
+    # 30초 주기 전달이 10회 연속 실패하면 CloudWatch 로그 기반 운영 알람을 발생시킨다.
+    refresh-risk-event-delivery-alert-threshold: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ALERT_THRESHOLD:10}
   payment:
     enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
     cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}

@@ -1,14 +1,18 @@
 package com.miriyum.domain.consumer.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
@@ -18,18 +22,24 @@ import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.InOrder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +66,9 @@ class ConsumerAuthServiceTest {
     @Mock
     private LoginDelayGuard loginDelayGuard;
 
+    @Mock
+    private RefreshTokenManager refreshTokenManager;
+
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
@@ -65,7 +78,7 @@ class ConsumerAuthServiceTest {
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
                 consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
-                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator());
+                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(), refreshTokenManager);
     }
 
     @Test
@@ -238,6 +251,25 @@ class ConsumerAuthServiceTest {
     }
 
     @Test
+    @DisplayName("로그인 시작 시점의 세션 세대를 토큰 발급까지 유지한다")
+    void loginIssuesTokenPairWithCapturedSessionEpoch() {
+        ConsumerAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(4L);
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 4L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
+
+        consumerAuthService.login(request);
+
+        InOrder order = inOrder(refreshTokenManager, passwordEncoder);
+        order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID);
+        order.verify(refreshTokenManager).issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 4L);
+    }
+    @Test
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
@@ -246,10 +278,9 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 0L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = consumerAuthService.login(request);
@@ -271,10 +302,9 @@ class ConsumerAuthServiceTest {
         given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.CONSUMER), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.CONSUMER, ACCOUNT_ID, 0L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = consumerAuthService.login(request);
@@ -293,11 +323,111 @@ class ConsumerAuthServiceTest {
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
     }
 
+    @Test
+    @DisplayName("정지된 일반 사용자 계정의 재발급 요청은 모든 Refresh Token family를 폐기한다")
+    void revokesAllRefreshTokenFamiliesWhenSuspendedAccountRefreshes() {
+        ConsumerAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(
+                        RefreshTokenRotationResult.Status.ROTATED,
+                        new TokenPair("access-token", "refresh-token-next")));
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> consumerAuthService.refresh("refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("정지 일반 사용자도 재사용 Refresh Token은 먼저 탐지한다")
+    void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
+        ConsumerAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", ConsumerAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+
+        assertThatThrownBy(() -> consumerAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.CONSUMER, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("활성 일반 사용자의 재사용 Refresh Token은 해당 family만 폐기한다")
+    void doesNotRevokeAllFamiliesWhenActiveAccountReusesRefreshToken() {
+        ConsumerAccount account = persistedAccount();
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> consumerAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).attemptRotate(TokenNamespace.CONSUMER, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token으로 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithExpiredRefreshTokenIsIdempotent() {
+        given(jwtTokenProvider.parseRefreshTokenForLogout("expired-refresh-token")).willReturn(null);
+
+        assertThatCode(() -> consumerAuthService.logout("expired-refresh-token"))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(refreshTokenManager);
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키가 없어도 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithoutRefreshTokenIsIdempotent() {
+        assertThatCode(() -> consumerAuthService.logout(null))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> consumerAuthService.logout(" "))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(jwtTokenProvider, refreshTokenManager);
+    }
+
     /**
      * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 지연 여부를 판정한다. 이 단위 테스트는
      * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지
      * 않은 상태를 재현한다.
      */
+    @Test
+    @DisplayName("로그인 중 ConsumerAccount 계정이 정지되면 Refresh Token을 발급하지 않는다")
+    void rejectsLoginWhenAccountIsSuspendedAfterInitialLookup() {
+        ConsumerAccount initialAccount = persistedAccount();
+        ConsumerAccount currentAccount = persistedAccount();
+        ReflectionTestUtils.setField(currentAccount, "status", ConsumerAccountStatus.SUSPENDED);
+        LoginRequest request = new LoginRequest("user@example.com", "password123");
+        given(consumerAccountRepository.findByEmail("user@example.com")).willReturn(Optional.of(initialAccount));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, ACCOUNT_ID)).willReturn(1L);
+
+        assertThatThrownBy(() -> consumerAuthService.login(request))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
+    }
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
@@ -311,6 +441,7 @@ class ConsumerAuthServiceTest {
     private ConsumerAccount persistedAccount() {
         ConsumerAccount account = ConsumerAccount.create("user@example.com", "hashed", "닉네임");
         ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        lenient().when(consumerAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
         return account;
     }
 }
