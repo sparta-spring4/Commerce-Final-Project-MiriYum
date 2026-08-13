@@ -57,7 +57,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-c")
 @SpringBootTest(
         classes = MiriyumApplication.class,
         properties = {
