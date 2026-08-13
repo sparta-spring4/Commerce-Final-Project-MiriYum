@@ -38,6 +38,7 @@ import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
+import java.lang.reflect.Method;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 import org.junit.jupiter.api.DisplayName;
@@ -48,11 +49,20 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(MockitoExtension.class)
 class ConsumerAuthServiceTest {
 
     private static final Long ACCOUNT_ID = 1L;
+
+    @Test
+    @DisplayName("리프레시 호출은 Valkey 지연 동안 DB 트랜잭션을 점유하지 않는다")
+    void 리프레시_호출에는_서비스_트랜잭션을_적용하지_않는다() throws NoSuchMethodException {
+        Method refresh = ConsumerAuthService.class.getMethod("refresh", String.class);
+
+        assertThat(refresh.getAnnotation(Transactional.class)).isNull();
+    }
 
     @Mock
     private ConsumerAccountRepository consumerAccountRepository;
