@@ -1141,7 +1141,7 @@ class MenuHoldRuntimeIT {
 
     private MenuHold holdFor(long reservationId) {
         return holdRepository.findAll().stream()
-                .filter(hold -> hold.getReservationId() == reservationId)
+                .filter(hold -> Long.valueOf(reservationId).equals(hold.getReservationId()))
                 .findFirst()
                 .orElseThrow();
     }

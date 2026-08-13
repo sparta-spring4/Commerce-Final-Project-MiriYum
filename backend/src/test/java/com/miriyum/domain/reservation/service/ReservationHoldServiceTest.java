@@ -919,6 +919,7 @@ class ReservationHoldServiceTest {
                 .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
         order.verify(capacityBucketRepository).findAllByIdInForUpdate(List.of(301L));
         order.verify(temporaryMenuHoldPort).applyTransition(any());
+        order.verify(holdRepository).saveAndFlush(hold);
     }
 
     @Test
@@ -956,6 +957,7 @@ class ReservationHoldServiceTest {
                 .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
         order.verify(capacityBucketRepository).findAllByIdInForUpdate(List.of(301L));
         order.verify(temporaryMenuHoldPort).applyTransition(any());
+        order.verify(holdRepository).saveAndFlush(hold);
     }
 
     @Test
@@ -1023,7 +1025,7 @@ class ReservationHoldServiceTest {
 
         assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
         then(auditRepository).should(never()).save(any());
-        then(holdRepository).should(never()).flush();
+        then(holdRepository).should(never()).saveAndFlush(any());
     }
 
     @Test
@@ -1367,7 +1369,7 @@ class ReservationHoldServiceTest {
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
-        then(holdRepository).should(never()).flush();
+        then(holdRepository).should(never()).saveAndFlush(any());
     }
 
     @Test
@@ -2004,14 +2006,14 @@ class ReservationHoldServiceTest {
     }
 
     @Test
-    @DisplayName("fresh transition은 audit 저장 뒤 Hold를 flush하고 갱신된 statusVersion을 반환한다")
-    void freshTransitionFlushesManagedHoldBeforeResultExtraction() {
+    @DisplayName("fresh transition은 audit 저장 뒤 Hold를 merge하고 영속 statusVersion을 반환한다")
+    void freshTransitionMergesHoldAfterAuditBeforeResultExtraction() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID);
         stubFreshTransition(hold);
-        org.mockito.Mockito.doAnswer(invocation -> {
+        given(holdRepository.saveAndFlush(hold)).willAnswer(invocation -> {
             ReflectionTestUtils.setField(hold, "statusVersion", 1L);
-            return null;
-        }).when(holdRepository).flush();
+            return hold;
+        });
 
         ReservationHoldContracts.Result result = service.transition(transitionCommand(
                 HOLD_ID, ReservationHoldStatus.CONFIRMED, TRANSITION_OPERATION_ID));
@@ -2019,7 +2021,7 @@ class ReservationHoldServiceTest {
         assertThat(result.statusVersion()).isEqualTo(1L);
         InOrder order = inOrder(auditRepository, holdRepository);
         order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
-        order.verify(holdRepository).flush();
+        order.verify(holdRepository).saveAndFlush(hold);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -2115,6 +2117,7 @@ class ReservationHoldServiceTest {
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.empty());
         given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        lenient().when(holdRepository.saveAndFlush(hold)).thenReturn(hold);
     }
 
     private void stubCapacityRelease(

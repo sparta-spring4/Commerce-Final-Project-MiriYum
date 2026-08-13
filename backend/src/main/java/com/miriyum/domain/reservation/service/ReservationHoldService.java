@@ -342,8 +342,8 @@ public class ReservationHoldService {
                 hold.getReservationTimePolicyVersion(),
                 hold.getCapacityPolicyVersion(),
                 normalized.operationId()));
-        holdRepository.flush();
-        return resultOf(hold);
+        ReservationHold persisted = holdRepository.saveAndFlush(hold);
+        return resultOf(persisted);
     }
 
     private static void requireSameTransitionMeaning(
