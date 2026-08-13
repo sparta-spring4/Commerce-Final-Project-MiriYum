@@ -4,9 +4,10 @@
 >
 > 기능 소유자: `reservation` 도메인의 Waiting capability
 >
-> 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회
+> 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회,
+> Issue #272 중앙 원장·운영자 전이, Issue #307 계정당 활성 웨이팅 1개 제한
 >
-> 구현 순서: `#271 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
+> 구현 순서: `#271 계약 + #307 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
 > 활성 대기 팀 판정과 종결의 상태 전이·실행 결과는 Issue #272가 소유한다.
 
 이 문서는 [현장·원격 웨이팅 정책](../../service-policies/05-waiting.md),
@@ -36,6 +37,65 @@ Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메�
 aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
 추가하지 않는다.
 
+## 계정당 활성 웨이팅 1개
+
+Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용자 계정당 고정 1건으로
+대체한다.
+
+- 계정은 전체 매장을 합쳐 활성 웨이팅을 최대 1건만 유지한다.
+- 현재 고도화 기본 범위의 대표자 관계를 계정 활성 관계로 계산한다. 향후 구성원 합류를
+  활성화할 때도 대표자·구성원 역할과 관계없이 같은 계정 단위 제한을 적용한다.
+- `WAIT-007`의 같은 매장 중복은 이 계정 전체 검사에 포섭한다. 생성·합류·대표자 이전은
+  계정 활성 관계를 한 번만 검사·점유하고 별도 매장 단위 유일성 제약이나 오류 경로를 두지
+  않는다. 같은 계정·같은 팀 관계는 멱등 결과 또는 기존 관계를 유지하고, 다른 활성 팀은
+  `WAITING_011`로 거부한다.
+- 다른 매장의 새 팀 생성·합류는 기존 활성 관계를 자동 취소·교체·병합하지 않고
+  `409 WAITING_011 ACCOUNT_ACTIVE_WAITING_EXISTS`로 거부한다. 이 오류는 사용자가 기존
+  웨이팅을 유효하게 종결해야 하며, 재조회·재시도 가능한 membership 전제 충돌
+  `WAITING_008`과 의미를 공유하지 않는다.
+- 같은 명령의 멱등 재전송은 최초 결과를 반환한다. 다른 멱등 키나 다른 요청 지문은 기존
+  활성 웨이팅을 변경할 권한이 아니다.
+- Waiting 원장이 유효한 종결을 확정하고 계정 활성 관계를 한 번 해제한 뒤에만 새 웨이팅을
+  허용한다. 비종결 `RESERVATION_CONVERTING` 동안은 관계를 유지하고 전환 실패로 기존
+  `WAITING`에 복귀해도 해제하지 않는다. 예약 전환 완료 등 실제 종결이 확정된 뒤에만 해제한다.
+- 차단 응답은 사용자가 정리할 자신의 기존 활성 웨이팅 최소 정보만 제공하고 다른 구성원
+  정보는 노출하지 않는다.
+- 예약은 활성 웨이팅 수에 포함하지 않는다. 서로 다른 매장 또는 겹치지 않는 시간대의 복수
+  예약 허용 계약을 변경하지 않는다.
+
+이 계약 PR은 일반 사용자 웨이팅 생성·합류 HTTP path를 새로 만들지 않는다. 해당 path는
+별도 소유 Issue에서 활성화할 때 계정 중복 전용 `WAITING_011` response를 연결한다. 현재
+OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_011`이나 계정 중복
+예시를 노출하지 않고, `WAITING_008`은 기존 활성 membership 전제 충돌 의미를 유지한다.
+`WAITING_011`은 응답 `code`의 wire 값이고 `ACCOUNT_ACTIVE_WAITING_EXISTS`는 서버 오류 식별자 이름이다.
+향후 consumer operation도 기존 오류 응답과 같이 `code`, `message` 두 필드만 반환하며 별도
+`errorKey`나 `details` 필드를 추가하지 않는다.
+
+### #272 runtime·migration 인계
+
+현재 `dev`의 V36은 `waiting_active_memberships`에
+`uk_waiting_active_memberships_store_consumer UNIQUE (store_id, consumer_account_id)`를 두므로
+계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V39 forward migration에서 이
+제약을 제거한 뒤 `UNIQUE (consumer_account_id)`로 교체한다.
+
+V39의 제약 변경 전에 다음 사전 대사를 수행한다.
+
+```sql
+SELECT consumer_account_id, COUNT(*) AS active_membership_count
+FROM waiting_active_memberships
+GROUP BY consumer_account_id
+HAVING COUNT(*) > 1;
+```
+
+- 결과가 1건이라도 있으면 migration과 배포를 차단하고 데이터와 기존 제약을 그대로 유지한다.
+- 중복 관계를 자동 취소·삭제·병합하지 않는다. Waiting 소유자가 원장·감사 기록을 확인하고
+  도메인의 유효한 종결 operation으로 계정당 활성 관계가 1건 이하가 되도록 처리한다.
+- 같은 사전 대사를 다시 실행해 초과 계정 0건을 재확인한 뒤에만 기존 제약을 제거하고
+  `UNIQUE (consumer_account_id)`를 추가한다.
+
+#272의 production Java·forward migration은 이 계약 PR이 `dev`에 병합된 뒤 정확한 허용
+목록과 실제 MySQL 동시성 검증으로 정렬한다.
+
 ## 안전한 기본값과 조회
 
 매장 설정 행이 아직 없더라도 두 GET은 오류나 `null` 설정을 반환하지 않는다. 설정 조회는
@@ -49,9 +109,10 @@ aggregate에는 넣지 않는다. production Java, migration, frontend 또는 �
 | `version` | `0` |
 
 비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
-시점의 활성 팀 수다. 종결 가능성 판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태
-조회 계약/runtime을 `dev`에 제공할 때 일괄 종결 action과 함께 추가한다. 그 전에는 응답에
-노출하지 않는다. 설정 행의 부재를 매장 부재로 해석하지 않는다.
+시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 종결 가능성
+판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공할 때
+일괄 종결 action과 함께 추가한다. 그 전에는 응답에 노출하지 않는다. 설정 행의 부재를 매장
+부재로 해석하지 않는다.
 
 ## 전체 교체와 버전
 
@@ -92,7 +153,8 @@ Frontend는 비활성화 전에 `GET .../disable-impact`로 현재 버전과 활
   이 요청 계약에 추가한다. 그 전에는 일괄 종결 action을 공개 입력으로 노출하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
-서버는 명령 시점의 활성 팀과 권한을 다시 확인한다.
+서버는 명령 시점의 활성 팀과 권한을 다시 확인한다. `RESERVATION_CONVERTING`도 활성 팀이므로
+한 건이라도 있으면 `disableAction` 없이 비활성화하지 않고 `409 WAITING_002`를 반환한다.
 
 ## 멱등성
 
@@ -189,9 +251,10 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 ## 웨이팅 원장과 운영자 전이 (Issue #272)
 
 `고도화` Waiting 원장은 매장과 KST 영업일별로 하나의 중앙 FIFO `queueSequence`를 부여한다.
-활성 membership은 팀마다 하나만 유지하며, 동일 팀의 중복 활성 등록을 허용하지 않는다. 목록은
-항상 `(queueSequence, waitingTeamId)` 오름차순으로 정렬한다. cursor는 이 복합 키를 담은
-opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 시작한다.
+활성 membership은 일반 사용자 계정당 전체 매장을 합쳐 하나만 유지하며, 동일 팀도 중복 활성
+등록을 허용하지 않는다. 목록은 항상 `(queueSequence, waitingTeamId)` 오름차순으로 정렬한다.
+cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터
+시작한다.
 
 매장 운영자는 다음 post-MVP1 store-operator 경로만 사용한다. 이 일곱 경로는
 `store-operator-openapi.yaml`에만 연결하며 `mvp1-openapi.yaml`에는 절대 추가하지 않는다.
@@ -215,7 +278,9 @@ opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 �
 
 원장 상태 enum은 `WAITING`, `CALLED`, `ARRIVED`, `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
 `CLOSED_BY_STORE`, `RESERVATION_CONVERTING`으로 고정한다. `CHECKED_IN`, `CANCELLED`,
-`NO_SHOW`, `CLOSED_BY_STORE`, `RESERVATION_CONVERTING`은 종결 상태다.
+`NO_SHOW`, `CLOSED_BY_STORE`는 종결 상태다. `RESERVATION_CONVERTING`은 예약 선점·결제 결과를
+기다리는 비종결 상태이며 계정 활성 membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도
+같은 활성 membership을 유지한다.
 
 | 현재 상태 | 허용 운영자 명령 | 다음 상태 | 조건 |
 |---|---|---|---|
@@ -225,10 +290,13 @@ opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 �
 | `CALLED` | cancel | `CANCELLED` | 현재 version 일치 |
 | `ARRIVED` | check-in | `CHECKED_IN` | 현재 version 일치 |
 | `ARRIVED` | cancel | `CANCELLED` | 현재 version 일치 |
+| `RESERVATION_CONVERTING` | cancel | `CANCELLED` | 현재 version 일치, 예약 선점·결제 성공·매장 종료와 경합 시 먼저 확정된 결과 하나만 유지하고 필요한 보상 후속 작업 기록 |
 | 종결 상태 | 없음 | 없음 | 새 전이는 거부 |
 
+`RESERVATION_CONVERTING`에서는 cancel 외 call·arrive·check-in을 `409 WAITING_006`으로 거부한다.
 명령은 다른 매장의 팀을 읽거나 전이할 수 없고, stale version·비선두 call·이미 종결된 팀은
-성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들도록
+성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들고, 전환 중
+취소가 먼저 확정되면 예약 선점 해제 또는 뒤늦은 결제 승인 취소·환불 후속 작업을 기록하도록
 조건부 version과 활성 membership 제약을 함께 사용한다.
 
 ### 운영자 응답 개인정보 경계
@@ -257,11 +325,15 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 | `404` | `WAITING_003` | 대상 매장 범위의 웨이팅 팀을 찾을 수 없음 |
 | `404` | `WAITING_004` | 대상 매장 범위의 웨이팅 종결 작업을 찾을 수 없음 |
 | `409` | `WAITING_005` | 대상 팀 version이 `expectedVersion`과 다름 |
-| `409` | `WAITING_006` | 현재 상태 또는 종결 상태 때문에 요청 전이가 허용되지 않음 |
+| `409` | `WAITING_006` | 현재 상태에서 요청한 전이가 허용되지 않음 |
 | `409` | `WAITING_007` | call 대상이 활성 FIFO의 선두가 아님 |
 | `409` | `WAITING_008` | 활성 membership의 현재 상태와 요청 전제가 충돌함 |
 | `409` | `WAITING_009` | 종결 작업이 아직 완료되지 않았거나 대사가 필요함 |
 | `409` | `WAITING_010` | 종결 작업 대상 처리 중 실패가 발생함 |
+
+`409 WAITING_011 ACCOUNT_ACTIVE_WAITING_EXISTS`는 향후 일반 사용자 생성·합류 요청에서
+계정에 이미 활성 웨이팅이 있을 때만 사용한다. 현재 표의 store-operator ledger operation에는
+노출하지 않으며 해당 consumer path를 소유한 Issue가 별도 response로 연결한다.
 
 기존 `COMMON_001`~`COMMON_004`, `AUTH_001`, `AUTH_011`, `STORE_001`, `STORE_003`,
 `STORE_005`, `STORE_007`, `COMMON_007`, `COMMON_008`, `COMMON_010`의 의미는 변경하지
