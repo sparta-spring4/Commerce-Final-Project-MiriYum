@@ -70,6 +70,7 @@ tasks.withType<Test> {
     systemProperty("miriyum.menu.schedule.enabled", "false")
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
+    systemProperty("miriyum.waiting.closure.enabled", "false")
 }
 
 val integrationTag = "integration"
@@ -130,6 +131,7 @@ val integrationTest = tasks.register<Test>("integrationTest") {
     useJUnitPlatform {
         includeTags(integrationTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 
@@ -141,6 +143,7 @@ fun registerIntegrationTestShard(taskName: String, shardTag: String) = tasks.reg
     useJUnitPlatform {
         includeTags(shardTag)
     }
+    systemProperty("spring.test.context.cache.maxSize", "4")
     dependsOn(verifyIntegrationTestTags)
 }
 
