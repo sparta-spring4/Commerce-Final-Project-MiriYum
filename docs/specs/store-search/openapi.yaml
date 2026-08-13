@@ -977,6 +977,63 @@ paths:
           $ref: "#/components/responses/MenuNotFound"
         "409":
           $ref: "#/components/responses/MenuStateConflict"
+  /api/v1/store-operators/stores/{storeId}/representative-menus:
+    get:
+      tags: [Store Management]
+      summary: 대표(인기) 메뉴 설정 조회
+      operationId: getRepresentativeMenus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: 현재 대표 메뉴 설정
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepresentativeMenuSettingSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+    put:
+      tags: [Store Management]
+      summary: 대표(인기) 메뉴 3~5개와 순서 전체 교체
+      description: SOLD_OUT 메뉴는 선정을 유지할 수 있지만 HIDDEN, PAUSED, RETIRED 또는 미게시 메뉴는 저장할 수 없다.
+      operationId: replaceRepresentativeMenus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepresentativeMenuReplaceRequest"
+      responses:
+        "200":
+          description: 교체된 대표 메뉴 설정
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepresentativeMenuSettingSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/RepresentativeMenuNotFound"
+        "409":
+          $ref: "#/components/responses/RepresentativeMenuConflict"
 components:
   securitySchemes:
     bearerAuth:
@@ -1563,6 +1620,83 @@ components:
         saleStatus:
           type: string
           enum: [SELLING, SOLD_OUT, PAUSED]
+    RepresentativeMenuSettingStatus:
+      type: string
+      enum: [UNCONFIGURED, CONFIGURED, REQUIRES_ATTENTION]
+    RepresentativeMenuReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, menuIds]
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        menuIds:
+          type: array
+          minItems: 3
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    RepresentativeMenuItem:
+      type: object
+      additionalProperties: false
+      required:
+        - menuId
+        - displayOrder
+        - publishedVersionNumber
+        - name
+        - price
+        - sellingStatus
+      properties:
+        menuId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        displayOrder:
+          type: integer
+          minimum: 1
+          maximum: 5
+        publishedVersionNumber:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        price:
+          type: integer
+          format: int64
+          minimum: 0
+        sellingStatus:
+          type: string
+          enum: [SELLING, SOLD_OUT]
+    RepresentativeMenuSetting:
+      type: object
+      additionalProperties: false
+      required: [version, status, items]
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/RepresentativeMenuSettingStatus"
+        items:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/RepresentativeMenuItem"
+    RepresentativeMenuSettingSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/RepresentativeMenuSetting"
     ManagedMenu:
       type: object
       additionalProperties: false
@@ -2427,6 +2561,28 @@ components:
               value:
                 code: STORE_007
                 message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+    RepresentativeMenuNotFound:
+      description: 매장 또는 요청한 메뉴를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value: { code: STORE_001, message: 매장을 찾을 수 없습니다. }
+            menuNotFound:
+              value: { code: STORE_009, message: 메뉴를 찾을 수 없습니다. }
+    RepresentativeMenuConflict:
+      description: 구 version 또는 현재 공개 불가 메뉴 때문에 전체 교체 불가
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            staleVersion:
+              value: { code: COMMON_008, message: 다른 요청이 먼저 반영되었습니다. 최신 상태를 확인한 뒤 다시 시도해 주세요. }
+            invalidMenuState:
+              value: { code: STORE_010, message: 현재 메뉴 상태에서 요청한 전이를 수행할 수 없습니다. }
     MenuNotFound:
       description: 메뉴를 찾을 수 없음
       content:

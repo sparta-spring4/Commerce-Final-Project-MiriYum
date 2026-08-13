@@ -32,9 +32,12 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
+    private static final String REPRESENTATIVE_MENUS_PATH =
+            "/api/v1/store-operators/stores/{storeId}/representative-menus";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
-                    Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH),
+                    Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH,
+                            REPRESENTATIVE_MENUS_PATH),
                     WAITING_SETTINGS_PATHS.stream())
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
