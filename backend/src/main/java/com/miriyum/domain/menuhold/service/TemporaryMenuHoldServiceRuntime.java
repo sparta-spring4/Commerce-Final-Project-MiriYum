@@ -17,18 +17,13 @@ import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -41,7 +36,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService {
 
     private static final String ACQUIRE_PREFIX = "reservation-temp-menu-acquire:";
-    private static final String RESTORE_PREFIX = "reservation-temp-menu-restore:";
 
     private final MenuTransactionFacade menuTransactionFacade;
     private final StoreServiceIntervalValidationService intervalService;
@@ -93,7 +87,7 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
                 !matchesResolvedInterval(command, selection))) {
             throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
         }
-        validateServiceIntervals(command, current.size());
+        validateServiceInterval(command);
 
         List<CurrentInventorySelection> acquired;
         try {
@@ -154,7 +148,7 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
         if (transitioned && (command.target() == TemporaryMenuHoldContracts.Target.RELEASE
                 || command.target() == TemporaryMenuHoldContracts.Target.EXPIRE)) {
             inventoryService.restoreInventory(new InventoryRestoreRequest(
-                    deriveRestoreOperationId(command.operationId()),
+                    command.operationId(),
                     hold.getAcquireOperationId()));
         }
         return toResult(hold);
@@ -203,25 +197,21 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
         }
     }
 
-    private void validateServiceIntervals(
-            TemporaryMenuHoldContracts.Create command,
-            int selectionCount
-    ) {
-        List<StoreServiceIntervalRequest> requests = IntStream.range(0, selectionCount)
-                .mapToObj(index -> new StoreServiceIntervalRequest(
-                        command.storeId(), command.startAt(), command.serviceEndAt()))
-                .toList();
+    private void validateServiceInterval(TemporaryMenuHoldContracts.Create command) {
+        List<StoreServiceIntervalRequest> requests = List.of(
+                new StoreServiceIntervalRequest(
+                        command.storeId(), command.startAt(), command.serviceEndAt()));
         var results = intervalService.validateServiceIntervals(requests);
-        if (results == null || results.size() != requests.size()
-                || !IntStream.range(0, requests.size()).allMatch(index -> {
-                    var request = requests.get(index);
-                    var result = results.get(index);
-                    return result != null
-                            && result.storeId() == request.storeId()
-                            && Objects.equals(result.startAt(), request.startAt())
-                            && Objects.equals(result.serviceEndAt(), request.serviceEndAt())
-                            && result.status() == StoreServiceIntervalStatus.ACCEPTING;
-                })) {
+        if (results == null || results.size() != 1) {
+            throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
+        }
+        var request = requests.getFirst();
+        var result = results.getFirst();
+        if (result == null
+                || result.storeId() != request.storeId()
+                || !Objects.equals(result.startAt(), request.startAt())
+                || !Objects.equals(result.serviceEndAt(), request.serviceEndAt())
+                || result.status() != StoreServiceIntervalStatus.ACCEPTING) {
             throw new ServiceException(MenuHoldErrorCode.INELIGIBLE_MENU);
         }
     }
@@ -265,16 +255,6 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
     private static TemporaryMenuHoldContracts.Result noHold() {
         return new TemporaryMenuHoldContracts.Result(
                 TemporaryMenuHoldContracts.Presence.NO_HOLD, null, null);
-    }
-
-    private static String deriveRestoreOperationId(String operationId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(operationId.getBytes(StandardCharsets.UTF_8));
-            return RESTORE_PREFIX + HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is required", exception);
-        }
     }
 
     private static ServiceException idempotencyReuse() {

@@ -203,10 +203,8 @@ class TemporaryMenuHoldServiceTest {
                 command.endDate(), command.endTime())).willReturn(current);
         StoreServiceIntervalRequest intervalRequest = new StoreServiceIntervalRequest(
                 12L, command.startAt(), command.serviceEndAt());
-        given(intervalService.validateServiceIntervals(
-                List.of(intervalRequest, intervalRequest))).willReturn(List.of(
-                        StoreServiceIntervalResult.of(intervalRequest, true),
-                        StoreServiceIntervalResult.of(intervalRequest, true)));
+        given(intervalService.validateServiceIntervals(List.of(intervalRequest)))
+                .willReturn(List.of(StoreServiceIntervalResult.of(intervalRequest, true)));
         given(inventoryService.acquireCurrentInventory(
                 "reservation-temp-menu-acquire:11", current)).willReturn(current);
 
@@ -220,8 +218,7 @@ class TemporaryMenuHoldServiceTest {
         order.verify(inventoryService).loadCurrentSelections(
                 sorted, command.serviceDate(), command.startTime(),
                 command.endDate(), command.endTime());
-        order.verify(intervalService).validateServiceIntervals(
-                List.of(intervalRequest, intervalRequest));
+        order.verify(intervalService).validateServiceIntervals(List.of(intervalRequest));
         order.verify(inventoryService).acquireCurrentInventory(
                 "reservation-temp-menu-acquire:11", current);
         ArgumentCaptor<MenuHold> holdCaptor = ArgumentCaptor.forClass(MenuHold.class);
@@ -391,15 +388,13 @@ class TemporaryMenuHoldServiceTest {
                         TemporaryMenuHoldContracts.Target.RELEASE,
                         TemporaryMenuHoldContracts.State.RELEASED,
                         "repeat-release-operation",
-                        "reservation-temp-menu-restore:"
-                                + "8e42e257290a2356bd67f7accafa838582047baae4a6fb59d1413c3561e9f46e"),
+                        "repeat-release-operation"),
                 Arguments.of(
                         "repeated expiry",
                         TemporaryMenuHoldContracts.Target.EXPIRE,
                         TemporaryMenuHoldContracts.State.EXPIRED,
                         "repeat-expire-operation",
-                        "reservation-temp-menu-restore:"
-                                + "bea7f917e5d9f64e7fda5f4d7d5f5168217e9de6fb814bc8626e890d92ee884b")
+                        "repeat-expire-operation")
         );
     }
 

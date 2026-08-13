@@ -45,17 +45,24 @@ class MenuHoldMigrationContractTest {
         String sql = normalizedV38();
 
         assertThat(sql)
+                .as("menu_holds schema replacement must stay atomic in MySQL")
+                .containsOnlyOnce("ALTER TABLE menu_holds")
                 .as("legacy MenuHold creation would fail if reservation_id stayed NOT NULL")
-                .contains("ALTER TABLE menu_holds MODIFY reservation_id BIGINT NULL;");
+                .contains("ALTER TABLE menu_holds "
+                        + "DROP CHECK ck_menu_holds_status, "
+                        + "MODIFY reservation_id BIGINT NULL, "
+                        + "MODIFY status VARCHAR(32) NOT NULL, "
+                        + "ADD reservation_hold_id BIGINT NULL, "
+                        + "ADD expires_at DATETIME(6) NULL,");
         assertThat(sql)
                 .as("temporary MenuHold rows would lose their ReservationHold parent")
-                .contains("ALTER TABLE menu_holds ADD reservation_hold_id BIGINT NULL;");
+                .contains("ADD reservation_hold_id BIGINT NULL");
         assertThat(sql)
                 .as("temporary MenuHold rows would not preserve the parent's expiry")
-                .contains("ALTER TABLE menu_holds ADD expires_at DATETIME(6) NULL;");
+                .contains("ADD expires_at DATETIME(6) NULL");
         assertThat(sql)
                 .as("RECONCILIATION_REQUIRED would be truncated by the legacy status width")
-                .contains("ALTER TABLE menu_holds MODIFY status VARCHAR(32) NOT NULL;");
+                .contains("MODIFY status VARCHAR(32) NOT NULL");
     }
 
     @Test
@@ -85,7 +92,7 @@ class MenuHoldMigrationContractTest {
 
         assertThat(sql)
                 .as("the legacy status-only CHECK would reject every temporary state")
-                .contains("ALTER TABLE menu_holds DROP CHECK ck_menu_holds_status;");
+                .contains("ALTER TABLE menu_holds DROP CHECK ck_menu_holds_status,");
         assertThat(sql)
                 .as("legacy and temporary parent/state/nullability combinations could drift")
                 .contains("CONSTRAINT ck_menu_holds_parent_and_status CHECK ( "

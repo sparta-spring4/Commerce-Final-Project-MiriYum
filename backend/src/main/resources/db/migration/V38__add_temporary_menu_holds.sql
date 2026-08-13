@@ -1,15 +1,14 @@
-ALTER TABLE menu_holds DROP CHECK ck_menu_holds_status;
-
-ALTER TABLE menu_holds MODIFY reservation_id BIGINT NULL;
-ALTER TABLE menu_holds MODIFY status VARCHAR(32) NOT NULL;
-ALTER TABLE menu_holds ADD reservation_hold_id BIGINT NULL;
-ALTER TABLE menu_holds ADD expires_at DATETIME(6) NULL;
-
+-- Required by MySQL for the composite foreign-key target; do not remove as redundant with the PK.
 ALTER TABLE reservation_holds
     ADD CONSTRAINT uk_reservation_holds_id_expires
     UNIQUE (reservation_hold_id, expires_at);
 
 ALTER TABLE menu_holds
+    DROP CHECK ck_menu_holds_status,
+    MODIFY reservation_id BIGINT NULL,
+    MODIFY status VARCHAR(32) NOT NULL,
+    ADD reservation_hold_id BIGINT NULL,
+    ADD expires_at DATETIME(6) NULL,
     ADD CONSTRAINT uk_menu_holds_reservation_hold
         UNIQUE (reservation_hold_id),
     ADD CONSTRAINT fk_menu_holds_reservation_hold_expiration
