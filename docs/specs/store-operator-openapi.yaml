@@ -63,6 +63,8 @@ paths:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1selling-status"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1retirement"
+  /api/v1/store-operators/stores/{storeId}/representative-menus:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1representative-menus"
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
     $ref: "./waiting/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1waiting-settings"
   /api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact:

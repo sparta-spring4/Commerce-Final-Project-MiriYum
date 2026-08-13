@@ -12,6 +12,7 @@ import com.miriyum.domain.menu.dto.storeoperator.MenuVisibilityRequest;
 import com.miriyum.domain.menu.entity.Menu;
 import com.miriyum.domain.menu.entity.MenuPublicationEvent;
 import com.miriyum.domain.menu.entity.MenuVersion;
+import com.miriyum.domain.menu.entity.RepresentativeMenuSetting;
 import com.miriyum.domain.menu.enums.MenuPublicationEventType;
 import com.miriyum.domain.menu.enums.MenuPublicationMode;
 import com.miriyum.domain.menu.enums.MenuAuditActorType;
@@ -61,6 +62,7 @@ public class MenuCommandService {
     private final MenuPublicationEventRepository eventRepository;
     private final MenuContentPolicy contentPolicy;
     private final MenuDatabaseClock databaseClock;
+    private final RepresentativeMenuService representativeMenuService;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
 
@@ -221,11 +223,17 @@ public class MenuCommandService {
         return execute(operatorId, "MENU_VISIBILITY", key,
                 MenuCommandFingerprint.of("VISIBILITY", storeId, menuId, request), () -> {
                     storeService.requireMenuMutationAuthority(operatorId, storeId);
+                    RepresentativeMenuSetting representativeSetting =
+                            representativeMenuService.lockSetting(storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
                     MenuVisibility previousVisibility = menu.getVisibility();
                     menu.changeVisibility(request.visibility());
                     menuRepository.saveAndFlush(menu);
+                    if (menu.getVisibility() == MenuVisibility.HIDDEN) {
+                        representativeMenuService.autoRemoveLocked(
+                                representativeSetting, menuId, now, key.value());
+                    }
                     recordOperator(menu, menu.getPublishedVersionNumber(),
                             MenuPublicationEventType.VISIBILITY_CHANGED, operatorId,
                             now, now, now, key.value(), request.changeReason(),
@@ -250,11 +258,17 @@ public class MenuCommandService {
         return execute(operatorId, "MENU_SELLING_STATUS", key,
                 MenuCommandFingerprint.of("SELLING_STATUS", storeId, menuId, request), () -> {
                     storeService.requireMenuMutationAuthority(operatorId, storeId);
+                    RepresentativeMenuSetting representativeSetting =
+                            representativeMenuService.lockSetting(storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
                     MenuSellingStatus previousSellingStatus = menu.getSellingStatus();
                     menu.changeSellingStatus(request.sellingStatus());
                     menuRepository.saveAndFlush(menu);
+                    if (menu.getSellingStatus() == MenuSellingStatus.PAUSED) {
+                        representativeMenuService.autoRemoveLocked(
+                                representativeSetting, menuId, now, key.value());
+                    }
                     recordOperator(menu, menu.getPublishedVersionNumber(),
                             MenuPublicationEventType.SELLING_STATUS_CHANGED, operatorId,
                             now, now, now, key.value(), request.changeReason(),
@@ -279,6 +293,8 @@ public class MenuCommandService {
         return execute(operatorId, "MENU_RETIREMENT", key,
                 MenuCommandFingerprint.of("RETIREMENT", storeId, menuId, request), () -> {
                     storeService.requireMenuMutationAuthority(operatorId, storeId);
+                    RepresentativeMenuSetting representativeSetting =
+                            representativeMenuService.lockSetting(storeId);
                     Menu menu = lockedMenu(storeId, menuId);
                     Instant now = databaseClock.now();
                     Integer previousVersion = menu.getPublishedVersionNumber();
@@ -286,6 +302,8 @@ public class MenuCommandService {
                     MenuSellingStatus previousSellingStatus = menu.getSellingStatus();
                     menu.retire(now);
                     menuRepository.saveAndFlush(menu);
+                    representativeMenuService.autoRemoveLocked(
+                            representativeSetting, menuId, now, key.value());
                     recordOperator(menu, null, MenuPublicationEventType.RETIRED,
                             operatorId, now, now, now, key.value(), request.changeReason(),
                             previousVersion, null,
