@@ -23,6 +23,8 @@ class RepresentativeMenuOpenApiContractTest {
         Map<String, Object> path = map(map(document.get("paths")).get(PATH));
 
         assertThat(path).containsKeys("get", "put");
+        assertThat(map(map(path.get("get")).get("responses")))
+                .containsKey("400");
         Map<String, Object> put = map(path.get("put"));
         assertThat(list(put.get("parameters")))
                 .anySatisfy(parameter -> assertThat(map(parameter))

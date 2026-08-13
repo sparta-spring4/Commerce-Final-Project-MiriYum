@@ -8,6 +8,7 @@ import com.miriyum.domain.menu.service.RepresentativeMenuService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -29,7 +30,7 @@ public class RepresentativeMenuController {
     @GetMapping
     public ApiResponse<RepresentativeMenuSettingResponse> get(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
-            @PathVariable long storeId
+            @PathVariable @Positive long storeId
     ) {
         return ApiResponse.success(
                 "대표 메뉴 설정을 조회했습니다.",
@@ -39,7 +40,7 @@ public class RepresentativeMenuController {
     @PutMapping
     public ResponseEntity<ApiResponse<RepresentativeMenuSettingResponse>> replace(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
-            @PathVariable long storeId,
+            @PathVariable @Positive long storeId,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @Valid @RequestBody RepresentativeMenuReplaceRequest request
     ) {

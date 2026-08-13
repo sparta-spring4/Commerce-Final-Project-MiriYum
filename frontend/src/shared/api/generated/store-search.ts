@@ -2070,6 +2070,7 @@ export interface operations {
           "application/json": components["schemas"]["RepresentativeMenuSettingSuccessResponse"];
         };
       };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];

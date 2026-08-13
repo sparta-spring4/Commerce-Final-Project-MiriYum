@@ -101,6 +101,25 @@ class RepresentativeMenuControllerTest {
     }
 
     @Test
+    void rejectsNonPositiveStoreIdsBeforeCallingService() throws Exception {
+        mockMvc.perform(get("/api/v1/store-operators/stores/0/representative-menus")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(put("/api/v1/store-operators/stores/-7/representative-menus")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validBody()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        verify(service, never()).get(any(Long.class), any(Long.class));
+        verify(service, never()).replace(any(Long.class), any(Long.class), any(), any());
+    }
+
+    @Test
     void rejectsInvalidSizeDuplicateAndNonCanonicalIds() throws Exception {
         assertBadRequest("{\"expectedVersion\":0,\"menuIds\":[\"1\",\"2\"]}");
         assertBadRequest("""

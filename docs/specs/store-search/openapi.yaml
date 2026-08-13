@@ -993,6 +993,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RepresentativeMenuSettingSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "401":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
