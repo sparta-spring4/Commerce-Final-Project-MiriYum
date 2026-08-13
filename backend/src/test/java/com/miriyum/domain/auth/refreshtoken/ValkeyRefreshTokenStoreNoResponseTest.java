@@ -6,17 +6,22 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 
@@ -31,7 +36,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 class ValkeyRefreshTokenStoreNoResponseTest {
 
     private static final TokenNamespace NAMESPACE = TokenNamespace.CONSUMER;
-    private static final Long ACCOUNT_ID = 7L;
+    private static final Long ACCOUNT_ID = 987654321L;
     private static final String FAMILY_ID = "family-1";
     private static final String TOKEN_HASH =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -41,10 +46,22 @@ class ValkeyRefreshTokenStoreNoResponseTest {
     private StringRedisTemplate redisTemplate;
 
     private ValkeyRefreshTokenStore store;
+    private Logger logger;
+    private ListAppender<ILoggingEvent> logAppender;
 
     @BeforeEach
     void setUp() {
         store = new ValkeyRefreshTokenStore(redisTemplate);
+        logger = (Logger) LoggerFactory.getLogger(ValkeyRefreshTokenStore.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void tearDown() {
+        logger.detachAppender(logAppender);
+        logAppender.stop();
     }
 
     @Test
@@ -67,6 +84,42 @@ class ValkeyRefreshTokenStoreNoResponseTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(this::errorCodeOf)
                 .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("Lua 무응답 로그에는 계정과 토큰 식별값을 남기지 않는다")
+    void doesNotLogAccountOrTokenIdentifiersWhenScriptReturnsNoResult() {
+        givenNoScriptResult();
+
+        assertThatThrownBy(this::rotate)
+                .isInstanceOf(ServiceException.class)
+                .extracting(this::errorCodeOf)
+                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .singleElement()
+                .satisfies(message -> assertThat(message)
+                        .contains("operation=rotate", "namespace=consumer")
+                        .doesNotContain(ACCOUNT_ID.toString(), FAMILY_ID, TOKEN_HASH, "token-1"));
+    }
+
+    @Test
+    @DisplayName("Lua 계약 밖 결과 로그에는 계정과 토큰 식별값을 남기지 않는다")
+    void doesNotLogAccountOrTokenIdentifiersWhenScriptReturnsUnexpectedResult() {
+        givenScriptResult(99L);
+
+        assertThatThrownBy(this::rotate)
+                .isInstanceOf(ServiceException.class)
+                .extracting(this::errorCodeOf)
+                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .singleElement()
+                .satisfies(message -> assertThat(message)
+                        .contains("operation=rotate", "result=99", "namespace=consumer")
+                        .doesNotContain(ACCOUNT_ID.toString(), FAMILY_ID, TOKEN_HASH, "token-1"));
     }
 
     @Test

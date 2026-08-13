@@ -145,19 +145,17 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(state.familyExpiresAt()),
                 Long.toString(expectedSessionEpoch));
         // CREATE_SCRIPT는 0(familyId 충돌)·1(생성)·2(session epoch 변경)만 반환한다.
-        int createResult = requireScriptResult(result, "create", state.namespace(), state.accountId());
+        int createResult = requireScriptResult(result, "create", state.namespace());
         return switch (createResult) {
             case 1 -> new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED);
             case 2 -> new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.SESSION_EPOCH_CHANGED);
             // familyId는 256bit 난수라 충돌은 사실상 일어나지 않는다. 그래도 스크립트가 아예 실행되지
             // 않은 경우와 같은 COMMON_012로 묶이면 장애 때 원인을 좁힐 수 없어 따로 기록한다.
             case 0 -> {
-                log.error("Refresh Token family key가 이미 존재합니다. namespace={}, accountId={}",
-                        state.namespace().value(), state.accountId());
+                log.error("Refresh Token family key가 이미 존재합니다. namespace={}", state.namespace().value());
                 throw unavailable();
             }
-            default -> throw unexpectedScriptResult(
-                    "create", createResult, state.namespace(), state.accountId());
+            default -> throw unexpectedScriptResult("create", createResult, state.namespace());
         };
     }
 
@@ -199,12 +197,12 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 familyId);
         // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 0만 정상 업무 결과이고,
         // null과 그 밖의 값은 Valkey 실행 이상이므로 인증 오류로 감추지 않고 COMMON_012로 실패시킨다.
-        int rotateResult = requireScriptResult(result, "rotate", namespace, accountId);
+        int rotateResult = requireScriptResult(result, "rotate", namespace);
         return switch (rotateResult) {
             case 1 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED);
             case 3 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.REUSED);
             case 0 -> new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.NOT_FOUND);
-            default -> throw unexpectedScriptResult("rotate", rotateResult, namespace, accountId);
+            default -> throw unexpectedScriptResult("rotate", rotateResult, namespace);
         };
     }
 
@@ -216,9 +214,9 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 REVOKE_SCRIPT, List.of(familyKey, accountFamiliesKey), accountId.toString(), epochSeconds(now));
         // REVOKE_SCRIPT는 0(없음/불일치)·1(폐기)만 반환한다. 반환값을 확인하지 않으면
         // 실행 자체가 실패해도 폐기가 끝난 것처럼 종료된다.
-        int revokeResult = requireScriptResult(result, "revoke", namespace, accountId);
+        int revokeResult = requireScriptResult(result, "revoke", namespace);
         if (revokeResult != 0 && revokeResult != 1) {
-            throw unexpectedScriptResult("revoke", revokeResult, namespace, accountId);
+            throw unexpectedScriptResult("revoke", revokeResult, namespace);
         }
     }
 
@@ -238,9 +236,9 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(now),
                 epochSeconds(sessionEpochExpiresAt));
         // REVOKE_ALL_SCRIPT는 폐기한 family 수를 반환한다. 0건도 정상이지만 음수는 있을 수 없다.
-        int revokedCount = requireScriptResult(result, "revokeAll", namespace, accountId);
+        int revokedCount = requireScriptResult(result, "revokeAll", namespace);
         if (revokedCount < 0) {
-            throw unexpectedScriptResult("revokeAll", revokedCount, namespace, accountId);
+            throw unexpectedScriptResult("revokeAll", revokedCount, namespace);
         }
     }
 
@@ -248,21 +246,24 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
      * Lua 실행이 결과를 돌려주지 않으면 업무 결과로 해석하지 않고 실패시킨다.
      *
      * <p>무응답을 "없음"이나 "성공"으로 접으면 Valkey 실행 이상이 인증 오류로 숨거나
-     * 폐기가 적용되지 않은 채 성공으로 보인다. 계정·family·토큰 식별값은 남기지 않는다.</p>
+     * 폐기가 적용되지 않은 채 성공으로 보인다.</p>
+     *
+     * <p>로그에는 연산 이름과 namespace만 남긴다. accountId·familyId·tokenId·tokenHash는
+     * 계정을 특정하는 값이라 AUTH-012의 비식별 계약상 남기지 않는다. 원인 분류에는
+     * "어느 연산이 어떤 값을 반환했는가"만 있으면 충분하다.</p>
      */
-    private int requireScriptResult(Long result, String operation, TokenNamespace namespace, Long accountId) {
+    private int requireScriptResult(Long result, String operation, TokenNamespace namespace) {
         if (result == null) {
-            log.error("Refresh Token {} 스크립트가 결과를 반환하지 않았습니다. namespace={}, accountId={}",
-                    operation, namespace.value(), accountId);
+            log.error("event=refresh_token_script_no_response operation={} namespace={}",
+                    operation, namespace.value());
             throw unavailable();
         }
         return result.intValue();
     }
 
-    private ServiceException unexpectedScriptResult(
-            String operation, int result, TokenNamespace namespace, Long accountId) {
-        log.error("Refresh Token {} 스크립트가 예상치 못한 값을 반환했습니다. result={}, namespace={}, accountId={}",
-                operation, result, namespace.value(), accountId);
+    private ServiceException unexpectedScriptResult(String operation, int result, TokenNamespace namespace) {
+        log.error("event=refresh_token_script_unexpected_result operation={} result={} namespace={}",
+                operation, result, namespace.value());
         return unavailable();
     }
 
