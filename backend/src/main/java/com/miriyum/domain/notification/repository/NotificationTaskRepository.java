@@ -106,6 +106,58 @@ public class NotificationTaskRepository {
         return rows.stream().findFirst();
     }
 
+    /**
+     * 소비자에게 실제 IN_APP 전달이 완료된 작업만 고정 keyset 순서로 조회한다.
+     */
+    public List<HistoryTask> findDeliveredInAppHistory(
+            long recipientAccountId,
+            HistoryBoundary boundary,
+            int limit
+    ) {
+        Timestamp occurredAt = boundary == null ? null : Timestamp.from(boundary.occurredAt());
+        Long notificationId = boundary == null ? null : boundary.notificationId();
+        return jdbcTemplate.query("""
+                        SELECT task.notification_id, task.source_domain, task.purpose,
+                               task.recipient_relation_version,
+                               task.resource_type, task.resource_id, task.resource_version,
+                               task.title, task.occurred_at, task.created_at, task.delivered_at
+                          FROM notification_tasks task
+                          JOIN notification_channel_attempts attempt
+                            ON attempt.notification_id = task.notification_id
+                           AND attempt.channel = 'IN_APP'
+                           AND attempt.status = 'DELIVERED'
+                         WHERE task.recipient_account_id = ?
+                           AND task.status = 'DELIVERED'
+                           AND task.delivered_at IS NOT NULL
+                           AND task.title IS NOT NULL
+                           AND (? IS NULL
+                                OR task.occurred_at < ?
+                                OR (task.occurred_at = ? AND task.notification_id < ?))
+                         ORDER BY task.occurred_at DESC, task.notification_id DESC
+                         LIMIT ?
+                        """,
+                (resultSet, rowNumber) -> new HistoryTask(
+                        resultSet.getLong("notification_id"),
+                        NotificationSourceDomain.valueOf(resultSet.getString("source_domain")),
+                        NotificationPurpose.valueOf(resultSet.getString("purpose")),
+                        resultSet.getLong("recipient_relation_version"),
+                        NotificationResourceType.valueOf(resultSet.getString("resource_type")),
+                        resultSet.getLong("resource_id"),
+                        resultSet.getLong("resource_version"),
+                        resultSet.getString("title"),
+                        instant(resultSet.getTimestamp("occurred_at")),
+                        instant(resultSet.getTimestamp("created_at")),
+                        instant(resultSet.getTimestamp("delivered_at"))
+                ),
+                recipientAccountId,
+                occurredAt,
+                occurredAt,
+                occurredAt,
+                notificationId,
+                limit
+        );
+    }
+
     public LeasedTask claim(
             DueTask task,
             String workerId,
@@ -361,5 +413,23 @@ public class NotificationTaskRepository {
     }
 
     public record DeliveryCompletion(NotificationTaskStatus status, String reason) {
+    }
+
+    public record HistoryBoundary(Instant occurredAt, long notificationId) {
+    }
+
+    public record HistoryTask(
+            long notificationId,
+            NotificationSourceDomain sourceDomain,
+            NotificationPurpose purpose,
+            long recipientRelationVersion,
+            NotificationResourceType resourceType,
+            long resourceId,
+            long resourceVersion,
+            String title,
+            Instant occurredAt,
+            Instant createdAt,
+            Instant deliveredAt
+    ) {
     }
 }

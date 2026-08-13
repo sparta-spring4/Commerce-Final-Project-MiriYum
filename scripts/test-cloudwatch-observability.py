@@ -17,6 +17,9 @@ DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 GIT_BASH_EXECUTABLE = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH_EXECUTABLE = str(GIT_BASH_EXECUTABLE) if GIT_BASH_EXECUTABLE.exists() else shutil.which("bash")
+TEST_NOTIFICATION_HISTORY_CURSOR_SECRET = (
+    "test-only-notification-history-cursor-secret"
+)
 
 
 class CloudWatchObservabilityConfigTest(unittest.TestCase):
@@ -32,6 +35,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
     @staticmethod
     def load_compose_config(env_file):
+        environment = CloudWatchObservabilityConfigTest.compose_environment()
         result = subprocess.run(
             [
                 "docker",
@@ -47,9 +51,18 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             cwd=ROOT,
             capture_output=True,
             check=True,
+            env=environment,
             text=True,
         )
         return json.loads(result.stdout)
+
+    @staticmethod
+    def compose_environment():
+        environment = os.environ.copy()
+        environment["MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"] = (
+            TEST_NOTIFICATION_HISTORY_CURSOR_SECRET
+        )
+        return environment
 
     def test_disk_metric_has_instance_only_aggregation(self):
         metrics = self.config["metrics"]
@@ -170,7 +183,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             env_file.write(without_password)
             env_path = Path(env_file.name)
 
-        environment = os.environ.copy()
+        environment = self.compose_environment()
         environment.pop("MIRIYUM_VALKEY_PASSWORD", None)
         try:
             result = subprocess.run(
