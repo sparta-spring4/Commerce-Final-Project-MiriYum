@@ -120,6 +120,18 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
 
+    def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
+        self.assertIn(
+            "miriyum-staging-refresh-risk-event-pending-count", self.resource_script
+        )
+        self.assertIn("RefreshTokenRiskEventPendingCount", self.resource_script)
+        self.assertIn(
+            "[..., event=refresh_token_risk_event_pending_count, label=pending_count, count]",
+            self.resource_script,
+        )
+        self.assertIn("metricValue=$count", self.resource_script)
+        self.assertIn("MiriYum pending refresh risk events", self.resource_script)
+
     def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
             "MIRIYUM_WAITING_CLOSURE_ENABLED=false",

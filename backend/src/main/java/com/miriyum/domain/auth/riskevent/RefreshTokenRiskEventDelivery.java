@@ -48,6 +48,10 @@ public class RefreshTokenRiskEventDelivery {
         List<PendingRefreshTokenRiskEvent> events;
         try {
             events = markerStore.findPendingEvents();
+            long pendingEventCount = markerStore.pendingEventCount();
+            if (pendingEventCount > 0) {
+                log.info("refresh_token_risk_event_pending_count pending_count {}", pendingEventCount);
+            }
         } catch (DataAccessException | ServiceException exception) {
             recordFailure("valkey_read");
             return 0;

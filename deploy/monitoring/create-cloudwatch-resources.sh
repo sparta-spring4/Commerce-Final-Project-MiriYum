@@ -38,6 +38,14 @@ aws logs put-metric-filter \
   --metric-transformations \
     "metricName=RefreshTokenRiskEventDeliveryStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
 
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-pending-count \
+  --filter-pattern '[..., event=refresh_token_risk_event_pending_count, label=pending_count, count]' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventPendingCount,metricNamespace=$NAMESPACE,metricValue=$count"
+
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$TOPIC_NAME" \
@@ -183,6 +191,23 @@ dashboard_body=$(cat <<EOF
         "stat": "Minimum",
         "metrics": [
           ["MiriYum/Staging", "DeploymentHealth"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum pending refresh risk events",
+        "period": 300,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"]
         ]
       }
     }

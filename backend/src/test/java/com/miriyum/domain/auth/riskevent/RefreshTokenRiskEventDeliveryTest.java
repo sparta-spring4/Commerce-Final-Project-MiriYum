@@ -73,6 +73,19 @@ class RefreshTokenRiskEventDeliveryTest {
     }
 
     @Test
+    @DisplayName("전달 주기마다 pending marker 수만 운영 로그에 남긴다")
+    void logsPendingMarkerCountWithoutSensitiveIdentifiers() {
+        given(markerStore.findPendingEvents()).willReturn(List.of());
+        given(markerStore.pendingEventCount()).willReturn(42L);
+
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("refresh_token_risk_event_pending_count pending_count 42");
+    }
+
+    @Test
     @DisplayName("전달 중 재사용 횟수가 증가한 marker는 삭제하지 않고 다음 전달에 남긴다")
     void keepsMarkerWhenOccurrenceCountChangedDuringDelivery() {
         PendingRefreshTokenRiskEvent event = event();

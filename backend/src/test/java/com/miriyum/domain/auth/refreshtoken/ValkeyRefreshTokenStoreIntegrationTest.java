@@ -240,6 +240,40 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("한 번의 전달 조회는 pending marker 100개까지만 읽는다")
+    void limitsPendingRiskEventReadBatch() {
+        for (int index = 0; index < 101; index++) {
+            String markerKey = "auth:risk:pending:batch:" + index;
+            redisTemplate.<String, String>opsForHash().put(markerKey, "namespace", TokenNamespace.CONSUMER.value());
+            redisTemplate.<String, String>opsForHash().put(markerKey, "accountId", "7");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "familyId", "family-" + index);
+            redisTemplate.<String, String>opsForHash().put(markerKey, "tokenHash", "a".repeat(64));
+            redisTemplate.<String, String>opsForHash().put(markerKey, "sourceEvent", "REUSED_ROTATED_TOKEN");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "originEvent", "ROTATION");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "policyVersion", "AUTH-012-v1");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "occurredAt", "0");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "occurrenceCount", "1");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "lastOccurredAt", "0");
+            redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+        }
+
+        assertThat(markerStore.findPendingEvents()).hasSize(100);
+        assertThat(redisTemplate.opsForSet().size(RefreshTokenRiskEventKey.pendingIndex())).isEqualTo(101);
+    }
+
+    @Test
+    @DisplayName("전달 조회 중 다시 생성된 marker의 pending 인덱스 연결은 제거하지 않는다")
+    void preservesRecreatedMarkerPendingIndexMembership() {
+        String markerKey = "auth:risk:pending:recreated";
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+
+        redisTemplate.<String, String>opsForHash().put(markerKey, "namespace", TokenNamespace.CONSUMER.value());
+
+        assertThat(markerStore.removeFromPendingIndexIfMarkerMissing(markerKey)).isFalse();
+        assertThat(redisTemplate.opsForSet().isMember(RefreshTokenRiskEventKey.pendingIndex(), markerKey)).isTrue();
+    }
+
+    @Test
     @DisplayName("전달 중 재사용 횟수가 바뀐 위험 marker는 삭제하지 않는다")
     void keepsRiskMarkerWhenOccurrenceCountChangesDuringDelivery() {
         Instant now = Instant.now();
