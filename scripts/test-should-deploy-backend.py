@@ -80,6 +80,13 @@ class ShouldDeployBackendTest(unittest.TestCase):
             WORKFLOW,
         )
 
+    def test_backend_ci_verifies_production_task_definition_secret_contract(self):
+        backend_ci = Path(".github/workflows/backend-ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Verify production task definition secret contract", backend_ci)
+        self.assertIn("scripts/test-verify-production-task-definition.py", backend_ci)
+        self.assertIn("scripts/verify-production-task-definition.py", backend_ci)
+
 
 if __name__ == "__main__":
     unittest.main()
