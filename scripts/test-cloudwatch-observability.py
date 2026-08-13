@@ -17,6 +17,9 @@ DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
 GIT_BASH_EXECUTABLE = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH_EXECUTABLE = str(GIT_BASH_EXECUTABLE) if GIT_BASH_EXECUTABLE.exists() else shutil.which("bash")
+TEST_NOTIFICATION_HISTORY_CURSOR_SECRET = (
+    "test-only-notification-history-cursor-secret"
+)
 
 
 class CloudWatchObservabilityConfigTest(unittest.TestCase):
@@ -32,6 +35,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
     @staticmethod
     def load_compose_config(env_file):
+        environment = CloudWatchObservabilityConfigTest.compose_environment()
         result = subprocess.run(
             [
                 "docker",
@@ -47,9 +51,18 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             cwd=ROOT,
             capture_output=True,
             check=True,
+            env=environment,
             text=True,
         )
         return json.loads(result.stdout)
+
+    @staticmethod
+    def compose_environment():
+        environment = os.environ.copy()
+        environment["MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET"] = (
+            TEST_NOTIFICATION_HISTORY_CURSOR_SECRET
+        )
+        return environment
 
     def test_disk_metric_has_instance_only_aggregation(self):
         metrics = self.config["metrics"]
@@ -102,6 +115,33 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertTrue(self.compose_config["networks"]["backend-valkey"]["internal"])
         self.assertNotIn("ports", services["valkey"])
 
+    def test_staging_enables_refresh_risk_event_delivery_explicitly(self):
+        backend_environment = self.compose_config["services"]["backend"]["environment"]
+
+        self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
+
+    def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
+        staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
+            "MIRIYUM_WAITING_CLOSURE_ENABLED=false",
+            "MIRIYUM_WAITING_CLOSURE_ENABLED=true",
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".env", delete=False
+        ) as env_file:
+            env_file.write(staging_environment)
+            env_path = Path(env_file.name)
+
+        try:
+            compose_config = self.load_compose_config(env_path)
+        finally:
+            env_path.unlink(missing_ok=True)
+
+        backend_environment = compose_config["services"]["backend"]["environment"]
+        self.assertEqual(
+            "true",
+            backend_environment.get("MIRIYUM_WAITING_CLOSURE_ENABLED"),
+        )
+
     def test_valkey_preserves_auth_state_with_aof_and_noeviction(self):
         valkey = self.compose_config["services"]["valkey"]
         self.assertEqual(
@@ -143,7 +183,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             env_file.write(without_password)
             env_path = Path(env_file.name)
 
-        environment = os.environ.copy()
+        environment = self.compose_environment()
         environment.pop("MIRIYUM_VALKEY_PASSWORD", None)
         try:
             result = subprocess.run(
@@ -336,6 +376,21 @@ main
     def test_dashboard_includes_ec2_network_metrics(self):
         self.assertIn('["AWS/EC2", "NetworkIn", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
         self.assertIn('["AWS/EC2", "NetworkOut", "InstanceId", "$EC2_INSTANCE_ID"]', self.resource_script)
+
+    def test_refresh_risk_delivery_stall_log_becomes_a_cloudwatch_metric(self):
+        self.assertIn("aws logs put-metric-filter", self.resource_script)
+        self.assertIn('event=refresh_token_risk_event_delivery_stalled', self.resource_script)
+        self.assertIn('metricName=RefreshTokenRiskEventDeliveryStalled', self.resource_script)
+
+    def test_refresh_risk_delivery_stall_metric_has_an_alarm(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name RefreshTokenRiskEventDeliveryStalled", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
 
 
 if __name__ == "__main__":

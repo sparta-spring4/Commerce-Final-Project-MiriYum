@@ -6,6 +6,9 @@ import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthority;
+import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthorityPort;
+import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.service.StoreService;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -32,6 +35,20 @@ class ReservationProductionDependencyTest {
         assertThat(ReservationMenuHoldPort.class.getMethod(
                 "fulfill", long.class, String.class).getReturnType())
                 .isEqualTo(ReservationMenuHoldResult.class);
+    }
+
+    @Test
+    void waitingConsumesOnlyTheApprovedManagedStorePublicContract()
+            throws NoSuchMethodException {
+        assertThat(StoreService.class.getMethod(
+                "getManagedStore", long.class, long.class).getReturnType())
+                .isEqualTo(ManagedStoreResponse.class);
+        assertThat(WaitingStoreAuthorityPort.class.getMethod(
+                "requireRead", long.class, long.class).getReturnType())
+                .isEqualTo(WaitingStoreAuthority.class);
+        assertThat(WaitingStoreAuthorityPort.class.getMethod(
+                "requireMutation", long.class, long.class).getReturnType())
+                .isEqualTo(WaitingStoreAuthority.class);
     }
 
     @Test

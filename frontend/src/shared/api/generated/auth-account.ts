@@ -150,7 +150,7 @@ export interface components {
        * @description Access JWT 수명(초)
        * @constant
        */
-      expiresIn: 3600;
+      expiresIn: 900;
     };
     CsrfTokenData: {
       token: string;
@@ -438,6 +438,7 @@ export interface operations {
       401: components["responses"]["InvalidCredentials"];
       403: components["responses"]["AccountRestricted"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 Access Token 재발급 */
@@ -462,6 +463,7 @@ export interface operations {
       401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["OriginRejected"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 shell CSRF 토큰 준비 */
@@ -498,8 +500,8 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 가입 */
@@ -543,6 +545,7 @@ export interface operations {
       401: components["responses"]["InvalidCredentials"];
       403: components["responses"]["AccountRestricted"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 Access Token 재발급 */
@@ -567,6 +570,7 @@ export interface operations {
       401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["OriginRejected"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 shell CSRF 토큰 준비 */
@@ -603,8 +607,8 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 본인 정보 조회 */

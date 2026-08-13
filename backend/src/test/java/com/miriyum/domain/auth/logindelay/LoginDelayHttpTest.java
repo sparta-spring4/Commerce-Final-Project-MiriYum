@@ -1,10 +1,17 @@
 package com.miriyum.domain.auth.logindelay;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenCreationResult;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenState;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenStore;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.testcontainers.containers.MySQLContainer;
@@ -37,7 +45,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 확인하려는 건 계정 단위 지연이므로, IP 한도만 넉넉히 올려 계정 지연을 격리해서 검증한다.</p>
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-a")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -69,6 +77,10 @@ class LoginDelayHttpTest {
     @Autowired
     private ConsumerAccountRepository consumerAccountRepository;
 
+    // HTTP 계약 테스트의 대상은 로그인 지연 응답이므로 Valkey 저장소는 격리한다.
+    @MockitoBean
+    private RefreshTokenStore refreshTokenStore;
+
     @Autowired
     private PasswordEncoder passwordEncoder;
 
@@ -83,6 +95,9 @@ class LoginDelayHttpTest {
         consumerAccountRepository.flush();
         consumerAccountRepository.saveAndFlush(
                 ConsumerAccount.create(EMAIL, passwordEncoder.encode(RAW_PASSWORD), "지연테스트"));
+        given(refreshTokenStore.currentSessionEpoch(any(), anyLong())).willReturn(0L);
+        given(refreshTokenStore.create(any(RefreshTokenState.class), eq(0L)))
+                .willReturn(new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED));
     }
 
     @Test

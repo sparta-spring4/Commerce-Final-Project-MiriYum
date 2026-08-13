@@ -97,8 +97,11 @@ public class ConsumerAuthController {
             throw new ServiceException(AuthErrorCode.CSRF_TOKEN_INVALID);
         }
 
-        consumerAuthService.logout(refreshToken);
+        // CSRF 검증을 통과한 로그아웃 요청은 서버 폐기 성공 여부와 무관하게 항상 브라우저 쿠키를 만료시킨다.
+        // Valkey 장애로 logout()이 COMMON_012를 던지면 이 헤더가 응답에 실리지 않아
+        // 503과 함께 유효한 Refresh Token이 브라우저에 남는다.
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieFactory.expiredRefreshCookie(NAMESPACE).toString());
+        consumerAuthService.logout(refreshToken);
         return ApiResponse.success("로그아웃했습니다.", null);
     }
 
