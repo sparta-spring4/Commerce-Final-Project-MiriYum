@@ -94,9 +94,9 @@ class PickupOpenApiContractTest {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
         List<Map<String, Object>> producers = List.of(
-                map(map(paths.get("/api/v1/consumers/pickup-reservations")).get("post")),
+                map(map(paths.get("/api/v1/consumers/me/pickup-reservations")).get("post")),
                 map(map(paths.get(
-                        "/api/v1/consumers/pickup-reservations/"
+                        "/api/v1/consumers/me/pickup-reservations/"
                                 + "{pickupReservationId}/cancellations"
                 )).get("post")),
                 map(map(paths.get(

@@ -225,7 +225,7 @@ class WaitingOpenApiContractTest {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> cancel = map(map(paths.get(
-                "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel"))
+                "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations"))
                 .get("post"));
 
         assertThat(list(cancel.get("x-allowed-source-statuses")))

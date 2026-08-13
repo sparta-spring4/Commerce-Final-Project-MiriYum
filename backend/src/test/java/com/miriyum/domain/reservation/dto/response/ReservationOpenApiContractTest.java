@@ -252,9 +252,9 @@ class ReservationOpenApiContractTest {
         );
         Map<String, Object> paths = map(document.get("paths"));
         List<Map<String, Object>> producers = List.of(
-                map(map(paths.get("/api/v1/consumers/reservations")).get("post")),
+                map(map(paths.get("/api/v1/consumers/me/reservations")).get("post")),
                 map(map(paths.get(
-                        "/api/v1/consumers/reservations/{reservationId}/cancellations"
+                        "/api/v1/consumers/me/reservations/{reservationId}/cancellations"
                 )).get("post")),
                 map(map(paths.get(
                         "/api/v1/store-operators/stores/{storeId}/reservations/"
