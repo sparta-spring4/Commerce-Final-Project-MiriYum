@@ -59,6 +59,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -356,6 +357,89 @@ class ReservationHoldRuntimeIT {
         assertThat(storedVersion).isEqualTo(1L);
         assertThat(replay).isEqualTo(fresh);
         assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("transition replay는 MySQL microsecond 명령 의미만 재생하고 감사 의미 충돌은 부작용 없이 거절한다")
+    void transitionReplayUsesCompleteMicrosecondNormalizedAuditMeaning() {
+        Instant requestedAt = BASE_NOW.plusNanos(123_456_789);
+        Instant normalizedRequestedAt = requestedAt.truncatedTo(ChronoUnit.MICROS);
+        clock.set(requestedAt);
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "audit-meaning-create");
+        String operationId = "audit-meaning-transition";
+        ReservationHoldContracts.TransitionCommand freshCommand =
+                new ReservationHoldContracts.TransitionCommand(
+                        active.reservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        operationId,
+                        "  PAYMENT  ",
+                        41L,
+                        requestedAt);
+
+        ReservationHoldContracts.Result fresh = holdFacade.transition(freshCommand);
+        ReservationHoldContracts.TransitionCommand sameMicrosecondReplay =
+                new ReservationHoldContracts.TransitionCommand(
+                        active.reservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        operationId,
+                        "PAYMENT",
+                        41L,
+                        normalizedRequestedAt.plusNanos(999));
+        ReservationHoldContracts.Result replay = holdFacade.transition(sameMicrosecondReplay);
+        List<ReservationHoldContracts.TransitionCommand> conflicts = List.of(
+                new ReservationHoldContracts.TransitionCommand(
+                        active.reservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        operationId,
+                        "WORKER",
+                        41L,
+                        normalizedRequestedAt),
+                new ReservationHoldContracts.TransitionCommand(
+                        active.reservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        operationId,
+                        "PAYMENT",
+                        42L,
+                        normalizedRequestedAt),
+                new ReservationHoldContracts.TransitionCommand(
+                        active.reservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        operationId,
+                        "PAYMENT",
+                        41L,
+                        normalizedRequestedAt.plus(1, ChronoUnit.MICROS)));
+        List<Throwable> conflictResults = conflicts.stream()
+                .map(command -> catchThrowable(() -> holdFacade.transition(command)))
+                .toList();
+
+        assertThat(replay).isEqualTo(fresh);
+        assertThat(conflictResults)
+                .allSatisfy(throwable -> assertThat(throwable)
+                        .isInstanceOfSatisfying(ServiceException.class, exception ->
+                                assertThat(exception.getErrorCode()).isEqualTo(
+                                        com.miriyum.global.exception.CommonErrorCode
+                                                .IDEMPOTENCY_KEY_REUSED)));
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT status, status_version
+                  FROM reservation_holds
+                 WHERE reservation_hold_id = ?
+                """, active.reservationHoldId()))
+                .containsEntry("status", "RECONCILIATION_REQUIRED")
+                .containsEntry("status_version", 1L);
+        assertAllBucketOccupancy(scenario.originalBucketIds(), PARTY_SIZE, 1);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT actor_type, actor_id, requested_at
+                  FROM reservation_hold_transition_audits
+                 WHERE command_id = ?
+                """, operationId))
+                .containsEntry("actor_type", "PAYMENT")
+                .containsEntry("actor_id", 41L)
+                .containsEntry(
+                        "requested_at",
+                        LocalDateTime.ofInstant(normalizedRequestedAt, ZoneOffset.UTC));
     }
 
     @Test

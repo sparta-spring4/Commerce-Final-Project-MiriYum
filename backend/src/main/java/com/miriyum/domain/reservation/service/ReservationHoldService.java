@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -325,7 +326,10 @@ public class ReservationHoldService {
         if (!command.operationId().equals(replay.getCommandId())
                 || replay.getBeforeStatus() == null
                 || replay.getReservationHoldId() != command.reservationHoldId()
-                || replay.getAfterStatus() != command.targetStatus()) {
+                || replay.getAfterStatus() != command.targetStatus()
+                || !command.actorType().equals(replay.getActorType())
+                || !Objects.equals(command.actorId(), replay.getActorId())
+                || !command.requestedAt().equals(replay.getRequestedAt())) {
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         }
     }
@@ -673,7 +677,7 @@ public class ReservationHoldService {
                 operationId,
                 actorType,
                 command.actorId(),
-                command.requestedAt());
+                command.requestedAt().truncatedTo(ChronoUnit.MICROS));
     }
 
     private static String normalizeText(String value, int maxLength, String fieldName) {

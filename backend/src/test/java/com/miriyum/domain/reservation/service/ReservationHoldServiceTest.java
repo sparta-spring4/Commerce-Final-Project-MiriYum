@@ -680,6 +680,62 @@ class ReservationHoldServiceTest {
         );
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("transitionReplayAuditMeaningConflicts")
+    @DisplayName("operation의 감사 명령 의미가 하나라도 다르면 COMMON_007이고 부작용이 없다")
+    void transitionReplayRejectsDifferentAuditMeaningWithoutSideEffects(
+            String ignoredDescription,
+            String requestedActorType,
+            Long requestedActorId,
+            Instant requestedAt
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                "PAYMENT",
+                41L,
+                NOW.minusSeconds(1));
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+
+        assertThatThrownBy(() -> service.transition(new ReservationHoldContracts.TransitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                requestedActorType,
+                requestedActorId,
+                requestedAt)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(consumerAccountService).shouldHaveNoInteractions();
+        then(storeEligibilityService).shouldHaveNoInteractions();
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(timePolicyRepository).shouldHaveNoInteractions();
+        then(intervalValidationService).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+        then(warningTaskRepository).shouldHaveNoInteractions();
+        assertThat(auditIdGenerationCount).hasValue(0);
+    }
+
+    private static Stream<Arguments> transitionReplayAuditMeaningConflicts() {
+        Instant requestedAt = NOW.minusSeconds(1);
+        return Stream.of(
+                Arguments.of("different actor type", "WORKER", 41L, requestedAt),
+                Arguments.of("different actor id", "PAYMENT", 42L, requestedAt),
+                Arguments.of("different requested at", "PAYMENT", 41L,
+                        requestedAt.plus(1, ChronoUnit.MICROS))
+        );
+    }
+
     @Test
     @DisplayName("생성 audit command ID와 충돌한 transition operation은 replay로 인정하지 않는다")
     void transitionOperationCollisionWithCreationAuditIsRejected() {
@@ -1287,11 +1343,30 @@ class ReservationHoldServiceTest {
             ReservationHoldStatus after,
             String operationId
     ) {
-        return ReservationHoldTransitionAudit.record(
-                HOLD_ID,
+        return transitionAudit(
+                hold,
+                before,
+                after,
+                operationId,
                 "SYSTEM",
                 null,
-                NOW.minusSeconds(1),
+                NOW.minusSeconds(1));
+    }
+
+    private static ReservationHoldTransitionAudit transitionAudit(
+            ReservationHold hold,
+            ReservationHoldStatus before,
+            ReservationHoldStatus after,
+            String operationId,
+            String actorType,
+            Long actorId,
+            Instant requestedAt
+    ) {
+        return ReservationHoldTransitionAudit.record(
+                HOLD_ID,
+                actorType,
+                actorId,
+                requestedAt,
                 NOW,
                 before,
                 after,
