@@ -18,14 +18,19 @@ public record ReservationTemporaryMenuHoldResult(
         } else if (state == null) {
             throw new IllegalArgumentException("HOLD_PRESENT requires state");
         }
-        if (state == State.CONFIRMED) {
+        if (state == State.CONFIRMED || state == State.FULFILLED) {
             if (finalReservationId == null || finalReservationId <= 0) {
                 throw new IllegalArgumentException(
-                        "CONFIRMED requires a positive finalReservationId");
+                        state + " requires a positive finalReservationId");
+            }
+        } else if (state == State.RELEASED) {
+            if (finalReservationId != null && finalReservationId <= 0) {
+                throw new IllegalArgumentException(
+                        "RELEASED finalReservationId must be positive when present");
             }
         } else if (finalReservationId != null) {
             throw new IllegalArgumentException(
-                    "finalReservationId is allowed only for CONFIRMED");
+                    "finalReservationId is allowed only for final-linked terminal states");
         }
     }
 
@@ -41,6 +46,7 @@ public record ReservationTemporaryMenuHoldResult(
         RECONCILIATION_REQUIRED,
         CONFIRMED,
         RELEASED,
-        EXPIRED
+        EXPIRED,
+        FULFILLED
     }
 }

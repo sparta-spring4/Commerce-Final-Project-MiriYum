@@ -1107,11 +1107,16 @@ class ReservationHoldRuntimeIT {
     void confirmedTemporaryMenuHoldCancellationRestoresInventoryExactlyOnce() {
         Scenario scenario = createScenario(10, 5, twoBuckets());
         MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary cancellation", 1);
-        ReservationHoldContracts.Result active = createMenuHoldGroup(
-                scenario, menu, "confirmed-temporary-cancellation-create");
+        ReservationHoldContracts.CreateCommand creationCommand = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "confirmed-temporary-cancellation-create",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
         long finalReservationId = seedFinalReservation(
                 scenario, active.consumerAccountId());
-        holdFacade.transition(transitionCommand(
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(transitionCommand(
                 active,
                 ReservationHoldStatus.CONFIRMED,
                 "confirmed-temporary-cancellation-confirm",
@@ -1134,6 +1139,12 @@ class ReservationHoldRuntimeIT {
         assertThat(onlineRemaining(menu.bucketId())).isOne();
         assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
 
+        ReservationHoldContracts.Result creationReplay = holdFacade.create(creationCommand);
+
+        assertThat(creationReplay).isEqualTo(confirmed);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
         ReservationCancellationCommandResult replay = cancellationFacade.cancelByConsumer(
                 active.consumerAccountId(),
                 finalReservationId,
@@ -1150,11 +1161,16 @@ class ReservationHoldRuntimeIT {
     void confirmedTemporaryMenuHoldFulfillmentDoesNotRestoreInventory() {
         Scenario scenario = createScenario(10, 5, twoBuckets());
         MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary fulfillment", 1);
-        ReservationHoldContracts.Result active = createMenuHoldGroup(
-                scenario, menu, "confirmed-temporary-fulfillment-create");
+        ReservationHoldContracts.CreateCommand creationCommand = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "confirmed-temporary-fulfillment-create",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
         long finalReservationId = seedFinalReservation(
                 scenario, active.consumerAccountId());
-        holdFacade.transition(transitionCommand(
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(transitionCommand(
                 active,
                 ReservationHoldStatus.CONFIRMED,
                 "confirmed-temporary-fulfillment-confirm",
@@ -1172,6 +1188,12 @@ class ReservationHoldRuntimeIT {
         assertThat(fulfilled.data().status()).isEqualTo("FULFILLED");
         assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
                 .isEqualTo("FULFILLED");
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+
+        ReservationHoldContracts.Result creationReplay = holdFacade.create(creationCommand);
+
+        assertThat(creationReplay).isEqualTo(confirmed);
         assertThat(onlineRemaining(menu.bucketId())).isZero();
         assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
     }

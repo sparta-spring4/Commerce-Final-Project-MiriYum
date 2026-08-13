@@ -148,6 +148,14 @@ class ReservationTemporaryMenuHoldPortContractTest {
                 ReservationTemporaryMenuHoldResult.Presence.NO_HOLD, null, null))
                 .isEqualTo(new ReservationTemporaryMenuHoldResult(
                         ReservationTemporaryMenuHoldResult.Presence.NO_HOLD, null, null));
+        assertThat(new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.RELEASED, 99L)
+                .finalReservationId()).isEqualTo(99L);
+        assertThat(new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.FULFILLED, 99L)
+                .finalReservationId()).isEqualTo(99L);
         assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("presence must not be null");
@@ -169,7 +177,17 @@ class ReservationTemporaryMenuHoldPortContractTest {
                 ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
                 ReservationTemporaryMenuHoldResult.State.ACTIVE, 99L))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("finalReservationId is allowed only for CONFIRMED");
+                .hasMessage("finalReservationId is allowed only for final-linked terminal states");
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.FULFILLED, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("FULFILLED requires a positive finalReservationId");
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.RELEASED, 0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("RELEASED finalReservationId must be positive when present");
     }
 
     private static void assertMethod(String name, Class<?> parameter)

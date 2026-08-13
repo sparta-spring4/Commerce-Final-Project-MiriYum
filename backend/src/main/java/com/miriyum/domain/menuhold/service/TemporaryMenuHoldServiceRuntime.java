@@ -254,8 +254,7 @@ public class TemporaryMenuHoldServiceRuntime implements TemporaryMenuHoldService
             case CONFIRMED -> TemporaryMenuHoldContracts.State.CONFIRMED;
             case RELEASED -> TemporaryMenuHoldContracts.State.RELEASED;
             case EXPIRED -> TemporaryMenuHoldContracts.State.EXPIRED;
-            case FULFILLED -> throw new ServiceException(
-                    MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+            case FULFILLED -> TemporaryMenuHoldContracts.State.FULFILLED;
         };
         return new TemporaryMenuHoldContracts.Result(
                 TemporaryMenuHoldContracts.Presence.HOLD_PRESENT,

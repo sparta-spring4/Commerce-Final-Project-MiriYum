@@ -118,6 +118,36 @@ class TemporaryMenuHoldServiceTest {
     }
 
     @Test
+    void replayReturnsFinalLinkageAfterConfirmedTemporaryHoldIsReleased() {
+        MenuHold hold = temporaryHold(List.of(snapshot(9L, 90L, 4)));
+        hold.confirmTemporary(91L);
+        hold.release();
+        given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
+
+        TemporaryMenuHoldContracts.Result result = service().verifyCreationReplay(
+                new TemporaryMenuHoldContracts.Replay(11L, List.of(
+                        new TemporaryMenuHoldContracts.Selection(9L, 4))));
+
+        assertThat(result.state()).isEqualTo(TemporaryMenuHoldContracts.State.RELEASED);
+        assertThat(result.finalReservationId()).isEqualTo(91L);
+    }
+
+    @Test
+    void replayReturnsFinalLinkageAfterConfirmedTemporaryHoldIsFulfilled() {
+        MenuHold hold = temporaryHold(List.of(snapshot(9L, 90L, 4)));
+        hold.confirmTemporary(91L);
+        hold.fulfill();
+        given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
+
+        TemporaryMenuHoldContracts.Result result = service().verifyCreationReplay(
+                new TemporaryMenuHoldContracts.Replay(11L, List.of(
+                        new TemporaryMenuHoldContracts.Selection(9L, 4))));
+
+        assertThat(result.state()).isEqualTo(TemporaryMenuHoldContracts.State.FULFILLED);
+        assertThat(result.finalReservationId()).isEqualTo(91L);
+    }
+
+    @Test
     void replayMismatchFailsWithCommon007BeforeAnyMutation() {
         MenuHold hold = temporaryHold(List.of(snapshot(9L, 90L, 4)));
         given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));

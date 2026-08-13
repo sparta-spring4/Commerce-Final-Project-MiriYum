@@ -136,6 +136,7 @@ class ReservationTemporaryMenuHoldAdapterTest {
         for (TemporaryMenuHoldContracts.State state
                 : TemporaryMenuHoldContracts.State.values()) {
             Long finalReservationId = state == TemporaryMenuHoldContracts.State.CONFIRMED
+                    || state == TemporaryMenuHoldContracts.State.FULFILLED
                     ? 91L : null;
             given(service.lockForTransition(11L)).willReturn(
                     new TemporaryMenuHoldContracts.Result(
@@ -378,7 +379,17 @@ class ReservationTemporaryMenuHoldAdapterTest {
                         () -> new TemporaryMenuHoldContracts.Result(
                                 TemporaryMenuHoldContracts.Presence.HOLD_PRESENT,
                                 TemporaryMenuHoldContracts.State.ACTIVE, 91L),
-                        "finalReservationId is allowed only for CONFIRMED")
+                        "finalReservationId is allowed only for final-linked terminal states"),
+                invalid("fulfilled result omits final linkage",
+                        () -> new TemporaryMenuHoldContracts.Result(
+                                TemporaryMenuHoldContracts.Presence.HOLD_PRESENT,
+                                TemporaryMenuHoldContracts.State.FULFILLED, null),
+                        "FULFILLED requires a positive finalReservationId"),
+                invalid("released result has non-positive final linkage",
+                        () -> new TemporaryMenuHoldContracts.Result(
+                                TemporaryMenuHoldContracts.Presence.HOLD_PRESENT,
+                                TemporaryMenuHoldContracts.State.RELEASED, 0L),
+                        "RELEASED finalReservationId must be positive when present")
         );
     }
 
