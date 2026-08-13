@@ -1,5 +1,7 @@
 package com.miriyum.domain.reservation.entity;
 
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -143,6 +145,81 @@ public class ReservationHold {
                 creationCommandId,
                 createdAt
         );
+    }
+
+    /**
+     * 활성 또는 대사 필요 선점을 확정하고 수용량 점유를 유지한다.
+     *
+     * @throws ServiceException 현재 상태에서 확정할 수 없는 경우
+     */
+    public void confirm() {
+        requireStatus(
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED
+        );
+        status = ReservationHoldStatus.CONFIRMED;
+    }
+
+    /**
+     * 활성 또는 대사 필요 선점을 해제하고 수용량 반환 대상으로 만든다.
+     *
+     * @throws ServiceException 현재 상태에서 해제할 수 없는 경우
+     */
+    public void release() {
+        validateRelease();
+        status = ReservationHoldStatus.RELEASED;
+    }
+
+    /** 수용량 복구 전에 현재 상태가 명시적 해제를 허용하는지 변경 없이 검증한다. */
+    public void validateRelease() {
+        requireStatus(
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED
+        );
+    }
+
+    /**
+     * 활성 선점을 중앙 만료 시각 경계에서 명시적으로 만료한다.
+     *
+     * @param now 명시적 만료 명령을 판정하는 중앙 시각
+     * @throws IllegalArgumentException 판정 시각이 없는 경우
+     * @throws ServiceException 활성 상태가 아니거나 아직 만료 경계 전인 경우
+     */
+    public void expire(Instant now) {
+        validateExpiry(now);
+        status = ReservationHoldStatus.EXPIRED;
+    }
+
+    /** 수용량 복구 전에 중앙 만료 경계와 현재 상태를 변경 없이 검증한다. */
+    public void validateExpiry(Instant now) {
+        requireStatus(ReservationHoldStatus.ACTIVE);
+        Instant validatedNow = requireNonNull(now, "now");
+        if (validatedNow.isBefore(expiresAt)) {
+            throw invalidTransition();
+        }
+    }
+
+    /**
+     * 활성 선점의 점유를 유지한 채 대사 필요 상태로 격리한다.
+     *
+     * @throws ServiceException 현재 상태가 활성이 아닌 경우
+     */
+    public void requireReconciliation() {
+        requireStatus(ReservationHoldStatus.ACTIVE);
+        status = ReservationHoldStatus.RECONCILIATION_REQUIRED;
+    }
+
+    private void requireStatus(ReservationHoldStatus... allowedStatuses) {
+        for (ReservationHoldStatus allowedStatus : allowedStatuses) {
+            if (status == allowedStatus) {
+                return;
+            }
+        }
+        throw invalidTransition();
+    }
+
+    private static ServiceException invalidTransition() {
+        return new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
     }
 
     private static Long requirePositive(Long value, String fieldName) {
