@@ -21,6 +21,7 @@ import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupReservationItem;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
+import com.miriyum.domain.pickup.notification.PickupNotificationPublisher;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
@@ -65,6 +66,7 @@ public class PickupReservationService {
     private final PickupIntervalTimePolicy intervalTimePolicy;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final PickupNotificationPublisher notificationPublisher;
 
     public PickupReservationService(
             StoreTransactionEligibilityService storeEligibilityService,
@@ -75,7 +77,8 @@ public class PickupReservationService {
             ConsumerAccountService consumerAccountService,
             PickupIntervalTimePolicy intervalTimePolicy,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            PickupNotificationPublisher notificationPublisher
     ) {
         this.storeEligibilityService = storeEligibilityService;
         this.menuTransactionFacade = menuTransactionFacade;
@@ -86,6 +89,7 @@ public class PickupReservationService {
         this.intervalTimePolicy = intervalTimePolicy;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.notificationPublisher = notificationPublisher;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -196,6 +200,7 @@ public class PickupReservationService {
         }
         PickupReservation saved = repository.saveAndFlush(pickup);
         PickupReservationResponse response = toResponse(saved);
+        notificationPublisher.recordCancelled(saved, requestedAt, key.value());
         return new BusinessResult<>(HttpStatus.OK.value(), "SUCCESS",
                 "pickup-reservation", response.pickupReservationId(), response);
     }
@@ -272,6 +277,7 @@ public class PickupReservationService {
             throw new IllegalStateException("saved pickup reservation id is required");
         }
         PickupReservationResponse response = toResponse(saved);
+        notificationPublisher.recordConfirmed(saved, createdAt, key.value());
         return new BusinessResult<>(HttpStatus.CREATED.value(), "SUCCESS",
                 "pickup-reservation", response.pickupReservationId(), response);
     }

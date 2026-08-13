@@ -9,6 +9,7 @@ import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
+import com.miriyum.domain.pickup.notification.PickupNotificationPublisher;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.global.exception.ServiceException;
@@ -19,6 +20,7 @@ import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +47,7 @@ public class PickupStoreManagementService {
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final PickupNotificationPublisher notificationPublisher;
 
     public PickupStoreManagementService(
             StoreService storeService,
@@ -52,7 +55,8 @@ public class PickupStoreManagementService {
             PickupReservationRepository repository,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            PickupNotificationPublisher notificationPublisher
     ) {
         this.storeService = storeService;
         this.inventoryService = inventoryService;
@@ -60,6 +64,7 @@ public class PickupStoreManagementService {
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.notificationPublisher = notificationPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -123,14 +128,18 @@ public class PickupStoreManagementService {
                         + "/cancellations|" + reason);
         IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
             PickupReservation pickup = findStorePickup(storeId, pickupReservationId, true);
-            pickup.cancelByStoreOperator(reason, clock.instant());
+            Instant occurredAt = clock.instant();
+            pickup.cancelByStoreOperator(reason, occurredAt);
             String operationId = "pickup-store-cancel-" + operatorAccountId
                     + "-" + key.value();
             MenuInventoryRestoreResult restored = inventoryService.restore(
                     new MenuInventoryRestoreCommand(
                             operationId, pickup.getAcquireOperationId()));
             requireMatchingRestore(pickup, operationId, restored);
-            return success(repository.saveAndFlush(pickup));
+            PickupReservation saved = repository.saveAndFlush(pickup);
+            BusinessResult<PickupReservationResponse> result = success(saved);
+            notificationPublisher.recordCancelled(saved, occurredAt, key.value());
+            return result;
         });
         return result(outcome);
     }
