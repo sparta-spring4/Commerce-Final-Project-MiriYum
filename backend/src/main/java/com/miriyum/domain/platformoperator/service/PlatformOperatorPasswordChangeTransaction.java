@@ -7,6 +7,7 @@ import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAuthEvent;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPasswordState;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -41,6 +42,9 @@ public class PlatformOperatorPasswordChangeTransaction {
     public ChangedAccount change(Long accountId, InitialPasswordChangeRequest request) {
         PlatformOperatorAccount account = accounts.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID));
+        if (account.getPasswordState() != PlatformOperatorPasswordState.TEMPORARY) {
+            throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+        }
         if (!request.newPassword().equals(request.newPasswordConfirm())) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
