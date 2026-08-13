@@ -166,6 +166,21 @@ class MenuHoldTest {
     }
 
     @Test
+    void rejectsNonPositiveFinalReservationForReconciliationWithoutMutation() {
+        Instant expiresAt = Instant.parse("2026-08-10T03:10:00Z");
+        MenuHold hold = temporaryHold(expiresAt);
+        hold.requireTemporaryReconciliation();
+
+        assertThatThrownBy(() -> hold.confirmTemporary(0L))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.RECONCILIATION_REQUIRED);
+        assertThat(hold.getReservationId()).isNull();
+        assertThat(hold.getReservationHoldId()).isEqualTo(11L);
+        assertThat(hold.getExpiresAt()).isEqualTo(expiresAt);
+    }
+
+    @Test
     void releasesActiveTemporaryHold() {
         MenuHold hold = temporaryHold();
 

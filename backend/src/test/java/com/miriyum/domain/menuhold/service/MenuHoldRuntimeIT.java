@@ -25,12 +25,10 @@ import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
-import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
-import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -115,7 +113,6 @@ class MenuHoldRuntimeIT {
     @Autowired MenuHoldRepository holdRepository;
     @Autowired MenuInventoryBucketRepository bucketRepository;
     @Autowired ReservationRepository reservationRepository;
-    @Autowired ReservationHoldRepository reservationHoldRepository;
     @Autowired ConsumerAccountRepository consumerRepository;
     @Autowired StoreOperatorAccountRepository operatorRepository;
     @Autowired StoreRepository storeRepository;
@@ -720,16 +717,14 @@ class MenuHoldRuntimeIT {
     @DisplayName("임시 MenuHold의 부모·만료·상태 계약을 실제 MySQL이 강제한다")
     void mysqlSchemaDefinesTemporaryParentAndStateConstraints() {
         String operationPrefix = "temporary-schema-" + consumerId + "-";
-        ReservationHold firstParent = transactions.execute(status ->
-                reservationHoldRepository.saveAndFlush(reservationHold(
-                        operationPrefix + "parent-1",
-                        Instant.parse("2026-08-10T03:00:00Z"))));
-        ReservationHold secondParent = transactions.execute(status ->
-                reservationHoldRepository.saveAndFlush(reservationHold(
-                        operationPrefix + "parent-2",
-                        Instant.parse("2026-08-10T04:00:00Z"))));
-        LocalDateTime firstExpiry = reservationHoldExpiry(firstParent.getId());
-        LocalDateTime secondExpiry = reservationHoldExpiry(secondParent.getId());
+        long firstParentId = insertReservationHoldParent(
+                operationPrefix + "parent-1",
+                LocalDateTime.of(2026, 8, 10, 3, 0));
+        long secondParentId = insertReservationHoldParent(
+                operationPrefix + "parent-2",
+                LocalDateTime.of(2026, 8, 10, 4, 0));
+        LocalDateTime firstExpiry = reservationHoldExpiry(firstParentId);
+        LocalDateTime secondExpiry = reservationHoldExpiry(secondParentId);
 
         assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
                 .as("the composite ReservationHold parent FK must exist")
@@ -748,7 +743,7 @@ class MenuHoldRuntimeIT {
 
         assertThatThrownBy(() -> insertMenuHold(
                 null,
-                firstParent.getId(),
+                firstParentId,
                 firstExpiry.plusNanos(1_000),
                 operationPrefix + "mismatched-expiry",
                 "ACTIVE"))
@@ -757,14 +752,14 @@ class MenuHoldRuntimeIT {
 
         insertMenuHold(
                 null,
-                firstParent.getId(),
+                firstParentId,
                 firstExpiry,
                 operationPrefix + "valid-temporary",
                 "ACTIVE");
 
         assertThatThrownBy(() -> insertMenuHold(
                 null,
-                firstParent.getId(),
+                firstParentId,
                 firstExpiry,
                 operationPrefix + "duplicate-parent",
                 "ACTIVE"))
@@ -781,7 +776,7 @@ class MenuHoldRuntimeIT {
                 .hasMessageContaining("ck_menu_holds_parent_and_status");
         assertThatThrownBy(() -> insertMenuHold(
                 null,
-                secondParent.getId(),
+                secondParentId,
                 null,
                 operationPrefix + "missing-expiry",
                 "ACTIVE"))
@@ -789,7 +784,7 @@ class MenuHoldRuntimeIT {
                 .hasMessageContaining("ck_menu_holds_parent_and_status");
         assertThatThrownBy(() -> insertMenuHold(
                 null,
-                secondParent.getId(),
+                secondParentId,
                 secondExpiry,
                 operationPrefix + "unlinked-confirmed",
                 "CONFIRMED"))
@@ -999,6 +994,63 @@ class MenuHoldRuntimeIT {
                 reservationHoldId);
     }
 
+    private long insertReservationHoldParent(String commandId, LocalDateTime createdAt) {
+        LocalDateTime expiresAt = createdAt.plusMinutes(10);
+        jdbcTemplate.update("""
+                INSERT INTO reservation_holds (
+                    consumer_account_id,
+                    store_id,
+                    store_name_snapshot,
+                    service_date,
+                    start_at,
+                    service_end_at,
+                    occupancy_end_at,
+                    time_zone_id_snapshot,
+                    start_offset_seconds,
+                    service_end_offset_seconds,
+                    occupancy_end_offset_seconds,
+                    slot_interval_minutes,
+                    service_duration_minutes,
+                    turnover_duration_minutes,
+                    reservation_time_policy_store_id,
+                    reservation_policy_version,
+                    adult_count,
+                    child_count,
+                    infant_count,
+                    notification_target_reference,
+                    contact_available_at_confirmation,
+                    capacity_policy_version,
+                    cancellation_policy_version,
+                    status,
+                    status_version,
+                    creation_command_id,
+                    created_at,
+                    expires_at
+                ) VALUES (
+                    ?, ?, 'store', ?, ?, ?, ?, 'Asia/Seoul',
+                    32400, 32400, 32400, 30, 60, 0, ?, 1,
+                    2, 0, 0, ?, TRUE, 1, 1, 'ACTIVE', 0, ?, ?, ?
+                )
+                """,
+                consumerId,
+                storeId,
+                LocalDate.of(2026, 8, 10),
+                LocalDateTime.of(2026, 8, 10, 3, 0),
+                LocalDateTime.of(2026, 8, 10, 4, 0),
+                LocalDateTime.of(2026, 8, 10, 4, 0),
+                storeId,
+                "consumer:" + consumerId,
+                commandId,
+                createdAt,
+                expiresAt);
+        return jdbcTemplate.queryForObject("""
+                SELECT reservation_hold_id
+                  FROM reservation_holds
+                 WHERE consumer_account_id = ?
+                   AND creation_command_id = ?
+                """, Long.class, consumerId, commandId);
+    }
+
     private void insertMenuHold(
             Long reservationId,
             Long reservationHoldId,
@@ -1034,26 +1086,6 @@ class MenuHoldRuntimeIT {
                 LocalTime.of(13, 0),
                 operationId,
                 status);
-    }
-
-    private ReservationHold reservationHold(String commandId, Instant createdAt) {
-        ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
-                storeId, 1L, 30, 60, 0);
-        policy.activate(Instant.parse("2026-08-01T00:00:00Z"), "임시 메뉴 홀드 통합 테스트");
-        ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
-                policy, LocalDateTime.of(2026, 8, 10, 12, 0),
-                ZoneId.of("Asia/Seoul"), null);
-        return ReservationHold.active(
-                consumerId,
-                storeId,
-                "store",
-                timeSnapshot,
-                PartyComposition.of(2, 0, 0),
-                ReservationContactSnapshot.contactable("consumer:" + consumerId),
-                1L,
-                new ReservationCancellationPolicyVersion(1L),
-                commandId,
-                createdAt);
     }
 
     private Reservation reservation() {
