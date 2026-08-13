@@ -91,6 +91,20 @@ class ReservationProductionDependencyTest {
                 && !line.startsWith("import com.miriyum.domain.reservation.")
                 && (line.contains(".entity.") || line.contains(".repository."))
                 && !APPROVED_NOTIFICATION_CONTRACT_IMPORTS.contains(line);
+    void reservationProductionDoesNotImportMenuHoldOwnedDtos() throws IOException {
+        Path production = Path.of(
+                "src", "main", "java", "com", "miriyum", "domain", "reservation");
+
+        try (Stream<Path> files = Files.walk(production)) {
+            List<String> forbiddenImports = files
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .flatMap(ReservationProductionDependencyTest::linesUnchecked)
+                    .filter(line -> line.startsWith(
+                            "import com.miriyum.domain.menuhold.dto"))
+                    .toList();
+
+            assertThat(forbiddenImports).isEmpty();
+        }
     }
 
     @Test
