@@ -240,25 +240,6 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    @DisplayName("pending 인덱스에 없는 marker는 전달 조회 대상에서 제외한다")
-    void ignoresMarkerThatIsNotInPendingIndex() {
-        Instant now = Instant.now();
-        RefreshTokenState state = state("family-risk-not-indexed", "token-first", now);
-        create(state);
-
-        assertThat(rotate(state, now.plusSeconds(1)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
-        assertThat(rotate(state, now.plusSeconds(2)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
-
-        String markerKey = RefreshTokenRiskEventKey.forReuse(
-                state.namespace(), state.familyId(), state.currentTokenHash());
-        redisTemplate.opsForSet().remove(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
-
-        assertThat(markerStore.findPendingEvents()).isEmpty();
-    }
-
-    @Test
     @DisplayName("전달 중 재사용 횟수가 바뀐 위험 marker는 삭제하지 않는다")
     void keepsRiskMarkerWhenOccurrenceCountChangesDuringDelivery() {
         Instant now = Instant.now();

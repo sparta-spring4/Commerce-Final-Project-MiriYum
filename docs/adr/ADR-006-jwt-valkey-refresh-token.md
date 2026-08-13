@@ -97,3 +97,11 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 family·token 식별자가 없으므로 재발급에 사용하지 않으며, 기존 Access Token은 원래 만료 시각까지 유지하고 사용자는 한 번 다시 로그인한다.
 - 1차 MVP는 서명 변조, 만료, audience·계정 유형 불일치, Access/Refresh 용도 교차, 동시 재발급의 계약을 검증한다. 고도화는 회전 경쟁, 이전 토큰 재사용, 전체 family 폐기, Valkey 지연·중단과 복구를 추가 검증한다.
 - 초기 단계에는 즉시 세션 폐기와 재사용 탐지가 제한된다는 단점이 있고, 고도화에는 Valkey 가용성·상태 마이그레이션·실패 폐쇄 운영 비용이 추가된다. 이 절은 그 비용을 기능·운영 요구가 생기는 단계로 미룬다.
+
+## 2026-08-13 날짜별 개정
+
+### 위험 사건 marker 인덱스와 Valkey Cluster 경계
+
+- Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
+- Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
+- pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 매 전진 배포마다 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 멱등하게 이관한다. 구버전 롤백 중 생성된 marker도 다음 전진 배포에서 다시 등록되며, `SADD`는 이미 등록된 marker를 중복 생성하지 않는다. 후속 전달 경로는 Set만 조회해 평상시 전 keyspace `SCAN`을 사용하지 않는다.

@@ -28,10 +28,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Map<String, RateLimitCategory> LIMITED_REQUESTS = Map.ofEntries(
             Map.entry("POST /api/v1/consumers/auth/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/consumers/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/authorizations", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/consumers/auth/kakao/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/consumers/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
             Map.entry("GET /api/v1/consumers/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
             Map.entry("POST /api/v1/store-operators/auth/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/store-operators/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/authorizations", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/sessions", RateLimitCategory.LOGIN),
+            Map.entry("POST /api/v1/store-operators/auth/kakao/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/store-operators/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
             Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
     );
