@@ -22,7 +22,6 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 ### Staging Valkey 시험 운영 경계
 
 - #141의 첫 staging 배포에는 단일 `valkey/valkey:8.1-alpine` 컨테이너를 **시험 후보값**으로 사용한다. `8.1-alpine`, 단일 컨테이너, `maxmemory 128mb`는 운영 확정값이 아니며, ARM64 EC2 기동·health·용량·AOF 복구 검증 전에는 변경할 수 있다. 관리형 ElastiCache와 replica는 현재 트래픽·가용성 요구에 비해 비용과 운영 범위가 커서 이번 시험 범위에 도입하지 않는다.
-- 현재 Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 따라서 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster를 지원하지 않는다. Cluster 전환이 필요해지면 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token·위험 marker 키 전체를 hash tag 기반으로 재설계하고, 기존 family는 재로그인으로 전환한다.
 - Valkey는 호스트 포트를 공개하지 않고, backend와만 공유하는 Docker `backend-valkey` internal network에 둔다. MySQL과 Nginx는 이 네트워크에 연결하지 않는다.
 - 시험 구성에서는 AOF, `appendfsync everysec`, `maxmemory 128mb`, `noeviction`을 적용한다. 인증 상태가 메모리 부족으로 조용히 축출되는 대신 새 쓰기가 명시적으로 실패하는지, 실제 사용량이 128MB 후보값에 적합한지는 측정으로 확인한다.
 - #141은 컨테이너 실행, 비밀번호 인증 healthcheck, staging `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개 확인까지 담당한다. 배포 SHA·ARM64 환경·검증 결과·실패 시 기능 비활성화 또는 이전 Compose로 되돌리는 조건을 기록한 뒤에만 시험 후보값을 유지하거나 변경한다. Spring Data Redis/Lettuce 연결과 Valkey 장애 시 인증 요청 fail-closed 검증은 #140에서 수행한다.
@@ -98,3 +97,11 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 family·token 식별자가 없으므로 재발급에 사용하지 않으며, 기존 Access Token은 원래 만료 시각까지 유지하고 사용자는 한 번 다시 로그인한다.
 - 1차 MVP는 서명 변조, 만료, audience·계정 유형 불일치, Access/Refresh 용도 교차, 동시 재발급의 계약을 검증한다. 고도화는 회전 경쟁, 이전 토큰 재사용, 전체 family 폐기, Valkey 지연·중단과 복구를 추가 검증한다.
 - 초기 단계에는 즉시 세션 폐기와 재사용 탐지가 제한된다는 단점이 있고, 고도화에는 Valkey 가용성·상태 마이그레이션·실패 폐쇄 운영 비용이 추가된다. 이 절은 그 비용을 기능·운영 요구가 생기는 단계로 미룬다.
+
+## 2026-08-13 날짜별 개정
+
+### 위험 사건 marker 인덱스와 Valkey Cluster 경계
+
+- Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
+- Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
+- pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 한 번 이관한다. 이관 완료 표식은 전체 scan 성공 뒤에만 기록하므로 중간 실패 시 다음 배포에서 다시 시도한다.

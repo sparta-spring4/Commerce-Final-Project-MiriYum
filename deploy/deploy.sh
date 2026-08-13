@@ -69,6 +69,40 @@ verify_valkey() {
   fi
 }
 
+# Set 인덱스 도입 전부터 남아 있던 marker도 다음 전달 대상에서 누락되지 않게 한 번 이관한다.
+backfill_pending_risk_event_index() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local done_key="auth:risk:pending-index:backfill-v1"
+  local marker_pattern="auth:risk:pending:*"
+  local pending_index="auth:risk:pending-index"
+
+  if "${compose[@]}" exec -T valkey sh -ec \
+    'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw EXISTS "$1"' sh "${done_key}" \
+    | grep -qx '1'; then
+    return 0
+  fi
+
+  "${compose[@]}" exec -T valkey sh -ec '
+    done_key="$1"
+    marker_pattern="$2"
+    pending_index="$3"
+    cursor=0
+
+    while :; do
+      scan_result="$(REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw SCAN "$cursor" MATCH "$marker_pattern" COUNT 100)"
+      cursor="$(printf "%s\\n" "$scan_result" | sed -n "1p")"
+      printf "%s\\n" "$scan_result" | sed -n "2,$p" | while IFS= read -r marker_key; do
+        [ -n "$marker_key" ] || continue
+        REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli SADD "$pending_index" "$marker_key" >/dev/null
+      done
+
+      [ "$cursor" = "0" ] && break
+    done
+
+    REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli SET "$done_key" completed NX >/dev/null
+  ' sh "${done_key}" "${marker_pattern}" "${pending_index}"
+}
+
 # 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 main() {
   local account_id registry deadline
@@ -103,6 +137,8 @@ main() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
     return 1
   fi
+
+  backfill_pending_risk_event_index
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do

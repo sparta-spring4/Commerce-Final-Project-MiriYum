@@ -242,6 +242,24 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn('port valkey 6379', self.deploy_script)
         self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
 
+    def test_deployment_backfills_existing_pending_risk_markers_before_scan_is_removed(self):
+        function_start = self.deploy_script.index("backfill_pending_risk_event_index()")
+        function_end = self.deploy_script.index(
+            "# 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로",
+            function_start,
+        )
+        backfill_function = self.deploy_script[function_start:function_end]
+
+        self.assertIn("auth:risk:pending-index:backfill-v1", backfill_function)
+        self.assertIn("auth:risk:pending:*", backfill_function)
+        self.assertIn("auth:risk:pending-index", backfill_function)
+        self.assertIn("SADD", backfill_function)
+        self.assertIn('SET "$done_key" completed NX', backfill_function)
+        self.assertLess(
+            backfill_function.index('while :; do'),
+            backfill_function.index('SET "$done_key" completed NX'),
+        )
+
     def test_valkey_health_wait_accepts_starting_then_healthy(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
