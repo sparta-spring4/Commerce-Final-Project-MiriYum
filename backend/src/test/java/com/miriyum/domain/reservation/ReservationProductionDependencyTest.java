@@ -23,6 +23,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 class ReservationProductionDependencyTest {
 
+    private static final Set<String> APPROVED_NOTIFICATION_CONTRACT_IMPORTS = Set.of(
+            "import com.miriyum.domain.notification.dto.source.NotificationActionAvailability;",
+            "import com.miriyum.domain.notification.dto.source.NotificationActionType;",
+            "import com.miriyum.domain.notification.dto.source.NotificationPurpose;",
+            "import com.miriyum.domain.notification.dto.source.NotificationResourceType;",
+            "import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;"
+    );
+
     @Test
     void fulfillmentConsumesOnlyApprovedStoreAndReservationMenuHoldPortSignatures()
             throws NoSuchMethodException {
@@ -61,13 +69,21 @@ class ReservationProductionDependencyTest {
             List<String> forbiddenImports = files
                     .filter(path -> path.toString().endsWith(".java"))
                     .flatMap(ReservationProductionDependencyTest::linesUnchecked)
-                    .filter(line -> line.startsWith("import com.miriyum.domain."))
-                    .filter(line -> !line.startsWith("import com.miriyum.domain.reservation."))
-                    .filter(line -> line.contains(".entity.") || line.contains(".repository."))
+                    .filter(ReservationProductionDependencyTest::isForbiddenForeignInternalImport)
                     .toList();
 
             assertThat(forbiddenImports).isEmpty();
         }
+    }
+
+    @Test
+    void notificationPublicEnumsAreAllowedButNotificationRepositoriesRemainForbidden() {
+        assertThat(isForbiddenForeignInternalImport(
+                "import com.miriyum.domain.notification.dto.source.NotificationPurpose;"
+        )).isFalse();
+        assertThat(isForbiddenForeignInternalImport(
+                "import com.miriyum.domain.notification.repository.NotificationTaskRepository;"
+        )).isTrue();
     }
 
     @Test
@@ -85,6 +101,13 @@ class ReservationProductionDependencyTest {
 
             assertThat(forbiddenImports).isEmpty();
         }
+    }
+
+    private static boolean isForbiddenForeignInternalImport(String line) {
+        return line.startsWith("import com.miriyum.domain.")
+                && !line.startsWith("import com.miriyum.domain.reservation.")
+                && (line.contains(".entity.") || line.contains(".repository."))
+                && !APPROVED_NOTIFICATION_CONTRACT_IMPORTS.contains(line);
     }
 
     @Test
