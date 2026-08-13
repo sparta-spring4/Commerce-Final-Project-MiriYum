@@ -25,10 +25,12 @@ import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
+import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
+import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -113,6 +115,7 @@ class MenuHoldRuntimeIT {
     @Autowired MenuHoldRepository holdRepository;
     @Autowired MenuInventoryBucketRepository bucketRepository;
     @Autowired ReservationRepository reservationRepository;
+    @Autowired ReservationHoldRepository reservationHoldRepository;
     @Autowired ConsumerAccountRepository consumerRepository;
     @Autowired StoreOperatorAccountRepository operatorRepository;
     @Autowired StoreRepository storeRepository;
@@ -677,13 +680,14 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
-    @DisplayName("V21의 FK·CHECK·유일 인덱스가 실제 MySQL에 정확히 생성된다")
+    @DisplayName("V21과 V34의 FK·CHECK·유일 인덱스가 실제 MySQL에 정확히 생성된다")
     void mysqlSchemaDefinesExactConstraintsAndIndexOrder() {
         assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
                 .containsExactlyInAnyOrder(
                         "fk_menu_holds_reservation",
                         "fk_menu_holds_store",
-                        "fk_menu_holds_consumer");
+                        "fk_menu_holds_consumer",
+                        "fk_menu_holds_reservation_hold_expiration");
         assertThat(constraintNames("menu_hold_items", "FOREIGN KEY"))
                 .containsExactlyInAnyOrder(
                         "fk_menu_hold_items_hold",
@@ -692,7 +696,7 @@ class MenuHoldRuntimeIT {
         assertThat(constraintNames("menu_holds", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_holds_service_interval",
-                        "ck_menu_holds_status");
+                        "ck_menu_holds_parent_and_status");
         assertThat(constraintNames("menu_hold_items", "CHECK"))
                 .containsExactlyInAnyOrder(
                         "ck_menu_hold_items_versions",
@@ -704,10 +708,110 @@ class MenuHoldRuntimeIT {
                 .isEqualTo("reservation_id");
         assertThat(indexColumns("menu_holds", "uk_menu_holds_acquire_operation"))
                 .isEqualTo("acquire_operation_id");
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation_hold"))
+                .isEqualTo("reservation_hold_id");
         assertThat(indexColumns("menu_hold_items", "uk_menu_hold_items_hold_bucket"))
                 .isEqualTo("menu_hold_id,menu_inventory_bucket_id");
         assertThat(indexColumns("menu_hold_items", "idx_menu_hold_items_bucket"))
                 .isEqualTo("menu_inventory_bucket_id,menu_hold_item_id");
+    }
+
+    @Test
+    @DisplayName("임시 MenuHold의 부모·만료·상태 계약을 실제 MySQL이 강제한다")
+    void mysqlSchemaDefinesTemporaryParentAndStateConstraints() {
+        String operationPrefix = "temporary-schema-" + consumerId + "-";
+        ReservationHold firstParent = transactions.execute(status ->
+                reservationHoldRepository.saveAndFlush(reservationHold(
+                        operationPrefix + "parent-1",
+                        Instant.parse("2026-08-10T03:00:00Z"))));
+        ReservationHold secondParent = transactions.execute(status ->
+                reservationHoldRepository.saveAndFlush(reservationHold(
+                        operationPrefix + "parent-2",
+                        Instant.parse("2026-08-10T04:00:00Z"))));
+        LocalDateTime firstExpiry = reservationHoldExpiry(firstParent.getId());
+        LocalDateTime secondExpiry = reservationHoldExpiry(secondParent.getId());
+
+        assertThat(constraintNames("menu_holds", "FOREIGN KEY"))
+                .as("the composite ReservationHold parent FK must exist")
+                .contains("fk_menu_holds_reservation_hold_expiration");
+        assertThat(foreignKeyColumnMapping(
+                "menu_holds", "fk_menu_holds_reservation_hold_expiration"))
+                .as("the FK must bind both parent identity and exact expiry")
+                .isEqualTo("reservation_hold_id->reservation_hold_id,expires_at->expires_at");
+        assertThat(indexColumns("menu_holds", "uk_menu_holds_reservation_hold"))
+                .as("one ReservationHold must have at most one temporary MenuHold")
+                .isEqualTo("reservation_hold_id");
+        assertThat(constraintNames("menu_holds", "CHECK"))
+                .as("the parent/state/nullability CHECK must replace the legacy status CHECK")
+                .contains("ck_menu_holds_parent_and_status")
+                .doesNotContain("ck_menu_holds_status");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                firstParent.getId(),
+                firstExpiry.plusNanos(1_000),
+                operationPrefix + "mismatched-expiry",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("fk_menu_holds_reservation_hold_expiration");
+
+        insertMenuHold(
+                null,
+                firstParent.getId(),
+                firstExpiry,
+                operationPrefix + "valid-temporary",
+                "ACTIVE");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                firstParent.getId(),
+                firstExpiry,
+                operationPrefix + "duplicate-parent",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uk_menu_holds_reservation_hold");
+
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                null,
+                null,
+                operationPrefix + "missing-parent",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParent.getId(),
+                null,
+                operationPrefix + "missing-expiry",
+                "ACTIVE"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParent.getId(),
+                secondExpiry,
+                operationPrefix + "unlinked-confirmed",
+                "CONFIRMED"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+
+        Reservation legacyReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        insertMenuHold(
+                legacyReservation.getId(),
+                null,
+                null,
+                operationPrefix + "legacy-confirmed",
+                "CONFIRMED");
+        jdbcTemplate.update(
+                "UPDATE menu_holds SET status = 'RELEASED' WHERE reservation_id = ?",
+                legacyReservation.getId());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                legacyReservation.getId())).isEqualTo("RELEASED");
     }
 
     @Test
@@ -873,6 +977,83 @@ class MenuHoldRuntimeIT {
                    AND table_name = ?
                    AND index_name = ?
                 """, String.class, tableName, indexName);
+    }
+
+    private String foreignKeyColumnMapping(String tableName, String constraintName) {
+        return jdbcTemplate.queryForObject("""
+                SELECT GROUP_CONCAT(
+                           CONCAT(column_name, '->', referenced_column_name)
+                           ORDER BY ordinal_position SEPARATOR ','
+                       )
+                  FROM information_schema.key_column_usage
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                   AND constraint_name = ?
+                """, String.class, tableName, constraintName);
+    }
+
+    private LocalDateTime reservationHoldExpiry(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT expires_at FROM reservation_holds WHERE reservation_hold_id = ?",
+                LocalDateTime.class,
+                reservationHoldId);
+    }
+
+    private void insertMenuHold(
+            Long reservationId,
+            Long reservationHoldId,
+            LocalDateTime expiresAt,
+            String operationId,
+            String status
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO menu_holds (
+                    reservation_id,
+                    reservation_hold_id,
+                    expires_at,
+                    store_id,
+                    consumer_account_id,
+                    service_date,
+                    start_time,
+                    end_date,
+                    end_time,
+                    acquire_operation_id,
+                    status,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """,
+                reservationId,
+                reservationHoldId,
+                expiresAt,
+                storeId,
+                consumerId,
+                LocalDate.of(2026, 8, 10),
+                LocalTime.NOON,
+                LocalDate.of(2026, 8, 10),
+                LocalTime.of(13, 0),
+                operationId,
+                status);
+    }
+
+    private ReservationHold reservationHold(String commandId, Instant createdAt) {
+        ReservationTimePolicyVersion policy = ReservationTimePolicyVersion.createDraft(
+                storeId, 1L, 30, 60, 0);
+        policy.activate(Instant.parse("2026-08-01T00:00:00Z"), "임시 메뉴 홀드 통합 테스트");
+        ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                policy, LocalDateTime.of(2026, 8, 10, 12, 0),
+                ZoneId.of("Asia/Seoul"), null);
+        return ReservationHold.active(
+                consumerId,
+                storeId,
+                "store",
+                timeSnapshot,
+                PartyComposition.of(2, 0, 0),
+                ReservationContactSnapshot.contactable("consumer:" + consumerId),
+                1L,
+                new ReservationCancellationPolicyVersion(1L),
+                commandId,
+                createdAt);
     }
 
     private Reservation reservation() {
