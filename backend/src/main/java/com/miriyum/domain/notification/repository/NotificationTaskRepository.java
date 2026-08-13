@@ -4,6 +4,7 @@ import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
 import com.miriyum.domain.notification.entity.NotificationPurpose;
 import com.miriyum.domain.notification.entity.NotificationResourceType;
 import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.entity.NotificationTaskStatus;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -145,11 +146,74 @@ public class NotificationTaskRepository {
         );
     }
 
-    public boolean markDelivered(
+    public Optional<DeliveryCompletion> completeDelivery(
             LeasedTask task,
-            String title
+            String title,
+            Instant sourceExpiresAt
     ) {
-        return updateTerminal(task, "DELIVERED", null, title, true);
+        BigDecimal sourceExpiry = sourceExpiresAt == null
+                ? null
+                : epochSeconds(sourceExpiresAt);
+        int updated = jdbcTemplate.update("""
+                UPDATE notification_tasks task
+                  JOIN (SELECT FROM_UNIXTIME(?) AS source_expires_at) boundary
+                   SET task.status = CASE
+                               WHEN task.expires_at IS NOT NULL
+                                    AND NOW(6) >= task.expires_at THEN 'CANCELLED'
+                               WHEN boundary.source_expires_at IS NOT NULL
+                                    AND NOW(6) >= boundary.source_expires_at THEN 'CANCELLED'
+                               ELSE 'DELIVERED'
+                           END,
+                       task.next_attempt_at = NULL,
+                       task.lease_owner = NULL, task.lease_token = NULL,
+                       task.lease_until = NULL,
+                       task.last_error_code = CASE
+                               WHEN task.expires_at IS NOT NULL
+                                    AND NOW(6) >= task.expires_at THEN 'TASK_EXPIRED'
+                               WHEN boundary.source_expires_at IS NOT NULL
+                                    AND NOW(6) >= boundary.source_expires_at
+                                    THEN 'SOURCE_SUPERSEDED'
+                               ELSE NULL
+                           END,
+                       task.title = CASE
+                               WHEN (task.expires_at IS NULL OR NOW(6) < task.expires_at)
+                                    AND (boundary.source_expires_at IS NULL
+                                         OR NOW(6) < boundary.source_expires_at)
+                                    THEN ?
+                               ELSE NULL
+                           END,
+                       task.delivered_at = CASE
+                               WHEN (task.expires_at IS NULL OR NOW(6) < task.expires_at)
+                                    AND (boundary.source_expires_at IS NULL
+                                         OR NOW(6) < boundary.source_expires_at)
+                                    THEN NOW(6)
+                               ELSE NULL
+                           END,
+                       task.version = task.version + 1
+                 WHERE task.notification_id = ?
+                   AND task.status = 'PENDING'
+                   AND task.lease_token = ?
+                   AND task.lease_until > NOW(6)
+                """,
+                sourceExpiry,
+                title,
+                task.notificationId(),
+                task.leaseToken()
+        );
+        if (updated != 1) {
+            return Optional.empty();
+        }
+        return Optional.of(jdbcTemplate.queryForObject("""
+                        SELECT status, last_error_code
+                          FROM notification_tasks
+                         WHERE notification_id = ?
+                        """,
+                (resultSet, rowNumber) -> new DeliveryCompletion(
+                        NotificationTaskStatus.valueOf(resultSet.getString("status")),
+                        resultSet.getString("last_error_code")
+                ),
+                task.notificationId()
+        ));
     }
 
     public boolean markCancelled(LeasedTask task, String reason) {
@@ -294,5 +358,8 @@ public class NotificationTaskRepository {
             int attemptCount,
             String leaseToken
     ) {
+    }
+
+    public record DeliveryCompletion(NotificationTaskStatus status, String reason) {
     }
 }

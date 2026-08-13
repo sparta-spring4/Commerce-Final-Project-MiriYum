@@ -32,6 +32,7 @@ public class NotificationTaskWorker {
      * @return 최종 상태로 수렴한 작업 수
      */
     @Scheduled(
+            scheduler = "notificationTaskScheduler",
             fixedDelayString = "#{@notificationWorkerPollDelayMs}",
             initialDelayString = "#{@notificationWorkerInitialDelayMs}"
     )

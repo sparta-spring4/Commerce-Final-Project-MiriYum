@@ -12,6 +12,8 @@ import com.miriyum.domain.notification.entity.NotificationPurpose;
 import com.miriyum.domain.notification.entity.NotificationResourceType;
 import com.miriyum.domain.notification.entity.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -25,8 +27,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -76,10 +81,13 @@ class NotificationTaskWorkerIntegrationTest {
     @Autowired TransactionTemplate transactions;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired TestPickupSource pickupSource;
+    @Autowired BlockingTitleRenderer titleRenderer;
+    @Autowired ApplicationContext applicationContext;
 
     @BeforeEach
     void resetDatabase() {
         pickupSource.reset(found(3L, 7L, "CONFIRMED"));
+        titleRenderer.reset();
         jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
         jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
         jdbcTemplate.execute("DELETE FROM notification_tasks");
@@ -225,6 +233,65 @@ class NotificationTaskWorkerIntegrationTest {
     }
 
     @Test
+    void deliveryCrossingImmutableTaskExpiryCancelsInsteadOfPublishingHistory() throws Exception {
+        record("task-expiry-race-1");
+        titleRenderer.blockNextRender();
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var delivery = executor.submit(worker::deliverDueBatch);
+            assertThat(titleRenderer.awaitRender()).isTrue();
+            jdbcTemplate.update("""
+                    UPDATE notification_tasks
+                       SET expires_at = TIMESTAMPADD(SECOND, 1, NOW(6))
+                    """);
+            BigDecimal expiryEpoch = jdbcTemplate.queryForObject(
+                    "SELECT UNIX_TIMESTAMP(expires_at) FROM notification_tasks",
+                    BigDecimal.class);
+            awaitDatabaseTimeAtOrAfter(expiryEpoch);
+            titleRenderer.releaseRender();
+
+            assertThat(delivery.get(10, TimeUnit.SECONDS)).isOne();
+        } finally {
+            titleRenderer.releaseRender();
+        }
+
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(taskTimestampCount("delivered_at")).isZero();
+        assertThat(channelString("failure_code")).isEqualTo("TASK_EXPIRED");
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "TASK_EXPIRED@notification-worker-test-v1"
+        );
+    }
+
+    @Test
+    void deliveryCrossingSourceExpiryCancelsAsSuperseded() throws Exception {
+        OffsetDateTime sourceExpiresAt = OffsetDateTime.now().plusSeconds(3).withNano(0);
+        record("source-expiry-race-1");
+        pickupSource.reset(found(3L, 7L, "CONFIRMED", sourceExpiresAt));
+        titleRenderer.blockNextRender();
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var delivery = executor.submit(worker::deliverDueBatch);
+            assertThat(titleRenderer.awaitRender()).isTrue();
+            awaitDatabaseTimeAtOrAfter(sourceExpiresAt);
+            titleRenderer.releaseRender();
+
+            assertThat(delivery.get(10, TimeUnit.SECONDS)).isOne();
+        } finally {
+            titleRenderer.releaseRender();
+        }
+
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(taskTimestampCount("delivered_at")).isZero();
+        assertThat(channelString("failure_code")).isEqualTo("SOURCE_SUPERSEDED");
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "SOURCE_SUPERSEDED@notification-worker-test-v1"
+        );
+    }
+
+    @Test
     void expiredLeaseIsRecoveredAndTheStaleWorkerCannotOverwriteDelivery() throws Exception {
         record("lease-recovery-1");
         pickupSource.blockFirstRead(found(3L, 7L, "CONFIRMED"));
@@ -284,6 +351,49 @@ class NotificationTaskWorkerIntegrationTest {
                 """);
     }
 
+    @Test
+    void blockingNotificationSourceDoesNotDelayApplicationScheduledTasks() throws Exception {
+        record("scheduler-isolation-1");
+        pickupSource.blockFirstRead(found(3L, 7L, "CONFIRMED"));
+        TaskScheduler notificationScheduler = applicationContext.getBean(
+                "notificationTaskScheduler", TaskScheduler.class);
+        TaskScheduler applicationScheduler = applicationContext.getBean(
+                "taskScheduler", TaskScheduler.class);
+        CountDownLatch applicationTaskRan = new CountDownLatch(1);
+
+        var notificationRun = notificationScheduler.schedule(
+                worker::deliverDueBatch, Instant.now());
+        try {
+            assertThat(pickupSource.awaitFirstRead()).isTrue();
+            applicationScheduler.schedule(applicationTaskRan::countDown, Instant.now());
+
+            assertThat(applicationTaskRan.await(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            pickupSource.releaseFirstRead();
+        }
+        notificationRun.get(10, TimeUnit.SECONDS);
+        assertThat(taskString("status")).isEqualTo("DELIVERED");
+    }
+
+    private void awaitDatabaseTimeAtOrAfter(OffsetDateTime threshold)
+            throws InterruptedException {
+        BigDecimal epochSeconds = BigDecimal.valueOf(threshold.toEpochSecond())
+                .add(BigDecimal.valueOf(threshold.getNano(), 9));
+        awaitDatabaseTimeAtOrAfter(epochSeconds);
+    }
+
+    private void awaitDatabaseTimeAtOrAfter(BigDecimal epochSeconds)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT UNIX_TIMESTAMP(NOW(6)) >= ?", Boolean.class, epochSeconds))) {
+            if (System.nanoTime() >= deadline) {
+                throw new IllegalStateException("database clock did not reach expiry threshold");
+            }
+            Thread.sleep(10);
+        }
+    }
+
     private String taskString(String column) {
         return jdbcTemplate.queryForObject(
                 "SELECT " + column + " FROM notification_tasks", String.class);
@@ -318,6 +428,15 @@ class NotificationTaskWorkerIntegrationTest {
             long recipientRelationVersion,
             String sourceState
     ) {
+        return found(resourceVersion, recipientRelationVersion, sourceState, null);
+    }
+
+    private static NotificationSourceContextV1 found(
+            long resourceVersion,
+            long recipientRelationVersion,
+            String sourceState,
+            OffsetDateTime expiresAt
+    ) {
         return new NotificationSourceContextV1(
                 NotificationSourceReadResult.FOUND,
                 resourceVersion,
@@ -326,7 +445,7 @@ class NotificationTaskWorkerIntegrationTest {
                 "미리윰 강남",
                 null,
                 OffsetDateTime.parse("2026-08-12T01:02:03Z"),
-                null,
+                expiresAt,
                 NotificationActionType.PICKUP_RESERVATION_DETAIL,
                 NotificationResourceType.PICKUP_RESERVATION,
                 "21",
@@ -349,6 +468,57 @@ class NotificationTaskWorkerIntegrationTest {
             return new TestPickupSource();
         }
 
+        @Bean
+        @Primary
+        BlockingTitleRenderer blockingTitleRenderer() {
+            return new BlockingTitleRenderer();
+        }
+
+    }
+
+    static final class BlockingTitleRenderer extends NotificationTitleRenderer {
+
+        private volatile CountDownLatch renderEntered;
+        private volatile CountDownLatch releaseRender;
+
+        void reset() {
+            renderEntered = null;
+            releaseRender = null;
+        }
+
+        void blockNextRender() {
+            renderEntered = new CountDownLatch(1);
+            releaseRender = new CountDownLatch(1);
+        }
+
+        boolean awaitRender() throws InterruptedException {
+            return renderEntered.await(10, TimeUnit.SECONDS);
+        }
+
+        void releaseRender() {
+            if (releaseRender != null) {
+                releaseRender.countDown();
+            }
+        }
+
+        @Override
+        public String render(
+                NotificationPurpose purpose,
+                NotificationSourceContextV1 context
+        ) {
+            if (renderEntered != null) {
+                renderEntered.countDown();
+                try {
+                    if (!releaseRender.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("title rendering was not released");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("title rendering interrupted", exception);
+                }
+            }
+            return super.render(purpose, context);
+        }
     }
 
     static final class TestPickupSource implements PickupNotificationSource {

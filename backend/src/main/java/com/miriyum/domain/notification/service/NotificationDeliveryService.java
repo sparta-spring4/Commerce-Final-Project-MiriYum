@@ -6,6 +6,7 @@ import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
 import com.miriyum.domain.notification.repository.NotificationChannelAttemptRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
+import com.miriyum.domain.notification.repository.NotificationTaskRepository.DeliveryCompletion;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.DueTask;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.LeasedTask;
 import com.miriyum.domain.notification.repository.NotificationTaskTransitionAuditRepository;
@@ -152,24 +153,39 @@ public class NotificationDeliveryService {
         } catch (RuntimeException invalidContext) {
             return fail(task, SOURCE_CONTEXT_INVALID, policy);
         }
-        return completeDelivery(task, title, policy);
+        Instant sourceExpiresAt = context.expiresAt() == null
+                ? null
+                : context.expiresAt().toInstant();
+        return completeDelivery(task, title, sourceExpiresAt, policy);
     }
 
     private boolean completeDelivery(
             LeasedTask task,
             String title,
+            Instant sourceExpiresAt,
             RuntimePolicy policy
     ) {
         Boolean updated = transactions.execute(status -> {
-            if (!taskRepository.markDelivered(task, title)) {
+            Optional<DeliveryCompletion> completion =
+                    taskRepository.completeDelivery(task, title, sourceExpiresAt);
+            if (completion.isEmpty()) {
                 return false;
             }
-            channelAttemptRepository.markDelivered(task.notificationId());
+            DeliveryCompletion outcome = completion.orElseThrow();
+            if (outcome.status() == NotificationTaskStatus.DELIVERED) {
+                channelAttemptRepository.markDelivered(task.notificationId());
+            } else if (outcome.status() == NotificationTaskStatus.CANCELLED) {
+                channelAttemptRepository.markCancelled(task.notificationId(), outcome.reason());
+            } else {
+                throw new IllegalStateException("unexpected delivery completion status");
+            }
             transitionAuditRepository.insert(
                     task.notificationId(),
                     NotificationTaskStatus.PENDING,
-                    NotificationTaskStatus.DELIVERED,
-                    auditReason("IN_APP_DELIVERED", policy),
+                    outcome.status(),
+                    auditReason(outcome.status() == NotificationTaskStatus.DELIVERED
+                            ? "IN_APP_DELIVERED"
+                            : outcome.reason(), policy),
                     task.correlationId()
             );
             return true;
