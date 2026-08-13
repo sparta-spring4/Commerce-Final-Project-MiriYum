@@ -53,7 +53,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * credential failures.</p>
  */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-c")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
