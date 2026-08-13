@@ -33,6 +33,10 @@ import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditR
 import com.miriyum.domain.reservation.repository.ReservationHoldWarningTaskRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
+import com.miriyum.domain.reservation.port.ReservationTemporaryMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldResult;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
@@ -100,6 +104,9 @@ class ReservationHoldServiceTest {
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
     @Mock
+    private ReservationTemporaryMenuHoldPort temporaryMenuHoldPort;
+
+    @Mock
     private ConsumerAccountService consumerAccountService;
 
     @Mock
@@ -136,6 +143,7 @@ class ReservationHoldServiceTest {
                 auditRepository,
                 warningTaskRepository,
                 capacityBucketRepository,
+                temporaryMenuHoldPort,
                 consumerAccountService,
                 storeEligibilityService,
                 timeResolutionService,
@@ -147,6 +155,226 @@ class ReservationHoldServiceTest {
                 });
     }
 
+    @Test
+    @DisplayName("생성 명령은 메뉴 선택을 정규화해 불변 오름차순 목록으로 보관한다")
+    void createCommandCanonicalizesMenuSelectionsAtItsBoundary() {
+        ReservationHoldContracts.CreateCommand command = commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(9L, 2),
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 4)));
+
+        List<ReservationTemporaryMenuHoldSelection> selections = command.menuSelections();
+
+        assertThat(selections).containsExactly(
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 6));
+        assertThatThrownBy(() -> selections.add(
+                new ReservationTemporaryMenuHoldSelection(10L, 1)))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("null과 빈 메뉴 선택은 같은 불변 빈 목록으로 정규화한다")
+    void createCommandCanonicalizesNullAndEmptyMenuSelections() {
+        ReservationHoldContracts.CreateCommand nullSelections = commandWithSelections(null);
+        ReservationHoldContracts.CreateCommand emptySelections = commandWithSelections(List.of());
+
+        assertThat(nullSelections.menuSelections()).isEmpty();
+        assertThat(emptySelections.menuSelections()).isEmpty();
+        assertThatThrownBy(() -> nullSelections.menuSelections().add(
+                new ReservationTemporaryMenuHoldSelection(3L, 1)))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("메뉴별 합계 100 초과와 int overflow는 replay 조회 전에 거절한다")
+    void createCommandRejectsExcessAndOverflowBeforeCollaborators() {
+        assertThatThrownBy(() -> commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 60),
+                new ReservationTemporaryMenuHoldSelection(3L, 41))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, Integer.MAX_VALUE),
+                new ReservationTemporaryMenuHoldSelection(3L, 1))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasCauseInstanceOf(ArithmeticException.class);
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("null 메뉴 항목과 양수가 아닌 메뉴 ID·수량은 collaborator 전에 거절한다")
+    void createCommandRejectsNullAndNonPositiveSelectionsBeforeCollaborators() {
+        assertThatThrownBy(() -> commandWithSelections(java.util.Arrays.asList(
+                new ReservationTemporaryMenuHoldSelection(3L, 1), null)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldSelection(0L, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldSelection(3L, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("초기 생성 replay는 fresh 검증 전에 저장된 메뉴 의미를 확인한다")
+    void initialCreationReplayVerifiesPersistedMenuMeaningBeforeFreshWork() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        List<ReservationTemporaryMenuHoldSelection> selections = List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2));
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willReturn(presentTemporaryMenuHold());
+
+        ReservationHoldContracts.Result result = service.create(
+                commandWithSelections(selections));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        ArgumentCaptor<ReservationTemporaryMenuHoldCommand.Replay> replayCaptor =
+                ArgumentCaptor.forClass(ReservationTemporaryMenuHoldCommand.Replay.class);
+        InOrder order = inOrder(holdRepository, temporaryMenuHoldPort);
+        order.verify(holdRepository).findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID);
+        order.verify(temporaryMenuHoldPort).verifyCreationReplay(replayCaptor.capture());
+        assertThat(replayCaptor.getValue().reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(replayCaptor.getValue().selections()).containsExactlyElementsOf(selections);
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("Store 잠금 뒤 동시 생성 replay도 저장된 메뉴 의미를 확인한다")
+    void concurrentCreationReplayVerifiesPersistedMenuMeaning() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        List<ReservationTemporaryMenuHoldSelection> selections = List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2));
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID))
+                .willReturn(Optional.empty(), Optional.of(existing));
+        given(consumerAccountService.getReservationContact(CONSUMER_ID))
+                .willReturn(new ReservationContactResult("opaque-contact-ref", true));
+        given(storeEligibilityService.requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(STORE_ID, "store"));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willReturn(presentTemporaryMenuHold());
+
+        ReservationHoldContracts.Result result = service.create(
+                commandWithSelections(selections));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        then(temporaryMenuHoldPort).should().verifyCreationReplay(
+                new ReservationTemporaryMenuHoldCommand.Replay(HOLD_ID, selections));
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).shouldHaveNoInteractions();
+        then(warningTaskRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("replay 메뉴 의미 불일치는 COMMON_007이고 fresh 효과가 없다")
+    void replayMenuMismatchReturnsCommon007WithoutFreshEffects() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willThrow(new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        assertThatThrownBy(() -> service.create(commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2)))))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        verifyNoFreshInteractions();
+        then(temporaryMenuHoldPort).should(never()).create(any());
+    }
+
+    @Test
+    @DisplayName("fresh 빈 메뉴 선택은 임시 MenuHold 포트에 영속 효과를 요청하지 않는다")
+    void freshEmptyMenuSelectionsHaveNoTemporaryMenuHoldEffects() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+
+        ReservationHoldContracts.Result result = service.create(commandWithSelections(List.of()));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("fresh 메뉴 선택은 모든 capacity 점유 뒤 저장된 Hold ID·만료와 정규화 선택을 전달한다")
+    void freshMenuSelectionsCreateTemporaryMenuHoldAfterCapacityOccupation() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+        given(temporaryMenuHoldPort.create(any())).willReturn(presentTemporaryMenuHold());
+        List<ReservationTemporaryMenuHoldSelection> input = List.of(
+                new ReservationTemporaryMenuHoldSelection(9L, 2),
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 4));
+
+        ReservationHoldContracts.Result result = service.create(commandWithSelections(input));
+
+        ArgumentCaptor<ReservationTemporaryMenuHoldCommand.Create> createCaptor =
+                ArgumentCaptor.forClass(ReservationTemporaryMenuHoldCommand.Create.class);
+        InOrder order = inOrder(capacityBucketRepository, holdRepository,
+                allocationRepository, temporaryMenuHoldPort, auditRepository,
+                warningTaskRepository);
+        order.verify(capacityBucketRepository).findLatestPolicyBucketsOverlappingForUpdate(
+                STORE_ID, SERVICE_DATE, START_TIME, LocalTime.of(19, 15));
+        order.verify(holdRepository).saveAndFlush(any(ReservationHold.class));
+        order.verify(allocationRepository).saveAll(anyList());
+        order.verify(temporaryMenuHoldPort).create(createCaptor.capture());
+        order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
+        order.verify(warningTaskRepository).save(any(ReservationHoldWarningTask.class));
+        ReservationTemporaryMenuHoldCommand.Create sent = createCaptor.getValue();
+        assertThat(sent.reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(sent.storeId()).isEqualTo(STORE_ID);
+        assertThat(sent.consumerAccountId()).isEqualTo(CONSUMER_ID);
+        assertThat(sent.serviceDate()).isEqualTo(SERVICE_DATE);
+        assertThat(sent.startTime()).isEqualTo(START_TIME);
+        assertThat(sent.endDate()).isEqualTo(SERVICE_DATE);
+        assertThat(sent.endTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(sent.startAt()).isEqualTo(result.startAt());
+        assertThat(sent.serviceEndAt()).isEqualTo(result.serviceEndAt());
+        assertThat(sent.expiresAt()).isEqualTo(result.expiresAt());
+        assertThat(sent.selections()).containsExactly(
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 6));
+    }
+
+    @Test
+    @DisplayName("MenuHold 실패는 audit·warning을 막고 앞선 capacity는 transaction rollback에 맡긴다")
+    void temporaryMenuHoldFailureStopsAuditAndWarningWithoutManualCompensation() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+        ServiceException failure = new ServiceException(
+                com.miriyum.domain.menuhold.error.MenuHoldErrorCode.INSUFFICIENT_QUANTITY);
+        given(temporaryMenuHoldPort.create(any())).willThrow(failure);
+
+        assertThatThrownBy(() -> service.create(commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2)))))
+                .isSameAs(failure);
+
+        assertThat(buckets).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(3);
+            assertThat(bucket.getOccupiedTeams()).isOne();
+        });
+        then(auditRepository).shouldHaveNoInteractions();
+        then(warningTaskRepository).shouldHaveNoInteractions();
+    }
     @ParameterizedTest(name = "{0}")
     @MethodSource("sameMeaningReplayOffsets")
     @DisplayName("같은 생성 명령의 같은 의미 replay는 현재 선점을 반환하고 fresh 부작용을 만들지 않는다")
@@ -1248,6 +1476,7 @@ class ReservationHoldServiceTest {
                 auditRepository,
                 warningTaskRepository,
                 capacityBucketRepository,
+                temporaryMenuHoldPort,
                 consumerAccountService,
                 storeEligibilityService,
                 timeResolutionService,
@@ -1510,6 +1739,29 @@ class ReservationHoldServiceTest {
         then(allocationRepository).shouldHaveNoInteractions();
         then(auditRepository).shouldHaveNoInteractions();
         then(warningTaskRepository).shouldHaveNoInteractions();
+    }
+
+    private static ReservationTemporaryMenuHoldResult presentTemporaryMenuHold() {
+        return new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.ACTIVE,
+                null);
+    }
+
+    private static ReservationHoldContracts.CreateCommand commandWithSelections(
+            List<ReservationTemporaryMenuHoldSelection> selections
+    ) {
+        return new ReservationHoldContracts.CreateCommand(
+                CONSUMER_ID,
+                STORE_ID,
+                SERVICE_DATE,
+                START_TIME,
+                null,
+                2,
+                1,
+                0,
+                CREATION_COMMAND_ID,
+                selections);
     }
 
     private static ReservationHoldContracts.CreateCommand command(

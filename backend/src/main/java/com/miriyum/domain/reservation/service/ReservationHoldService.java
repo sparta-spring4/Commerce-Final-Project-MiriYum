@@ -17,6 +17,9 @@ import com.miriyum.domain.reservation.entity.ReservationHoldTransitionAudit;
 import com.miriyum.domain.reservation.entity.ReservationHoldWarningTask;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.port.ReservationTemporaryMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
@@ -62,6 +65,7 @@ public class ReservationHoldService {
     private final ReservationHoldTransitionAuditRepository auditRepository;
     private final ReservationHoldWarningTaskRepository warningTaskRepository;
     private final ReservationCapacityBucketRepository capacityBucketRepository;
+    private final ReservationTemporaryMenuHoldPort temporaryMenuHoldPort;
     private final ConsumerAccountService consumerAccountService;
     private final StoreTransactionEligibilityService storeEligibilityService;
     private final ReservationTimeResolutionService timeResolutionService;
@@ -79,6 +83,7 @@ public class ReservationHoldService {
             ReservationHoldTransitionAuditRepository auditRepository,
             ReservationHoldWarningTaskRepository warningTaskRepository,
             ReservationCapacityBucketRepository capacityBucketRepository,
+            ReservationTemporaryMenuHoldPort temporaryMenuHoldPort,
             ConsumerAccountService consumerAccountService,
             StoreTransactionEligibilityService storeEligibilityService,
             ReservationTimeResolutionService timeResolutionService,
@@ -92,6 +97,7 @@ public class ReservationHoldService {
                 auditRepository,
                 warningTaskRepository,
                 capacityBucketRepository,
+                temporaryMenuHoldPort,
                 consumerAccountService,
                 storeEligibilityService,
                 timeResolutionService,
@@ -108,6 +114,7 @@ public class ReservationHoldService {
             ReservationHoldTransitionAuditRepository auditRepository,
             ReservationHoldWarningTaskRepository warningTaskRepository,
             ReservationCapacityBucketRepository capacityBucketRepository,
+            ReservationTemporaryMenuHoldPort temporaryMenuHoldPort,
             ConsumerAccountService consumerAccountService,
             StoreTransactionEligibilityService storeEligibilityService,
             ReservationTimeResolutionService timeResolutionService,
@@ -121,6 +128,7 @@ public class ReservationHoldService {
         this.auditRepository = auditRepository;
         this.warningTaskRepository = warningTaskRepository;
         this.capacityBucketRepository = capacityBucketRepository;
+        this.temporaryMenuHoldPort = temporaryMenuHoldPort;
         this.consumerAccountService = consumerAccountService;
         this.storeEligibilityService = storeEligibilityService;
         this.timeResolutionService = timeResolutionService;
@@ -151,6 +159,7 @@ public class ReservationHoldService {
             if (!sameUserControlledMeaning(replay, normalized)) {
                 throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
+            verifyMenuCreationReplay(replay, normalized.menuSelections());
             return resultOf(replay);
         }
 
@@ -169,6 +178,7 @@ public class ReservationHoldService {
             if (!sameUserControlledMeaning(concurrentReplay, normalized)) {
                 throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
+            verifyMenuCreationReplay(concurrentReplay, normalized.menuSelections());
             return resultOf(concurrentReplay);
         }
         ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
@@ -241,6 +251,8 @@ public class ReservationHoldService {
                         capacityPolicyVersion))
                 .toList();
         allocationRepository.saveAll(allocations);
+
+        createTemporaryMenuHold(saved, normalized.menuSelections());
 
         String auditCommandId = CREATION_AUDIT_COMMAND_PREFIX
                 + requireAuditCommandId();
@@ -644,7 +656,41 @@ public class ReservationHoldService {
                 command.startTime(),
                 command.startOffset(),
                 party,
-                creationCommandId);
+                creationCommandId,
+                command.menuSelections());
+    }
+
+    private void verifyMenuCreationReplay(
+            ReservationHold hold,
+            List<ReservationTemporaryMenuHoldSelection> selections
+    ) {
+        temporaryMenuHoldPort.verifyCreationReplay(
+                new ReservationTemporaryMenuHoldCommand.Replay(
+                        requirePersistedId(hold), selections));
+    }
+
+    private void createTemporaryMenuHold(
+            ReservationHold hold,
+            List<ReservationTemporaryMenuHoldSelection> selections
+    ) {
+        if (selections.isEmpty()) {
+            return;
+        }
+        ZoneId timeZone = ZoneId.of(hold.getTimeZoneId());
+        var localStart = hold.getStartAt().atZone(timeZone);
+        var localEnd = hold.getServiceEndAt().atZone(timeZone);
+        temporaryMenuHoldPort.create(new ReservationTemporaryMenuHoldCommand.Create(
+                requirePersistedId(hold),
+                hold.getStoreId(),
+                hold.getConsumerAccountId(),
+                localStart.toLocalDate(),
+                localStart.toLocalTime(),
+                localEnd.toLocalDate(),
+                localEnd.toLocalTime(),
+                hold.getStartAt(),
+                hold.getServiceEndAt(),
+                hold.getExpiresAt(),
+                selections));
     }
 
     private static NormalizedTransitionCommand normalizeTransition(
@@ -798,7 +844,8 @@ public class ReservationHoldService {
             LocalTime startTime,
             ZoneOffset startOffset,
             PartyComposition party,
-            String creationCommandId
+            String creationCommandId,
+            List<ReservationTemporaryMenuHoldSelection> menuSelections
     ) {
     }
 
