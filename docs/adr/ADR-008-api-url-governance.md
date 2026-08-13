@@ -98,15 +98,28 @@ Issue #303은 #82를 대체하지 않는다. #82의 사용자 namespace와 `/me`
 
 새 단수 segment가 필요하면 임의 예외를 추가하지 않는다. Issue와 OpenAPI에서 그것이 단일 값·projection인지 설명하고 convention test allowlist를 같은 PR에서 검토한다.
 
-### Controller–OpenAPI 완전 대조
+### Controller–OpenAPI 완전 대조와 contract-first 경계
 
 `ControllerOpenApiContractTest`는 모든 기능별 `docs/specs/*/openapi.yaml`에서 path item의 실제 HTTP operation을 수집한다. path가 없는 `mvp1-common/openapi.yaml`과 audience·aggregate entrypoint는 정본 operation 집합에서 제외한다. `$ref` entrypoint는 기존 `AudienceOpenApiContractTest`가 기능별 원본으로 정확히 연결되는지 계속 검증한다.
 
-Spring route와 기능별 OpenAPI route의 집합 차이를 양방향으로 검사한다.
+Spring route와 runtime 활성 기능별 OpenAPI route의 집합 차이를 양방향으로 검사한다.
 
 - Spring에만 있는 route: 문서화되지 않은 runtime API로 실패
-- OpenAPI에만 있는 route: 구현되지 않은 계약으로 실패
+- runtime 활성 OpenAPI에만 있는 route: 구현되지 않은 계약으로 실패
 - path는 같고 method가 다른 route: 양쪽 차집합으로 실패
+
+저장소의 `contract-first` 순서를 보존하기 위해 Controller보다 먼저 승인되는 path item은
+`x-miriyum-runtime-status: contract-only`와 양의 GitHub Issue 번호인
+`x-miriyum-owner-issue`를 함께 선언한다. 두 필드 중 하나만 있거나 상태 값·Issue 번호가
+잘못되면 실패한다. 이 메타데이터가 있는 path는 runtime 집합 대조에서만 제외하고 URL
+convention과 OpenAPI lint·reference 검증은 그대로 적용한다. Controller가 추가되면 같은
+PR에서 두 필드를 제거해야 하며, 실제 Spring route와 `contract-only` path가 공존하면
+stale 계약 상태로 실패한다. Java 상수의 광범위한 승인 목록은 두지 않는다.
+
+현재 Controller가 없는 웨이팅 설정 `PUT /waiting-settings`와
+`GET /waiting-settings/deactivation-impact`는 소유 Issue #271을 표시한다. 이후 선행 계약도
+같은 path-local metadata를 사용하므로 계약만 존재하는 이유와 제거 시점을 OpenAPI에서
+추적할 수 있다.
 
 현재 승인 미노출 목록의 payment와 webhook route는 consumer·public audience entrypoint에 각각 연결한다. `mvp1-openapi.yaml`은 1차 MVP aggregate이므로 이후 단계 route를 포함하지 않는 기존 단계 계약을 유지한다.
 
@@ -180,7 +193,9 @@ Java 문자열 중복은 줄지만 도메인 Controller가 중앙 클래스에 �
 ## 완료 조건
 
 - `dev`에 존재하는 모든 `/api/v1/**` Controller route가 승인된 문법을 만족한다.
-- 기능별 OpenAPI와 Spring Controller의 `HTTP method + normalized path` 차집합이 양방향 0건이다.
+- contract-only metadata가 없는 기능별 OpenAPI와 Spring Controller의
+  `HTTP method + normalized path` 차집합이 양방향 0건이다.
+- 모든 contract-only path가 유효한 소유 Issue를 가지며 실제 Spring route와 공존하지 않는다.
 - production, test, 기능별 OpenAPI, audience entrypoint, 생성 client, frontend 호출부와 활성 문서에 구 URL이 남지 않는다.
 - Security, JWT cookie Path, rate limit과 멱등성 fingerprint가 정본 경로와 일치한다.
 - 새 API의 문법 위반과 OpenAPI 누락이 backend CI에서 재현 가능하게 실패한다.
