@@ -10,6 +10,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
@@ -42,6 +43,7 @@ public class WaitingLedgerService {
 
     private final WaitingStoreAuthorityPort authorityPort;
     private final WaitingTeamRepository teamRepository;
+    private final WaitingQueueSequenceRepository sequenceRepository;
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
     private final WaitingStatusEventRepository eventRepository;
@@ -52,6 +54,7 @@ public class WaitingLedgerService {
     public WaitingLedgerService(
             WaitingStoreAuthorityPort authorityPort,
             WaitingTeamRepository teamRepository,
+            WaitingQueueSequenceRepository sequenceRepository,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
             WaitingStatusEventRepository eventRepository,
@@ -61,6 +64,7 @@ public class WaitingLedgerService {
     ) {
         this.authorityPort = Objects.requireNonNull(authorityPort);
         this.teamRepository = Objects.requireNonNull(teamRepository);
+        this.sequenceRepository = Objects.requireNonNull(sequenceRepository);
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
         this.eventRepository = Objects.requireNonNull(eventRepository);
@@ -213,6 +217,14 @@ public class WaitingLedgerService {
     private void requireFifoHead(WaitingTeam team) {
         if (team.getStatus() != WaitingTeamStatus.WAITING) {
             throw new ServiceException(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+        }
+        sequenceRepository.findByStoreIdAndBusinessDateForUpdate(
+                        team.getStoreId(), team.getBusinessDate())
+                .orElseThrow(() -> new ServiceException(
+                        ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT));
+        if (teamRepository.existsByStoreIdAndBusinessDateAndStatus(
+                team.getStoreId(), team.getBusinessDate(), WaitingTeamStatus.CALLED)) {
+            throw new ServiceException(ReservationErrorCode.WAITING_NOT_FIFO_HEAD);
         }
         WaitingTeam head = teamRepository.findFifoHead(
                         team.getStoreId(), team.getBusinessDate(), WaitingTeamStatus.WAITING)

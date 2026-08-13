@@ -77,6 +77,12 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
     @Query("select team from WaitingTeam team where team.id = :waitingTeamId")
     Optional<WaitingTeam> findByIdForUpdate(@Param("waitingTeamId") long waitingTeamId);
 
+    boolean existsByStoreIdAndBusinessDateAndStatus(
+            long storeId,
+            LocalDate businessDate,
+            WaitingTeamStatus status
+    );
+
     @Query("""
             select team
             from WaitingTeam team

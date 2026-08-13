@@ -350,6 +350,30 @@ class WaitingClosureServiceIT {
         assertThat(count("waiting_status_events")).isZero();
     }
 
+    @Test
+    void laterItemGetsFreshLeaseAfterEarlierWorkConsumesMoreThanLeaseDuration() {
+        Fixture fixture = fixture();
+        addSecondWaitingTeam(fixture.storeId);
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+
+        WaitingClosureClaim first = service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30)).getFirst();
+        assertThat(service.processClaimedItem(first)).isTrue();
+        mutableClock.advance(Duration.ofSeconds(31));
+
+        WaitingClosureClaim second = service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30)).getFirst();
+        mutableClock.advance(Duration.ofSeconds(29));
+
+        assertThat(service.processClaimedItem(second)).isTrue();
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_closure_jobs", String.class))
+                .isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject(
+                "SELECT completed_team_count FROM waiting_closure_jobs", Long.class))
+                .isEqualTo(2L);
+    }
+
     private Fixture fixture() {
         long operatorId = operators.saveAndFlush(
                 StoreOperatorAccount.create("closure@example.com", "hashed", "owner")).getId();
@@ -368,6 +392,20 @@ class WaitingClosureServiceIT {
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 storeId, consumerId, team.getId(), mutableClock.instant().minusSeconds(60)));
         return new Fixture(operatorId, storeId);
+    }
+
+    private void addSecondWaitingTeam(long storeId) {
+        jdbc.update("INSERT INTO consumer_accounts (email,password_hash,name,status,created_at,updated_at) "
+                + "VALUES ('closure-consumer-2@example.com','hashed','consumer','ACTIVE',NOW(6),NOW(6))");
+        long consumerId = jdbc.queryForObject(
+                "SELECT consumer_account_id FROM consumer_accounts "
+                        + "WHERE email='closure-consumer-2@example.com'",
+                Long.class);
+        WaitingTeam team = teams.saveAndFlush(WaitingTeam.create(
+                storeId, consumerId, LocalDate.of(2026, 8, 13), 2,
+                WaitingSource.REMOTE, 2L, mutableClock.instant().minusSeconds(60)));
+        memberships.saveAndFlush(WaitingActiveMembership.create(
+                storeId, consumerId, team.getId(), mutableClock.instant().minusSeconds(60)));
     }
 
     private void expireLease() {

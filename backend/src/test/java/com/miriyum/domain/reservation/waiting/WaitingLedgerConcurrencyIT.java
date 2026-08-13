@@ -166,6 +166,37 @@ class WaitingLedgerConcurrencyIT {
     }
 
     @Test
+    void concurrentCallsRemainBlockedWhileEarlierCallIsUnresolved() throws Exception {
+        Fixture fixture = fixture(3);
+        createTeams(fixture, 350);
+        List<Long> teamIds = jdbc.queryForList(
+                "SELECT waiting_team_id FROM waiting_teams ORDER BY queue_sequence", Long.class);
+        commandFacade.call(
+                fixture.operatorId(), fixture.storeId(), teamIds.getFirst(), key(360),
+                new WaitingTeamTransitionRequest(0L));
+
+        List<Attempt<WaitingCommandResult>> attempts = runTogether(2, index ->
+                commandFacade.call(
+                        fixture.operatorId(),
+                        fixture.storeId(),
+                        teamIds.get(index + 1),
+                        key(361 + index),
+                        new WaitingTeamTransitionRequest(0L)));
+
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(attempt.succeeded()).isFalse();
+            assertThat(attempt.failure()).isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_NOT_FIFO_HEAD));
+        });
+        assertThat(jdbc.queryForList(
+                "SELECT status FROM waiting_teams ORDER BY queue_sequence", String.class))
+                .containsExactly("CALLED", "WAITING", "WAITING");
+        assertThat(count("waiting_transition_audits")).isEqualTo(4);
+        assertThat(count("waiting_status_events")).isEqualTo(4);
+    }
+
+    @Test
     void concurrentSameClosureKeyProducesOneImmutableJobAndSnapshot() throws Exception {
         Fixture fixture = fixture(2);
         createTeams(fixture, 400);

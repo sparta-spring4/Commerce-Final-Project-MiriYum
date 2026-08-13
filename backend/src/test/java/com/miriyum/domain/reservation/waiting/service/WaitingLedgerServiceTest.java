@@ -14,10 +14,12 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingActiveTeamImpact;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
+import com.miriyum.domain.reservation.waiting.entity.WaitingQueueSequence;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
@@ -73,6 +75,8 @@ class WaitingLedgerServiceTest {
     @Mock
     private WaitingTeamRepository teamRepository;
     @Mock
+    private WaitingQueueSequenceRepository sequenceRepository;
+    @Mock
     private WaitingActiveMembershipRepository membershipRepository;
     @Mock
     private WaitingTransitionAuditRepository auditRepository;
@@ -92,6 +96,7 @@ class WaitingLedgerServiceTest {
         service = new WaitingLedgerService(
                 authorityPort,
                 teamRepository,
+                sequenceRepository,
                 membershipRepository,
                 auditRepository,
                 eventRepository,
@@ -185,6 +190,7 @@ class WaitingLedgerServiceTest {
         given(authorityPort.requireMutation(OPERATOR_ID, STORE_ID))
                 .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
         given(teamRepository.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(target));
+        allowCallWindow(target);
         given(teamRepository.findFifoHead(
                 STORE_ID, target.getBusinessDate(), WaitingTeamStatus.WAITING))
                 .willReturn(Optional.of(head));
@@ -207,6 +213,7 @@ class WaitingLedgerServiceTest {
         given(authorityPort.requireMutation(OPERATOR_ID, STORE_ID))
                 .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
         given(teamRepository.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(target));
+        allowCallWindow(target);
         given(teamRepository.findFifoHead(
                 STORE_ID, target.getBusinessDate(), WaitingTeamStatus.WAITING))
                 .willReturn(Optional.of(target));
@@ -225,6 +232,40 @@ class WaitingLedgerServiceTest {
                         + "550e8400-e29b-41d4-a716-446655440000");
         verifyNoInteractions(membershipRepository);
         then(eventRepository).should().save(any());
+    }
+
+    @Test
+    @DisplayName("기존 CALLED 흐름이 있으면 queue 잠금 안에서 다음 팀 호출을 WAITING_007로 거절한다")
+    void unresolvedCalledTeamBlocksNextCallInsideQueueLock() {
+        WaitingTeam target = team(TEAM_ID, STORE_ID, WaitingTeamStatus.WAITING);
+        given(authorityPort.requireMutation(OPERATOR_ID, STORE_ID))
+                .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
+        given(teamRepository.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(target));
+        given(sequenceRepository.findByStoreIdAndBusinessDateForUpdate(
+                STORE_ID, target.getBusinessDate()))
+                .willReturn(Optional.of(WaitingQueueSequence.create(
+                        STORE_ID, target.getBusinessDate())));
+        given(teamRepository.existsByStoreIdAndBusinessDateAndStatus(
+                STORE_ID, target.getBusinessDate(), WaitingTeamStatus.CALLED))
+                .willReturn(true);
+        executeBusinessWork();
+
+        assertThatThrownBy(() -> service.call(
+                OPERATOR_ID, STORE_ID, TEAM_ID, 0L, COMMAND, OCCURRED_AT))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_NOT_FIFO_HEAD));
+
+        InOrder order = inOrder(teamRepository, sequenceRepository);
+        order.verify(teamRepository).findByIdForUpdate(TEAM_ID);
+        order.verify(sequenceRepository).findByStoreIdAndBusinessDateForUpdate(
+                STORE_ID, target.getBusinessDate());
+        order.verify(teamRepository).existsByStoreIdAndBusinessDateAndStatus(
+                STORE_ID, target.getBusinessDate(), WaitingTeamStatus.CALLED);
+        then(teamRepository).should(never()).findFifoHead(
+                org.mockito.ArgumentMatchers.anyLong(), any(), any());
+        assertThat(target.getStatus()).isEqualTo(WaitingTeamStatus.WAITING);
+        verifyNoInteractions(auditRepository, eventRepository);
     }
 
     @Test
@@ -483,6 +524,16 @@ class WaitingLedgerServiceTest {
                     objectMapper.valueToTree(result.data())
             );
         });
+    }
+
+    private void allowCallWindow(WaitingTeam target) {
+        given(sequenceRepository.findByStoreIdAndBusinessDateForUpdate(
+                STORE_ID, target.getBusinessDate()))
+                .willReturn(Optional.of(WaitingQueueSequence.create(
+                        STORE_ID, target.getBusinessDate())));
+        given(teamRepository.existsByStoreIdAndBusinessDateAndStatus(
+                STORE_ID, target.getBusinessDate(), WaitingTeamStatus.CALLED))
+                .willReturn(false);
     }
 
     private static IdempotencyCommand command(String type, String fingerprint) {

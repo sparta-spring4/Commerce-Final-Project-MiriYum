@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
         matchIfMissing = true)
 @Slf4j
 public class WaitingClosureJobRunner {
+    private static final int MAX_ITEMS_PER_POLL = 100;
+
     private final WaitingClosureService closureService;
     private final String ownerId;
     private final Duration leaseDuration;
@@ -33,7 +35,13 @@ public class WaitingClosureJobRunner {
             fixedDelayString = "${miriyum.waiting.closure.fixed-delay-ms:5000}",
             initialDelayString = "${miriyum.waiting.closure.initial-delay-ms:5000}")
     public void processClosureBatch() {
-        closureService.claimPendingItems(ownerId, 100, leaseDuration).forEach(this::processSafely);
+        for (int processed = 0; processed < MAX_ITEMS_PER_POLL; processed++) {
+            var claimed = closureService.claimPendingItems(ownerId, 1, leaseDuration);
+            if (claimed.isEmpty()) {
+                return;
+            }
+            processSafely(claimed.getFirst());
+        }
     }
 
     void processSafely(WaitingClosureClaim claim) {

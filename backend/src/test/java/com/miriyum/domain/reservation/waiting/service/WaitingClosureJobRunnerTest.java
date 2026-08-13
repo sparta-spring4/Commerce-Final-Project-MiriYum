@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
 import java.time.Duration;
 import java.util.List;
@@ -47,24 +48,46 @@ class WaitingClosureJobRunnerTest {
     }
 
     @Test
-    void runnerUsesStableOwnerAndFencedClaim() {
+    void runnerClaimsEachItemImmediatelyBeforeProcessing() {
+        WaitingClosureClaim first = new WaitingClosureClaim(11L, "runner-a", 3L);
+        WaitingClosureClaim second = new WaitingClosureClaim(12L, "runner-a", 1L);
+        given(closureService.claimPendingItems("runner-a", 1, Duration.ofSeconds(30)))
+                .willReturn(List.of(first), List.of(second), List.of());
+        WaitingClosureJobRunner runner = new WaitingClosureJobRunner(
+                closureService, "runner-a", Duration.ofSeconds(30));
+
+        runner.processClosureBatch();
+
+        var order = org.mockito.Mockito.inOrder(closureService);
+        order.verify(closureService).claimPendingItems("runner-a", 1, Duration.ofSeconds(30));
+        order.verify(closureService).processClaimedItem(first);
+        order.verify(closureService).claimPendingItems("runner-a", 1, Duration.ofSeconds(30));
+        order.verify(closureService).processClaimedItem(second);
+        order.verify(closureService).claimPendingItems("runner-a", 1, Duration.ofSeconds(30));
+        order.verifyNoMoreInteractions();
+    }
+
+    @Test
+    void runnerProcessesAtMostOneHundredItemsPerPoll() {
         WaitingClosureClaim claim = new WaitingClosureClaim(11L, "runner-a", 3L);
-        given(closureService.claimPendingItems("runner-a", 100, Duration.ofSeconds(30)))
+        given(closureService.claimPendingItems("runner-a", 1, Duration.ofSeconds(30)))
                 .willReturn(List.of(claim));
         WaitingClosureJobRunner runner = new WaitingClosureJobRunner(
                 closureService, "runner-a", Duration.ofSeconds(30));
 
         runner.processClosureBatch();
 
-        then(closureService).should().processClaimedItem(claim);
+        then(closureService).should(times(100))
+                .claimPendingItems("runner-a", 1, Duration.ofSeconds(30));
+        then(closureService).should(times(100)).processClaimedItem(claim);
     }
 
     @Test
     void wrappedMysqlDeadlockRequeuesUsingSameFence() {
         WaitingClosureClaim claim = new WaitingClosureClaim(11L, "runner-a", 3L);
         var deadlock = new RuntimeException(new java.sql.SQLException("deadlock", "40001", 1213));
-        given(closureService.claimPendingItems("runner-a", 100, Duration.ofSeconds(30)))
-                .willReturn(List.of(claim));
+        given(closureService.claimPendingItems("runner-a", 1, Duration.ofSeconds(30)))
+                .willReturn(List.of(claim), List.of());
         org.mockito.Mockito.doThrow(deadlock).when(closureService).processClaimedItem(claim);
         WaitingClosureJobRunner runner = new WaitingClosureJobRunner(
                 closureService, "runner-a", Duration.ofSeconds(30));
