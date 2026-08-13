@@ -3,9 +3,9 @@ package com.miriyum.domain.reservation.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;

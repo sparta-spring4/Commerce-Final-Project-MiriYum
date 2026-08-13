@@ -2,9 +2,9 @@ package com.miriyum.domain.pickup.notification;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
-import com.miriyum.domain.notification.entity.NotificationActionAvailability;
-import com.miriyum.domain.notification.entity.NotificationActionType;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationActionAvailability;
+import com.miriyum.domain.notification.dto.source.NotificationActionType;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupStatus;

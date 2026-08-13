@@ -12,7 +12,7 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
 import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.pickup.dto.request.PickupStoreSearchRequest;
 import com.miriyum.domain.pickup.dto.request.StorePickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;

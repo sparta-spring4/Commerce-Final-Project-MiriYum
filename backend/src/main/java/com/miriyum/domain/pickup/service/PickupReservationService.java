@@ -277,7 +277,7 @@ public class PickupReservationService {
             throw new IllegalStateException("saved pickup reservation id is required");
         }
         PickupReservationResponse response = toResponse(saved);
-        notificationPublisher.recordConfirmed(saved, createdAt, key.value());
+        notificationPublisher.recordConfirmed(saved, saved.getCreatedAt(), key.value());
         return new BusinessResult<>(HttpStatus.CREATED.value(), "SUCCESS",
                 "pickup-reservation", response.pickupReservationId(), response);
     }

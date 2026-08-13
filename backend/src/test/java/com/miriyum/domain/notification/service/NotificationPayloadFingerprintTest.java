@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 

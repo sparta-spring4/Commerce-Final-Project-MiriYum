@@ -20,7 +20,7 @@ import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
 import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.pickup.dto.request.PickupMenuSelectionRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
@@ -226,6 +226,7 @@ class PickupReservationServiceTest {
     @Test
     void createsConfirmedPickupFromLockedStoreAndActualAcquiredBucket() {
         PickupReservationCreateRequest request = request(2);
+        Instant persistedCreatedAt = NOW.minusSeconds(1);
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
         given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
@@ -238,6 +239,7 @@ class PickupReservationServiceTest {
         given(repository.saveAndFlush(any())).willAnswer(invocation -> {
             PickupReservation saved = invocation.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", 77L);
+            ReflectionTestUtils.setField(saved, "createdAt", persistedCreatedAt);
             return saved;
         });
 
@@ -287,6 +289,7 @@ class PickupReservationServiceTest {
             assertThat(event.resourceId()).isEqualTo("77");
             assertThat(event.resourceVersion()).isEqualTo(1L);
             assertThat(event.correlationId()).isEqualTo(KEY.value());
+            assertThat(event.occurredAt().toInstant()).isEqualTo(persistedCreatedAt);
         });
     }
 

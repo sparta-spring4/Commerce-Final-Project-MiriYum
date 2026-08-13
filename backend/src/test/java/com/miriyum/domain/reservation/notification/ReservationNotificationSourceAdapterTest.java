@@ -5,9 +5,9 @@ import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
-import com.miriyum.domain.notification.entity.NotificationActionAvailability;
-import com.miriyum.domain.notification.entity.NotificationActionType;
-import com.miriyum.domain.notification.entity.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationActionAvailability;
+import com.miriyum.domain.notification.dto.source.NotificationActionType;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import java.util.Optional;

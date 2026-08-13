@@ -24,11 +24,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 class ReservationProductionDependencyTest {
 
     private static final Set<String> APPROVED_NOTIFICATION_CONTRACT_IMPORTS = Set.of(
-            "import com.miriyum.domain.notification.entity.NotificationActionAvailability;",
-            "import com.miriyum.domain.notification.entity.NotificationActionType;",
-            "import com.miriyum.domain.notification.entity.NotificationPurpose;",
-            "import com.miriyum.domain.notification.entity.NotificationResourceType;",
-            "import com.miriyum.domain.notification.entity.NotificationSourceDomain;"
+            "import com.miriyum.domain.notification.dto.source.NotificationActionAvailability;",
+            "import com.miriyum.domain.notification.dto.source.NotificationActionType;",
+            "import com.miriyum.domain.notification.dto.source.NotificationPurpose;",
+            "import com.miriyum.domain.notification.dto.source.NotificationResourceType;",
+            "import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;"
     );
 
     @Test
@@ -79,7 +79,7 @@ class ReservationProductionDependencyTest {
     @Test
     void notificationPublicEnumsAreAllowedButNotificationRepositoriesRemainForbidden() {
         assertThat(isForbiddenForeignInternalImport(
-                "import com.miriyum.domain.notification.entity.NotificationPurpose;"
+                "import com.miriyum.domain.notification.dto.source.NotificationPurpose;"
         )).isFalse();
         assertThat(isForbiddenForeignInternalImport(
                 "import com.miriyum.domain.notification.repository.NotificationTaskRepository;"

@@ -25,7 +25,7 @@ import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
 import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
-import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -2015,6 +2015,30 @@ class ReservationServiceTest {
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(menuHoldPort).shouldHaveNoInteractions();
         then(cancellationAuditRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("알림 publisher가 없는 부분 배선 서비스는 예약 취소 변경 전에 명시적으로 실패한다")
+    void cancellationRequiresNotificationPublisherBeforeMutation() {
+        IdempotencyCommand command = cancellationCommand("consumer", 11L);
+        Reservation reservation = confirmedReservation();
+        stubFreshIdempotency(command, null);
+        given(reservationRepository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
+                .willReturn(Optional.of(reservation));
+        ReflectionTestUtils.setField(reservationService, "notificationPublisher", null);
+
+        assertThatThrownBy(() -> invokeConsumerCancellation(
+                command,
+                null,
+                NOW.minusSeconds(10),
+                CONSUMER_CANCELLATION_CORRELATION
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("reservation cancellation dependencies are required");
+
+        assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+        then(cancellationPolicyEvaluator).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
     }
 
     @Test

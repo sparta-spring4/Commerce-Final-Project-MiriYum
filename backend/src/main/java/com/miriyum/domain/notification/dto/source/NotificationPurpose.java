@@ -1,4 +1,4 @@
-package com.miriyum.domain.notification.entity;
+package com.miriyum.domain.notification.dto.source;
 
 public enum NotificationPurpose {
     RESERVATION_CONFIRMED,

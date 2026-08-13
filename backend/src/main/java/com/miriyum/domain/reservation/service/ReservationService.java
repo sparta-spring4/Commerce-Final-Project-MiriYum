@@ -669,6 +669,7 @@ public class ReservationService {
             Instant requestedAt,
             String correlationId
     ) {
+        requireCancellationDependencies();
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
@@ -812,6 +813,16 @@ public class ReservationService {
                 String.valueOf(managedReservation.getId()),
                 response
         );
+    }
+
+    private void requireCancellationDependencies() {
+        if (capacityAllocationRepository == null
+                || cancellationPolicyEvaluator == null
+                || cancellationAuditRepository == null
+                || menuHoldPort == null
+                || notificationPublisher == null) {
+            throw new IllegalStateException("reservation cancellation dependencies are required");
+        }
     }
 
     private static TreeSet<Long> validateOriginalAllocations(
