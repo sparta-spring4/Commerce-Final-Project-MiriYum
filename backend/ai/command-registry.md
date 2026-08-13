@@ -15,7 +15,7 @@
 | `backend.integration-test-shard-d` | `CONFIGURED` | `.\gradlew.bat integrationTestShardD` | `backend.integration-test`와 동일한 입력 | `@Tag("integration-shard-d")` 통합 테스트가 성공하고 명령이 `0`으로 종료한다 | 현재 변경 증거와 함께 Gradle 테스트 출력, 종료 코드, `integrationTestShardD` 보고서를 보존한다 | Docker/Testcontainers 시작, Flyway, context 시작, assertion, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
 | `backend.build` | `CONFIGURED` | `.\gradlew.bat build` | `backend.test`, `backend.integration-test`와 동일한 입력 | 컴파일, 빠른 테스트, 통합 테스트, 패키징이 종료 코드 `0`으로 성공한다 | 현재 변경 증거와 함께 Gradle 빌드 출력, 종료 코드, 생성된 보고서를 보존한다 | 모든 컴파일, 테스트, 패키징, 의존성 또는 toolchain 실패는 `FAIL`을 의미한다 |
 
-위 여섯 명령은 파일이 존재하고 각 명령의 성공적인 종료 코드 `0`이 관찰된 후에만 활성화되었다.
+위 여덟 명령은 파일이 존재하고 각 명령의 성공적인 종료 코드 `0`이 관찰된 후에만 활성화되었다.
 
 ## 러너 플랫폼별 호출
 
