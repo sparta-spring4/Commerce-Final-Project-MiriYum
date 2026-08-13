@@ -88,6 +88,7 @@ val verifyIntegrationTestTags = tasks.register("verifyIntegrationTestTags") {
             source.contains("@Testcontainers")
                 || source.contains("MySQLContainer")
                 || source.contains("@SpringBootTest")
+                || source.contains("@Tag(\"$integrationTag\")")
         }
         val missingIntegrationTags = candidates.filterNot { file ->
             file.readText().contains("@Tag(\"$integrationTag\")")
