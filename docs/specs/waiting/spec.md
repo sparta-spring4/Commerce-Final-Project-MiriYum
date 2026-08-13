@@ -67,6 +67,32 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
 별도 소유 Issue에서 활성화할 때 계정 중복 전용 `WAITING_011` response를 연결한다. 현재
 OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_011`이나 계정 중복
 예시를 노출하지 않고, `WAITING_008`은 기존 활성 membership 전제 충돌 의미를 유지한다.
+`WAITING_011`은 응답 `code`의 wire 값이고 `ACCOUNT_ACTIVE_WAITING_EXISTS`는 서버 오류 식별자 이름이다.
+향후 consumer operation도 기존 오류 응답과 같이 `code`, `message` 두 필드만 반환하며 별도
+`errorKey`나 `details` 필드를 추가하지 않는다.
+
+### #272 runtime·migration 인계
+
+현재 `dev`의 V36은 `waiting_active_memberships`에
+`uk_waiting_active_memberships_store_consumer UNIQUE (store_id, consumer_account_id)`를 두므로
+계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V38 forward migration에서 이
+제약을 제거한 뒤 `UNIQUE (consumer_account_id)`로 교체한다.
+
+V38의 제약 변경 전에 다음 사전 대사를 수행한다.
+
+```sql
+SELECT consumer_account_id, COUNT(*) AS active_membership_count
+FROM waiting_active_memberships
+GROUP BY consumer_account_id
+HAVING COUNT(*) > 1;
+```
+
+- 결과가 1건이라도 있으면 migration과 배포를 차단하고 데이터와 기존 제약을 그대로 유지한다.
+- 중복 관계를 자동 취소·삭제·병합하지 않는다. Waiting 소유자가 원장·감사 기록을 확인하고
+  도메인의 유효한 종결 operation으로 계정당 활성 관계가 1건 이하가 되도록 처리한다.
+- 같은 사전 대사를 다시 실행해 초과 계정 0건을 재확인한 뒤에만 기존 제약을 제거하고
+  `UNIQUE (consumer_account_id)`를 추가한다.
+
 #272의 production Java·forward migration은 이 계약 PR이 `dev`에 병합된 뒤 정확한 허용
 목록과 실제 MySQL 동시성 검증으로 정렬한다.
 

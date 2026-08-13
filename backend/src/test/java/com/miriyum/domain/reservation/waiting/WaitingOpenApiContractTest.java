@@ -17,6 +17,8 @@ class WaitingOpenApiContractTest {
 
     private static final Path CONTRACT = Path.of(
             "..", "docs", "specs", "waiting", "openapi.yaml");
+    private static final Path SPEC = Path.of(
+            "..", "docs", "specs", "waiting", "spec.md");
     private static final String SETTINGS_PATH =
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
     private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/disable-impact";
@@ -175,23 +177,44 @@ class WaitingOpenApiContractTest {
     void waitingLedgerConflictDoesNotExposeTheAccountActiveWaitingBusinessRule()
             throws IOException {
         Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> responses = map(map(document.get("components")).get("responses"));
         Map<String, Object> conflict = map(responses.get("WaitingLedgerConflict"));
         Map<String, Object> json = map(map(conflict.get("content")).get("application/json"));
         Map<String, Object> examples = map(json.get("examples"));
 
-        assertThat(examples)
-                .containsKey("activeMembershipConflict")
-                .doesNotContainKey("accountActiveWaitingConflict");
+        assertThat(responseExampleCodes(conflict))
+                .containsExactlyInAnyOrder(
+                        "WAITING_005", "WAITING_006", "WAITING_007", "WAITING_008", "WAITING_009",
+                        "WAITING_010", "COMMON_007", "COMMON_008")
+                .doesNotContain("WAITING_011");
+        assertThat(paths.toString())
+                .doesNotContain("WAITING_011", "ACCOUNT_ACTIVE_WAITING_EXISTS");
 
         Map<String, Object> value = map(
                 map(examples.get("activeMembershipConflict")).get("value"));
         assertThat(value)
                 .containsOnlyKeys("code", "message")
-                .containsEntry("code", "WAITING_008")
-                .containsEntry("message", "활성 웨이팅 멤버십과 요청 전제가 충돌합니다.");
-        assertThat(conflict.get("description").toString())
-                .doesNotContain("계정 전체", "자동 취소", "교체하지 않는다");
+                .containsEntry("code", "WAITING_008");
+    }
+
+    @Test
+    void accountWideMembershipMigrationHandoffIsCanonicalAndFailClosed()
+            throws IOException {
+        String spec = Files.readString(SPEC);
+
+        assertThat(spec).contains(
+                "uk_waiting_active_memberships_store_consumer",
+                "UNIQUE (consumer_account_id)",
+                "SELECT consumer_account_id, COUNT(*) AS active_membership_count",
+                "HAVING COUNT(*) > 1",
+                "migration과 배포를 차단",
+                "자동 취소·삭제·병합하지 않는다",
+                "0건을 재확인");
+        assertThat(spec).contains(
+                "`WAITING_011`은 응답 `code`의 wire 값",
+                "`ACCOUNT_ACTIVE_WAITING_EXISTS`는 서버 오류 식별자 이름",
+                "`code`, `message` 두 필드만");
     }
 
     @Test
