@@ -75,10 +75,10 @@ OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_
 
 현재 `dev`의 V36은 `waiting_active_memberships`에
 `uk_waiting_active_memberships_store_consumer UNIQUE (store_id, consumer_account_id)`를 두므로
-계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V38 forward migration에서 이
+계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V39 forward migration에서 이
 제약을 제거한 뒤 `UNIQUE (consumer_account_id)`로 교체한다.
 
-V38의 제약 변경 전에 다음 사전 대사를 수행한다.
+V39의 제약 변경 전에 다음 사전 대사를 수행한다.
 
 ```sql
 SELECT consumer_account_id, COUNT(*) AS active_membership_count
