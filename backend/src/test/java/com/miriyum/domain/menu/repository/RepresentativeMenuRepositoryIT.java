@@ -2,14 +2,20 @@ package com.miriyum.domain.menu.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.miriyum.domain.menu.entity.Menu;
 import com.miriyum.domain.menu.enums.RepresentativeMenuSettingStatus;
+import com.miriyum.domain.menu.enums.MenuSellingStatus;
+import com.miriyum.domain.menu.enums.MenuVisibility;
 import com.miriyum.domain.menu.model.AllergenDisclosure;
 import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
 import com.miriyum.domain.menu.model.AllergenIngredientCode;
 import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
 import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
+import com.miriyum.domain.search.dto.publicapi.PublicMenu;
+import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -50,6 +56,12 @@ class RepresentativeMenuRepositoryIT {
 
     @Autowired
     private RepresentativeMenuSettingRepository settingRepository;
+
+    @Autowired
+    private StorePublicReadRepository publicReadRepository;
+
+    @Autowired
+    private RepresentativeMenuQueryService representativeMenuQueryService;
 
     @Autowired
     private StoreOperatorAccountRepository operatorRepository;
@@ -141,6 +153,56 @@ class RepresentativeMenuRepositoryIT {
         assertThat(autoRemoved.orderedMenuIds()).containsExactly(fourth, second);
     }
 
+    @Test
+    void derivesPublicMembershipFromCurrentSettingAndFiltersIneligibleMenus() {
+        Store store = saveStore("public-representative@example.com", "3000000001");
+        long operatorId = store.getStoreOperatorAccountId();
+        Instant now = Instant.parse("2026-08-13T00:00:00Z");
+        Menu soldOut = savePublished(store.getId(), operatorId, "sold-out", false, now);
+        Menu paused = savePublished(store.getId(), operatorId, "paused", false, now);
+        Menu selling = savePublished(store.getId(), operatorId, "selling", false, now);
+        Menu hidden = savePublished(store.getId(), operatorId, "hidden", false, now);
+        Menu retired = savePublished(store.getId(), operatorId, "retired", false, now);
+        savePublished(store.getId(), operatorId, "legacy", true, now);
+
+        settingRepository.ensureExists(store.getId());
+        var setting = settingRepository.findByStoreIdForUpdate(store.getId()).orElseThrow();
+        setting.replace(List.of(
+                soldOut.getId(), paused.getId(), selling.getId(),
+                hidden.getId(), retired.getId()));
+        settingRepository.saveAndFlush(setting);
+
+        soldOut.changeSellingStatus(MenuSellingStatus.SOLD_OUT);
+        paused.changeSellingStatus(MenuSellingStatus.PAUSED);
+        hidden.changeVisibility(MenuVisibility.HIDDEN);
+        retired.retire(now.plusSeconds(1));
+        menuRepository.saveAllAndFlush(List.of(soldOut, paused, selling, hidden, retired));
+        entityManager.clear();
+
+        List<PublicMenu> publicMenus = publicReadRepository.findPublicMenus(store.getId());
+        var snapshot = representativeMenuQueryService.getCurrent(store.getId());
+
+        assertThat(publicMenus)
+                .extracting(PublicMenu::name, PublicMenu::representative,
+                        PublicMenu::saleStatus)
+                .containsExactlyInAnyOrder(
+                        tuple("sold-out", true, MenuSellingStatus.SOLD_OUT),
+                        tuple("paused", false, MenuSellingStatus.PAUSED),
+                        tuple("selling", true, MenuSellingStatus.SELLING),
+                        tuple("legacy", false, MenuSellingStatus.SELLING));
+        assertThat(snapshot.items())
+                .extracting(item -> item.menuId())
+                .containsExactly(
+                        String.valueOf(soldOut.getId()),
+                        String.valueOf(selling.getId()));
+        assertThat(snapshot.items())
+                .extracting(item -> item.displayOrder())
+                .containsExactly(1, 2);
+        assertThat(snapshot.items().getFirst().sellingStatus())
+                .isEqualTo(MenuSellingStatus.SOLD_OUT);
+        assertThat(snapshot.version()).isEqualTo(1L);
+    }
+
     private Store saveStore(String email, String registrationNumber) {
         long operatorId = operatorRepository.saveAndFlush(
                 StoreOperatorAccount.create(email, "hashed", "owner")).getId();
@@ -164,6 +226,30 @@ class RepresentativeMenuRepositoryIT {
                 List.of(), false);
         return menuRepository.saveAndFlush(Menu.create(
                 storeId, content, operatorId, Instant.parse("2026-08-13T00:00:00Z"))).getId();
+    }
+
+    private Menu savePublished(
+            long storeId,
+            long operatorId,
+            String name,
+            boolean legacyRepresentative,
+            Instant now
+    ) {
+        Menu menu = Menu.create(
+                storeId,
+                new MenuContent(
+                        name, "", 5_000, legacyRepresentative, "BEVERAGE",
+                        List.of(), List.of(), true, true,
+                        DisclosureRegistrationStatus.REGISTERED,
+                        List.of(new AllergenDisclosure(
+                                AllergenIngredientCode.MILK,
+                                AllergenDisclosureStatus.CONTAINS)),
+                        DisclosureRegistrationStatus.NOT_APPLICABLE,
+                        List.of(), false),
+                operatorId,
+                now);
+        menu.publish(now);
+        return menuRepository.saveAndFlush(menu);
     }
 
     private void insertSetting(long storeId) {
