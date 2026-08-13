@@ -22,4 +22,53 @@ public class NotificationChannelAttemptRepository {
             throw new IllegalStateException("initial notification channel attempt was not recorded");
         }
     }
+
+    public void markProcessing(long notificationId) {
+        requireSingleUpdate(jdbcTemplate.update("""
+                UPDATE notification_channel_attempts
+                   SET status = 'PROCESSING', attempt_count = attempt_count + 1,
+                       last_attempted_at = NOW(6), failure_code = NULL
+                 WHERE notification_id = ?
+                   AND channel = 'IN_APP'
+                   AND status IN ('PENDING', 'PROCESSING')
+                """, notificationId));
+    }
+
+    public void markDelivered(long notificationId) {
+        updateTerminal(notificationId, "DELIVERED", null);
+    }
+
+    public void markCancelled(long notificationId, String reason) {
+        updateTerminal(notificationId, "CANCELLED", reason);
+    }
+
+    public void markFailed(long notificationId, String reason) {
+        updateTerminal(notificationId, "FAILED", reason);
+    }
+
+    public void markRetryPending(long notificationId, String reason) {
+        requireSingleUpdate(jdbcTemplate.update("""
+                UPDATE notification_channel_attempts
+                   SET status = 'PENDING', failure_code = ?
+                 WHERE notification_id = ?
+                   AND channel = 'IN_APP'
+                   AND status = 'PROCESSING'
+                """, reason, notificationId));
+    }
+
+    private void updateTerminal(long notificationId, String status, String reason) {
+        requireSingleUpdate(jdbcTemplate.update("""
+                UPDATE notification_channel_attempts
+                   SET status = ?, failure_code = ?
+                 WHERE notification_id = ?
+                   AND channel = 'IN_APP'
+                   AND status = 'PROCESSING'
+                """, status, reason, notificationId));
+    }
+
+    private static void requireSingleUpdate(int updated) {
+        if (updated != 1) {
+            throw new IllegalStateException("notification channel attempt did not converge");
+        }
+    }
 }

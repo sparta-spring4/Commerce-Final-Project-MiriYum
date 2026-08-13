@@ -1,0 +1,402 @@
+package com.miriyum.domain.notification.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
+import com.miriyum.domain.notification.entity.NotificationActionAvailability;
+import com.miriyum.domain.notification.entity.NotificationActionType;
+import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.entity.NotificationResourceType;
+import com.miriyum.domain.notification.entity.NotificationSourceDomain;
+import com.miriyum.domain.notification.port.PickupNotificationSource;
+import java.time.OffsetDateTime;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
+import org.testcontainers.utility.DockerImageName;
+
+@Tag("integration")
+@Tag("integration-shard-a")
+@Testcontainers
+@Import(NotificationTaskWorkerIntegrationTest.FakeSourceConfig.class)
+@SpringBootTest(
+        classes = MiriyumApplication.class,
+        properties = {
+            "spring.jpa.hibernate.ddl-auto=validate",
+            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+            "miriyum.notification.worker.enabled=true",
+            "miriyum.notification.worker.policy-version=notification-worker-test-v1",
+            "miriyum.notification.worker.worker-id=worker-test",
+            "miriyum.notification.worker.batch-size=10",
+            "miriyum.notification.worker.lease-duration-ms=30000",
+            "miriyum.notification.worker.max-attempts=3",
+            "miriyum.notification.worker.initial-retry-delay-ms=5000",
+            "miriyum.notification.worker.max-retry-delay-ms=60000",
+            "miriyum.notification.worker.initial-delay-ms=3600000",
+            "miriyum.store.schedule.activation-delay-ms=3600000",
+            "miriyum.menu.schedule.initial-delay-ms=3600000",
+            "miriyum.reservation.time-policy.activation-delay-ms=3600000"
+        }
+)
+class NotificationTaskWorkerIntegrationTest {
+
+    @Container
+    static final MySQLContainer MYSQL =
+            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    @Autowired NotificationTaskRecorder recorder;
+    @Autowired NotificationTaskWorker worker;
+    @Autowired TransactionTemplate transactions;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired TestPickupSource pickupSource;
+
+    @BeforeEach
+    void resetDatabase() {
+        pickupSource.reset(found(3L, 7L, "CONFIRMED"));
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
+        jdbcTemplate.execute("DELETE FROM consumer_accounts");
+        jdbcTemplate.update("""
+                INSERT INTO consumer_accounts (
+                    consumer_account_id, email, password_hash, name, status, created_at, updated_at
+                ) VALUES (11, 'worker-owner@example.com', 'hash', '알림소유자',
+                          'ACTIVE', NOW(6), NOW(6))
+                """);
+    }
+
+    @Test
+    void foundContextDeliversInAppAndAuditsTheTransition() {
+        record("found-1");
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(taskString("status")).isEqualTo("DELIVERED");
+        assertThat(taskString("title")).isEqualTo("미리윰 강남 픽업 예약이 확정되었습니다.");
+        assertThat(taskTimestampCount("delivered_at")).isOne();
+        assertThat(channelString("status")).isEqualTo("DELIVERED");
+        assertThat(channelInt("attempt_count")).isOne();
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "IN_APP_DELIVERED@notification-worker-test-v1"
+        );
+    }
+
+    @Test
+    void supersededAndNotEligibleResultsCancelWithoutGuessingAnotherRecipient() {
+        record("superseded-1");
+        pickupSource.reset(result(NotificationSourceReadResult.SUPERSEDED));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(channelString("failure_code")).isEqualTo("SOURCE_SUPERSEDED");
+
+        resetDatabase();
+        record("not-eligible-1");
+        pickupSource.reset(result(NotificationSourceReadResult.NOT_ELIGIBLE));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(channelString("failure_code")).isEqualTo("RECIPIENT_NOT_ELIGIBLE");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT recipient_account_id FROM notification_tasks", Long.class)).isEqualTo(11L);
+    }
+
+    @Test
+    void foundContextWithChangedVersionOrRecipientRelationFailsClosed() {
+        record("changed-version-1");
+        pickupSource.reset(found(4L, 7L, "CONFIRMED"));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+        assertThat(channelString("failure_code")).isEqualTo("SOURCE_SUPERSEDED");
+
+        resetDatabase();
+        record("changed-recipient-1");
+        pickupSource.reset(found(3L, 8L, "CONFIRMED"));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+        assertThat(channelString("failure_code")).isEqualTo("RECIPIENT_NOT_ELIGIBLE");
+    }
+
+    @Test
+    void temporaryUnavailabilityUsesBoundedDelayedRetryThenFails() {
+        record("temporary-1");
+        pickupSource.reset(result(NotificationSourceReadResult.TEMPORARILY_UNAVAILABLE));
+
+        int firstResult = worker.deliverDueBatch();
+
+        assertThat(firstResult)
+                .as("taskStatus=%s, channelStatus=%s, failureCode=%s",
+                        taskString("status"),
+                        channelString("status"),
+                        channelString("failure_code"))
+                .isZero();
+        assertThat(taskString("status")).isEqualTo("PENDING");
+        assertThat(channelString("status")).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT next_attempt_at > NOW(6) FROM notification_tasks
+                """, Boolean.class)).isTrue();
+
+        makeRetryDue();
+        assertThat(worker.deliverDueBatch()).isZero();
+        makeRetryDue();
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(taskString("status")).isEqualTo("FAILED");
+        assertThat(channelString("status")).isEqualTo("FAILED");
+        assertThat(channelInt("attempt_count")).isEqualTo(3);
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "SOURCE_TEMPORARILY_UNAVAILABLE@notification-worker-test-v1",
+                "SOURCE_TEMPORARILY_UNAVAILABLE@notification-worker-test-v1",
+                "SOURCE_RETRY_EXHAUSTED@notification-worker-test-v1"
+        );
+    }
+
+    @Test
+    void malformedFoundContextFailsWithoutRetryingAsTemporaryUnavailability() {
+        record("invalid-context-1");
+        pickupSource.reset(new NotificationSourceContextV1(
+                NotificationSourceReadResult.FOUND,
+                3L,
+                7L,
+                "CONFIRMED",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(taskString("status")).isEqualTo("FAILED");
+        assertThat(channelString("failure_code")).isEqualTo("SOURCE_CONTEXT_INVALID");
+        assertThat(channelInt("attempt_count")).isOne();
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "SOURCE_CONTEXT_INVALID@notification-worker-test-v1"
+        );
+    }
+
+    @Test
+    void temporaryUnavailabilityNeverSchedulesPastImmutableTaskExpiry() {
+        record("expiring-temporary-1", OffsetDateTime.now().plusSeconds(2).withNano(0));
+        pickupSource.reset(result(NotificationSourceReadResult.TEMPORARILY_UNAVAILABLE));
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(taskString("status")).isEqualTo("CANCELLED");
+        assertThat(channelString("failure_code")).isEqualTo("TASK_EXPIRED");
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "TASK_EXPIRED@notification-worker-test-v1"
+        );
+    }
+
+    @Test
+    void expiredLeaseIsRecoveredAndTheStaleWorkerCannotOverwriteDelivery() throws Exception {
+        record("lease-recovery-1");
+        pickupSource.blockFirstRead(found(3L, 7L, "CONFIRMED"));
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var staleWorker = executor.submit(worker::deliverDueBatch);
+            assertThat(pickupSource.awaitFirstRead()).isTrue();
+            jdbcTemplate.update("""
+                    UPDATE notification_tasks
+                       SET lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND)
+                    """);
+
+            var recoveringWorker = executor.submit(worker::deliverDueBatch);
+            assertThat(recoveringWorker.get(10, TimeUnit.SECONDS)).isOne();
+            pickupSource.releaseFirstRead();
+            assertThat(staleWorker.get(10, TimeUnit.SECONDS)).isZero();
+        }
+
+        assertThat(taskString("status")).isEqualTo("DELIVERED");
+        assertThat(channelInt("attempt_count")).isEqualTo(2);
+        assertThat(auditReasons()).containsExactly(
+                "SOURCE_EVENT_RECORDED",
+                "LEASE_RECOVERED@notification-worker-test-v1",
+                "IN_APP_DELIVERED@notification-worker-test-v1"
+        );
+    }
+
+    private void record(String sourceEventId) {
+        record(sourceEventId, null);
+    }
+
+    private void record(String sourceEventId, OffsetDateTime expiresAt) {
+        OffsetDateTime occurredAt = OffsetDateTime.parse("2026-08-12T01:02:03Z");
+        transactions.executeWithoutResult(ignored -> recorder.record(new NotificationSourceEventV1(
+                sourceEventId,
+                NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
+                "11",
+                7L,
+                NotificationResourceType.PICKUP_RESERVATION,
+                "21",
+                3L,
+                "CONFIRMED",
+                occurredAt,
+                occurredAt,
+                expiresAt,
+                null,
+                "correlation-" + sourceEventId
+        )));
+    }
+
+    private void makeRetryDue() {
+        jdbcTemplate.update("""
+                UPDATE notification_tasks
+                   SET next_attempt_at = DATE_SUB(NOW(6), INTERVAL 1 SECOND)
+                 WHERE status = 'PENDING'
+                """);
+    }
+
+    private String taskString(String column) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + column + " FROM notification_tasks", String.class);
+    }
+
+    private int taskTimestampCount(String column) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification_tasks WHERE " + column + " IS NOT NULL",
+                Integer.class);
+    }
+
+    private String channelString(String column) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + column + " FROM notification_channel_attempts", String.class);
+    }
+
+    private int channelInt(String column) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + column + " FROM notification_channel_attempts", Integer.class);
+    }
+
+    private java.util.List<String> auditReasons() {
+        return jdbcTemplate.queryForList("""
+                SELECT reason
+                  FROM notification_task_transition_audits
+                 ORDER BY notification_task_transition_audit_id
+                """, String.class);
+    }
+
+    private static NotificationSourceContextV1 found(
+            long resourceVersion,
+            long recipientRelationVersion,
+            String sourceState
+    ) {
+        return new NotificationSourceContextV1(
+                NotificationSourceReadResult.FOUND,
+                resourceVersion,
+                recipientRelationVersion,
+                sourceState,
+                "미리윰 강남",
+                null,
+                OffsetDateTime.parse("2026-08-12T01:02:03Z"),
+                null,
+                NotificationActionType.PICKUP_RESERVATION_DETAIL,
+                NotificationResourceType.PICKUP_RESERVATION,
+                "21",
+                NotificationActionAvailability.AVAILABLE
+        );
+    }
+
+    private static NotificationSourceContextV1 result(NotificationSourceReadResult result) {
+        return new NotificationSourceContextV1(
+                result, 0L, 0L, null, null, null, null, null,
+                null, null, null, null
+        );
+    }
+
+    @TestConfiguration
+    static class FakeSourceConfig {
+
+        @Bean
+        TestPickupSource testPickupSource() {
+            return new TestPickupSource();
+        }
+
+    }
+
+    static final class TestPickupSource implements PickupNotificationSource {
+
+        private final AtomicReference<NotificationSourceContextV1> result = new AtomicReference<>();
+        private final AtomicInteger reads = new AtomicInteger();
+        private volatile CountDownLatch firstReadEntered;
+        private volatile CountDownLatch releaseFirstRead;
+
+        void reset(NotificationSourceContextV1 context) {
+            result.set(context);
+            reads.set(0);
+            firstReadEntered = null;
+            releaseFirstRead = null;
+        }
+
+        void blockFirstRead(NotificationSourceContextV1 context) {
+            reset(context);
+            firstReadEntered = new CountDownLatch(1);
+            releaseFirstRead = new CountDownLatch(1);
+        }
+
+        boolean awaitFirstRead() throws InterruptedException {
+            return firstReadEntered.await(10, TimeUnit.SECONDS);
+        }
+
+        void releaseFirstRead() {
+            releaseFirstRead.countDown();
+        }
+
+        @Override
+        public NotificationSourceContextV1 readContext(
+                String resourceId,
+                long expectedVersion,
+                String recipientAccountId
+        ) {
+            if (reads.getAndIncrement() == 0 && firstReadEntered != null) {
+                firstReadEntered.countDown();
+                try {
+                    if (!releaseFirstRead.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("first source read was not released");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("source read interrupted", exception);
+                }
+            }
+            return result.get();
+        }
+    }
+}
