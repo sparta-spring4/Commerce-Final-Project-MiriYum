@@ -8,6 +8,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.domain.reservation.config.ReservationHoldExpirationConfig;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -120,11 +123,57 @@ class ReservationHoldExpirationJobTest {
     }
 
     @Test
+    @DisplayName("application context 종료는 실행 중인 만료 작업을 interrupt한다")
+    void applicationContextShutdownInterruptsRunningExpirationTask() {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(ReservationHoldExpirationConfig.class)
+                .run(context -> {
+                    ThreadPoolTaskScheduler scheduler = context.getBean(
+                            "reservationHoldExpirationScheduler",
+                            ThreadPoolTaskScheduler.class);
+                    scheduler.execute(() -> {
+                        started.countDown();
+                        try {
+                            release.await();
+                        } catch (InterruptedException exception) {
+                            interrupted.countDown();
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+
+                    assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        context.close();
+                        assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
+                    } finally {
+                        release.countDown();
+                    }
+                });
+    }
+
+    @Test
     @DisplayName("enabled=false이면 전용 scheduler를 만들지 않는다")
     void disabledConfigurationCreatesNoScheduler() {
         new ApplicationContextRunner()
                 .withUserConfiguration(ReservationHoldExpirationConfig.class)
                 .withPropertyValues("miriyum.reservation.hold-expiration.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean("reservationHoldExpirationScheduler");
+                });
+    }
+
+    @Test
+    @DisplayName("application 환경 변수 off-switch는 만료 worker를 등록하지 않는다")
+    void applicationEnvironmentOffSwitchDisablesExpirationWorker() {
+        new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withPropertyValues("MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=false")
+                .withUserConfiguration(ReservationHoldExpirationConfig.class)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean("reservationHoldExpirationScheduler");

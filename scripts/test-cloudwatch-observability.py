@@ -120,6 +120,30 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
 
+    def test_staging_can_disable_reservation_hold_expiration_through_env_file(self):
+        staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
+            "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=true",
+            "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=false",
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".env", delete=False
+        ) as env_file:
+            env_file.write(staging_environment)
+            env_path = Path(env_file.name)
+
+        try:
+            compose_config = self.load_compose_config(env_path)
+        finally:
+            env_path.unlink(missing_ok=True)
+
+        backend_environment = compose_config["services"]["backend"]["environment"]
+        self.assertEqual(
+            "false",
+            backend_environment.get(
+                "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED"
+            ),
+        )
+
     def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
             "MIRIYUM_WAITING_CLOSURE_ENABLED=false",

@@ -62,6 +62,9 @@ miriyum:
       enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}
     # 30초 주기 전달이 10회 연속 실패하면 CloudWatch 로그 기반 운영 알람을 발생시킨다.
     refresh-risk-event-delivery-alert-threshold: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ALERT_THRESHOLD:10}
+  reservation:
+    hold-expiration:
+      enabled: ${MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED:true}
   payment:
     enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
     cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
