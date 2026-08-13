@@ -8,7 +8,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @ConditionalOnProperty(
         name = "miriyum.waiting.closure.enabled",
-        havingValue = "true",
-        matchIfMissing = true)
+        havingValue = "true")
 public class WaitingClosureScheduleConfig {
 }

@@ -58,6 +58,9 @@ miriyum:
       max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
       poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
       initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
+  waiting:
+    closure:
+      enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}

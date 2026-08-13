@@ -12,8 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Component
 @ConditionalOnProperty(
         name = "miriyum.waiting.closure.enabled",
-        havingValue = "true",
-        matchIfMissing = true)
+        havingValue = "true")
 @Slf4j
 public class WaitingClosureJobRunner {
     private static final int MAX_ITEMS_PER_POLL = 100;

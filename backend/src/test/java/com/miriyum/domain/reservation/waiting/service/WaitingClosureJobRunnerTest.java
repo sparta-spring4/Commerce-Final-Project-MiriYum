@@ -13,11 +13,31 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.scheduling.config.ScheduledTaskHolder;
 
 @ExtendWith(MockitoExtension.class)
 class WaitingClosureJobRunnerTest {
     @Mock WaitingClosureService closureService;
+
+    @Test
+    void applicationDefaultsDoNotRegisterClosureSchedulingOrRunner() {
+        new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withInitializer(context -> context.getEnvironment().getPropertySources()
+                        .remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME))
+                .withBean(WaitingClosureService.class, () -> mock(WaitingClosureService.class))
+                .withUserConfiguration(ClosureSchedulingTestConfig.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context)
+                            .doesNotHaveBean(WaitingClosureScheduleConfig.class)
+                            .doesNotHaveBean(WaitingClosureJobRunner.class);
+                });
+    }
 
     @Test
     void disabledPropertyDoesNotRegisterClosureRunner() {
@@ -143,5 +163,10 @@ class WaitingClosureJobRunnerTest {
         order.verify(closureService).claimPendingItems(
                 "runner-a", 1, Duration.ofSeconds(30), 12L);
         order.verifyNoMoreInteractions();
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @Import({WaitingClosureScheduleConfig.class, WaitingClosureJobRunner.class})
+    static class ClosureSchedulingTestConfig {
     }
 }
