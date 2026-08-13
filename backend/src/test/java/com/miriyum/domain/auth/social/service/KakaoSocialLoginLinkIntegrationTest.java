@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.social.dto.KakaoIdentityFingerprint;
 import com.miriyum.domain.auth.social.entity.SocialLoginLink;
 import com.miriyum.domain.auth.social.enums.KakaoLinkResult;
@@ -32,6 +34,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -85,10 +88,15 @@ class KakaoSocialLoginLinkIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoBean
+    private RefreshTokenManager refreshTokenManager;
+
     @BeforeEach
     void setUp() {
         jdbcTemplate.update("DELETE FROM social_login_links");
         jdbcTemplate.update("DELETE FROM consumer_accounts");
+        org.mockito.Mockito.when(refreshTokenManager.issue(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(new TokenPair("access-token", "refresh-token"));
     }
 
     @Test

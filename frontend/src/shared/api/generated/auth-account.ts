@@ -641,7 +641,6 @@ export interface operations {
         };
       };
       403: components["responses"]["CsrfRejected"];
-      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 카카오 인가 주소 발급 */
@@ -718,6 +717,7 @@ export interface operations {
       400: components["responses"]["InvalidKakaoOAuth"];
       409: components["responses"]["AccountConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 가입 */
@@ -824,7 +824,6 @@ export interface operations {
         };
       };
       403: components["responses"]["CsrfRejected"];
-      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 카카오 인가 주소 발급 */
@@ -901,6 +900,7 @@ export interface operations {
       400: components["responses"]["InvalidKakaoOAuth"];
       409: components["responses"]["AccountConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 본인 정보 조회 */
