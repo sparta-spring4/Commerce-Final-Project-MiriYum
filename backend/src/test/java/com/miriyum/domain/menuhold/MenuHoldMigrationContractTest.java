@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 
 class MenuHoldMigrationContractTest {
 
+    private static final Path V38 = Path.of(
+            "src/main/resources/db/migration/V38__add_temporary_menu_holds.sql");
+
     @Test
     void migrationDefinesReservationHoldAndItemIntegrity() throws IOException {
         String sql = Files.readString(Path.of(
@@ -35,5 +38,77 @@ class MenuHoldMigrationContractTest {
                 .contains("FOREIGN KEY (menu_inventory_bucket_id) REFERENCES menu_inventory_buckets")
                 .contains("idx_menu_hold_items_bucket")
                 .contains("ON DELETE RESTRICT");
+    }
+
+    @Test
+    void v38AddsNullableLegacyAndTemporaryParentColumns() throws IOException {
+        String sql = normalizedV38();
+
+        assertThat(sql)
+                .as("menu_holds schema replacement must stay atomic in MySQL")
+                .containsOnlyOnce("ALTER TABLE menu_holds")
+                .as("legacy MenuHold creation would fail if reservation_id stayed NOT NULL")
+                .contains("ALTER TABLE menu_holds "
+                        + "DROP CHECK ck_menu_holds_status, "
+                        + "MODIFY reservation_id BIGINT NULL, "
+                        + "MODIFY status VARCHAR(32) NOT NULL, "
+                        + "ADD reservation_hold_id BIGINT NULL, "
+                        + "ADD expires_at DATETIME(6) NULL,");
+        assertThat(sql)
+                .as("temporary MenuHold rows would lose their ReservationHold parent")
+                .contains("ADD reservation_hold_id BIGINT NULL");
+        assertThat(sql)
+                .as("temporary MenuHold rows would not preserve the parent's expiry")
+                .contains("ADD expires_at DATETIME(6) NULL");
+        assertThat(sql)
+                .as("RECONCILIATION_REQUIRED would be truncated by the legacy status width")
+                .contains("MODIFY status VARCHAR(32) NOT NULL");
+    }
+
+    @Test
+    void v38DefinesOneTemporaryMenuHoldPerReservationHold() throws IOException {
+        String sql = normalizedV38();
+
+        assertThat(sql)
+                .as("the composite FK target would not be a declared unique key")
+                .contains("ALTER TABLE reservation_holds ADD CONSTRAINT "
+                        + "uk_reservation_holds_id_expires UNIQUE "
+                        + "(reservation_hold_id, expires_at);");
+        assertThat(sql)
+                .as("one ReservationHold could own more than one temporary MenuHold root")
+                .contains("CONSTRAINT uk_menu_holds_reservation_hold "
+                        + "UNIQUE (reservation_hold_id)");
+        assertThat(sql)
+                .as("a MenuHold could link to a ReservationHold with a different expiry")
+                .contains("CONSTRAINT fk_menu_holds_reservation_hold_expiration "
+                        + "FOREIGN KEY (reservation_hold_id, expires_at) "
+                        + "REFERENCES reservation_holds (reservation_hold_id, expires_at) "
+                        + "ON DELETE RESTRICT");
+    }
+
+    @Test
+    void v38ReplacesLegacyStatusCheckWithParentAndStateInvariant() throws IOException {
+        String sql = normalizedV38();
+
+        assertThat(sql)
+                .as("the legacy status-only CHECK would reject every temporary state")
+                .contains("ALTER TABLE menu_holds DROP CHECK ck_menu_holds_status,");
+        assertThat(sql)
+                .as("legacy and temporary parent/state/nullability combinations could drift")
+                .contains("CONSTRAINT ck_menu_holds_parent_and_status CHECK ( "
+                        + "(reservation_hold_id IS NULL AND expires_at IS NULL "
+                        + "AND reservation_id IS NOT NULL "
+                        + "AND status IN ('CONFIRMED', 'RELEASED', 'FULFILLED')) OR "
+                        + "(reservation_hold_id IS NOT NULL AND expires_at IS NOT NULL "
+                        + "AND reservation_id IS NULL "
+                        + "AND status IN ('ACTIVE', 'RECONCILIATION_REQUIRED', "
+                        + "'RELEASED', 'EXPIRED')) OR "
+                        + "(reservation_hold_id IS NOT NULL AND expires_at IS NOT NULL "
+                        + "AND reservation_id IS NOT NULL "
+                        + "AND status IN ('CONFIRMED', 'RELEASED', 'FULFILLED')) )");
+    }
+
+    private static String normalizedV38() throws IOException {
+        return Files.readString(V38).replaceAll("\\s+", " ").trim();
     }
 }
