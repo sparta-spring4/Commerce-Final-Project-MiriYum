@@ -130,7 +130,7 @@ main() {
   fi
 
   if ! backfill_pending_risk_event_index; then
-    # #304 전까지 전달기는 SCAN을 사용하므로 이관 실패는 관측만 하고 새 배포는 유지한다.
+    # Set-only 전달 worker는 backfill이 완료된 marker 인덱스에서만 시작한다.
     echo "Pending risk event index backfill failed; aborting deployment before Set-only delivery starts." >&2
     publish_deployment_health 0
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true

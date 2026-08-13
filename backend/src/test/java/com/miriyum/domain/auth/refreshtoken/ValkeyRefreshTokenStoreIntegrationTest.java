@@ -294,7 +294,17 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         String validMarkerKey = "auth:risk:pending:valid";
         redisTemplate.opsForSet().add(
                 RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey, validMarkerKey);
-        redisTemplate.<String, String>opsForHash().put(malformedMarkerKey, "namespace", TokenNamespace.CONSUMER.value());
+        redisTemplate.<String, String>opsForHash().putAll(malformedMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", "not-a-number",
+                "familyId", "family-malformed",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
         redisTemplate.<String, String>opsForHash().putAll(validMarkerKey, Map.of(
                 "namespace", TokenNamespace.CONSUMER.value(),
                 "accountId", "7",
