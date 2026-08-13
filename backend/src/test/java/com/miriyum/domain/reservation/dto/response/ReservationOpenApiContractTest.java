@@ -16,7 +16,7 @@ import org.yaml.snakeyaml.Yaml;
 class ReservationOpenApiContractTest {
 
     @Test
-    void publicReservationApiMatrixKeepsAllElevenOperationsExplicit() throws IOException {
+    void publicReservationApiMatrixKeepsAllElevenMvp1OperationsExplicit() throws IOException {
         Map<String, Object> document = load(
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
@@ -25,7 +25,7 @@ class ReservationOpenApiContractTest {
                 new OperationContract(
                         "/api/v1/consumers/reservations", "post", "createReservation",
                         "#/components/schemas/ReservationCreateRequest",
-                        Set.of("201", "400", "401", "403", "404", "409", "503")),
+                        Set.of("201", "202", "400", "401", "403", "404", "409", "503")),
                 new OperationContract(
                         "/api/v1/consumers/reservations/{reservationId}", "get", "getReservation",
                         null, Set.of("200", "401", "403", "404")),
@@ -80,8 +80,13 @@ class ReservationOpenApiContractTest {
         );
 
         assertThat(paths.keySet())
-                .hasSize(12)
+                .hasSize(15)
                 .contains("/api/v1/consumers/me/reservations")
+                .contains(
+                        "/api/v1/consumers/reservation-requests/{reservationRequestId}",
+                        "/api/v1/consumers/reservation-requests/{reservationRequestId}/finalizations",
+                        "/api/v1/consumers/reservation-requests/{reservationRequestId}/abandonments"
+                )
                 .containsAll(contracts.stream().map(OperationContract::path).toList());
         Map<String, Object> aggregate = load(
                 Path.of("..", "docs", "specs", "mvp1-openapi.yaml")
@@ -130,6 +135,111 @@ class ReservationOpenApiContractTest {
                                     + escapeJsonPointer(contract.path())
                     );
         });
+    }
+
+    @Test
+    void depositRequestOperationsStayPostMvp1AndExposeStrictContracts() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+        String requestPath =
+                "/api/v1/consumers/reservation-requests/{reservationRequestId}";
+        String finalizationPath = requestPath + "/finalizations";
+        String abandonmentPath = requestPath + "/abandonments";
+        assertThat(paths).containsKeys(requestPath, finalizationPath, abandonmentPath);
+
+        Map<String, Object> create = map(map(paths.get(
+                "/api/v1/consumers/reservations"
+        )).get("post"));
+        Map<String, Object> createResponses = map(create.get("responses"));
+        assertThat(createResponses).containsKey("202");
+        Map<String, Object> createAccepted = map(createResponses.get("202"));
+        assertThat(map(map(map(createAccepted.get("content")).get("application/json")).get("schema")))
+                .containsEntry("$ref", "#/components/schemas/ReservationRequestResponse");
+
+        Map<String, Object> get = map(map(paths.get(requestPath)).get("get"));
+        assertThat(get).containsEntry("operationId", "getReservationRequest");
+        assertThat(map(get.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "401", "403", "404");
+        assertThat(list(get.get("parameters")).stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(parameter -> parameter.get("$ref")))
+                .containsExactly("#/components/parameters/ReservationRequestId");
+
+        Map<String, Object> finalization = map(map(paths.get(finalizationPath)).get("post"));
+        assertDepositCommand(finalization, "finalizeReservationRequest");
+        assertThat(map(finalization.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "202", "400", "401", "403", "404", "409");
+        assertThat(map(map(map(map(map(finalization.get("responses")).get("200"))
+                .get("content")).get("application/json")).get("schema")))
+                .containsEntry("$ref", "#/components/schemas/ReservationSuccessResponse");
+        assertThat(map(map(map(map(map(finalization.get("responses")).get("202"))
+                .get("content")).get("application/json")).get("schema")))
+                .containsEntry("$ref", "#/components/schemas/ReservationRequestResponse");
+
+        Map<String, Object> abandonment = map(map(paths.get(abandonmentPath)).get("post"));
+        assertDepositCommand(abandonment, "abandonReservationRequest");
+        assertThat(map(abandonment.get("responses")).keySet())
+                .containsExactlyInAnyOrder("200", "202", "400", "401", "403", "404", "409");
+        for (String status : List.of("200", "202")) {
+            assertThat(map(map(map(map(map(abandonment.get("responses")).get(status))
+                    .get("content")).get("application/json")).get("schema")))
+                    .containsEntry("$ref", "#/components/schemas/ReservationRequestResponse");
+        }
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        assertThat(schemas).containsKeys(
+                "ReservationDepositProcessStatus",
+                "ReservationPaymentPreparation",
+                "ReservationRequest",
+                "ReservationRequestResponse"
+        );
+        assertThat(list(map(schemas.get("ReservationDepositProcessStatus")).get("enum")))
+                .containsExactly(
+                        "AWAITING_PAYMENT",
+                        "FINALIZING_RESOURCES",
+                        "COMPLETED",
+                        "ABANDONED",
+                        "EXPIRED",
+                        "COMPENSATION_REQUIRED",
+                        "COMPENSATING",
+                        "COMPENSATED",
+                        "RECOVERY_REQUIRED"
+                );
+
+        Map<String, Object> preparation = map(schemas.get("ReservationPaymentPreparation"));
+        assertThat(list(preparation.get("required")))
+                .containsExactlyInAnyOrder(
+                        "paymentId",
+                        "portOnePaymentId",
+                        "orderName",
+                        "amountMinor",
+                        "currency",
+                        "sourceExpiresAt",
+                        "status"
+                );
+        assertThat(map(map(preparation.get("properties")).get("status")))
+                .containsEntry("const", "READY");
+
+        Map<String, Object> request = map(schemas.get("ReservationRequest"));
+        assertThat(list(request.get("required")))
+                .containsExactlyInAnyOrder(
+                        "reservationRequestId",
+                        "status",
+                        "expiresAt",
+                        "paymentPreparation",
+                        "reservation"
+                );
+        assertThat(list(map(map(request.get("properties")).get("reservation")).get("oneOf")))
+                .hasSize(2);
+
+        Map<String, Object> mvp1 = load(Path.of("..", "docs", "specs", "mvp1-openapi.yaml"));
+        assertThat(map(mvp1.get("paths"))).doesNotContainKeys(
+                requestPath,
+                finalizationPath,
+                abandonmentPath
+        );
     }
 
     @Test
@@ -237,7 +347,11 @@ class ReservationOpenApiContractTest {
                         "ACCOUNT_006",
                         "MENU_HOLD_001",
                         "MENU_HOLD_002",
-                        "NOTIFICATION_002"
+                        "NOTIFICATION_002",
+                        "PAYMENT_004",
+                        "PAYMENT_008",
+                        "COMMON_007",
+                        "COMMON_008"
                 );
     }
 
@@ -618,6 +732,30 @@ class ReservationOpenApiContractTest {
 
         assertThat(map(operation.get("responses")))
                 .containsKeys("200", "400", "401", "403", "404", "409");
+    }
+
+    private static void assertDepositCommand(
+            Map<String, Object> operation,
+            String operationId
+    ) {
+        assertThat(operation).containsEntry("operationId", operationId);
+        assertThat(list(operation.get("security"))).anySatisfy(requirement ->
+                assertThat(map(requirement)).containsKey("bearerAuth"));
+        assertThat(list(operation.get("parameters")).stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(parameter -> parameter.get("$ref")))
+                .containsExactlyInAnyOrder(
+                        "#/components/parameters/ReservationRequestId",
+                        "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                );
+        Map<String, Object> requestBody = map(operation.get("requestBody"));
+        assertThat(requestBody).containsEntry("required", true);
+        assertThat(map(map(map(requestBody.get("content")).get("application/json")).get("schema")))
+                .containsEntry("$ref", "#/components/schemas/EmptyCommandRequest");
+        assertThat(map(map(operation.get("responses")).get("404")))
+                .containsEntry("$ref", "#/components/responses/ReservationRequestNotFound");
+        assertThat(map(map(operation.get("responses")).get("409")))
+                .containsEntry("$ref", "#/components/responses/ReservationRequestConflict");
     }
 
     private static void assertCancellationOperation(

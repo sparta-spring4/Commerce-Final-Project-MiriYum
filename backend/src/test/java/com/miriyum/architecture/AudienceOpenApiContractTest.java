@@ -23,7 +23,10 @@ class AudienceOpenApiContractTest {
             "/api/v1/consumers/payments",
             "/api/v1/consumers/payments/{paymentId}",
             "/api/v1/consumers/payments/{paymentId}/confirmations",
-            "/api/v1/payments/webhooks/portone"
+            "/api/v1/payments/webhooks/portone",
+            "/api/v1/consumers/reservation-requests/{reservationRequestId}",
+            "/api/v1/consumers/reservation-requests/{reservationRequestId}/finalizations",
+            "/api/v1/consumers/reservation-requests/{reservationRequestId}/abandonments"
     );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
             "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: MiriYum MVP1 Reservation API
-  version: 1.1.0
-  description: 일반 예약·매장별 시간 정책·수용량·취소·방문 완료 계약
+  version: 1.2.0
+  description: 일반 예약·매장별 시간 정책·수용량·취소·방문 완료와 고도화 예약금 요청 계약
   license:
     name: All rights reserved
     identifier: LicenseRef-All-Rights-Reserved
@@ -24,6 +24,10 @@ paths:
     post:
       tags: [Reservation]
       summary: 일반 예약과 선택 메뉴 홀드 생성
+      description: |
+        예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
+        예약금이 필요하면 수용량·선택 메뉴를 임시 선점하고 필수 PaymentPreparation을 포함한 202를 반환한다.
+        같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
       operationId: createReservation
       security:
         - bearerAuth: []
@@ -42,6 +46,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReservationSuccessResponse"
+        "202":
+          description: 예약금 결제를 기다리는 미완료 예약 요청
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRequestResponse"
         "400":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "401":
@@ -54,6 +64,116 @@ paths:
           $ref: "#/components/responses/ReservationConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/reservation-requests/{reservationRequestId}:
+    get:
+      tags: [Reservation]
+      summary: 본인 예약금 요청 최신 상태 조회
+      description: |
+        진행·대사·보상 상태를 포함한 최신 상태를 항상 200으로 반환한다.
+        실제 부재와 타인 소유는 같은 RESERVATION_001 404로 숨긴다.
+      operationId: getReservationRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ReservationRequestId"
+      responses:
+        "200":
+          description: 예약금 요청 최신 상태
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRequestResponse"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ReservationRequestNotFound"
+  /api/v1/consumers/reservation-requests/{reservationRequestId}/finalizations:
+    post:
+      tags: [Reservation]
+      summary: 본인 예약금 요청 최종 확정
+      description: |
+        브라우저의 결제 성공 주장을 받지 않고 저장된 paymentId로 Payment 공개 결과를 조회한다.
+        자원 확정이 완료되면 200 Reservation을, 아직 대사·보상·복구가 끝나지 않았으면 202 최신 요청 상태를 반환한다.
+      operationId: finalizeReservationRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ReservationRequestId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyCommandRequest"
+      responses:
+        "200":
+          description: 최종 확정된 예약
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationSuccessResponse"
+        "202":
+          description: 아직 종결되지 않은 예약금 요청
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRequestResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ReservationRequestNotFound"
+        "409":
+          $ref: "#/components/responses/ReservationRequestConflict"
+  /api/v1/consumers/reservation-requests/{reservationRequestId}/abandonments:
+    post:
+      tags: [Reservation]
+      summary: 본인 예약금 요청 포기
+      description: |
+        완료 전 포기 의사를 영속화한다. 명시적 비성공은 자원을 반환하고,
+        이미 PAID이거나 뒤늦게 PAID로 확인되면 Reservation을 만들지 않고 정확히 한 번의 전액 환불 의무로 수렴한다.
+        이미 COMPLETED인 요청은 RESERVATION_005로 거절한다.
+      operationId: abandonReservationRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ReservationRequestId"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyCommandRequest"
+      responses:
+        "200":
+          description: 자원 반환과 포기가 완료된 예약금 요청
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRequestResponse"
+        "202":
+          description: 결제 대사 또는 전액 환불 보상이 아직 끝나지 않은 예약금 요청
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRequestResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ReservationRequestNotFound"
+        "409":
+          $ref: "#/components/responses/ReservationRequestConflict"
   /api/v1/consumers/reservations/{reservationId}:
     get:
       tags: [Reservation]
@@ -437,6 +557,12 @@ components:
       required: true
       schema:
         $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+    ReservationRequestId:
+      name: reservationRequestId
+      in: path
+      required: true
+      schema:
+        $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
     StoreId:
       name: storeId
       in: path
@@ -740,6 +866,74 @@ components:
     EmptyCommandRequest:
       type: object
       additionalProperties: false
+    ReservationDepositProcessStatus:
+      type: string
+      enum:
+        - AWAITING_PAYMENT
+        - FINALIZING_RESOURCES
+        - COMPLETED
+        - ABANDONED
+        - EXPIRED
+        - COMPENSATION_REQUIRED
+        - COMPENSATING
+        - COMPENSATED
+        - RECOVERY_REQUIRED
+      description: Reservation이 소유하는 예약금 조정 단계. Payment·Hold 상태의 복제 원본이 아니다.
+    ReservationPaymentPreparation:
+      type: object
+      additionalProperties: false
+      required:
+        - paymentId
+        - portOnePaymentId
+        - orderName
+        - amountMinor
+        - currency
+        - sourceExpiresAt
+        - status
+      properties:
+        paymentId:
+          $ref: "../payment/openapi.yaml#/components/schemas/PaymentId"
+        portOnePaymentId:
+          $ref: "../payment/openapi.yaml#/components/schemas/PortOnePaymentId"
+        orderName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        amountMinor:
+          allOf:
+            - $ref: "../payment/openapi.yaml#/components/schemas/MoneyMinor"
+            - minimum: 1
+        currency:
+          $ref: "../payment/openapi.yaml#/components/schemas/Currency"
+        sourceExpiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        status:
+          type: string
+          const: READY
+      description: Payment 공개 PaymentPreparation의 HTTP projection. 성공한 예약금 생성 202에서는 항상 존재한다.
+    ReservationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reservationRequestId
+        - status
+        - expiresAt
+        - paymentPreparation
+        - reservation
+      properties:
+        reservationRequestId:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/PublicId"
+        status:
+          $ref: "#/components/schemas/ReservationDepositProcessStatus"
+        expiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        paymentPreparation:
+          $ref: "#/components/schemas/ReservationPaymentPreparation"
+        reservation:
+          oneOf:
+            - $ref: "#/components/schemas/ReservationDetail"
+            - type: "null"
+          description: COMPLETED이면 확정 Reservation, 그 전과 보상·복구 상태에서는 null
     MenuHoldItem:
       type: object
       additionalProperties: false
@@ -987,6 +1181,17 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
         data:
           $ref: "#/components/schemas/ReservationDetail"
+    ReservationRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/ReservationRequest"
     ReservationPageSuccessResponse:
       type: object
       additionalProperties: false
@@ -1050,6 +1255,15 @@ components:
           example:
             code: RESERVATION_001
             message: 예약을 찾을 수 없습니다.
+    ReservationRequestNotFound:
+      description: 본인 범위에서 예약금 요청을 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: RESERVATION_001
+            message: 예약 요청을 찾을 수 없습니다.
     ReservationCreationNotFound:
       description: 매장, 선택 메뉴 또는 해당 시간대 메뉴 수량 버킷을 찾을 수 없음
       content:
@@ -1085,7 +1299,7 @@ components:
                 code: RESERVATION_001
                 message: 예약을 찾을 수 없습니다.
     ReservationConflict:
-      description: 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
+      description: 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록
       content:
         application/json:
           schema:
@@ -1111,6 +1325,41 @@ components:
               value:
                 code: NOTIFICATION_002
                 message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
+            activePaymentSourceConflict:
+              value:
+                code: PAYMENT_004
+                message: 같은 예약 거래에 처리 중인 결제가 있습니다.
+            paymentSourceExpired:
+              value:
+                code: PAYMENT_008
+                message: 결제 준비 대상이 만료됐거나 확정할 수 없습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
+    ReservationRequestConflict:
+      description: 예약금 요청의 조정 상태·멱등·동시 요청 충돌
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            invalidState:
+              value:
+                code: RESERVATION_005
+                message: 현재 예약 상태에서 처리할 수 없습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+            concurrentModification:
+              value:
+                code: COMMON_008
+                message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.
     ReservationStateConflict:
       description: 현재 상태 또는 취소 정책에서 명령 불가
       content:

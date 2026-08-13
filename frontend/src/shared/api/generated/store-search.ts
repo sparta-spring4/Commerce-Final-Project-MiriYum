@@ -879,11 +879,244 @@ export interface external {
     };
     $defs: Record<string, never>;
   };
+  "../payment/openapi.yaml": {
+    paths: {
+      "/api/v1/consumers/payments": {
+        /** 본인 결제·환불 이력 조회 */
+        get: operations["getCurrentConsumerPayments"];
+      };
+      "/api/v1/consumers/payments/{paymentId}": {
+        /** 본인 결제 상세 조회 */
+        get: operations["getCurrentConsumerPayment"];
+      };
+      "/api/v1/consumers/payments/{paymentId}/confirmations": {
+        /**
+         * PortOne 서버 조회 기반 결제 확정
+         * @description 브라우저가 전달한 성공 여부·금액·통화·transactionId를 받거나 신뢰하지 않는다.
+         * 인증 principal을 포함한 소유 범위에서 결제를 먼저 조회하며 실제 부재와 타인 소유를 모두 PAYMENT_001 404로 숨긴다.
+         * 준비된 portOnePaymentId를 서버에서 조회하고 원장 스냅샷과 대조한 뒤 같은 멱등 확정 경로를 실행한다.
+         */
+        post: operations["confirmCurrentConsumerPayment"];
+      };
+      "/api/v1/payments/webhooks/portone": {
+        /**
+         * PortOne V2 결제·환불 Webhook 수신
+         * @description 2024-04-25 body와 Standard Webhooks 서명을 raw body 기준으로 검증한다.
+         * 유효한 사건도 성공 근거로 바로 사용하지 않고 알려진 paymentId를 PortOne V2 API에서 다시 조회한다.
+         * Paid·Failed·PayPending과 PartialCancelled·Cancelled·CancelPending만 처리하며 지원 type의 필수 식별자 누락은 400으로 거부한다.
+         * allowlist 밖의 알려진 또는 미래 type은 서명 검증 후 거래를 변경하지 않고 200으로 무시한다.
+         */
+        post: operations["receivePortOnePaymentWebhook"];
+      };
+    };
+    webhooks: Record<string, never>;
+    components: {
+      schemas: {
+        /**
+         * @description Payment가 내부 DB PK와 별도로 채번한 공개 전용 결제 참조. 채번·소유 규칙은 Payment spec을 따른다.
+         * @example 900000000000000001
+         */
+        PaymentId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+        /**
+         * @description Payment가 내부 DB PK와 별도로 채번한 공개 전용 환불 참조. 채번·소유 규칙은 Payment spec을 따른다.
+         * @example 910000000000000001
+         */
+        RefundId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+        /**
+         * @description 준비된 내부 주문에서 결정적으로 파생해 MiriYum이 채번한 PortOne paymentId
+         * @example payment-reservation-123456
+         */
+        PortOnePaymentId: string;
+        /**
+         * @description ISO 4217 통화 코드
+         * @example KRW
+         */
+        Currency: string;
+        /**
+         * Format: int64
+         * @description 통화의 최소 단위 정수 금액
+         */
+        MoneyMinor: number;
+        /** @enum {string} */
+        PaymentStatus: "READY" | "CONFIRMING" | "PAID" | "PARTIALLY_REFUNDED" | "REFUNDED" | "RECONCILIATION_REQUIRED";
+        /** @enum {string} */
+        RefundStatus: "REQUESTED" | "VALIDATING" | "PROCESSING" | "COMPLETED" | "FAILED" | "RECONCILIATION_REQUIRED";
+        /** @enum {string} */
+        PaymentAttemptStatus: "NOT_STARTED" | "PENDING" | "PAID" | "FAILED" | "CANCELLED" | "UNKNOWN";
+        PaymentConfirmationRequest: {
+          portOnePaymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOnePaymentId"];
+        };
+        RefundSummary: {
+          refundId: external["../payment/openapi.yaml"]["components"]["schemas"]["RefundId"];
+          amountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
+          currency: external["../payment/openapi.yaml"]["components"]["schemas"]["Currency"];
+          status: external["../payment/openapi.yaml"]["components"]["schemas"]["RefundStatus"];
+          requestedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+          completedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+        };
+        Payment: {
+          paymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentId"];
+          reservationReferenceId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+          amountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
+          refundedAmountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
+          refundableAmountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
+          currency: external["../payment/openapi.yaml"]["components"]["schemas"]["Currency"];
+          status: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentStatus"];
+          lastAttemptStatus: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentAttemptStatus"];
+          createdAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+          paidAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+          updatedAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"] | null;
+          refunds: external["../payment/openapi.yaml"]["components"]["schemas"]["RefundSummary"][];
+        };
+        PaymentHistorySlice: {
+          items: external["../payment/openapi.yaml"]["components"]["schemas"]["Payment"][];
+          nextCursor: string | null;
+          hasNext: boolean;
+        };
+        PortOneIgnoredWebhookData: {
+          storeId?: string;
+          [key: string]: unknown;
+        };
+        PortOneSupportedPaymentWebhookData: {
+          storeId: string;
+          paymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOnePaymentId"];
+          transactionId: string;
+          [key: string]: unknown;
+        };
+        PortOneSupportedCancellationWebhookData: {
+          storeId: string;
+          paymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOnePaymentId"];
+          transactionId: string;
+          cancellationId: string;
+          [key: string]: unknown;
+        };
+        PortOneSupportedPaymentWebhookRequest: {
+          /** @enum {string} */
+          type: "Transaction.Paid" | "Transaction.Failed" | "Transaction.PayPending";
+          /** Format: date-time */
+          timestamp: string;
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneSupportedPaymentWebhookData"];
+          [key: string]: unknown;
+        };
+        PortOneSupportedCancellationWebhookRequest: {
+          /** @enum {string} */
+          type: "Transaction.PartialCancelled" | "Transaction.Cancelled" | "Transaction.CancelPending";
+          /** Format: date-time */
+          timestamp: string;
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneSupportedCancellationWebhookData"];
+          [key: string]: unknown;
+        };
+        PortOneIgnoredWebhookRequest: {
+          /** @description 현재 Payment 처리 allowlist 밖의 알려진 또는 미래 type. 서명 검증 후 거래를 변경하지 않고 200으로 무시한다. */
+          type: string;
+          /** Format: date-time */
+          timestamp: string;
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneIgnoredWebhookData"];
+          [key: string]: unknown;
+        };
+        PortOneWebhookRequest: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneSupportedPaymentWebhookRequest"] | external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneSupportedCancellationWebhookRequest"] | external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneIgnoredWebhookRequest"];
+        PaymentSuccessResponse: {
+          code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+          message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["Payment"];
+        };
+        PaymentReconciliationSuccessResponse: {
+          code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+          /** @constant */
+          message: "결제 결과를 확인 중입니다.";
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["Payment"] & {
+            /** @constant */
+            status?: "RECONCILIATION_REQUIRED";
+          };
+        };
+        PaymentHistorySuccessResponse: {
+          code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+          message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+          data: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentHistorySlice"];
+        };
+        NoDataSuccessResponse: {
+          code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+          message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+          data: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["NoData"];
+        };
+      };
+      responses: {
+        /** @description 본인 범위에서 결제를 찾을 수 없음 */
+        PaymentNotFound: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+        /** @description 결제 상태·금액·통화·PortOne 매핑·source 또는 공통 멱등 계약 충돌 */
+        PaymentConflict: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+        /** @description size·status 입력값 또는 이력 cursor가 올바르지 않음 */
+        PaymentHistoryBadRequest: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+        /** @description PortOne Webhook 서명 또는 timestamp 검증 실패 */
+        InvalidWebhookSignature: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+      };
+      parameters: {
+        /** @description MiriYum이 공개한 내부 결제 참조 */
+        PaymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentId"];
+        /** @description Standard Webhooks 메시지 식별자 */
+        WebhookId: string;
+        /** @description Standard Webhooks 서명 timestamp */
+        WebhookTimestamp: string;
+        /** @description PortOne Webhook Secret으로 검증하는 Standard Webhooks 서명 */
+        WebhookSignature: string;
+      };
+      requestBodies: never;
+      headers: never;
+      pathItems: never;
+    };
+    $defs: Record<string, never>;
+  };
   "../reservation/openapi.yaml": {
     paths: {
       "/api/v1/consumers/reservations": {
-        /** 일반 예약과 선택 메뉴 홀드 생성 */
+        /**
+         * 일반 예약과 선택 메뉴 홀드 생성
+         * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
+         * 예약금이 필요하면 수용량·선택 메뉴를 임시 선점하고 필수 PaymentPreparation을 포함한 202를 반환한다.
+         * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
+         */
         post: operations["createReservation"];
+      };
+      "/api/v1/consumers/reservation-requests/{reservationRequestId}": {
+        /**
+         * 본인 예약금 요청 최신 상태 조회
+         * @description 진행·대사·보상 상태를 포함한 최신 상태를 항상 200으로 반환한다.
+         * 실제 부재와 타인 소유는 같은 RESERVATION_001 404로 숨긴다.
+         */
+        get: operations["getReservationRequest"];
+      };
+      "/api/v1/consumers/reservation-requests/{reservationRequestId}/finalizations": {
+        /**
+         * 본인 예약금 요청 최종 확정
+         * @description 브라우저의 결제 성공 주장을 받지 않고 저장된 paymentId로 Payment 공개 결과를 조회한다.
+         * 자원 확정이 완료되면 200 Reservation을, 아직 대사·보상·복구가 끝나지 않았으면 202 최신 요청 상태를 반환한다.
+         */
+        post: operations["finalizeReservationRequest"];
+      };
+      "/api/v1/consumers/reservation-requests/{reservationRequestId}/abandonments": {
+        /**
+         * 본인 예약금 요청 포기
+         * @description 완료 전 포기 의사를 영속화한다. 명시적 비성공은 자원을 반환하고,
+         * 이미 PAID이거나 뒤늦게 PAID로 확인되면 Reservation을 만들지 않고 정확히 한 번의 전액 환불 의무로 수렴한다.
+         * 이미 COMPLETED인 요청은 RESERVATION_005로 거절한다.
+         */
+        post: operations["abandonReservationRequest"];
       };
       "/api/v1/consumers/reservations/{reservationId}": {
         /** 본인 예약 상세 조회 */
@@ -1036,6 +1269,30 @@ export interface external {
           reason: string;
         };
         EmptyCommandRequest: Record<string, never>;
+        /**
+         * @description Reservation이 소유하는 예약금 조정 단계. Payment·Hold 상태의 복제 원본이 아니다.
+         * @enum {string}
+         */
+        ReservationDepositProcessStatus: "AWAITING_PAYMENT" | "FINALIZING_RESOURCES" | "COMPLETED" | "ABANDONED" | "EXPIRED" | "COMPENSATION_REQUIRED" | "COMPENSATING" | "COMPENSATED" | "RECOVERY_REQUIRED";
+        /** @description Payment 공개 PaymentPreparation의 HTTP projection. 성공한 예약금 생성 202에서는 항상 존재한다. */
+        ReservationPaymentPreparation: {
+          paymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentId"];
+          portOnePaymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOnePaymentId"];
+          orderName: string;
+          amountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
+          currency: external["../payment/openapi.yaml"]["components"]["schemas"]["Currency"];
+          sourceExpiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+          /** @constant */
+          status: "READY";
+        };
+        ReservationRequest: {
+          reservationRequestId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+          status: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationDepositProcessStatus"];
+          expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
+          paymentPreparation: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationPaymentPreparation"];
+          /** @description COMPLETED이면 확정 Reservation, 그 전과 보상·복구 상태에서는 null */
+          reservation: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationDetail"] | null;
+        };
         MenuHoldItem: {
           menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
           menuName: string;
@@ -1114,6 +1371,11 @@ export interface external {
           message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
           data: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationDetail"];
         };
+        ReservationRequestResponse: {
+          code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+          message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+          data: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequest"];
+        };
         ReservationPageSuccessResponse: {
           code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
           message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -1148,6 +1410,12 @@ export interface external {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
         };
+        /** @description 본인 범위에서 예약금 요청을 찾을 수 없음 */
+        ReservationRequestNotFound: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
         /** @description 매장, 선택 메뉴 또는 해당 시간대 메뉴 수량 버킷을 찾을 수 없음 */
         ReservationCreationNotFound: {
           content: {
@@ -1160,8 +1428,14 @@ export interface external {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
         };
-        /** @description 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록 */
+        /** @description 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록 */
         ReservationConflict: {
+          content: {
+            "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+          };
+        };
+        /** @description 예약금 요청의 조정 상태·멱등·동시 요청 충돌 */
+        ReservationRequestConflict: {
           content: {
             "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
           };
@@ -1211,6 +1485,7 @@ export interface external {
       };
       parameters: {
         ReservationId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+        ReservationRequestId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
         StoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
         ServiceDate: external["../reservation/openapi.yaml"]["components"]["schemas"]["StoreLocalDate"];
         ReservationTimePolicyVersion: number;
@@ -2108,7 +2383,144 @@ export interface operations {
       409: components["responses"]["RepresentativeMenuConflict"];
     };
   };
-  /** 일반 예약과 선택 메뉴 홀드 생성 */
+  /** 본인 결제·환불 이력 조회 */
+  getCurrentConsumerPayments: {
+    parameters: {
+      query?: {
+        /** @description 이전 응답의 불투명 nextCursor. 다른 필터에 재사용할 수 없다. */
+        cursor?: string;
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 공개 결제 상태 필터 */
+        status?: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentStatus"];
+      };
+    };
+    responses: {
+      /** @description 생성 시각·결제 ID 역순의 본인 결제·환불 이력 slice */
+      200: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentHistorySuccessResponse"];
+        };
+      };
+      400: external["../payment/openapi.yaml"]["components"]["responses"]["PaymentHistoryBadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      500: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["InternalServerError"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 본인 결제 상세 조회 */
+  getCurrentConsumerPayment: {
+    parameters: {
+      path: {
+        paymentId: external["../payment/openapi.yaml"]["components"]["parameters"]["PaymentId"];
+      };
+    };
+    responses: {
+      /** @description 본인 결제와 환불 상세 */
+      200: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../payment/openapi.yaml"]["components"]["responses"]["PaymentNotFound"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      500: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["InternalServerError"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * PortOne 서버 조회 기반 결제 확정
+   * @description 브라우저가 전달한 성공 여부·금액·통화·transactionId를 받거나 신뢰하지 않는다.
+   * 인증 principal을 포함한 소유 범위에서 결제를 먼저 조회하며 실제 부재와 타인 소유를 모두 PAYMENT_001 404로 숨긴다.
+   * 준비된 portOnePaymentId를 서버에서 조회하고 원장 스냅샷과 대조한 뒤 같은 멱등 확정 경로를 실행한다.
+   */
+  confirmCurrentConsumerPayment: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        paymentId: external["../payment/openapi.yaml"]["components"]["parameters"]["PaymentId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentConfirmationRequest"];
+      };
+    };
+    responses: {
+      /** @description 인증된 서버 조회로 최종 상태를 확정했거나 기존 최종 결과를 재생함 */
+      200: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentSuccessResponse"];
+        };
+      };
+      /** @description 결과가 불명확하여 신규 청구·환불을 차단하고 대사 대상으로 격리함 */
+      202: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentReconciliationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../payment/openapi.yaml"]["components"]["responses"]["PaymentNotFound"];
+      409: external["../payment/openapi.yaml"]["components"]["responses"]["PaymentConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      500: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["InternalServerError"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * PortOne V2 결제·환불 Webhook 수신
+   * @description 2024-04-25 body와 Standard Webhooks 서명을 raw body 기준으로 검증한다.
+   * 유효한 사건도 성공 근거로 바로 사용하지 않고 알려진 paymentId를 PortOne V2 API에서 다시 조회한다.
+   * Paid·Failed·PayPending과 PartialCancelled·Cancelled·CancelPending만 처리하며 지원 type의 필수 식별자 누락은 400으로 거부한다.
+   * allowlist 밖의 알려진 또는 미래 type은 서명 검증 후 거래를 변경하지 않고 200으로 무시한다.
+   */
+  receivePortOnePaymentWebhook: {
+    parameters: {
+      header: {
+        "webhook-id": external["../payment/openapi.yaml"]["components"]["parameters"]["WebhookId"];
+        "webhook-timestamp": external["../payment/openapi.yaml"]["components"]["parameters"]["WebhookTimestamp"];
+        "webhook-signature": external["../payment/openapi.yaml"]["components"]["parameters"]["WebhookSignature"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["PortOneWebhookRequest"];
+      };
+    };
+    responses: {
+      /** @description 검증·중복 제거 후 처리했거나 이미 처리한 사건을 확인함 */
+      200: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["NoDataSuccessResponse"];
+        };
+      };
+      /** @description 서명은 유효하지만 PortOne 조회 결과가 불명확하여 대사 대상으로 격리함 */
+      202: {
+        content: {
+          "application/json": external["../payment/openapi.yaml"]["components"]["schemas"]["NoDataSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../payment/openapi.yaml"]["components"]["responses"]["InvalidWebhookSignature"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      500: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["InternalServerError"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 일반 예약과 선택 메뉴 홀드 생성
+   * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
+   * 예약금이 필요하면 수용량·선택 메뉴를 임시 선점하고 필수 PaymentPreparation을 포함한 202를 반환한다.
+   * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
+   */
   createReservation: {
     parameters: {
       header: {
@@ -2127,12 +2539,120 @@ export interface operations {
           "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationSuccessResponse"];
         };
       };
+      /** @description 예약금 결제를 기다리는 미완료 예약 요청 */
+      202: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequestResponse"];
+        };
+      };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
       404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationCreationNotFound"];
       409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 본인 예약금 요청 최신 상태 조회
+   * @description 진행·대사·보상 상태를 포함한 최신 상태를 항상 200으로 반환한다.
+   * 실제 부재와 타인 소유는 같은 RESERVATION_001 404로 숨긴다.
+   */
+  getReservationRequest: {
+    parameters: {
+      path: {
+        reservationRequestId: external["../reservation/openapi.yaml"]["components"]["parameters"]["ReservationRequestId"];
+      };
+    };
+    responses: {
+      /** @description 예약금 요청 최신 상태 */
+      200: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequestResponse"];
+        };
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationRequestNotFound"];
+    };
+  };
+  /**
+   * 본인 예약금 요청 최종 확정
+   * @description 브라우저의 결제 성공 주장을 받지 않고 저장된 paymentId로 Payment 공개 결과를 조회한다.
+   * 자원 확정이 완료되면 200 Reservation을, 아직 대사·보상·복구가 끝나지 않았으면 202 최신 요청 상태를 반환한다.
+   */
+  finalizeReservationRequest: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        reservationRequestId: external["../reservation/openapi.yaml"]["components"]["parameters"]["ReservationRequestId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["EmptyCommandRequest"];
+      };
+    };
+    responses: {
+      /** @description 최종 확정된 예약 */
+      200: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationSuccessResponse"];
+        };
+      };
+      /** @description 아직 종결되지 않은 예약금 요청 */
+      202: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequestResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationRequestNotFound"];
+      409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationRequestConflict"];
+    };
+  };
+  /**
+   * 본인 예약금 요청 포기
+   * @description 완료 전 포기 의사를 영속화한다. 명시적 비성공은 자원을 반환하고,
+   * 이미 PAID이거나 뒤늦게 PAID로 확인되면 Reservation을 만들지 않고 정확히 한 번의 전액 환불 의무로 수렴한다.
+   * 이미 COMPLETED인 요청은 RESERVATION_005로 거절한다.
+   */
+  abandonReservationRequest: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        reservationRequestId: external["../reservation/openapi.yaml"]["components"]["parameters"]["ReservationRequestId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["EmptyCommandRequest"];
+      };
+    };
+    responses: {
+      /** @description 자원 반환과 포기가 완료된 예약금 요청 */
+      200: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequestResponse"];
+        };
+      };
+      /** @description 결제 대사 또는 전액 환불 보상이 아직 끝나지 않은 예약금 요청 */
+      202: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationRequestResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationRequestNotFound"];
+      409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationRequestConflict"];
     };
   };
   /** 본인 예약 상세 조회 */
