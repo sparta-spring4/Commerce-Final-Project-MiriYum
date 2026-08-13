@@ -123,17 +123,16 @@ main() {
 
   if ! verify_valkey; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
     return 1
   fi
 
   if ! backfill_pending_risk_event_index; then
-    echo "Pending risk event index backfill failed; stopping deployment." >&2
-    publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
-    return 1
+    # #304 전까지 전달기는 SCAN을 사용하므로 이관 실패는 관측만 하고 새 배포는 유지한다.
+    echo "Pending risk event index backfill failed; continuing while SCAN delivery remains active before #304." >&2
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
   fi
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
@@ -141,8 +140,8 @@ main() {
     if (( SECONDS >= deadline )); then
       echo "Backend health check timed out after ${HEALTH_TIMEOUT_SECONDS}s" >&2
       publish_deployment_health 0
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend || true
       return 1
     fi
     sleep 3

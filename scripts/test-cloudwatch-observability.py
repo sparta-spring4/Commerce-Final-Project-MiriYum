@@ -255,7 +255,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("SADD", backfill_function)
         self.assertNotIn("backfill-v1", backfill_function)
 
-    def test_main_publishes_failed_health_when_risk_event_backfill_fails(self):
+    def test_main_continues_when_risk_event_backfill_fails_before_scan_delivery_is_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             metric_path = temporary_path / "metric-arguments"
@@ -274,7 +274,9 @@ aws() {
   fi
   return 0
 }
+ps_calls=0
 docker() {
+
   if [[ "$1" == "login" ]]; then
     cat >/dev/null
     return 0
@@ -282,6 +284,12 @@ docker() {
   if [[ "$1" == "compose" ]]; then
     if [[ "$*" == *"sh -ec"* ]]; then
       return 1
+    fi
+    if [[ "$*" == *" ps"* ]]; then
+      ps_calls=$((ps_calls + 1))
+      if [[ "$ps_calls" -eq 1 ]]; then
+        return 1
+      fi
     fi
     printf '%s\\n' "$*" >> "$BACKFILL_TEST_COMPOSE"
   fi
@@ -302,10 +310,61 @@ main
                 },
             )
 
-            self.assertNotEqual(0, result.returncode)
-            self.assertIn("Pending risk event index backfill failed", result.stderr)
-            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Pending risk event index backfill failed; continuing", result.stderr)
+            self.assertIn("Value=1", metric_path.read_text(encoding="utf-8"))
             self.assertIn("logs --tail 100 valkey", log_path.read_text(encoding="utf-8"))
+
+    def test_deployment_backfill_propagates_valkey_scan_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" == "SCAN" ]]; then
+  echo "simulated SCAN failure" >&2
+  exit 1
+fi
+
+exit 1
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+
+if backfill_pending_risk_event_index; then
+  exit 0
+fi
+exit 1
+""",
+                {"TEST_VALKEY_BIN": self.to_bash_path(bin_path)},
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("simulated SCAN failure", result.stderr)
 
     def test_deployment_repeats_backfill_after_legacy_rollback(self):
         with tempfile.TemporaryDirectory() as directory:
