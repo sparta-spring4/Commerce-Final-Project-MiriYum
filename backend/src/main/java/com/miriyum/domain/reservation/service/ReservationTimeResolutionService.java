@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.dto.response.ResolvedReservationTime;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowStatus;
@@ -15,12 +16,15 @@ import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -127,6 +131,88 @@ public class ReservationTimeResolutionService {
                             provisionalResult.storeId()));
         }
         return List.copyOf(results);
+    }
+
+    ReservationTimeSnapshot resolveCreationTime(long storeId, ReservationTimeRequest request) {
+        List<StoreReservationWindowResult> windows =
+                storeScheduleService.resolveReservationWindows(
+                        List.of(storeId), request.serviceDate(), request.startTime());
+        if (windows == null || windows.size() != 1) {
+            throw outsideReservationWindow();
+        }
+        StoreReservationWindowResult window = windows.getFirst();
+        if (window == null
+                || window.storeId() != storeId
+                || window.status() != StoreReservationWindowStatus.ACCEPTING) {
+            throw outsideReservationWindow();
+        }
+
+        Instant evaluatedAt = clock.instant();
+        List<ReservationTimePolicyVersion> policies =
+                timePolicyRepository.findResolutionCandidatesByStoreIds(
+                        Set.of(storeId),
+                        ReservationTimePolicyStatus.ACTIVE,
+                        ReservationTimePolicyStatus.SCHEDULED,
+                        evaluatedAt);
+        ReservationTimePolicyVersion policy = singleEffectivePolicy(
+                policies, storeId, evaluatedAt);
+        LocalDateTime requestedAt = LocalDateTime.of(
+                request.serviceDate(), request.startTime());
+        if (policy == null || !isSlotAligned(window.windowStartAt(), requestedAt, policy)) {
+            throw outsideReservationWindow();
+        }
+
+        ReservationTimeSnapshot snapshot;
+        try {
+            snapshot = ReservationTimeSnapshot.calculate(
+                    policy,
+                    requestedAt,
+                    ZoneId.of(window.timeZoneId()),
+                    request.startOffset());
+        } catch (DateTimeException | IllegalArgumentException exception) {
+            throw outsideReservationWindow();
+        }
+        if (!staysWithinCreationLocalBoundary(snapshot)) {
+            throw outsideReservationWindow();
+        }
+        if (snapshot.getStartAt().isBefore(evaluatedAt)) {
+            throw outsideReservationWindow();
+        }
+
+        StoreServiceIntervalRequest intervalRequest = new StoreServiceIntervalRequest(
+                storeId, snapshot.getStartAt(), snapshot.getServiceEndAt());
+        List<StoreServiceIntervalResult> intervalResults =
+                storeServiceIntervalValidationService.validateServiceIntervals(
+                        List.of(intervalRequest));
+        if (intervalResults == null || intervalResults.size() != 1) {
+            throw outsideReservationWindow();
+        }
+        StoreServiceIntervalResult interval = intervalResults.getFirst();
+        if (interval == null
+                || interval.storeId() != intervalRequest.storeId()
+                || !interval.startAt().equals(intervalRequest.startAt())
+                || !interval.serviceEndAt().equals(intervalRequest.serviceEndAt())
+                || interval.status() != StoreServiceIntervalStatus.ACCEPTING) {
+            throw outsideReservationWindow();
+        }
+        return snapshot;
+    }
+
+    private static boolean staysWithinCreationLocalBoundary(ReservationTimeSnapshot snapshot) {
+        ZoneId zone = ZoneId.of(snapshot.getTimeZoneId());
+        ZonedDateTime start = snapshot.getStartAt().atZone(zone);
+        ZonedDateTime serviceEnd = snapshot.getServiceEndAt().atZone(zone);
+        ZonedDateTime occupancyEnd = snapshot.getOccupancyEndAt().atZone(zone);
+        ZoneOffset requiredOffset = start.getOffset();
+        return start.toLocalDate().equals(snapshot.getServiceDate())
+                && serviceEnd.toLocalDate().equals(snapshot.getServiceDate())
+                && occupancyEnd.toLocalDate().equals(snapshot.getServiceDate())
+                && serviceEnd.getOffset().equals(requiredOffset)
+                && occupancyEnd.getOffset().equals(requiredOffset);
+    }
+
+    private static ServiceException outsideReservationWindow() {
+        return new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
     }
 
     private static List<Long> validateRequest(
