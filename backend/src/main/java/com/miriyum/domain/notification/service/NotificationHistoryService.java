@@ -10,11 +10,15 @@ import com.miriyum.domain.notification.entity.NotificationActionAvailability;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryBoundary;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryTask;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,11 +56,8 @@ public class NotificationHistoryService {
         HistoryBoundary boundary = decoded == null
                 ? null
                 : new HistoryBoundary(decoded.occurredAt(), decoded.notificationId());
-        List<HistoryTask> rows = taskRepository.findDeliveredInAppHistory(
-                consumerAccountId,
-                boundary,
-                size + 1
-        );
+        List<HistoryTask> rows = readDeliveredInAppHistory(
+                consumerAccountId, boundary, size + 1);
         boolean hasNext = rows.size() > size;
         List<HistoryTask> visible = hasNext ? rows.subList(0, size) : rows;
         List<NotificationHistoryItemResponse> items = new ArrayList<>(visible.size());
@@ -73,6 +74,19 @@ public class NotificationHistoryService {
             );
         }
         return new NotificationHistoryPageResponse(List.copyOf(items), hasNext, nextCursor);
+    }
+
+    private List<HistoryTask> readDeliveredInAppHistory(
+            long consumerAccountId,
+            HistoryBoundary boundary,
+            int limit
+    ) {
+        try {
+            return taskRepository.findDeliveredInAppHistory(
+                    consumerAccountId, boundary, limit);
+        } catch (TransientDataAccessException | DataAccessResourceFailureException unavailable) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     private NotificationHistoryItemResponse toResponse(

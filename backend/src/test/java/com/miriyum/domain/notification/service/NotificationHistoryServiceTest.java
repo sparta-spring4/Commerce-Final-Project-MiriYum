@@ -18,11 +18,14 @@ import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryTask;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.BadSqlGrammarException;
 
 class NotificationHistoryServiceTest {
 
@@ -153,6 +156,29 @@ class NotificationHistoryServiceTest {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
         verifyNoInteractions(repository);
+    }
+
+    @Test
+    void historyStorageAvailabilityFailureReturnsServiceUnavailable() {
+        given(repository.findDeliveredInAppHistory(CONSUMER_ID, null, 21))
+                .willThrow(new DataAccessResourceFailureException(
+                        "history database unavailable"));
+
+        assertThatThrownBy(() -> service.getHistory(CONSUMER_ID, null, 20))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+    }
+
+    @Test
+    void badSqlProgrammingFailureIsNotNormalizedAsAvailabilityFailure() {
+        BadSqlGrammarException badSql = new BadSqlGrammarException(
+                "history query", "SELECT broken", new SQLException("syntax error"));
+        given(repository.findDeliveredInAppHistory(CONSUMER_ID, null, 21))
+                .willThrow(badSql);
+
+        assertThatThrownBy(() -> service.getHistory(CONSUMER_ID, null, 20))
+                .isSameAs(badSql);
     }
 
     private static HistoryTask historyTask(long notificationId, Instant occurredAt) {

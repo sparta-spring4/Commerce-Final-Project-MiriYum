@@ -43,11 +43,11 @@ public class NotificationHistoryController {
     ) {
         try {
             consumerAccountService.requireActiveAccount(principal.accountId());
-            NotificationHistoryPageResponse response = historyService.getHistory(
-                    principal.accountId(), cursor, size);
-            return ApiResponse.success("조회했습니다.", response);
         } catch (TransientDataAccessException | DataAccessResourceFailureException unavailable) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
+        NotificationHistoryPageResponse response = historyService.getHistory(
+                principal.accountId(), cursor, size);
+        return ApiResponse.success("조회했습니다.", response);
     }
 }

@@ -19,12 +19,12 @@ import com.miriyum.domain.notification.dto.response.NotificationHistoryPageRespo
 import com.miriyum.domain.notification.dto.response.NotificationResourceResponse;
 import com.miriyum.domain.notification.entity.NotificationPurpose;
 import com.miriyum.domain.notification.entity.NotificationResourceType;
-import com.miriyum.domain.notification.service.NotificationHistoryService;
 import com.miriyum.domain.notification.exception.NotificationErrorCode;
+import com.miriyum.domain.notification.service.NotificationHistoryService;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.security.SecurityConfig;
 import java.time.OffsetDateTime;
-import java.sql.SQLException;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,10 +32,8 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.HttpHeaders;
 import org.springframework.dao.CannotAcquireLockException;
-import org.springframework.jdbc.BadSqlGrammarException;
-import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -132,24 +130,12 @@ class NotificationHistoryControllerTest {
     @Test
     void historyStorageAvailabilityFailureReturnsServiceUnavailable() throws Exception {
         given(historyService.getHistory(CONSUMER_ID, null, 20))
-                .willThrow(new DataAccessResourceFailureException("history database unavailable"));
+                .willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
 
         mockMvc.perform(get("/api/v1/consumers/me/notifications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("COMMON_012"));
-    }
-
-    @Test
-    void badSqlProgrammingFailureRemainsInternalServerError() throws Exception {
-        given(historyService.getHistory(CONSUMER_ID, null, 20))
-                .willThrow(new BadSqlGrammarException(
-                        "history query", "SELECT broken", new SQLException("syntax error")));
-
-        mockMvc.perform(get("/api/v1/consumers/me/notifications")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.code").value("COMMON_011"));
     }
 
     @Test
