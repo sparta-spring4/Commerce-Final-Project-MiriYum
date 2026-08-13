@@ -71,6 +71,8 @@ SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링�
 
 `deploy.sh`는 `http://127.0.0.1:8080/actuator/health`와 Valkey의 `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개를 모두 확인한다. 어느 하나라도 실패하면 `DeploymentHealth=0`을 기록하고 배포를 실패 처리한다.
 
+위 확인 뒤 실행하는 pending marker Set 인덱스 backfill은 #304 전까지는 경고·Valkey 상태·로그만 남기고 배포를 계속한다. 현재 위험 사건 전달이 기존 marker `SCAN`을 사용하므로 backfill 실패가 전달을 막지 않기 때문이다. #304에서 전달이 Set-only 읽기로 바뀌면 backfill 실패를 `DeploymentHealth=0`과 배포 실패로 승격한다.
+
 - health 성공: `DeploymentHealth=1`
 - health timeout: `DeploymentHealth=0`
 

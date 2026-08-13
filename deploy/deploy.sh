@@ -69,6 +69,30 @@ verify_valkey() {
   fi
 }
 
+# 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
+backfill_pending_risk_event_index() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local marker_pattern="auth:risk:pending:*"
+  local pending_index="auth:risk:pending-index"
+
+  "${compose[@]}" exec -T valkey sh -ec '
+    marker_pattern="$1"
+    pending_index="$2"
+    cursor=0
+
+    while :; do
+      scan_result="$(REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw SCAN "$cursor" MATCH "$marker_pattern" COUNT 100)"
+      cursor="$(printf "%s\\n" "$scan_result" | sed -n "1p")"
+      printf "%s\\n" "$scan_result" | tail -n +2 | while IFS= read -r marker_key; do
+        [ -n "$marker_key" ] || continue
+        REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli SADD "$pending_index" "$marker_key" >/dev/null
+      done
+
+      [ "$cursor" = "0" ] && break
+    done
+  ' sh "${marker_pattern}" "${pending_index}"
+}
+
 # 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 main() {
   local account_id registry deadline
@@ -99,9 +123,16 @@ main() {
 
   if ! verify_valkey; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
     return 1
+  fi
+
+  if ! backfill_pending_risk_event_index; then
+    # #304 전까지 전달기는 SCAN을 사용하므로 이관 실패는 관측만 하고 새 배포는 유지한다.
+    echo "Pending risk event index backfill failed; continuing while SCAN delivery remains active before #304." >&2
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
   fi
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
@@ -109,8 +140,8 @@ main() {
     if (( SECONDS >= deadline )); then
       echo "Backend health check timed out after ${HEALTH_TIMEOUT_SECONDS}s" >&2
       publish_deployment_health 0
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend || true
       return 1
     fi
     sleep 3
