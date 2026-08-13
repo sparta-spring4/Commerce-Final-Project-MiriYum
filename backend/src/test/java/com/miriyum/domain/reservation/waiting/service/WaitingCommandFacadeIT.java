@@ -8,10 +8,12 @@ import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingTeamTransitionRequest;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
+import com.miriyum.domain.reservation.waiting.entity.WaitingQueueSequence;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
@@ -74,6 +76,9 @@ class WaitingCommandFacadeIT {
 
     @Autowired
     private WaitingTeamRepository teamRepository;
+
+    @Autowired
+    private WaitingQueueSequenceRepository sequenceRepository;
 
     @Autowired
     private WaitingActiveMembershipRepository membershipRepository;
@@ -196,6 +201,9 @@ class WaitingCommandFacadeIT {
         )).getId();
         long consumerId = createConsumer(email);
         Instant createdAt = Instant.now().minusSeconds(60);
+        WaitingQueueSequence sequence = WaitingQueueSequence.create(storeId, BUSINESS_DATE);
+        sequence.allocate();
+        sequenceRepository.saveAndFlush(sequence);
         long teamId = teamRepository.saveAndFlush(WaitingTeam.create(
                 storeId,
                 consumerId,
