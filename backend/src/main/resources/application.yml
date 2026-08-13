@@ -46,6 +46,18 @@ miriyum:
       timeout-policy-version: ${MIRIYUM_PORTONE_TIMEOUT_POLICY_VERSION:portone-v2-v1}
       connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
       read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
+  notification:
+    worker:
+      enabled: ${MIRIYUM_NOTIFICATION_WORKER_ENABLED:false}
+      policy-version: ${MIRIYUM_NOTIFICATION_WORKER_POLICY_VERSION:}
+      worker-id: ${MIRIYUM_NOTIFICATION_WORKER_ID:}
+      batch-size: ${MIRIYUM_NOTIFICATION_WORKER_BATCH_SIZE:0}
+      lease-duration-ms: ${MIRIYUM_NOTIFICATION_WORKER_LEASE_DURATION_MS:0}
+      max-attempts: ${MIRIYUM_NOTIFICATION_WORKER_MAX_ATTEMPTS:0}
+      initial-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_RETRY_DELAY_MS:0}
+      max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
+      poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
+      initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
