@@ -126,11 +126,56 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         )
         self.assertIn("RefreshTokenRiskEventPendingCount", self.resource_script)
         self.assertIn(
-            "[..., event=refresh_token_risk_event_pending_count, label=pending_count, count]",
+            "[..., event=refresh_token_risk_event_pending_count, pending_count, ...]",
             self.resource_script,
         )
-        self.assertIn("metricValue=$count", self.resource_script)
+        self.assertIn("metricValue=$pending_count", self.resource_script)
         self.assertIn("MiriYum pending refresh risk events", self.resource_script)
+
+    def test_resource_script_preserves_pending_count_field_reference_for_cloudwatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            arguments_path = temporary_path / "aws-arguments"
+            aws_path = bin_path / "aws"
+            aws_path.write_text(
+                """#!/usr/bin/env bash
+printf '%s\\n' \"$@\" >> \"$AWS_TEST_ARGUMENTS\"
+case \"$1 $2\" in
+  \"logs describe-log-groups\"|\"sns list-subscriptions-by-topic\") echo 0 ;;
+  \"sns create-topic\") echo arn:aws:sns:ap-northeast-2:123456789012:miriyum-staging-alerts ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            aws_path.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{bin_path}{os.pathsep}{environment['PATH']}",
+                    "AWS_REGION": "ap-northeast-2",
+                    "EC2_INSTANCE_ID": "i-1234567890abcdef0",
+                    "ALARM_EMAIL": "test@example.com",
+                    "AWS_TEST_ARGUMENTS": str(arguments_path),
+                }
+            )
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(RESOURCE_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                env=environment,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn(
+                "metricValue=$pending_count",
+                arguments_path.read_text(encoding="utf-8"),
+            )
 
     def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
@@ -267,7 +312,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("SADD", backfill_function)
         self.assertNotIn("backfill-v1", backfill_function)
 
-    def test_main_continues_when_risk_event_backfill_fails_before_scan_delivery_is_replaced(self):
+    def test_deployment_fails_when_risk_event_backfill_fails_before_set_only_delivery_starts(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             metric_path = temporary_path / "metric-arguments"
@@ -322,10 +367,19 @@ main
                 },
             )
 
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-            self.assertIn("Pending risk event index backfill failed; continuing", result.stderr)
-            self.assertIn("Value=1", metric_path.read_text(encoding="utf-8"))
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Pending risk event index backfill failed; aborting deployment", result.stderr)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
             self.assertIn("logs --tail 100 valkey", log_path.read_text(encoding="utf-8"))
+
+    def test_deployment_backfills_pending_index_before_starting_the_new_backend(self):
+        main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
+        valkey_start = main_body.index('up -d mysql valkey')
+        backfill = main_body.index('backfill_pending_risk_event_index')
+        backend_start = main_body.index('up -d --remove-orphans')
+
+        self.assertLess(valkey_start, backfill)
+        self.assertLess(backfill, backend_start)
 
     def test_deployment_backfill_propagates_valkey_scan_failure(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -240,8 +243,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    @DisplayName("한 번의 전달 조회는 pending marker 100개까지만 읽는다")
-    void limitsPendingRiskEventReadBatch() {
+    @DisplayName("pending marker 101개는 두 번의 전달 조회에서 모두 탐색한다")
+    void continuesPendingIndexScanFromThePreviousBatch() {
         for (int index = 0; index < 101; index++) {
             String markerKey = "auth:risk:pending:batch:" + index;
             redisTemplate.<String, String>opsForHash().put(markerKey, "namespace", TokenNamespace.CONSUMER.value());
@@ -257,7 +260,18 @@ class ValkeyRefreshTokenStoreIntegrationTest {
             redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
         }
 
-        assertThat(markerStore.findPendingEvents()).hasSize(100);
+        List<String> firstBatch = markerStore.findPendingEvents().stream()
+                .map(PendingRefreshTokenRiskEvent::eventKey)
+                .toList();
+        List<String> secondBatch = markerStore.findPendingEvents().stream()
+                .map(PendingRefreshTokenRiskEvent::eventKey)
+                .toList();
+
+        assertThat(firstBatch).hasSize(100);
+        assertThat(firstBatch).doesNotContainAnyElementsOf(secondBatch);
+        assertThat(Stream.concat(firstBatch.stream(), secondBatch.stream()).toList())
+                .hasSize(101)
+                .doesNotHaveDuplicates();
         assertThat(redisTemplate.opsForSet().size(RefreshTokenRiskEventKey.pendingIndex())).isEqualTo(101);
     }
 
@@ -271,6 +285,34 @@ class ValkeyRefreshTokenStoreIntegrationTest {
 
         assertThat(markerStore.removeFromPendingIndexIfMarkerMissing(markerKey)).isFalse();
         assertThat(redisTemplate.opsForSet().isMember(RefreshTokenRiskEventKey.pendingIndex(), markerKey)).isTrue();
+    }
+
+    @Test
+    @DisplayName("형식이 손상된 pending marker는 격리하고 같은 배치의 정상 사건 전달은 계속한다")
+    void quarantinesMalformedPendingMarkerWithoutBlockingValidEvent() {
+        String malformedMarkerKey = "auth:risk:pending:malformed";
+        String validMarkerKey = "auth:risk:pending:valid";
+        redisTemplate.opsForSet().add(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey, validMarkerKey);
+        redisTemplate.<String, String>opsForHash().put(malformedMarkerKey, "namespace", TokenNamespace.CONSUMER.value());
+        redisTemplate.<String, String>opsForHash().putAll(validMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", "7",
+                "familyId", "family-valid",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
+
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> assertThat(event.eventKey()).isEqualTo(validMarkerKey));
+        assertThat(redisTemplate.opsForSet().isMember(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
+        assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
     }
 
     @Test

@@ -71,18 +71,19 @@ SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링�
 
 `deploy.sh`는 `http://127.0.0.1:8080/actuator/health`와 Valkey의 `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개를 모두 확인한다. 어느 하나라도 실패하면 `DeploymentHealth=0`을 기록하고 배포를 실패 처리한다.
 
-위 확인 뒤 실행하는 pending marker Set 인덱스 backfill은 #304 전까지는 경고·Valkey 상태·로그만 남기고 배포를 계속한다. 현재 위험 사건 전달이 기존 marker `SCAN`을 사용하므로 backfill 실패가 전달을 막지 않기 때문이다. #304에서 전달이 Set-only 읽기로 바뀌면 backfill 실패를 `DeploymentHealth=0`과 배포 실패로 승격한다.
+위 확인 뒤 pending marker Set 인덱스를 backfill한다. 현재 위험 사건 전달은 Set만 조회하므로, backfill에 실패하면 새 backend를 시작하지 않고 `DeploymentHealth=0`을 기록해 배포를 실패 처리한다. 이 순서는 새 전달 worker가 인덱스에 없는 기존 marker를 놓치지 않도록 보장한다.
 
 - health 성공: `DeploymentHealth=1`
 - health timeout: `DeploymentHealth=0`
+- pending marker Set 인덱스 backfill 실패: `DeploymentHealth=0`
 
 CloudWatch 전송 실패가 배포 자체를 실패시키지는 않는다. 배포 성공·실패의 최종 기준은 기존 SSM 결과와 loopback health check이며, CloudWatch는 이를 보조하는 관측 수단이다.
 
 ## 위험 사건 전달 정체 지표
 
-pending marker 전달 작업은 한 주기에 최대 100개만 조회한다. `RefreshTokenRiskEventPendingCount`는 현재 대기 중인 marker 수만 기록하며, 계정·family·토큰 식별자는 포함하지 않는다. 이 값이 지속적으로 증가하면 전달 작업이 처리 속도를 따라가지 못하는지 점검한다.
+pending marker 전달 작업은 `SSCAN` 커서를 이어서 읽고, 한 주기에 최대 100개만 조회한다. 한 페이지가 100개를 넘으면 남은 marker는 메모리 buffer에 보관해 다음 주기에 먼저 처리하므로 특정 marker만 반복 조회하지 않는다. `RefreshTokenRiskEventPendingCount`는 0을 포함한 현재 대기 marker 수만 기록하며, 계정·family·토큰 식별자는 포함하지 않는다. 지표 조회가 실패해도 위험 사건 전달은 중단하지 않고 관측 실패 로그만 남긴다. 이 값이 지속적으로 증가하면 전달 작업이 처리 속도를 따라가지 못하는지 점검한다.
 
-Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
+Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 반대로 필수 필드가 없는 손상 marker는 전달 대상에서 제거하고 식별자 없는 제한 로그만 남겨, 한 건의 저장 상태 이상이 정상 위험 사건 전달 전체를 막지 않게 한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
 
 ```text
 event=refresh_token_risk_event_delivery_stalled consecutive_failures=10 failure_stage=mysql_write

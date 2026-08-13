@@ -42,9 +42,9 @@ aws logs put-metric-filter \
   --region "$AWS_REGION" \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name miriyum-staging-refresh-risk-event-pending-count \
-  --filter-pattern '[..., event=refresh_token_risk_event_pending_count, label=pending_count, count]' \
+  --filter-pattern '[..., event=refresh_token_risk_event_pending_count, pending_count, ...]' \
   --metric-transformations \
-    "metricName=RefreshTokenRiskEventPendingCount,metricNamespace=$NAMESPACE,metricValue=$count"
+    'metricName=RefreshTokenRiskEventPendingCount,metricNamespace='"$NAMESPACE"',metricValue=$pending_count'
 
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \

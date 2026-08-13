@@ -119,7 +119,8 @@ main() {
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+  # 새 backend가 pending Set만 읽기 시작하기 전에 Valkey와 기존 marker 인덱스를 준비한다.
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
 
   if ! verify_valkey; then
     publish_deployment_health 0
@@ -130,10 +131,14 @@ main() {
 
   if ! backfill_pending_risk_event_index; then
     # #304 전까지 전달기는 SCAN을 사용하므로 이관 실패는 관측만 하고 새 배포는 유지한다.
-    echo "Pending risk event index backfill failed; continuing while SCAN delivery remains active before #304." >&2
+    echo "Pending risk event index backfill failed; aborting deployment before Set-only delivery starts." >&2
+    publish_deployment_health 0
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
+    return 1
   fi
+
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do
