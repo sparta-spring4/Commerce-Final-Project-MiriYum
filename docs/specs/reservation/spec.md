@@ -41,7 +41,7 @@
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
 | 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
-| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
+| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publications` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
 | 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellations` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
 `PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이, 결제·노쇼 상태 선도입과 담당자별 중복 구현을 유발하므로 사용하지 않는다.

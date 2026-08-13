@@ -173,7 +173,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - `PUT /api/v1/store-operators/stores/{storeId}/operating-hours`와 `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-slots`는 제출한 전체 주간 설정을 새 불변 `DRAFT` 버전으로 저장할 뿐 게시하지 않는다.
 - 초안 내용은 제자리에서 수정하지 않는다. 변경하려면 새 초안 버전을 저장하고, 게시할 버전 번호를 명시한다.
-- `POST .../{version}/publication`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
+- `POST .../{version}/publications`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
 - 게시 명령은 비어 있지 않은 `changeReason`을 항상 요구한다. 초안 저장 자체에는 변경 사유를 요구하지 않지만 게시 감사에 사유를 보존한다.
 - `POST .../{version}/publication-cancellations`은 비어 있지 않은 `changeReason`을 받고 아직 효력이 발생하지 않은 `SCHEDULED` 버전에만 사용할 수 있다. 성공하면 예약 시각을 제거하고 버전을 `DRAFT`로 되돌려 내용은 유지한다. 이미 활성화된 버전은 취소할 수 없으며 되돌리려면 이전 내용을 복제한 새 초안을 게시한다.
 - 버전 상태는 `DRAFT`, `SCHEDULED`, `ACTIVE`, `RETIRED`, `ACTIVATION_FAILED`를 사용한다. 정상 게시로 새 버전이 `ACTIVE`가 되면 이전 활성 버전은 `RETIRED`가 된다. 권한·매장 상태·시간대 또는 재검증 실패처럼 재시도로 해결되지 않는 자동 게시 실패는 `ACTIVATION_FAILED`로 끝내고 조용히 활성화하지 않는다.

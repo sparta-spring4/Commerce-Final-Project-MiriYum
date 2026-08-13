@@ -57,7 +57,7 @@
 ### 6. 운영시간
 - 화면 경로: 현재 `routes.ts`에 미등록. 운영시간 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
 - 초안 저장: `PUT /api/v1/store-operators/stores/{storeId}/operating-hours`
-- 게시: `POST /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellations`
+- 게시: `POST /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publications`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellations`
 - PUT은 월~일 전체 초안을 만든다. 일부 요일 로컬 병합 금지. 게시 요청은 `IMMEDIATE/SCHEDULED`, 예약 게시일 때 offset 포함 `effectiveAt`, 필수 `changeReason`을 사용한다.
 - 현재 운영자용 GET은 없다. 기존 설정을 읽어 편집하거나 재접속 뒤 복구하는 route는 조회 계약이 승인되기 전까지 활성화하지 않는다.
 - 구간 `[startTime,endTime)`, 브레이크타임을 분리하고 `STORE_006`을 구간별 표시
@@ -65,8 +65,8 @@
 
 ### 7. 예약 접수 시간대
 - 화면 경로: 현재 `routes.ts`에 미등록. 예약 접수 시간대 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
-- 접수 구간 초안: `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-slots`; 게시: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellations`
-- 예약 시간 정책 초안: `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies`; 게시: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations`
+- 접수 구간 초안: `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-slots`; 게시: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publications`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellations`
+- 예약 시간 정책 초안: `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies`; 게시: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publications`; 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations`
 - 접수 구간은 전체 주간 초안이며 영업시간 밖·브레이크 충돌을 표시한다. 예약 시간 정책은 `slotInterval`, `serviceDuration`, `turnoverDuration`을 별도로 다룬다.
 - 두 계약 모두 현재 운영자용 GET이 없으므로 기존 설정 편집·재접속 복구는 조회 계약 승인 전까지 활성화하지 않는다.
 - 수용량 필드를 이 요청에 섞지 않는다.
@@ -75,17 +75,17 @@
 
 - 화면 경로: 현재 `routes.ts`에 미등록. 휴점 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
 - 정기 휴무 전체 초안: `PUT /api/v1/store-operators/stores/{storeId}/regular-closures`에 `weeklyDays`, `dates`와 Idempotency-Key를 보낸다.
-- 정기 휴무 게시: `POST /api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication`에 `publicationMode`, 필수 `changeReason`, 예약 게시일 때 offset 포함 `effectiveAt`을 보낸다.
+- 정기 휴무 게시: `POST /api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publications`에 `publicationMode`, 필수 `changeReason`, 예약 게시일 때 offset 포함 `effectiveAt`을 보낸다.
 - 정기 휴무 예약 게시 취소: `POST /api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellations`에 `changeReason`을 보낸다.
 - 임시 휴무 등록: `POST /api/v1/store-operators/stores/{storeId}/temporary-closures`에 offset 포함 `startAt`, `endAt`, `reason(MAINTENANCE/STAFFING/PRIVATE_EVENT/OTHER)`, 선택 `publicMessage`를 보낸다.
-- 임시 휴무 종료 변경: `PUT /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at`에 `endAt`, `changeReason`을 보낸다. 취소는 `POST /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation`에 `changeReason`을 보낸다.
+- 임시 휴무 종료 변경: `PUT /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at`에 `endAt`, `changeReason`을 보낸다. 취소는 `POST /api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellations`에 `changeReason`을 보낸다.
 - 모든 쓰기에 Idempotency-Key를 사용하고 `STORE_003` 권한 없음, `STORE_001` 매장 없음, `409` 게시·기간 충돌을 처리한다. 현재 운영자용 휴점 목록 GET은 없으므로 서버 응답으로 받은 버전·식별자를 보존하되 임의 조회 API를 만들지 않는다.
 
 ### 8. 메뉴 목록·등록·수정
 - 화면 경로: 메뉴 목록·등록·수정 모두 현재 `routes.ts`에 미등록. 각 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
 - `GET/POST /api/v1/store-operators/stores/{storeId}/menus`
 - `GET/PUT /api/v1/store-operators/stores/{storeId}/menus/{menuId}`로 조회·내용 초안 저장
-- 게시·예약 게시 취소·운영 종료는 각각 `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication`, `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations`, `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement`
+- 게시·예약 게시 취소·운영 종료는 각각 `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications`, `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations`, `POST /api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirements`
 - 노출·판매 상태는 각각 `PATCH /api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility`, `PATCH /api/v1/store-operators/stores/{storeId}/menus/{menuId}/selling-status`
 - menu category catalog는 `/api/v1/menu-categories`
 - 내용 초안 요청에는 기본정보와 함께 `allergenInformationStatus`, `allergenDisclosures`, `originInformationStatus`, `originDisclosures`, `alcoholic`을 모두 보낸다. 알레르기·원산지·주류 여부를 운영자에게 명시적으로 입력받으며, 빈 배열이나 `NOT_REGISTERED`를 안전·해당 없음으로 추론하지 않는다.
