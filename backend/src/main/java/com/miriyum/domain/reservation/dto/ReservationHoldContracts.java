@@ -104,8 +104,38 @@ public final class ReservationHoldContracts {
             String operationId,
             String actorType,
             Long actorId,
-            Instant requestedAt
+            Instant requestedAt,
+            Long finalReservationId
     ) {
+        public TransitionCommand {
+            if (targetStatus == ReservationHoldStatus.CONFIRMED) {
+                if (finalReservationId != null && finalReservationId <= 0) {
+                    throw new IllegalArgumentException(
+                            "finalReservationId must be positive when present");
+                }
+            } else if (finalReservationId != null) {
+                throw new IllegalArgumentException(
+                        "finalReservationId is allowed only for CONFIRMED");
+            }
+        }
+
+        public TransitionCommand(
+                long reservationHoldId,
+                ReservationHoldStatus targetStatus,
+                String operationId,
+                String actorType,
+                Long actorId,
+                Instant requestedAt
+        ) {
+            this(
+                    reservationHoldId,
+                    targetStatus,
+                    operationId,
+                    actorType,
+                    actorId,
+                    requestedAt,
+                    null);
+        }
     }
 
     /** Entity를 노출하지 않고 생성·종결 replay에 재사용하는 선점 결과 스냅샷이다. */

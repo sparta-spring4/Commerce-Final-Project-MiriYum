@@ -19,6 +19,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.port.ReservationTemporaryMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldCapacityAllocationRepository;
@@ -295,6 +296,10 @@ public class ReservationHoldService {
             ReservationHold current = holdRepository
                     .findById(normalized.reservationHoldId())
                     .orElseThrow(ReservationHoldService::holdNotFound);
+            ReservationTemporaryMenuHoldResult replayMenuHold =
+                    temporaryMenuHoldPort.lockForTransition(
+                            normalized.reservationHoldId());
+            requireFinalLinkageMeaning(replayMenuHold, normalized, true);
             return resultOf(current);
         }
 
@@ -306,15 +311,23 @@ public class ReservationHoldService {
                 .orElse(null);
         if (concurrentReplay != null) {
             requireSameTransitionMeaning(concurrentReplay, normalized);
+            ReservationTemporaryMenuHoldResult replayMenuHold =
+                    temporaryMenuHoldPort.lockForTransition(
+                            normalized.reservationHoldId());
+            requireFinalLinkageMeaning(replayMenuHold, normalized, true);
             return resultOf(hold);
         }
+        ReservationTemporaryMenuHoldResult menuHold =
+                temporaryMenuHoldPort.lockForTransition(normalized.reservationHoldId());
+        requireFinalLinkageMeaning(menuHold, normalized, false);
         Instant occurredAt = clock.instant();
         ReservationHoldStatus beforeStatus = hold.getStatus();
+        validateReservationHoldTransition(
+                hold, normalized.targetStatus(), occurredAt);
         if (normalized.targetStatus().requiresCapacityRelease()) {
-            validateCapacityReleasingTransition(
-                    hold, normalized.targetStatus(), occurredAt);
             restoreCapacity(hold);
         }
+        applyTemporaryMenuHoldTransition(menuHold, normalized);
         applyTransition(hold, normalized.targetStatus(), occurredAt);
         auditRepository.save(ReservationHoldTransitionAudit.record(
                 normalized.reservationHoldId(),
@@ -599,17 +612,35 @@ public class ReservationHoldService {
         }
     }
 
-    private static void validateCapacityReleasingTransition(
+    private static void validateReservationHoldTransition(
             ReservationHold hold,
             ReservationHoldStatus targetStatus,
             Instant occurredAt
     ) {
         switch (targetStatus) {
+            case CONFIRMED -> requireHoldStatus(
+                    hold,
+                    ReservationHoldStatus.ACTIVE,
+                    ReservationHoldStatus.RECONCILIATION_REQUIRED);
             case RELEASED -> hold.validateRelease();
             case EXPIRED -> hold.validateExpiry(occurredAt);
-            default -> throw new IllegalArgumentException(
-                    "targetStatus must release capacity");
+            case RECONCILIATION_REQUIRED -> requireHoldStatus(
+                    hold, ReservationHoldStatus.ACTIVE);
+            case ACTIVE -> throw new ServiceException(
+                    ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
+    }
+
+    private static void requireHoldStatus(
+            ReservationHold hold,
+            ReservationHoldStatus... allowed
+    ) {
+        for (ReservationHoldStatus status : allowed) {
+            if (hold.getStatus() == status) {
+                return;
+            }
+        }
+        throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
     }
 
     private static LocalTime laterOf(LocalTime left, LocalTime right) {
@@ -660,6 +691,86 @@ public class ReservationHoldService {
                 command.menuSelections());
     }
 
+    private void applyTemporaryMenuHoldTransition(
+            ReservationTemporaryMenuHoldResult menuHold,
+            NormalizedTransitionCommand command
+    ) {
+        if (menuHold == null) {
+            throw new IllegalStateException("temporary MenuHold lock result is required");
+        }
+        if (menuHold.presence()
+                == ReservationTemporaryMenuHoldResult.Presence.NO_HOLD) {
+            return;
+        }
+        temporaryMenuHoldPort.applyTransition(
+                new ReservationTemporaryMenuHoldCommand.ApplyTransition(
+                        command.reservationHoldId(),
+                        toTemporaryMenuHoldTarget(command.targetStatus()),
+                        command.operationId(),
+                        command.finalReservationId()));
+    }
+
+    private static void requireFinalLinkageMeaning(
+            ReservationTemporaryMenuHoldResult menuHold,
+            NormalizedTransitionCommand command,
+            boolean replay
+    ) {
+        if (menuHold == null) {
+            throw new IllegalStateException("temporary MenuHold lock result is required");
+        }
+        boolean matches;
+        if (menuHold.presence()
+                == ReservationTemporaryMenuHoldResult.Presence.NO_HOLD) {
+            matches = command.finalReservationId() == null;
+        } else if (replay) {
+            matches = menuHold.state() == expectedMenuHoldState(command.targetStatus())
+                    && Objects.equals(
+                            menuHold.finalReservationId(),
+                            command.finalReservationId());
+        } else if (command.targetStatus() != ReservationHoldStatus.CONFIRMED) {
+            matches = command.finalReservationId() == null;
+        } else {
+            matches = command.finalReservationId() != null
+                    && command.finalReservationId() > 0;
+        }
+        if (matches) {
+            return;
+        }
+        if (replay) {
+            throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
+        }
+        throw new IllegalArgumentException(
+                "finalReservationId must match persistent temporary MenuHold presence");
+    }
+
+    private static ReservationTemporaryMenuHoldResult.State expectedMenuHoldState(
+            ReservationHoldStatus targetStatus
+    ) {
+        return switch (targetStatus) {
+            case CONFIRMED -> ReservationTemporaryMenuHoldResult.State.CONFIRMED;
+            case RELEASED -> ReservationTemporaryMenuHoldResult.State.RELEASED;
+            case EXPIRED -> ReservationTemporaryMenuHoldResult.State.EXPIRED;
+            case RECONCILIATION_REQUIRED ->
+                    ReservationTemporaryMenuHoldResult.State.RECONCILIATION_REQUIRED;
+            case ACTIVE -> throw new ServiceException(
+                    ReservationErrorCode.INVALID_STATE_TRANSITION);
+        };
+    }
+
+    private static ReservationTemporaryMenuHoldCommand.Target toTemporaryMenuHoldTarget(
+            ReservationHoldStatus targetStatus
+    ) {
+        return switch (targetStatus) {
+            case CONFIRMED -> ReservationTemporaryMenuHoldCommand.Target.CONFIRM;
+            case RELEASED -> ReservationTemporaryMenuHoldCommand.Target.RELEASE;
+            case EXPIRED -> ReservationTemporaryMenuHoldCommand.Target.EXPIRE;
+            case RECONCILIATION_REQUIRED ->
+                    ReservationTemporaryMenuHoldCommand.Target.REQUIRE_RECONCILIATION;
+            case ACTIVE -> throw new ServiceException(
+                    ReservationErrorCode.INVALID_STATE_TRANSITION);
+        };
+    }
+
     private void verifyMenuCreationReplay(
             ReservationHold hold,
             List<ReservationTemporaryMenuHoldSelection> selections
@@ -705,6 +816,16 @@ public class ReservationHoldService {
         if (command.targetStatus() == null) {
             throw new IllegalArgumentException("targetStatus is required");
         }
+        if (command.targetStatus() == ReservationHoldStatus.CONFIRMED) {
+            if (command.finalReservationId() != null
+                    && command.finalReservationId() <= 0) {
+                throw new IllegalArgumentException(
+                        "finalReservationId must be positive when present");
+            }
+        } else if (command.finalReservationId() != null) {
+            throw new IllegalArgumentException(
+                    "finalReservationId is allowed only for CONFIRMED");
+        }
         String operationId = normalizeText(command.operationId(), 100, "operationId");
         String actorType = normalizeText(command.actorType(), 32, "actorType");
         if (SYSTEM_ACTOR.equals(actorType)) {
@@ -723,7 +844,8 @@ public class ReservationHoldService {
                 operationId,
                 actorType,
                 command.actorId(),
-                command.requestedAt().truncatedTo(ChronoUnit.MICROS));
+                command.requestedAt().truncatedTo(ChronoUnit.MICROS),
+                command.finalReservationId());
     }
 
     private static String normalizeText(String value, int maxLength, String fieldName) {
@@ -855,7 +977,8 @@ public class ReservationHoldService {
             String operationId,
             String actorType,
             Long actorId,
-            Instant requestedAt
+            Instant requestedAt,
+            Long finalReservationId
     ) {
     }
 }
