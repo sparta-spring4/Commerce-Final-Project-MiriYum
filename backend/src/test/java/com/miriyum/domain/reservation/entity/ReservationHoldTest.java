@@ -2,14 +2,15 @@ package com.miriyum.domain.reservation.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Modifier;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class ReservationHoldTest {
@@ -88,16 +89,119 @@ class ReservationHoldTest {
     }
 
     @Test
-    void doesNotExposeExpirationMutationOrLifecycleTransitionsInPersistencePr() {
-        assertThat(Arrays.stream(ReservationHold.class.getDeclaredMethods())
-                .filter(method -> Modifier.isPublic(method.getModifiers()))
-                .map(method -> method.getName())
-                .filter(name -> name.startsWith("set")
-                        || name.equals("confirm")
-                        || name.equals("release")
-                        || name.equals("expire")
-                        || name.equals("requireReconciliation")))
-                .isEmpty();
+    void activeHoldTransitionsToConfirmedWithoutReleasingCapacity() {
+        ReservationHold hold = hold();
+
+        hold.confirm();
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        assertThat(hold.getStatus().requiresCapacityRelease()).isFalse();
+    }
+
+    @Test
+    void activeHoldTransitionsToReleasedAndRequiresCapacityRelease() {
+        ReservationHold hold = hold();
+
+        hold.release();
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(hold.getStatus().requiresCapacityRelease()).isTrue();
+    }
+
+    @Test
+    void activeHoldTransitionsToReconciliationRequiredWithoutReleasingCapacity() {
+        ReservationHold hold = hold();
+
+        hold.requireReconciliation();
+
+        assertThat(hold.getStatus())
+                .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED);
+        assertThat(hold.getStatus().requiresCapacityRelease()).isFalse();
+    }
+
+    @Test
+    void activeHoldCannotExpireBeforeItsExpirationBoundary() {
+        ReservationHold hold = hold();
+
+        assertInvalidTransition(() -> hold.expire(
+                CREATED_AT.plus(Duration.ofMinutes(10)).minusNanos(1)
+        ));
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+    }
+
+    @Test
+    void activeHoldExpiresAtItsExpirationBoundaryAndRequiresCapacityRelease() {
+        ReservationHold hold = hold();
+
+        hold.expire(CREATED_AT.plus(Duration.ofMinutes(10)));
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(hold.getStatus().requiresCapacityRelease()).isTrue();
+    }
+
+    @Test
+    void activeHoldExpiresAfterItsExpirationBoundary() {
+        ReservationHold hold = hold();
+
+        hold.expire(CREATED_AT.plus(Duration.ofMinutes(10)).plusNanos(1));
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.EXPIRED);
+    }
+
+    @Test
+    void reconciliationRequiredHoldCanOnlyRecoverToConfirmedOrReleased() {
+        ReservationHold confirmed = hold();
+        confirmed.requireReconciliation();
+        confirmed.confirm();
+
+        ReservationHold released = hold();
+        released.requireReconciliation();
+        released.release();
+
+        assertThat(confirmed.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        assertThat(released.getStatus()).isEqualTo(ReservationHoldStatus.RELEASED);
+    }
+
+    @Test
+    void reconciliationRequiredHoldRejectsExpirationAndRepeatedReconciliation() {
+        ReservationHold hold = hold();
+        hold.requireReconciliation();
+
+        assertInvalidTransition(() -> hold.expire(hold.getExpiresAt()));
+        assertInvalidTransition(hold::requireReconciliation);
+        assertThat(hold.getStatus())
+                .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED);
+    }
+
+    @Test
+    void terminalHoldRejectsEveryFurtherTransition() {
+        ReservationHold hold = hold();
+        hold.confirm();
+
+        assertInvalidTransition(hold::confirm);
+        assertInvalidTransition(hold::release);
+        assertInvalidTransition(() -> hold.expire(hold.getExpiresAt()));
+        assertInvalidTransition(hold::requireReconciliation);
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+    }
+
+    private static void assertInvalidTransition(Runnable transition) {
+        assertThatThrownBy(transition::run)
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
+    }
+
+    private static ReservationHold hold() {
+        return hold(
+                11L,
+                22L,
+                "Miri Yum Restaurant",
+                3L,
+                new ReservationCancellationPolicyVersion(1L),
+                CREATION_COMMAND_ID,
+                CREATED_AT
+        );
     }
 
     private static ReservationHold hold(
