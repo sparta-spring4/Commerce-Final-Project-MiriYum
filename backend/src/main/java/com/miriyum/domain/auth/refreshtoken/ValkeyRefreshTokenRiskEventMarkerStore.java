@@ -24,7 +24,9 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
             if occurrenceCount == false or occurrenceCount ~= ARGV[1] then
                 return 0
             end
-            return redis.call('DEL', KEYS[1])
+            redis.call('DEL', KEYS[1])
+            redis.call('SREM', KEYS[2], KEYS[1])
+            return 1
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -55,7 +57,9 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
     public boolean deleteIfUnchanged(String eventKey, long occurrenceCount) {
         try {
             Long deleted = redisTemplate.execute(
-                    DELETE_IF_UNCHANGED_SCRIPT, List.of(eventKey), Long.toString(occurrenceCount));
+                    DELETE_IF_UNCHANGED_SCRIPT,
+                    List.of(eventKey, RefreshTokenRiskEventKey.pendingIndex()),
+                    Long.toString(occurrenceCount));
             return deleted != null && deleted > 0;
         } catch (DataAccessException | IllegalArgumentException exception) {
             throw unavailable();
