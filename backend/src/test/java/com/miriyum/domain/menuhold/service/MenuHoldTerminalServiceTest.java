@@ -20,15 +20,19 @@ import com.miriyum.domain.menuhold.inventory.dto.InventoryRestoreRequest;
 import com.miriyum.domain.menuhold.repository.MenuHoldRepository;
 import com.miriyum.domain.menu.service.MenuTransactionFacade;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
-import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -153,53 +157,39 @@ class MenuHoldTerminalServiceTest {
                 new MenuHoldFulfillCommand(12L, "conflicting-fulfill")));
     }
 
-    @Test
-    void temporaryPolicyAppliesEveryLegalTransitionWithoutInventoryDependency() {
-        MenuHold confirm = temporaryHold();
-        MenuHold reconcile = temporaryHold();
-        MenuHold release = temporaryHold();
-        MenuHold expire = temporaryHold();
+    @ParameterizedTest(name = "{0}: {1} -> {2}")
+    @MethodSource("temporaryStateTargetMatrix")
+    void temporaryPolicyCoversEveryRealisticSourceStateAndTarget(
+            String regression,
+            MenuHoldStatus sourceState,
+            TemporaryMenuHoldContracts.Target target,
+            boolean expectedTransitioned,
+            MenuHoldStatus expectedStatus,
+            Long expectedReservationId,
+            MenuHoldErrorCode expectedError
+    ) {
+        MenuHold hold = temporaryHoldInState(sourceState);
+        MenuHoldStatus originalStatus = hold.getStatus();
+        Long originalReservationId = hold.getReservationId();
+        Long finalReservationId = target == TemporaryMenuHoldContracts.Target.CONFIRM
+                ? 91L : null;
         MenuHoldTerminalService terminal = new MenuHoldTerminalService();
 
-        assertThat(terminal.apply(
-                confirm, TemporaryMenuHoldContracts.Target.CONFIRM, 91L)).isTrue();
-        assertThat(terminal.apply(
-                reconcile, TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION,
-                null)).isTrue();
-        assertThat(terminal.apply(
-                release, TemporaryMenuHoldContracts.Target.RELEASE, null)).isTrue();
-        assertThat(terminal.apply(
-                expire, TemporaryMenuHoldContracts.Target.EXPIRE, null)).isTrue();
+        if (expectedError != null) {
+            assertThatThrownBy(() -> terminal.apply(hold, target, finalReservationId))
+                    .isInstanceOf(ServiceException.class)
+                    .extracting(error -> ((ServiceException) error).getErrorCode())
+                    .isEqualTo(expectedError);
+            assertThat(hold.getStatus()).isEqualTo(originalStatus);
+            assertThat(hold.getReservationId()).isEqualTo(originalReservationId);
+            return;
+        }
 
-        assertThat(confirm.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
-        assertThat(confirm.getReservationId()).isEqualTo(91L);
-        assertThat(reconcile.getStatus()).isEqualTo(MenuHoldStatus.RECONCILIATION_REQUIRED);
-        assertThat(release.getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
-        assertThat(expire.getStatus()).isEqualTo(MenuHoldStatus.EXPIRED);
-    }
+        boolean transitioned = terminal.apply(hold, target, finalReservationId);
 
-    @Test
-    void temporaryPolicyReplaysMatchingTerminalMeaningWithoutMutation() {
-        MenuHold confirmed = temporaryHold();
-        confirmed.confirmTemporary(91L);
-        MenuHold released = temporaryHold();
-        released.releaseTemporary();
-        MenuHold expired = temporaryHold();
-        expired.expireTemporary();
-        MenuHold reconciliation = temporaryHold();
-        reconciliation.requireTemporaryReconciliation();
-        MenuHoldTerminalService terminal = new MenuHoldTerminalService();
-
-        assertThat(terminal.apply(
-                confirmed, TemporaryMenuHoldContracts.Target.CONFIRM, 91L)).isFalse();
-        assertThat(terminal.apply(
-                released, TemporaryMenuHoldContracts.Target.RELEASE, null)).isFalse();
-        assertThat(terminal.apply(
-                expired, TemporaryMenuHoldContracts.Target.EXPIRE, null)).isFalse();
-        assertThat(terminal.apply(
-                reconciliation,
-                TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION,
-                null)).isFalse();
+        assertThat(transitioned).isEqualTo(expectedTransitioned);
+        assertThat(hold.getStatus()).isEqualTo(expectedStatus);
+        assertThat(hold.getReservationId()).isEqualTo(expectedReservationId);
     }
 
     @Test
@@ -235,20 +225,97 @@ class MenuHoldTerminalServiceTest {
     }
 
     @Test
-    void temporaryPolicyRejectsIllegalAndLegacyTransitionsWithoutMutation() {
-        MenuHold reconciliation = temporaryHold();
-        reconciliation.requireTemporaryReconciliation();
+    void temporaryPolicyRejectsLegacyRowsWithoutMutation() {
         MenuHold legacy = confirmedHold();
         MenuHoldTerminalService terminal = new MenuHoldTerminalService();
 
         assertTemporaryStateConflict(() -> terminal.apply(
-                reconciliation, TemporaryMenuHoldContracts.Target.EXPIRE, null));
-        assertTemporaryStateConflict(() -> terminal.apply(
                 legacy, TemporaryMenuHoldContracts.Target.RELEASE, null));
 
-        assertThat(reconciliation.getStatus())
-                .isEqualTo(MenuHoldStatus.RECONCILIATION_REQUIRED);
         assertThat(legacy.getStatus()).isEqualTo(MenuHoldStatus.CONFIRMED);
+    }
+
+    private static Stream<Arguments> temporaryStateTargetMatrix() {
+        return Stream.of(
+                allowed("active confirms", MenuHoldStatus.ACTIVE,
+                        TemporaryMenuHoldContracts.Target.CONFIRM,
+                        true, MenuHoldStatus.CONFIRMED, 91L),
+                allowed("active releases", MenuHoldStatus.ACTIVE,
+                        TemporaryMenuHoldContracts.Target.RELEASE,
+                        true, MenuHoldStatus.RELEASED, null),
+                allowed("active expires", MenuHoldStatus.ACTIVE,
+                        TemporaryMenuHoldContracts.Target.EXPIRE,
+                        true, MenuHoldStatus.EXPIRED, null),
+                allowed("active requires reconciliation", MenuHoldStatus.ACTIVE,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION,
+                        true, MenuHoldStatus.RECONCILIATION_REQUIRED, null),
+
+                allowed("reconciliation confirms", MenuHoldStatus.RECONCILIATION_REQUIRED,
+                        TemporaryMenuHoldContracts.Target.CONFIRM,
+                        true, MenuHoldStatus.CONFIRMED, 91L),
+                allowed("reconciliation releases", MenuHoldStatus.RECONCILIATION_REQUIRED,
+                        TemporaryMenuHoldContracts.Target.RELEASE,
+                        true, MenuHoldStatus.RELEASED, null),
+                rejected("reconciliation cannot expire",
+                        MenuHoldStatus.RECONCILIATION_REQUIRED,
+                        TemporaryMenuHoldContracts.Target.EXPIRE),
+                allowed("reconciliation replay", MenuHoldStatus.RECONCILIATION_REQUIRED,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION,
+                        false, MenuHoldStatus.RECONCILIATION_REQUIRED, null),
+
+                allowed("confirmed replay", MenuHoldStatus.CONFIRMED,
+                        TemporaryMenuHoldContracts.Target.CONFIRM,
+                        false, MenuHoldStatus.CONFIRMED, 91L),
+                rejected("confirmed cannot release", MenuHoldStatus.CONFIRMED,
+                        TemporaryMenuHoldContracts.Target.RELEASE),
+                rejected("confirmed cannot expire", MenuHoldStatus.CONFIRMED,
+                        TemporaryMenuHoldContracts.Target.EXPIRE),
+                rejected("confirmed cannot require reconciliation", MenuHoldStatus.CONFIRMED,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION),
+
+                rejected("released cannot confirm", MenuHoldStatus.RELEASED,
+                        TemporaryMenuHoldContracts.Target.CONFIRM),
+                allowed("released replay", MenuHoldStatus.RELEASED,
+                        TemporaryMenuHoldContracts.Target.RELEASE,
+                        false, MenuHoldStatus.RELEASED, null),
+                rejected("released cannot expire", MenuHoldStatus.RELEASED,
+                        TemporaryMenuHoldContracts.Target.EXPIRE),
+                rejected("released cannot require reconciliation", MenuHoldStatus.RELEASED,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION),
+
+                rejected("expired cannot confirm", MenuHoldStatus.EXPIRED,
+                        TemporaryMenuHoldContracts.Target.CONFIRM),
+                rejected("expired cannot release", MenuHoldStatus.EXPIRED,
+                        TemporaryMenuHoldContracts.Target.RELEASE),
+                allowed("expired replay", MenuHoldStatus.EXPIRED,
+                        TemporaryMenuHoldContracts.Target.EXPIRE,
+                        false, MenuHoldStatus.EXPIRED, null),
+                rejected("expired cannot require reconciliation", MenuHoldStatus.EXPIRED,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION)
+        );
+    }
+
+    private static Arguments allowed(
+            String name,
+            MenuHoldStatus source,
+            TemporaryMenuHoldContracts.Target target,
+            boolean transitioned,
+            MenuHoldStatus result,
+            Long finalReservationId
+    ) {
+        return Arguments.of(
+                name, source, target, transitioned, result, finalReservationId, null);
+    }
+
+    private static Arguments rejected(
+            String name,
+            MenuHoldStatus source,
+            TemporaryMenuHoldContracts.Target target
+    ) {
+        return Arguments.of(
+                name, source, target, false, source,
+                source == MenuHoldStatus.CONFIRMED ? 91L : null,
+                MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
     }
 
     private void assertStateConflict(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
@@ -288,5 +355,20 @@ class MenuHoldTerminalServiceTest {
                 "reservation-temp-menu-acquire:11",
                 List.of(new MenuHoldItemSnapshot(
                         40L, 50L, 2L, "아메리카노", 5_000, 3L, 1)));
+    }
+
+    private static MenuHold temporaryHoldInState(MenuHoldStatus state) {
+        MenuHold hold = temporaryHold();
+        switch (state) {
+            case ACTIVE -> {
+            }
+            case RECONCILIATION_REQUIRED -> hold.requireTemporaryReconciliation();
+            case CONFIRMED -> hold.confirmTemporary(91L);
+            case RELEASED -> hold.releaseTemporary();
+            case EXPIRED -> hold.expireTemporary();
+            case FULFILLED -> throw new IllegalArgumentException(
+                    "FULFILLED is not a temporary pre-terminal source state");
+        }
+        return hold;
     }
 }

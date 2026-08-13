@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -29,10 +30,15 @@ import java.lang.reflect.Method;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -247,56 +253,42 @@ class TemporaryMenuHoldServiceTest {
                 .doesNotContain(" join ", "fetch", "item", "bucket");
     }
 
-    @Test
-    void releaseTransitionRestoresOriginalAcquireExactlyOnceWithBoundedDerivedOperation() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("repeatedRestoringTransitions")
+    void repeatedRealTerminalTransitionRestoresOriginalAcquireExactlyOnce(
+            String regression,
+            TemporaryMenuHoldContracts.Target target,
+            TemporaryMenuHoldContracts.State expectedState,
+            String operationId,
+            String expectedRestoreOperationId
+    ) {
         MenuHold hold = temporaryHold(List.of(snapshot(3L, 30L, 1)));
         given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
-        given(terminalService.apply(
-                hold, TemporaryMenuHoldContracts.Target.RELEASE, null)).willAnswer(invocation -> {
-                    hold.releaseTemporary();
-                    return true;
-                });
-
-        TemporaryMenuHoldContracts.Result result = service().applyTransition(
+        List<InventoryRestoreRequest> restores = new ArrayList<>();
+        doAnswer(invocation -> {
+            restores.add(invocation.getArgument(0, InventoryRestoreRequest.class));
+            return null;
+        }).when(inventoryService).restoreInventory(
+                org.mockito.ArgumentMatchers.any(InventoryRestoreRequest.class));
+        TemporaryMenuHoldServiceRuntime runtime = new TemporaryMenuHoldServiceRuntime(
+                menuTransactionFacade, intervalService, inventoryService,
+                holdRepository, new MenuHoldTerminalService());
+        TemporaryMenuHoldContracts.ApplyTransition command =
                 new TemporaryMenuHoldContracts.ApplyTransition(
-                        11L, TemporaryMenuHoldContracts.Target.RELEASE,
-                        "terminal-operation", null));
+                        11L, target, operationId, null);
 
-        assertThat(result.state()).isEqualTo(TemporaryMenuHoldContracts.State.RELEASED);
-        ArgumentCaptor<InventoryRestoreRequest> restore =
-                ArgumentCaptor.forClass(InventoryRestoreRequest.class);
-        then(inventoryService).should().restoreInventory(restore.capture());
-        assertThat(restore.getValue().sourceAcquireOperationId())
+        TemporaryMenuHoldContracts.Result first = runtime.applyTransition(command);
+        TemporaryMenuHoldContracts.Result replay = runtime.applyTransition(command);
+
+        assertThat(first.state()).isEqualTo(expectedState);
+        assertThat(replay.state()).isEqualTo(expectedState);
+        assertThat(restores).singleElement().satisfies(restore -> {
+            assertThat(restore.sourceAcquireOperationId())
                 .isEqualTo("reservation-temp-menu-acquire:11");
-        assertThat(restore.getValue().operationId())
-                .isNotEqualTo("terminal-operation")
+            assertThat(restore.operationId())
+                .isEqualTo(expectedRestoreOperationId)
                 .hasSizeLessThanOrEqualTo(100);
-    }
-
-    @Test
-    void expireTransitionAlsoRestoresOriginalAcquireExactlyOnce() {
-        MenuHold hold = temporaryHold(List.of(snapshot(3L, 30L, 1)));
-        given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
-        given(terminalService.apply(
-                hold, TemporaryMenuHoldContracts.Target.EXPIRE, null)).willAnswer(invocation -> {
-                    hold.expireTemporary();
-                    return true;
-                });
-
-        TemporaryMenuHoldContracts.Result result = service().applyTransition(
-                new TemporaryMenuHoldContracts.ApplyTransition(
-                        11L, TemporaryMenuHoldContracts.Target.EXPIRE,
-                        "expire-operation", null));
-
-        assertThat(result.state()).isEqualTo(TemporaryMenuHoldContracts.State.EXPIRED);
-        ArgumentCaptor<InventoryRestoreRequest> restore =
-                ArgumentCaptor.forClass(InventoryRestoreRequest.class);
-        then(inventoryService).should().restoreInventory(restore.capture());
-        assertThat(restore.getValue().sourceAcquireOperationId())
-                .isEqualTo("reservation-temp-menu-acquire:11");
-        assertThat(restore.getValue().operationId())
-                .isNotEqualTo("expire-operation")
-                .hasSizeLessThanOrEqualTo(100);
+        });
     }
 
     @Test
@@ -360,6 +352,25 @@ class TemporaryMenuHoldServiceTest {
         return new TemporaryMenuHoldServiceRuntime(
                 menuTransactionFacade, intervalService, inventoryService,
                 holdRepository, terminalService);
+    }
+
+    private static Stream<Arguments> repeatedRestoringTransitions() {
+        return Stream.of(
+                Arguments.of(
+                        "repeated release",
+                        TemporaryMenuHoldContracts.Target.RELEASE,
+                        TemporaryMenuHoldContracts.State.RELEASED,
+                        "repeat-release-operation",
+                        "reservation-temp-menu-restore:"
+                                + "8e42e257290a2356bd67f7accafa838582047baae4a6fb59d1413c3561e9f46e"),
+                Arguments.of(
+                        "repeated expiry",
+                        TemporaryMenuHoldContracts.Target.EXPIRE,
+                        TemporaryMenuHoldContracts.State.EXPIRED,
+                        "repeat-expire-operation",
+                        "reservation-temp-menu-restore:"
+                                + "bea7f917e5d9f64e7fda5f4d7d5f5168217e9de6fb814bc8626e890d92ee884b")
+        );
     }
 
     private static void assertMandatory(String methodName, Class<?> parameterType)
