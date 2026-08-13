@@ -86,11 +86,7 @@ class ReservationProductionDependencyTest {
         )).isTrue();
     }
 
-    private static boolean isForbiddenForeignInternalImport(String line) {
-        return line.startsWith("import com.miriyum.domain.")
-                && !line.startsWith("import com.miriyum.domain.reservation.")
-                && (line.contains(".entity.") || line.contains(".repository."))
-                && !APPROVED_NOTIFICATION_CONTRACT_IMPORTS.contains(line);
+    @Test
     void reservationProductionDoesNotImportMenuHoldOwnedDtos() throws IOException {
         Path production = Path.of(
                 "src", "main", "java", "com", "miriyum", "domain", "reservation");
@@ -105,6 +101,13 @@ class ReservationProductionDependencyTest {
 
             assertThat(forbiddenImports).isEmpty();
         }
+    }
+
+    private static boolean isForbiddenForeignInternalImport(String line) {
+        return line.startsWith("import com.miriyum.domain.")
+                && !line.startsWith("import com.miriyum.domain.reservation.")
+                && (line.contains(".entity.") || line.contains(".repository."))
+                && !APPROVED_NOTIFICATION_CONTRACT_IMPORTS.contains(line);
     }
 
     @Test
