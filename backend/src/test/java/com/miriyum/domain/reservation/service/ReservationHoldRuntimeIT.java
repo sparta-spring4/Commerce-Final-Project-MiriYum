@@ -315,11 +315,14 @@ class ReservationHoldRuntimeIT {
                 multiple.reservationHoldId())).isTrue();
         assertThat(ledgerCountFor(List.of(firstMenu.bucketId(), secondMenu.bucketId())))
                 .isEqualTo(2);
+        assertThat(countHoldAllocations(multiple.reservationHoldId())).isEqualTo(2);
         assertThat(countTransitionAudits(multiple.reservationHoldId())).isOne();
+        assertThat(countWarningTasks(multiple.reservationHoldId())).isOne();
 
         Scenario insufficientScenario = createScenario(10, 5, twoBuckets());
         MenuFixture sufficient = createMenuFixture(insufficientScenario, "Task 3 enough", 5);
         MenuFixture insufficient = createMenuFixture(insufficientScenario, "Task 3 short", 1);
+        GroupArtifactCounts beforeInsufficient = groupArtifactCounts();
         assertThatThrownBy(() -> holdFacade.create(createCommand(
                 insufficientScenario,
                 createConsumer(),
@@ -339,10 +342,12 @@ class ReservationHoldRuntimeIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM reservation_holds WHERE creation_command_id = ?",
                 Integer.class, "task3-insufficient")).isZero();
+        assertThat(groupArtifactCounts()).isEqualTo(beforeInsufficient);
 
         Scenario persistenceFailureScenario = createScenario(10, 5, twoBuckets());
         MenuFixture persistenceMenu = createMenuFixture(
                 persistenceFailureScenario, "Task 3 persistence", 5);
+        GroupArtifactCounts beforePersistenceFailure = groupArtifactCounts();
         createFailureTrigger(CreationFailurePoint.MENU_HOLD_INSERT);
         try {
             assertThatThrownBy(() -> holdFacade.create(createCommand(
@@ -362,11 +367,19 @@ class ReservationHoldRuntimeIT {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM reservation_holds WHERE creation_command_id = ?",
                 Integer.class, "task3-persistence-failure")).isZero();
+        assertThat(groupArtifactCounts()).isEqualTo(beforePersistenceFailure);
 
-        ReservationHoldContracts.Result replay = holdFacade.create(multipleCommand);
-        int ledgersBeforeMismatch = ledgerCountFor(
+        Task3CreationSnapshot beforeStableReplay = task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
                 List.of(firstMenu.bucketId(), secondMenu.bucketId()));
+        ReservationHoldContracts.Result replay = holdFacade.create(multipleCommand);
         assertThat(replay).isEqualTo(multiple);
+        assertThat(task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
+                List.of(firstMenu.bucketId(), secondMenu.bucketId())))
+                .isEqualTo(beforeStableReplay);
         assertThatThrownBy(() -> holdFacade.create(createCommand(
                 multipleScenario,
                 multipleConsumer,
@@ -379,10 +392,11 @@ class ReservationHoldRuntimeIT {
                                         .IDEMPOTENCY_KEY_REUSED));
         assertThat(onlineRemaining(firstMenu.bucketId())).isEqualTo(3);
         assertThat(onlineRemaining(secondMenu.bucketId())).isEqualTo(4);
-        assertThat(ledgerCountFor(List.of(firstMenu.bucketId(), secondMenu.bucketId())))
-                .isEqualTo(ledgersBeforeMismatch);
-        assertAllBucketOccupancy(multipleScenario.originalBucketIds(), 2, 1);
-        assertThat(countTransitionAudits(multiple.reservationHoldId())).isOne();
+        assertThat(task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
+                List.of(firstMenu.bucketId(), secondMenu.bucketId())))
+                .isEqualTo(beforeStableReplay);
     }
 
     @Test
@@ -1572,6 +1586,135 @@ class ReservationHoldRuntimeIT {
                 bucketIds.toArray());
     }
 
+    private int countHoldAllocations(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_hold_capacity_allocations "
+                        + "WHERE reservation_hold_id = ?",
+                Integer.class,
+                reservationHoldId);
+    }
+
+    private int countWarningTasks(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_hold_warning_tasks "
+                        + "WHERE reservation_hold_id = ?",
+                Integer.class,
+                reservationHoldId);
+    }
+
+    private GroupArtifactCounts groupArtifactCounts() {
+        return new GroupArtifactCounts(
+                count("reservation_holds"),
+                count("reservation_hold_capacity_allocations"),
+                count("menu_holds"),
+                count("menu_hold_items"),
+                count("menu_inventory_ledger"),
+                count("reservation_hold_transition_audits"),
+                count("reservation_hold_warning_tasks"));
+    }
+
+    private Task3CreationSnapshot task3CreationSnapshot(
+            Scenario scenario,
+            long reservationHoldId,
+            List<Long> inventoryBucketIds
+    ) {
+        List<Long> orderedCapacityIds = scenario.originalBucketIds().stream().sorted().toList();
+        List<Long> orderedInventoryIds = inventoryBucketIds.stream().sorted().toList();
+        return new Task3CreationSnapshot(
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_capacity_bucket_id,
+                               occupied_people,
+                               occupied_teams
+                          FROM reservation_capacity_buckets
+                         WHERE reservation_capacity_bucket_id IN (%s)
+                         ORDER BY reservation_capacity_bucket_id
+                        """.formatted(placeholders(orderedCapacityIds.size())),
+                        orderedCapacityIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT menu_inventory_bucket_id,
+                               online_hold_remaining,
+                               shared_remaining,
+                               availability_status,
+                               lock_version
+                          FROM menu_inventory_buckets
+                         WHERE menu_inventory_bucket_id IN (%s)
+                         ORDER BY menu_inventory_bucket_id
+                        """.formatted(placeholders(orderedInventoryIds.size())),
+                        orderedInventoryIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT operation_id,
+                               menu_inventory_bucket_id,
+                               operation_type,
+                               pool_type,
+                               quantity_delta,
+                               quantity_before,
+                               quantity_after
+                          FROM menu_inventory_ledger
+                         WHERE menu_inventory_bucket_id IN (%s)
+                         ORDER BY menu_inventory_ledger_id
+                        """.formatted(placeholders(orderedInventoryIds.size())),
+                        orderedInventoryIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_hold_id,
+                               status,
+                               status_version,
+                               creation_command_id,
+                               capacity_policy_version,
+                               created_at,
+                               expires_at
+                          FROM reservation_holds
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_hold_id,
+                               reservation_capacity_bucket_id,
+                               occupied_people,
+                               occupied_teams,
+                               capacity_policy_version
+                          FROM reservation_hold_capacity_allocations
+                         WHERE reservation_hold_id = ?
+                         ORDER BY reservation_capacity_bucket_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT menu_hold_id,
+                               reservation_hold_id,
+                               expires_at,
+                               acquire_operation_id,
+                               status,
+                               created_at,
+                               updated_at
+                          FROM menu_holds
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT item.menu_id,
+                               item.menu_inventory_bucket_id,
+                               item.menu_policy_version,
+                               item.inventory_policy_version,
+                               item.quantity
+                          FROM menu_hold_items item
+                          JOIN menu_holds hold ON hold.menu_hold_id = item.menu_hold_id
+                         WHERE hold.reservation_hold_id = ?
+                         ORDER BY item.menu_id, item.menu_inventory_bucket_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT before_status,
+                               after_status,
+                               command_id,
+                               requested_at,
+                               occurred_at
+                          FROM reservation_hold_transition_audits
+                         WHERE reservation_hold_id = ?
+                         ORDER BY reservation_hold_transition_audit_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT created_at,
+                               warning_due_at
+                          FROM reservation_hold_warning_tasks
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId));
+    }
+
     private int countWhere(String tableName, String idColumn, long id) {
         if (!tableName.equals("menu_holds") || !idColumn.equals("reservation_hold_id")) {
             throw new IllegalArgumentException("unsupported count target");
@@ -2017,6 +2160,30 @@ class ReservationHoldRuntimeIT {
     }
 
     private record MenuFixture(long menuId, long bucketId) {
+    }
+
+    private record GroupArtifactCounts(
+            int reservationHolds,
+            int holdAllocations,
+            int menuHolds,
+            int menuHoldItems,
+            int inventoryLedgers,
+            int transitionAudits,
+            int warningTasks
+    ) {
+    }
+
+    private record Task3CreationSnapshot(
+            List<Map<String, Object>> capacityBuckets,
+            List<Map<String, Object>> inventoryBuckets,
+            List<Map<String, Object>> inventoryLedger,
+            List<Map<String, Object>> reservationHolds,
+            List<Map<String, Object>> holdAllocations,
+            List<Map<String, Object>> menuHolds,
+            List<Map<String, Object>> menuHoldItems,
+            List<Map<String, Object>> transitionAudits,
+            List<Map<String, Object>> warningTasks
+    ) {
     }
 
     private record ConfirmedReservationFixture(long consumerId, long reservationId) {
