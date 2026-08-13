@@ -22,6 +22,7 @@ import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManage
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.util.Locale;
+import java.util.Objects;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -103,6 +104,7 @@ public class PlatformOperatorAuthService {
             }
             if (!attemptCompleted || !matches) throw invalidCredentials();
             PlatformOperatorAccount current = accounts.findById(account.getId()).orElseThrow(this::invalidCredentials);
+            if (!sameCredentialSnapshot(account, current)) throw invalidCredentials();
             if (current.getStatus() != PlatformOperatorAccountStatus.ACTIVE) {
                 sessions.revokeAll(current.getId());
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
@@ -180,6 +182,12 @@ public class PlatformOperatorAuthService {
     private boolean matches(String raw, String encoded) {
         try { return passwordEncoder.matches(raw, encoded); }
         catch (IllegalArgumentException exception) { return false; }
+    }
+
+    private boolean sameCredentialSnapshot(PlatformOperatorAccount verified, PlatformOperatorAccount current) {
+        return verified.getRowVersion() == current.getRowVersion()
+                && Objects.equals(verified.getPasswordHash(), current.getPasswordHash())
+                && verified.getPasswordState() == current.getPasswordState();
     }
 
     private ServiceException invalidCredentials() { return new ServiceException(AuthErrorCode.INVALID_CREDENTIALS); }

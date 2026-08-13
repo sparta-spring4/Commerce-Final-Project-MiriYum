@@ -1,25 +1,42 @@
 package com.miriyum.domain.platformoperator.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.auth.dto.request.LoginRequest;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
+import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.platformoperator.config.PlatformOperatorAuthProperties;
 import com.miriyum.domain.platformoperator.dto.auth.InitialPasswordChangeRequest;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
+import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManager;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.jdbc.core.JdbcTemplate;
-import com.miriyum.domain.auth.dto.request.LoginRequest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -50,6 +67,43 @@ class PlatformOperatorInitialPasswordConcurrencyIT {
     @Autowired PasswordEncoder encoder;
     @Autowired PlatformOperatorAuthService authService;
     @Autowired JdbcTemplate jdbc;
+
+    @Test
+    void oldTemporaryPasswordCannotIssueNormalSessionAfterConcurrentChangeCommits() throws Exception {
+        events.deleteAll();
+        accounts.deleteAll();
+        PlatformOperatorAccount account = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "login-change-race@example.com", encoder.encode("Password1!"), "race",
+                Instant.now().plusSeconds(600)));
+        CountDownLatch passwordMatched = new CountDownLatch(1);
+        CountDownLatch resumeLogin = new CountDownLatch(1);
+        PasswordEncoder blockingEncoder = new BlockingPasswordEncoder(encoder, account.getPasswordHash(),
+                passwordMatched, resumeLogin);
+        LoginDelayGuard delay = mock(LoginDelayGuard.class);
+        PlatformOperatorSessionManager sessions = mock(PlatformOperatorSessionManager.class);
+        PlatformOperatorAuthEventRecorder eventRecorder = mock(PlatformOperatorAuthEventRecorder.class);
+        when(delay.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId()))
+                .thenReturn(LoginAttempt.acquired("attempt"));
+        when(delay.completeAttempt(any(), any(Long.class), any(), any(Boolean.class))).thenReturn(true);
+        PlatformOperatorAuthService racingService = new PlatformOperatorAuthService(
+                accounts, blockingEncoder, new PasswordPolicy(), delay, sessions, transaction, eventRecorder,
+                properties(), Clock.fixed(Instant.now(), ZoneOffset.UTC));
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var login = executor.submit(() -> racingService.login(
+                    new LoginRequest(account.getEmail(), "Password1!")));
+            assertThat(passwordMatched.await(10, TimeUnit.SECONDS)).isTrue();
+            transaction.change(account.getId(),
+                    new InitialPasswordChangeRequest("Password1!", "Changed2@", "Changed2@"));
+            resumeLogin.countDown();
+
+            assertThatThrownBy(login::get)
+                    .hasCauseInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error.getCause()).getErrorCode())
+                            .isEqualTo(AuthErrorCode.INVALID_CREDENTIALS));
+        }
+        verify(sessions, never()).issue(any(), any(Long.class), any(Long.class), any(Boolean.class));
+    }
 
     @Test
     void arbitraryUnknownEmailsShareOneBoundedDelayRow() {
@@ -132,6 +186,46 @@ class PlatformOperatorInitialPasswordConcurrencyIT {
             return "SUCCESS";
         } catch (ServiceException exception) {
             return exception.getErrorCode().getCode();
+        }
+    }
+
+    private static PlatformOperatorAuthProperties properties() {
+        PlatformOperatorAuthProperties properties = new PlatformOperatorAuthProperties();
+        properties.setEnabled(true);
+        properties.getTemporaryPassword().setValidity(Duration.ofMinutes(10));
+        properties.getTemporaryPassword().setMaxFailures(3);
+        return properties;
+    }
+
+    private static final class BlockingPasswordEncoder implements PasswordEncoder {
+        private final PasswordEncoder delegate;
+        private final String blockedHash;
+        private final CountDownLatch passwordMatched;
+        private final CountDownLatch resumeLogin;
+
+        private BlockingPasswordEncoder(PasswordEncoder delegate, String blockedHash,
+                CountDownLatch passwordMatched, CountDownLatch resumeLogin) {
+            this.delegate = delegate;
+            this.blockedHash = blockedHash;
+            this.passwordMatched = passwordMatched;
+            this.resumeLogin = resumeLogin;
+        }
+
+        @Override public String encode(CharSequence rawPassword) { return delegate.encode(rawPassword); }
+
+        @Override
+        public boolean matches(CharSequence rawPassword, String encodedPassword) {
+            boolean matches = delegate.matches(rawPassword, encodedPassword);
+            if (matches && blockedHash.equals(encodedPassword)) {
+                passwordMatched.countDown();
+                try {
+                    if (!resumeLogin.await(10, TimeUnit.SECONDS)) throw new AssertionError("login did not resume");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(exception);
+                }
+            }
+            return matches;
         }
     }
 }
