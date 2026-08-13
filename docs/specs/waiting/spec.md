@@ -185,3 +185,85 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 `mvp1-openapi.yaml`에서는 제외된다. 현재 작업은 frontend나 생성 클라이언트를 만들지 않는다.
 후속 contract-first 구현은 audience 진입점으로 노출 범위를 확인하되 TypeScript 생성 입력은
 기능 원본인 이 디렉터리의 `openapi.yaml`을 사용하고, 1차 MVP aggregate에서 생성하지 않는다.
+
+## 웨이팅 원장과 운영자 전이 (Issue #272)
+
+`고도화` Waiting 원장은 매장과 KST 영업일별로 하나의 중앙 FIFO `queueSequence`를 부여한다.
+활성 membership은 팀마다 하나만 유지하며, 동일 팀의 중복 활성 등록을 허용하지 않는다. 목록은
+항상 `(queueSequence, waitingTeamId)` 오름차순으로 정렬한다. cursor는 이 복합 키를 담은
+opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 시작한다.
+
+매장 운영자는 다음 post-MVP1 store-operator 경로만 사용한다. 이 일곱 경로는
+`store-operator-openapi.yaml`에만 연결하며 `mvp1-openapi.yaml`에는 절대 추가하지 않는다.
+
+| 경로 | method | 계약 |
+|---|---:|---|
+| `/stores/{storeId}/waiting-teams` | `GET` | FIFO 목록과 cursor 조회 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}` | `GET` | 팀 원장 상세 조회 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/call` | `POST` | FIFO 선두 `WAITING` 팀 호출 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive` | `POST` | `CALLED` 팀 도착 처리 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in` | `POST` | `ARRIVED` 팀 입장 처리 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel` | `POST` | 활성 팀 취소 처리 |
+| `/stores/{storeId}/waiting-close-jobs/{jobId}` | `GET` | 활성 팀 종결 작업 조회 |
+
+두 조회와 모든 명령은 store-operator Bearer 인증 및 기존 Store 공개 권한 판정을 요구한다.
+모든 `POST`는 공통 `Idempotency-Key`와 대상 팀의 `expectedVersion`을 요구한다. 같은
+주체·명령·키·전체 요청 지문의 재전송은 최초 결과를 반환하고, 다른 지문으로 같은 키를
+재사용하면 `COMMON_007`이다. 조건부 version 충돌은 `COMMON_008`이다.
+
+### 상태와 전이
+
+원장 상태 enum은 `WAITING`, `CALLED`, `ARRIVED`, `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
+`CLOSED_BY_STORE`, `RESERVATION_CONVERTING`으로 고정한다. `CHECKED_IN`, `CANCELLED`,
+`NO_SHOW`, `CLOSED_BY_STORE`, `RESERVATION_CONVERTING`은 종결 상태다.
+
+| 현재 상태 | 허용 운영자 명령 | 다음 상태 | 조건 |
+|---|---|---|---|
+| `WAITING` | call | `CALLED` | 같은 매장·KST 영업일 활성 큐의 FIFO 선두 |
+| `WAITING` | cancel | `CANCELLED` | 현재 version 일치 |
+| `CALLED` | arrive | `ARRIVED` | 현재 version 일치 |
+| `CALLED` | cancel | `CANCELLED` | 현재 version 일치 |
+| `ARRIVED` | check-in | `CHECKED_IN` | 현재 version 일치 |
+| `ARRIVED` | cancel | `CANCELLED` | 현재 version 일치 |
+| 종결 상태 | 없음 | 없음 | 새 전이는 거부 |
+
+명령은 다른 매장의 팀을 읽거나 전이할 수 없고, stale version·비선두 call·이미 종결된 팀은
+성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들도록
+조건부 version과 활성 membership 제약을 함께 사용한다.
+
+### 운영자 응답 개인정보 경계
+
+목록 item은 `waitingTeamId`, `status`, `queueSequence`, `partySize`, `createdAt`, `version`만
+노출한다. 상세는 여기에 `storeId`와 상태별 시각(`calledAt`, `arrivedAt`, `checkedInAt`,
+`cancelledAt`)만 추가한다. 어떤 운영자 목록·상세·종결 작업 응답에도 consumer ID, 계정 ID,
+전화번호, 좌표, 원본 접수 식별자 또는 멱등 키를 넣지 않는다.
+
+### 활성 팀 종결 작업과 #271 경계
+
+`PENDING`, `PROCESSING`, `COMPLETED`, `RECONCILIATION_REQUIRED`는 종결 작업 상태 enum이다.
+작업 조회는 대상 snapshot의 총 팀 수와 completed·failed·reconciliation-required 팀 수를
+반환한다. 실패 또는 결과 불명은 성공으로 추측하지 않고 `RECONCILIATION_REQUIRED`와 대사
+필요 수로 남긴다.
+
+Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accepted`/작업 생성 계약을
+소유한다. Issue #272는 생성된 `waiting-close-jobs/{jobId}`의 조회, 원장 전이와 작업 실행만
+소유한다. 이 원장 계약은 #271의 settings path, `WaitingDisableAction`, 설정 version 또는
+`202` 응답을 다시 정의하거나 변경하지 않는다.
+
+### 오류 계약
+
+| HTTP | code | 의미 |
+|---:|---|---|
+| `404` | `WAITING_003` | 대상 매장 범위의 웨이팅 팀을 찾을 수 없음 |
+| `404` | `WAITING_004` | 대상 매장 범위의 웨이팅 종결 작업을 찾을 수 없음 |
+| `409` | `WAITING_005` | 대상 팀 version이 `expectedVersion`과 다름 |
+| `409` | `WAITING_006` | 현재 상태 또는 종결 상태 때문에 요청 전이가 허용되지 않음 |
+| `409` | `WAITING_007` | call 대상이 활성 FIFO의 선두가 아님 |
+| `409` | `WAITING_008` | 활성 membership의 현재 상태와 요청 전제가 충돌함 |
+| `409` | `WAITING_009` | 종결 작업이 아직 완료되지 않았거나 대사가 필요함 |
+| `409` | `WAITING_010` | 종결 작업 대상 처리 중 실패가 발생함 |
+
+기존 `COMMON_001`~`COMMON_004`, `AUTH_001`, `AUTH_011`, `STORE_001`, `STORE_003`,
+`STORE_005`, `STORE_007`, `COMMON_007`, `COMMON_008`, `COMMON_010`의 의미는 변경하지
+않는다. 각 ledger operation의 response status 집합은 `200`, `400`, `401`, `403`, `404`,
+`409`, `429`로 고정한다.
