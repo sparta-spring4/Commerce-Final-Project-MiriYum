@@ -68,7 +68,9 @@ public class StorePublicReadRepository {
         List<MenuRow> rows = jdbcTemplate.query("""
                 SELECT m.menu_id, m.selling_status, mv.menu_version_id, mv.name,
                        mv.description, mv.price,
-                       CASE WHEN rme.menu_id IS NULL THEN FALSE ELSE TRUE END AS representative,
+                       CASE WHEN rme.menu_id IS NOT NULL
+                                  AND m.selling_status IN ('SELLING', 'SOLD_OUT')
+                            THEN TRUE ELSE FALSE END AS representative,
                        mv.primary_category_code, mv.hold_selection_allowed,
                        mv.pickup_selection_allowed
                 FROM stores s
@@ -80,7 +82,6 @@ public class StorePublicReadRepository {
                 LEFT JOIN representative_menu_entries rme
                   ON rme.store_id = m.store_id
                  AND rme.menu_id = m.menu_id
-                 AND m.selling_status IN ('SELLING', 'SOLD_OUT')
                 WHERE s.store_id = :storeId
                   AND s.verification_status = 'APPROVED'
                   AND s.operation_status <> 'CLOSED'
