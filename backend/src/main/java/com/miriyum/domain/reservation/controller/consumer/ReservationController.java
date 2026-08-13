@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 인증된 소비자의 일반 예약 생성·조회·취소와 예약 이력을 제공하는 HTTP 경계다. */
 @RestController
-@RequestMapping("/api/v1/consumers")
+@RequestMapping("/api/v1/consumers/me")
 @RequiredArgsConstructor
 public class ReservationController {
 
@@ -94,7 +94,7 @@ public class ReservationController {
                 .body(ApiResponse.success("예약이 취소되었습니다.", result.data()));
     }
 
-    @GetMapping("/me/reservations")
+    @GetMapping("/reservations")
     public ApiResponse<ReservationHistoryPageResponse> getReservationHistory(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @RequestParam(required = false) String status,

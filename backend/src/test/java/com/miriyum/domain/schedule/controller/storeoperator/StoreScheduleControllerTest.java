@@ -340,7 +340,7 @@ class StoreScheduleControllerTest {
                         200, operatingResponse()));
 
         mockMvc.perform(post(
-                        BASE_URL + "/operating-hours/1/publication")
+                        BASE_URL + "/operating-hours/1/publications")
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
@@ -362,7 +362,7 @@ class StoreScheduleControllerTest {
         authenticateStoreOperator(11L);
 
         mockMvc.perform(post(
-                        BASE_URL + "/operating-hours/1/publication")
+                        BASE_URL + "/operating-hours/1/publications")
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
@@ -386,7 +386,7 @@ class StoreScheduleControllerTest {
         authenticateStoreOperator(11L);
 
         mockMvc.perform(post(
-                        BASE_URL + "/operating-hours/1/publication")
+                        BASE_URL + "/operating-hours/1/publications")
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
@@ -409,7 +409,7 @@ class StoreScheduleControllerTest {
         authenticateStoreOperator(11L);
 
         mockMvc.perform(post(
-                        BASE_URL + "/operating-hours/0/publication")
+                        BASE_URL + "/operating-hours/0/publications")
                         .header(HttpHeaders.AUTHORIZATION,
                                 "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)

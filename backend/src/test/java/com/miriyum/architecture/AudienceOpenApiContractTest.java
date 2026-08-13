@@ -19,25 +19,25 @@ class AudienceOpenApiContractTest {
     private static final Path SPECS = Path.of("..", "docs", "specs");
     private static final Set<String> NON_FEATURE_OPENAPI_FILES =
             Set.of("mvp1-common/openapi.yaml");
-    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of(
-            "/api/v1/consumers/payments",
-            "/api/v1/consumers/payments/{paymentId}",
-            "/api/v1/consumers/payments/{paymentId}/confirmations",
+    private static final Set<String> PAYMENT_PATHS = Set.of(
+            "/api/v1/consumers/me/payments",
+            "/api/v1/consumers/me/payments/{paymentId}",
+            "/api/v1/consumers/me/payments/{paymentId}/confirmations",
             "/api/v1/payments/webhooks/portone"
     );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
-            "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+            "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches";
     private static final Set<String> WAITING_SETTINGS_PATHS = Set.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-settings",
-            "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact");
     private static final Set<String> WAITING_LEDGER_PATHS = Set.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-teams",
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
-            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
+            "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =
@@ -46,7 +46,9 @@ class AudienceOpenApiContractTest {
             Stream.concat(
                     Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH,
                             REPRESENTATIVE_MENUS_PATH),
-                    Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream()))
+                    Stream.concat(
+                            PAYMENT_PATHS.stream(),
+                            Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream())))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
@@ -94,10 +96,7 @@ class AudienceOpenApiContractTest {
         audiencePaths.addAll(paths("consumer-openapi.yaml").keySet());
         audiencePaths.addAll(paths("store-operator-openapi.yaml").keySet());
 
-        assertThat(intersection(audiencePaths, APPROVED_UNEXPOSED_FEATURE_PATHS)).isEmpty();
-        Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
-        exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
-        assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
+        assertThat(audiencePaths).isEqualTo(featurePaths);
     }
 
     @Test

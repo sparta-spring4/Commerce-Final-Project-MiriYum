@@ -1457,7 +1457,7 @@ class ReservationCancellationIT {
         appendCanonical(
                 canonical,
                 "route",
-                "/api/v1/consumers/reservations/{reservationId}/cancellations");
+                "/api/v1/consumers/me/reservations/{reservationId}/cancellations");
         appendCanonical(canonical, "reservationId", String.valueOf(reservationId));
         appendCanonical(canonical, "reason", reason);
         return RequestFingerprint.of(canonical.toString());

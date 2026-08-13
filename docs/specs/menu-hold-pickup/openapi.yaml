@@ -85,7 +85,7 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/PickupTransactionEligibilityConflict"
-  /api/v1/consumers/pickup-reservations:
+  /api/v1/consumers/me/pickup-reservations:
     post:
       tags: [Pickup]
       summary: 픽업 예약 생성
@@ -119,7 +119,7 @@ paths:
           $ref: "#/components/responses/PickupConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}:
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}:
     get:
       tags: [Pickup]
       summary: 본인 픽업 예약 상세 조회
@@ -141,7 +141,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/PickupNotFound"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations:
     post:
       tags: [Pickup]
       summary: 본인 픽업 예약 취소

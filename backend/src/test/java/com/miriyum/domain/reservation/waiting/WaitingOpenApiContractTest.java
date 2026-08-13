@@ -19,17 +19,17 @@ class WaitingOpenApiContractTest {
             "..", "docs", "specs", "waiting", "openapi.yaml");
     private static final String SETTINGS_PATH =
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
-    private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/disable-impact";
+    private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/deactivation-impact";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
     private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-teams", Set.of("get"),
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}", Set.of("get"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}", Set.of("get"));
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}", Set.of("get"));
 
     @Test
     void storeOperatorWaitingSettingsKeepTheApprovedContract() throws IOException {
@@ -42,14 +42,15 @@ class WaitingOpenApiContractTest {
                         DISABLE_IMPACT_PATH,
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
-        assertThat(settingsPath).containsOnlyKeys("get", "put");
+        assertThat(settingsPath).containsOnlyKeys(
+                "get", "put", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
 
         Map<String, Object> settingsQuery = map(settingsPath.get("get"));
         assertThat(map(settingsQuery.get("responses")).keySet())
@@ -57,7 +58,8 @@ class WaitingOpenApiContractTest {
                         "200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> disableImpactPath = map(paths.get(DISABLE_IMPACT_PATH));
-        assertThat(disableImpactPath).containsOnlyKeys("get");
+        assertThat(disableImpactPath).containsOnlyKeys(
+                "get", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
         Map<String, Object> disableImpactQuery = map(disableImpactPath.get("get"));
         assertThat(map(disableImpactQuery.get("responses")).keySet())
                 .containsExactlyInAnyOrder(

@@ -1112,7 +1112,7 @@ public class ReservationService {
 
     private static String fingerprintForCreation(NormalizedCreationRequest request) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/consumers/reservations|");
+                "POST|/api/v1/consumers/me/reservations|");
         append(canonical, "storeId", Long.toString(request.storeId()));
         append(canonical, "serviceDate", request.serviceDate().toString());
         append(canonical, "startTime", request.startTime().toString());
@@ -1830,7 +1830,7 @@ public class ReservationService {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies/{version}"
-                        + "/publication-cancellation|"
+                        + "/publication-cancellations|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));

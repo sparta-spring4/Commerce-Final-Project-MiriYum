@@ -23,9 +23,9 @@ class PickupOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
         assertThat(paths).containsKeys(
                 "/api/v1/stores/{storeId}/pickup-availability",
-                "/api/v1/consumers/pickup-reservations",
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}",
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations",
+                "/api/v1/consumers/me/pickup-reservations",
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}",
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}",
                 "/api/v1/store-operators/stores/{storeId}/pickup-reservations/{pickupReservationId}/fulfillments",
@@ -52,7 +52,7 @@ class PickupOpenApiContractTest {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> operation = map(map(paths.get(
-                "/api/v1/consumers/pickup-reservations")).get("post"));
+                "/api/v1/consumers/me/pickup-reservations")).get("post"));
         Map<String, Object> operationResponses = map(operation.get("responses"));
         assertThat(map(operationResponses.get("404"))).containsEntry(
                 "$ref", "#/components/responses/PickupCreationNotFound");
@@ -94,7 +94,7 @@ class PickupOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
 
         Map<String, Object> consumerCancellation = map(map(paths.get(
-                "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations"))
+                "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations"))
                 .get("post"));
         assertThat(map(map(consumerCancellation.get("responses")).get("409")))
                 .containsEntry("$ref", "#/components/responses/PickupCancellationConflict");

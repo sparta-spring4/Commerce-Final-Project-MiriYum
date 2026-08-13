@@ -62,7 +62,7 @@ class PaymentControllerTest {
                 IDEMPOTENCY_KEY
         ))).willReturn(result);
 
-        mockMvc.perform(post("/api/v1/consumers/payments/{paymentId}/confirmations", PAYMENT_ID)
+        mockMvc.perform(post("/api/v1/consumers/me/payments/{paymentId}/confirmations", PAYMENT_ID)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -89,7 +89,7 @@ class PaymentControllerTest {
                 PaymentAttemptStatus.UNKNOWN
         ));
 
-        mockMvc.perform(post("/api/v1/consumers/payments/{paymentId}/confirmations", PAYMENT_ID)
+        mockMvc.perform(post("/api/v1/consumers/me/payments/{paymentId}/confirmations", PAYMENT_ID)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -113,7 +113,7 @@ class PaymentControllerTest {
                 PaymentStatus.RECONCILIATION_REQUIRED,
                 PaymentAttemptStatus.UNKNOWN));
 
-        mockMvc.perform(post("/api/v1/consumers/payments/{paymentId}/confirmations", PAYMENT_ID)
+        mockMvc.perform(post("/api/v1/consumers/me/payments/{paymentId}/confirmations", PAYMENT_ID)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -133,7 +133,7 @@ class PaymentControllerTest {
                 new PaymentHistorySlice(List.of(result(
                         PaymentStatus.PAID, PaymentAttemptStatus.PAID)), null, false));
 
-        mockMvc.perform(get("/api/v1/consumers/payments")
+        mockMvc.perform(get("/api/v1/consumers/me/payments")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
                         .queryParam("status", "PAID"))
                 .andExpect(status().isOk())
@@ -146,7 +146,7 @@ class PaymentControllerTest {
     @Test
     @DisplayName("소비자 JWT가 없으면 Payment Service에 도달하지 않는다")
     void rejectsMissingConsumerToken() throws Exception {
-        mockMvc.perform(get("/api/v1/consumers/payments/{paymentId}", PAYMENT_ID))
+        mockMvc.perform(get("/api/v1/consumers/me/payments/{paymentId}", PAYMENT_ID))
                 .andExpect(status().isUnauthorized());
 
         then(paymentService).shouldHaveNoInteractions();

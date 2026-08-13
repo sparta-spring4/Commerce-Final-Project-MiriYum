@@ -175,7 +175,7 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - 초안 내용은 제자리에서 수정하지 않는다. 변경하려면 새 초안 버전을 저장하고, 게시할 버전 번호를 명시한다.
 - `POST .../{version}/publication`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
 - 게시 명령은 비어 있지 않은 `changeReason`을 항상 요구한다. 초안 저장 자체에는 변경 사유를 요구하지 않지만 게시 감사에 사유를 보존한다.
-- `POST .../{version}/publication-cancellation`은 비어 있지 않은 `changeReason`을 받고 아직 효력이 발생하지 않은 `SCHEDULED` 버전에만 사용할 수 있다. 성공하면 예약 시각을 제거하고 버전을 `DRAFT`로 되돌려 내용은 유지한다. 이미 활성화된 버전은 취소할 수 없으며 되돌리려면 이전 내용을 복제한 새 초안을 게시한다.
+- `POST .../{version}/publication-cancellations`은 비어 있지 않은 `changeReason`을 받고 아직 효력이 발생하지 않은 `SCHEDULED` 버전에만 사용할 수 있다. 성공하면 예약 시각을 제거하고 버전을 `DRAFT`로 되돌려 내용은 유지한다. 이미 활성화된 버전은 취소할 수 없으며 되돌리려면 이전 내용을 복제한 새 초안을 게시한다.
 - 버전 상태는 `DRAFT`, `SCHEDULED`, `ACTIVE`, `RETIRED`, `ACTIVATION_FAILED`를 사용한다. 정상 게시로 새 버전이 `ACTIVE`가 되면 이전 활성 버전은 `RETIRED`가 된다. 권한·매장 상태·시간대 또는 재검증 실패처럼 재시도로 해결되지 않는 자동 게시 실패는 `ACTIVATION_FAILED`로 끝내고 조용히 활성화하지 않는다.
 - 영업시간 새 버전이 활성화되면 이전 영업 버전을 기준으로 검증된 예약 접수 버전의 활성 포인터를 해제하고 해당 예약 버전을 `RETIRED`로 전환한다. 이 전환은 원 영업시간 게시와 같은 사유·요청 식별자를 가진 별도 예약-stream 감사 사건으로 남긴다. 예약 접수 시간대는 새 영업 버전을 기준으로 새 초안을 검증·게시하기 전까지 신규 노출·예약에 사용할 수 없다.
 
@@ -324,4 +324,4 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | 2026-08-05 | 세 공개 매장 GET 경로가 IP당 60초에 60회의 중앙 공개 조회 한도를 공유 | `SCALE-005`를 적용하고 비용이 큰 가용성 검색을 컨트롤러 실행 전에 제한하며 경로별 우회 한도를 만들지 않음 |
 # 품절 메뉴 대안 검색
 
-`POST /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.
+`POST /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.

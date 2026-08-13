@@ -200,11 +200,11 @@ opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 �
 |---|---:|---|
 | `/stores/{storeId}/waiting-teams` | `GET` | FIFO 목록과 cursor 조회 |
 | `/stores/{storeId}/waiting-teams/{waitingTeamId}` | `GET` | 팀 원장 상세 조회 |
-| `/stores/{storeId}/waiting-teams/{waitingTeamId}/call` | `POST` | FIFO 선두 `WAITING` 팀 호출 |
-| `/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive` | `POST` | `CALLED` 팀 도착 처리 |
-| `/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in` | `POST` | `ARRIVED` 팀 입장 처리 |
-| `/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel` | `POST` | 활성 팀 취소 처리 |
-| `/stores/{storeId}/waiting-close-jobs/{jobId}` | `GET` | 활성 팀 종결 작업 조회 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/calls` | `POST` | FIFO 선두 `WAITING` 팀 호출 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals` | `POST` | `CALLED` 팀 도착 처리 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins` | `POST` | `ARRIVED` 팀 입장 처리 |
+| `/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 활성 팀 취소 처리 |
+| `/stores/{storeId}/waiting-closure-jobs/{jobId}` | `GET` | 활성 팀 종결 작업 조회 |
 
 두 조회와 모든 명령은 store-operator Bearer 인증 및 기존 Store 공개 권한 판정을 요구한다.
 모든 `POST`는 공통 `Idempotency-Key`와 대상 팀의 `expectedVersion`을 요구한다. 같은
@@ -246,7 +246,7 @@ opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 �
 필요 수로 남긴다.
 
 Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accepted`/작업 생성 계약을
-소유한다. Issue #272는 생성된 `waiting-close-jobs/{jobId}`의 조회, 원장 전이와 작업 실행만
+소유한다. Issue #272는 생성된 `waiting-closure-jobs/{jobId}`의 조회, 원장 전이와 작업 실행만
 소유한다. 이 원장 계약은 #271의 settings path, `WaitingDisableAction`, 설정 version 또는
 `202` 응답을 다시 정의하거나 변경하지 않는다.
 
