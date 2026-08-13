@@ -236,8 +236,38 @@ class ReservationOpenApiContractTest {
                         "RESERVATION_003",
                         "ACCOUNT_006",
                         "MENU_HOLD_001",
-                        "MENU_HOLD_002"
+                        "MENU_HOLD_002",
+                        "NOTIFICATION_002"
                 );
+    }
+
+    @Test
+    void reservationProducersDocumentNotificationSourceEventConflict() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+        List<Map<String, Object>> producers = List.of(
+                map(map(paths.get("/api/v1/consumers/reservations")).get("post")),
+                map(map(paths.get(
+                        "/api/v1/consumers/reservations/{reservationId}/cancellations"
+                )).get("post")),
+                map(map(paths.get(
+                        "/api/v1/store-operators/stores/{storeId}/reservations/"
+                                + "{reservationId}/cancellations"
+                )).get("post"))
+        );
+
+        assertThat(producers).allSatisfy(operation -> {
+            Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
+            Map<String, Object> examples = map(
+                    map(map(conflict.get("content")).get("application/json")).get("examples")
+            );
+            assertThat(examples.values().stream()
+                    .map(ReservationOpenApiContractTest::map)
+                    .map(example -> map(example.get("value")).get("code")))
+                    .contains("NOTIFICATION_002");
+        });
     }
 
     @Test

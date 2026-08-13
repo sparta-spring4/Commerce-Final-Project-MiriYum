@@ -1,6 +1,6 @@
 package com.miriyum.domain.notification.dto.response;
 
-import com.miriyum.domain.notification.entity.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import java.time.OffsetDateTime;
 
 public record NotificationHistoryItemResponse(
