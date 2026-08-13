@@ -129,7 +129,7 @@ class PlatformOperatorAuthHttpIT {
 
         assertThat(limitedRefresh).isNotNull();
         mvc.perform(post("/api/v1/platform-operators/auth/accounts"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isNotFound());
     }
 
     @RestController

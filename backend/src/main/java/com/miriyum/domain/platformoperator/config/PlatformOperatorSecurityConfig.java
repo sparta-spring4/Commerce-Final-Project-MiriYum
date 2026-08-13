@@ -27,7 +27,9 @@ public class PlatformOperatorSecurityConfig {
                         "/api/v1/platform-operators/auth/sessions",
                         "/api/v1/platform-operators/auth/token-refreshes",
                         "/api/v1/platform-operators/auth/csrf-tokens/current",
-                        "/api/v1/platform-operators/auth/sessions/current")
+                        "/api/v1/platform-operators/auth/sessions/current",
+                        // There is intentionally no signup Controller; let MVC return the non-enumerable 404.
+                        "/api/v1/platform-operators/auth/accounts")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
