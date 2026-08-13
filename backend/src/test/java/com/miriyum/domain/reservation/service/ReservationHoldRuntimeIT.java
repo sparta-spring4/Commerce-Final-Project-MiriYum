@@ -1116,11 +1116,12 @@ class ReservationHoldRuntimeIT {
         ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
         long finalReservationId = seedFinalReservation(
                 scenario, active.consumerAccountId());
-        ReservationHoldContracts.Result confirmed = holdFacade.transition(transitionCommand(
+        ReservationHoldContracts.TransitionCommand confirmationCommand = transitionCommand(
                 active,
                 ReservationHoldStatus.CONFIRMED,
                 "confirmed-temporary-cancellation-confirm",
-                finalReservationId));
+                finalReservationId);
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(confirmationCommand);
         transferCapacityToFinalReservation(active, scenario, finalReservationId);
         IdempotencyKey cancellationKey = key(201);
         ConsumerCancellationRequest request =
@@ -1136,6 +1137,13 @@ class ReservationHoldRuntimeIT {
         assertThat(cancelled.data().status()).isEqualTo("CANCELLED");
         assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
                 .isEqualTo("RELEASED");
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
+        ReservationHoldContracts.Result confirmationReplay =
+                holdFacade.transition(confirmationCommand);
+
+        assertThat(confirmationReplay).isEqualTo(confirmed);
         assertThat(onlineRemaining(menu.bucketId())).isOne();
         assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
 
@@ -1170,11 +1178,12 @@ class ReservationHoldRuntimeIT {
         ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
         long finalReservationId = seedFinalReservation(
                 scenario, active.consumerAccountId());
-        ReservationHoldContracts.Result confirmed = holdFacade.transition(transitionCommand(
+        ReservationHoldContracts.TransitionCommand confirmationCommand = transitionCommand(
                 active,
                 ReservationHoldStatus.CONFIRMED,
                 "confirmed-temporary-fulfillment-confirm",
-                finalReservationId));
+                finalReservationId);
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(confirmationCommand);
         transferCapacityToFinalReservation(active, scenario, finalReservationId);
 
         ReservationFulfillmentCommandResult fulfilled = fulfillmentFacade.fulfill(
@@ -1188,6 +1197,13 @@ class ReservationHoldRuntimeIT {
         assertThat(fulfilled.data().status()).isEqualTo("FULFILLED");
         assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
                 .isEqualTo("FULFILLED");
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+
+        ReservationHoldContracts.Result confirmationReplay =
+                holdFacade.transition(confirmationCommand);
+
+        assertThat(confirmationReplay).isEqualTo(confirmed);
         assertThat(onlineRemaining(menu.bucketId())).isZero();
         assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
 

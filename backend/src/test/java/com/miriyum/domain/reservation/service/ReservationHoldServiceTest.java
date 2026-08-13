@@ -1335,6 +1335,111 @@ class ReservationHoldServiceTest {
         then(auditRepository).should(never()).save(any());
     }
 
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("confirm replay는 최종 예약의 합법적인 후속 MenuHold 종결 상태를 반환한다")
+    void confirmationReplayReturnsFinalLinkedTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("종결된 MenuHold의 confirm replay도 다른 최종 Reservation 연결은 거절한다")
+    void confirmationReplayRejectsDifferentFinalLinkageInTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                92L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("reconciliation replay는 확정 뒤 최종 예약의 후속 MenuHold 종결 상태를 반환한다")
+    void reconciliationReplayReturnsFinalLinkedTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
     @Test
     @DisplayName("initial replay locks the latest Hold before the MenuHold snapshot")
     void initialReplayLocksLatestHoldBeforeMenuHoldSnapshot() {
@@ -1586,6 +1691,13 @@ class ReservationHoldServiceTest {
                 Arguments.of("different requested at", "PAYMENT", 41L,
                         requestedAt.plus(1, ChronoUnit.MICROS))
         );
+    }
+
+    private static Stream<ReservationTemporaryMenuHoldResult.State>
+            finalLinkedTerminalMenuStates() {
+        return Stream.of(
+                ReservationTemporaryMenuHoldResult.State.RELEASED,
+                ReservationTemporaryMenuHoldResult.State.FULFILLED);
     }
 
     @Test
