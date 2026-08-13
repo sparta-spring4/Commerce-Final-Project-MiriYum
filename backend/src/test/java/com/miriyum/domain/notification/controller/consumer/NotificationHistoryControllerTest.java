@@ -24,6 +24,7 @@ import com.miriyum.domain.notification.exception.NotificationErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.security.SecurityConfig;
 import java.time.OffsetDateTime;
+import java.sql.SQLException;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -136,6 +138,18 @@ class NotificationHistoryControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("COMMON_012"));
+    }
+
+    @Test
+    void badSqlProgrammingFailureRemainsInternalServerError() throws Exception {
+        given(historyService.getHistory(CONSUMER_ID, null, 20))
+                .willThrow(new BadSqlGrammarException(
+                        "history query", "SELECT broken", new SQLException("syntax error")));
+
+        mockMvc.perform(get("/api/v1/consumers/me/notifications")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("COMMON_011"));
     }
 
     @Test
