@@ -4,9 +4,10 @@
 >
 > 기능 소유자: `reservation` 도메인의 Waiting capability
 >
-> 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회
+> 계약 범위: Issue #271 매장 운영자 설정 조회·교체와 비활성화 영향 조회,
+> Issue #272 중앙 원장·운영자 전이, Issue #307 계정당 활성 웨이팅 1개 제한
 >
-> 구현 순서: `#271 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
+> 구현 순서: `#271 계약 + #307 계약 → #272 원장·종결 공개 계약/runtime → #271 설정 runtime`.
 > 활성 대기 팀 판정과 종결의 상태 전이·실행 결과는 Issue #272가 소유한다.
 
 이 문서는 [현장·원격 웨이팅 정책](../../service-policies/05-waiting.md),
@@ -35,6 +36,32 @@ Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메�
 만들지 않는다. 이 계약은 store-operator audience 진입점에 고도화 path를 조합하지만 1차 MVP
 aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
 추가하지 않는다.
+
+## 계정당 활성 웨이팅 1개
+
+Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용자 계정당 고정 1건으로
+대체한다.
+
+- 계정은 전체 매장을 합쳐 활성 웨이팅을 최대 1건만 유지한다.
+- 현재 고도화 기본 범위의 대표자 관계를 계정 활성 관계로 계산한다. 향후 구성원 합류를
+  활성화할 때도 대표자·구성원 역할과 관계없이 같은 계정 단위 제한을 적용한다.
+- 다른 매장의 새 팀 생성·합류는 기존 활성 관계를 자동 취소·교체·병합하지 않고
+  `409 WAITING_008`로 거부한다.
+- 같은 명령의 멱등 재전송은 최초 결과를 반환한다. 다른 멱등 키나 다른 요청 지문은 기존
+  활성 웨이팅을 변경할 권한이 아니다.
+- Waiting 원장이 유효한 종결을 확정하고 계정 활성 관계를 한 번 해제한 뒤에만 새 웨이팅을
+  허용한다. 비종결 `RESERVATION_CONVERTING` 동안은 관계를 유지하고 전환 실패로 기존
+  `WAITING`에 복귀해도 해제하지 않는다. 예약 전환 완료 등 실제 종결이 확정된 뒤에만 해제한다.
+- 차단 응답은 사용자가 정리할 자신의 기존 활성 웨이팅 최소 정보만 제공하고 다른 구성원
+  정보는 노출하지 않는다.
+- 예약은 활성 웨이팅 수에 포함하지 않는다. 서로 다른 매장 또는 겹치지 않는 시간대의 복수
+  예약 허용 계약을 변경하지 않는다.
+
+이 계약 PR은 일반 사용자 웨이팅 생성·합류 HTTP path를 새로 만들지 않는다. 해당 path는
+별도 소유 Issue에서 활성화할 때 이 규칙과 `WAITING_008`을 사용한다. 현재 OpenAPI는 공통
+웨이팅 충돌 의미만 계정 전체 단일 활성 규칙으로 고정하고 기존 store-operator path 집합을
+변경하지 않는다. #272의 production Java·migration은 이 계약 PR이 `dev`에 병합된 뒤 별도
+정확한 허용 목록과 실제 MySQL 동시성 검증으로 정렬한다.
 
 ## 안전한 기본값과 조회
 
@@ -189,9 +216,10 @@ authorized enumeration 정책을 따른다. 매장이 존재하지만 인증된 
 ## 웨이팅 원장과 운영자 전이 (Issue #272)
 
 `고도화` Waiting 원장은 매장과 KST 영업일별로 하나의 중앙 FIFO `queueSequence`를 부여한다.
-활성 membership은 팀마다 하나만 유지하며, 동일 팀의 중복 활성 등록을 허용하지 않는다. 목록은
-항상 `(queueSequence, waitingTeamId)` 오름차순으로 정렬한다. cursor는 이 복합 키를 담은
-opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 시작한다.
+활성 membership은 일반 사용자 계정당 전체 매장을 합쳐 하나만 유지하며, 동일 팀도 중복 활성
+등록을 허용하지 않는다. 목록은 항상 `(queueSequence, waitingTeamId)` 오름차순으로 정렬한다.
+cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터
+시작한다.
 
 매장 운영자는 다음 post-MVP1 store-operator 경로만 사용한다. 이 일곱 경로는
 `store-operator-openapi.yaml`에만 연결하며 `mvp1-openapi.yaml`에는 절대 추가하지 않는다.
@@ -215,7 +243,9 @@ opaque 값이며, 다음 페이지는 직전 cursor보다 큰 복합 키부터 �
 
 원장 상태 enum은 `WAITING`, `CALLED`, `ARRIVED`, `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
 `CLOSED_BY_STORE`, `RESERVATION_CONVERTING`으로 고정한다. `CHECKED_IN`, `CANCELLED`,
-`NO_SHOW`, `CLOSED_BY_STORE`, `RESERVATION_CONVERTING`은 종결 상태다.
+`NO_SHOW`, `CLOSED_BY_STORE`는 종결 상태다. `RESERVATION_CONVERTING`은 예약 선점·결제 결과를
+기다리는 비종결 상태이며 계정 활성 membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도
+같은 활성 membership을 유지한다.
 
 | 현재 상태 | 허용 운영자 명령 | 다음 상태 | 조건 |
 |---|---|---|---|
@@ -259,7 +289,7 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 | `409` | `WAITING_005` | 대상 팀 version이 `expectedVersion`과 다름 |
 | `409` | `WAITING_006` | 현재 상태 또는 종결 상태 때문에 요청 전이가 허용되지 않음 |
 | `409` | `WAITING_007` | call 대상이 활성 FIFO의 선두가 아님 |
-| `409` | `WAITING_008` | 활성 membership의 현재 상태와 요청 전제가 충돌함 |
+| `409` | `WAITING_008` | 계정에 이미 활성 웨이팅이 있거나 활성 membership의 현재 상태와 요청 전제가 충돌함 |
 | `409` | `WAITING_009` | 종결 작업이 아직 완료되지 않았거나 대사가 필요함 |
 | `409` | `WAITING_010` | 종결 작업 대상 처리 중 실패가 발생함 |
 

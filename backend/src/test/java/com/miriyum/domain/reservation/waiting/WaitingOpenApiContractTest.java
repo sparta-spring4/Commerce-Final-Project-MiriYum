@@ -172,6 +172,43 @@ class WaitingOpenApiContractTest {
     }
 
     @Test
+    void waitingActiveMembershipConflictNamesTheAccountWideSingleActiveRule()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        Map<String, Object> conflict = map(responses.get("WaitingLedgerConflict"));
+        Map<String, Object> json = map(map(conflict.get("content")).get("application/json"));
+        Map<String, Object> examples = map(json.get("examples"));
+
+        assertThat(examples).containsKey("accountActiveWaitingConflict");
+
+        Map<String, Object> value = map(
+                map(examples.get("accountActiveWaitingConflict")).get("value"));
+        assertThat(value)
+                .containsOnlyKeys("code", "message")
+                .containsEntry("code", "WAITING_008");
+        assertThat(value.get("message").toString())
+                .contains("계정", "활성 웨이팅", "종료");
+        assertThat(conflict.get("description").toString())
+                .contains("계정 전체", "자동 취소", "교체하지 않는다");
+    }
+
+    @Test
+    void reservationConvertingRemainsNonTerminalAndKeepsTheActiveMembership()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> status = map(schemas.get("WaitingTeamStatus"));
+
+        assertThat(status.get("description").toString())
+                .contains(
+                        "RESERVATION_CONVERTING",
+                        "비종결",
+                        "활성 membership 유지",
+                        "WAITING 복귀");
+    }
+
+    @Test
     void waitingSchemasReferenceCanonicalEnumsWithoutInlineCopies() throws IOException {
         Map<String, Object> document = load(CONTRACT);
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
