@@ -58,10 +58,11 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'occurredAt', ARGV[6],
                         'occurrenceCount', '1',
                         'lastOccurredAt', ARGV[6])
-                    return
+                else
+                    redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
+                    redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
                 end
-                redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
-                redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
+                redis.call('SADD', KEYS[4], KEYS[3])
             end
 
             if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -185,7 +186,9 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
         String familyKey = RefreshTokenKey.forFamily(namespace, familyId);
         String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
         String riskEventKey = RefreshTokenRiskEventKey.forReuse(namespace, familyId, expectedTokenHash);
-        Long result = execute(ROTATE_SCRIPT, List.of(familyKey, accountFamiliesKey, riskEventKey),
+        String pendingRiskEventIndexKey = RefreshTokenRiskEventKey.pendingIndex();
+        Long result = execute(ROTATE_SCRIPT, List.of(
+                        familyKey, accountFamiliesKey, riskEventKey, pendingRiskEventIndexKey),
                 accountId.toString(),
                 expectedTokenId,
                 expectedTokenHash,
