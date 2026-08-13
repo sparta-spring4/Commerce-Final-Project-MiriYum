@@ -47,8 +47,10 @@ class ValkeyPlatformOperatorSessionStoreIntegrationTest {
     @Test
     void replacesAndRotatesAtomicallyWithoutRawSecrets() {
         Instant now = Instant.now();
-        store.replaceActiveSession(state("hash-session-one", "token-1", "hash-refresh-one", now));
-        store.replaceActiveSession(state("hash-session-two", "token-2", "hash-refresh-two", now));
+        assertThat(store.replaceActiveSession(state("hash-session-one", "token-1", "hash-refresh-one", now)).status())
+                .isEqualTo(PlatformOperatorSessionResult.Status.CREATED);
+        assertThat(store.replaceActiveSession(state("hash-session-two", "token-2", "hash-refresh-two", now)).status())
+                .isEqualTo(PlatformOperatorSessionResult.Status.REPLACED);
 
         assertThat(store.validateAndTouch(proof("hash-session-one", "token-1", "hash-refresh-one"),
                 now, now.plusSeconds(1800)).status()).isEqualTo(PlatformOperatorSessionResult.Status.INVALID);

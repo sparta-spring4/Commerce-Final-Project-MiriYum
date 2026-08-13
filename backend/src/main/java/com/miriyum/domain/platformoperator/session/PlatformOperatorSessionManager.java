@@ -57,9 +57,12 @@ public class PlatformOperatorSessionManager {
                 accountId, sha256(sessionId), tokenId, sha256(refresh), now, now, idle, absolute,
                 authorityVersion, sessionVersion, passwordChangeRequired);
         PlatformOperatorSessionResult created = store.replaceActiveSession(state);
-        if (created.status() != PlatformOperatorSessionResult.Status.CREATED) throw invalidSession();
-        events.record(accountId, authorityVersion, sessionVersion, PlatformOperatorAuthEventType.SESSION_REVOKED,
-                PlatformOperatorAuthEventOutcome.SUCCESS);
+        if (created.status() != PlatformOperatorSessionResult.Status.CREATED
+                && created.status() != PlatformOperatorSessionResult.Status.REPLACED) throw invalidSession();
+        if (created.status() == PlatformOperatorSessionResult.Status.REPLACED) {
+            events.record(accountId, authorityVersion, sessionVersion, PlatformOperatorAuthEventType.SESSION_REVOKED,
+                    PlatformOperatorAuthEventOutcome.SUCCESS);
+        }
         String access = tokens.generateAccessToken(TokenNamespace.PLATFORM_OPERATOR, accountId, claims);
         return result(access, refresh, passwordChangeRequired, idle, absolute);
     }

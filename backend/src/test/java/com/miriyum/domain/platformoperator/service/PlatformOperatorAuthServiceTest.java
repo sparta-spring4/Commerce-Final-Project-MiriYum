@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -80,6 +81,19 @@ class PlatformOperatorAuthServiceTest {
         verify(accounts, never()).save(account);
         verify(events).record(account, PlatformOperatorAuthEventType.LOGIN,
                 PlatformOperatorAuthEventOutcome.FAILURE);
+    }
+
+    @Test
+    void unknownEmailStillUsesPasswordVerifierAndRateLimitWithoutAuditEvent() {
+        when(accounts.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.login(new LoginRequest("missing@example.com", "Wrong1!")))
+                .isInstanceOf(ServiceException.class);
+
+        verify(encoder).matches(eq("Wrong1!"), any());
+        verify(delay).tryAcquireAttempt(eq(com.miriyum.domain.auth.jwt.TokenNamespace.PLATFORM_OPERATOR),
+                org.mockito.ArgumentMatchers.longThat(id -> id < 0));
+        verify(events, never()).record(any(PlatformOperatorAccount.class), any(), any());
     }
 
     @Test

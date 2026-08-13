@@ -28,7 +28,7 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
                 'passwordChangeRequired', ARGV[11])
             redis.call('EXPIREAT', KEYS[2], ARGV[12])
             redis.call('SET', KEYS[1], KEYS[2], 'EXAT', ARGV[12])
-            return 1
+            if previous == false then return 1 else return 2 end
             """, Long.class);
 
     private static final RedisScript<Long> VALIDATE = new DefaultRedisScript<>("""
@@ -86,13 +86,16 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
     @Override
     public PlatformOperatorSessionResult replaceActiveSession(PlatformOperatorSessionState state) {
         long expiry = Math.min(state.idleExpiresAt().getEpochSecond(), state.absoluteExpiresAt().getEpochSecond());
-        execute(REPLACE, List.of(accountKey(state.accountId()), sessionKey(state.sessionHash())),
+        long result = execute(REPLACE, List.of(accountKey(state.accountId()), sessionKey(state.sessionHash())),
                 state.accountId().toString(), state.sessionHash(), state.refreshTokenId(), state.refreshTokenHash(),
                 epoch(state.loginAt()), epoch(state.lastActivityAt()), epoch(state.idleExpiresAt()),
                 epoch(state.absoluteExpiresAt()), Long.toString(state.authorityVersion()),
                 Long.toString(state.sessionVersion()), Boolean.toString(state.passwordChangeRequired()),
                 Long.toString(expiry));
-        return new PlatformOperatorSessionResult(PlatformOperatorSessionResult.Status.CREATED, state);
+        PlatformOperatorSessionResult.Status status = result == 2
+                ? PlatformOperatorSessionResult.Status.REPLACED
+                : PlatformOperatorSessionResult.Status.CREATED;
+        return new PlatformOperatorSessionResult(status, state);
     }
 
     @Override

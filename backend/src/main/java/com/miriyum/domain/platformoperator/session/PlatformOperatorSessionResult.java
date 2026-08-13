@@ -12,6 +12,7 @@ public record PlatformOperatorSessionResult(
     }
     public enum Status {
         CREATED,
+        REPLACED,
         VALID,
         ROTATED,
         INVALID,

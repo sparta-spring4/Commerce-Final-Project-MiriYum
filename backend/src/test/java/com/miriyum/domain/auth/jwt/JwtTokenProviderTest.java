@@ -157,6 +157,7 @@ class JwtTokenProviderTest {
         assertInvalid(provider, forged("other-issuer", "consumer", "consumer:42", "consumer"));
         assertInvalid(provider, forged(ISSUER, "store-operator", "consumer:42", "consumer"));
         assertInvalid(provider, forged(ISSUER, "consumer", "store-operator:42", "consumer"));
+        assertInvalid(provider, forged(ISSUER, "consumer", "consumer:unexpected:42", "consumer"));
     }
 
     private void assertInvalid(JwtTokenProvider provider, String token) {

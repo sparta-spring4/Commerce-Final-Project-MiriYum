@@ -74,11 +74,14 @@ class PlatformOperatorOpenApiContractTest {
                 contract.put(verb + " " + path.substring("/api/v1/platform-operators/auth".length()),
                         (String) map(operation).get("operationId"))));
 
-        assertThat(runtime.keySet()).containsExactlyInAnyOrderElementsOf(contract.keySet());
-        assertThat(contract.values()).containsExactlyInAnyOrder(
-                "createPlatformOperatorSession", "refreshPlatformOperatorToken",
-                "getCurrentPlatformOperatorCsrfToken", "deleteCurrentPlatformOperatorSession",
-                "replacePlatformOperatorInitialPassword");
+        Map<String, String> expected = Map.of(
+                "post /sessions", "createPlatformOperatorSession",
+                "post /token-refreshes", "refreshPlatformOperatorToken",
+                "get /csrf-tokens/current", "getCurrentPlatformOperatorCsrfToken",
+                "delete /sessions/current", "deleteCurrentPlatformOperatorSession",
+                "put /initial-password", "replacePlatformOperatorInitialPassword");
+        assertThat(runtime.keySet()).containsExactlyInAnyOrderElementsOf(expected.keySet());
+        assertThat(contract).containsExactlyInAnyOrderEntriesOf(expected);
         assertThat(runtime).containsEntry("post /sessions", "login")
                 .containsEntry("post /token-refreshes", "refresh")
                 .containsEntry("get /csrf-tokens/current", "csrfToken")

@@ -38,6 +38,7 @@ public class PlatformOperatorAuthService {
     private final PlatformOperatorAuthEventRecorder events;
     private final PlatformOperatorAuthProperties properties;
     private final Clock clock;
+    private final String dummyPasswordHash;
 
     public PlatformOperatorAuthService(
             PlatformOperatorAccountRepository accounts, PasswordEncoder passwordEncoder, PasswordPolicy passwordPolicy,
@@ -53,16 +54,35 @@ public class PlatformOperatorAuthService {
         this.events = events;
         this.properties = properties;
         this.clock = clock;
+        this.dummyPasswordHash = passwordEncoder.encode("platform-operator-non-account-verification");
     }
 
     public PlatformOperatorTokenResult login(LoginRequest request) {
-        PlatformOperatorAccount account = accounts.findByEmail(request.email().toLowerCase(Locale.ROOT))
-                .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+        String email = request.email().toLowerCase(Locale.ROOT);
+        PlatformOperatorAccount account = accounts.findByEmail(email).orElse(null);
+        if (account == null) {
+            verifyUnknownCredential(email, request.password());
+            throw invalidCredentials();
+        }
         try {
             return loginKnownAccount(request, account);
         } catch (ServiceException exception) {
             events.record(account, PlatformOperatorAuthEventType.LOGIN, PlatformOperatorAuthEventOutcome.FAILURE);
             throw exception;
+        }
+    }
+
+    private void verifyUnknownCredential(String email, String rawPassword) {
+        long syntheticAccountId = -1L - Integer.toUnsignedLong(email.hashCode());
+        LoginAttempt attempt = delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, syntheticAccountId);
+        if (attempt.status() != LoginAttempt.Status.ACQUIRED) return;
+        boolean completed = false;
+        try {
+            matches(passwordPolicy.toNfc(rawPassword), dummyPasswordHash);
+            completed = true;
+            delayGuard.completeAttempt(TokenNamespace.PLATFORM_OPERATOR, syntheticAccountId, attempt, false);
+        } finally {
+            if (!completed) delayGuard.releaseAttempt(TokenNamespace.PLATFORM_OPERATOR, syntheticAccountId, attempt);
         }
     }
 

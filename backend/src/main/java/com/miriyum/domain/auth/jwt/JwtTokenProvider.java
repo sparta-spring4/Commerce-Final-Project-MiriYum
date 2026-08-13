@@ -203,6 +203,9 @@ public class JwtTokenProvider {
 
         try {
             Long accountId = Long.valueOf(subject.substring(separatorIndex + 1));
+            if (!subject.equals(namespace.value() + ":" + accountId)) {
+                throw new ServiceException(invalidCode);
+            }
             SessionTokenClaims sessionClaims = parseSessionClaims(claims, namespace, invalidCode);
             return new ParsedToken(
                     namespace,
