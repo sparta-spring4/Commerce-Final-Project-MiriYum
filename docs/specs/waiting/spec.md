@@ -45,6 +45,10 @@ Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용�
 - 계정은 전체 매장을 합쳐 활성 웨이팅을 최대 1건만 유지한다.
 - 현재 고도화 기본 범위의 대표자 관계를 계정 활성 관계로 계산한다. 향후 구성원 합류를
   활성화할 때도 대표자·구성원 역할과 관계없이 같은 계정 단위 제한을 적용한다.
+- `WAIT-007`의 같은 매장 중복은 이 계정 전체 검사에 포섭한다. 생성·합류·대표자 이전은
+  계정 활성 관계를 한 번만 검사·점유하고 별도 매장 단위 유일성 제약이나 오류 경로를 두지
+  않는다. 같은 계정·같은 팀 관계는 멱등 결과 또는 기존 관계를 유지하고, 다른 활성 팀은
+  `WAITING_011`로 거부한다.
 - 다른 매장의 새 팀 생성·합류는 기존 활성 관계를 자동 취소·교체·병합하지 않고
   `409 WAITING_011 ACCOUNT_ACTIVE_WAITING_EXISTS`로 거부한다. 이 오류는 사용자가 기존
   웨이팅을 유효하게 종결해야 하며, 재조회·재시도 가능한 membership 전제 충돌
@@ -79,9 +83,10 @@ OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_
 | `version` | `0` |
 
 비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
-시점의 활성 팀 수다. 종결 가능성 판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태
-조회 계약/runtime을 `dev`에 제공할 때 일괄 종결 action과 함께 추가한다. 그 전에는 응답에
-노출하지 않는다. 설정 행의 부재를 매장 부재로 해석하지 않는다.
+시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 종결 가능성
+판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공할 때
+일괄 종결 action과 함께 추가한다. 그 전에는 응답에 노출하지 않는다. 설정 행의 부재를 매장
+부재로 해석하지 않는다.
 
 ## 전체 교체와 버전
 
@@ -122,7 +127,8 @@ Frontend는 비활성화 전에 `GET .../disable-impact`로 현재 버전과 활
   이 요청 계약에 추가한다. 그 전에는 일괄 종결 action을 공개 입력으로 노출하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
-서버는 명령 시점의 활성 팀과 권한을 다시 확인한다.
+서버는 명령 시점의 활성 팀과 권한을 다시 확인한다. `RESERVATION_CONVERTING`도 활성 팀이므로
+한 건이라도 있으면 `disableAction` 없이 비활성화하지 않고 `409 WAITING_002`를 반환한다.
 
 ## 멱등성
 
@@ -258,10 +264,13 @@ cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 
 | `CALLED` | cancel | `CANCELLED` | 현재 version 일치 |
 | `ARRIVED` | check-in | `CHECKED_IN` | 현재 version 일치 |
 | `ARRIVED` | cancel | `CANCELLED` | 현재 version 일치 |
+| `RESERVATION_CONVERTING` | cancel | `CANCELLED` | 현재 version 일치, 예약 선점·결제 성공·매장 종료와 경합 시 먼저 확정된 결과 하나만 유지하고 필요한 보상 후속 작업 기록 |
 | 종결 상태 | 없음 | 없음 | 새 전이는 거부 |
 
+`RESERVATION_CONVERTING`에서는 cancel 외 call·arrive·check-in을 `409 WAITING_006`으로 거부한다.
 명령은 다른 매장의 팀을 읽거나 전이할 수 없고, stale version·비선두 call·이미 종결된 팀은
-성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들도록
+성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들고, 전환 중
+취소가 먼저 확정되면 예약 선점 해제 또는 뒤늦은 결제 승인 취소·환불 후속 작업을 기록하도록
 조건부 version과 활성 membership 제약을 함께 사용한다.
 
 ### 운영자 응답 개인정보 경계
@@ -290,7 +299,7 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 | `404` | `WAITING_003` | 대상 매장 범위의 웨이팅 팀을 찾을 수 없음 |
 | `404` | `WAITING_004` | 대상 매장 범위의 웨이팅 종결 작업을 찾을 수 없음 |
 | `409` | `WAITING_005` | 대상 팀 version이 `expectedVersion`과 다름 |
-| `409` | `WAITING_006` | 현재 상태 또는 종결 상태 때문에 요청 전이가 허용되지 않음 |
+| `409` | `WAITING_006` | 현재 상태에서 요청한 전이가 허용되지 않음 |
 | `409` | `WAITING_007` | call 대상이 활성 FIFO의 선두가 아님 |
 | `409` | `WAITING_008` | 활성 membership의 현재 상태와 요청 전제가 충돌함 |
 | `409` | `WAITING_009` | 종결 작업이 아직 완료되지 않았거나 대사가 필요함 |

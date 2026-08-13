@@ -195,18 +195,24 @@ class WaitingOpenApiContractTest {
     }
 
     @Test
-    void reservationConvertingRemainsNonTerminalAndKeepsTheActiveMembership()
+    void reservationConvertingCanBeCancelledAndCountsAsActive()
             throws IOException {
         Map<String, Object> document = load(CONTRACT);
-        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
-        Map<String, Object> status = map(schemas.get("WaitingTeamStatus"));
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> cancel = map(map(paths.get(
+                "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel"))
+                .get("post"));
 
-        assertThat(status.get("description").toString())
-                .contains(
-                        "RESERVATION_CONVERTING",
-                        "비종결",
-                        "활성 membership 유지",
-                        "WAITING 복귀");
+        assertThat(list(cancel.get("x-allowed-source-statuses")))
+                .containsExactly("WAITING", "CALLED", "ARRIVED", "RESERVATION_CONVERTING");
+        assertThat(cancel).containsEntry("x-result-status", "CANCELLED");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> impact = map(schemas.get("WaitingDisableImpact"));
+        Map<String, Object> activeTeamCount = map(map(impact.get("properties")).get("activeTeamCount"));
+
+        assertThat(list(activeTeamCount.get("x-counted-statuses")))
+                .containsExactly("WAITING", "CALLED", "ARRIVED", "RESERVATION_CONVERTING");
     }
 
     @Test
