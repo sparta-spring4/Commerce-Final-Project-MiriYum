@@ -30,12 +30,14 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
+import com.miriyum.domain.reservation.entity.ReservationHoldTransitionAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
+import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
@@ -119,7 +121,8 @@ import org.testcontainers.utility.DockerImageName;
             "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.store.schedule.activation-enabled=false",
-            "miriyum.reservation.time-policy.activation-enabled=false"
+            "miriyum.reservation.time-policy.activation-enabled=false",
+            "miriyum.reservation.hold-expiration.enabled=false"
         }
 )
 @Import(ReservationHoldRuntimeIT.MutableClockConfig.class)
@@ -155,6 +158,9 @@ class ReservationHoldRuntimeIT {
     private ReservationHoldService holdService;
 
     @Autowired
+    private ReservationHoldExpirationService holdExpirationService;
+
+    @Autowired
     private ReservationCapacityCommandFacade capacityFacade;
 
     @Autowired
@@ -165,6 +171,9 @@ class ReservationHoldRuntimeIT {
 
     @Autowired
     private ReservationHoldRepository holdRepository;
+
+    @Autowired
+    private ReservationHoldTransitionAuditRepository holdTransitionAuditRepository;
 
     @Autowired
     private ReservationRepository reservationRepository;
@@ -1005,7 +1014,7 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
-    @DisplayName("release와 expire 경합은 하나의 그룹 종결과 자원 복구 한 번만 commit한다")
+    @DisplayName("만료 정각의 release와 expire 경합은 같은 완전 만료 결과로 수렴한다")
     void releaseAndExpireRaceCommitsOneTerminalGroupAndRestoresOnce() throws Exception {
         Scenario scenario = createScenario(10, 5, twoBuckets());
         MenuFixture menu = createMenuFixture(scenario, "Task 5 release expire", 1);
@@ -1024,20 +1033,16 @@ class ReservationHoldRuntimeIT {
                 () -> invokeTransition(release),
                 () -> invokeTransition(expire));
 
-        HoldAttempt winner = attempts.stream()
-                .filter(attempt -> attempt.result() != null)
-                .findFirst()
-                .orElseThrow();
-        assertThat(attempts).filteredOn(attempt -> attempt.result() != null).hasSize(1);
         assertThat(attempts)
-                .filteredOn(attempt -> attempt.errorCode() != null)
-                .singleElement()
+                .extracting(HoldAttempt::result)
+                .doesNotContainNull()
+                .extracting(ReservationHoldContracts.Result::status)
+                .containsOnly(ReservationHoldStatus.EXPIRED);
+        assertThat(attempts)
                 .extracting(HoldAttempt::errorCode)
-                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
-        String terminal = winner.result().status().name();
-        assertThat(terminal).isIn("RELEASED", "EXPIRED");
-        assertThat(currentStatus(active.reservationHoldId())).isEqualTo(terminal);
-        assertThat(temporaryMenuHoldStatus(active.reservationHoldId())).isEqualTo(terminal);
+                .containsOnlyNulls();
+        assertThat(currentStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
         assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
         assertThat(onlineRemaining(menu.bucketId())).isOne();
         assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
@@ -1046,7 +1051,7 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
-    @DisplayName("confirm과 expire 경합은 완전 확정 또는 완전 만료만 commit한다")
+    @DisplayName("만료 정각의 confirm과 expire 경합은 같은 완전 만료 결과로 수렴한다")
     void confirmAndExpireRaceNeverCommitsMixedGroupState() throws Exception {
         Scenario scenario = createScenario(10, 5, twoBuckets());
         MenuFixture menu = createMenuFixture(scenario, "Task 5 confirm expire", 1);
@@ -1069,37 +1074,23 @@ class ReservationHoldRuntimeIT {
                 () -> invokeTransition(confirm),
                 () -> invokeTransition(expire));
 
-        HoldAttempt winner = attempts.stream()
-                .filter(attempt -> attempt.result() != null)
-                .findFirst()
-                .orElseThrow();
-        assertThat(attempts).filteredOn(attempt -> attempt.result() != null).hasSize(1);
         assertThat(attempts)
-                .filteredOn(attempt -> attempt.errorCode() != null)
-                .singleElement()
+                .extracting(HoldAttempt::result)
+                .doesNotContainNull()
+                .extracting(ReservationHoldContracts.Result::status)
+                .containsOnly(ReservationHoldStatus.EXPIRED);
+        assertThat(attempts)
                 .extracting(HoldAttempt::errorCode)
-                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION);
+                .containsOnlyNulls();
         assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
         assertThat(terminalAuditCount(active.reservationHoldId())).isOne();
-        if (winner.result().status() == ReservationHoldStatus.CONFIRMED) {
-            assertThat(currentStatus(active.reservationHoldId())).isEqualTo("CONFIRMED");
-            assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
-                    .isEqualTo("CONFIRMED");
-            assertThat(temporaryMenuHoldReservationId(active.reservationHoldId()))
-                    .isEqualTo(finalReservationId);
-            assertAllBucketOccupancy(scenario.originalBucketIds(), PARTY_SIZE, 1);
-            assertThat(onlineRemaining(menu.bucketId())).isZero();
-            assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
-        } else {
-            assertThat(winner.result().status()).isEqualTo(ReservationHoldStatus.EXPIRED);
-            assertThat(currentStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
-            assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
-                    .isEqualTo("EXPIRED");
-            assertThat(temporaryMenuHoldReservationId(active.reservationHoldId())).isNull();
-            assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
-            assertThat(onlineRemaining(menu.bucketId())).isOne();
-            assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
-        }
+        assertThat(currentStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldReservationId(active.reservationHoldId())).isNull();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
     }
 
     @Test
@@ -1699,6 +1690,171 @@ class ReservationHoldRuntimeIT {
                  WHERE reservation_hold_id = ?
                    AND after_status = 'EXPIRED'
                 """, Long.class, afterBoundary.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("만료 정각의 확정은 결정적 EXPIRED 감사로 치환되고 원 operation replay도 수렴한다")
+    void confirmationAtExpiryBoundaryPersistsDeterministicExpirationAudit() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "command-time-expiry-create");
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand confirmation = transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "late-confirm-operation");
+
+        ReservationHoldContracts.Result expired = holdFacade.transition(confirmation);
+        ReservationHoldContracts.Result replay = holdFacade.transition(confirmation);
+
+        assertThat(expired.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(replay).isEqualTo(expired);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT command_id
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, String.class, active.reservationHoldId()))
+                .isEqualTo("reservation-hold-expire:" + active.reservationHoldId());
+        assertThat(holdTransitionAuditRepository
+                .findAllByReservationHoldIdOrderByIdAsc(active.reservationHoldId()))
+                .filteredOn(audit -> audit.getAfterStatus() == ReservationHoldStatus.EXPIRED)
+                .extracting(ReservationHoldTransitionAudit::getRequestedAt)
+                .containsExactly(active.expiresAt());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE command_id = 'late-confirm-operation'
+                """, Long.class)).isZero();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("RECONCILIATION_REQUIRED 전이 감사 후 10분 경계부터 현재 장기 체류만 센다")
+    void reconciliationLongStayUsesTransitionAuditBoundaryAndCurrentStatus() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "reconciliation-long-stay-create");
+        Instant reconciledAt = active.createdAt().plusSeconds(60);
+        clock.set(reconciledAt);
+        ReservationHoldContracts.Result reconciliation = transition(
+                active,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                "reconciliation-long-stay-enter");
+
+        clock.set(reconciledAt.plusSeconds(599));
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isZero();
+
+        clock.set(reconciledAt.plusSeconds(600));
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isOne();
+        assertThat(holdExpirationService.expireDueHolds(100)).isZero();
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED.name());
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+
+        ReservationHoldContracts.Result released = transition(
+                reconciliation,
+                ReservationHoldStatus.RELEASED,
+                "reconciliation-long-stay-release");
+
+        assertThat(released.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isZero();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("두 만료 worker가 같은 후보를 조회해도 결정적 operation으로 한 번만 만료·복구한다")
+    void concurrentExpirationWorkersConvergeToOneTransition() throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "worker-worker-expiry-create");
+        clock.set(active.expiresAt());
+
+        RacePair<Integer, Integer> workers = invokePairWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> holdExpirationService.expireDueHolds(1),
+                () -> holdExpirationService.expireDueHolds(1));
+
+        assertThat(workers.first()).isOne();
+        assertThat(workers.second()).isOne();
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.EXPIRED.name());
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, Long.class, active.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("만료 service는 실제 keyset page를 끝까지 소진해 모든 due Hold를 한 번씩 만료한다")
+    void expirationServiceConsumesAllKeysetPages() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        List<ReservationHoldContracts.Result> active = List.of(
+                createHold(scenario, createConsumer(), "keyset-expiry-create-1"),
+                createHold(scenario, createConsumer(), "keyset-expiry-create-2"),
+                createHold(scenario, createConsumer(), "keyset-expiry-create-3"));
+        clock.set(active.getFirst().expiresAt());
+
+        int completed = holdExpirationService.expireDueHolds(2);
+
+        assertThat(completed).isEqualTo(3);
+        assertThat(active)
+                .extracting(result -> currentStatus(result.reservationHoldId()))
+                .containsOnly(ReservationHoldStatus.EXPIRED.name());
+        assertThat(active)
+                .allSatisfy(result ->
+                        assertThat(countTransitionAudits(result.reservationHoldId()))
+                                .isEqualTo(2));
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @ParameterizedTest(name = "target={0}")
+    @EnumSource(
+            value = ReservationHoldStatus.class,
+            names = {"CONFIRMED", "RELEASED"}
+    )
+    @DisplayName("만료 정각의 명령과 worker 경합은 단일 EXPIRED와 한 번의 복구로 수렴한다")
+    void commandAndWorkerAtExpiryBoundaryConvergeToSingleExpiration(
+            ReservationHoldStatus requestedTarget
+    ) throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario,
+                createConsumer(),
+                "command-worker-expiry-" + requestedTarget.name().toLowerCase(Locale.ROOT));
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand requested = transitionCommand(
+                active,
+                requestedTarget,
+                "command-worker-operation-"
+                        + requestedTarget.name().toLowerCase(Locale.ROOT));
+
+        RacePair<Integer, ReservationHoldContracts.Result> race = invokePairWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> holdExpirationService.expireDueHolds(100),
+                () -> holdFacade.transition(requested));
+
+        assertThat(race.first()).isOne();
+        assertThat(race.second().status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.EXPIRED.name());
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, Long.class, active.reservationHoldId())).isOne();
         assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
     }
 

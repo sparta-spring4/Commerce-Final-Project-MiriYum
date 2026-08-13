@@ -592,6 +592,46 @@ main
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
 
+class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(
+            encoding="utf-8"
+        )
+
+    def test_reservation_hold_reconciliation_stall_log_becomes_a_cloudwatch_metric(self):
+        self.assertIn("aws logs put-metric-filter", self.resource_script)
+        self.assertIn(
+            'event=reservation_hold_reconciliation_stalled',
+            self.resource_script,
+        )
+        self.assertIn(
+            'metricName=ReservationHoldReconciliationStalled',
+            self.resource_script,
+        )
+
+    def test_reservation_hold_reconciliation_stall_metric_has_a_level_triggered_alarm(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name ReservationHoldReconciliationStalled", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--period 300", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+        self.assertIn("--treat-missing-data notBreaching", self.resource_script)
+
+    def test_observability_document_describes_the_ten_minute_level_signal(self):
+        self.assertIn("`occurredAt`부터 10분", self.observability_document)
+        self.assertIn(
+            "event=reservation_hold_reconciliation_stalled long_stay_count=3",
+            self.observability_document,
+        )
+        self.assertIn("`ReservationHoldReconciliationStalled=1`", self.observability_document)
+        self.assertIn("`notBreaching`으로 복귀", self.observability_document)
+
 
 if __name__ == "__main__":
     unittest.main()
