@@ -41,6 +41,17 @@ miriyum:
   jwt:
     secret: ${MIRIYUM_JWT_SECRET}
     issuer: ${MIRIYUM_JWT_ISSUER:miriyum}
+  kakao:
+    enabled: ${MIRIYUM_KAKAO_ENABLED:false}
+    rest-api-key: ${MIRIYUM_KAKAO_REST_API_KEY:}
+    client-secret: ${MIRIYUM_KAKAO_CLIENT_SECRET:}
+    redirect-uris: ${MIRIYUM_KAKAO_REDIRECT_URIS:}
+    state-secret: ${MIRIYUM_KAKAO_STATE_SECRET:${miriyum.jwt.secret}}
+    sign-up-ticket-secret: ${MIRIYUM_KAKAO_SIGN_UP_TICKET_SECRET:${miriyum.jwt.secret}}
+    identity-fingerprint-active-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_KEY_VERSION:}
+    identity-fingerprint-active-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_SECRET:}
+    identity-fingerprint-previous-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_KEY_VERSION:}
+    identity-fingerprint-previous-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_SECRET:}
   security:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:

@@ -25,6 +25,24 @@ export interface paths {
     /** 일반 사용자 현재 shell 로그아웃 */
     delete: operations["deleteConsumerCurrentSession"];
   };
+  "/api/v1/consumers/auth/kakao/authorizations": {
+    /** 일반 사용자 카카오 인가 주소 발급 */
+    post: operations["createConsumerKakaoAuthorization"];
+  };
+  "/api/v1/consumers/auth/kakao/sessions": {
+    /**
+     * 일반 사용자 카카오 로그인
+     * @description 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+     */
+    post: operations["createConsumerKakaoSession"];
+  };
+  "/api/v1/consumers/auth/kakao/accounts": {
+    /**
+     * 카카오 일반 사용자 가입 완료
+     * @description 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 일반 사용자 계정과 카카오 연결을 함께 생성한다.
+     */
+    post: operations["createConsumerKakaoAccount"];
+  };
   "/api/v1/store-operators/auth/accounts": {
     /** 매장 운영자 가입 */
     post: operations["createStoreOperatorAccount"];
@@ -45,6 +63,24 @@ export interface paths {
     /** 매장 운영자 현재 shell 로그아웃 */
     delete: operations["deleteStoreOperatorCurrentSession"];
   };
+  "/api/v1/store-operators/auth/kakao/authorizations": {
+    /** 매장 운영자 카카오 인가 주소 발급 */
+    post: operations["createStoreOperatorKakaoAuthorization"];
+  };
+  "/api/v1/store-operators/auth/kakao/sessions": {
+    /**
+     * 매장 운영자 카카오 로그인
+     * @description 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+     */
+    post: operations["createStoreOperatorKakaoSession"];
+  };
+  "/api/v1/store-operators/auth/kakao/accounts": {
+    /**
+     * 카카오 매장 운영자 가입 완료
+     * @description 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 매장 운영자 계정과 카카오 연결을 함께 생성한다.
+     */
+    post: operations["createStoreOperatorKakaoAccount"];
+  };
   "/api/v1/consumers/me": {
     /** 일반 사용자 본인 정보 조회 */
     get: operations["getCurrentConsumerAccount"];
@@ -58,6 +94,17 @@ export interface paths {
      */
     put: operations["registerCurrentConsumerContact"];
   };
+  "/api/v1/consumers/me/kakao/authorizations": {
+    /** 일반 사용자 카카오 연결 인가 주소 발급 */
+    post: operations["createConsumerKakaoLinkAuthorization"];
+  };
+  "/api/v1/consumers/me/kakao-links": {
+    /**
+     * 일반 사용자 계정에 카카오 연결
+     * @description Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+     */
+    post: operations["createConsumerKakaoLink"];
+  };
   "/api/v1/store-operators/me/contact": {
     /**
      * 매장 운영자 최초 연락처 등록
@@ -70,6 +117,17 @@ export interface paths {
     get: operations["getCurrentStoreOperatorAccount"];
     /** 매장 운영자 표시 이름 수정 */
     patch: operations["updateCurrentStoreOperatorAccount"];
+  };
+  "/api/v1/store-operators/me/kakao/authorizations": {
+    /** 매장 운영자 카카오 연결 인가 주소 발급 */
+    post: operations["createStoreOperatorKakaoLinkAuthorization"];
+  };
+  "/api/v1/store-operators/me/kakao-links": {
+    /**
+     * 매장 운영자 계정에 카카오 연결
+     * @description Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+     */
+    post: operations["createStoreOperatorKakaoLink"];
   };
 }
 
@@ -120,6 +178,61 @@ export interface components {
       phoneNumber: components["schemas"]["MvpPhoneNumberInput"];
       displayName: string;
     };
+    KakaoAuthorizationRequest: {
+      /**
+       * Format: uri
+       * @description 카카오 개발자 콘솔과 서버 허용 목록에 모두 등록한 콜백 주소
+       */
+      redirectUri: string;
+    };
+    KakaoAuthenticationRequest: {
+      /** @description 카카오가 콜백 주소에 전달한 일회용 인가 코드 */
+      authorizationCode: string;
+      /** @description 서버가 카카오 인가 주소 발급 시 만든 5분 수명의 서명된 상태값. 같은 브라우저의 HttpOnly state 쿠키와도 일치해야 한다. */
+      state: string;
+      /**
+       * Format: uri
+       * @description 인가 주소 발급 때 사용한 동일한 허용 콜백 주소
+       */
+      redirectUri: string;
+    };
+    ConsumerKakaoSignUpRequest: {
+      /** @description 첫 카카오 로그인 결과로 받은 5분 수명의 가입 티켓 */
+      signUpTicket: string;
+      email: components["schemas"]["Email"];
+      phoneNumber: components["schemas"]["MvpPhoneNumberInput"];
+      /** @constant */
+      ageConfirmed: true;
+      nickname: string;
+    };
+    StoreOperatorKakaoSignUpRequest: {
+      /** @description 첫 카카오 로그인 결과로 받은 5분 수명의 가입 티켓 */
+      signUpTicket: string;
+      email: components["schemas"]["Email"];
+      phoneNumber: components["schemas"]["MvpPhoneNumberInput"];
+      displayName: string;
+    };
+    KakaoAuthorizationData: {
+      /** Format: uri */
+      authorizationUrl: string;
+    };
+    KakaoLoginData: {
+      /** @enum {string} */
+      status: "AUTHENTICATED" | "SIGN_UP_REQUIRED";
+      /** @description AUTHENTICATED일 때만 Access JWT를 반환한다. */
+      accessToken?: string;
+      /** @constant */
+      tokenType?: "Bearer";
+      /** @constant */
+      expiresIn?: 3600;
+      /** @description SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓 */
+      signUpTicket?: string;
+    };
+    /**
+     * @description CREATED는 새 연결, ALREADY_LINKED는 같은 계정에 이미 존재한 멱등 결과다.
+     * @enum {string}
+     */
+    KakaoLinkData: "CREATED" | "ALREADY_LINKED";
     ConsumerAccountUpdateRequest: {
       nickname: string;
     };
@@ -184,6 +297,21 @@ export interface components {
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["TokenData"];
     };
+    KakaoAuthorizationSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["KakaoAuthorizationData"];
+    };
+    KakaoLoginSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["KakaoLoginData"];
+    };
+    KakaoLinkSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["KakaoLinkData"];
+    };
     CsrfTokenSuccessResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
@@ -214,6 +342,18 @@ export interface components {
     };
     /** @description Refresh Token 쿠키가 없거나 유효하지 않음 */
     InvalidRefreshToken: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 카카오 인가 코드, state 또는 가입 티켓이 없거나 유효하지 않음 */
+    InvalidKakaoOAuth: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 같은 계정 유형의 다른 계정에 이미 연결된 카카오 계정 */
+    KakaoAlreadyLinked: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -501,6 +641,82 @@ export interface operations {
         };
       };
       403: components["responses"]["CsrfRejected"];
+    };
+  };
+  /** 일반 사용자 카카오 인가 주소 발급 */
+  createConsumerKakaoAuthorization: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthorizationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 인가 주소와 같은 브라우저 콜백 검증용 5분 state 쿠키 */
+      200: {
+        headers: {
+          /** @description MIRIYUM_CONSUMER_KAKAO_LOGIN_STATE HttpOnly state 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoAuthorizationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 일반 사용자 카카오 로그인
+   * @description 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+   */
+  createConsumerKakaoSession: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthenticationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 로그인 결과 */
+      200: {
+        headers: {
+          /** @description 로그인 완료 상태일 때만 MIRIYUM_CONSUMER_REFRESH Refresh JWT 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoLoginSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      403: components["responses"]["AccountRestricted"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 카카오 일반 사용자 가입 완료
+   * @description 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 일반 사용자 계정과 카카오 연결을 함께 생성한다.
+   */
+  createConsumerKakaoAccount: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConsumerKakaoSignUpRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 일반 사용자 가입과 로그인 완료 */
+      201: {
+        headers: {
+          /** @description MIRIYUM_CONSUMER_REFRESH Refresh JWT 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoLoginSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      409: components["responses"]["AccountConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
@@ -608,6 +824,82 @@ export interface operations {
         };
       };
       403: components["responses"]["CsrfRejected"];
+    };
+  };
+  /** 매장 운영자 카카오 인가 주소 발급 */
+  createStoreOperatorKakaoAuthorization: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthorizationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 인가 주소와 같은 브라우저 콜백 검증용 5분 state 쿠키 */
+      200: {
+        headers: {
+          /** @description MIRIYUM_STORE_OPERATOR_KAKAO_LOGIN_STATE HttpOnly state 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoAuthorizationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 매장 운영자 카카오 로그인
+   * @description 연결된 계정이면 Access JWT와 Refresh Cookie를 반환하고, 처음 로그인한 카카오 계정이면 5분 가입 티켓을 반환한다.
+   */
+  createStoreOperatorKakaoSession: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthenticationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 로그인 결과 */
+      200: {
+        headers: {
+          /** @description 로그인 완료 상태일 때만 MIRIYUM_STORE_OPERATOR_REFRESH Refresh JWT 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoLoginSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      403: components["responses"]["AccountRestricted"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 카카오 매장 운영자 가입 완료
+   * @description 최초 카카오 로그인에서 받은 5분 가입 티켓과 서비스 필수 정보를 제출해 비밀번호 없는 매장 운영자 계정과 카카오 연결을 함께 생성한다.
+   */
+  createStoreOperatorKakaoAccount: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StoreOperatorKakaoSignUpRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 매장 운영자 가입과 로그인 완료 */
+      201: {
+        headers: {
+          /** @description MIRIYUM_STORE_OPERATOR_REFRESH Refresh JWT 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoLoginSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      409: components["responses"]["AccountConflict"];
+      429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
@@ -677,6 +969,53 @@ export interface operations {
       409: components["responses"]["ContactRegistrationConflict"];
     };
   };
+  /** 일반 사용자 카카오 연결 인가 주소 발급 */
+  createConsumerKakaoLinkAuthorization: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthorizationRequest"];
+      };
+    };
+    responses: {
+      /** @description 현재 일반 사용자 계정에 묶인 카카오 연결 인가 주소와 5분 state 쿠키 */
+      200: {
+        headers: {
+          /** @description MIRIYUM_CONSUMER_KAKAO_LINK_STATE HttpOnly state 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoAuthorizationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 일반 사용자 계정에 카카오 연결
+   * @description Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+   */
+  createConsumerKakaoLink: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthenticationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 연결 완료 또는 같은 계정에 이미 연결됨 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["KakaoLinkSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+      409: components["responses"]["KakaoAlreadyLinked"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /**
    * 매장 운영자 최초 연락처 등록
    * @description 기존 연락처가 없는 매장 운영자 계정이 1차 MVP 신뢰 연락처를 최초 등록한다. 매장 운영자 연락처는 예약 알림용 opaque reference를 생성하지 않는다.
@@ -741,6 +1080,53 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["AccountRestricted"];
       409: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Conflict"];
+    };
+  };
+  /** 매장 운영자 카카오 연결 인가 주소 발급 */
+  createStoreOperatorKakaoLinkAuthorization: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthorizationRequest"];
+      };
+    };
+    responses: {
+      /** @description 현재 매장 운영자 계정에 묶인 카카오 연결 인가 주소와 5분 state 쿠키 */
+      200: {
+        headers: {
+          /** @description MIRIYUM_STORE_OPERATOR_KAKAO_LINK_STATE HttpOnly state 쿠키 */
+          "Set-Cookie"?: string;
+        };
+        content: {
+          "application/json": components["schemas"]["KakaoAuthorizationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 매장 운영자 계정에 카카오 연결
+   * @description Access JWT의 계정 ID와 OAuth state의 계정 ID가 같은 경우에만 연결한다. 카카오 이메일 일치만으로는 자동 연결하지 않는다.
+   */
+  createStoreOperatorKakaoLink: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KakaoAuthenticationRequest"];
+      };
+    };
+    responses: {
+      /** @description 카카오 연결 완료 또는 같은 계정에 이미 연결됨 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["KakaoLinkSuccessResponse"];
+        };
+      };
+      400: components["responses"]["InvalidKakaoOAuth"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+      409: components["responses"]["KakaoAlreadyLinked"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
 }

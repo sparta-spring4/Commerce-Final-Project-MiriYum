@@ -44,8 +44,20 @@ class AudienceOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/representative-menus";
     private static final Set<String> POST_MVP1_AUDIENCE_PATHS =
             Stream.concat(
-                    Stream.of(MENU_ALTERNATIVE_SEARCH_PATH, NOTIFICATION_HISTORY_PATH,
-                            REPRESENTATIVE_MENUS_PATH),
+                    Stream.of(
+                            MENU_ALTERNATIVE_SEARCH_PATH,
+                            NOTIFICATION_HISTORY_PATH,
+                            REPRESENTATIVE_MENUS_PATH,
+                            "/api/v1/consumers/auth/kakao/authorizations",
+                            "/api/v1/consumers/auth/kakao/sessions",
+                            "/api/v1/consumers/auth/kakao/accounts",
+                            "/api/v1/consumers/me/kakao/authorizations",
+                            "/api/v1/consumers/me/kakao-links",
+                            "/api/v1/store-operators/auth/kakao/authorizations",
+                            "/api/v1/store-operators/auth/kakao/sessions",
+                            "/api/v1/store-operators/auth/kakao/accounts",
+                            "/api/v1/store-operators/me/kakao/authorizations",
+                            "/api/v1/store-operators/me/kakao-links"),
                     Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream()))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
@@ -98,6 +110,17 @@ class AudienceOpenApiContractTest {
         Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
         exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
         assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
+    }
+
+    @Test
+    void kakaoLoginDataExposesAuthenticationAndSignUpFieldsAtTheTopLevel() throws IOException {
+        Map<String, Object> schemas = schemas("auth-account/openapi.yaml");
+        Map<String, Object> kakaoLoginData = map(schemas.get("KakaoLoginData"));
+        Map<String, Object> properties = map(kakaoLoginData.get("properties"));
+
+        assertThat(properties).containsKeys("status", "accessToken", "tokenType", "expiresIn", "signUpTicket");
+        assertThat(map(properties.get("status"))).doesNotContainKeys(
+                "accessToken", "tokenType", "expiresIn", "signUpTicket");
     }
 
     @Test

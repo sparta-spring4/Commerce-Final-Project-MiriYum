@@ -109,6 +109,9 @@ public class ConsumerAuthService {
     public TokenPair login(LoginRequest request) {
         ConsumerAccount account = consumerAccountRepository.findByEmail(request.email())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
+        if (account.getPasswordHash() == null) {
+            throw new ServiceException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
 
         LoginAttempt attempt = loginDelayGuard.tryAcquireAttempt(TokenNamespace.CONSUMER, account.getId());
         if (attempt.status() == LoginAttempt.Status.DELAYED) {
