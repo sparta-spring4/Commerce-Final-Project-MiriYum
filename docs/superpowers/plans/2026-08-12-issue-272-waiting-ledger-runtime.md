@@ -378,3 +378,76 @@ git commit -m "test(reservation): 웨이팅 원장 동시성 검증"
 - [ ] **Step 6: Request code review and publish Draft PR**
 
 Review against Issue #272 acceptance criteria and exact allowlist. Push only after clean status and fresh verification, then create a Draft PR targeting `dev` with `Refs #272`; do not close #272 until #271 handoff expectations are confirmed.
+
+### Task 7: Review remediation for closure lease consumption and WAIT-011 serialization
+
+**Files:**
+
+- Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/WaitingClosureJobRunner.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/WaitingLedgerService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingClosureJobRunnerTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingClosureServiceIT.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingLedgerServiceTest.java`
+- Modify: `backend/src/test/java/com/miriyum/domain/reservation/waiting/WaitingLedgerConcurrencyIT.java`
+- Update externally: PR #290 body and review replies
+
+**Interfaces:**
+
+- `WaitingClosureService.claimPendingItems(String owner, int limit, Duration leaseDuration)` remains unchanged; runner calls it with `limit=1` immediately before each item and stops after 100 processed claims or the first empty result.
+- `WaitingLedgerService` additionally consumes `WaitingQueueSequenceRepository.findByStoreIdAndBusinessDateForUpdate(long, LocalDate)` as the call serialization mutex.
+- `WaitingTeamRepository.existsByStoreIdAndBusinessDateAndStatus(long, LocalDate, WaitingTeamStatus)` detects an unresolved `CALLED` flow inside the queue-row lock.
+- Existing error `WAITING_NOT_FIFO_HEAD` represents a call blocked by an earlier unresolved call; no public contract changes.
+
+- [ ] **Step 1: Write RED runner tests**
+
+Add tests proving the runner requests one claim at a time, processes it before requesting the next, stops on an empty claim, and never processes more than 100 claims in one poll.
+
+- [ ] **Step 2: Run runner RED**
+
+```powershell
+.\gradlew.bat test --tests "*WaitingClosureJobRunnerTest" --rerun-tasks
+```
+
+Expected: existing runner requests 100 claims at once, so the one-at-a-time assertions fail.
+
+- [ ] **Step 3: Implement one-at-a-time claim loop**
+
+Replace the bulk `forEach` entrypoint with a bounded loop that calls `claimPendingItems(ownerId, 1, leaseDuration)`, returns on empty, and calls `processSafely` before the next iteration.
+
+- [ ] **Step 4: Run runner GREEN and MySQL closure regression**
+
+```powershell
+.\gradlew.bat test --tests "*WaitingClosureJobRunnerTest" --rerun-tasks
+.\gradlew.bat integrationTest --tests "*WaitingClosureServiceIT" --rerun-tasks
+```
+
+- [ ] **Step 5: Write RED WAIT-011 tests**
+
+Add a service test that requires queue sequence locking before the unresolved-call lookup and rejects a second call with `WAITING_NOT_FIFO_HEAD`. Add a MySQL barrier test that calls two distinct FIFO teams for the same store/business date concurrently and asserts one `CALLED`, one `WAITING`, one transition audit, and one status event.
+
+- [ ] **Step 6: Run WAIT-011 RED**
+
+```powershell
+.\gradlew.bat test --tests "*WaitingLedgerServiceTest" --rerun-tasks
+.\gradlew.bat integrationTest --tests "*WaitingLedgerConcurrencyIT" --rerun-tasks
+```
+
+Expected: the service has no queue-sequence dependency or unresolved `CALLED` guard, so the new tests fail.
+
+- [ ] **Step 7: Implement queue-row call serialization**
+
+Inject `WaitingQueueSequenceRepository`, lock the store/business-date sequence row during `call`, reject when a `CALLED` team exists, then perform the existing FIFO-head check and transition. Add only the repository existence query; do not add migration or public error code changes.
+
+- [ ] **Step 8: Run focused and full verification**
+
+```powershell
+.\gradlew.bat test --tests "*WaitingClosure*" --tests "*WaitingLedgerServiceTest" --rerun-tasks
+.\gradlew.bat integrationTest --tests "*WaitingClosureServiceIT" --tests "*WaitingLedgerConcurrencyIT" --rerun-tasks
+.\gradlew.bat test --rerun-tasks
+git diff --check origin/dev...HEAD
+```
+
+- [ ] **Step 9: Commit, push, update PR body, and reply**
+
+Commit only the listed files, push `feature/272-waiting-ledger-runtime`, update PR #290 to current Ready/CI evidence while retaining `#208 → #260 → #290` migration ordering, then reply to the actionable review with the commit and test evidence.

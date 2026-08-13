@@ -139,3 +139,24 @@ job은 `PENDING`, `RUNNING`, `COMPLETED`, `COMPLETED_WITH_RECONCILIATION` 상태
 7. MySQL 동시성·전체 회귀·OpenAPI 검증을 통과한다.
 
 완료 시 #272는 #271 설정 runtime이 활성 팀 영향 조회와 일괄 종결 job을 실제로 호출할 수 있는 공개 Service 계약/runtime을 제공해야 한다. #272 단독으로 #271 설정 PUT의 `202` HTTP 응답이나 프론트/SSE를 완료했다고 주장하지 않는다.
+
+## 2026-08-13 리뷰 보완 결정
+
+### Closure lease 소비
+
+worker poll 하나는 최대 100개 항목을 처리할 수 있지만, lease는 처리할 항목 1개에만 직전에 부여한다. runner는 `1건 claim → 즉시 process/failure 기록`을 최대 100회 반복하고 claim 결과가 없으면 현재 poll을 종료한다. 처리 대기 중인 뒤쪽 항목에 미리 같은 만료 시각을 부여하지 않으므로 앞 항목 처리 시간이 30초를 넘겨도 아직 시작하지 않은 항목의 attempt와 reconciliation 상태에 영향을 주지 않는다.
+
+lease duration은 30초를 유지한다. 장기 단일 항목 처리의 heartbeat 갱신은 이번 보완 범위에 추가하지 않으며, 소유권은 기존 owner·token·`leaseUntil > now` fencing을 그대로 사용한다.
+
+### WAIT-011 호출 직렬화
+
+호출 command는 대상 팀 잠금 뒤 같은 매장·영업일의 `waiting_queue_sequences` 행을 비관적으로 잠근다. 이 행이 해당 호출 흐름의 직렬화 mutex다. 잠금 안에서 미종결 `CALLED` 팀 존재 여부와 현재 `WAITING` FIFO 선두를 확인하고, 기존 `CALLED`가 있으면 다음 팀을 `WAITING_NOT_FIFO_HEAD`로 거부한다.
+
+새 공개 상태나 오류 코드를 만들지 않는다. 도착·입장·취소·미응답 처리로 기존 `CALLED` 흐름이 끝난 뒤에만 다음 호출이 가능하다. 별도 advisory lock이나 새로운 migration/guard table은 도입하지 않는다.
+
+### 보완 검증
+
+- Runner 단위 회귀: claim limit이 항상 1이고 각 claim 직후 처리한 뒤 다음 claim으로 이동하며 poll당 최대 100건을 넘지 않는다.
+- MySQL closure 회귀: 첫 항목 처리 시각이 lease duration을 넘어도 두 번째 항목은 처리 직전 새 lease를 받아 정상 처리된다.
+- Service 단위 회귀: queue sequence 잠금 뒤 기존 `CALLED` 흐름이 있으면 다음 `WAITING` 팀 호출을 거부한다.
+- MySQL 동시성 회귀: 같은 매장·영업일의 두 `WAITING` 팀을 동시에 호출해 정확히 한 팀만 `CALLED`가 되고 다른 팀은 `WAITING`으로 남는다.
