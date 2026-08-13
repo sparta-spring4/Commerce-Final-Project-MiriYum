@@ -255,6 +255,58 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("SADD", backfill_function)
         self.assertNotIn("backfill-v1", backfill_function)
 
+    def test_main_publishes_failed_health_when_risk_event_backfill_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            log_path = temporary_path / "compose-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$BACKFILL_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"sh -ec"* ]]; then
+      return 1
+    fi
+    printf '%s\\n' "$*" >> "$BACKFILL_TEST_COMPOSE"
+  fi
+  return 0
+}
+curl() { return 0; }
+wait_for_valkey_health() { return 0; }
+verify_valkey() { return 0; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "BACKFILL_TEST_METRIC": self.to_bash_path(metric_path),
+                    "BACKFILL_TEST_COMPOSE": self.to_bash_path(log_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Pending risk event index backfill failed", result.stderr)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertIn("logs --tail 100 valkey", log_path.read_text(encoding="utf-8"))
+
     def test_deployment_repeats_backfill_after_legacy_rollback(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)

@@ -128,7 +128,13 @@ main() {
     return 1
   fi
 
-  backfill_pending_risk_event_index
+  if ! backfill_pending_risk_event_index; then
+    echo "Pending risk event index backfill failed; stopping deployment." >&2
+    publish_deployment_health 0
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
+    return 1
+  fi
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do
