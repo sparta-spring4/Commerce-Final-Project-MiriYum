@@ -53,7 +53,7 @@ HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicap
 
 구조 테스트는 controller→repository 직접 호출, 모듈 간 repository/entity 직접 접근과 순환 의존을 거부한다.
 
-도메인 의존 그래프의 순환 baseline은 빈 집합이다. 예약 내역 HTTP 경계는 `reservation.controller.consumer`가 소유하고, 예약은 `ReservationMenuHoldPort`만 의존하며 `ReservationMenuHoldAdapter`가 MenuHold 기능을 연결한다. MenuHold의 예약 시간 해석은 `ReservationTimeResolutionService`로 좁혀 역방향 Service 의존을 만들지 않는다. 구조 테스트는 전체 도메인 그래프에서 순환 pair와 edge가 모두 0건인지 검사한다.
+도메인 의존 그래프의 순환 baseline은 빈 집합이다. 예약 내역 HTTP 경계는 `reservation.controller.consumer`가 소유한다. 1차 MVP의 즉시 확정 메뉴 결합은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`가 연결하고, 고도화 10분 임시 선점 결합은 예약 소유 `ReservationTemporaryMenuHoldPort`와 MenuHold 소유 `ReservationTemporaryMenuHoldAdapter`가 연결한다. 두 포트는 scalar DTO만 교환하고 Reservation은 MenuHold Entity·Repository를 직접 참조하지 않는다. MenuHold의 예약 시간 해석은 `ReservationTimeResolutionService`로 좁혀 역방향 Service 의존을 만들지 않는다. 구조 테스트는 전체 도메인 그래프에서 순환 pair와 edge가 모두 0건인지 검사한다.
 
 공통 Store→Menu 잠금·검증 흐름은 `MenuTransactionFacade`가 소유하고 MenuHold와 Pickup이 사용한다. 이 Facade는 트랜잭션 조정 경계를 명시하며, 도메인 간 순환을 허용하는 예외가 아니다.
 

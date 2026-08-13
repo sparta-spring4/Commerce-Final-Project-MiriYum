@@ -61,10 +61,38 @@ class MenuHoldProductionDependencyTest {
         assertThat(violations).isEmpty();
     }
 
+    @Test
+    void menuHoldOwnedContractsDoNotImportReservationOwnedDtos() throws IOException {
+        List<Path> ownedContractPaths = List.of(
+                MENU_HOLD_SOURCE.resolve("dto"),
+                MENU_HOLD_SOURCE.resolve("service"));
+
+        List<Path> violations = new ArrayList<>();
+        for (Path contractPath : ownedContractPaths) {
+            try (var sources = Files.walk(contractPath)) {
+                violations.addAll(sources
+                        .filter(path -> path.toString().endsWith(".java"))
+                        .filter(path -> containsText(
+                                path, "com.miriyum.domain.reservation.port.dto"))
+                        .toList());
+            }
+        }
+
+        assertThat(violations).isEmpty();
+    }
+
     private boolean containsForbiddenImport(Path source) {
         try {
             String content = Files.readString(source);
             return FORBIDDEN_IMPORTS.stream().anyMatch(content::contains);
+        } catch (IOException exception) {
+            throw new IllegalStateException("failed to inspect " + source, exception);
+        }
+    }
+
+    private boolean containsText(Path source, String forbiddenText) {
+        try {
+            return Files.readString(source).contains(forbiddenText);
         } catch (IOException exception) {
             throw new IllegalStateException("failed to inspect " + source, exception);
         }

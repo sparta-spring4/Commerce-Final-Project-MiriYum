@@ -148,6 +148,20 @@
 - 정책 재게시 뒤 Hold를 해제하거나 명시적으로 만료할 때는 최초 allocation 버킷과 현재 최신 정책의 겹치는 버킷을 합친 PK 정렬 집합을 잠그고 각 버킷에서 한 번만 복구한다. 같은 ID는 중복 제거하고 과거 중간 정책 버킷은 감사용 이력으로 남겨 수정하지 않는다.
 - Hold 부재는 `RESERVATION_001`, 수용량 부족은 `RESERVATION_003`, 중복 유효 거래는 `RESERVATION_004`, 허용되지 않은 전이는 `RESERVATION_005`, allocation·최신 버킷 불일치는 `RESERVATION_008`, 인원 정책 위반은 `RESERVATION_009`, 멱등 재사용은 `COMMON_007`, 기술적 잠금 재시도 소진은 `COMMON_008`을 사용하며 #265에서 새 공개 오류 코드를 추가하지 않는다.
 
+### 임시 선점 그룹의 메뉴 수량 원자 결합
+
+> 활성화 단계: Issue #266 — 수용량과 선택 메뉴 수량의 단일 그룹 primitive만 활성, HTTP·worker·Payment·최종 Reservation 생성 비활성
+
+- 생성 명령의 선택 메뉴는 `menuId`별로 중복 수량을 합산하고 메뉴 ID 오름차순으로 정규화한다. 메뉴별 합산 overflow와 허용 수량 범위 위반은 저장·잠금 전에 거절한다. 빈 목록은 MenuHold 행 부재라는 하나의 정규 의미를 가진다.
+- 생성 replay는 기존 수용량 입력 의미와 함께 임시 MenuHold에 저장된 메뉴 ID·합산 수량을 비교한다. 메뉴 있음/없음 변경, 메뉴 ID 변경 또는 합산 수량 변경은 `COMMON_007`이며 Hold·수용량·메뉴 재고·감사를 변경하지 않는다. 최초 replay와 Store 잠금 뒤 concurrent replay가 같은 비교를 사용한다.
+- fresh 생성은 Store와 겹치는 Reservation·Hold, 수용량 버킷을 기존 순서로 잠그고 수용량을 점유한 뒤 `ReservationHold`를 영속한다. 선택 메뉴가 있으면 예약 소유 `ReservationTemporaryMenuHoldPort`를 호출해 메뉴 재고 버킷을 PK 오름차순으로 잠그고 수량 원장과 임시 MenuHold를 같은 트랜잭션에 기록한다. 일부 메뉴 부족, 계약 불일치 또는 저장 실패에는 ReservationHold·allocation·수용량·메뉴 재고·감사·경고 의무를 전부 롤백한다.
+- 메뉴 재고 확보 operation ID는 소비자 범위 생성 command ID를 재사용하지 않는다. 영속된 Hold ID로 `reservation-temp-menu-acquire:{reservationHoldId}` 형식의 100자 이하 결정적 전역 ID를 만들고 MenuHold의 case-sensitive unique 계약을 따른다.
+- 종결은 ReservationHold를 잠근 직후 포트의 `lockForTransition(reservationHoldId)`로 임시 MenuHold 루트만 잠근다. 이후 수용량 유지 또는 복구를 처리하고, 포트의 `applyTransition`이 MenuHold 상태 변경과 필요한 메뉴 재고 복구를 수행한다. 두 계약은 호출자 트랜잭션에 필수 참여하며 최종 잠금 순서는 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK`다.
+- 생성과 종결의 MenuHold 위치는 의도적으로 다르다. fresh 생성은 기존 MenuHold 행을 잠그지 않고 `capacity → 새 MenuHold insert → inventory`로 진행하며, 종결만 기존 MenuHold 루트를 `capacity`보다 먼저 잠근다. 두 경로의 공통 불변식은 `capacity`가 항상 `inventory`보다 앞서고 각 버킷을 PK 오름차순으로 잠근다는 것이다.
+- `ACTIVE → RECONCILIATION_REQUIRED`는 수용량과 메뉴 수량을 모두 유지한다. `ACTIVE|RECONCILIATION_REQUIRED → RELEASED`와 `ACTIVE → EXPIRED`는 수용량과 메뉴 수량을 같은 트랜잭션에서 한 번만 반환한다. `CONFIRMED`는 재고를 유지하며 임시 MenuHold에 기존 최종 Reservation ID를 연결한다.
+- 메뉴가 있는 `CONFIRMED` 명령만 양의 `finalReservationId`를 요구한다. 메뉴 없는 그룹과 다른 목표 상태에는 이 값이 없어야 한다. 최초 audit replay와 Hold 잠금 후 concurrent replay도 임시 MenuHold의 영속 `reservationId`를 비교하며, 같은 operation ID를 다른 최종 Reservation에 재사용하면 `COMMON_007`이다.
+- #266은 호출자가 검증한 목표 상태와 이미 존재하는 최종 Reservation ID를 그룹에 적용하는 primitive만 소유한다. 자동 만료·명령 시점 만료 우선·중복 worker·대사 orchestration은 #267, Payment/PG 검증·목표 상태 결정·최종 Reservation 생성은 #238이 소유한다.
+
 ## 수용량
 
 - 자원은 개별 테이블·좌석이 아니라 매장·업무 날짜·시간 구간별 전체 예약 가능 인원과 팀 수다.
