@@ -22,8 +22,9 @@ public interface WaitingClosureJobItemRepository
 
     @Query(value = """
             SELECT * FROM waiting_closure_job_items
-            WHERE status = :pending
-               OR (status = :processing AND lease_until <= :now)
+            WHERE (status = :pending
+               OR (status = :processing AND lease_until <= :now))
+              AND waiting_closure_job_item_id > :afterItemId
             ORDER BY waiting_closure_job_item_id
             LIMIT :limit
             FOR UPDATE SKIP LOCKED
@@ -32,6 +33,7 @@ public interface WaitingClosureJobItemRepository
             @Param("pending") String pending,
             @Param("processing") String processing,
             @Param("now") java.time.Instant now,
+            @Param("afterItemId") long afterItemId,
             @Param("limit") int limit);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

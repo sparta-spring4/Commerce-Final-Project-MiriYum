@@ -115,7 +115,8 @@ class WaitingClosureServiceIT {
             assertThat(createdButUncommitted.await(5, TimeUnit.SECONDS)).isTrue();
 
             Future<List<WaitingClosureClaim>> invisibleClaim = executor.submit(() ->
-                    service.claimPendingItems("runner-before-commit", 100, Duration.ofSeconds(30)));
+                    service.claimPendingItems(
+                            "runner-before-commit", 100, Duration.ofSeconds(30), 0L));
             assertThat(invisibleClaim.get(5, TimeUnit.SECONDS)).isEmpty();
             allowCommit.countDown();
             assertThat(creator.get(5, TimeUnit.SECONDS).httpStatus()).isEqualTo(202);
@@ -140,7 +141,7 @@ class WaitingClosureServiceIT {
             mutableClock.advance(Duration.ofSeconds(31));
             String newOwner = original.owner().equals("runner-a") ? "runner-b" : "runner-a";
             WaitingClosureClaim reclaimed = service.claimPendingItems(
-                    newOwner, 100, Duration.ofSeconds(30)).getFirst();
+                    newOwner, 100, Duration.ofSeconds(30), 0L).getFirst();
             assertThat(reclaimed.token()).isGreaterThan(original.token());
 
             CountDownLatch staleReady = new CountDownLatch(2);
@@ -357,12 +358,12 @@ class WaitingClosureServiceIT {
         startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
 
         WaitingClosureClaim first = service.claimPendingItems(
-                "runner-a", 1, Duration.ofSeconds(30)).getFirst();
+                "runner-a", 1, Duration.ofSeconds(30), 0L).getFirst();
         assertThat(service.processClaimedItem(first)).isTrue();
         mutableClock.advance(Duration.ofSeconds(31));
 
         WaitingClosureClaim second = service.claimPendingItems(
-                "runner-a", 1, Duration.ofSeconds(30)).getFirst();
+                "runner-a", 1, Duration.ofSeconds(30), first.itemId()).getFirst();
         mutableClock.advance(Duration.ofSeconds(29));
 
         assertThat(service.processClaimedItem(second)).isTrue();
@@ -372,6 +373,44 @@ class WaitingClosureServiceIT {
         assertThat(jdbc.queryForObject(
                 "SELECT completed_team_count FROM waiting_closure_jobs", Long.class))
                 .isEqualTo(2L);
+    }
+
+    @Test
+    void retryableFailureConsumesOneAttemptPerPollAndDoesNotBlockLaterItem() {
+        Fixture fixture = fixture();
+        addSecondWaitingTeam(fixture.storeId);
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+
+        WaitingClosureClaim failed = service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30), 0L).getFirst();
+        assertThat(service.recordFailure(failed, true)).isTrue();
+
+        WaitingClosureClaim later = service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30), failed.itemId()).getFirst();
+        assertThat(service.processClaimedItem(later)).isTrue();
+        assertThat(service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30), later.itemId())).isEmpty();
+
+        assertThat(jdbc.queryForObject(
+                "SELECT attempt_count FROM waiting_closure_job_items "
+                        + "WHERE waiting_closure_job_item_id = ?",
+                Integer.class, failed.itemId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_closure_job_items "
+                        + "WHERE waiting_closure_job_item_id = ?",
+                String.class, failed.itemId())).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_closure_job_items "
+                        + "WHERE waiting_closure_job_item_id = ?",
+                String.class, later.itemId())).isEqualTo("COMPLETED");
+
+        WaitingClosureClaim nextPollRetry = service.claimPendingItems(
+                "runner-a", 1, Duration.ofSeconds(30), 0L).getFirst();
+        assertThat(nextPollRetry.itemId()).isEqualTo(failed.itemId());
+        assertThat(jdbc.queryForObject(
+                "SELECT attempt_count FROM waiting_closure_job_items "
+                        + "WHERE waiting_closure_job_item_id = ?",
+                Integer.class, failed.itemId())).isEqualTo(2);
     }
 
     private Fixture fixture() {
@@ -419,14 +458,14 @@ class WaitingClosureServiceIT {
     }
 
     private java.util.List<WaitingClosureClaim> claim(String owner) {
-        return service.claimPendingItems(owner, 100, java.time.Duration.ofSeconds(30));
+        return service.claimPendingItems(owner, 100, java.time.Duration.ofSeconds(30), 0L);
     }
 
     private Future<List<WaitingClosureClaim>> concurrentClaim(
             ExecutorService executor, CountDownLatch ready, CountDownLatch release, String owner) {
         return executor.submit(() -> {
             ready.countDown(); await(release);
-            return service.claimPendingItems(owner, 100, Duration.ofSeconds(30));
+            return service.claimPendingItems(owner, 100, Duration.ofSeconds(30), 0L);
         });
     }
 

@@ -97,11 +97,12 @@ public class WaitingClosureService {
             propagation = Propagation.REQUIRES_NEW,
             isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED,
             timeout = 5)
-    List<WaitingClosureClaim> claimPendingItems(String owner, int limit, Duration leaseDuration) {
+    List<WaitingClosureClaim> claimPendingItems(
+            String owner, int limit, Duration leaseDuration, long afterItemId) {
         Instant now = clock.instant();
         List<WaitingClosureJobItem> items = itemRepository.findGloballyClaimableForUpdate(
                 WaitingClosureItemStatus.PENDING.name(), WaitingClosureItemStatus.PROCESSING.name(),
-                now, Math.min(limit, 100));
+                now, afterItemId, Math.min(limit, 100));
         java.util.ArrayList<WaitingClosureClaim> claimed = new java.util.ArrayList<>();
         for (WaitingClosureJobItem item : items) {
             WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId()).orElseThrow();

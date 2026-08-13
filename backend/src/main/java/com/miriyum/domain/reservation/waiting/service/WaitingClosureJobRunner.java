@@ -35,12 +35,16 @@ public class WaitingClosureJobRunner {
             fixedDelayString = "${miriyum.waiting.closure.fixed-delay-ms:5000}",
             initialDelayString = "${miriyum.waiting.closure.initial-delay-ms:5000}")
     public void processClosureBatch() {
+        long afterItemId = 0L;
         for (int processed = 0; processed < MAX_ITEMS_PER_POLL; processed++) {
-            var claimed = closureService.claimPendingItems(ownerId, 1, leaseDuration);
+            var claimed = closureService.claimPendingItems(
+                    ownerId, 1, leaseDuration, afterItemId);
             if (claimed.isEmpty()) {
                 return;
             }
-            processSafely(claimed.getFirst());
+            WaitingClosureClaim claim = claimed.getFirst();
+            afterItemId = claim.itemId();
+            processSafely(claim);
         }
     }
 

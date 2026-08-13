@@ -220,7 +220,7 @@ class WaitingLedgerConcurrencyIT {
         new TransactionTemplate(transactionManager).execute(status ->
                 closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(510), 8L));
         List<WaitingClosureClaim> claimed = closureService.claimPendingItems(
-                "concurrency", 100, Duration.ofSeconds(30));
+                "concurrency", 100, Duration.ofSeconds(30), 0L);
         assertThat(claimed).hasSize(2);
 
         closureService.processClaimedItem(claimed.getFirst());
@@ -237,7 +237,7 @@ class WaitingLedgerConcurrencyIT {
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 fixture.storeId(), secondConsumerId, secondTeamId, Instant.now()));
         WaitingClosureClaim retried = closureService.claimPendingItems(
-                "concurrency", 100, Duration.ofSeconds(30)).getFirst();
+                "concurrency", 100, Duration.ofSeconds(30), 0L).getFirst();
         closureService.processClaimedItem(retried);
 
         assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))
