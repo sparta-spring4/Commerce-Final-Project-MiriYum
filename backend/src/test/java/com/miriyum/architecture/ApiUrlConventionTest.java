@@ -18,14 +18,23 @@ class ApiUrlConventionTest {
         Set<ApiRoute> invalid = Set.of(
                 route(RequestMethod.GET, "/api/v1/consumers/reservations"),
                 route(RequestMethod.GET, "/api/v1/consumers/profile/me"),
+                route(RequestMethod.GET, "/api/v1/payments/me"),
+                route(RequestMethod.POST, "/api/v1/stores/auth"),
+                route(RequestMethod.GET, "/api/v1/webhooks/me"),
                 route(RequestMethod.POST, "/api/v1/store-operators/stores/{storeId}/publication"),
                 route(RequestMethod.GET, "/api/v1/stores/{storeId}/menu"));
 
         assertThat(ApiUrlConvention.violations(invalid))
-                .hasSize(4)
+                .hasSize(7)
                 .anyMatch(message -> message.contains("/consumers/reservations")
                         && message.contains("scope"))
                 .anyMatch(message -> message.contains("/profile/me")
+                        && message.contains("position"))
+                .anyMatch(message -> message.contains("/payments/me")
+                        && message.contains("position"))
+                .anyMatch(message -> message.contains("/stores/auth")
+                        && message.contains("position"))
+                .anyMatch(message -> message.contains("/webhooks/me")
                         && message.contains("position"))
                 .anyMatch(message -> message.contains("/publication")
                         && message.contains("legacy"))

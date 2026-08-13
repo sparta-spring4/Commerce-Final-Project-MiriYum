@@ -70,8 +70,12 @@ final class ApiUrlConvention {
 
     private static String audienceViolation(List<String> segments) {
         String audience = segments.get(2);
-        for (int index = 4; index < segments.size(); index++) {
-            if (segments.get(index).equals("me") || segments.get(index).equals("auth")) {
+        boolean accountAudience = audience.equals("consumers")
+                || audience.equals("store-operators");
+        for (int index = 3; index < segments.size(); index++) {
+            boolean accountScope = segments.get(index).equals("me")
+                    || segments.get(index).equals("auth");
+            if (accountScope && !(accountAudience && index == 3)) {
                 return "/me and /auth are allowed only in their canonical audience position";
             }
         }
