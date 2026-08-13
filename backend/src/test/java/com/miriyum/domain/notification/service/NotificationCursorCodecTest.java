@@ -57,6 +57,17 @@ class NotificationCursorCodecTest {
     }
 
     @Test
+    void rejectsSignedButOutOfRangeTimestampAsInvalidCursor() {
+        NotificationCursorCodec codec = codec("0123456789abcdef0123456789abcdef");
+        String cursor = codec.encodeRawForTest(
+                "notification-history-v1\n9223372036854775807\n0\n103",
+                CONSUMER_ID
+        );
+
+        assertInvalidCursor(() -> codec.decode(CONSUMER_ID, cursor));
+    }
+
+    @Test
     void missingDedicatedSecretDoesNotFallBackToAnotherApplicationSecret() {
         NotificationCursorCodec codec = codec("");
 

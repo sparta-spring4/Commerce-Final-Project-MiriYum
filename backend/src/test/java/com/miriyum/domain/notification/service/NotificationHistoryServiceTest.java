@@ -85,6 +85,25 @@ class NotificationHistoryServiceTest {
     }
 
     @Test
+    void sourceAdapterExceptionKeepsDeliveredItemAndOmitsAction() {
+        HistoryTask task = historyTask(103L, OCCURRED_AT);
+        given(repository.findDeliveredInAppHistory(CONSUMER_ID, null, 2))
+                .willReturn(List.of(task));
+        given(sourceRegistry.readContext(
+                NotificationSourceDomain.PICKUP,
+                NotificationResourceType.PICKUP_RESERVATION,
+                31L,
+                3L,
+                CONSUMER_ID
+        )).willThrow(new IllegalStateException("source temporarily unavailable"));
+
+        assertThat(service.getHistory(CONSUMER_ID, null, 1).items())
+                .singleElement()
+                .extracting(item -> item.action())
+                .isNull();
+    }
+
+    @Test
     void recipientRelationMismatchNeverReturnsAction() {
         HistoryTask task = historyTask(103L, OCCURRED_AT);
         given(repository.findDeliveredInAppHistory(CONSUMER_ID, null, 2))

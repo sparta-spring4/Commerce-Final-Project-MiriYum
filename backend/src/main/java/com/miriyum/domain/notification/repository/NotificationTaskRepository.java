@@ -129,6 +129,7 @@ public class NotificationTaskRepository {
                          WHERE task.recipient_account_id = ?
                            AND task.status = 'DELIVERED'
                            AND task.delivered_at IS NOT NULL
+                           AND task.title IS NOT NULL
                            AND (? IS NULL
                                 OR task.occurred_at < ?
                                 OR (task.occurred_at = ? AND task.notification_id < ?))

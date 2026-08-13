@@ -71,6 +71,10 @@ class NotificationHistoryIntegrationTest {
         insertAttempt(103L, "DELIVERED");
         insertTask(102L, 11L, "DELIVERED", occurredAt, null);
         insertAttempt(102L, "DELIVERED");
+        insertTask(100L, 11L, "DELIVERED", occurredAt, occurredAt.plusSeconds(1));
+        jdbcTemplate.update(
+                "UPDATE notification_tasks SET title = NULL WHERE notification_id = 100");
+        insertAttempt(100L, "DELIVERED");
         insertTask(101L, 12L, "DELIVERED", occurredAt, occurredAt.plusSeconds(1));
         insertAttempt(101L, "DELIVERED");
 

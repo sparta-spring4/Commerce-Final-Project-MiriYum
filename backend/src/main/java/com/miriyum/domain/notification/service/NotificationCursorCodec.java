@@ -36,6 +36,13 @@ public class NotificationCursorCodec {
         return encode(version, consumerAccountId, boundary);
     }
 
+    String encodeRawForTest(String boundaryPayload, long consumerAccountId) {
+        byte[] key = settings.requireCursorKey();
+        String payload = boundaryPayload + "\n" + scope(key, consumerAccountId);
+        String envelope = payload + "\n" + hexHmac(key, "cursor\n" + payload);
+        return ENCODER.encodeToString(envelope.getBytes(StandardCharsets.UTF_8));
+    }
+
     public Boundary decode(long consumerAccountId, String cursor) {
         byte[] key = settings.requireCursorKey();
         if (cursor == null
@@ -68,7 +75,7 @@ public class NotificationCursorCodec {
             return new Boundary(Instant.ofEpochSecond(epochSecond, nano), notificationId);
         } catch (ServiceException exception) {
             throw exception;
-        } catch (IllegalArgumentException exception) {
+        } catch (RuntimeException exception) {
             throw invalidCursor();
         }
     }
