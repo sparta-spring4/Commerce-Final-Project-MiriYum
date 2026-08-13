@@ -1,4 +1,4 @@
--- 카카오 OAuth 전용 계정은 비밀번호 없이 생성할 수 있다.
+-- Kakao OAuth accounts are created without a password hash.
 ALTER TABLE consumer_accounts MODIFY password_hash VARCHAR(255) NULL;
 ALTER TABLE store_operator_accounts MODIFY password_hash VARCHAR(255) NULL;
 
