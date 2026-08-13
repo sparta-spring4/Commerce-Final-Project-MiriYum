@@ -1,0 +1,33 @@
+name: Document Routing
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: document-routing-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  document-routing:
+    name: document-routing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify document routing guard fixtures
+        shell: pwsh
+        run: ./.github/scripts/test-check-document-routing.ps1
+
+      - name: Reject non-canonical SDD artifacts
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/check-document-routing.ps1 -BaseRef $env:BASE_REF -HeadRef $env:HEAD_REF
