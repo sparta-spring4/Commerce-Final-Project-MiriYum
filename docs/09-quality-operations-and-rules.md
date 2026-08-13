@@ -1,5 +1,12 @@
 # 09. 품질·운영·규칙
 
+## 플랫폼 운영자 인증 검증 게이트
+
+- 기능 플래그 OFF의 Controller 부재와 실제 404를 HTTP 통합 테스트로 검증한다.
+- 로그인·최초 비밀번호 변경·refresh·logout·CSRF와 제한 세션의 업무 API 403을 실제 MySQL·Valkey 흐름으로 검증한다.
+- 최초 비밀번호 변경 경합은 실제 MySQL 두 트랜잭션으로, 세션 교체·회전·재사용 회수는 실제 Valkey Lua 연산으로 검증한다.
+- `platform-operator-openapi.yaml`의 다섯 경로는 아키텍처·OpenAPI 드리프트 테스트로 고정한다.
+
 ## 증거 원칙
 
 검증 기록은 정확한 명령, 환경·정책·스키마 버전, 결과와 증거를 남긴다. 상태는 `PASS`, `FAIL`, `BLOCKED`, `NOT RUN`, `NOT CONFIGURED`, `NOT APPLICABLE` 가운데 하나를 사용한다. 실행 파일·외부 환경·기능이 없으면 성공으로 추측하지 않는다.

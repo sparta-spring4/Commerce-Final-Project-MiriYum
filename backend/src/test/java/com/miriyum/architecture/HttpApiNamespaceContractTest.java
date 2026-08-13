@@ -43,6 +43,8 @@ class HttpApiNamespaceContractTest {
                 .allMatch(mapping -> mapping.path().startsWith("/api/v1/consumers"));
         assertThat(mappings.stream().filter(ControllerMapping::isStoreOperator))
                 .allMatch(mapping -> mapping.path().startsWith("/api/v1/store-operators"));
+        assertThat(mappings.stream().filter(ControllerMapping::isPlatformOperator))
+                .allMatch(mapping -> mapping.path().startsWith("/api/v1/platform-operators"));
     }
 
     private static List<ControllerMapping> controllerMappings() {
@@ -79,6 +81,10 @@ class HttpApiNamespaceContractTest {
         boolean isStoreOperator() {
             return packageName.startsWith("com.miriyum.domain.storeoperator.controller.")
                     || packageName.contains(".controller.storeoperator");
+        }
+
+        boolean isPlatformOperator() {
+            return packageName.startsWith("com.miriyum.domain.platformoperator.controller.");
         }
     }
 }
