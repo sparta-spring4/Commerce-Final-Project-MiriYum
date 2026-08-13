@@ -108,7 +108,7 @@ class PlatformOperatorAuthHttpIT {
                 .andExpect(status().isOk());
         mvc.perform(get("/api/v1/platform-operators/test-business").header("Authorization", "Bearer " + access))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("AUTH_013"));
+                .andExpect(jsonPath("$.code").value("AUTH_015"));
 
         MvcResult refreshed = mvc.perform(post("/api/v1/platform-operators/auth/token-refreshes")
                         .cookie(activeRefresh)
