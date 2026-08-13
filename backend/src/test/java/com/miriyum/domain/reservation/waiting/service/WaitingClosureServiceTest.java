@@ -196,9 +196,9 @@ class WaitingClosureServiceTest {
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
         item.claim("owner", NOW.minusSeconds(3), NOW.plusSeconds(1));
-        item.requeue("owner", 1L);
+        item.requeue("owner", 1L, NOW.minusSeconds(2));
         item.claim("owner", NOW.minusSeconds(2), NOW.plusSeconds(1));
-        item.requeue("owner", 2L);
+        item.requeue("owner", 2L, NOW.minusSeconds(1));
         item.claim("owner", NOW.minusSeconds(1), NOW.plusSeconds(1));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));

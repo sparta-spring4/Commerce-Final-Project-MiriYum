@@ -79,22 +79,30 @@ public class WaitingClosureJobItem {
         status = WaitingClosureItemStatus.PROCESSING; attemptCount++; lastAttemptedAt = now;
         leaseOwner = owner; leaseUntil = until; claimToken++;
     }
-    public boolean isOwnedBy(String owner, long token) {
-        return status == WaitingClosureItemStatus.PROCESSING && claimToken == token && owner.equals(leaseOwner);
+    public boolean isOwnedBy(String owner, long token, Instant now) {
+        return status == WaitingClosureItemStatus.PROCESSING
+                && claimToken == token
+                && owner.equals(leaseOwner)
+                && leaseUntil != null
+                && leaseUntil.isAfter(now);
     }
     public boolean isExpiredAt(Instant now) { return leaseUntil != null && !leaseUntil.isAfter(now); }
     public void complete(String owner, long token, Instant now) {
-        requireFence(owner, token); status = WaitingClosureItemStatus.COMPLETED; completedAt = now; clearLease();
+        requireFence(owner, token, now); status = WaitingClosureItemStatus.COMPLETED; completedAt = now; clearLease();
     }
-    public void requeue(String owner, long token) { requireFence(owner, token); status = WaitingClosureItemStatus.PENDING; clearLease(); }
+    public void requeue(String owner, long token, Instant now) {
+        requireFence(owner, token, now); status = WaitingClosureItemStatus.PENDING; clearLease();
+    }
     public void requireReconciliation(String owner, long token, Instant now) {
-        requireFence(owner, token); status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; clearLease();
+        requireFence(owner, token, now); status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; clearLease();
     }
     public void reconcileExpired(Instant now) {
         if (status != WaitingClosureItemStatus.PROCESSING || !isExpiredAt(now)) throw new IllegalStateException("lease is not expired");
         status = WaitingClosureItemStatus.RECONCILIATION_REQUIRED; completedAt = now; clearLease();
     }
-    private void requireFence(String owner, long token) { if (!isOwnedBy(owner, token)) throw new IllegalStateException("stale closure claim"); }
+    private void requireFence(String owner, long token, Instant now) {
+        if (!isOwnedBy(owner, token, now)) throw new IllegalStateException("stale closure claim");
+    }
     private void clearLease() { leaseOwner = null; leaseUntil = null; }
     public Long getId() { return id; }
     public Long getWaitingClosureJobId() { return waitingClosureJobId; }

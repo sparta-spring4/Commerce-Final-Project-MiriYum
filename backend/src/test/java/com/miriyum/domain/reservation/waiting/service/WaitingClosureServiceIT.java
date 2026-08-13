@@ -328,6 +328,28 @@ class WaitingClosureServiceIT {
         assertThat(count("waiting_status_events")).isOne();
     }
 
+    @Test
+    void expiredLeaseRejectsOwnerAtExactBoundaryBeforeReclaim() {
+        Fixture fixture = fixture();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim expired = claim("runner-a").getFirst();
+
+        mutableClock.advance(Duration.ofSeconds(30));
+
+        assertThat(service.processClaimedItem(expired)).isFalse();
+        assertThat(service.recordFailure(expired, true)).isFalse();
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_closure_job_items", String.class))
+                .isEqualTo("PROCESSING");
+        assertThat(jdbc.queryForObject(
+                "SELECT lease_owner FROM waiting_closure_job_items", String.class))
+                .isEqualTo("runner-a");
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_teams", String.class))
+                .isEqualTo("WAITING");
+        assertThat(count("waiting_transition_audits")).isZero();
+        assertThat(count("waiting_status_events")).isZero();
+    }
+
     private Fixture fixture() {
         long operatorId = operators.saveAndFlush(
                 StoreOperatorAccount.create("closure@example.com", "hashed", "owner")).getId();

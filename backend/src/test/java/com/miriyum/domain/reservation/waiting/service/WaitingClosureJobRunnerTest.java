@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 
 @ExtendWith(MockitoExtension.class)
 class WaitingClosureJobRunnerTest {
@@ -25,6 +26,24 @@ class WaitingClosureJobRunnerTest {
                 .withPropertyValues("miriyum.waiting.closure.enabled=false")
                 .run(context -> assertThat(context)
                         .doesNotHaveBean(WaitingClosureJobRunner.class));
+    }
+
+    @Test
+    void enabledWaitingClosureRegistersScheduledTaskWithoutOtherSchedulers() {
+        new ApplicationContextRunner()
+                .withBean(WaitingClosureService.class, () -> mock(WaitingClosureService.class))
+                .withUserConfiguration(
+                        WaitingClosureScheduleConfig.class,
+                        WaitingClosureJobRunner.class)
+                .withPropertyValues(
+                        "miriyum.waiting.closure.enabled=true",
+                        "miriyum.waiting.closure.initial-delay-ms=3600000",
+                        "miriyum.waiting.closure.fixed-delay-ms=3600000")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(WaitingClosureJobRunner.class);
+                    assertThat(context.getBean(ScheduledTaskHolder.class).getScheduledTasks())
+                            .hasSize(1);
+                });
     }
 
     @Test

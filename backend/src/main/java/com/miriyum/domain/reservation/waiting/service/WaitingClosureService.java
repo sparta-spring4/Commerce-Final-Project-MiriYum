@@ -121,7 +121,7 @@ public class WaitingClosureService {
         Instant now = clock.instant();
         WaitingClosureJobItem item = itemRepository.findByIdForUpdate(claim.itemId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
-        if (!item.isOwnedBy(claim.owner(), claim.token())) return false;
+        if (!item.isOwnedBy(claim.owner(), claim.token(), now)) return false;
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
         WaitingTeam team = teamRepository.findByIdForUpdate(item.getWaitingTeamId())
@@ -149,10 +149,12 @@ public class WaitingClosureService {
         Instant now = clock.instant();
         WaitingClosureJobItem item = itemRepository.findByIdForUpdate(claim.itemId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
-        if (!item.isOwnedBy(claim.owner(), claim.token())) return false;
+        if (!item.isOwnedBy(claim.owner(), claim.token(), now)) return false;
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
-        if (retryable && item.getAttemptCount() < MAX_ITEM_ATTEMPTS) item.requeue(claim.owner(), claim.token());
+        if (retryable && item.getAttemptCount() < MAX_ITEM_ATTEMPTS) {
+            item.requeue(claim.owner(), claim.token(), now);
+        }
         else item.requireReconciliation(claim.owner(), claim.token(), now);
         reconcile(job, now);
         return true;
