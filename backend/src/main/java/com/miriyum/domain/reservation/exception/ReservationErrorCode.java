@@ -53,6 +53,46 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "RESERVATION_010",
             "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."
+    ),
+    WAITING_TEAM_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "WAITING_003",
+            "대상 매장 범위의 웨이팅 팀을 찾을 수 없습니다."
+    ),
+    WAITING_CLOSE_JOB_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "WAITING_004",
+            "대상 매장 범위의 웨이팅 종결 작업을 찾을 수 없습니다."
+    ),
+    WAITING_VERSION_CONFLICT(
+            HttpStatus.CONFLICT,
+            "WAITING_005",
+            "대상 팀 버전이 요청 버전과 다릅니다."
+    ),
+    WAITING_INVALID_TRANSITION(
+            HttpStatus.CONFLICT,
+            "WAITING_006",
+            "현재 상태에서는 요청한 웨이팅 전이를 수행할 수 없습니다."
+    ),
+    WAITING_NOT_FIFO_HEAD(
+            HttpStatus.CONFLICT,
+            "WAITING_007",
+            "호출 대상이 활성 FIFO 선두가 아닙니다."
+    ),
+    WAITING_ACTIVE_MEMBERSHIP_CONFLICT(
+            HttpStatus.CONFLICT,
+            "WAITING_008",
+            "활성 웨이팅 멤버십과 요청 전제가 충돌합니다."
+    ),
+    WAITING_CLOSE_JOB_NOT_READY(
+            HttpStatus.CONFLICT,
+            "WAITING_009",
+            "웨이팅 종결 작업이 아직 완료되지 않았거나 재확인이 필요합니다."
+    ),
+    WAITING_CLOSE_JOB_ITEM_FAILED(
+            HttpStatus.CONFLICT,
+            "WAITING_010",
+            "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다."
     );
 
     private final HttpStatus httpStatus;

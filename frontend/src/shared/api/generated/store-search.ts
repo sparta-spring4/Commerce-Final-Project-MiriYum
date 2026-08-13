@@ -132,6 +132,15 @@ export interface paths {
     /** 메뉴 운영 종료 */
     post: operations["retireMenu"];
   };
+  "/api/v1/store-operators/stores/{storeId}/representative-menus": {
+    /** 대표(인기) 메뉴 설정 조회 */
+    get: operations["getRepresentativeMenus"];
+    /**
+     * 대표(인기) 메뉴 3~5개와 순서 전체 교체
+     * @description SOLD_OUT 메뉴는 선정을 유지할 수 있지만 HIDDEN, PAUSED, RETIRED 또는 미게시 메뉴는 저장할 수 없다.
+     */
+    put: operations["replaceRepresentativeMenus"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -329,6 +338,34 @@ export interface components {
       pickupEnabled: boolean;
       /** @enum {string} */
       saleStatus: "SELLING" | "SOLD_OUT" | "PAUSED";
+    };
+    /** @enum {string} */
+    RepresentativeMenuSettingStatus: "UNCONFIGURED" | "CONFIGURED" | "REQUIRES_ATTENTION";
+    RepresentativeMenuReplaceRequest: {
+      /** Format: int64 */
+      expectedVersion: number;
+      menuIds: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"][];
+    };
+    RepresentativeMenuItem: {
+      menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+      displayOrder: number;
+      publishedVersionNumber: number;
+      name: string;
+      /** Format: int64 */
+      price: number;
+      /** @enum {string} */
+      sellingStatus: "SELLING" | "SOLD_OUT";
+    };
+    RepresentativeMenuSetting: {
+      /** Format: int64 */
+      version: number;
+      status: components["schemas"]["RepresentativeMenuSettingStatus"];
+      items: components["schemas"]["RepresentativeMenuItem"][];
+    };
+    RepresentativeMenuSettingSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["RepresentativeMenuSetting"];
     };
     ManagedMenu: {
       menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
@@ -674,6 +711,18 @@ export interface components {
     };
     /** @description 매장 운영·입점 검증 상태 또는 일정 구간·잠금 충돌 */
     SchedulePublicationConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 또는 요청한 메뉴를 찾을 수 없음 */
+    RepresentativeMenuNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 구 version 또는 현재 공개 불가 메뉴 때문에 전체 교체 불가 */
+    RepresentativeMenuConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -2005,6 +2054,58 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["MenuNotFound"];
       409: components["responses"]["MenuStateConflict"];
+    };
+  };
+  /** 대표(인기) 메뉴 설정 조회 */
+  getRepresentativeMenus: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description 현재 대표 메뉴 설정 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RepresentativeMenuSettingSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
+    };
+  };
+  /**
+   * 대표(인기) 메뉴 3~5개와 순서 전체 교체
+   * @description SOLD_OUT 메뉴는 선정을 유지할 수 있지만 HIDDEN, PAUSED, RETIRED 또는 미게시 메뉴는 저장할 수 없다.
+   */
+  replaceRepresentativeMenus: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RepresentativeMenuReplaceRequest"];
+      };
+    };
+    responses: {
+      /** @description 교체된 대표 메뉴 설정 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RepresentativeMenuSettingSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["RepresentativeMenuNotFound"];
+      409: components["responses"]["RepresentativeMenuConflict"];
     };
   };
   /** 일반 예약과 선택 메뉴 홀드 생성 */

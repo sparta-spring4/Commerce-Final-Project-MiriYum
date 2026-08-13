@@ -30,6 +30,14 @@ aws logs put-retention-policy \
   --log-group-name "$LOG_GROUP_NAME" \
   --retention-in-days 7
 
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-delivery-stalled \
+  --filter-pattern '"event=refresh_token_risk_event_delivery_stalled"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventDeliveryStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$TOPIC_NAME" \
@@ -111,6 +119,15 @@ put_alarm "miriyum-staging-deployment-health-failed" \
   --evaluation-periods 1 \
   --threshold 0.5 \
   --comparison-operator LessThanThreshold
+
+put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled" \
+  --namespace "$NAMESPACE" \
+  --metric-name RefreshTokenRiskEventDeliveryStalled \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
 
 dashboard_body=$(cat <<EOF
 {

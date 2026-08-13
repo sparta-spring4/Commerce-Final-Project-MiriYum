@@ -1,10 +1,12 @@
 package com.miriyum.domain.consumer.controller.auth;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -27,7 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * SCALE-014, 이슈 #63).</p>
  */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-c")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -72,5 +74,16 @@ class ConsumerAuthControllerTest {
                         .content(requestBody))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.accountType").value("CONSUMER"));
+    }
+
+    @Test
+    @DisplayName("Refresh 쿠키 없이도 CSRF 검증을 통과하면 로그아웃이 성공한다")
+    void logoutSucceedsWithoutRefreshCookie() throws Exception {
+        String csrfToken = "consumer-logout-csrf-token";
+
+        mockMvc.perform(delete("/api/v1/consumers/auth/sessions/current")
+                        .cookie(new Cookie("MIRIYUM_CONSUMER_XSRF_TOKEN", csrfToken))
+                        .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk());
     }
 }
