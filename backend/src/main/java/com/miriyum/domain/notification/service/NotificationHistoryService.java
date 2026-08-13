@@ -45,6 +45,7 @@ public class NotificationHistoryService {
         if (consumerAccountId <= 0 || size < 1 || size > 50) {
             throw new IllegalArgumentException("notification history arguments are invalid");
         }
+        cursorCodec.requireAvailable();
         NotificationCursorCodec.Boundary decoded = cursor == null
                 ? null
                 : cursorCodec.decode(consumerAccountId, cursor);

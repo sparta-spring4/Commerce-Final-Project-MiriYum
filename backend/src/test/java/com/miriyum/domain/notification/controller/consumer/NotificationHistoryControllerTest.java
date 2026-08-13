@@ -20,6 +20,7 @@ import com.miriyum.domain.notification.dto.response.NotificationResourceResponse
 import com.miriyum.domain.notification.entity.NotificationPurpose;
 import com.miriyum.domain.notification.entity.NotificationResourceType;
 import com.miriyum.domain.notification.service.NotificationHistoryService;
+import com.miriyum.domain.notification.exception.NotificationErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.security.SecurityConfig;
 import java.time.OffsetDateTime;
@@ -31,6 +32,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -89,13 +92,19 @@ class NotificationHistoryControllerTest {
     }
 
     @Test
-    void invalidCursorShapeAndOversizedPageAreRejectedBeforeBusinessQuery() throws Exception {
+    void malformedCursorReturnsNotificationSpecificError() throws Exception {
+        given(historyService.getHistory(CONSUMER_ID, "contains.dot", 20))
+                .willThrow(new ServiceException(NotificationErrorCode.INVALID_HISTORY_CURSOR));
+
         mockMvc.perform(get("/api/v1/consumers/me/notifications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
                         .queryParam("cursor", "contains.dot"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_001"));
+                .andExpect(jsonPath("$.code").value("NOTIFICATION_001"));
+    }
 
+    @Test
+    void oversizedPageIsRejectedBeforeBusinessQuery() throws Exception {
         mockMvc.perform(get("/api/v1/consumers/me/notifications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
                         .queryParam("size", "51"))
@@ -103,6 +112,30 @@ class NotificationHistoryControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON_001"));
 
         verifyNoInteractions(consumerAccountService, historyService);
+    }
+
+    @Test
+    void currentAccountAvailabilityFailureReturnsServiceUnavailable() throws Exception {
+        willThrow(new CannotAcquireLockException("account lookup timed out"))
+                .given(consumerAccountService).requireActiveAccount(CONSUMER_ID);
+
+        mockMvc.perform(get("/api/v1/consumers/me/notifications")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COMMON_012"));
+
+        verifyNoInteractions(historyService);
+    }
+
+    @Test
+    void historyStorageAvailabilityFailureReturnsServiceUnavailable() throws Exception {
+        given(historyService.getHistory(CONSUMER_ID, null, 20))
+                .willThrow(new DataAccessResourceFailureException("history database unavailable"));
+
+        mockMvc.perform(get("/api/v1/consumers/me/notifications")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COMMON_012"));
     }
 
     @Test

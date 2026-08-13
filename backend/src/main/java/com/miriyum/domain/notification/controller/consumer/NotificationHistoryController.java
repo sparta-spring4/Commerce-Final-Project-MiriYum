@@ -4,11 +4,13 @@ import com.miriyum.domain.auth.jwt.AuthenticatedPrincipal;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.notification.dto.response.NotificationHistoryPageResponse;
 import com.miriyum.domain.notification.service.NotificationHistoryService;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,15 +38,16 @@ public class NotificationHistoryController {
     @GetMapping
     public ApiResponse<NotificationHistoryPageResponse> getHistory(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
-            @RequestParam(required = false)
-            @Size(min = 1, max = 512)
-            @Pattern(regexp = "^[A-Za-z0-9_-]+$")
-            String cursor,
+            @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size
     ) {
-        consumerAccountService.requireActiveAccount(principal.accountId());
-        NotificationHistoryPageResponse response = historyService.getHistory(
-                principal.accountId(), cursor, size);
-        return ApiResponse.success("조회했습니다.", response);
+        try {
+            consumerAccountService.requireActiveAccount(principal.accountId());
+            NotificationHistoryPageResponse response = historyService.getHistory(
+                    principal.accountId(), cursor, size);
+            return ApiResponse.success("조회했습니다.", response);
+        } catch (TransientDataAccessException | DataAccessResourceFailureException unavailable) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 }

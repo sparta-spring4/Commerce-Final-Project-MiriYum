@@ -32,6 +32,11 @@ public class NotificationCursorCodec {
         return encode(CONTRACT_VERSION, consumerAccountId, boundary);
     }
 
+    /** secret 누락 여부를 page 내용과 무관하게 endpoint 진입 시 확인한다. */
+    public void requireAvailable() {
+        settings.requireCursorKey();
+    }
+
     String encodeForTest(String version, long consumerAccountId, Boundary boundary) {
         return encode(version, consumerAccountId, boundary);
     }

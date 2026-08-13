@@ -41,6 +41,15 @@ class NotificationCursorCodecTest {
     }
 
     @Test
+    void rejectsBlankOversizedAndNonUrlSafeCursorShapes() {
+        NotificationCursorCodec codec = codec("0123456789abcdef0123456789abcdef");
+
+        assertInvalidCursor(() -> codec.decode(CONSUMER_ID, ""));
+        assertInvalidCursor(() -> codec.decode(CONSUMER_ID, "A".repeat(513)));
+        assertInvalidCursor(() -> codec.decode(CONSUMER_ID, "contains.dot"));
+    }
+
+    @Test
     void rejectsCursorIssuedForAnotherConsumer() {
         NotificationCursorCodec codec = codec("0123456789abcdef0123456789abcdef");
         String cursor = codec.encode(CONSUMER_ID, BOUNDARY);

@@ -1,11 +1,14 @@
 package com.miriyum.domain.notification.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
+import com.miriyum.domain.notification.config.NotificationHistorySettings;
 import com.miriyum.domain.notification.entity.NotificationActionAvailability;
 import com.miriyum.domain.notification.entity.NotificationActionType;
 import com.miriyum.domain.notification.entity.NotificationPurpose;
@@ -13,6 +16,8 @@ import com.miriyum.domain.notification.entity.NotificationResourceType;
 import com.miriyum.domain.notification.entity.NotificationSourceDomain;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryTask;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -133,6 +138,21 @@ class NotificationHistoryServiceTest {
                 .singleElement()
                 .extracting(item -> item.action())
                 .isNull();
+    }
+
+    @Test
+    void missingCursorSecretFailsClosedEvenForEmptyFirstPage() {
+        NotificationHistoryService unavailableService = new NotificationHistoryService(
+                repository,
+                new NotificationCursorCodec(new NotificationHistorySettings("")),
+                sourceRegistry
+        );
+
+        assertThatThrownBy(() -> unavailableService.getHistory(CONSUMER_ID, null, 20))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+        verifyNoInteractions(repository);
     }
 
     private static HistoryTask historyTask(long notificationId, Instant occurredAt) {
