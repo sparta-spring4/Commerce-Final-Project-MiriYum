@@ -287,6 +287,12 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
+    /** @description 현재 픽업 상태 또는 알림 원 사건 충돌로 운영자 취소 불가 */
+    PickupOperatorCancellationConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 메뉴 재고 버킷을 찾을 수 없음 */
     MenuInventoryNotFound: {
       content: {
@@ -671,7 +677,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StorePickupNotFound"];
-      409: components["responses"]["PickupStateConflict"];
+      409: components["responses"]["PickupOperatorCancellationConflict"];
     };
   };
   /** 운영자 메뉴 재고 버킷 목록 조회 */
