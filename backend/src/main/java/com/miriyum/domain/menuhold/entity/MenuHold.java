@@ -177,7 +177,7 @@ public class MenuHold extends BaseEntity {
      * @throws IllegalStateException 이미 이행 완료된 홀드인 경우
      */
     public boolean release() {
-        requireLegacyMode();
+        requireFinalReservationMode();
         if (status == MenuHoldStatus.RELEASED) {
             return false;
         }
@@ -195,7 +195,7 @@ public class MenuHold extends BaseEntity {
      * @throws IllegalStateException 이미 해제된 홀드인 경우
      */
     public boolean fulfill() {
-        requireLegacyMode();
+        requireFinalReservationMode();
         if (status == MenuHoldStatus.FULFILLED) {
             return false;
         }
@@ -206,9 +206,16 @@ public class MenuHold extends BaseEntity {
         return true;
     }
 
-    private void requireLegacyMode() {
-        if (reservationId == null || reservationHoldId != null || expiresAt != null) {
-            throw new IllegalStateException("temporary menu hold cannot use a legacy transition");
+    private void requireFinalReservationMode() {
+        boolean hasTemporaryLineage = reservationHoldId != null && expiresAt != null;
+        boolean hasNoTemporaryLineage = reservationHoldId == null && expiresAt == null;
+        if (reservationId == null
+                || (!hasTemporaryLineage && !hasNoTemporaryLineage)
+                || (status != MenuHoldStatus.CONFIRMED
+                && status != MenuHoldStatus.RELEASED
+                && status != MenuHoldStatus.FULFILLED)) {
+            throw new IllegalStateException(
+                    "menu hold is not connected to a final reservation lifecycle");
         }
     }
 

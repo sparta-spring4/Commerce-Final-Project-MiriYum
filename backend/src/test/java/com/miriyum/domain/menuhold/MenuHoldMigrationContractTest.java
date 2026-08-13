@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 
 class MenuHoldMigrationContractTest {
 
-    private static final Path V37 = Path.of(
-            "src/main/resources/db/migration/V37__add_temporary_menu_holds.sql");
+    private static final Path V38 = Path.of(
+            "src/main/resources/db/migration/V38__add_temporary_menu_holds.sql");
 
     @Test
     void migrationDefinesReservationHoldAndItemIntegrity() throws IOException {
@@ -41,8 +41,8 @@ class MenuHoldMigrationContractTest {
     }
 
     @Test
-    void v37AddsNullableLegacyAndTemporaryParentColumns() throws IOException {
-        String sql = normalizedV37();
+    void v38AddsNullableLegacyAndTemporaryParentColumns() throws IOException {
+        String sql = normalizedV38();
 
         assertThat(sql)
                 .as("legacy MenuHold creation would fail if reservation_id stayed NOT NULL")
@@ -59,8 +59,8 @@ class MenuHoldMigrationContractTest {
     }
 
     @Test
-    void v37DefinesOneTemporaryMenuHoldPerReservationHold() throws IOException {
-        String sql = normalizedV37();
+    void v38DefinesOneTemporaryMenuHoldPerReservationHold() throws IOException {
+        String sql = normalizedV38();
 
         assertThat(sql)
                 .as("the composite FK target would not be a declared unique key")
@@ -80,8 +80,8 @@ class MenuHoldMigrationContractTest {
     }
 
     @Test
-    void v37ReplacesLegacyStatusCheckWithParentAndStateInvariant() throws IOException {
-        String sql = normalizedV37();
+    void v38ReplacesLegacyStatusCheckWithParentAndStateInvariant() throws IOException {
+        String sql = normalizedV38();
 
         assertThat(sql)
                 .as("the legacy status-only CHECK would reject every temporary state")
@@ -101,7 +101,7 @@ class MenuHoldMigrationContractTest {
                         + "AND status IN ('CONFIRMED', 'RELEASED', 'FULFILLED')) )");
     }
 
-    private static String normalizedV37() throws IOException {
-        return Files.readString(V37).replaceAll("\\s+", " ").trim();
+    private static String normalizedV38() throws IOException {
+        return Files.readString(V38).replaceAll("\\s+", " ").trim();
     }
 }

@@ -50,13 +50,13 @@
 > 활성화 단계: Issue #266 — 내부 원자 결합 계약만 활성, 사용자 HTTP·자동 만료·Payment orchestration 비활성
 
 - 기존 즉시 확정 MenuHold는 `reservationId`를 부모로 사용하고 `reservationHoldId`와 `expiresAt`이 없는 현재 계약을 유지한다. 임시 MenuHold는 `reservationHoldId`를 부모로 사용하고 연결 ReservationHold와 정확히 같은 `expiresAt`을 저장한다. 임시 그룹 확정 뒤에는 기존 최종 `reservationId`도 함께 연결한다.
-- V37은 `reservation_holds(reservation_hold_id, expires_at)` 참조 unique와 `menu_holds(reservation_hold_id, expires_at)` 복합 FK를 둔다. 임시 MenuHold의 `reservationHoldId`는 unique이며 하나의 ReservationHold에 MenuHold 루트가 최대 한 건만 존재한다.
+- V38은 `reservation_holds(reservation_hold_id, expires_at)` 참조 unique와 `menu_holds(reservation_hold_id, expires_at)` 복합 FK를 둔다. 임시 MenuHold의 `reservationHoldId`는 unique이며 하나의 ReservationHold에 MenuHold 루트가 최대 한 건만 존재한다.
 - DB CHECK는 기존 행과 임시 행을 구분한다. 기존 행은 `reservationHoldId/expiresAt = NULL`, `reservationId IS NOT NULL`, 상태 `CONFIRMED|RELEASED|FULFILLED`만 허용한다. 최종 Reservation에 연결되지 않은 임시 행은 `reservationHoldId/expiresAt IS NOT NULL`, `reservationId IS NULL`, 상태 `ACTIVE|RECONCILIATION_REQUIRED|RELEASED|EXPIRED`만 허용한다. 연결된 임시 행은 세 식별·시각 필드가 모두 존재하고 상태 `CONFIRMED|RELEASED|FULFILLED`만 허용한다.
 - 선택 메뉴는 Menu ID 오름차순으로 정규화하며 중복 선택 수량을 합산한다. 빈 선택은 임시 MenuHold를 만들지 않는다. replay에서 연결 행 부재는 빈 선택과만 같고, 저장된 항목의 메뉴 ID·수량은 정규 선택 목록과 정확히 같아야 한다.
 - Reservation은 `ReservationTemporaryMenuHoldPort`의 scalar 명령·결과만 사용하고 `ReservationTemporaryMenuHoldAdapter`가 MenuHold 소유 공개 Service에 연결한다. 생성과 종결 Service는 `MANDATORY`로 호출자 트랜잭션에 참여하며 자체 새 트랜잭션을 시작하지 않는다.
-- 생성은 수용량 버킷 뒤 메뉴 재고 버킷을 PK 오름차순으로 잠근다. 확보 operation ID는 `reservation-temp-menu-acquire:{reservationHoldId}`이며 기존 case-sensitive 전역 unique와 수량 원장 replay 계약을 사용한다.
+- 생성은 수용량 버킷 뒤 메뉴 재고 버킷을 PK 오름차순으로 잠근다. 생성하는 MenuHold 루트는 새 ReservationHold에만 연결되는 hold별 배타적 행이므로 기존 MenuHold 행을 잠그지 않는다. 기존 그룹을 확인하는 replay와 종결은 ReservationHold를 먼저 잠근 뒤 연결 MenuHold 루트를 잠그는 aggregate 선행 순서를 유지한다. 확보 operation ID는 `reservation-temp-menu-acquire:{reservationHoldId}`이며 기존 case-sensitive 전역 unique와 수량 원장 replay 계약을 사용한다.
 - 종결 포트는 `lockForTransition`과 `applyTransition`으로 분리한다. 전자는 ReservationHold 잠금 직후 임시 MenuHold 루트만 잠그고 상태·수량을 바꾸지 않는다. 후자는 수용량 처리 뒤 같은 잠금 행에 상태를 적용하고, `RELEASED|EXPIRED`에서만 최초 확보 원장을 기준으로 메뉴 수량을 정확히 한 번 복구한다.
-- `ACTIVE`와 `RECONCILIATION_REQUIRED`는 수량을 유지한다. `CONFIRMED`는 수량을 유지하고 양의 최종 `reservationId`를 연결한다. 같은 확정 명령 replay는 같은 연결만 허용하며 다른 Reservation ID는 `COMMON_007`이다. 기존 즉시 확정 MenuHold의 취소·이행·조회 의미와 응답은 바뀌지 않는다.
+- `ACTIVE`와 `RECONCILIATION_REQUIRED`는 수량을 유지한다. `CONFIRMED`는 수량을 유지하고 양의 최종 `reservationId`를 연결한다. 같은 확정 명령 replay는 같은 연결만 허용하며 다른 Reservation ID는 `COMMON_007`이다. 최종 Reservation에 연결된 임시 MenuHold는 이후 기존 예약 취소에서 `RELEASED`로 전이하며 최초 확보 원장을 기준으로 수량을 한 번만 복구하고, 방문 완료에서는 수량 복구 없이 `FULFILLED`로 전이한다. 최종 Reservation에 연결되지 않은 임시 상태는 이 경계에 합류하지 않는다. 기존 즉시 확정 MenuHold의 취소·이행·조회 의미와 응답은 바뀌지 않는다.
 - #267의 worker·명령 시점 자동 만료·대사 orchestration과 #238의 Payment/PG 판정·최종 Reservation 생성은 이 단계에서 구현하지 않는다.
 
 ## 재고 버킷과 수량 풀

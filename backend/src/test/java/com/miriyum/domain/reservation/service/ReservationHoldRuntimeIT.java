@@ -21,6 +21,7 @@ import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
 import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationFulfillmentRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -160,6 +161,9 @@ class ReservationHoldRuntimeIT {
     private ReservationCancellationCommandFacade cancellationFacade;
 
     @Autowired
+    private ReservationFulfillmentCommandFacade fulfillmentFacade;
+
+    @Autowired
     private ReservationHoldRepository holdRepository;
 
     @Autowired
@@ -225,6 +229,7 @@ class ReservationHoldRuntimeIT {
         jdbcTemplate.execute("DELETE FROM reservation_hold_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservation_holds");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_fulfillment_audits");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
@@ -1098,6 +1103,80 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("확정된 임시 MenuHold는 최종 예약 취소에서 수량을 한 번만 복구한다")
+    void confirmedTemporaryMenuHoldCancellationRestoresInventoryExactlyOnce() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary cancellation", 1);
+        ReservationHoldContracts.Result active = createMenuHoldGroup(
+                scenario, menu, "confirmed-temporary-cancellation-create");
+        long finalReservationId = seedFinalReservation(
+                scenario, active.consumerAccountId());
+        holdFacade.transition(transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "confirmed-temporary-cancellation-confirm",
+                finalReservationId));
+        transferCapacityToFinalReservation(active, scenario, finalReservationId);
+        IdempotencyKey cancellationKey = key(201);
+        ConsumerCancellationRequest request =
+                new ConsumerCancellationRequest("confirmed temporary hold cancellation");
+
+        ReservationCancellationCommandResult cancelled = cancellationFacade.cancelByConsumer(
+                active.consumerAccountId(),
+                finalReservationId,
+                cancellationKey,
+                request);
+
+        assertThat(cancelled.httpStatus()).isEqualTo(200);
+        assertThat(cancelled.data().status()).isEqualTo("CANCELLED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("RELEASED");
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
+        ReservationCancellationCommandResult replay = cancellationFacade.cancelByConsumer(
+                active.consumerAccountId(),
+                finalReservationId,
+                cancellationKey,
+                request);
+
+        assertThat(replay).isEqualTo(cancelled);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+    }
+
+    @Test
+    @DisplayName("확정된 임시 MenuHold는 최종 예약 방문 완료에서 수량을 복구하지 않는다")
+    void confirmedTemporaryMenuHoldFulfillmentDoesNotRestoreInventory() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary fulfillment", 1);
+        ReservationHoldContracts.Result active = createMenuHoldGroup(
+                scenario, menu, "confirmed-temporary-fulfillment-create");
+        long finalReservationId = seedFinalReservation(
+                scenario, active.consumerAccountId());
+        holdFacade.transition(transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "confirmed-temporary-fulfillment-confirm",
+                finalReservationId));
+        transferCapacityToFinalReservation(active, scenario, finalReservationId);
+
+        ReservationFulfillmentCommandResult fulfilled = fulfillmentFacade.fulfill(
+                scenario.operatorId(),
+                scenario.storeId(),
+                finalReservationId,
+                key(202),
+                new ReservationFulfillmentRequest());
+
+        assertThat(fulfilled.httpStatus()).isEqualTo(200);
+        assertThat(fulfilled.data().status()).isEqualTo("FULFILLED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("FULFILLED");
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+    }
+
+    @Test
     @DisplayName("reconciliation이 release·confirm보다 먼저 잠그면 자원을 유지한 뒤 그룹으로 수렴한다")
     void reconciliationBeforeReleaseOrConfirmRetainsThenConvergesAsOneGroup()
             throws Exception {
@@ -1755,7 +1834,10 @@ class ReservationHoldRuntimeIT {
     }
 
     private long seedFinalReservation(Scenario scenario) {
-        long consumerId = createConsumer();
+        return seedFinalReservation(scenario, createConsumer());
+    }
+
+    private long seedFinalReservation(Scenario scenario, long consumerId) {
         return transactions.execute(status -> {
             Store store = storeRepository.findById(scenario.storeId()).orElseThrow();
             ReservationTimePolicyVersion policy = timePolicyRepository
@@ -1777,6 +1859,27 @@ class ReservationHoldRuntimeIT {
                     1L,
                     new ReservationCancellationPolicyVersion(1L),
                     BASE_NOW.minusSeconds(60))).getId();
+        });
+    }
+
+    private void transferCapacityToFinalReservation(
+            ReservationHoldContracts.Result hold,
+            Scenario scenario,
+            long finalReservationId
+    ) {
+        transactions.executeWithoutResult(status -> {
+            capacityAllocationRepository.saveAllAndFlush(
+                    scenario.originalBucketIds().stream()
+                            .map(bucketId -> ReservationCapacityAllocation.allocate(
+                                    finalReservationId,
+                                    bucketId,
+                                    PARTY_SIZE,
+                                    hold.capacityPolicyVersion()))
+                            .toList());
+            jdbcTemplate.update(
+                    "DELETE FROM reservation_hold_capacity_allocations "
+                            + "WHERE reservation_hold_id = ?",
+                    hold.reservationHoldId());
         });
     }
 

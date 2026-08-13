@@ -154,6 +154,21 @@ class MenuHoldTest {
     }
 
     @Test
+    void finalReservationTransitionsConfirmedTemporaryHoldToReleaseOrFulfillment() {
+        MenuHold released = temporaryHold();
+        released.confirmTemporary(101L);
+        MenuHold fulfilled = temporaryHold();
+        fulfilled.confirmTemporary(102L);
+
+        assertThat(released.release()).isTrue();
+        assertThat(released.getStatus()).isEqualTo(MenuHoldStatus.RELEASED);
+        assertThat(released.release()).isFalse();
+        assertThat(fulfilled.fulfill()).isTrue();
+        assertThat(fulfilled.getStatus()).isEqualTo(MenuHoldStatus.FULFILLED);
+        assertThat(fulfilled.fulfill()).isFalse();
+    }
+
+    @Test
     void rejectsNonPositiveFinalReservationBeforeMutatingTemporaryHold() {
         MenuHold hold = temporaryHold();
 
