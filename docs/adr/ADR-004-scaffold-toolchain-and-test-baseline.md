@@ -79,5 +79,6 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 
 ### 통합 테스트 shard 분할
 
-- `integration-test`는 `integration-test-a`, `integration-test-b` 두 matrix job으로 다시 분할해 병렬 실행한다. 모든 통합 테스트 클래스는 `integration-shard-a` 또는 `integration-shard-b` 중 정확히 하나를 추가로 선언한다.
-- Gradle 검증 task는 통합 marker와 shard tag의 누락 또는 중복을 실패시킨다. 두 shard가 모두 성공해야 `backend-ci` 집계 job이 성공하므로 기존 Required check 이름과 전체 테스트 게이트는 유지한다.
+- `integration-test`는 `integration-test-a`부터 `integration-test-d`까지 네 matrix job으로 분할해 병렬 실행한다(#288 2단계에서 2개 → 4개). 모든 통합 테스트 클래스는 `integration-shard-a`~`integration-shard-d` 중 정확히 하나를 추가로 선언한다.
+- Gradle 검증 task는 통합 marker와 shard tag의 누락 또는 중복을 실패시킨다. 네 shard가 모두 성공해야 `backend-ci` 집계 job이 성공하므로 기존 Required check 이름과 전체 테스트 게이트는 유지한다. Required check는 집계 job 이름 하나이므로 shard 수를 바꿔도 브랜치 보호 설정을 변경하지 않는다.
+- shard 배치는 도메인이 아니라 **Spring 컨텍스트 시그니처**(`@SpringBootTest` properties와 `@AutoConfigureMockMvc`·`@Testcontainers` 조합) 기준으로 묶는다. 같은 시그니처 클래스를 서로 다른 shard에 두면 같은 ApplicationContext를 shard마다 새로 기동하므로, 총 기동 횟수는 shard 수가 아니라 시그니처가 쪼개진 정도에 따라 늘어난다.
