@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.util.Set;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -63,6 +66,70 @@ class ValkeyPlatformOperatorSessionStoreIntegrationTest {
 
         Set<String> keys = redis.keys("miriyum:auth:platform-operator:*");
         assertThat(String.join(" ", keys)).doesNotContain("raw-session", "raw-refresh");
+    }
+
+    @Test
+    void concurrentLoginsLeaveExactlyOneActiveSession() throws Exception {
+        Instant now = Instant.now();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var futures = List.of(
+                    executor.submit(() -> replaceAfterBarrier(state("concurrent-one", "token-1", "refresh-1", now), ready, start)),
+                    executor.submit(() -> replaceAfterBarrier(state("concurrent-two", "token-2", "refresh-2", now), ready, start)));
+            ready.await();
+            start.countDown();
+            assertThat(futures).allSatisfy(future -> {
+                try { assertThat(future.get().status()).isIn(
+                        PlatformOperatorSessionResult.Status.CREATED,
+                        PlatformOperatorSessionResult.Status.REPLACED); }
+                catch (Exception exception) { throw new AssertionError(exception); }
+            });
+        }
+        long valid = List.of(
+                store.validateAndTouch(proof("concurrent-one", "token-1", "refresh-1"), now, now.plusSeconds(1800)),
+                store.validateAndTouch(proof("concurrent-two", "token-2", "refresh-2"), now, now.plusSeconds(1800)))
+                .stream().filter(result -> result.status() == PlatformOperatorSessionResult.Status.VALID).count();
+        assertThat(valid).isEqualTo(1);
+        assertThat(redis.keys("miriyum:auth:platform-operator:*")).hasSize(2);
+    }
+
+    @Test
+    void concurrentRefreshHasOneWinnerAndReuseRevokesTheSession() throws Exception {
+        Instant now = Instant.now();
+        store.replaceActiveSession(state("rotation-race", "token-old", "refresh-old", now));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<PlatformOperatorSessionResult> results;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var futures = List.of(
+                    executor.submit(() -> rotateAfterBarrier("token-next-1", "refresh-next-1", now, ready, start)),
+                    executor.submit(() -> rotateAfterBarrier("token-next-2", "refresh-next-2", now, ready, start)));
+            ready.await();
+            start.countDown();
+            results = futures.stream().map(future -> {
+                try { return future.get(); } catch (Exception exception) { throw new AssertionError(exception); }
+            }).toList();
+        }
+        assertThat(results).extracting(PlatformOperatorSessionResult::status)
+                .containsExactlyInAnyOrder(PlatformOperatorSessionResult.Status.ROTATED,
+                        PlatformOperatorSessionResult.Status.REUSED);
+        assertThat(store.validateAndTouch(proof("rotation-race", "token-next-1", "refresh-next-1"),
+                now, now.plusSeconds(1800)).status()).isEqualTo(PlatformOperatorSessionResult.Status.INVALID);
+        assertThat(store.validateAndTouch(proof("rotation-race", "token-next-2", "refresh-next-2"),
+                now, now.plusSeconds(1800)).status()).isEqualTo(PlatformOperatorSessionResult.Status.INVALID);
+    }
+
+    private PlatformOperatorSessionResult replaceAfterBarrier(
+            PlatformOperatorSessionState state, CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown(); start.await(); return store.replaceActiveSession(state);
+    }
+
+    private PlatformOperatorSessionResult rotateAfterBarrier(
+            String nextId, String nextHash, Instant now, CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown(); start.await();
+        return store.rotate(proof("rotation-race", "token-old", "refresh-old"),
+                nextId, nextHash, now, now.plusSeconds(1800));
     }
 
     private PlatformOperatorSessionState state(String session, String tokenId, String refresh, Instant now) {

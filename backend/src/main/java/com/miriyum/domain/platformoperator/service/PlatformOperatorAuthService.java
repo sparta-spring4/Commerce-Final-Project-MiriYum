@@ -61,7 +61,7 @@ public class PlatformOperatorAuthService {
         String email = request.email().toLowerCase(Locale.ROOT);
         PlatformOperatorAccount account = accounts.findByEmail(email).orElse(null);
         if (account == null) {
-            verifyUnknownCredential(email, request.password());
+            verifyUnknownCredential(request.password());
             throw invalidCredentials();
         }
         try {
@@ -72,10 +72,13 @@ public class PlatformOperatorAuthService {
         }
     }
 
-    private void verifyUnknownCredential(String email, String rawPassword) {
-        long syntheticAccountId = -1L - Integer.toUnsignedLong(email.hashCode());
+    private void verifyUnknownCredential(String rawPassword) {
+        long syntheticAccountId = Long.MIN_VALUE;
         LoginAttempt attempt = delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, syntheticAccountId);
-        if (attempt.status() != LoginAttempt.Status.ACQUIRED) return;
+        if (attempt.status() != LoginAttempt.Status.ACQUIRED) {
+            matches(passwordPolicy.toNfc(rawPassword), dummyPasswordHash);
+            return;
+        }
         boolean completed = false;
         try {
             matches(passwordPolicy.toNfc(rawPassword), dummyPasswordHash);

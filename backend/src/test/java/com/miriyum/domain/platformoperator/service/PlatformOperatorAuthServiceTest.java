@@ -92,7 +92,7 @@ class PlatformOperatorAuthServiceTest {
 
         verify(encoder).matches(eq("Wrong1!"), any());
         verify(delay).tryAcquireAttempt(eq(com.miriyum.domain.auth.jwt.TokenNamespace.PLATFORM_OPERATOR),
-                org.mockito.ArgumentMatchers.longThat(id -> id < 0));
+                eq(Long.MIN_VALUE));
         verify(events, never()).record(any(PlatformOperatorAccount.class), any(), any());
     }
 

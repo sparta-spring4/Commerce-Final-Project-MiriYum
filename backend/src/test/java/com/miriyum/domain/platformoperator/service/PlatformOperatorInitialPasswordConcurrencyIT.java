@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.jdbc.core.JdbcTemplate;
+import com.miriyum.domain.auth.dto.request.LoginRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -46,6 +48,25 @@ class PlatformOperatorInitialPasswordConcurrencyIT {
     @Autowired PlatformOperatorAccountRepository accounts;
     @Autowired PlatformOperatorAuthEventRepository events;
     @Autowired PasswordEncoder encoder;
+    @Autowired PlatformOperatorAuthService authService;
+    @Autowired JdbcTemplate jdbc;
+
+    @Test
+    void arbitraryUnknownEmailsShareOneBoundedDelayRow() {
+        jdbc.update("DELETE FROM login_failure_delays WHERE account_namespace = ? AND account_id < 0",
+                "platform-operator");
+        for (int index = 0; index < 12; index++) {
+            try {
+                authService.login(new LoginRequest("missing-" + index + "@example.com", "Wrong1!"));
+            } catch (ServiceException ignored) {
+                // Every unknown credential has the same public failure contract.
+            }
+        }
+        Integer rows = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM login_failure_delays WHERE account_namespace = ? AND account_id < 0",
+                Integer.class, "platform-operator");
+        assertThat(rows).isEqualTo(1);
+    }
 
     @Test
     void concurrentTemporaryPasswordFailuresAreAllCountedAtomically() throws Exception {
