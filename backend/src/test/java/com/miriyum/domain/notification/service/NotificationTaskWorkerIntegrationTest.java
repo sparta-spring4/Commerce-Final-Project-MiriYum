@@ -464,6 +464,7 @@ class NotificationTaskWorkerIntegrationTest {
     static class FakeSourceConfig {
 
         @Bean
+        @Primary
         TestPickupSource testPickupSource() {
             return new TestPickupSource();
         }
