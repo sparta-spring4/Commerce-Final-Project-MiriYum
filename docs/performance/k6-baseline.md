@@ -1,5 +1,15 @@
 # 핵심 API k6 기준선
 
+## #338 authRefresh 반복 cleanup 회귀 검증
+
+- 검증 commit: `9302bb6c468514ad35b2ef9fc11bf047cd41e759`
+- smoke `local-auth-search-smoke-20260814-02`: `authRefresh` 1회와 `storeSearch` 1회가 통과했고 unexpected 4xx·5xx·dropped iteration은 모두 0이었다.
+- baseline 입력: local HTTPS proxy, `authRefresh`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`.
+- `local-auth-baseline-20260814-02`: 61 iterations, 122 measured requests, p50 40.247 ms, p95 68.365 ms, p99 76.349 ms, unexpected 4xx·5xx·dropped iteration 0.
+- `local-auth-baseline-20260814-03`: 61 iterations, 122 measured requests, p50 37.697 ms, p95 65.720 ms, p99 69.530 ms, unexpected 4xx·5xx·dropped iteration 0.
+- 잔여 family 비교 실행 `local-auth-baseline-20260814-04`: 60 iterations, 120 measured requests, p50 35.290 ms, p95 63.671 ms, p99 65.627 ms, unexpected 4xx·5xx·dropped iteration 0. 수정 전 실패 실행이 남긴 활성 family 기준값 62개가 실행 뒤에도 62개로 유지되어 새 활성 family가 누적되지 않았다. 기존 62개는 이 PR에서 직접 삭제하지 않는다.
+- 공개 매장 생성은 로컬 `MIRIYUM_KAKAO_LOCAL_REST_API_KEY`가 구성되지 않아 지오코딩 단계에서 HTTP 503으로 실패했다. 따라서 결과가 0건인 검색 smoke만 수행했으며 `storeSearch` baseline 수치나 #286 병목 증거로 사용하지 않는다.
+
 - 소유 Issue: [#285](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/285)
 - 기록일: 2026-08-14
 - 기준 `dev`: `bb46e4e140d964a53d19d1ab97ce90a300551a9f`
@@ -174,7 +184,7 @@ Pop-Location
 - backend 기본 IP rate limit은 login 5회/600초, refresh 30회/60초다. local loadtest override는 하네스 최대 입력을 수용하도록 각각 `600,000회/600초`, `60,000회/60초`를 backend에만 주입한다. 이 조건의 결과는 순수 인증 지연시간·처리량 기준선이며 기본 보호 동작 검증이 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 근거로 사용하지 않는다.
 - 공개 매장 검색의 기본 한도는 source IP 기준 60회/60초이고 local loadtest override는 `60,000회/60초`를 주입한다. override가 없는 환경에서 `2 iterations/s × 30초`를 반복하려면 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량·p50/p95/p99 기준선 또는 #286 근거로 사용하지 않는다.
 - CSRF 준비 제한은 local loadtest override에 복제하지 않고 backend 기본 예산 60회/60초를 상속한다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택한 baseline은 이 예산 아래의 50으로 제한한다. 예약·알림처럼 auth refresh를 선택하지 않은 시나리오는 CSRF 예산 때문에 50으로 제한하지 않는다.
-- 성공한 인증 login은 refresh 결과와 관계없이 같은 cookie jar에서 CSRF 토큰을 준비한 뒤 현재 session을 logout한다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup의 Reservation·Notification bearer 준비 로그인도 Access Token을 반환하기 전에 Refresh Token family를 회수한다. CSRF·logout 요청은 `phase=cleanup`이라 성능 threshold와 summary에서 제외되며, cleanup 실패는 실행 실패다. 정상 종료에서는 k6가 만든 Valkey family가 남지 않는다. 강제 중단으로 cleanup이 실행되지 못하면 합성 계정 전체 로그인 종료 또는 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다음 실행을 허용한다.
+- 성공한 인증 login은 refresh 결과와 관계없이 같은 cookie jar에서 CSRF 토큰을 준비한 뒤 현재 session을 logout한다. k6의 `noCookiesReset=true`가 같은 VU의 cookie jar를 iteration 사이에 유지하므로 VU runtime의 CSRF 토큰 캐시와 수명이 일치하며, VU별 cookie jar 격리는 유지된다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup의 Reservation·Notification bearer 준비 로그인도 Access Token을 반환하기 전에 Refresh Token family를 회수한다. CSRF·logout 요청은 `phase=cleanup`이라 성능 threshold와 summary에서 제외되며, cleanup 실패는 실행 실패다. 정상 종료에서는 k6가 만든 Valkey family가 남지 않는다. 강제 중단으로 cleanup이 실행되지 못하면 합성 계정 전체 로그인 종료 또는 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다음 실행을 허용한다.
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
 
