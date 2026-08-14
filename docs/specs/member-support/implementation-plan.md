@@ -39,6 +39,8 @@
 - Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/entity/StoreOperatorAccount.java`
 - Create: `backend/src/main/resources/db/migration/V42__create_member_support.sql`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportMigrationIT.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportCatalogTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/auth/membersupport/MemberAccountGuardTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorRoleTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorAuthorizationOpenApiContractTest.java`
 
@@ -46,7 +48,7 @@
 - Produces account fields `boolean passwordResetRequired` and `long supportVersion` plus methods `approveRecovery(String email)`, `replaceRecoveredPassword(String hash)`, `applySuspension()`, `clearSuspension()`, and `assertSupportVersion(long expected)`.
 - Produces error codes `AUTH_016 MEMBER_SUPPORT_NOT_FOUND`, `AUTH_017 MEMBER_SUPPORT_STATE_CONFLICT`, and `AUTH_018 PERMANENT_SANCTION_APPROVAL_CONFLICT`.
 
-- [ ] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V42, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V42 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
+- [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V42, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V42 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
 
 ```java
 assertThat(appliedVersions(dataSource)).contains("42");
@@ -56,7 +58,7 @@ assertThat(PlatformOperatorRole.SUPER_ADMIN.defaultPermissions())
         .contains(PlatformOperatorPermission.ACCOUNT_PERMANENT_SANCTION_APPROVE);
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `backend\gradlew.bat test --tests "*PlatformOperatorRoleTest" --tests "*PlatformOperatorAuthorizationOpenApiContractTest"`
 
@@ -64,7 +66,7 @@ Run: `backend\gradlew.bat integrationTest --tests "*MemberSupportMigrationIT"`
 
 Expected: compile/assertion failures for missing enum values, error codes, V42, and account columns.
 
-- [ ] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V42 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
+- [x] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V42 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
 
 ```java
 public void assertSupportVersion(long expected) {
@@ -78,7 +80,7 @@ public void approveRecovery(String newEmail) {
 }
 ```
 
-- [ ] **Step 4: Run GREEN and commit.**
+- [x] **Step 4: Run GREEN and commit.**
 
 Run the two RED commands again; expected PASS.
 
