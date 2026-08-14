@@ -42,9 +42,9 @@ aws logs put-metric-filter \
   --region "$AWS_REGION" \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name miriyum-staging-refresh-risk-event-marker-long-stay \
-  --filter-pattern '[..., marker = refresh_token_risk_event_marker_long_stay, label = long_stay_count, long_stay_count]' \
+  --filter-pattern '"event=refresh_token_risk_event_marker_long_stay"' \
   --metric-transformations \
-    'metricName=RefreshTokenRiskEventMarkerLongStay,metricNamespace='"$NAMESPACE"',metricValue=$long_stay_count'
+    "metricName=RefreshTokenRiskEventMarkerLongStay,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
 
 aws logs put-metric-filter \
   --region "$AWS_REGION" \
@@ -273,8 +273,7 @@ dashboard_body=$(cat <<EOF
         "period": 300,
         "stat": "Maximum",
         "metrics": [
-          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"],
-          [".", "RefreshTokenRiskEventMarkerLongStay"]
+          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"]
         ]
       }
     },
@@ -294,6 +293,23 @@ dashboard_body=$(cat <<EOF
           ["MiriYum/Staging", "RefreshTokenRiskEventMarkerMalformed"],
           [".", "RefreshTokenRiskEventMarkerQuarantineFailed"],
           [".", "RefreshTokenRiskEventStaleIndexCleanupFailed"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum refresh risk marker long-stay signal",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventMarkerLongStay"]
         ]
       }
     }
