@@ -11,6 +11,8 @@ Issue #82는 공개 API와 일반 사용자·매장 운영자 API를 각각 `/ap
 
 그 뒤 `dev`에 2차 MVP와 고도화 API가 추가되면서 namespace는 유지됐지만 하위 경로 결정 방식이 갈렸다. 소비자 소유 업무 리소스가 `/consumers/me/**`와 `/consumers/**`에 나뉘었고, 상태 전이 생성이 `/cancellations`, `/fulfillments`, `/confirmations` 같은 복수 명사와 `/call`, `/arrive`, `/cancel`, `/publication` 같은 단수·동사 segment를 함께 사용한다. 기존 `HttpApiNamespaceContractTest`는 Controller의 class-level root prefix만 검사하므로 이 차이를 차단하지 못한다.
 
+최신 `dev`의 고도화 범위에는 플랫폼 운영자 전용 `/api/v1/platform-operators/**`와 `platform-operator-openapi.yaml`도 추가됐다. 따라서 현재 URL 거버넌스는 공개·일반 사용자·매장 운영자·플랫폼 운영자 네 진입점을 같은 정본과 실행 gate로 관리한다.
+
 Issue #303은 #82를 대체하지 않는다. #82의 사용자 namespace와 `/me` 의미를 `dev`의 모든 현재 API에 적용하고, 하위 리소스 문법과 실행 가능한 검증 gate를 추가한다.
 
 ## 결정
@@ -19,6 +21,7 @@ Issue #303은 #82를 대체하지 않는다. #82의 사용자 namespace와 `/me`
 
 - 인증된 일반 사용자 전용 API는 `/api/v1/consumers/**`에 둔다.
 - 인증된 매장 운영자 전용 API는 `/api/v1/store-operators/**`에 둔다.
+- 인증된 플랫폼 운영자 전용 API는 `/api/v1/platform-operators/**`에 둔다.
 - 무인증 공개 API는 호출자 namespace를 두지 않고 `/api/v1/stores/**` 같은 리소스 중심 경로를 사용한다.
 - Refresh·CSRF cookie 범위를 제한하기 위해 계정 유형별 인증 API의 `/auth` segment를 유지한다.
 - `/me`는 계정 DTO만 뜻하지 않고 인증된 본인의 소유 범위를 뜻한다. 소비자 본인 소유 예약·픽업·결제·알림은 `/api/v1/consumers/me/**` 아래에 둔다.
@@ -70,7 +73,7 @@ Issue #303은 #82를 대체하지 않는다. #82의 사용자 namespace와 `/me`
 1. Controller class/method mapping과 Controller 테스트
 2. Spring Security matcher, JWT namespace, cookie Path, CSRF/Origin·Referer와 rate-limit 대상
 3. HTTP route를 포함하는 멱등성 fingerprint와 고정 canonical 문자열 테스트
-4. 기능별 OpenAPI path와 public·consumer·store-operator entrypoint `$ref`
+4. 기능별 OpenAPI path와 public·consumer·store-operator·platform-operator entrypoint `$ref`
 5. OpenAPI 생성 TypeScript와 frontend API 호출부
 6. 활성 `docs/06`, `docs/07`, `docs/09`, 관련 기능 spec과 handoff 문서
 7. PR template의 API 계약 checklist
@@ -89,7 +92,7 @@ Issue #303은 #82를 대체하지 않는다. #82의 사용자 namespace와 `/me`
 
 `ApiUrlConventionTest`는 전체 Spring route inventory에 다음을 적용한다.
 
-- controller package audience와 `/consumers`, `/store-operators`, 공개 namespace 일치
+- controller package audience와 `/consumers`, `/store-operators`, `/platform-operators`, 공개 namespace 일치. audience 패키지는 정확한 패키지 또는 그 하위 패키지만 인정한다.
 - `/me`와 `/auth`의 승인된 위치
 - 고정 segment의 lowercase `kebab-case`
 - 컬렉션·상태 전이 segment의 복수 명사 형태
@@ -139,7 +142,7 @@ stale 계약 상태로 실패한다. Java 상수의 광범위한 승인 목록�
 ## 오류와 보안 불변식
 
 - 새 경로에서도 기존 HTTP status, 외부 오류 code, message, response envelope를 유지한다.
-- consumer token은 `/api/v1/consumers/**`, store-operator token은 `/api/v1/store-operators/**`에서만 인증 주체가 된다.
+- consumer token은 `/api/v1/consumers/**`, store-operator token은 `/api/v1/store-operators/**`, platform-operator token은 `/api/v1/platform-operators/**`에서만 인증 주체가 된다.
 - 교차 namespace token은 기존 `AUTH_004` 계약으로 거부한다.
 - Refresh·CSRF cookie 이름과 보안 속성은 유지하고 승인된 `/auth` Path만 사용한다.
 - 공개 route는 기존과 같이 principal을 필수로 요구하지 않는다.

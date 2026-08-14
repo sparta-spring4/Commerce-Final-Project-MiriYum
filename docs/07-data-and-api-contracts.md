@@ -8,11 +8,11 @@
 
 ## OpenAPI 소유권과 진입점
 
-기능별 원본은 `docs/specs/<기능>/openapi.yaml`이 소유하며, `docs/specs/mvp1-common/openapi.yaml`은 path를 갖지 않는 공통 계약 전용이다. 클라이언트별 진입점은 `public-openapi.yaml`, `consumer-openapi.yaml`, `store-operator-openapi.yaml`이며, 서로 path가 중복되지 않는다. 기능별 원본의 path는 세 클라이언트 진입점 중 하나에 모두 노출한다. `mvp1-openapi.yaml`은 1차 MVP 통합 진입점이므로 그 path 집합은 세 클라이언트 진입점 path 합집합의 부분집합이어야 하며, 이후 단계에 추가된 경로를 포함하지 않는다. 진입점과 aggregate는 path item을 다시 정의하지 않고 단일 `$ref`로만 연결한다. TypeScript 계약은 기능별 원본에서 생성하며 수동 편집하지 않는다.
+기능별 원본은 `docs/specs/<기능>/openapi.yaml`이 소유하며, `docs/specs/mvp1-common/openapi.yaml`은 path를 갖지 않는 공통 계약 전용이다. 클라이언트별 진입점은 `public-openapi.yaml`, `consumer-openapi.yaml`, `store-operator-openapi.yaml`, `platform-operator-openapi.yaml`이며, 서로 path가 중복되지 않는다. 기능별 원본의 path는 네 클라이언트 진입점 중 정확히 하나에 노출한다. `mvp1-openapi.yaml`은 1차 MVP 통합 진입점이므로 그 path 집합은 public·consumer·store-operator 진입점 path 합집합의 부분집합이어야 하며, 이후 단계인 platform-operator 경로를 포함하지 않는다. 진입점과 aggregate는 path item을 다시 정의하지 않고 단일 `$ref`로만 연결한다. TypeScript 계약은 기능별 원본에서 생성하며 수동 편집하지 않는다.
 
 ## API URL 정본 문법
 
-- 인증된 일반 사용자 API는 `/api/v1/consumers/**`, 매장 운영자 API는 `/api/v1/store-operators/**`, 공개 매장 API는 `/api/v1/stores/**`를 사용한다.
+- 인증된 일반 사용자 API는 `/api/v1/consumers/**`, 매장 운영자 API는 `/api/v1/store-operators/**`, 플랫폼 운영자 API는 `/api/v1/platform-operators/**`, 공개 매장 API는 `/api/v1/stores/**`를 사용한다.
 - 로그인 주체가 소유한 예약·픽업·결제·알림은 `/consumers/me/**` 아래에 둔다. 인증 쿠키 범위를 분리하는 계정 lifecycle은 `/auth`를 유지한다.
 - 고정 segment는 lowercase kebab-case를 사용한다. `POST`로 생성하는 상태 전이·사건은 `publications`, `publication-cancellations`, `retirements`, `cancellations`, `calls`, `arrivals`, `check-ins`처럼 복수 명사로 표현한다.
 - `visibility`, `selling-status`, `end-at`, `deactivation-impact`처럼 하나의 값·projection을 나타내는 segment와 `portone` 같은 provider segment는 단수일 수 있다. 동사를 endpoint 끝에 두는 명령형 URL은 추가하지 않는다.

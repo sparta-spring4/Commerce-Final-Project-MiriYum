@@ -65,6 +65,28 @@ class HttpApiNamespaceContractTest {
                 .hasMessageContaining("platform-operator namespace owner");
     }
 
+    @Test
+    void consumerLookalikePackageCannotOwnConsumerNamespace() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.consumerproxy",
+                new ApiRoute(RequestMethod.GET, "/api/v1/consumers/me/widgets")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("consumer namespace owner");
+    }
+
+    @Test
+    void storeOperatorLookalikePackageCannotOwnStoreOperatorNamespace() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.storeoperatorlegacy",
+                new ApiRoute(RequestMethod.GET, "/api/v1/store-operators/stores")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("store-operator namespace owner");
+    }
+
     private static void assertAudienceNamespaces(Set<ControllerRoute> routes) {
         assertThat(routes).isNotEmpty();
         assertThat(routes).noneMatch(route -> LEGACY_ROOTS.stream()
@@ -96,16 +118,24 @@ class HttpApiNamespaceContractTest {
     }
 
     private static boolean isConsumer(ControllerRoute route) {
-        return route.packageName().startsWith("com.miriyum.domain.consumer.controller.")
-                || route.packageName().contains(".controller.consumer");
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.consumer.controller")
+                || containsPackageOrChild(route.packageName(), ".controller.consumer");
     }
 
     private static boolean isStoreOperator(ControllerRoute route) {
-        return route.packageName().startsWith("com.miriyum.domain.storeoperator.controller.")
-                || route.packageName().contains(".controller.storeoperator");
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.storeoperator.controller")
+                || containsPackageOrChild(route.packageName(), ".controller.storeoperator");
     }
 
     private static boolean isPlatformOperator(ControllerRoute route) {
-        return route.packageName().startsWith("com.miriyum.domain.platformoperator.controller.");
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.platformoperator.controller");
+    }
+
+    private static boolean isPackageOrChild(String packageName, String packageRoot) {
+        return packageName.equals(packageRoot) || packageName.startsWith(packageRoot + ".");
+    }
+
+    private static boolean containsPackageOrChild(String packageName, String packageSuffix) {
+        return packageName.endsWith(packageSuffix) || packageName.contains(packageSuffix + ".");
     }
 }
