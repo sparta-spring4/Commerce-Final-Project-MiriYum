@@ -59,6 +59,7 @@ public class ReservationHoldService {
 
     private static final String SYSTEM_ACTOR = "SYSTEM";
     private static final String CREATION_AUDIT_COMMAND_PREFIX = "reservation-hold-create:";
+    private static final String EXPIRATION_COMMAND_PREFIX = "reservation-hold-expire:";
 
     private final ReservationHoldRepository holdRepository;
     private final ReservationRepository reservationRepository;
@@ -307,6 +308,7 @@ public class ReservationHoldService {
         ReservationHold hold = holdRepository
                 .findByIdForUpdate(normalized.reservationHoldId())
                 .orElseThrow(ReservationHoldService::holdNotFound);
+        requireCanonicalExpirationCommand(hold, normalized);
         ReservationHoldTransitionAudit concurrentReplay = auditRepository
                 .findByCommandId(normalized.operationId())
                 .orElse(null);
@@ -321,29 +323,83 @@ public class ReservationHoldService {
         }
         ReservationTemporaryMenuHoldResult menuHold =
                 temporaryMenuHoldPort.lockForTransition(normalized.reservationHoldId());
-        requireFinalLinkageMeaning(menuHold, normalized, hold.getStatus(), false);
+        if (isUnexecutedExpirationNoOp(hold, normalized)) {
+            return resultOf(hold);
+        }
         Instant occurredAt = clock.instant();
+        NormalizedTransitionCommand effective = effectiveTransitionCommand(
+                hold, normalized, occurredAt);
+        requireFinalLinkageMeaning(menuHold, effective, hold.getStatus(), false);
         ReservationHoldStatus beforeStatus = hold.getStatus();
         validateReservationHoldTransition(
-                hold, normalized.targetStatus(), occurredAt);
-        if (normalized.targetStatus().requiresCapacityRelease()) {
+                hold, effective.targetStatus(), occurredAt);
+        if (effective.targetStatus().requiresCapacityRelease()) {
             restoreCapacity(hold);
         }
-        applyTemporaryMenuHoldTransition(menuHold, normalized);
-        applyTransition(hold, normalized.targetStatus(), occurredAt);
+        applyTemporaryMenuHoldTransition(menuHold, effective);
+        applyTransition(hold, effective.targetStatus(), occurredAt);
         auditRepository.save(ReservationHoldTransitionAudit.record(
-                normalized.reservationHoldId(),
-                normalized.actorType(),
-                normalized.actorId(),
-                normalized.requestedAt(),
+                effective.reservationHoldId(),
+                effective.actorType(),
+                effective.actorId(),
+                effective.requestedAt(),
                 occurredAt,
                 beforeStatus,
-                normalized.targetStatus(),
+                effective.targetStatus(),
                 hold.getReservationTimePolicyVersion(),
                 hold.getCapacityPolicyVersion(),
-                normalized.operationId()));
+                effective.operationId()));
         ReservationHold persisted = holdRepository.saveAndFlush(hold);
         return resultOf(persisted);
+    }
+
+    private static void requireCanonicalExpirationCommand(
+            ReservationHold hold,
+            NormalizedTransitionCommand requested
+    ) {
+        if (!requested.operationId().startsWith(EXPIRATION_COMMAND_PREFIX)) {
+            return;
+        }
+        String expectedOperationId = EXPIRATION_COMMAND_PREFIX + hold.getId();
+        if (requested.targetStatus() != ReservationHoldStatus.EXPIRED
+                || !expectedOperationId.equals(requested.operationId())
+                || !SYSTEM_ACTOR.equals(requested.actorType())
+                || requested.actorId() != null
+                || !hold.getExpiresAt().equals(requested.requestedAt())) {
+            throw new IllegalArgumentException(
+                    "reserved namespace requires the canonical expiration command");
+        }
+    }
+
+    private static boolean isUnexecutedExpirationNoOp(
+            ReservationHold hold,
+            NormalizedTransitionCommand requested
+    ) {
+        if (hold.getStatus() == ReservationHoldStatus.EXPIRED) {
+            return true;
+        }
+        return requested.targetStatus() == ReservationHoldStatus.EXPIRED
+                && hold.getStatus() != ReservationHoldStatus.ACTIVE;
+    }
+
+    private static NormalizedTransitionCommand effectiveTransitionCommand(
+            ReservationHold hold,
+            NormalizedTransitionCommand requested,
+            Instant occurredAt
+    ) {
+        if (hold.getStatus() != ReservationHoldStatus.ACTIVE
+                || requested.targetStatus() == ReservationHoldStatus.EXPIRED
+                || occurredAt.isBefore(hold.getExpiresAt())) {
+            return requested;
+        }
+        return new NormalizedTransitionCommand(
+                requested.reservationHoldId(),
+                ReservationHoldStatus.EXPIRED,
+                EXPIRATION_COMMAND_PREFIX + requested.reservationHoldId(),
+                SYSTEM_ACTOR,
+                null,
+                hold.getExpiresAt(),
+                null);
     }
 
     private static void requireSameTransitionMeaning(
@@ -861,6 +917,11 @@ public class ReservationHoldService {
                     "finalReservationId is allowed only for CONFIRMED");
         }
         String operationId = normalizeText(command.operationId(), 100, "operationId");
+        if (operationId.startsWith(EXPIRATION_COMMAND_PREFIX)
+                && command.targetStatus() != ReservationHoldStatus.EXPIRED) {
+            throw new IllegalArgumentException(
+                    "expiration operation namespace is reserved for EXPIRED");
+        }
         String actorType = normalizeText(command.actorType(), 32, "actorType");
         if (SYSTEM_ACTOR.equals(actorType)) {
             if (command.actorId() != null && command.actorId() <= 0) {

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -13,6 +14,14 @@ import org.springframework.data.repository.query.Param;
 
 /** 임시 선점 루트의 최소 영속성 경계다. */
 public interface ReservationHoldRepository extends JpaRepository<ReservationHold, Long> {
+
+    /** 무잠금 만료 후보 조회가 반환하는 최소 projection이다. */
+    interface ExpirationCandidate {
+
+        Long getReservationHoldId();
+
+        Instant getExpiresAt();
+    }
 
     /**
      * 종결 명령을 직렬화하기 위해 선점 aggregate를 비관적 쓰기 잠금으로 조회한다.
@@ -29,6 +38,31 @@ public interface ReservationHoldRepository extends JpaRepository<ReservationHold
     Optional<ReservationHold> findByConsumerAccountIdAndCreationCommandId(
             Long consumerAccountId,
             String creationCommandId
+    );
+
+    /**
+     * 고정 cutoff까지 만료된 ACTIVE 선점을 PK keyset 순서로 조회한다.
+     *
+     * <p>이 결과는 잠금 없는 힌트이며 실제 만료 여부는 종결 transaction에서 다시 판정한다.</p>
+     *
+     * @param cutoff 한 poll이 공유하는 중앙 시각
+     * @param afterId 직전 페이지의 마지막 선점 ID
+     * @param pageable 최대 batch 크기
+     * @return ID와 영속 만료 시각 projection
+     */
+    @Query("""
+            select hold.id as reservationHoldId, hold.expiresAt as expiresAt
+            from ReservationHold hold
+            where hold.status =
+                :#{T(com.miriyum.domain.reservation.entity.ReservationHoldStatus).ACTIVE}
+              and hold.expiresAt <= :cutoff
+              and hold.id > :afterId
+            order by hold.id asc
+            """)
+    List<ExpirationCandidate> findActiveExpirationCandidatesAfter(
+            @Param("cutoff") Instant cutoff,
+            @Param("afterId") long afterId,
+            Pageable pageable
     );
 
     /**
