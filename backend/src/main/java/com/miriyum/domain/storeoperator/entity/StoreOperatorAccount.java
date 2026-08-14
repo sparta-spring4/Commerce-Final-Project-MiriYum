@@ -100,4 +100,20 @@ public class StoreOperatorAccount extends BaseEntity {
         this.passwordResetRequired = true;
         this.supportVersion++;
     }
+
+    public void replaceRecoveredPassword(String newPasswordHash) {
+        this.passwordHash = java.util.Objects.requireNonNull(newPasswordHash);
+        this.passwordResetRequired = false;
+        this.supportVersion++;
+    }
+
+    public void applySupportSuspension() {
+        this.status = StoreOperatorAccountStatus.SUSPENDED;
+        this.supportVersion++;
+    }
+
+    public void clearSupportSuspension() {
+        this.status = StoreOperatorAccountStatus.ACTIVE;
+        this.supportVersion++;
+    }
 }

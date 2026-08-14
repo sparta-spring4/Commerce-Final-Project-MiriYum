@@ -117,4 +117,14 @@ public class ConsumerAccount extends BaseEntity {
         this.passwordResetRequired = false;
         this.supportVersion++;
     }
+
+    public void applySupportSuspension() {
+        this.status = ConsumerAccountStatus.SUSPENDED;
+        this.supportVersion++;
+    }
+
+    public void clearSupportSuspension() {
+        this.status = ConsumerAccountStatus.ACTIVE;
+        this.supportVersion++;
+    }
 }

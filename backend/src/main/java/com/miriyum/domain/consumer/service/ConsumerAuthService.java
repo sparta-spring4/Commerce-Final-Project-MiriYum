@@ -135,7 +135,8 @@ public class ConsumerAuthService {
             long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.CONSUMER, account.getId());
             ConsumerAccount currentAccount = consumerAccountRepository.findById(account.getId())
                     .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
-            if (currentAccount.getStatus() != ConsumerAccountStatus.ACTIVE) {
+            if (currentAccount.getStatus() != ConsumerAccountStatus.ACTIVE
+                    || currentAccount.isPasswordResetRequired()) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
             return issueTokenPair(currentAccount.getId(), sessionEpoch);
@@ -160,14 +161,14 @@ public class ConsumerAuthService {
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
         RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
                 TokenNamespace.CONSUMER, parsed, refreshToken);
-        if (attempt.reused() && account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+        if (attempt.reused() && isRestricted(account)) {
             refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
         }
         if (!attempt.rotated()) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
         TokenPair tokenPair = attempt.tokenPair();
-        if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+        if (isRestricted(account)) {
             refreshTokenManager.revokeAll(TokenNamespace.CONSUMER, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
@@ -197,5 +198,9 @@ public class ConsumerAuthService {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private boolean isRestricted(ConsumerAccount account) {
+        return account.getStatus() != ConsumerAccountStatus.ACTIVE || account.isPasswordResetRequired();
     }
 }

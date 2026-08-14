@@ -99,7 +99,9 @@ Commit: `feat: add member support schema and catalogs`
 - Create: `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/StoreOperatorMemberSupportRepository.java`
 - Create: `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/StoreOperatorMemberSupportAdapter.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/consumer/service/ConsumerAuthService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/consumer/service/ConsumerKakaoAuthService.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAuthService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorKakaoAuthService.java`
 - Test: `backend/src/test/java/com/miriyum/domain/consumer/membersupport/ConsumerMemberSupportAdapterTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/storeoperator/membersupport/StoreOperatorMemberSupportAdapterTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/auth/membersupport/MemberAccountSupportRegistryTest.java`
@@ -122,7 +124,7 @@ public interface MemberAccountSupportPort {
 
 - `MemberAccountSupportRegistry.require(MemberAccountType)` returns the correct port without probing the other account table.
 
-- [ ] **Step 1: Write adapter tests.** Name the mutations they catch: wrong account type routing, PII in minimal projection, failure to block login during password reset, failure to revoke all refresh state, and support-version mismatch.
+- [x] **Step 1: Write adapter tests.** Name the mutations they catch: wrong account type routing, PII in minimal projection, failure to block login during password reset, failure to revoke all refresh state, and support-version mismatch.
 
 ```java
 assertThat(adapter.findMinimal(id).orElseThrow())
@@ -133,15 +135,15 @@ assertThatThrownBy(() -> authService.login(login))
                 ex -> assertThat(ex.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `backend\gradlew.bat test --tests "*MemberSupportAdapterTest" --tests "*MemberAccountSupportRegistryTest"`
 
 Expected: missing port/adapter types and login accepting `passwordResetRequired` accounts.
 
-- [ ] **Step 3: Implement ports with own-domain repositories.** Use Querydsl/JPA projections inside each account domain, lock the account row for mutations, call entity CAS methods, encode the recovered password with the existing `PasswordPolicy`/`PasswordEncoder`, and revoke the namespace with `RefreshTokenManager.revokeAll`.
+- [x] **Step 3: Implement ports with own-domain repositories.** Use Querydsl/JPA projections inside each account domain, lock the account row for mutations, call entity CAS methods, encode the recovered password with the existing `PasswordPolicy`/`PasswordEncoder`, and revoke the namespace with `RefreshTokenManager.revokeAll`.
 
-- [ ] **Step 4: Run GREEN and commit.**
+- [x] **Step 4: Run GREEN and commit.**
 
 Commit: `feat: expose member account support ports`
 

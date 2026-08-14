@@ -130,10 +130,12 @@
 - `backend/src/main/java/com/miriyum/domain/consumer/entity/ConsumerAccount.java`
 - `backend/src/main/java/com/miriyum/domain/consumer/service/ConsumerAccountService.java`
 - `backend/src/main/java/com/miriyum/domain/consumer/service/ConsumerAuthService.java`
+- `backend/src/main/java/com/miriyum/domain/consumer/service/ConsumerKakaoAuthService.java`
 - `backend/src/main/java/com/miriyum/domain/consumer/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/entity/StoreOperatorAccount.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAccountService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAuthService.java`
+- `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorKakaoAuthService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/config/membersupport/**`
