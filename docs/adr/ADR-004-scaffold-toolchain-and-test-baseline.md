@@ -89,3 +89,103 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 - #288 2단계에서 `integration-test`를 `integration-test-a`부터 `integration-test-d`까지 네 matrix job으로 확장해 병렬 실행한다. 모든 통합 테스트 클래스는 `integration-shard-a`~`integration-shard-d` 중 정확히 하나를 선언한다.
 - Gradle 검증 task는 통합 marker와 shard tag의 누락 또는 중복을 실패시킨다. 네 shard가 모두 성공해야 `backend-ci` 집계 job이 성공하므로 기존 Required check 이름과 전체 테스트 게이트는 유지한다. Required check는 집계 job 이름 하나이므로 shard 수를 바꿔도 브랜치 보호 설정을 변경하지 않는다.
 - shard 배치는 도메인 단위가 아니라 최근 실행 시간과 테스트 구성 정보를 함께 보아 균형 있게 정한다. `@SpringBootTest` properties·`@AutoConfigureMockMvc`·`@Testcontainers` 조합은 후보를 찾는 힌트일 뿐, Spring ApplicationContext 캐시 키에는 `@DynamicPropertySource`, `@MockitoBean` 등의 context customizer도 포함된다. 따라서 정적 시그니처가 같다는 이유만으로 캐시 공유나 기동 횟수를 단정하지 않으며, 컨텍스트 재사용을 최적화 근거로 삼을 때는 cache debug log 또는 동등한 실행 증거를 남긴다.
+
+## 2026-08-14 날짜별 개정
+
+### 로컬 Backend 전체 검증 병렬 runner 설계
+
+Issue [#330](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/330)은 CI의 unit job과 integration shard A~D 병렬 구조를 Windows 로컬에서도 안전하게 재현하는 선택적 PowerShell 7 runner를 도입한다. 이 runner는 기존 `root.verify.backend`의 순서와 첫 실패 중단 계약을 대체하지 않는다. 현재 `backend.build`가 소유한 compile·unit·integration·assemble 범위를 빠르게 확인하는 로컬 실행 표면이며, 최종 gate와 각 Pull Request의 CI 증거는 기존 정본을 따른다.
+
+설계는 승인됐지만 runtime 상태는 아직 `NOT CONFIGURED`다. 구현은 Test JVM heap과 fork를 소유한 [#306](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/306)에 의해 차단된다. 아래 Auto 기준은 #306이 Test JVM heap 1GB와 `maxParallelForks = 1`로 확정되어 `dev`에 병합되는 경우에만 유효하다. #306이 2GB 또는 다른 fork 계약을 선택하면 Auto 임계값과 25분 목표를 다시 측정하고 승인할 때까지 구현을 `BLOCKED`로 유지한다.
+
+### 실행 구조와 명령
+
+`backend/`에서 다음 명령을 사용한다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1
+pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShards 1
+pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShards 2
+pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShards 4
+```
+
+기본값은 `Auto`다. `ParallelShards`는 동시에 실행할 integration worker의 상한이며 전체 child 수가 아니다. unit+assemble child 하나는 integration queue와 별도로 실행하므로 `ParallelShards=4`의 최대 동시 child는 다섯 개다.
+
+- unit child는 `test assemble`을 실행한다.
+- integration queue는 `integrationTestShardA`부터 `integrationTestShardD`까지 실행한다.
+- 모든 child는 `--no-daemon --rerun-tasks --console=plain`을 사용한다.
+- runner는 Gradle daemon heap을 1GB로 제한하지만 Test JVM heap과 fork는 재정의하지 않는다.
+- init script는 #306의 실제 Test task 설정이 기대한 1GB/fork 1인지 검증하고 다르면 실행을 중단한다.
+- 한 child가 실패하거나 timeout돼도 아직 시작하지 않은 integration shard를 계속 실행해 전체 진단을 모은다.
+
+`Auto`는 실행 시작 시 자원을 한 번만 읽고 실행 중 병렬도를 증감하지 않는다. Windows는 OS가 보고한 현재 가용 물리 메모리, GitHub Actions Ubuntu는 `/proc/meminfo`의 `MemAvailable`, CPU는 현재 프로세스에 제공되는 논리 processor 수를 사용한다.
+
+| 조건 | 선택값 | 최대 동시 child |
+|---|---:|---:|
+| 가용 RAM 20GB 이상, logical CPU 8 이상 | 4 | 5 |
+| 가용 RAM 12GB 이상, logical CPU 4 이상 | 2 | 3 |
+| 그 외 또는 자원 탐지 실패 | 1 | 2 |
+
+메모리 기준은 고정 여유 4GB와 integration worker당 4GB의 합이다. 고정 여유는 unit child와 OS·Docker 여유를 함께 보수적으로 다루며, 기존 5-child benchmark에서 관찰한 Java peak 약 7.1GB와 Docker peak 미측정 위험을 반영한다. 명시적 1·2·4 override는 기준 미달 경고를 출력하되 사용자가 선택한 값을 적용한다.
+
+### child 격리와 process 수명 주기
+
+한 실행은 `backend/build/local-verification/<run-id>/` 아래에 child별 독립 경로를 만든다.
+
+- `build/<child-id>`: Gradle build directory와 XML·HTML report
+- `project-cache/<child-id>`: Gradle project cache
+- `logs/<child-id>.stdout.log`, `logs/<child-id>.stderr.log`: 분리된 출력
+
+Gradle user home의 dependency cache는 공유하지만 build directory와 project cache를 공유하지 않는다. init script는 child별 절대 build directory를 설정하며, runner는 `--project-cache-dir`에 child별 경로를 전달한다.
+
+process 실행은 `System.Diagnostics.ProcessStartInfo`를 사용한다. Ubuntu는 Wrapper 실행 파일과 각 인자를 `ArgumentList`로 전달한다. Windows는 `cmd.exe /d /s /c`에 Wrapper 경로와 인자를 전달하는 adapter를 사용하며, 공백·비ASCII 경로와 따옴표가 포함된 인자가 보존되는지 contract fixture로 고정한다. stdout과 stderr는 runner가 child별 파일로 redirect하고 `WaitForExit()` 뒤 실제 `ExitCode`를 읽는다.
+
+각 child timeout은 35분이다. timeout·Ctrl-C·예외가 발생하면 살아 있는 root process에 전체 process tree 종료를 요청하고 종료를 기다린다. descendant가 남거나 정리 결과를 확인할 수 없으면 runner 전체를 실패로 기록한다. Ctrl-C에서도 이미 생성된 로그와 report를 삭제하지 않는다.
+
+### 결과 판정과 보고서
+
+unit 및 각 shard는 다음 조건을 모두 만족해야 성공이다.
+
+1. child process exit code가 `0`이다.
+2. 예상 test result directory에 XML이 하나 이상 존재한다.
+3. XML 전체의 `tests` 합이 0보다 크다.
+4. `failures`, `errors`, `skipped` 합이 모두 0이다.
+
+exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 child는 실패다. malformed XML, 필수 attribute 누락과 빈 report도 실패다. runner는 모든 child가 끝난 뒤 선택값과 근거, child별 task·PID·시작/종료·elapsed·exit code·test 합계·log/report 경로를 출력하며 하나라도 실패하면 non-zero로 종료한다.
+
+### 플랫폼과 CI 경계
+
+첫 지원 범위는 Windows PowerShell 7과 GitHub Actions `ubuntu-24.04`의 `pwsh`다. Backend CI의 unit job은 실제 Gradle 전체 runner를 다시 실행하지 않고 PowerShell contract fixture만 실행한다. fixture는 다음 계약을 검증한다.
+
+- Auto 경계와 탐지 실패 fallback, 명시적 override
+- integration 동시 실행 상한 1·2·4와 별도 unit child
+- child별 build/cache/log/report 격리
+- 실제 exit code 수집과 최종 non-zero 전파
+- XML 누락·malformed·tests=0·failure/error/skipped 거부
+- 한 child 실패와 timeout 뒤에도 남은 queue 실행
+- Ctrl-C·timeout의 descendant 종료와 orphan 0건
+- 공백·비ASCII 경로의 인자 보존
+- Windows Wrapper와 Ubuntu Wrapper 선택
+
+Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 해당 플랫폼 지원을 `CONFIGURED`라고 부르지 않는다. macOS는 이번 범위에 포함하지 않는다.
+
+### 성능 목표와 검증 범위
+
+2026-08-14의 외부 실험에서는 Test JVM 1GB, fork 1, Gradle daemon 1GB로 unit+assemble과 A~D 다섯 child를 실행해 23분 0.828초 wall clock, unit 2,093개와 integration 544개, failure/error/skipped 0을 관찰했다. Java peak working set은 약 7.1GB였고 Docker peak는 측정하지 못했다. 실험 wrapper는 `Start-Process.ExitCode`를 안정적으로 수집하지 못했으므로 정식 runner의 성공 증거가 아니라 exit-code contract의 실패 fixture 근거로만 사용한다.
+
+구현 후 현재 34GB Windows 기준 머신에서 Auto 전체 실행을 한 번 수행해 unit+assemble+A~D, XML 무결성과 25분 이하 wall clock을 확인한다. 이는 해당 머신과 실행의 관찰 결과이며 모든 PC에 대한 보장이 아니다. 같은 코드·설정으로 기존 43~46분 전체 build를 설계 단계에서 반복하지 않는다. 로컬 runner 성공은 해당 commit의 Backend CI 성공을 대신하지 않는다.
+
+### shard 재배치 경계
+
+현재 class-duration XML은 보존되지 않았고 benchmark 이후 통합 테스트 소스도 변경됐으므로 #330은 shard 태그를 수정하지 않는다. #306과 runner 완료 후 비교 가능한 최신 실행에서 같은 shard의 불균형이 최소 두 번 반복될 때만 별도 Issue를 연다.
+
+재배치 Issue는 class-duration 중앙값과 실제 shard 총 시간을 함께 사용하고, 이동할 정확한 테스트 파일 allowlist를 변경 전에 확정한다. 클래스 수만으로 이동하지 않는다. context cache 재사용은 cache debug log 또는 동등한 실행 증거가 없으면 근거로 사용하지 않으며, 태그 이동 뒤 전체 runner로 실제 균형과 전체 통과를 다시 검증한다.
+
+### 검토한 대안과 결과
+
+- 단일 Gradle invocation의 `--parallel` 또는 재귀 custom task는 실제 Test JVM 병렬 실행과 child별 report·cleanup 격리가 입증되지 않아 선택하지 않는다.
+- CI workflow만 유지하고 로컬 명령을 추가하지 않는 안은 43~46분 로컬 피드백 문제를 해결하지 않아 선택하지 않는다.
+- runner가 Test heap/fork를 강제로 덮어쓰는 안은 #306의 소유권과 중복되므로 금지한다.
+- 실패 즉시 다른 child를 종료하는 안은 전체 진단을 잃고 CI의 `fail-fast=false` 정책과 달라 선택하지 않는다.
+
+runner가 contract fixture, Windows 전체 실행과 Ubuntu CI 증거를 모두 통과한 뒤에만 backend 명령 레지스트리와 verification runner 상태를 `CONFIGURED`로 갱신한다. 그 전까지 계획, script 이름 또는 Issue만으로 활성 상태를 주장하지 않는다.
