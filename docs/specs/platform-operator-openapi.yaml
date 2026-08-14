@@ -22,6 +22,22 @@ paths:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
   /api/v1/platform-operators/reauthentication-approvals:
     $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
+  /api/v1/platform-operators/members:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members"
+  /api/v1/platform-operators/members/{accountType}/{accountId}:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members~1{accountType}~1{accountId}"
+  /api/v1/platform-operators/member-support-cases:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases"
+  /api/v1/platform-operators/member-support-cases/{caseId}:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}"
+  /api/v1/platform-operators/member-support-cases/{caseId}/assignments:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/member-support-cases/{caseId}/decisions:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-support-cases~1{caseId}~1decisions"
+  /api/v1/platform-operators/members/{accountType}/{accountId}/sanctions:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members~1{accountType}~1{accountId}~1sanctions"
+  /api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1{sanctionId}~1additional-approvals"
 components:
   securitySchemes:
     platformOperatorBearerAuth:

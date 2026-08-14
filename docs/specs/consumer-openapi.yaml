@@ -3,10 +3,21 @@ info:
   title: MiriYum MVP1 Consumer API
   version: 1.0.0
   description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
 servers:
   - url: /
 security: []
 paths:
+  /api/v1/consumers/account-recovery-verifications:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-verifications"
+  /api/v1/consumers/account-recovery-cases:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-cases"
+  /api/v1/consumers/account-recovery-password-resets:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-password-resets"
+  /api/v1/consumers/account-sanction-appeals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-sanction-appeals"
   /api/v1/consumers/auth/accounts:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1consumers~1auth~1accounts"
   /api/v1/consumers/auth/sessions:
@@ -57,3 +68,12 @@ paths:
     $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}"
   /api/v1/consumers/me/payments/{paymentId}/confirmations:
     $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}~1confirmations"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "./mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+    consumerRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_CONSUMER_REFRESH
+      description: 일반 사용자 Refresh JWT HttpOnly 쿠키

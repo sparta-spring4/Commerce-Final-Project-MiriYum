@@ -15,3 +15,4 @@
 
 - [플랫폼 운영자 인증·세션·최초 비밀번호 변경](platform-operator-auth/spec.md): #275가 소유하는 독립 인증 namespace와 중앙 세션 계약
 - [플랫폼 운영자 권한·재인증·고위험 명령 공통 기반](platform-operator-authorization/spec.md): #276이 소유하는 RBAC·사건 배정·일회 승인·guard 계약
+- [회원 조회·계정 복구·제재 사건 관리](member-support/spec.md): #278이 소유하는 최소 회원 조회·mock 확인·복구·제재·이의 계약
