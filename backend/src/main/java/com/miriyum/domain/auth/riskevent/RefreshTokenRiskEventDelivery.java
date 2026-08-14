@@ -39,7 +39,10 @@ public class RefreshTokenRiskEventDelivery {
         this.alertThreshold = Math.max(1, alertThreshold);
     }
 
-    @Scheduled(fixedDelayString = "${miriyum.auth.refresh-risk-event-delivery-delay-ms:30000}")
+    @Scheduled(
+            fixedDelayString = "${miriyum.auth.refresh-risk-event-delivery-delay-ms:30000}",
+            scheduler = "refreshTokenRiskEventTaskScheduler"
+    )
     public void deliverPendingEventsOnSchedule() {
         deliverPendingEvents();
     }
