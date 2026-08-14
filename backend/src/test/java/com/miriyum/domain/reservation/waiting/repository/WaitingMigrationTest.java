@@ -240,6 +240,39 @@ class WaitingMigrationTest {
     }
 
     @Test
+    @DisplayName("V41은 V40 예약 전환 중 행을 재작성 취소 삭제 없이 그대로 보존한다")
+    void preservesLegacyReservationConvertingRowWhenApplyingV41() throws SQLException {
+        try {
+            Flyway v40 = flywayForTarget("40");
+            v40.clean();
+            v40.migrate();
+            try (Connection connection = connection()) {
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+                insertLegacyReservationConvertingTeam(connection);
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 1");
+            }
+
+            Flyway v41 = flywayForTarget(null);
+            v41.migrate();
+
+            assertThat(queryStrings("""
+                    SELECT CONCAT(
+                        status, ':', version, ':',
+                        reservation_converting_at IS NULL, ':',
+                        waiting_payment_id IS NULL, ':',
+                        reservation_reference_id IS NULL, ':',
+                        reservation_converted_at IS NULL
+                    )
+                    FROM waiting_teams
+                    WHERE store_id = 99001
+                      AND queue_sequence = 901
+                    """)).containsExactly("RESERVATION_CONVERTING:0:1:1:1:1");
+        } finally {
+            cleanDatabase();
+        }
+    }
+
+    @Test
     @DisplayName("순번 행의 기본 키는 매장과 영업일 복합 키다")
     void createsStoreBusinessDateCompositeSequencePrimaryKey() throws SQLException {
         migrate();
@@ -286,6 +319,8 @@ class WaitingMigrationTest {
                     null, null, null, null, null, null);
             insertConversionTeam(connection, 102L, "RESERVATION_CONVERTING", createdAt,
                     convertingAt, "123456789", null, null, null, null);
+            insertConversionTeam(connection, 113L, "RESERVATION_CONVERTING", createdAt,
+                    null, null, null, null, null, null);
             insertConversionTeam(connection, 103L, "RESERVATION_CONVERTED", createdAt,
                     convertingAt, "123456789", 987L, completedAt, null, null);
             insertConversionTeam(connection, 104L, "CANCELLED", createdAt,
@@ -728,6 +763,19 @@ class WaitingMigrationTest {
                 statement.setLong(9, reservationReferenceId);
             }
             setInstant(statement, 10, reservationConvertedAt);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertLegacyReservationConvertingTeam(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO waiting_teams (
+                    store_id, consumer_account_id, business_date, party_size, source,
+                    queue_sequence, status, version, created_at
+                ) VALUES (99001, 99002, ?, 2, 'REMOTE', 901, 'RESERVATION_CONVERTING', 0, ?)
+                """)) {
+            statement.setObject(1, LocalDate.of(2026, 8, 12));
+            setInstant(statement, 2, Instant.parse("2026-08-12T03:00:00Z"));
             statement.executeUpdate();
         }
     }

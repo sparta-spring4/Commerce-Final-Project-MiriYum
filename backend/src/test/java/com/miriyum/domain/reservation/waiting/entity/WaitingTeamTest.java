@@ -536,6 +536,26 @@ class WaitingTeamTest {
     }
 
     @Test
+    @DisplayName("V41 이전 예약 전환 snapshot은 취소와 매장 종료에서 생성 시각으로 fallback한다")
+    void terminatesLegacyReservationConvertingSnapshotWithoutAttemptIdentity() {
+        WaitingTeam cancelled = legacyReservationConvertingTeam();
+        WaitingTeam closed = legacyReservationConvertingTeam();
+        Instant terminatedAt = CREATED_AT.plusSeconds(10);
+
+        cancelled.cancel(0L, terminatedAt);
+        closed.closeByStore(0L, terminatedAt);
+
+        assertThat(cancelled.getStatus()).isEqualTo(WaitingTeamStatus.CANCELLED);
+        assertThat(cancelled.getCancelledAt()).isEqualTo(terminatedAt);
+        assertThat(cancelled.getReservationConvertingAt()).isNull();
+        assertThat(cancelled.getWaitingPaymentId()).isNull();
+        assertThat(closed.getStatus()).isEqualTo(WaitingTeamStatus.CLOSED_BY_STORE);
+        assertThat(closed.getClosedByStoreAt()).isEqualTo(terminatedAt);
+        assertThat(closed.getReservationConvertingAt()).isNull();
+        assertThat(closed.getWaitingPaymentId()).isNull();
+    }
+
+    @Test
     @DisplayName("예약 전환 중인 팀은 call arrive check-in 공개 명령을 모두 거절한다")
     void rejectsCallArriveAndCheckInFromReservationConverting() {
         WaitingTeam team = reservationConvertingTeam();
@@ -582,6 +602,18 @@ class WaitingTeamTest {
 
     private static WaitingTeam reservationConvertingTeam() {
         return convertingTeam("123456789", CREATED_AT);
+    }
+
+    private static WaitingTeam legacyReservationConvertingTeam() {
+        WaitingTeam team = newTeam();
+        try {
+            var status = WaitingTeam.class.getDeclaredField("status");
+            status.setAccessible(true);
+            status.set(team, WaitingTeamStatus.RESERVATION_CONVERTING);
+            return team;
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private static WaitingTeam convertingTeam(String paymentId, Instant convertingAt) {

@@ -146,11 +146,19 @@ ALTER TABLE waiting_teams
         CHECK (
             COALESCE((CASE status
                 WHEN 'RESERVATION_CONVERTING' THEN
-                    reservation_converting_at IS NOT NULL
-                    AND reservation_converting_at >= created_at
-                    AND REGEXP_LIKE(waiting_payment_id, '^[1-9][0-9]{0,18}$')
-                    AND reservation_reference_id IS NULL
+                    reservation_reference_id IS NULL
                     AND reservation_converted_at IS NULL
+                    AND (
+                        (
+                            reservation_converting_at IS NULL
+                            AND waiting_payment_id IS NULL
+                        )
+                        OR (
+                            reservation_converting_at IS NOT NULL
+                            AND reservation_converting_at >= created_at
+                            AND REGEXP_LIKE(waiting_payment_id, '^[1-9][0-9]{0,18}$')
+                        )
+                    )
                 WHEN 'RESERVATION_CONVERTED' THEN
                     reservation_converting_at IS NOT NULL
                     AND reservation_converting_at >= created_at
