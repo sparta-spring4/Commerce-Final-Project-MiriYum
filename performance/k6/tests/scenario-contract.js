@@ -1,6 +1,8 @@
 import { check } from 'k6'
 
 import { runAuthRefresh } from '../scenarios/auth-refresh.js'
+import { runNotificationHistory } from '../scenarios/notification-history.js'
+import { runReservationCreate } from '../scenarios/reservation-create.js'
 import { runStoreSearch } from '../scenarios/store-search.js'
 
 export const options = {
@@ -13,9 +15,52 @@ function envelope(data) {
   return JSON.stringify({ code: 'SUCCESS', message: 'ok', data })
 }
 
+function notificationItem(notificationId) {
+  return {
+    notificationId,
+    purpose: 'RESERVATION_CONFIRMED',
+    title: '예약이 확정되었습니다',
+    resource: { type: 'RESERVATION', id: '9001' },
+    occurredAt: '2026-08-14T12:00:00+09:00',
+    createdAt: '2026-08-14T12:00:00+09:00',
+    deliveredAt: '2026-08-14T12:00:01+09:00',
+    action: null,
+  }
+}
+
+function reservationConflictClient(code) {
+  return {
+    post() {
+      return {
+        status: 409,
+        body: JSON.stringify({ code, message: 'conflict' }),
+        headers: {},
+      }
+    },
+  }
+}
+
+const RESERVATION_INPUT = {
+  baseUrl: 'http://backend:8080',
+  accessToken: 'access-token-value',
+  template: {
+    storeId: '301',
+    serviceDate: '2026-08-20',
+    startTime: '18:00:00',
+    startOffset: '+09:00',
+    party: { adultCount: 2, childCount: 0, infantCount: 0 },
+    menuSelections: [],
+  },
+  runId: 'local-smoke-20260814',
+  vu: 1,
+  iteration: 2,
+  tags: { phase: 'measured' },
+}
+
 class RecordingClient {
   constructor() {
     this.calls = []
+    this.notificationPage = 0
   }
 
   post(url, body, params) {
@@ -27,6 +72,13 @@ class RecordingClient {
         headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=refresh-cookie-value' },
       }
     }
+    if (url.endsWith('/api/v1/consumers/me/reservations')) {
+      return {
+        status: 201,
+        body: envelope({ reservationId: '9001', storeId: '301', status: 'CONFIRMED' }),
+        headers: {},
+      }
+    }
     return {
       status: 200,
       body: envelope({ accessToken: 'rotated-access-token', tokenType: 'Bearer', expiresIn: 900 }),
@@ -36,6 +88,16 @@ class RecordingClient {
 
   get(url, params) {
     this.calls.push({ method: 'GET', url, ...params })
+    if (url.includes('/api/v1/consumers/me/notifications')) {
+      this.notificationPage += 1
+      return {
+        status: 200,
+        body: envelope(this.notificationPage === 1
+          ? { items: [notificationItem('11'), notificationItem('10')], hasNext: true, nextCursor: 'opaque_cursor_1' }
+          : { items: [notificationItem('9')], hasNext: false, nextCursor: null }),
+        headers: {},
+      }
+    }
     return {
       status: 200,
       body: envelope({
@@ -67,9 +129,33 @@ export default function () {
     search: { input: '서울 한식' },
     tags: { phase: 'measured' },
   })
+  const reservationResult = runReservationCreate({
+    client,
+    ...RESERVATION_INPUT,
+  })
+  const notificationResult = runNotificationHistory({
+    client,
+    baseUrl: 'http://backend:8080',
+    accessToken: 'access-token-value',
+    pageSize: 2,
+    tags: { phase: 'measured' },
+  })
 
-  const [loginCall, refreshCall, searchCall] = client.calls
-  const combinedResult = JSON.stringify({ authResult, searchResult })
+  const [loginCall, refreshCall, searchCall, reservationCall, firstNotificationCall, secondNotificationCall] = client.calls
+  const combinedResult = JSON.stringify({
+    authResult,
+    searchResult,
+    reservationResult,
+    notificationResult,
+  })
+  const capacityConflict = runReservationCreate({
+    client: reservationConflictClient('RESERVATION_003'),
+    ...RESERVATION_INPUT,
+  })
+  const notificationConflict = runReservationCreate({
+    client: reservationConflictClient('NOTIFICATION_002'),
+    ...RESERVATION_INPUT,
+  })
 
   check(null, {
     'login uses the consumer session resource': () =>
@@ -93,5 +179,27 @@ export default function () {
       && searchResult.status === 200
       && !combinedResult.includes('access-token-value')
       && !combinedResult.includes('refresh-cookie-value'),
+    'reservation uses a UUID idempotency key': () =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        reservationCall.headers['Idempotency-Key'],
+      ),
+    'reservation sends only the approved fixture fields': () =>
+      reservationCall.body === '{"storeId":"301","serviceDate":"2026-08-20","startTime":"18:00:00","startOffset":"+09:00","party":{"adultCount":2,"childCount":0,"infantCount":0},"menuSelections":[]}',
+    'reservation exposes no created resource identifier': () =>
+      reservationResult.status === 201 && !combinedResult.includes('9001'),
+    'approved capacity conflict is an expected 4xx': () =>
+      capacityConflict.classification === 'expected_4xx',
+    'notification invariant conflict is an unexpected 4xx': () =>
+      notificationConflict.classification === 'unexpected_4xx',
+    'notification first page omits the cursor': () =>
+      firstNotificationCall.url === 'http://backend:8080/api/v1/consumers/me/notifications?size=2',
+    'notification next page forwards the opaque cursor unchanged': () =>
+      secondNotificationCall.url === 'http://backend:8080/api/v1/consumers/me/notifications?size=2&cursor=opaque_cursor_1',
+    'notification result exposes counts but not cursor or item identifiers': () =>
+      notificationResult.firstStatus === 200
+      && notificationResult.nextStatus === 200
+      && notificationResult.itemCount === 3
+      && !combinedResult.includes('opaque_cursor_1')
+      && !combinedResult.includes('notificationId'),
   })
 }
