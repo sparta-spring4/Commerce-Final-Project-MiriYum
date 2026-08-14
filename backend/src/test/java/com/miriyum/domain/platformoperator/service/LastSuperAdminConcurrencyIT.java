@@ -85,6 +85,31 @@ class LastSuperAdminConcurrencyIT {
         assertThat(roles.countActiveSuperAdministrators()).isEqualTo(1L);
     }
 
+    @Test
+    void suspendedOperatorSuperAdminGrantCanBeRemovedWhileOneActiveSuperAdminRemains() {
+        permissions.deleteAll();
+        roles.deleteAll();
+        authEvents.deleteAll();
+        accounts.deleteAll();
+        PlatformOperatorAccount active = account("active-super@example.com");
+        PlatformOperatorAccount suspended = account("suspended-super@example.com");
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                active.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                suspended.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        suspended.suspend();
+        accounts.saveAndFlush(suspended);
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            policy.assertRemovable(suspended.getId());
+            roles.deleteByPlatformOperatorAccountIdAndRole(suspended.getId(), PlatformOperatorRole.SUPER_ADMIN);
+        });
+
+        assertThat(roles.existsByPlatformOperatorAccountIdAndRole(
+                suspended.getId(), PlatformOperatorRole.SUPER_ADMIN)).isFalse();
+        assertThat(roles.countActiveSuperAdministrators()).isEqualTo(1L);
+    }
+
     private PlatformOperatorAccount account(String email) {
         return accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
                 email, encoder.encode("Password1!"), email, Instant.now().plusSeconds(600)));

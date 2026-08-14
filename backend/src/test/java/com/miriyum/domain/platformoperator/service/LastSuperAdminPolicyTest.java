@@ -8,7 +8,6 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAuthorityGuard;
-import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthorityGuardRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
@@ -38,14 +37,14 @@ class LastSuperAdminPolicyTest {
 
     @Test
     void allowsOneOfTwoActiveSuperAdministrators() {
-        when(roles.existsByPlatformOperatorAccountIdAndRole(7L, PlatformOperatorRole.SUPER_ADMIN)).thenReturn(true);
+        when(roles.countActiveSuperAdministratorById(7L)).thenReturn(1L);
         when(roles.countActiveSuperAdministrators()).thenReturn(2L);
         inTransaction(() -> assertThatCode(() -> policy.assertRemovable(7L)).doesNotThrowAnyException());
     }
 
     @Test
     void rejectsRemovingTheLastActiveSuperAdministrator() {
-        when(roles.existsByPlatformOperatorAccountIdAndRole(7L, PlatformOperatorRole.SUPER_ADMIN)).thenReturn(true);
+        when(roles.countActiveSuperAdministratorById(7L)).thenReturn(1L);
         when(roles.countActiveSuperAdministrators()).thenReturn(1L);
         inTransaction(() -> assertThatThrownBy(() -> policy.assertRemovable(7L))
                 .isInstanceOf(ServiceException.class)

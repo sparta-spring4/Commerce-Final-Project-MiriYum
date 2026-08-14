@@ -1,6 +1,5 @@
 package com.miriyum.domain.platformoperator.service;
 
-import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthorityGuardRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
@@ -31,7 +30,7 @@ public class LastSuperAdminPolicy {
             throw new IllegalStateException("last-super-admin decision requires an active mutation transaction");
         }
         guard.lockSingleton().orElseThrow(() -> new IllegalStateException("authority guard row is missing"));
-        if (!roles.existsByPlatformOperatorAccountIdAndRole(targetOperatorId, PlatformOperatorRole.SUPER_ADMIN)) {
+        if (roles.countActiveSuperAdministratorById(targetOperatorId) == 0) {
             return;
         }
         if (roles.countActiveSuperAdministrators() <= 1) {

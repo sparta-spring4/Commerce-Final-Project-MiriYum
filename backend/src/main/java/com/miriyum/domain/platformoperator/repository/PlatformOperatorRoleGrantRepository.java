@@ -23,4 +23,15 @@ public interface PlatformOperatorRoleGrantRepository extends JpaRepository<Platf
                and accounts.status = 'ACTIVE'
             """, nativeQuery = true)
     long countActiveSuperAdministrators();
+
+    @Query(value = """
+            select count(*)
+              from platform_operator_role_grants grants
+              join platform_operator_accounts accounts
+                on accounts.platform_operator_account_id = grants.platform_operator_account_id
+             where grants.platform_operator_account_id = :operatorId
+               and grants.role = 'SUPER_ADMIN'
+               and accounts.status = 'ACTIVE'
+            """, nativeQuery = true)
+    long countActiveSuperAdministratorById(@Param("operatorId") long operatorId);
 }
