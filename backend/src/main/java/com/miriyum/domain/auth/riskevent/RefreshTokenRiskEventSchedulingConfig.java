@@ -14,7 +14,6 @@ public class RefreshTokenRiskEventSchedulingConfig {
 
     @Bean(
             name = "refreshTokenRiskEventTaskScheduler",
-            destroyMethod = "shutdown",
             defaultCandidate = false
     )
     @ConditionalOnProperty(
