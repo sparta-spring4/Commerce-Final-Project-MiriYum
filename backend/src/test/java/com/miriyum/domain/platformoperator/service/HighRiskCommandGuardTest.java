@@ -22,6 +22,7 @@ import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRep
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 class HighRiskCommandGuardTest {
     private PlatformOperatorAccountRepository accounts;
@@ -104,6 +106,18 @@ class HighRiskCommandGuardTest {
         when(approvals.consumeBoundApproval(any(), any(Long.class), any(), any(), any(), any(), any(Long.class), any()))
                 .thenReturn(0);
         assertDenied();
+    }
+
+    @Test
+    void mapsCentralAuthorityStoreFailureToServiceUnavailable() {
+        when(accounts.findByIdForUpdate(7L)).thenThrow(new DataAccessResourceFailureException("down"));
+        try (MockedStatic<TransactionSynchronizationManager> tx = mockStatic(TransactionSynchronizationManager.class)) {
+            tx.when(TransactionSynchronizationManager::isActualTransactionActive).thenReturn(true);
+            assertThatThrownBy(() -> guard.authorize(request))
+                    .isInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                            .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+        }
     }
 
     private void assertDenied() {

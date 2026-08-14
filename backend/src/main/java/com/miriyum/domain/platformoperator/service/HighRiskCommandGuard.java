@@ -11,8 +11,10 @@ import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +51,14 @@ public class HighRiskCommandGuard {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("high-risk authorization requires an active command transaction");
         }
+        try {
+            return authorizeAgainstStores(request);
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private AdminAuditContext authorizeAgainstStores(HighRiskCommandRequest request) {
         PlatformOperatorAccount account = accounts.findByIdForUpdate(request.principal().accountId())
                 .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
                 .filter(candidate -> candidate.getAuthorityVersion() == request.principal().authorityVersion())

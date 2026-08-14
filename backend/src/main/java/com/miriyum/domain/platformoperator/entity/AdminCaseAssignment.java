@@ -81,4 +81,19 @@ public class AdminCaseAssignment extends BaseEntity {
     public boolean isActiveAt(Instant now) {
         return status == AdminCaseAssignmentStatus.ASSIGNED && Objects.requireNonNull(now).isBefore(expiresAt);
     }
+
+    public void reassign(long operatorId, Instant newExpiresAt, Instant now) {
+        Instant changedAt = Objects.requireNonNull(now);
+        Instant expiry = Objects.requireNonNull(newExpiresAt);
+        if (operatorId < 1 || !expiry.isAfter(changedAt) || status == AdminCaseAssignmentStatus.CLOSED) {
+            throw new IllegalArgumentException("valid active reassignment is required");
+        }
+        platformOperatorAccountId = operatorId;
+        expiresAt = expiry;
+        status = AdminCaseAssignmentStatus.ASSIGNED;
+    }
+
+    public void close() {
+        status = AdminCaseAssignmentStatus.CLOSED;
+    }
 }

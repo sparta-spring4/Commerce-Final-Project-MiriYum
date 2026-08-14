@@ -10,7 +10,9 @@ public record AdminCaseAssignmentRequest(
         long operatorId
 ) {
     public AdminCaseAssignmentRequest {
-        if (caseType == null || caseId == null || caseId.isBlank() || caseVersion < 1 || operatorId < 1) {
+        if (caseType == null || caseId == null
+                || !caseId.matches("^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
+                || caseVersion < 1 || operatorId < 1) {
             throw new IllegalArgumentException("valid case assignment fields are required");
         }
     }

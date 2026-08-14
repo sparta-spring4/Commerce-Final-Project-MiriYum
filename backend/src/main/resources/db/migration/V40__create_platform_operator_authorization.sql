@@ -1,7 +1,7 @@
 CREATE TABLE platform_operator_role_grants (
     platform_operator_role_grant_id BIGINT NOT NULL AUTO_INCREMENT,
     platform_operator_account_id BIGINT NOT NULL,
-    role VARCHAR(50) NOT NULL,
+    role VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     granted_at DATETIME(6) NOT NULL,
     PRIMARY KEY (platform_operator_role_grant_id),
     CONSTRAINT uk_platform_operator_role_grants_account_role
@@ -19,7 +19,7 @@ CREATE TABLE platform_operator_role_grants (
 CREATE TABLE platform_operator_permission_grants (
     platform_operator_permission_grant_id BIGINT NOT NULL AUTO_INCREMENT,
     platform_operator_account_id BIGINT NOT NULL,
-    permission VARCHAR(70) NOT NULL,
+    permission VARCHAR(70) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     granted_at DATETIME(6) NOT NULL,
     PRIMARY KEY (platform_operator_permission_grant_id),
     CONSTRAINT uk_platform_operator_permission_grants_account_permission
@@ -39,18 +39,18 @@ CREATE TABLE platform_operator_permission_grants (
 
 CREATE TABLE admin_case_assignments (
     admin_case_assignment_id BIGINT NOT NULL AUTO_INCREMENT,
-    case_type VARCHAR(50) NOT NULL,
-    case_id VARCHAR(100) NOT NULL,
+    case_type VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    case_id VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     case_version BIGINT NOT NULL,
     platform_operator_account_id BIGINT NOT NULL,
-    status VARCHAR(20) NOT NULL,
+    status VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     expires_at DATETIME(6) NOT NULL,
     row_version BIGINT NOT NULL DEFAULT 0,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (admin_case_assignment_id),
-    CONSTRAINT uk_admin_case_assignments_case_operator
-        UNIQUE (case_type, case_id, case_version, platform_operator_account_id),
+    CONSTRAINT uk_admin_case_assignments_case_version
+        UNIQUE (case_type, case_id, case_version),
     CONSTRAINT fk_admin_case_assignments_account FOREIGN KEY (platform_operator_account_id)
         REFERENCES platform_operator_accounts (platform_operator_account_id) ON DELETE RESTRICT,
     CONSTRAINT ck_admin_case_assignments_case_version CHECK (case_version >= 1),
@@ -61,12 +61,12 @@ CREATE TABLE admin_case_assignments (
 
 CREATE TABLE platform_operator_reauthentication_approvals (
     platform_operator_reauthentication_approval_id BIGINT NOT NULL AUTO_INCREMENT,
-    approval_digest CHAR(64) NOT NULL,
+    approval_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     platform_operator_account_id BIGINT NOT NULL,
-    purpose VARCHAR(50) NOT NULL,
-    target_type VARCHAR(50) NOT NULL,
-    target_id VARCHAR(100) NOT NULL,
-    session_fingerprint CHAR(64) NOT NULL,
+    purpose VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    target_type VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    target_id VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    session_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     authority_version BIGINT NOT NULL,
     issued_at DATETIME(6) NOT NULL,
     expires_at DATETIME(6) NOT NULL,

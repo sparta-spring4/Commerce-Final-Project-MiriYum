@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.service;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
@@ -12,6 +13,7 @@ import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRep
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,6 +26,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +40,7 @@ public class ReauthenticationService {
     private final PlatformOperatorAccountRepository accounts;
     private final PlatformOperatorReauthenticationApprovalRepository approvals;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordPolicy passwordPolicy;
     private final Clock clock;
     private final byte[] fingerprintKey;
 
@@ -44,12 +48,14 @@ public class ReauthenticationService {
             PlatformOperatorAccountRepository accounts,
             PlatformOperatorReauthenticationApprovalRepository approvals,
             PasswordEncoder passwordEncoder,
+            PasswordPolicy passwordPolicy,
             Clock clock,
             @Value("${miriyum.jwt.secret}") String fingerprintSecret
     ) {
         this.accounts = accounts;
         this.approvals = approvals;
         this.passwordEncoder = passwordEncoder;
+        this.passwordPolicy = passwordPolicy;
         this.clock = clock;
         this.fingerprintKey = fingerprintSecret.getBytes(StandardCharsets.UTF_8);
     }
@@ -59,31 +65,40 @@ public class ReauthenticationService {
             PlatformOperatorPrincipal principal,
             ReauthenticationApprovalRequest request
     ) {
-        PlatformOperatorAccount account = accounts.findById(principal.accountId())
-                .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
-                .filter(candidate -> candidate.getPasswordState() == PlatformOperatorPasswordState.ACTIVE)
-                .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+        PlatformOperatorAccount account;
+        try {
+            account = accounts.findById(principal.accountId())
+                    .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
+                    .filter(candidate -> candidate.getPasswordState() == PlatformOperatorPasswordState.ACTIVE)
+                    .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
         if (account.getAuthorityVersion() != principal.authorityVersion()
                 || account.getSessionVersion() != principal.sessionVersion()) {
             throw new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
         }
-        if (!matches(request.currentPassword(), account.getPasswordHash())) {
+        if (!matches(passwordPolicy.toNfc(request.currentPassword()), account.getPasswordHash())) {
             throw new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED);
         }
 
         String plaintext = newApproval();
         Instant issuedAt = clock.instant();
         Instant expiresAt = issuedAt.plus(APPROVAL_TTL);
-        approvals.save(PlatformOperatorReauthenticationApproval.issue(
-                sha256(plaintext),
-                principal.accountId(),
-                request.purpose(),
-                request.targetType(),
-                request.targetId(),
-                sessionFingerprint(principal.sessionId()),
-                principal.authorityVersion(),
-                issuedAt,
-                expiresAt));
+        try {
+            approvals.saveAndFlush(PlatformOperatorReauthenticationApproval.issue(
+                    sha256(plaintext),
+                    principal.accountId(),
+                    request.purpose(),
+                    request.targetType(),
+                    request.targetId(),
+                    sessionFingerprint(principal.sessionId()),
+                    principal.authorityVersion(),
+                    issuedAt,
+                    expiresAt));
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
         return new ReauthenticationApprovalResult(plaintext, expiresAt);
     }
 

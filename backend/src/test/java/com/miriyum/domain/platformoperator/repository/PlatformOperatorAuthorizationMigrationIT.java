@@ -46,30 +46,53 @@ class PlatformOperatorAuthorizationMigrationIT {
                         "SELECT COUNT(*) FROM platform_operator_authority_guard WHERE guard_id = 1"))
                         .isEqualTo(1L);
 
-                long accountId = insertAccount(connection);
+                long accountId = insertAccount(connection, "authorization@example.com");
+                long secondAccountId = insertAccount(connection, "authorization-2@example.com");
                 insertRoleGrant(connection, accountId, "SUPER_ADMIN");
                 assertThatThrownBy(() -> insertRoleGrant(connection, accountId, "SUPER_ADMIN"))
                         .isInstanceOf(SQLException.class);
                 assertThatThrownBy(() -> insertRoleGrant(connection, accountId, "UNREGISTERED_ROLE"))
                         .isInstanceOf(SQLException.class);
+                insertAssignment(connection, accountId, "Case-Exact");
+                assertThatThrownBy(() -> insertAssignment(connection, secondAccountId, "Case-Exact"))
+                        .isInstanceOf(SQLException.class);
+                assertThat(singleLong(connection, """
+                        SELECT COUNT(*) FROM admin_case_assignments
+                         WHERE case_type = 'ONBOARDING_REVIEW' AND case_id = 'case-exact' AND case_version = 1
+                        """)).isZero();
             }
         }
     }
 
-    private static long insertAccount(Connection connection) throws SQLException {
+    private static long insertAccount(Connection connection, String email) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 INSERT INTO platform_operator_accounts
                     (email, password_hash, display_name, status, password_state,
                      temporary_password_expires_at, temporary_password_failure_count,
                      authority_version, session_version, row_version, created_at, updated_at)
-                VALUES ('authorization@example.com', 'hash', 'operator', 'ACTIVE', 'ACTIVE',
+                VALUES (?, 'hash', 'operator', 'ACTIVE', 'ACTIVE',
                         NULL, 0, 1, 1, 0, NOW(6), NOW(6))
                 """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, email);
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
                 keys.next();
                 return keys.getLong(1);
             }
+        }
+    }
+
+    private static void insertAssignment(Connection connection, long accountId, String caseId) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                INSERT INTO admin_case_assignments
+                    (case_type, case_id, case_version, platform_operator_account_id,
+                     status, expires_at, row_version, created_at, updated_at)
+                VALUES ('ONBOARDING_REVIEW', ?, 1, ?, 'ASSIGNED',
+                        DATE_ADD(NOW(6), INTERVAL 10 MINUTE), 0, NOW(6), NOW(6))
+                """)) {
+            statement.setString(1, caseId);
+            statement.setLong(2, accountId);
+            statement.executeUpdate();
         }
     }
 

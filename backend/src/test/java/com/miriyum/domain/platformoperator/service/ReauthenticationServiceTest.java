@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorReauthenticationApproval;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
@@ -21,6 +22,7 @@ import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRep
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class ReauthenticationServiceTest {
@@ -50,6 +53,7 @@ class ReauthenticationServiceTest {
                 accounts,
                 approvals,
                 encoder,
+                new PasswordPolicy(),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 "test-only-secret-key-must-be-at-least-32-bytes");
         account = mock(PlatformOperatorAccount.class);
@@ -60,7 +64,7 @@ class ReauthenticationServiceTest {
         when(account.getPasswordState()).thenReturn(PlatformOperatorPasswordState.ACTIVE);
         when(account.getAuthorityVersion()).thenReturn(3L);
         when(account.getSessionVersion()).thenReturn(2L);
-        when(approvals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(approvals.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -78,7 +82,7 @@ class ReauthenticationServiceTest {
         assertThat(result.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
         ArgumentCaptor<PlatformOperatorReauthenticationApproval> captor =
                 ArgumentCaptor.forClass(PlatformOperatorReauthenticationApproval.class);
-        verify(approvals).save(captor.capture());
+        verify(approvals).saveAndFlush(captor.capture());
         PlatformOperatorReauthenticationApproval saved = captor.getValue();
         assertThat(saved.getApprovalDigest()).hasSize(64).doesNotContain(result.approval());
         assertThat(saved.getSessionFingerprint()).hasSize(64).doesNotContain("raw-session-id");
@@ -111,5 +115,42 @@ class ReauthenticationServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID));
+    }
+
+    @Test
+    void normalizesTheCurrentPasswordToNfcBeforeComparison() {
+        String nfd = "Passwoe\u0301rd1!";
+        when(encoder.matches("Passwoérd1!", "encoded-password")).thenReturn(true);
+        ReauthenticationApprovalRequest request = new ReauthenticationApprovalRequest(
+                nfd, PAYMENT_RECOVERY, PAYMENT_RECOVERY_CASE, "recovery-1");
+
+        service.issue(principal, request);
+
+        verify(encoder).matches("Passwoérd1!", "encoded-password");
+    }
+
+    @Test
+    void mapsAuthorityStoreFailureToServiceUnavailable() {
+        when(accounts.findById(7L)).thenThrow(new DataAccessResourceFailureException("down"));
+        ReauthenticationApprovalRequest request = new ReauthenticationApprovalRequest(
+                "Password1!", PAYMENT_RECOVERY, PAYMENT_RECOVERY_CASE, "recovery-1");
+
+        assertThatThrownBy(() -> service.issue(principal, request))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+    }
+
+    @Test
+    void mapsApprovalStoreFailureToServiceUnavailable() {
+        when(encoder.matches("Password1!", "encoded-password")).thenReturn(true);
+        when(approvals.saveAndFlush(any())).thenThrow(new DataAccessResourceFailureException("down"));
+        ReauthenticationApprovalRequest request = new ReauthenticationApprovalRequest(
+                "Password1!", PAYMENT_RECOVERY, PAYMENT_RECOVERY_CASE, "recovery-1");
+
+        assertThatThrownBy(() -> service.issue(principal, request))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
     }
 }
