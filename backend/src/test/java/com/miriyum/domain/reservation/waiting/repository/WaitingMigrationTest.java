@@ -82,7 +82,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V36은 웨이팅 원장 소유 테이블 일곱 개만 생성한다")
+    @DisplayName("V41까지 적용하면 Waiting 소유 테이블 여덟 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
@@ -90,6 +90,7 @@ class WaitingMigrationTest {
                 "waiting_active_memberships",
                 "waiting_closure_job_items",
                 "waiting_closure_jobs",
+                "waiting_conversion_compensations",
                 "waiting_queue_sequences",
                 "waiting_status_events",
                 "waiting_teams",
@@ -109,6 +110,7 @@ class WaitingMigrationTest {
                 "waiting_closure_job_items.waiting_closure_job_id->waiting_closure_jobs.waiting_closure_job_id",
                 "waiting_closure_job_items.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_closure_jobs.store_id->stores.store_id",
+                "waiting_conversion_compensations.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_queue_sequences.store_id->stores.store_id",
                 "waiting_status_events.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_teams.consumer_account_id->consumer_accounts.consumer_account_id",
