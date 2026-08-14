@@ -56,7 +56,7 @@ public final class StoreScheduleFingerprint {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
-                        + "/operating-hours/{version}/publication|");
+                        + "/operating-hours/{version}/publications|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
         append(canonical, "publicationMode", request.publicationMode().name());
@@ -83,7 +83,7 @@ public final class StoreScheduleFingerprint {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}/"
-                        + streamPath + "/{version}/publication-cancellation|");
+                        + streamPath + "/{version}/publication-cancellations|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
         append(canonical, "changeReason", request.changeReason());
@@ -98,7 +98,7 @@ public final class StoreScheduleFingerprint {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}/"
-                        + streamPath + "/{version}/publication|");
+                        + streamPath + "/{version}/publications|");
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
         append(canonical, "publicationMode", request.publicationMode().name());

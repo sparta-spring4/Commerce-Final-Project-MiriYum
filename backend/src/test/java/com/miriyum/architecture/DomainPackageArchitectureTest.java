@@ -151,6 +151,7 @@ class DomainPackageArchitectureTest {
                         "notification",
                         "payment",
                         "pickup",
+                        "platformoperator",
                         "recommendation",
                         "reservation",
                         "schedule",

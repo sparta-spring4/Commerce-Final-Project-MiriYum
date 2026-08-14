@@ -1,0 +1,54 @@
+{
+  "family": "miriyum-production-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "REPLACE_WITH_ECS_TASK_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "REPLACE_WITH_ECS_TASK_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "REPLACE_WITH_ECR_IMAGE_URI",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "MIRIYUM_JWT_ISSUER", "value": "miriyum"},
+        {"name": "MIRIYUM_ALLOWED_ORIGIN", "value": "REPLACE_WITH_HTTPS_ORIGIN"},
+        {"name": "MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_KAKAO_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_PAYMENT_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED", "value": "true"},
+        {"name": "MIRIYUM_WAITING_CLOSURE_ENABLED", "value": "false"},
+        {"name": "MIRIYUM_VALKEY_HOST", "value": "REPLACE_WITH_VALKEY_ENDPOINT"},
+        {"name": "MIRIYUM_VALKEY_PORT", "value": "6379"}
+      ],
+      "secrets": [
+        {"name": "MIRIYUM_DB_URL", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_DB_URL::"},
+        {"name": "MIRIYUM_DB_USERNAME", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_DB_USERNAME::"},
+        {"name": "MIRIYUM_DB_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_DB_PASSWORD::"},
+        {"name": "MIRIYUM_JWT_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_JWT_SECRET::"},
+        {"name": "MIRIYUM_KAKAO_LOCAL_REST_API_KEY", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_KAKAO_LOCAL_REST_API_KEY::"},
+        {"name": "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET::"},
+        {"name": "MIRIYUM_VALKEY_PASSWORD", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_VALKEY_PASSWORD::"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "REPLACE_WITH_PRODUCTION_LOG_GROUP",
+          "awslogs-region": "ap-northeast-2",
+          "awslogs-stream-prefix": "backend"
+        }
+      }
+    }
+  ]
+}

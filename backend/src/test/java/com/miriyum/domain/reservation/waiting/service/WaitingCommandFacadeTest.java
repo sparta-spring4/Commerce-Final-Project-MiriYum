@@ -111,8 +111,8 @@ class WaitingCommandFacadeTest {
         assertThat(command.getValue().commandType()).isEqualTo("WAITING_TEAM_CALL");
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
                 "method=4:POST|"
-                        + "route=75:/api/v1/store-operators/stores/{storeId}/waiting-teams/"
-                        + "{waitingTeamId}/call|"
+                        + "route=76:/api/v1/store-operators/stores/{storeId}/waiting-teams/"
+                        + "{waitingTeamId}/calls|"
                         + "storeId=2:21|"
                         + "waitingTeamId=2:31|"
                         + "expectedVersion=1:4|"
@@ -140,7 +140,7 @@ class WaitingCommandFacadeTest {
                 org.mockito.ArgumentMatchers.eq(REQUESTED_AT));
         assertThat(command.getValue().commandType()).isEqualTo("WAITING_TEAM_ARRIVE");
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                canonical("arrive", 77, 1L)));
+                canonical("arrivals", 1L)));
     }
 
     @Test
@@ -164,7 +164,7 @@ class WaitingCommandFacadeTest {
                 org.mockito.ArgumentMatchers.eq(REQUESTED_AT));
         assertThat(command.getValue().commandType()).isEqualTo("WAITING_TEAM_CHECK_IN");
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                canonical("check-in", 79, 2L)));
+                canonical("check-ins", 2L)));
     }
 
     @Test
@@ -188,7 +188,7 @@ class WaitingCommandFacadeTest {
                 org.mockito.ArgumentMatchers.eq(REQUESTED_AT));
         assertThat(command.getValue().commandType()).isEqualTo("WAITING_TEAM_CANCEL");
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                canonical("cancel", 77, 2L)));
+                canonical("cancellations", 2L)));
     }
 
     @Test
@@ -329,11 +329,11 @@ class WaitingCommandFacadeTest {
                 "lock conflict", new SQLException("mysql lock", "40001", errorCode));
     }
 
-    private static String canonical(String action, int routeLength, long expectedVersion) {
+    private static String canonical(String action, long expectedVersion) {
+        String route = "/api/v1/store-operators/stores/{storeId}/waiting-teams/"
+                + "{waitingTeamId}/" + action;
         return "method=4:POST|"
-                + "route=" + routeLength
-                + ":/api/v1/store-operators/stores/{storeId}/waiting-teams/"
-                + "{waitingTeamId}/" + action + "|"
+                + "route=" + route.length() + ":" + route + "|"
                 + "storeId=2:21|"
                 + "waitingTeamId=2:31|"
                 + "expectedVersion=1:" + expectedVersion + "|";

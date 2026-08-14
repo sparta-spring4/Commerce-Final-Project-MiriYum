@@ -6,7 +6,7 @@
 > 협업 검토: 3번 팀원 — 예약 가용성, 4번 팀원 — 메뉴 수량 가용성
 > 관련 정책 ID: STORE-002~STORE-007, STORE-014, OPER-002~OPER-010, S-005, S-007, E-002, C-001~C-013
 > OpenAPI: `docs/specs/store-search/openapi.yaml`
-> 최종 승인일: 2026-07-31
+> 최종 승인일: 2026-08-14
 
 ## 범위
 
@@ -173,9 +173,9 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 - `PUT /api/v1/store-operators/stores/{storeId}/operating-hours`와 `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-slots`는 제출한 전체 주간 설정을 새 불변 `DRAFT` 버전으로 저장할 뿐 게시하지 않는다.
 - 초안 내용은 제자리에서 수정하지 않는다. 변경하려면 새 초안 버전을 저장하고, 게시할 버전 번호를 명시한다.
-- `POST .../{version}/publication`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
+- `POST .../{version}/publications`은 저장된 초안에만 사용할 수 있다. `publicationMode=IMMEDIATE`는 중앙 확정 시각에 활성화하고, `publicationMode=SCHEDULED`는 미래 `effectiveAt`을 예약한다. `effectiveAt`은 오프셋을 포함한 RFC 3339 date-time이며 서버는 이를 중앙 `Instant`로 저장하고 응답에 매장 `timeZoneId`를 함께 반환한다. `SCHEDULED`에는 `effectiveAt`이 필수이고 `IMMEDIATE`에는 허용하지 않는다.
 - 게시 명령은 비어 있지 않은 `changeReason`을 항상 요구한다. 초안 저장 자체에는 변경 사유를 요구하지 않지만 게시 감사에 사유를 보존한다.
-- `POST .../{version}/publication-cancellation`은 비어 있지 않은 `changeReason`을 받고 아직 효력이 발생하지 않은 `SCHEDULED` 버전에만 사용할 수 있다. 성공하면 예약 시각을 제거하고 버전을 `DRAFT`로 되돌려 내용은 유지한다. 이미 활성화된 버전은 취소할 수 없으며 되돌리려면 이전 내용을 복제한 새 초안을 게시한다.
+- `POST .../{version}/publication-cancellations`은 비어 있지 않은 `changeReason`을 받고 아직 효력이 발생하지 않은 `SCHEDULED` 버전에만 사용할 수 있다. 성공하면 예약 시각을 제거하고 버전을 `DRAFT`로 되돌려 내용은 유지한다. 이미 활성화된 버전은 취소할 수 없으며 되돌리려면 이전 내용을 복제한 새 초안을 게시한다.
 - 버전 상태는 `DRAFT`, `SCHEDULED`, `ACTIVE`, `RETIRED`, `ACTIVATION_FAILED`를 사용한다. 정상 게시로 새 버전이 `ACTIVE`가 되면 이전 활성 버전은 `RETIRED`가 된다. 권한·매장 상태·시간대 또는 재검증 실패처럼 재시도로 해결되지 않는 자동 게시 실패는 `ACTIVATION_FAILED`로 끝내고 조용히 활성화하지 않는다.
 - 영업시간 새 버전이 활성화되면 이전 영업 버전을 기준으로 검증된 예약 접수 버전의 활성 포인터를 해제하고 해당 예약 버전을 `RETIRED`로 전환한다. 이 전환은 원 영업시간 게시와 같은 사유·요청 식별자를 가진 별도 예약-stream 감사 사건으로 남긴다. 예약 접수 시간대는 새 영업 버전을 기준으로 새 초안을 검증·게시하기 전까지 신규 노출·예약에 사용할 수 없다.
 
@@ -236,6 +236,12 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - `HIDDEN`, `PAUSED`, `RETIRED`, 현재 게시 버전 없음은 대표 목록에서 자동 해제한다. 안전한 숨김·중지·종료 명령은 최소 개수 때문에 거부하지 않으며 3개 미만이면 설정을 `REQUIRES_ATTENTION`으로 표시한다.
 - 공개 상세의 기존 `representativeMenus`는 설정 순서로 현재 공개 가능한 항목만 반환한다. 별도 `popularMenus` 필드를 만들지 않는다.
 - Payment·Reservation이 예약금 계산에 사용할 때는 Store/Menu 소유 공개 Service·DTO로 setting version과 순서·게시 version·기본 가격을 읽고 Entity·Repository를 직접 참조하지 않는다.
+
+## 예약금 현재 설정
+
+- Store는 매장별 1:1 현재 예약금 설정의 영속 원본을 소유한다. 행 없음은 비율과 revision도 없는 `UNCONFIGURED`, 행 존재와 `enabled=false`는 `DISABLED`, 행 존재와 `enabled=true`는 `ENABLED`다. 두 행 존재 상태는 모두 10~30 정수 비율과 양수 `policyVersion`을 가진다.
+- 최초 설정은 `policyVersion=1`, 기술적 낙관적 잠금 토큰 `lockVersion=0`으로 시작한다. 실제 `enabled` 또는 비율 변경만 `policyVersion`을 증가시키고, 동일 값 저장은 완전한 no-op이며 비활성화해도 마지막 비율을 보존한다. `lockVersion`은 공개 계약에 노출하지 않는다.
+- Store의 `enabled`는 설정 의도다. Store는 Menu를 조회하지 않으며, #238이 Store 공개 조회와 대표 메뉴 snapshot을 결합해 예약 시점 적용 가능 여부와 금액을 계산한다. 유효 대표 메뉴가 0개면 계산 불가로 명시하고 결제 불필요로 대체하지 않는다.
 
 ## 권한
 
@@ -324,4 +330,4 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 | 2026-08-05 | 세 공개 매장 GET 경로가 IP당 60초에 60회의 중앙 공개 조회 한도를 공유 | `SCALE-005`를 적용하고 비용이 큰 가용성 검색을 컨트롤러 실행 전에 제한하며 경로별 우회 한도를 만들지 않음 |
 # 품절 메뉴 대안 검색
 
-`POST /api/v1/stores/{storeId}/menus/{menuId}/alternatives/search`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.
+`POST /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches`는 원본 메뉴와 요청 수량을 기준으로 현재 대안을 조회한다. 원본 메뉴는 게시·공개 상태라면 수동 판매 상태가 `SELLING` 또는 `SOLD_OUT`일 때 조회할 수 있지만, 대안 후보에는 `SELLING` 메뉴만 포함한다. 같은 매장의 적격·재고 충분 메뉴가 하나라도 있으면 그 결과만 반환하며, 없을 때에만 원본 매장의 검증 좌표 기준 3km 이내 다른 매장을 검색한다. 알레르기 제외 코드가 있으면 정보가 등록되지 않았거나 `CONTAINS`/`MAY_CONTAIN`인 후보를 제외한다. 이 조회는 재고 확보나 예약 성공을 보장하지 않으며 사용자 현재 위치와 전체 요청 body를 저장하거나 로그로 남기지 않는다.

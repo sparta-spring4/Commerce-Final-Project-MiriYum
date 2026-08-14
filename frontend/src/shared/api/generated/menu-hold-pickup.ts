@@ -13,15 +13,15 @@ export interface paths {
     /** 픽업 가능 시간과 메뉴 수량 조회 */
     get: operations["getPickupAvailability"];
   };
-  "/api/v1/consumers/pickup-reservations": {
+  "/api/v1/consumers/me/pickup-reservations": {
     /** 픽업 예약 생성 */
     post: operations["createPickupReservation"];
   };
-  "/api/v1/consumers/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}": {
     /** 본인 픽업 예약 상세 조회 */
     get: operations["getPickupReservation"];
   };
-  "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 본인 픽업 예약 취소 */
     post: operations["cancelPickupReservation"];
   };

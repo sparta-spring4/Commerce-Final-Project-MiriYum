@@ -6,7 +6,7 @@
 > 협업 검토: Reservation, Consumer
 > 관련 정책 ID: PAY-001~PAY-011, PAY-013~PAY-015, RES-006, RES-009, RES-014
 > OpenAPI: `docs/specs/payment/openapi.yaml`
-> 최종 승인일: 2026-08-11
+> 최종 승인일: 2026-08-14
 
 ## 목표와 범위
 
@@ -43,7 +43,7 @@ PortOne  → Payment Webhook HTTP
               같은 멱등 확정 경로
 ```
 
-- Reservation은 임시 선점과 서버가 확정한 예약금 스냅샷을 만든 뒤 `PaymentService.prepareReservationDeposit(...)`를 호출한다.
+- Reservation은 임시 선점과 서버가 확정한 예약금 스냅샷을 만든 뒤 `PaymentService.prepareReservationDeposit(...)`를 호출한다. 이 snapshot은 Store 설정 revision인 `policyVersion`과 `PAY-002` 계산 알고리즘 version을 서로 다른 값으로 보존하며 Store의 기술적 `lockVersion`은 포함하지 않는다.
 - Payment는 Reservation을 역조회하거나 Reservation Entity·Repository를 참조하지 않는다. 준비 명령에 포함된 소유자·금액·통화·만료·정책 버전 스냅샷을 원장에 보존한다.
 - 별도의 브라우저용 결제 준비 HTTP API는 만들지 않는다. 예약 조정 응답이 Payment 준비 DTO를 포함하는 계약은 #238의 Reservation OpenAPI가 소유한다.
 - Payment는 결제 확정·본인 조회·PortOne Webhook HTTP를 소유한다.
@@ -79,7 +79,7 @@ PaymentPreparation prepareReservationDeposit(PrepareReservationDepositCommand co
 - `amountMinor`: 서버가 계산한 최소 통화 단위의 양수 정수
 - `currency`: ISO 4217 통화 코드
 - `sourceExpiresAt`: 임시 선점의 중앙 만료 시각
-- `sourcePolicyVersion`: 예약금 계산 정책의 known version
+- `sourcePolicyVersion`: `PAY-002` 예약금 계산 알고리즘의 known version. Store 설정 revision인 `policyVersion`과 서로 다른 의미이며, Store revision은 Reservation 소유 계산 snapshot에서 별도로 보존한다.
 - `idempotencyKey`: 예약 조정 명령과 결제 준비를 연결하는 멱등 키
 
 `PaymentPreparation`은 `paymentId`, `portOnePaymentId`, `orderName`, `amountMinor`, `currency`, `sourceExpiresAt`, `status=READY`만 반환한다. Store ID, Channel Key와 활성 결제수단은 배포 환경의 공개 frontend 설정이며 이 DTO가 API Secret이나 Webhook Secret을 반환하지 않는다.
@@ -124,9 +124,9 @@ ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + co
 
 | 사용자 목적 | API | 인증·멱등 |
 | --- | --- | --- |
-| 결제 확정 요청 | `POST /api/v1/consumers/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
-| 본인 결제 상세 | `GET /api/v1/consumers/payments/{paymentId}` | Consumer Access JWT |
-| 본인 결제·환불 이력 | `GET /api/v1/consumers/payments` | Consumer Access JWT, cursor pagination |
+| 결제 확정 요청 | `POST /api/v1/consumers/me/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
+| 본인 결제 상세 | `GET /api/v1/consumers/me/payments/{paymentId}` | Consumer Access JWT |
+| 본인 결제·환불 이력 | `GET /api/v1/consumers/me/payments` | Consumer Access JWT, cursor pagination |
 | PortOne Webhook | `POST /api/v1/payments/webhooks/portone` | Access JWT 없음, Webhook signature·원문 body 검증 |
 
 확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.

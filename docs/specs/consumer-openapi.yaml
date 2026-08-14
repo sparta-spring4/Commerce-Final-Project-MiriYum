@@ -35,15 +35,25 @@ paths:
     $ref: "./notification/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1notifications"
   /api/v1/consumers/me/reservations:
     $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations"
-  /api/v1/consumers/reservations:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations"
-  /api/v1/consumers/reservations/{reservationId}:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}"
-  /api/v1/consumers/reservations/{reservationId}/cancellations:
-    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1reservations~1{reservationId}~1cancellations"
-  /api/v1/consumers/pickup-reservations:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}"
-  /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations:
-    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/consumers/me/reservations/{reservationId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}"
+  /api/v1/consumers/me/reservations/{reservationId}/cancellations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservations~1{reservationId}~1cancellations"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}~1finalizations"
+  /api/v1/consumers/me/reservation-requests/{reservationRequestId}/abandonments:
+    $ref: "./reservation/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1reservation-requests~1{reservationRequestId}~1abandonments"
+  /api/v1/consumers/me/pickup-reservations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations"
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations~1{pickupReservationId}"
+  /api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations:
+    $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1pickup-reservations~1{pickupReservationId}~1cancellations"
+  /api/v1/consumers/me/payments:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments"
+  /api/v1/consumers/me/payments/{paymentId}:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}"
+  /api/v1/consumers/me/payments/{paymentId}/confirmations:
+    $ref: "./payment/openapi.yaml#/paths/~1api~1v1~1consumers~1me~1payments~1{paymentId}~1confirmations"

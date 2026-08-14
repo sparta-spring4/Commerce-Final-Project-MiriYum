@@ -8,7 +8,9 @@
 type WithRequired<T, K extends keyof T> = T & { [P in K]-?: T[P] };
 
 export interface paths {
-  "/api/v1/consumers/reservations": {
+  "/api/v1/consumers/me/reservations": {
+    /** 내 예약 이력 조회 */
+    get: operations["getCurrentConsumerReservations"];
     /**
      * 일반 예약과 선택 메뉴 홀드 생성
      * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
@@ -17,7 +19,7 @@ export interface paths {
      */
     post: operations["createReservation"];
   };
-  "/api/v1/consumers/reservation-requests/{reservationRequestId}": {
+  "/api/v1/consumers/me/reservation-requests/{reservationRequestId}": {
     /**
      * 본인 예약금 요청 최신 상태 조회
      * @description 진행·대사·보상 상태를 포함한 최신 상태를 항상 200으로 반환한다.
@@ -25,7 +27,7 @@ export interface paths {
      */
     get: operations["getReservationRequest"];
   };
-  "/api/v1/consumers/reservation-requests/{reservationRequestId}/finalizations": {
+  "/api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations": {
     /**
      * 본인 예약금 요청 최종 확정
      * @description 브라우저의 결제 성공 주장을 받지 않고 저장된 paymentId로 Payment 공개 결과를 조회한다.
@@ -33,7 +35,7 @@ export interface paths {
      */
     post: operations["finalizeReservationRequest"];
   };
-  "/api/v1/consumers/reservation-requests/{reservationRequestId}/abandonments": {
+  "/api/v1/consumers/me/reservation-requests/{reservationRequestId}/abandonments": {
     /**
      * 본인 예약금 요청 포기
      * @description 완료 전 포기 의사를 영속화한다. 명시적 비성공은 자원을 반환하고,
@@ -42,11 +44,11 @@ export interface paths {
      */
     post: operations["abandonReservationRequest"];
   };
-  "/api/v1/consumers/reservations/{reservationId}": {
+  "/api/v1/consumers/me/reservations/{reservationId}": {
     /** 본인 예약 상세 조회 */
     get: operations["getReservation"];
   };
-  "/api/v1/consumers/reservations/{reservationId}/cancellations": {
+  "/api/v1/consumers/me/reservations/{reservationId}/cancellations": {
     /** 본인 예약 취소 */
     post: operations["cancelReservationByConsumer"];
   };
@@ -74,17 +76,13 @@ export interface paths {
     /** 매장별 예약 시간 정책 초안 저장 */
     put: operations["createReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publications": {
     /** 예약 시간 정책 초안 즉시 또는 예약 게시 */
     post: operations["publishReservationTimePolicyDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations": {
     /** 예약 시간 정책 예약 게시 철회 */
     post: operations["cancelReservationTimePolicyPublication"];
-  };
-  "/api/v1/consumers/me/reservations": {
-    /** 내 예약 내역 조회 */
-    get: operations["getCurrentConsumerReservations"];
   };
 }
 
@@ -552,15 +550,15 @@ export interface external {
   };
   "../payment/openapi.yaml": {
     paths: {
-      "/api/v1/consumers/payments": {
+      "/api/v1/consumers/me/payments": {
         /** 본인 결제·환불 이력 조회 */
         get: operations["getCurrentConsumerPayments"];
       };
-      "/api/v1/consumers/payments/{paymentId}": {
+      "/api/v1/consumers/me/payments/{paymentId}": {
         /** 본인 결제 상세 조회 */
         get: operations["getCurrentConsumerPayment"];
       };
-      "/api/v1/consumers/payments/{paymentId}/confirmations": {
+      "/api/v1/consumers/me/payments/{paymentId}/confirmations": {
         /**
          * PortOne 서버 조회 기반 결제 확정
          * @description 브라우저가 전달한 성공 여부·금액·통화·transactionId를 받거나 신뢰하지 않는다.
@@ -757,6 +755,29 @@ export interface external {
 
 export interface operations {
 
+  /** 내 예약 이력 조회 */
+  getCurrentConsumerReservations: {
+    parameters: {
+      query?: {
+        status?: components["schemas"]["ReservationHistoryStatus"];
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 예약 이력 정렬. 아래 허용값 이외에는 400을 반환한다. */
+        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
+      };
+    };
+    responses: {
+      /** @description 본인 예약 이력 페이지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReservationHistoryPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+    };
+  };
   /**
    * 일반 예약과 선택 메뉴 홀드 생성
    * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
@@ -1171,29 +1192,6 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];
       409: components["responses"]["ReservationTimePolicyConflict"];
-    };
-  };
-  /** 내 예약 내역 조회 */
-  getCurrentConsumerReservations: {
-    parameters: {
-      query?: {
-        status?: components["schemas"]["ReservationHistoryStatus"];
-        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
-        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
-        /** @description 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다. */
-        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
-      };
-    };
-    responses: {
-      /** @description 본인 예약 내역 페이지 */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ReservationHistoryPageSuccessResponse"];
-        };
-      };
-      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
-      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: components["responses"]["AccountRestricted"];
     };
   };
   /** 본인 결제·환불 이력 조회 */
