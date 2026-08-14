@@ -42,3 +42,17 @@ export function classifyStatus(status, expected4xx = []) {
   if (status >= 500 && status < 600) return 'server_5xx'
   return 'unexpected_status'
 }
+
+export function recordClassification(classification, tags = {}) {
+  const counter = CLASSIFICATION_COUNTERS[classification]
+  if (counter !== undefined) counter.add(1, tags)
+  return classification
+}
+import { Counter } from 'k6/metrics'
+
+const CLASSIFICATION_COUNTERS = Object.freeze({
+  expected_4xx: new Counter('expected_4xx'),
+  unexpected_4xx: new Counter('unexpected_4xx'),
+  server_5xx: new Counter('server_5xx'),
+  unexpected_status: new Counter('unexpected_status'),
+})
