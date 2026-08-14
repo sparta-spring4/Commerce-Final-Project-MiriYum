@@ -105,6 +105,7 @@ export const options = {
   scenarios: buildScenarios(),
   thresholds: buildThresholds(),
   insecureSkipTLSVerify: config.targetEnv === 'local',
+  noCookiesReset: true,
   setupTimeout: '2m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
