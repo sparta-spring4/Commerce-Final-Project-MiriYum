@@ -87,7 +87,7 @@ class StoreReservationDepositPolicyMigrationTest {
 
     @Test
     @Transactional
-    @DisplayName("V40 스키마와 JPA Repository로 현재 예약금 정책을 저장하고 조회한다")
+    @DisplayName("V41 스키마와 JPA Repository로 현재 예약금 정책을 저장하고 조회한다")
     void storesAndReadsCurrentPolicyWithFlywaySchema() {
         long storeId = createStore();
 
@@ -164,7 +164,7 @@ class StoreReservationDepositPolicyMigrationTest {
     }
 
     @Test
-    @DisplayName("V40은 기존 매장에 정책 행을 backfill하지 않는다")
+    @DisplayName("V41은 기존 매장에 정책 행을 backfill하지 않는다")
     void migratesExistingSchemaWithoutPolicyBackfill() throws Exception {
         try (MySQLContainer legacy = new MySQLContainer(
                 DockerImageName.parse("mysql:8.0.40"))) {
@@ -189,7 +189,7 @@ class StoreReservationDepositPolicyMigrationTest {
 
             assertThat(flyway.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V40__create_store_reservation_deposit_policies.sql");
+                    .contains("V41__create_store_reservation_deposit_policies.sql");
             try (var connection = legacy.createConnection("");
                  var statement = connection.createStatement();
                  var rows = statement.executeQuery(
