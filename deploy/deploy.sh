@@ -18,6 +18,16 @@ publish_deployment_health() {
     >/dev/null || echo "Warning: CloudWatch deployment health metric was not published." >&2
 }
 
+validate_runtime_environment() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  # Compose owns required-variable declarations, so this stays in sync with new runtime keys.
+  if ! "${compose[@]}" config --quiet; then
+    echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
+    return 1
+  fi
+}
+
 wait_for_valkey_health() {
   local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
   local deadline container_id health
@@ -104,6 +114,8 @@ main() {
     echo "Missing runtime environment file: ${ENV_FILE}" >&2
     return 1
   fi
+
+  validate_runtime_environment
 
   for command in aws curl docker; do
     command -v "${command}" >/dev/null

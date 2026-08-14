@@ -266,6 +266,48 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn('port valkey 6379', self.deploy_script)
         self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
 
+    def test_deployment_stops_before_registry_login_when_runtime_environment_is_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            command_log = temporary_path / "commands"
+            result = self.run_deploy_script(
+                """
+aws() {
+  echo "aws $*" >> "$PREFLIGHT_COMMAND_LOG"
+  return 1
+}
+docker() {
+  echo "docker $*" >> "$PREFLIGHT_COMMAND_LOG"
+  if [[ "$*" == *"config --quiet"* ]]; then
+    echo "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required" >&2
+    return 1
+  fi
+  return 1
+}
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "PREFLIGHT_COMMAND_LOG": self.to_bash_path(command_log),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required", result.stderr)
+            self.assertEqual(
+                [
+                    "docker compose --env-file "
+                    f"{self.to_bash_path(environment_file)} -f "
+                    f"{self.to_bash_path(temporary_path / 'docker-compose.yml')} config --quiet"
+                ],
+                command_log.read_text(encoding="utf-8").splitlines(),
+            )
+
     def test_deployment_backfills_existing_pending_risk_markers_before_scan_is_removed(self):
         function_start = self.deploy_script.index("backfill_pending_risk_event_index()")
         function_end = self.deploy_script.index(
