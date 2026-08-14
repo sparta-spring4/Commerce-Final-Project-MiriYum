@@ -49,6 +49,11 @@
       "name": "miriyum.storage.s3.region",
       "type": "java.lang.String",
       "description": "S3 파일 저장에 사용할 AWS 리전입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.max-size-bytes",
+      "type": "java.lang.Long",
+      "description": "Maximum file size accepted by the S3 storage adapter in bytes."
     }
   ]
 }

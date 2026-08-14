@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record S3StorageProperties(
         boolean enabled,
         String bucket,
-        String region
+        String region,
+        long maxSizeBytes
 ) {
 }

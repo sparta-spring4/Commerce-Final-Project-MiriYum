@@ -115,6 +115,7 @@ miriyum:
       enabled: ${MIRIYUM_STORAGE_S3_ENABLED:false}
       bucket: ${MIRIYUM_STORAGE_S3_BUCKET:}
       region: ${MIRIYUM_STORAGE_S3_REGION:ap-northeast-2}
+      max-size-bytes: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
   rate-limit:
     sign-up:
       max-requests: ${MIRIYUM_RATE_LIMIT_SIGN_UP_MAX_REQUESTS:5}
