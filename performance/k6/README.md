@@ -124,9 +124,11 @@ docker compose --env-file deploy/local/.env `
   /scripts/main.js
 ```
 
-`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록한다.
+`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록하되, 아래 IP rate-limit 창을 공유하는 반복 실행은 새 창에서 시작해야 한다.
 
 현재 backend 기본 IP rate limit은 login 성공 표본을 단일 k6 컨테이너 기준 5회/600초로 제한한다. 따라서 rate limit 완화가 결정되기 전의 `authRefresh` 결과는 보호 동작과 오류 분류 확인용일 뿐 처리량 기준선이 아니며, p50/p95/p99를 #286 최적화 근거로 사용하지 않는다. local loadtest 전용 제한값과 결과 해석 정책은 [#331](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/331)에서 Auth·배포 소유자 승인 후 결정한다.
+
+공개 매장 검색도 단일 k6 컨테이너의 source IP를 기준으로 60회/60초 제한을 공유한다. 위 `storeSearch` 예시의 `2 iterations/s × 30초`는 한 창의 60회를 모두 소비하므로, 같은 조건의 다음 실행은 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 부하를 높여 한 실행에서 60회를 넘기거나 같은 창에서 반복해 429가 섞인 결과는 검색 처리량 또는 p50/p95/p99 기준선으로 사용하지 않으며 #286에 전달하지 않는다. 검색 제한의 local-only 정책도 #331에서 함께 결정한다.
 
 `SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, full commit SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·commit·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
 
