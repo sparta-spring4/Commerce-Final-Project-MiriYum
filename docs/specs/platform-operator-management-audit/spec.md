@@ -137,6 +137,7 @@
 ### Backend
 
 - `backend/src/main/resources/db/migration/V43__create_platform_operator_management_audit.sql`
+- `backend/src/main/java/com/miriyum/global/idempotency/IdempotencyCommand.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/audit/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/dto/management/**`
@@ -150,6 +151,7 @@
 ### 테스트
 
 - `backend/src/test/java/com/miriyum/domain/platformoperator/**`
+- `backend/src/test/java/com/miriyum/global/idempotency/IdempotencyCommandTest.java`
 - `backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/architecture/HttpApiNamespaceContractTest.java`
 
