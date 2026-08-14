@@ -3,7 +3,7 @@
 - 소유 Issue: [#285](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/285)
 - 기록일: 2026-08-14
 - 기준 `dev`: `bb46e4e140d964a53d19d1ab97ce90a300551a9f`
-- 검증 script commit: `a3dff4b0fd7e60afad16f9094bd66dda6a027b0d`
+- 검증 script commit: `83d590e1831d6051b2cbe623fed127a122b8f721`
 - 단계: 고도화
 - 해석: 최초 환경별 기준선을 수집하기 위한 harness 증거이며 실서비스 SLO 판정이 아니다.
 
@@ -11,11 +11,12 @@
 
 | 구간 | 상태 | 관찰 결과 |
 |---|---|---|
-| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 20, 공통 계약 25, scenario 20, summary 6 checks가 모두 성공했다. |
+| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 21, 공통 계약 27, scenario 24, smoke proof 8, summary 6 checks가 모두 성공했다. |
+| k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했으며 workflow는 외부 API 요청 없이 고정 k6 이미지의 계약 테스트만 실행한다. |
 | k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
-| k6 local-baseline profile inspect | PASS | `storeSearch`, 총 2 VU·2 arrival/s·30초가 하나의 constant-arrival-rate executor로 해석됐다. |
+| k6 local-baseline profile inspect | PASS | 동일 target·commit·fixture의 smoke artifact를 전달했을 때 `storeSearch`, 1 VU·1 arrival/s·10초가 하나의 constant-arrival-rate executor로 해석됐다. commit이 다른 artifact는 init context에서 요청 전에 거부됐다. |
 | k6 Secure cookie TLS probe | PASS | 고정 k6 이미지의 실제 VU cookie jar가 Caddy 내부 TLS를 거쳐 mock login의 `Secure` refresh cookie를 다음 refresh 요청에 재전송했다. |
-| k6 mock runtime summary | PASS | 최종 `main.js`를 TLS mock 검색 API에 실행해 비어 있지 않은 안전 JSON·Markdown과 `dropped iterations=0`을 생성했다. |
+| k6 mock runtime summary | NOT RUN | 응답 검증과 summary schema가 변경된 현재 script commit에서는 네트워크 mock을 반복하지 않았다. summary 입력·비식별 출력은 고정 k6 계약 테스트로 검증했고 실제 backend smoke는 계속 `NOT CONFIGURED`다. |
 | Local Compose 합성 | PASS | load-test override 사용 시 `mysql`, `valkey`, `backend`, `loadtest-proxy`, `loadtest`; 기본 Compose 단독 사용 시 기존 `mysql`, `backend`만 존재했다. |
 | Backend 단위 테스트 | PASS | 최종 브랜치 상태에서 backend 작업 디렉터리의 `.\gradlew.bat test`가 exit 0이었다. |
 | Backend assemble | PASS | `.\gradlew.bat assemble`이 compile·bootJar·jar를 포함해 exit 0이었다. |
@@ -44,7 +45,7 @@
 ### k6 계약 테스트
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'scenario-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run --quiet "/scripts/tests/$test"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -53,18 +54,21 @@ foreach ($test in $tests) {
 
 관찰 결과:
 
-- `config-contract.js`: 20/20 checks 성공
-- `contracts-contract.js`: 25/25 checks 성공
-- `scenario-contract.js`: 20/20 checks 성공
+- `config-contract.js`: 21/21 checks 성공
+- `contracts-contract.js`: 27/27 checks 성공
+- `scenario-contract.js`: 24/24 checks 성공
+- `smoke-proof-contract.js`: 8/8 checks 성공
 - `summary-contract.js`: 6/6 checks 성공
-- 계약 테스트의 의도적 예약 conflict와 인증 rate-limit은 합계 `expected_4xx=2`, notification invariant conflict는 `unexpected_4xx=1`로 분리됐다. 이는 실제 환경 오류율이 아니다.
+- 계약 테스트의 의도적 예약 conflict와 인증 rate-limit은 합계 `expected_4xx=2`, 공개 계약에 없는 `RESERVATION_004`와 notification invariant conflict는 `unexpected_4xx=2`로 분리됐다. 이는 실제 환경 오류율이 아니다.
 
 ### profile inspect
 
 네 시나리오 smoke:
 
 ```powershell
-docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
+docker run --rm `
+  -v "${PWD}/performance/k6:/scripts:ro" `
+  grafana/k6:2.1.0 inspect `
   -e TARGET_ENV=local `
   -e BASE_URL=https://loadtest-proxy:8443 `
   -e ALLOWED_HOSTS=loadtest-proxy `
@@ -78,29 +82,33 @@ docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect 
 `storeSearch` local-baseline options:
 
 ```powershell
-docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
+docker run --rm `
+  -v "${PWD}/performance/k6:/scripts:ro" `
+  -v "${PWD}/performance/k6/results:/results:ro" `
+  grafana/k6:2.1.0 inspect `
   -e TARGET_ENV=local `
   -e BASE_URL=https://loadtest-proxy:8443 `
   -e ALLOWED_HOSTS=loadtest-proxy `
   -e PROFILE=local-baseline `
-  -e LOCAL_SMOKE_RUN_ID=local-smoke-approved `
+  -e LOCAL_SMOKE_RUN_ID=review-smoke `
+  -e SMOKE_PROOF_PATH=/results/review-smoke-proof.json `
   -e SCENARIOS=storeSearch `
-  -e MAX_VUS=2 `
-  -e DURATION_SECONDS=30 `
-  -e ARRIVAL_RATE=2 `
+  -e MAX_VUS=1 `
+  -e DURATION_SECONDS=10 `
+  -e ARRIVAL_RATE=1 `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-baseline-inspect `
   -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
   /scripts/main.js
 ```
 
-두 명령 모두 exit 0이었다. example fixture는 schema 검증 전용이므로 이 결과는 실제 API smoke 또는 성능 증거가 아니다.
+두 명령 모두 exit 0이었다. baseline inspect에는 smoke summary schema와 같은 ignored 임시 artifact를 `/results`에 read-only mount하여 사용했고, target environment·target fingerprint·commit SHA·fixture SHA-256·시나리오 포함 관계·고정 smoke 상한·threshold 성공을 현재 입력과 대조했다. 같은 artifact에 다른 commit SHA를 전달한 부정 검사는 `smoke proof commit does not match`로 exit 1이었고 임시 artifact는 검증 뒤 삭제했다. example fixture는 schema 검증 전용이므로 이 결과는 실제 API smoke 또는 성능 증거가 아니다.
 
 ### Secure cookie TLS probe
 
 고정 `grafana/k6:2.1.0`과 `caddy:2.10.2-alpine`을 임시 격리 Docker network에서 실행했다. mock login은 backend와 같은 `Secure; HttpOnly; SameSite=Strict` refresh cookie를 반환했고, 같은 VU의 다음 refresh 요청은 cookie를 자동 재전송해 200을 받았다. 1/1 check와 두 HTTP 요청이 성공했다. 이 결과는 로컬 TLS 전송 경계와 k6 cookie jar 동작만 검증하며 실제 backend smoke 성공이나 성능 수치로 해석하지 않는다.
 
-같은 TLS mock 경계에서 최종 `main.js`의 `storeSearch` smoke도 exit 0이었다. 생성된 안전 summary는 요청 1건, dropped iteration 0, expected·unexpected 4xx 0, 5xx 0을 포함했고 기본 `http_req_failed`와 응답 body는 제외했다. mock 지연시간은 실제 backend 기준선으로 기록하지 않는다.
+직전 검증 script commit의 TLS mock `storeSearch` smoke와 안전 summary 결과는 현재 script commit의 실행 증거로 재사용하지 않는다. 현재 summary schema, threshold 성공 판정과 비식별 필드 제한은 `summary-contract.js`에서 검증했으며 mock 지연시간은 실제 backend 기준선으로 기록하지 않는다.
 
 ### Compose 합성
 
@@ -166,7 +174,7 @@ Pop-Location
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
 
-다음 실행은 `performance/k6/README.md`의 local smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID` 없이는 local baseline 구성이 거부된다. staging은 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, 저장소에서 리뷰한 trusted hostname, `STAGING_APPROVED=true`와 성공한 `STAGING_SMOKE_RUN_ID`가 모두 있을 때만 실행한다.
+다음 실행은 `performance/k6/README.md`의 local smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 local baseline 구성이 거부된다. staging은 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, 저장소에서 리뷰한 trusted hostname, `STAGING_APPROVED=true`, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 실행한다.
 
 ## 후속 이슈 연결
 
