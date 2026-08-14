@@ -44,6 +44,9 @@ final class SpringMvcRouteInventory {
         Set<Class<?>> controllers = new LinkedHashSet<>();
         ClassLoader classLoader = SpringMvcRouteInventory.class.getClassLoader();
         scanner.findCandidateComponents("com.miriyum.domain").forEach(candidate -> {
+            if (candidate.getBeanClassName().contains("$")) {
+                return;
+            }
             try {
                 controllers.add(ClassUtils.forName(candidate.getBeanClassName(), classLoader));
             } catch (ClassNotFoundException exception) {

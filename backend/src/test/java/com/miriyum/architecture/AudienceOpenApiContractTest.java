@@ -76,6 +76,7 @@ class AudienceOpenApiContractTest {
         Set<String> publicPaths = paths("public-openapi.yaml").keySet();
         Set<String> consumerPaths = paths("consumer-openapi.yaml").keySet();
         Set<String> operatorPaths = paths("store-operator-openapi.yaml").keySet();
+        Set<String> platformOperatorPaths = paths("platform-operator-openapi.yaml").keySet();
         Set<String> aggregatePaths = paths("mvp1-openapi.yaml").keySet();
 
         assertThat(consumerPaths)
@@ -87,13 +88,20 @@ class AudienceOpenApiContractTest {
         assertThat(intersection(publicPaths, consumerPaths)).isEmpty();
         assertThat(intersection(publicPaths, operatorPaths)).isEmpty();
         assertThat(intersection(consumerPaths, operatorPaths)).isEmpty();
+        assertThat(platformOperatorPaths).allMatch(path -> path.startsWith("/api/v1/platform-operators/"));
+        assertThat(intersection(publicPaths, platformOperatorPaths)).isEmpty();
+        assertThat(intersection(consumerPaths, platformOperatorPaths)).isEmpty();
+        assertThat(intersection(operatorPaths, platformOperatorPaths)).isEmpty();
 
         Set<String> allAudiencePaths = new HashSet<>(publicPaths);
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
+        allAudiencePaths.addAll(platformOperatorPaths);
         assertThat(intersection(aggregatePaths, POST_MVP1_AUDIENCE_PATHS)).isEmpty();
+        assertThat(intersection(aggregatePaths, platformOperatorPaths)).isEmpty();
         Set<String> mvp1AndLaterStagePaths = new HashSet<>(aggregatePaths);
         mvp1AndLaterStagePaths.addAll(POST_MVP1_AUDIENCE_PATHS);
+        mvp1AndLaterStagePaths.addAll(platformOperatorPaths);
         assertThat(mvp1AndLaterStagePaths).isEqualTo(allAudiencePaths);
     }
 
@@ -107,6 +115,7 @@ class AudienceOpenApiContractTest {
         Set<String> audiencePaths = new HashSet<>(paths("public-openapi.yaml").keySet());
         audiencePaths.addAll(paths("consumer-openapi.yaml").keySet());
         audiencePaths.addAll(paths("store-operator-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("platform-operator-openapi.yaml").keySet());
 
         assertThat(audiencePaths).isEqualTo(featurePaths);
     }
@@ -128,6 +137,7 @@ class AudienceOpenApiContractTest {
                 "public-openapi.yaml",
                 "consumer-openapi.yaml",
                 "store-operator-openapi.yaml",
+                "platform-operator-openapi.yaml",
                 "mvp1-openapi.yaml")) {
             Map<String, Object> paths = paths(file);
             assertThat(paths).isNotEmpty();

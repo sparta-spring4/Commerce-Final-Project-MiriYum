@@ -37,6 +37,13 @@ class SpringMvcRouteInventoryTest {
                         "/api/v1/stores/{storeId}/alternative-searches"));
     }
 
+    @Test
+    void excludesNestedTestFixturesFromProductionInventory() {
+        assertThat(SpringMvcRouteInventory.routes())
+                .extracting(route -> route.route().path())
+                .doesNotContain("/api/v1/platform-operators/test-business");
+    }
+
     @RestController
     @RequestMapping("/api/v1/consumers/me")
     private static class ReservationCancellationController {

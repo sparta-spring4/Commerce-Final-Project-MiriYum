@@ -12,6 +12,7 @@ class HttpApiNamespaceContractTest {
 
     private static final String CONSUMER_ROOT = "/api/v1/consumers";
     private static final String STORE_OPERATOR_ROOT = "/api/v1/store-operators";
+    private static final String PLATFORM_OPERATOR_ROOT = "/api/v1/platform-operators";
     private static final Set<String> LEGACY_ROOTS = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -52,6 +53,18 @@ class HttpApiNamespaceContractTest {
                 .hasMessageContaining("store-operator namespace owner");
     }
 
+    @Test
+    @DisplayName("platform-operator namespace는 platformoperator audience 패키지만 선언할 수 있다")
+    void platformOperatorNamespaceIsOwnedByPlatformOperatorAudiencePackage() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.publicapi",
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/audits")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("platform-operator namespace owner");
+    }
+
     private static void assertAudienceNamespaces(Set<ControllerRoute> routes) {
         assertThat(routes).isNotEmpty();
         assertThat(routes).noneMatch(route -> LEGACY_ROOTS.stream()
@@ -63,12 +76,18 @@ class HttpApiNamespaceContractTest {
         assertThat(routes.stream().filter(HttpApiNamespaceContractTest::isStoreOperator))
                 .as("store-operator audience canonical root")
                 .allMatch(route -> usesNamespace(route, STORE_OPERATOR_ROOT));
+        assertThat(routes.stream().filter(HttpApiNamespaceContractTest::isPlatformOperator))
+                .as("platform-operator audience canonical root")
+                .allMatch(route -> usesNamespace(route, PLATFORM_OPERATOR_ROOT));
         assertThat(routes.stream().filter(route -> usesNamespace(route, CONSUMER_ROOT)))
                 .as("consumer namespace owner")
                 .allMatch(HttpApiNamespaceContractTest::isConsumer);
         assertThat(routes.stream().filter(route -> usesNamespace(route, STORE_OPERATOR_ROOT)))
                 .as("store-operator namespace owner")
                 .allMatch(HttpApiNamespaceContractTest::isStoreOperator);
+        assertThat(routes.stream().filter(route -> usesNamespace(route, PLATFORM_OPERATOR_ROOT)))
+                .as("platform-operator namespace owner")
+                .allMatch(HttpApiNamespaceContractTest::isPlatformOperator);
     }
 
     private static boolean usesNamespace(ControllerRoute route, String root) {
@@ -84,5 +103,9 @@ class HttpApiNamespaceContractTest {
     private static boolean isStoreOperator(ControllerRoute route) {
         return route.packageName().startsWith("com.miriyum.domain.storeoperator.controller.")
                 || route.packageName().contains(".controller.storeoperator");
+    }
+
+    private static boolean isPlatformOperator(ControllerRoute route) {
+        return route.packageName().startsWith("com.miriyum.domain.platformoperator.controller.");
     }
 }

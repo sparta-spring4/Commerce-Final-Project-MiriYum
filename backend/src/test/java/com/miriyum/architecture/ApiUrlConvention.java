@@ -12,7 +12,7 @@ final class ApiUrlConvention {
     private static final Set<String> SINGLETON_SEGMENTS = Set.of(
             "auth", "me", "current", "contact", "visibility", "selling-status",
             "end-at", "menu-hold-availability", "pickup-availability",
-            "deactivation-impact", "portone", "kakao");
+            "deactivation-impact", "initial-password", "portone", "kakao");
     private static final Set<String> LEGACY_COMMAND_SEGMENTS = Set.of(
             "publication", "publication-cancellation", "retirement", "cancellation",
             "call", "arrive", "check-in", "cancel");
@@ -71,7 +71,8 @@ final class ApiUrlConvention {
     private static String audienceViolation(List<String> segments) {
         String audience = segments.get(2);
         boolean accountAudience = audience.equals("consumers")
-                || audience.equals("store-operators");
+                || audience.equals("store-operators")
+                || audience.equals("platform-operators");
         for (int index = 3; index < segments.size(); index++) {
             boolean accountScope = segments.get(index).equals("me")
                     || segments.get(index).equals("auth");
