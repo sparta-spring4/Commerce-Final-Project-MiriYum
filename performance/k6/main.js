@@ -4,6 +4,7 @@ import http from 'k6/http'
 
 import { loadConfig } from './config.js'
 import { validateAuthPoolCapacity, validateFixture } from './lib/contracts.js'
+import { COOKIE_LIFETIME_OPTIONS } from './lib/runtime-options.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -102,10 +103,10 @@ function validateExecutionCapacity() {
 validateExecutionCapacity()
 
 export const options = {
+  ...COOKIE_LIFETIME_OPTIONS,
   scenarios: buildScenarios(),
   thresholds: buildThresholds(),
   insecureSkipTLSVerify: config.targetEnv === 'local',
-  noCookiesReset: true,
   setupTimeout: '2m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',

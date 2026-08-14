@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-const mainSource = open('/scripts/main.js')
+import { COOKIE_LIFETIME_OPTIONS } from '../lib/runtime-options.js'
 
 export const options = {
   thresholds: {
@@ -11,6 +11,6 @@ export const options = {
 export default function () {
   check(null, {
     'VU cookie jars persist across iterations for the CSRF token cache': () =>
-      /noCookiesReset\s*:\s*true/.test(mainSource),
+      COOKIE_LIFETIME_OPTIONS.noCookiesReset === true,
   })
 }
