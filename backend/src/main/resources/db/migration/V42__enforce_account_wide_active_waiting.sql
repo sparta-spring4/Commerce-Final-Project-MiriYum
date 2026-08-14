@@ -1,6 +1,6 @@
 -- Issue #272 / WAIT-008: replace the V36 store-scoped active membership key with one per account.
 --
--- Deployment gate (run and record this limited operational report before applying V41):
+-- Deployment gate (run and record this limited operational report before applying V42):
 -- SELECT consumer_account_id, COUNT(*) AS active_membership_count
 -- FROM waiting_active_memberships
 -- GROUP BY consumer_account_id

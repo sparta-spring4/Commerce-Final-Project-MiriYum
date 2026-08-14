@@ -536,7 +536,7 @@ class WaitingTeamTest {
     }
 
     @Test
-    @DisplayName("V42 이전 예약 전환 snapshot은 취소와 매장 종료에서 생성 시각으로 fallback한다")
+    @DisplayName("V43 이전 예약 전환 snapshot은 취소와 매장 종료에서 생성 시각으로 fallback한다")
     void terminatesLegacyReservationConvertingSnapshotWithoutAttemptIdentity() {
         WaitingTeam cancelled = legacyReservationConvertingTeam();
         WaitingTeam closed = legacyReservationConvertingTeam();
