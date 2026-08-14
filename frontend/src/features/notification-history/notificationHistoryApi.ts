@@ -27,29 +27,7 @@ function isResource(value: unknown): boolean {
 }
 
 function isAction(value: unknown): boolean {
-  if (value === null) {
-    return true
-  }
-  if (
-    !isRecord(value) ||
-    !isResource(value.resource) ||
-    !['AVAILABLE', 'EXPIRED', 'SUPERSEDED', 'UNAVAILABLE'].includes(
-      String(value.availability),
-    ) ||
-    !(value.expiresAt === null || typeof value.expiresAt === 'string')
-  ) {
-    return false
-  }
-
-  const resource = value.resource as Record<string, unknown>
-  return (
-    (value.type === 'RESERVATION_DETAIL' &&
-      resource.type === 'RESERVATION') ||
-    (value.type === 'PICKUP_RESERVATION_DETAIL' &&
-      resource.type === 'PICKUP_RESERVATION') ||
-    (value.type === 'MENU_SUBSTITUTION_REVIEW' &&
-      resource.type === 'MENU_SUBSTITUTION_PROPOSAL')
-  )
+  return value === null || isRecord(value)
 }
 
 function isNotificationHistoryItem(

@@ -1,14 +1,11 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { Link } from 'react-router'
 
+import { ROUTES } from '../../app/routes'
 import type { ApiClient } from '../../shared/api/client'
-import {
-  hasErrorCode,
-  isApiContractError,
-  isApiError,
-  isNetworkError,
-} from '../../shared/api/apiError'
-import { CommonErrorCode } from '../../shared/api/envelope'
+import { hasErrorCode } from '../../shared/api/apiError'
+import { toAsyncState } from '../../shared/ui/asyncState'
 import {
   readNotificationHistoryPage,
   type NotificationHistoryItem,
@@ -25,6 +22,7 @@ function formatDeliveredAt(deliveredAt: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Asia/Seoul',
   }).format(new Date(deliveredAt))
 }
 
@@ -62,29 +60,36 @@ function HistoryError({
     )
   }
 
-  if (isApiError(error) && error.status === 401) {
-    return <p role="alert">로그인이 필요합니다.</p>
-  }
+  const presentation = toAsyncState(error)
 
-  if (isApiError(error) && error.status === 403) {
+  if (presentation.state === 'forbidden') {
+    if (presentation.action === 'signIn') {
+      return (
+        <section role="alert">
+          <p>로그인이 필요합니다.</p>
+          <Link to={ROUTES.consumerSignIn}>로그인하기</Link>
+        </section>
+      )
+    }
+
     return <p role="alert">현재 계정으로 알림 이력을 볼 수 없습니다.</p>
   }
 
   if (
-    isApiError(error) &&
-    (error.status === 503 || error.code === CommonErrorCode.SERVICE_UNAVAILABLE)
+    presentation.state === 'awaitingRecovery' &&
+    presentation.action === 'recheck'
   ) {
     return (
       <section role="alert">
         <p>알림 이력을 잠시 불러올 수 없습니다.</p>
         <button type="button" onClick={onRetry}>
-          다시 시도
+          다시 확인
         </button>
       </section>
     )
   }
 
-  if (isNetworkError(error)) {
+  if (presentation.state === 'indeterminate') {
     return (
       <section role="alert">
         <p>알림 이력 조회 결과를 확인할 수 없습니다.</p>
@@ -95,7 +100,7 @@ function HistoryError({
     )
   }
 
-  if (isApiContractError(error)) {
+  if (presentation.state === 'awaitingRecovery') {
     return <p role="alert">알림 이력을 복구하는 중입니다.</p>
   }
 

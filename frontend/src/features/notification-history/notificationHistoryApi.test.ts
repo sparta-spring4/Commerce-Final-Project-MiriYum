@@ -116,4 +116,57 @@ describe('readNotificationHistoryPage', () => {
       violation: 'notificationHistoryData',
     })
   })
+
+  test('keeps the page when one history item has an unknown action object', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '알림 이력을 조회했습니다.',
+          data: {
+            items: [
+              {
+                notificationId: '1001',
+                purpose: 'RESERVATION_CONFIRMED',
+                title: '예약이 확정되었습니다.',
+                resource: { type: 'RESERVATION', id: '501' },
+                occurredAt: '2026-08-13T10:00:00+09:00',
+                createdAt: '2026-08-13T10:00:01+09:00',
+                deliveredAt: '2026-08-13T10:00:02+09:00',
+                action: {
+                  type: 'WAITING_DETAIL',
+                  resource: { type: 'WAITING', id: '701' },
+                  availability: 'AVAILABLE',
+                  expiresAt: null,
+                },
+              },
+              {
+                notificationId: '1000',
+                purpose: 'RESERVATION_CANCELLED',
+                title: '예약이 취소되었습니다.',
+                resource: { type: 'RESERVATION', id: '500' },
+                occurredAt: '2026-08-13T09:00:00+09:00',
+                createdAt: '2026-08-13T09:00:01+09:00',
+                deliveredAt: '2026-08-13T09:00:02+09:00',
+                action: null,
+              },
+            ],
+            hasNext: false,
+            nextCursor: null,
+          },
+        }),
+      ),
+    )
+
+    const { readNotificationHistoryPage } = await import(
+      './notificationHistoryApi'
+    )
+
+    const page = await readNotificationHistoryPage(createApiClient())
+
+    expect(page.items.map((item) => item.title)).toEqual([
+      '예약이 확정되었습니다.',
+      '예약이 취소되었습니다.',
+    ])
+  })
 })

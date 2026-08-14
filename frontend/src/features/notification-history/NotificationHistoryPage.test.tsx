@@ -2,12 +2,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
-import { describe, expect, test } from 'vitest'
+import { MemoryRouter } from 'react-router'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { createApiClient } from '../../shared/api/client'
 import { server } from '../../test/msw/server'
 
 const NOTIFICATION_HISTORY_PATH = '/api/v1/consumers/me/notifications'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 function historyItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -50,7 +55,7 @@ async function renderPage(queryClient = createTestQueryClient()) {
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        {children}
+        <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
   }
@@ -91,6 +96,26 @@ describe('NotificationHistoryPage', () => {
     )
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  test('renders the delivery time in Asia/Seoul on a UTC device', async () => {
+    vi.stubEnv('TZ', 'UTC')
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(
+          successResponse([
+            historyItem({ deliveredAt: '2026-08-13T01:00:02Z' }),
+          ]),
+        ),
+      ),
+    )
+
+    await renderPage()
+    await screen.findByText('예약이 확정되었습니다.')
+
+    const deliveredTime = document.querySelector('time')
+    expect(deliveredTime).toHaveTextContent('2026. 8. 13.')
+    expect(deliveredTime).toHaveTextContent('10:00')
   })
 
   test('renders an empty result as a normal state', async () => {
@@ -196,6 +221,40 @@ describe('NotificationHistoryPage', () => {
 
     expect(await screen.findByText(expectedMessage)).toBeVisible()
     expect(screen.queryByText('서버 내부 상세 메시지')).not.toBeInTheDocument()
+  })
+
+  test('offers the existing consumer sign-in route after a 401', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(
+          { code: 'AUTH_001', message: '인증이 필요합니다.' },
+          { status: 401 },
+        ),
+      ),
+    )
+
+    await renderPage()
+
+    expect(
+      await screen.findByRole('link', { name: '로그인하기' }),
+    ).toHaveAttribute('href', '/sign-in')
+  })
+
+  test('offers recheck while the notification service recovers', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(
+          { code: 'COMMON_012', message: '일시적으로 사용할 수 없습니다.' },
+          { status: 503 },
+        ),
+      ),
+    )
+
+    await renderPage()
+
+    expect(
+      await screen.findByRole('button', { name: '다시 확인' }),
+    ).toBeVisible()
   })
 
   test('offers recheck when the request result cannot be confirmed', async () => {
