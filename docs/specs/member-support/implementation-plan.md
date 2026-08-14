@@ -166,7 +166,7 @@ Commit: `feat: expose member account support ports`
 - `consumeForSubmission(String rawProof, MemberAccountType, Purpose)` atomically marks the digest consumed and returns account ID plus decrypted new email only to the transaction caller.
 - AES-GCM ciphertext uses a random 96-bit nonce; the configured base64 key decodes to exactly 32 bytes; HMAC-SHA-256 produces equality digests with a separate configured key.
 
-- [ ] **Step 1: Write failing tests for one-time binding and leakage.** Assert same plaintext encrypts differently, wrong purpose/type/account fails, concurrent consume succeeds once, `toString()` redacts all request secrets, and disabled mock returns no proof.
+- [x] **Step 1: Write failing tests for one-time binding and leakage.** Assert same plaintext encrypts differently, wrong purpose/type/account fails, concurrent consume succeeds once, `toString()` redacts all request secrets, and disabled mock returns no proof.
 
 ```java
 OpaqueProof proof = service.issueRecovery(MemberAccountType.CONSUMER, valid);
@@ -175,13 +175,13 @@ assertThat(service.consumeForSubmission(proof.value(), CONSUMER, MEMBER_RECOVERY
 assertThat(proof.toString()).doesNotContain(proof.value());
 ```
 
-- [ ] **Step 2: Run RED.**
+- [x] **Step 2: Run RED.**
 
 Run: `backend\gradlew.bat test --tests "*MockMemberIdentityVerificationServiceTest" --tests "*MemberSupportConfigurationTest"`
 
-- [ ] **Step 3: Implement minimal crypto, property validation, and digest consumption.** Do not log submitted fields. Store old-email/phone/business checks only as booleans; persist only target IDs, purpose, ciphertext/digest, expiry, and consume timestamps.
+- [x] **Step 3: Implement minimal crypto, property validation, and digest consumption.** Do not log submitted fields. Store old-email/phone/business checks only as booleans; persist only target IDs, purpose, ciphertext/digest, expiry, and consume timestamps.
 
-- [ ] **Step 4: Run GREEN and commit.**
+- [x] **Step 4: Run GREEN and commit.**
 
 Commit: `feat: add opaque member verification proofs`
 

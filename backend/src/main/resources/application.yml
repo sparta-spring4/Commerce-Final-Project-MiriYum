@@ -62,6 +62,13 @@ miriyum:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  member-support:
+    enabled: ${MIRIYUM_MEMBER_SUPPORT_ENABLED:false}
+    proof-digest-secret: ${MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET:}
+    pii-encryption-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_KEY:}
+    verification-ttl: ${MIRIYUM_MEMBER_SUPPORT_VERIFICATION_TTL:PT15M}
+    assignment-ttl: ${MIRIYUM_MEMBER_SUPPORT_ASSIGNMENT_TTL:PT30M}
+    dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   auth:
     # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
     refresh-risk-event-delivery:
