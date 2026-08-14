@@ -56,4 +56,27 @@ describe('readNotificationHistoryPage', () => {
 
     expect(receivedCursor).toBe(opaqueCursor)
   })
+
+  test('rejects a success envelope with malformed history data', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '알림 이력을 조회했습니다.',
+          data: { hasNext: false, nextCursor: null },
+        }),
+      ),
+    )
+
+    const { readNotificationHistoryPage } = await import(
+      './notificationHistoryApi'
+    )
+
+    await expect(
+      readNotificationHistoryPage(createApiClient()),
+    ).rejects.toMatchObject({
+      name: 'ApiContractError',
+      violation: 'notificationHistoryData',
+    })
+  })
 })
