@@ -7,12 +7,18 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /** JWT 발급과 Valkey 상태 회전의 순서를 한 곳에서 보장한다. */
 @Component
 public class RefreshTokenManager {
+
+    private static final Logger log = LoggerFactory.getLogger(RefreshTokenManager.class);
+    private static final Duration MAX_FAMILY_LIFETIME = Duration.ofDays(30);
 
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenStore refreshTokenStore;
@@ -51,6 +57,7 @@ public class RefreshTokenManager {
                 identity.familyId(),
                 identity.tokenId(),
                 RefreshTokenHash.sha256(refreshToken),
+                now,
                 now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds()),
                 now,
                 RefreshTokenState.Status.ACTIVE), expectedSessionEpoch);
@@ -74,11 +81,22 @@ public class RefreshTokenManager {
             String rawRefreshToken
     ) {
         Instant now = clock.instant();
+        Instant nextFamilyExpiresAt = nextFamilyExpiresAt(now, parsedToken.familyCreatedAt());
+        if (!nextFamilyExpiresAt.isAfter(now)) {
+            return new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.NOT_FOUND, null);
+        }
         RefreshTokenIdentity nextIdentity = identityGenerator.generate();
         String nextAccessToken = jwtTokenProvider.generateAccessToken(namespace, parsedToken.accountId());
-        String nextRefreshToken = jwtTokenProvider.generateRefreshToken(
-                namespace, parsedToken.accountId(), parsedToken.familyId(), nextIdentity.tokenId());
-        Instant nextFamilyExpiresAt = now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds());
+        String nextRefreshToken = parsedToken.familyCreatedAt() == null
+                ? jwtTokenProvider.generateRefreshToken(
+                        namespace, parsedToken.accountId(), parsedToken.familyId(), nextIdentity.tokenId())
+                : jwtTokenProvider.generateRefreshToken(
+                        namespace,
+                        parsedToken.accountId(),
+                        parsedToken.familyId(),
+                        nextIdentity.tokenId(),
+                        parsedToken.familyCreatedAt(),
+                        Duration.between(now, nextFamilyExpiresAt));
         RefreshTokenRotationResult result = refreshTokenStore.rotate(
                 namespace,
                 parsedToken.familyId(),
@@ -90,7 +108,29 @@ public class RefreshTokenManager {
                 now,
                 nextFamilyExpiresAt);
         TokenPair tokenPair = result.rotated() ? new TokenPair(nextAccessToken, nextRefreshToken) : null;
+        if (result.rotated() && isAbsoluteLifetimeCapApplied(now, parsedToken.familyCreatedAt(), nextFamilyExpiresAt)) {
+            log.info("event=refresh_token_absolute_lifetime_cap_applied");
+        }
         return new RefreshTokenRotationAttempt(result.status(), tokenPair);
+    }
+
+    private Instant nextFamilyExpiresAt(Instant now, Instant familyCreatedAt) {
+        Instant slidingExpiresAt = now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds());
+        if (familyCreatedAt == null) {
+            return slidingExpiresAt;
+        }
+        Instant absoluteExpiresAt = familyCreatedAt.plus(MAX_FAMILY_LIFETIME);
+        return slidingExpiresAt.isBefore(absoluteExpiresAt) ? slidingExpiresAt : absoluteExpiresAt;
+    }
+
+    private boolean isAbsoluteLifetimeCapApplied(
+            Instant now,
+            Instant familyCreatedAt,
+            Instant nextFamilyExpiresAt
+    ) {
+        return familyCreatedAt != null
+                && nextFamilyExpiresAt.equals(familyCreatedAt.plus(MAX_FAMILY_LIFETIME))
+                && nextFamilyExpiresAt.isBefore(now.plusSeconds(jwtTokenProvider.getRefreshTokenValiditySeconds()));
     }
 
     public void revoke(TokenNamespace namespace, ParsedToken parsedToken) {
