@@ -10,9 +10,11 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(prefix = "miriyum.member-support", name = "enabled", havingValue = "true")
 public final class MemberSupportCrypto {
     private static final int NONCE_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;

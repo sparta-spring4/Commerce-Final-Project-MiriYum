@@ -119,16 +119,25 @@ class HttpApiNamespaceContractTest {
 
     private static boolean isConsumer(ControllerRoute route) {
         return isPackageOrChild(route.packageName(), "com.miriyum.domain.consumer.controller")
-                || containsPackageOrChild(route.packageName(), ".controller.consumer");
+                || containsPackageOrChild(route.packageName(), ".controller.consumer")
+                || isMemberSupportAudience(route, CONSUMER_ROOT);
     }
 
     private static boolean isStoreOperator(ControllerRoute route) {
         return isPackageOrChild(route.packageName(), "com.miriyum.domain.storeoperator.controller")
-                || containsPackageOrChild(route.packageName(), ".controller.storeoperator");
+                || containsPackageOrChild(route.packageName(), ".controller.storeoperator")
+                || isMemberSupportAudience(route, STORE_OPERATOR_ROOT);
     }
 
     private static boolean isPlatformOperator(ControllerRoute route) {
-        return isPackageOrChild(route.packageName(), "com.miriyum.domain.platformoperator.controller");
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.platformoperator.controller")
+                && usesNamespace(route, PLATFORM_OPERATOR_ROOT);
+    }
+
+    private static boolean isMemberSupportAudience(ControllerRoute route, String root) {
+        return isPackageOrChild(route.packageName(),
+                "com.miriyum.domain.platformoperator.controller.membersupport")
+                && usesNamespace(route, root);
     }
 
     private static boolean isPackageOrChild(String packageName, String packageRoot) {

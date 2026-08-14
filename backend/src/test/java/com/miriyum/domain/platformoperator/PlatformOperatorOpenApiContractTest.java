@@ -26,8 +26,19 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/auth/initial-password");
     private static final String REAUTHENTICATION_PATH =
             "/api/v1/platform-operators/reauthentication-approvals";
+    private static final Set<String> MEMBER_SUPPORT_PATHS = Set.of(
+            "/api/v1/platform-operators/members",
+            "/api/v1/platform-operators/members/{accountType}/{accountId}",
+            "/api/v1/platform-operators/member-support-cases",
+            "/api/v1/platform-operators/member-support-cases/{caseId}",
+            "/api/v1/platform-operators/member-support-cases/{caseId}/assignments",
+            "/api/v1/platform-operators/member-support-cases/{caseId}/decisions",
+            "/api/v1/platform-operators/members/{accountType}/{accountId}/sanctions",
+            "/api/v1/platform-operators/member-sanctions/{sanctionId}/additional-approvals");
     private static final Set<String> EXPECTED_AUDIENCE_PATHS = java.util.stream.Stream
-            .concat(AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH))
+            .concat(java.util.stream.Stream.concat(
+                    AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH)),
+                    MEMBER_SUPPORT_PATHS.stream())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     @Test
@@ -58,7 +69,8 @@ class PlatformOperatorOpenApiContractTest {
             String ref = (String) map(entry.getValue()).get("$ref");
             String feature = entry.getKey().equals(REAUTHENTICATION_PATH)
                     ? "platform-operator-authorization"
-                    : "platform-operator-auth";
+                    : MEMBER_SUPPORT_PATHS.contains(entry.getKey())
+                    ? "member-support" : "platform-operator-auth";
             assertThat(ref).startsWith("./" + feature + "/openapi.yaml#/paths/");
             assertThat(map(document(feature + "/openapi.yaml").get("paths"))).containsKey(entry.getKey());
         }

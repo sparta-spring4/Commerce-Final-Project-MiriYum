@@ -45,6 +45,7 @@ class MemberSupportMigrationIT {
                 assertThat(columns(connection, "member_support_audits"))
                         .contains("retention_until")
                         .doesNotContain("email", "phone", "password", "approval");
+                assertThat(columns(connection, "member_sanctions")).contains("sanction_public_id");
 
                 long operatorId = insertOperator(connection);
                 try (var statement = connection.prepareStatement("""

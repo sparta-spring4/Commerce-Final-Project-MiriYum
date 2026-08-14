@@ -96,6 +96,7 @@ CREATE TABLE member_support_cases (
 
 CREATE TABLE member_sanctions (
     member_sanction_id BIGINT NOT NULL AUTO_INCREMENT,
+    sanction_public_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     member_support_case_id BIGINT NOT NULL,
     previous_sanction_id BIGINT NULL,
     account_type VARCHAR(30) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -118,6 +119,7 @@ CREATE TABLE member_sanctions (
              THEN 1 ELSE NULL END
     ) STORED,
     PRIMARY KEY (member_sanction_id),
+    CONSTRAINT uk_member_sanctions_public_id UNIQUE (sanction_public_id),
     CONSTRAINT uk_member_sanctions_case UNIQUE (member_support_case_id),
     CONSTRAINT uk_member_sanctions_active_level
         UNIQUE (account_type, account_id, level, active_level_marker),

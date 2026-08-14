@@ -159,6 +159,8 @@
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorAuthorizationOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java`
+- `backend/src/test/java/com/miriyum/architecture/ApiUrlConvention.java`
+- `backend/src/test/java/com/miriyum/architecture/ApiUrlConventionTest.java`
 - `backend/src/test/java/com/miriyum/architecture/ControllerOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/architecture/DomainPackageArchitectureTest.java`
 - `backend/src/test/java/com/miriyum/architecture/HttpApiNamespaceContractTest.java`

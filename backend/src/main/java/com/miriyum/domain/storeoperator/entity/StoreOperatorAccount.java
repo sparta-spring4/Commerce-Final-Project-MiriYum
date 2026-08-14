@@ -102,6 +102,9 @@ public class StoreOperatorAccount extends BaseEntity {
     }
 
     public void replaceRecoveredPassword(String newPasswordHash) {
+        if (!passwordResetRequired) {
+            throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT);
+        }
         this.passwordHash = java.util.Objects.requireNonNull(newPasswordHash);
         this.passwordResetRequired = false;
         this.supportVersion++;

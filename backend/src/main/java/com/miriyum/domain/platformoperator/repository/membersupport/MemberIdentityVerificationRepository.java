@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface MemberIdentityVerificationRepository extends JpaRepository<MemberIdentityVerification, Long> {
+    Optional<MemberIdentityVerification> findByProofDigest(String digest);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select verification from MemberIdentityVerification verification where verification.proofDigest = :digest")
     Optional<MemberIdentityVerification> findByProofDigestForUpdate(@Param("digest") String digest);
