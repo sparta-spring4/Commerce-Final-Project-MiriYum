@@ -65,6 +65,7 @@ export function runAuthRefresh({ client, baseUrl, allowedOrigin, account, tags =
       loginStatus: login.status,
       refreshStatus: null,
       classification: login.classification,
+      completed: false,
     }
   }
 
@@ -84,5 +85,6 @@ export function runAuthRefresh({ client, baseUrl, allowedOrigin, account, tags =
     loginStatus: login.status,
     refreshStatus: response.status,
     classification,
+    completed: classification === 'success',
   }
 }

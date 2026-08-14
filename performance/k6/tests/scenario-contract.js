@@ -15,6 +15,15 @@ function envelope(data) {
   return JSON.stringify({ code: 'SUCCESS', message: 'ok', data })
 }
 
+function throws(action) {
+  try {
+    action()
+    return false
+  } catch (_) {
+    return true
+  }
+}
+
 function notificationItem(notificationId) {
   return {
     notificationId,
@@ -38,6 +47,40 @@ function reservationConflictClient(code) {
       }
     },
   }
+}
+
+function rateLimitedAuthClient() {
+  return {
+    post() {
+      return {
+        status: 429,
+        body: JSON.stringify({ code: 'AUTH_009', message: 'rate limited', data: null }),
+        headers: {},
+      }
+    },
+  }
+}
+
+function notificationPagesClient(pages) {
+  let index = 0
+  return {
+    get() {
+      const data = pages[Math.min(index, pages.length - 1)]
+      index += 1
+      return { status: 200, body: envelope(data), headers: {} }
+    },
+  }
+}
+
+function notificationContractThrows(pages) {
+  return throws(() => runNotificationHistory({
+    client: notificationPagesClient(pages),
+    baseUrl: 'http://backend:8080',
+    accessToken: 'access-token-value',
+    pageSize: 2,
+    minimumDeliveredItemsPerAccount: 3,
+    tags: { phase: 'measured' },
+  }))
 }
 
 const RESERVATION_INPUT = {
@@ -138,6 +181,7 @@ export default function () {
     baseUrl: 'http://backend:8080',
     accessToken: 'access-token-value',
     pageSize: 2,
+    minimumDeliveredItemsPerAccount: 3,
     tags: { phase: 'measured' },
   })
 
@@ -155,6 +199,13 @@ export default function () {
   const notificationConflict = runReservationCreate({
     client: reservationConflictClient('NOTIFICATION_002'),
     ...RESERVATION_INPUT,
+  })
+  const rateLimitedAuth = runAuthRefresh({
+    client: rateLimitedAuthClient(),
+    baseUrl: 'https://loadtest-proxy:8443',
+    allowedOrigin: 'http://localhost:5173',
+    account: { email: 'consumer@example.test', password: 'synthetic-password' },
+    tags: { phase: 'measured' },
   })
 
   check(null, {
@@ -189,6 +240,9 @@ export default function () {
       reservationResult.status === 201 && !combinedResult.includes('9001'),
     'approved capacity conflict is an expected 4xx': () =>
       capacityConflict.classification === 'expected_4xx',
+    'rate-limited login is classified but does not complete auth refresh': () =>
+      rateLimitedAuth.classification === 'expected_4xx'
+      && rateLimitedAuth.completed === false,
     'notification invariant conflict is an unexpected 4xx': () =>
       notificationConflict.classification === 'unexpected_4xx',
     'notification first page omits the cursor': () =>
@@ -201,5 +255,76 @@ export default function () {
       && notificationResult.itemCount === 3
       && !combinedResult.includes('opaque_cursor_1')
       && !combinedResult.includes('notificationId'),
+    'notification fixture promise fails when the first page has no next page': () =>
+      throws(() => runNotificationHistory({
+        client: {
+          get() {
+            return {
+              status: 200,
+              body: envelope({
+                items: [notificationItem('11'), notificationItem('10')],
+                hasNext: false,
+                nextCursor: null,
+              }),
+              headers: {},
+            }
+          },
+        },
+        baseUrl: 'http://backend:8080',
+        accessToken: 'access-token-value',
+        pageSize: 2,
+        minimumDeliveredItemsPerAccount: 3,
+        tags: { phase: 'measured' },
+      })),
+    'notification history rejects a null deliveredAt': () =>
+      notificationContractThrows([
+        {
+          items: [
+            { ...notificationItem('11'), deliveredAt: null },
+            notificationItem('10'),
+          ],
+          hasNext: true,
+          nextCursor: 'opaque_cursor_1',
+        },
+        { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+      ]),
+    'notification history rejects a cursor outside the OpenAPI pattern': () =>
+      notificationContractThrows([
+        {
+          items: [notificationItem('11'), notificationItem('10')],
+          hasNext: true,
+          nextCursor: 'opaque.cursor.1',
+        },
+        { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+      ]),
+    'notification history rejects more items than the requested page size': () =>
+      notificationContractThrows([
+        {
+          items: [notificationItem('12'), notificationItem('11'), notificationItem('10')],
+          hasNext: true,
+          nextCursor: 'opaque_cursor_1',
+        },
+        { items: [], hasNext: false, nextCursor: null },
+      ]),
+    'notification history rejects an invalid action shape': () =>
+      notificationContractThrows([
+        {
+          items: [
+            {
+              ...notificationItem('11'),
+              action: {
+                type: 'RESERVATION_DETAIL',
+                resource: { type: 'PICKUP_RESERVATION', id: '9001' },
+                availability: 'AVAILABLE',
+                expiresAt: null,
+              },
+            },
+            notificationItem('10'),
+          ],
+          hasNext: true,
+          nextCursor: 'opaque_cursor_1',
+        },
+        { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+      ]),
   })
 }

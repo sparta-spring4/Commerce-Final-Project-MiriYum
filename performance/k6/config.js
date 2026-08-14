@@ -89,6 +89,9 @@ export function loadConfig(env) {
     throw new Error('PROFILE must be smoke, local-baseline, or staging-baseline')
   }
 
+  if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
+    throw new Error('staging execution requires STAGING_APPROVED=true')
+  }
   assertSafeTarget(targetEnv, baseUrl, allowedHosts)
   if (profile === 'local-baseline' && targetEnv !== 'local') {
     throw new Error('local-baseline requires TARGET_ENV=local')
@@ -96,12 +99,11 @@ export function loadConfig(env) {
   if (profile === 'staging-baseline' && targetEnv !== 'staging') {
     throw new Error('staging-baseline requires TARGET_ENV=staging')
   }
-  if (targetEnv === 'staging' && env.STAGING_APPROVED !== 'true') {
-    throw new Error('staging execution requires STAGING_APPROVED=true')
-  }
-  if (profile === 'staging-baseline') {
-    requireRunId(env.STAGING_SMOKE_RUN_ID)
-  }
+  const prerequisiteSmokeRunId = profile === 'local-baseline'
+    ? requireRunId(env.LOCAL_SMOKE_RUN_ID)
+    : profile === 'staging-baseline'
+      ? requireRunId(env.STAGING_SMOKE_RUN_ID)
+      : null
 
   const fixturePath = requireText('FIXTURE_PATH', env.FIXTURE_PATH)
   if (!fixturePath.endsWith('.json')) {
@@ -124,6 +126,7 @@ export function loadConfig(env) {
     profile,
     fixturePath,
     runId: requireRunId(env.RUN_ID),
+    prerequisiteSmokeRunId,
     commitSha: requireCommitSha(env.COMMIT_SHA),
     limits,
     scenarioNames,

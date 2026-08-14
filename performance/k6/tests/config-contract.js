@@ -20,8 +20,8 @@ function throws(action) {
 
 const LOCAL_SMOKE_ENV = {
   TARGET_ENV: 'local',
-  BASE_URL: 'http://backend:8080',
-  ALLOWED_HOSTS: 'backend',
+  BASE_URL: 'https://loadtest-proxy:8443',
+  ALLOWED_HOSTS: 'loadtest-proxy',
   PROFILE: 'smoke',
   FIXTURE_PATH: '/scripts/fixtures/test-data.local.json',
   RUN_ID: 'local-smoke-20260814',
@@ -38,6 +38,12 @@ export default function () {
       throws(() => assertSafeTarget('staging', 'https://other.example', ['staging.miriyum.test'])),
     'non-TLS staging target is rejected': () =>
       throws(() => assertSafeTarget('staging', 'http://staging.miriyum.test', ['staging.miriyum.test'])),
+    'non-TLS local target is rejected to preserve secure refresh cookies': () =>
+      throws(() => assertSafeTarget('local', 'http://loadtest-proxy:8443', ['loadtest-proxy'])),
+    'remote host cannot be disguised as a local target': () =>
+      throws(() => assertSafeTarget('local', 'https://api.example.test', ['api.example.test'])),
+    'unreviewed external host cannot be selected as staging': () =>
+      throws(() => assertSafeTarget('staging', 'https://staging.example.test', ['staging.example.test'])),
     'zero load input is rejected': () =>
       throws(() => parsePositiveInt('MAX_VUS', '0', 100)),
     'load above its hard ceiling is rejected': () =>
@@ -51,6 +57,25 @@ export default function () {
     },
     'local baseline requires explicit load inputs': () =>
       throws(() => loadConfig({ ...LOCAL_SMOKE_ENV, PROFILE: 'local-baseline' })),
+    'local baseline requires prior local smoke evidence': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'storeSearch',
+        MAX_VUS: '1',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '1',
+      })),
+    'local baseline retains prior local smoke evidence': () =>
+      loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'storeSearch',
+        MAX_VUS: '1',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '1',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
+      }).prerequisiteSmokeRunId === 'local-smoke-approved',
     'staging requires an explicit approval gate': () =>
       throws(() => loadConfig({
         ...LOCAL_SMOKE_ENV,
@@ -88,6 +113,7 @@ export default function () {
         MAX_VUS: '1',
         DURATION_SECONDS: '10',
         ARRIVAL_RATE: '2',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
       })),
     'baseline arrival rate covers every selected scenario': () =>
       throws(() => loadConfig({
@@ -97,6 +123,7 @@ export default function () {
         MAX_VUS: '2',
         DURATION_SECONDS: '10',
         ARRIVAL_RATE: '1',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
       })),
     'baseline longer than the bearer validity safety window is rejected': () =>
       throws(() => loadConfig({
@@ -106,6 +133,7 @@ export default function () {
         MAX_VUS: '1',
         DURATION_SECONDS: '601',
         ARRIVAL_RATE: '1',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
       })),
   })
 }

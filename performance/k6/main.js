@@ -3,7 +3,7 @@ import execution from 'k6/execution'
 import http from 'k6/http'
 
 import { loadConfig } from './config.js'
-import { validateFixture } from './lib/contracts.js'
+import { validateAuthPoolCapacity, validateFixture } from './lib/contracts.js'
 import { renderSafeSummary } from './lib/summary.js'
 import { loginConsumer, runAuthRefresh } from './scenarios/auth-refresh.js'
 import { runNotificationHistory } from './scenarios/notification-history.js'
@@ -31,7 +31,7 @@ function buildScenarios() {
           : 1,
         maxDuration: '1m',
         gracefulStop: '5s',
-        tags: { profile: config.profile, target_env: config.targetEnv },
+        tags: { phase: 'measured', profile: config.profile, target_env: config.targetEnv },
       }
       return
     }
@@ -44,7 +44,7 @@ function buildScenarios() {
       preAllocatedVUs: allocate(config.limits.maxVus, index, count),
       maxVUs: allocate(config.limits.maxVus, index, count),
       gracefulStop: '30s',
-      tags: { profile: config.profile, target_env: config.targetEnv },
+      tags: { phase: 'measured', profile: config.profile, target_env: config.targetEnv },
     }
   })
   return scenarios
@@ -56,21 +56,19 @@ function buildThresholds() {
     const tags = `phase:measured,scenario:${scenario}`
     thresholds[`checks{${tags}}`] = ['rate==1']
     thresholds[`http_req_duration{${tags}}`] = ['max>=0']
-    thresholds[`http_req_failed{${tags}}`] = ['rate>=0']
     thresholds[`http_reqs{${tags}}`] = ['count>=0']
     thresholds[`expected_4xx{${tags}}`] = ['count>=0']
     thresholds[`unexpected_4xx{${tags}}`] = ['count==0']
     thresholds[`server_5xx{${tags}}`] = ['count==0']
     thresholds[`unexpected_status{${tags}}`] = ['count==0']
+    thresholds[`dropped_iterations{${tags}}`] = ['count==0']
   }
   return thresholds
 }
 
 function validateExecutionCapacity() {
-  if (config.profile !== 'smoke'
-      && config.scenarioNames.includes('authRefresh')
-      && fixture.accounts.length < config.limits.maxVus) {
-    throw new Error('baseline fixture requires at least one synthetic account per maximum VU')
+  if (config.profile !== 'smoke' && config.scenarioNames.includes('authRefresh')) {
+    validateAuthPoolCapacity(fixture, config.limits.maxVus)
   }
   if (!config.scenarioNames.includes('reservationCreate')) return
   const reservationIndex = config.scenarioNames.indexOf('reservationCreate')
@@ -88,6 +86,7 @@ validateExecutionCapacity()
 export const options = {
   scenarios: buildScenarios(),
   thresholds: buildThresholds(),
+  insecureSkipTLSVerify: config.targetEnv === 'local',
   setupTimeout: '2m',
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
@@ -146,13 +145,16 @@ function executeScenario(name, action) {
     check(null, { [`${name} contract remains valid`]: () => false }, { phase: 'measured' })
     return
   }
-  const accepted = result.classification === 'success'
-    || result.classification === 'expected_4xx'
+  const accepted = result.completed !== false
+    && (result.classification === 'success' || result.classification === 'expected_4xx')
   check(result, { [`${name} result is accepted`]: () => accepted }, { phase: 'measured' })
 }
 
 function accountForCurrentVu() {
-  return fixture.accounts[(execution.vu.idInTest - 1) % fixture.accounts.length]
+  const alias = fixture.auth.accountAliases[
+    (execution.vu.idInTest - 1) % fixture.auth.accountAliases.length
+  ]
+  return fixture.accounts.find((account) => account.alias === alias)
 }
 
 function preparedToken(data, alias) {
@@ -208,6 +210,7 @@ export function notificationHistory(data) {
       baseUrl: config.baseUrl,
       accessToken: preparedToken(data, alias),
       pageSize: fixture.notification.pageSize,
+      minimumDeliveredItemsPerAccount: fixture.notification.minimumDeliveredItemsPerAccount,
     })
   })
 }
@@ -217,6 +220,7 @@ export function handleSummary(data) {
     targetEnv: config.targetEnv,
     profile: config.profile,
     runId: config.runId,
+    prerequisiteSmokeRunId: config.prerequisiteSmokeRunId,
     commitSha: config.commitSha,
     limits: config.limits,
   })

@@ -15,6 +15,11 @@ const SUMMARY_INPUT = {
       contains: 'time',
       values: { avg: 11.2, 'p(50)': 10.1, 'p(95)': 20.2, 'p(99)': 25.3, max: 30.4 },
     },
+    'dropped_iterations{phase:measured,scenario:notificationHistory}': {
+      type: 'counter',
+      contains: 'default',
+      values: { count: 2, rate: 0.2 },
+    },
     http_req_duration: {
       type: 'trend',
       contains: 'time',
@@ -33,6 +38,7 @@ export default function () {
     targetEnv: 'local',
     profile: 'smoke',
     runId: 'safe-run',
+    prerequisiteSmokeRunId: 'local-smoke-approved',
     commitSha: '0123456789abcdef0123456789abcdef01234567',
     limits: { maxVus: 1, durationSeconds: 1, arrivalRate: 1 },
     forbiddenProbe: 'Bearer secret-token cursor-secret response-body',
@@ -42,9 +48,13 @@ export default function () {
 
   check(null, {
     'summary keeps approved run metadata': () =>
-      parsed.runId === 'safe-run' && parsed.targetEnv === 'local',
+      parsed.runId === 'safe-run'
+      && parsed.targetEnv === 'local'
+      && parsed.prerequisiteSmokeRunId === 'local-smoke-approved',
     'summary keeps measured scenario percentiles': () =>
       parsed.metrics.notificationHistory.httpReqDuration.p95 === 20.2,
+    'summary discloses dropped configured arrivals': () =>
+      parsed.metrics.notificationHistory.droppedIterations.count === 2,
     'summary excludes untagged preparation aggregate': () => !combined.includes('9999'),
     'summary excludes unknown metrics': () => !combined.includes('leaked_response_body'),
     'summary excludes forbidden metadata and credentials': () =>

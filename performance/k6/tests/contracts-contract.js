@@ -1,6 +1,11 @@
 import { check } from 'k6'
 
-import { classifyStatus, parseEnvelope, validateFixture } from '../lib/contracts.js'
+import {
+  classifyStatus,
+  parseEnvelope,
+  validateAuthPoolCapacity,
+  validateFixture,
+} from '../lib/contracts.js'
 import { bearerHeaders, deterministicUuid, jsonHeaders, originHeaders } from '../lib/session.js'
 
 export const options = {
@@ -24,10 +29,14 @@ export default function () {
     accounts: [
       { alias: 'consumer-01', emailEnv: 'K6_CONSUMER_01_EMAIL', passwordEnv: 'K6_CONSUMER_01_PASSWORD' },
       { alias: 'consumer-02', emailEnv: 'K6_CONSUMER_02_EMAIL', passwordEnv: 'K6_CONSUMER_02_PASSWORD' },
+      { alias: 'consumer-03', emailEnv: 'K6_CONSUMER_03_EMAIL', passwordEnv: 'K6_CONSUMER_03_PASSWORD' },
+      { alias: 'consumer-04', emailEnv: 'K6_CONSUMER_04_EMAIL', passwordEnv: 'K6_CONSUMER_04_PASSWORD' },
+      { alias: 'consumer-05', emailEnv: 'K6_CONSUMER_05_EMAIL', passwordEnv: 'K6_CONSUMER_05_PASSWORD' },
     ],
+    auth: { accountAliases: ['consumer-01', 'consumer-02'] },
     search: { input: '서울 한식' },
     reservationTemplates: [{
-      accountAlias: 'consumer-01',
+      accountAlias: 'consumer-03',
       storeId: '301',
       serviceDate: '2099-08-20',
       startTime: '18:00:00',
@@ -36,7 +45,7 @@ export default function () {
       menuSelections: [],
     }],
     notification: {
-      accountAliases: ['consumer-01', 'consumer-02'],
+      accountAliases: ['consumer-04', 'consumer-05'],
       pageSize: 2,
       minimumDeliveredItemsPerAccount: 3,
     },
@@ -83,7 +92,7 @@ export default function () {
         && origin.Origin === 'http://localhost:5173'
     },
     'complete synthetic fixture contract is accepted': () =>
-      validateFixture(validFixture).accounts.length === 2,
+      validateFixture(validFixture).accounts.length === 5,
     'duplicate synthetic account alias is rejected': () =>
       throws(() => validateFixture({
         ...validFixture,
@@ -95,6 +104,28 @@ export default function () {
         reservationTemplates: [{
           ...validFixture.reservationTemplates[0],
           accountAlias: 'unknown-consumer',
+        }],
+      })),
+    'auth fixture must reference distinct declared accounts': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        auth: { accountAliases: ['consumer-01', 'unknown-consumer'] },
+      })),
+    'auth and prepared bearer account pools must not overlap': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        auth: { accountAliases: ['consumer-03'] },
+      })),
+    'auth pool must cover every globally addressable baseline VU': () =>
+      throws(() => validateAuthPoolCapacity(validFixture, 3)),
+    'auth pool accepts a global VU ceiling it fully covers': () =>
+      validateAuthPoolCapacity(validFixture, 2) === validFixture,
+    'reservation and notification account pools must not overlap': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        reservationTemplates: [{
+          ...validFixture.reservationTemplates[0],
+          accountAlias: 'consumer-04',
         }],
       })),
     'notification fixture must guarantee a second page': () =>

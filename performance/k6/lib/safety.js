@@ -4,6 +4,14 @@ const PRODUCTION_HOSTS = new Set([
   'miriyum.com',
   'www.miriyum.com',
 ])
+const LOCAL_HOSTS = new Set([
+  'loadtest-proxy',
+  'localhost',
+  '127.0.0.1',
+  '::1',
+])
+// Staging stays fail-closed until an approved hostname is added in a reviewed repository change.
+const TRUSTED_STAGING_HOSTS = new Set([])
 
 export function assertSafeTarget(targetEnv, baseUrl, allowedHosts) {
   if (!VALID_TARGET_ENVS.has(targetEnv)) {
@@ -31,8 +39,14 @@ export function assertSafeTarget(targetEnv, baseUrl, allowedHosts) {
   if (!normalizedAllowedHosts.includes(hostname)) {
     throw new Error('target host is not allowlisted')
   }
-  if (targetEnv === 'staging' && protocol !== 'https:') {
-    throw new Error('staging target must use HTTPS')
+  if (protocol !== 'https:') {
+    throw new Error(`${targetEnv} target must use HTTPS`)
+  }
+  if (targetEnv === 'local' && !LOCAL_HOSTS.has(hostname)) {
+    throw new Error('local target must use the dedicated proxy or a loopback host')
+  }
+  if (targetEnv === 'staging' && !TRUSTED_STAGING_HOSTS.has(hostname)) {
+    throw new Error('staging target host is not configured in the trusted repository allowlist')
   }
 }
 

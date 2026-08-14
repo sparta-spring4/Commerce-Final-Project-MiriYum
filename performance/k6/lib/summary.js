@@ -7,13 +7,13 @@ const ALLOWED_SCENARIOS = new Set([
 
 const ALLOWED_METRICS = Object.freeze({
   http_req_duration: ['httpReqDuration', ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)']],
-  http_req_failed: ['httpReqFailed', ['rate', 'passes', 'fails']],
   http_reqs: ['httpRequests', ['count', 'rate']],
   checks: ['checks', ['rate', 'passes', 'fails']],
   expected_4xx: ['expected4xx', ['count', 'rate']],
   unexpected_4xx: ['unexpected4xx', ['count', 'rate']],
   server_5xx: ['server5xx', ['count', 'rate']],
   unexpected_status: ['unexpectedStatus', ['count', 'rate']],
+  dropped_iterations: ['droppedIterations', ['count', 'rate']],
 })
 
 const VALUE_NAMES = Object.freeze({
@@ -52,6 +52,7 @@ function safeMetadata(metadata) {
     targetEnv: metadata.targetEnv,
     profile: metadata.profile,
     runId: metadata.runId,
+    prerequisiteSmokeRunId: metadata.prerequisiteSmokeRunId || null,
     commitSha: metadata.commitSha,
     limits: {
       maxVus: limits.maxVus,
@@ -89,14 +90,14 @@ function renderMarkdown(summary) {
     `- runId: ${summary.runId}`,
     `- commitSha: ${summary.commitSha}`,
     '',
-    '| scenario | p50 ms | p95 ms | p99 ms | requests | expected 4xx | unexpected 4xx | 5xx |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    '| scenario | p50 ms | p95 ms | p99 ms | requests | dropped iterations | expected 4xx | unexpected 4xx | 5xx |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|',
   ]
   for (const scenario of ALLOWED_SCENARIOS) {
     const metrics = summary.metrics[scenario]
     if (metrics === undefined) continue
     const duration = metrics.httpReqDuration || {}
-    lines.push(`| ${scenario} | ${duration.p50 ?? '-'} | ${duration.p95 ?? '-'} | ${duration.p99 ?? '-'} | ${metrics.httpRequests?.count ?? '-'} | ${metrics.expected4xx?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
+    lines.push(`| ${scenario} | ${duration.p50 ?? '-'} | ${duration.p95 ?? '-'} | ${duration.p99 ?? '-'} | ${metrics.httpRequests?.count ?? '-'} | ${metrics.droppedIterations?.count ?? 0} | ${metrics.expected4xx?.count ?? 0} | ${metrics.unexpected4xx?.count ?? 0} | ${metrics.server5xx?.count ?? 0} |`)
   }
   return `${lines.join('\n')}\n`
 }

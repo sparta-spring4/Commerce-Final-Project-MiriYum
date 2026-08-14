@@ -94,8 +94,8 @@ function validateReservationTemplate(template, accountAliases) {
 export function validateFixture(fixture) {
   requireKeys(
     fixture,
-    ['allowedOrigin', 'accounts', 'search', 'reservationTemplates', 'notification'],
-    ['allowedOrigin', 'accounts', 'search', 'reservationTemplates', 'notification'],
+    ['allowedOrigin', 'accounts', 'auth', 'search', 'reservationTemplates', 'notification'],
+    ['allowedOrigin', 'accounts', 'auth', 'search', 'reservationTemplates', 'notification'],
     'k6 fixture',
   )
   if (typeof fixture.allowedOrigin !== 'string'
@@ -124,9 +124,22 @@ export function validateFixture(fixture) {
     throw new Error('fixture must contain a reservation template')
   }
   const accountAliases = new Set(aliases)
+
+  requireKeys(fixture.auth, ['accountAliases'], ['accountAliases'], 'auth fixture')
+  const authAliases = fixture.auth.accountAliases
+  if (!Array.isArray(authAliases)
+      || authAliases.length < 1
+      || new Set(authAliases).size !== authAliases.length
+      || authAliases.some((alias) => !accountAliases.has(alias))) {
+    throw new Error('auth fixture requires distinct declared account aliases')
+  }
+
   fixture.reservationTemplates.forEach((template) => {
     validateReservationTemplate(template, accountAliases)
   })
+  const reservationAliases = new Set(
+    fixture.reservationTemplates.map((template) => template.accountAlias),
+  )
 
   requireKeys(
     fixture.notification,
@@ -150,6 +163,23 @@ export function validateFixture(fixture) {
   )
   if (minimumItems <= pageSize) {
     throw new Error('notification fixture must guarantee at least two pages')
+  }
+  const notificationAliasSet = new Set(notificationAliases)
+  if (authAliases.some((alias) => reservationAliases.has(alias) || notificationAliasSet.has(alias))) {
+    throw new Error('auth account pool must be isolated from prepared bearer account pools')
+  }
+  if ([...reservationAliases].some((alias) => notificationAliasSet.has(alias))) {
+    throw new Error('reservation and notification account pools must be isolated')
+  }
+  return fixture
+}
+
+export function validateAuthPoolCapacity(fixture, requiredAccounts) {
+  if (!Number.isInteger(requiredAccounts) || requiredAccounts < 1) {
+    throw new Error('required auth account capacity must be a positive integer')
+  }
+  if (fixture.auth.accountAliases.length < requiredAccounts) {
+    throw new Error(`baseline fixture requires ${requiredAccounts} isolated auth accounts`)
   }
   return fixture
 }

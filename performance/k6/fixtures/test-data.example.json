@@ -10,14 +10,32 @@
       "alias": "consumer-02",
       "emailEnv": "K6_CONSUMER_02_EMAIL",
       "passwordEnv": "K6_CONSUMER_02_PASSWORD"
+    },
+    {
+      "alias": "consumer-03",
+      "emailEnv": "K6_CONSUMER_03_EMAIL",
+      "passwordEnv": "K6_CONSUMER_03_PASSWORD"
+    },
+    {
+      "alias": "consumer-04",
+      "emailEnv": "K6_CONSUMER_04_EMAIL",
+      "passwordEnv": "K6_CONSUMER_04_PASSWORD"
+    },
+    {
+      "alias": "consumer-05",
+      "emailEnv": "K6_CONSUMER_05_EMAIL",
+      "passwordEnv": "K6_CONSUMER_05_PASSWORD"
     }
   ],
+  "auth": {
+    "accountAliases": ["consumer-01", "consumer-02"]
+  },
   "search": {
     "input": "서울 한식"
   },
   "reservationTemplates": [
     {
-      "accountAlias": "consumer-01",
+      "accountAlias": "consumer-03",
       "storeId": "301",
       "serviceDate": "2099-08-20",
       "startTime": "18:00:00",
@@ -31,7 +49,7 @@
     }
   ],
   "notification": {
-    "accountAliases": ["consumer-01", "consumer-02"],
+    "accountAliases": ["consumer-04", "consumer-05"],
     "pageSize": 2,
     "minimumDeliveredItemsPerAccount": 3
   }

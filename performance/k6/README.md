@@ -4,8 +4,9 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 
 ## 안전 경계
 
-- `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부한다.
+- `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
 - staging은 `STAGING_APPROVED=true`가 필요하고, baseline은 성공한 smoke의 `STAGING_SMOKE_RUN_ID`도 요구한다.
+- staging host는 저장소의 신뢰 allowlist가 비어 있는 동안 fail-closed다. 실제 host는 별도 리뷰 변경으로 먼저 고정해야 한다.
 - `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
 - `test-data.example.json`은 schema 예시이며 실행 가능한 데이터가 아니다. 실제 local fixture는 ignored `fixtures/test-data.local.json`, staging fixture는 저장소 밖 승인 경로를 사용한다.
@@ -15,7 +16,8 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 
 `fixtures/test-data.example.json`을 `fixtures/test-data.local.json`으로 복사한 뒤 다음 조건을 실제 합성 데이터에 맞춘다.
 
-- 최소 2개 계정 alias와 각 계정의 email/password 환경변수 이름
+- `auth.accountAliases`, 예약 template, `notification.accountAliases`가 서로 겹치지 않도록 분리한 합성 계정과 각 계정의 email/password 환경변수 이름
+- baseline 인증 계정 풀은 전역 VU ID 충돌을 막기 위해 전체 `MAX_VUS` 이상이어야 하며, 한 VU는 실행 중 같은 계정으로 login과 refresh를 이어서 수행
 - 공백이 아닌 1~100자 공개 검색 입력
 - 예약별 account alias, 충돌하지 않는 store/date/time/party/menu 조합
 - `notification.accountAliases`에 지정한 서로 다른 최소 2개 계정과, 각 계정의 `pageSize + 1`개 이상 공개 `IN_APP` 전달 완료 알림
@@ -29,6 +31,12 @@ K6_CONSUMER_01_EMAIL=synthetic-consumer-01@example.test
 K6_CONSUMER_01_PASSWORD=replace-outside-the-repository
 K6_CONSUMER_02_EMAIL=synthetic-consumer-02@example.test
 K6_CONSUMER_02_PASSWORD=replace-outside-the-repository
+K6_CONSUMER_03_EMAIL=synthetic-consumer-03@example.test
+K6_CONSUMER_03_PASSWORD=replace-outside-the-repository
+K6_CONSUMER_04_EMAIL=synthetic-consumer-04@example.test
+K6_CONSUMER_04_PASSWORD=replace-outside-the-repository
+K6_CONSUMER_05_EMAIL=synthetic-consumer-05@example.test
+K6_CONSUMER_05_PASSWORD=replace-outside-the-repository
 ```
 
 ## 정적 계약 검사
@@ -48,8 +56,8 @@ foreach ($test in $tests) {
 $commitSha = git rev-parse HEAD
 docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
   -e TARGET_ENV=local `
-  -e BASE_URL=http://backend:8080 `
-  -e ALLOWED_HOSTS=backend `
+  -e BASE_URL=https://loadtest-proxy:8443 `
+  -e ALLOWED_HOSTS=loadtest-proxy `
   -e PROFILE=smoke `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
   -e RUN_ID=local-inspect `
@@ -71,15 +79,15 @@ $runId = 'local-smoke-20260814-01'
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `
   -f deploy/local/docker-compose.loadtest.yml `
-  --profile loadtest up -d mysql valkey backend
+  --profile loadtest up -d mysql valkey backend loadtest-proxy
 
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `
   -f deploy/local/docker-compose.loadtest.yml `
   --profile loadtest run --rm --env-from-file $credentialFile loadtest run `
   -e TARGET_ENV=local `
-  -e BASE_URL=http://backend:8080 `
-  -e ALLOWED_HOSTS=backend `
+  -e BASE_URL=https://loadtest-proxy:8443 `
+  -e ALLOWED_HOSTS=loadtest-proxy `
   -e PROFILE=smoke `
   -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
   -e RUN_ID=$runId `
@@ -87,7 +95,7 @@ docker compose --env-file deploy/local/.env `
   /scripts/main.js
 ```
 
-smoke는 인증·검색·예약을 각각 1 iteration 실행하고, 알림은 최소 두 합성 계정을 한 번씩 조회한다. 잘못된 fixture, 인증 실패, 응답 계약 위반, unexpected 4xx, 5xx 또는 비표준 status가 하나라도 있으면 baseline을 실행하지 않는다.
+smoke는 인증·검색·예약을 각각 1 iteration 실행하고, 알림은 최소 두 합성 계정을 한 번씩 조회한다. 전용 HTTPS proxy는 backend의 `Secure` refresh cookie 속성을 유지하면서 k6 cookie jar가 login 뒤 refresh에 cookie를 재전송하게 한다. 알림 이력은 요청 pageSize, cursor 패턴, item·resource·action·필수 전달 시각의 OpenAPI 값 계약과 실제 두 번째 페이지 항목까지 검증한다. 잘못된 fixture, 인증 실패, 응답 계약 위반, unexpected 4xx, 5xx 또는 비표준 status가 하나라도 있으면 baseline을 실행하지 않는다.
 
 ## 로컬 baseline
 
@@ -95,14 +103,16 @@ smoke는 인증·검색·예약을 각각 1 iteration 실행하고, 알림은 �
 
 ```powershell
 $runId = 'local-search-baseline-20260814-01'
+$localSmokeRunId = 'local-smoke-20260814-01'
 docker compose --env-file deploy/local/.env `
   -f deploy/local/docker-compose.dev.yml `
   -f deploy/local/docker-compose.loadtest.yml `
   --profile loadtest run --rm --env-from-file $credentialFile loadtest run `
   -e TARGET_ENV=local `
-  -e BASE_URL=http://backend:8080 `
-  -e ALLOWED_HOSTS=backend `
+  -e BASE_URL=https://loadtest-proxy:8443 `
+  -e ALLOWED_HOSTS=loadtest-proxy `
   -e PROFILE=local-baseline `
+  -e LOCAL_SMOKE_RUN_ID=$localSmokeRunId `
   -e SCENARIOS=storeSearch `
   -e MAX_VUS=2 `
   -e DURATION_SECONDS=30 `
@@ -113,7 +123,7 @@ docker compose --env-file deploy/local/.env `
   /scripts/main.js
 ```
 
-`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록한다.
+`SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이며 인증과 알림 iteration은 최대 두 요청을 보낸다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록한다.
 
 ## staging gate
 
@@ -124,7 +134,7 @@ docker compose --env-file deploy/local/.env `
 3. 팀 공지·실행 시간·최대 VU·duration·arrival rate 승인
 4. 같은 SHA의 staging smoke 성공 `RUN_ID`
 
-staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`과 `STAGING_SMOKE_RUN_ID`를 전달한다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`과 `STAGING_SMOKE_RUN_ID`를 전달한다. 현재 신뢰 staging host allowlist는 의도적으로 비어 있으므로 승인된 hostname을 저장소 변경으로 먼저 고정하기 전에는 실행되지 않는다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
 
 ## 종료와 결과 취급
 
