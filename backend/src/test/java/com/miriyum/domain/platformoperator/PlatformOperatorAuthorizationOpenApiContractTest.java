@@ -50,6 +50,20 @@ class PlatformOperatorAuthorizationOpenApiContractTest {
         assertThat((String) approval.get("description")).contains("5분", "목적", "대상", "세션");
     }
 
+    @Test
+    void forbiddenResponseDocumentsLimitedSessionAndAuthorizationDenialCodes() throws Exception {
+        Map<String, Object> document = document("platform-operator-authorization/openapi.yaml");
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        Map<String, Object> forbidden = map(responses.get("AuthorizationDenied"));
+        Map<String, Object> content = map(map(forbidden.get("content")).get("application/json"));
+        Map<String, Object> examples = map(content.get("examples"));
+
+        assertThat(map(map(examples.get("InitialPasswordChangeRequired")).get("value")))
+                .containsEntry("code", "AUTH_012");
+        assertThat(map(map(examples.get("AuthorizationDenied")).get("value")))
+                .containsEntry("code", "ADMIN_001");
+    }
+
     private static Map<String, Object> document(String file) throws Exception {
         try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
             return map(new Yaml().load(input));

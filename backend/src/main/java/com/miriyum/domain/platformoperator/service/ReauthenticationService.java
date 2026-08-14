@@ -1,6 +1,9 @@
 package com.miriyum.domain.platformoperator.service;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
@@ -8,6 +11,8 @@ import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorReauthenticationApproval;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPasswordState;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
@@ -41,6 +46,8 @@ public class ReauthenticationService {
     private final PlatformOperatorReauthenticationApprovalRepository approvals;
     private final PasswordEncoder passwordEncoder;
     private final PasswordPolicy passwordPolicy;
+    private final LoginDelayGuard delayGuard;
+    private final PlatformOperatorAuthEventRecorder events;
     private final Clock clock;
     private final byte[] fingerprintKey;
 
@@ -49,14 +56,21 @@ public class ReauthenticationService {
             PlatformOperatorReauthenticationApprovalRepository approvals,
             PasswordEncoder passwordEncoder,
             PasswordPolicy passwordPolicy,
+            LoginDelayGuard delayGuard,
+            PlatformOperatorAuthEventRecorder events,
             Clock clock,
-            @Value("${miriyum.jwt.secret}") String fingerprintSecret
+            @Value("${miriyum.platform-operator.reauthentication-fingerprint-secret}") String fingerprintSecret
     ) {
         this.accounts = accounts;
         this.approvals = approvals;
         this.passwordEncoder = passwordEncoder;
         this.passwordPolicy = passwordPolicy;
+        this.delayGuard = delayGuard;
+        this.events = events;
         this.clock = clock;
+        if (fingerprintSecret == null || fingerprintSecret.length() < 32) {
+            throw new IllegalArgumentException("reauthentication fingerprint secret must contain at least 32 characters");
+        }
         this.fingerprintKey = fingerprintSecret.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -78,9 +92,7 @@ public class ReauthenticationService {
                 || account.getSessionVersion() != principal.sessionVersion()) {
             throw new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
         }
-        if (!matches(passwordPolicy.toNfc(request.currentPassword()), account.getPasswordHash())) {
-            throw new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED);
-        }
+        verifyCurrentPassword(account, request.currentPassword());
 
         String plaintext = newApproval();
         Instant issuedAt = clock.instant();
@@ -99,7 +111,36 @@ public class ReauthenticationService {
         } catch (DataAccessException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
+        events.record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.SUCCESS);
         return new ReauthenticationApprovalResult(plaintext, expiresAt);
+    }
+
+    private void verifyCurrentPassword(PlatformOperatorAccount account, String currentPassword) {
+        LoginAttempt attempt = delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId());
+        if (attempt.status() != LoginAttempt.Status.ACQUIRED) {
+            rejectAndAudit(account);
+        }
+        boolean completed = false;
+        try {
+            boolean passwordMatches = matches(passwordPolicy.toNfc(currentPassword), account.getPasswordHash());
+            completed = true;
+            boolean attemptCompleted = delayGuard.completeAttempt(
+                    TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt, passwordMatches);
+            if (!attemptCompleted || !passwordMatches) {
+                rejectAndAudit(account);
+            }
+        } finally {
+            if (!completed) {
+                delayGuard.releaseAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt);
+            }
+        }
+    }
+
+    private void rejectAndAudit(PlatformOperatorAccount account) {
+        events.record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.FAILURE);
+        throw new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED);
     }
 
     String sessionFingerprint(String sessionId) {

@@ -44,6 +44,7 @@ import org.testcontainers.mysql.MySQLContainer;
         "spring.jpa.hibernate.ddl-auto=validate",
         "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
         "miriyum.platform-operator.enabled=true",
+        "miriyum.platform-operator.reauthentication-fingerprint-secret=test-only-reauthentication-fingerprint-secret",
         "miriyum.platform-operator.temporary-password.validity=PT10M",
         "miriyum.platform-operator.temporary-password.max-failures=3",
         "miriyum.store.schedule.activation-enabled=false",
@@ -133,6 +134,46 @@ class PlatformOperatorAuthHttpIT {
                             .contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isUnauthorized());
         }
+    }
+
+    @Test
+    void reauthenticationFailuresShareTheAccountLoginDelayBudgetAndAreAudited() throws Exception {
+        MvcResult login = mvc.perform(post("/api/v1/platform-operators/auth/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"operator@example.com\",\"password\":\"Password1!\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String limitedAccess = com.jayway.jsonpath.JsonPath.read(
+                login.getResponse().getContentAsString(), "$.data.accessToken");
+        MvcResult changed = mvc.perform(put("/api/v1/platform-operators/auth/initial-password")
+                        .header("Authorization", "Bearer " + limitedAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Password1!","newPassword":"Changed2@",
+                                 "newPasswordConfirm":"Changed2@"}
+                                """))
+                .andExpect(status().isOk()).andReturn();
+        String activeAccess = com.jayway.jsonpath.JsonPath.read(
+                changed.getResponse().getContentAsString(), "$.data.accessToken");
+        long eventsBeforeReauthentication = authEvents.count();
+        String wrongPasswordBody = """
+                {"currentPassword":"Wrong3#!","purpose":"PAYMENT_RECOVERY",
+                 "targetType":"PAYMENT_RECOVERY_CASE","targetId":"recovery-1"}
+                """;
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                            .header("Authorization", "Bearer " + activeAccess)
+                            .contentType(MediaType.APPLICATION_JSON).content(wrongPasswordBody))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("ADMIN_002"));
+        }
+
+        assertThat(authEvents.count()).isEqualTo(eventsBeforeReauthentication + 5);
+        mvc.perform(post("/api/v1/platform-operators/auth/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"operator@example.com\",\"password\":\"Changed2@\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_005"));
     }
 
     @Test

@@ -12,11 +12,16 @@ import static org.mockito.Mockito.when;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorReauthenticationApproval;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPasswordState;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
@@ -40,6 +45,8 @@ class ReauthenticationServiceTest {
     private PlatformOperatorAccountRepository accounts;
     private PlatformOperatorReauthenticationApprovalRepository approvals;
     private PasswordEncoder encoder;
+    private LoginDelayGuard delayGuard;
+    private PlatformOperatorAuthEventRecorder events;
     private ReauthenticationService service;
     private PlatformOperatorAccount account;
     private PlatformOperatorPrincipal principal;
@@ -49,21 +56,32 @@ class ReauthenticationServiceTest {
         accounts = mock(PlatformOperatorAccountRepository.class);
         approvals = mock(PlatformOperatorReauthenticationApprovalRepository.class);
         encoder = mock(PasswordEncoder.class);
+        delayGuard = mock(LoginDelayGuard.class);
+        events = mock(PlatformOperatorAuthEventRecorder.class);
         service = new ReauthenticationService(
                 accounts,
                 approvals,
                 encoder,
                 new PasswordPolicy(),
+                delayGuard,
+                events,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 "test-only-secret-key-must-be-at-least-32-bytes");
         account = mock(PlatformOperatorAccount.class);
         principal = new PlatformOperatorPrincipal(7L, "operator@example.com", "raw-session-id", 3L, 2L, false);
         when(accounts.findById(7L)).thenReturn(Optional.of(account));
         when(account.getPasswordHash()).thenReturn("encoded-password");
+        when(account.getId()).thenReturn(7L);
         when(account.getStatus()).thenReturn(PlatformOperatorAccountStatus.ACTIVE);
         when(account.getPasswordState()).thenReturn(PlatformOperatorPasswordState.ACTIVE);
         when(account.getAuthorityVersion()).thenReturn(3L);
         when(account.getSessionVersion()).thenReturn(2L);
+        when(delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, 7L))
+                .thenReturn(LoginAttempt.acquired("attempt"));
+        when(delayGuard.completeAttempt(
+                TokenNamespace.PLATFORM_OPERATOR, 7L, LoginAttempt.acquired("attempt"), true)).thenReturn(true);
+        when(delayGuard.completeAttempt(
+                TokenNamespace.PLATFORM_OPERATOR, 7L, LoginAttempt.acquired("attempt"), false)).thenReturn(true);
         when(approvals.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -90,6 +108,8 @@ class ReauthenticationServiceTest {
         assertThat(saved.getTargetType()).isEqualTo(PAYMENT_RECOVERY_CASE);
         assertThat(saved.getTargetId()).isEqualTo("recovery-1");
         assertThat(saved.getAuthorityVersion()).isEqualTo(3L);
+        verify(events).record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.SUCCESS);
     }
 
     @Test
@@ -103,6 +123,8 @@ class ReauthenticationServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+        verify(events).record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.FAILURE);
     }
 
     @Test
@@ -152,5 +174,13 @@ class ReauthenticationServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE));
+    }
+
+    @Test
+    void rejectsAFingerprintSecretShorterThanThirtyTwoCharacters() {
+        assertThatThrownBy(() -> new ReauthenticationService(
+                accounts, approvals, encoder, new PasswordPolicy(), delayGuard, events,
+                Clock.fixed(NOW, ZoneOffset.UTC), "too-short"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

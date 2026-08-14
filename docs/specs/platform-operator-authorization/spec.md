@@ -58,6 +58,12 @@
 
 현재 비밀번호, 승인 원문, 토큰과 원문 세션 ID는 로그·감사·DB에 남기지 않는다. WebAuthn 도입 시점·등록·분실 복구는 ADMIN-002의 TODO로 유지한다.
 
+재인증 비밀번호 검증은 로그인과 동일한 `PLATFORM_OPERATOR` 계정별 `LoginDelayGuard` 예산을 사용한다. 따라서 어느 인스턴스에서 발생한 로그인·재인증 실패든 MySQL의 같은 실패 횟수와 지연 단계를 공유하며, 성공하면 같은 예산을 초기화한다. 재인증 성공·실패는 비밀번호나 승인 원문 없이 `REAUTHENTICATION` 인증 사건으로 append한다.
+
+`currentPassword`의 wire 검증은 NFC 정규화 후 Unicode code point 8~64개를 기준으로 한다. UTF-16 surrogate pair나 NFD 결합 문자가 포함돼도 활성 비밀번호 정본과 동일한 기준으로 판단한다.
+
+세션 fingerprint HMAC은 JWT 서명 secret을 재사용하지 않고 `miriyum.platform-operator.reauthentication-fingerprint-secret` 전용 secret을 사용한다. 운영 배포 환경 변수 `MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET`은 32자 이상이어야 하며 production compose에서 필수다.
+
 ## 고위험 명령 guard
 
 소비 도메인은 자신의 활성 MySQL 명령 트랜잭션 안에서 `HighRiskCommandGuard.authorize()`를 호출한다. guard는 다음 순서를 지킨다.
@@ -90,6 +96,7 @@
 | 권한·배정·승인 누락, 불일치, 만료 또는 재사용 | 403 | `ADMIN_001` |
 | 현재 비밀번호 불일치 | 401 | `ADMIN_002` |
 | 세션 또는 권한 version 불일치 | 401 | `AUTH_015` |
+| 최초 비밀번호 변경 전 제한 세션 | 403 | `AUTH_012` |
 | 마지막 활성 슈퍼관리자 제거 | 409 | `ADMIN_003` |
 | 중앙 권한·승인 저장소 장애 | 503 | `COMMON_012` |
 | feature flag OFF | 404 | MVC 404 |
@@ -99,6 +106,32 @@
 ## 데이터와 migration
 
 최신 `dev`의 V39 다음 migration은 `V40__create_platform_operator_authorization.sql`이다. 새 테이블은 역할 grant, 직접 권한 grant, 사건 배정, 재인증 승인과 singleton 권한 guard다. 기존 migration이나 #275 인증 테이블을 다시 작성하지 않는다.
+
+만료·소비된 재인증 승인 원장은 이번 PR에서 자동 삭제하지 않는다. `target_id`와 session fingerprint 보존 기간 및 정리 작업은 운영 데이터 보존 정책을 정한 후 후속 작업으로 추가한다.
+
+## 변경 allowlist
+
+이 기능 PR은 다음 경로만 변경할 수 있다.
+
+- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/auth/PlatformOperatorAuthorizationController.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/dto/authorization/**`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/entity/{AdminCaseAssignment,PlatformOperatorAuthorityGuard,PlatformOperatorPermissionGrant,PlatformOperatorReauthenticationApproval,PlatformOperatorRoleGrant}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/enums/{AdminCaseAssignmentStatus,AdminCaseType,AdminCommandPurpose,AdminTargetType,PlatformOperatorAuthEventType,PlatformOperatorPermission,PlatformOperatorRole}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/repository/{AdminCaseAssignmentRepository,PlatformOperatorAuthorityGuardRepository,PlatformOperatorPermissionGrantRepository,PlatformOperatorReauthenticationApprovalRepository,PlatformOperatorRoleGrantRepository}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/service/{AdminCaseAssignmentManager,AdminCaseAssignmentService,AdminCaseAssignmentVerifier,HighRiskCommandGuard,LastSuperAdminPolicy,OperatorAuthorityReader,OperatorAuthorityService,ReauthenticationService}.java`
+- `backend/src/main/java/com/miriyum/global/validation/NfcCodePointSize.java`
+- `backend/src/main/resources/{application.yml,db/migration/V40__create_platform_operator_authorization.sql}`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/**`
+- `backend/src/test/java/com/miriyum/global/config/PlatformOperatorReauthenticationConfigurationTest.java`
+- `deploy/{.env.example,docker-compose.prod.yml,local/.env.example,local/docker-compose.dev.yml}`
+- `docs/{02-users-and-permissions.md,05-functional-requirements.md,07-data-and-api-contracts.md,09-quality-operations-and-rules.md}`
+- `docs/service-policies/15-admin-operation.md`
+- `docs/specs/{README.md,platform-operator-openapi.yaml}`
+- `docs/specs/platform-operator-authorization/{spec.md,openapi.yaml}`
+- `redocly.yaml`
+
+`docs/superpowers/**`, 다른 도메인의 Entity·Repository, 기존 migration과 실제 #277~#282 업무 명령은 allowlist 밖이다.
 
 ## 테스트와 인수 조건
 

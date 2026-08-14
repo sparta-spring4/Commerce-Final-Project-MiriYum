@@ -40,6 +40,7 @@ management:
 miriyum:
   platform-operator:
     enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
+    reauthentication-fingerprint-secret: ${MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET:}
     temporary-password:
       validity: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_VALIDITY:}
       max-failures: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_MAX_FAILURES:0}

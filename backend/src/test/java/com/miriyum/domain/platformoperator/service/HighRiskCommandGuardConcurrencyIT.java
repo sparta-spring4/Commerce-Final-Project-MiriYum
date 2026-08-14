@@ -46,6 +46,7 @@ import org.testcontainers.mysql.MySQLContainer;
         "spring.jpa.hibernate.ddl-auto=validate",
         "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
         "miriyum.platform-operator.enabled=true",
+        "miriyum.platform-operator.reauthentication-fingerprint-secret=test-only-reauthentication-fingerprint-secret",
         "miriyum.platform-operator.temporary-password.validity=PT10M",
         "miriyum.platform-operator.temporary-password.max-failures=3",
         "miriyum.store.schedule.activation-enabled=false",
