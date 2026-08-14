@@ -1,0 +1,156 @@
+# 핵심 API k6 기준선
+
+- 소유 Issue: [#285](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/285)
+- 기록일: 2026-08-14
+- 기준 `dev`: `bb46e4e140d964a53d19d1ab97ce90a300551a9f`
+- 검증 script commit: `0ef50b53ad648e2aea7f89d6441a2bf49e6687b9`
+- 단계: 고도화
+- 해석: 최초 환경별 기준선을 수집하기 위한 harness 증거이며 실서비스 SLO 판정이 아니다.
+
+## 실행 상태
+
+| 구간 | 상태 | 관찰 결과 |
+|---|---|---|
+| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 15, 공통 계약 20, scenario 14, summary 5 checks가 모두 성공했다. |
+| k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
+| k6 local-baseline profile inspect | PASS | `storeSearch`, 총 2 VU·2 arrival/s·30초가 하나의 constant-arrival-rate executor로 해석됐다. |
+| Local Compose 합성 | PASS | load-test override 사용 시 `mysql`, `valkey`, `backend`, `loadtest`; 기본 Compose 단독 사용 시 기존 `mysql`, `backend`만 존재했다. |
+| Backend 단위 테스트 | PASS | 최종 브랜치 상태에서 backend 작업 디렉터리의 `.\gradlew.bat test`가 exit 0이었다. |
+| Backend assemble | PASS | `.\gradlew.bat assemble`이 compile·bootJar·jar를 포함해 exit 0이었다. |
+| Backend 통합 테스트 | FAIL | 전체 task와 shard A가 Testcontainers JDBC readiness/context 전환 중 각각 15분·10분 안에 종료되지 않았다. |
+| Backend build | NOT RUN | `build`가 실패한 통합 gate에 의존하므로 동일 장시간 실행을 반복하지 않았다. PR의 공식 A~D CI shard 성공이 필요하다. |
+| Local smoke·baseline | NOT CONFIGURED | ignored `performance/k6/fixtures/test-data.local.json`과 `deploy/local/.env`가 없어 요청을 보내지 않았다. |
+| Staging smoke·baseline | NOT CONFIGURED | 승인된 시간·부하 상한·합성 fixture·배포 SHA·smoke run ID가 없어 요청을 보내지 않았다. |
+
+`NOT CONFIGURED`는 성공이 아니다. 실제 합성 계정, 서로 충돌하지 않는 예약 template, 계정별 2페이지 이상의 공개 `IN_APP` 전달 완료 알림이 준비되기 전에는 local 또는 staging 지연시간·처리량을 추정하지 않는다.
+
+## 실행 환경
+
+| 항목 | 실제 값 |
+|---|---|
+| Docker Client | `29.4.3` |
+| Docker Compose | `v5.1.3` |
+| k6 image | `grafana/k6:2.1.0` |
+| k6 image digest | `sha256:65c920dc067d5e2e00befbf982af6ad6ad0117034e8b1c65817c7975c52d4669` |
+| Local DB·Valkey·backend runtime | 실행하지 않음 |
+| Staging runtime·인스턴스 사양 | 확인되지 않음 |
+
+## 실제 명령과 결과
+
+### k6 계약 테스트
+
+```powershell
+$tests = @('config-contract.js', 'contracts-contract.js', 'scenario-contract.js', 'summary-contract.js')
+foreach ($test in $tests) {
+  docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run --quiet "/scripts/tests/$test"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+```
+
+관찰 결과:
+
+- `config-contract.js`: 15/15 checks 성공
+- `contracts-contract.js`: 20/20 checks 성공
+- `scenario-contract.js`: 14/14 checks 성공
+- `summary-contract.js`: 5/5 checks 성공
+- 계약 테스트의 의도적 fake conflict는 `expected_4xx=1`, `unexpected_4xx=1`로 서로 분리됐다. 이는 실제 환경 오류율이 아니다.
+
+### profile inspect
+
+네 시나리오 smoke:
+
+```powershell
+docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
+  -e TARGET_ENV=local `
+  -e BASE_URL=http://backend:8080 `
+  -e ALLOWED_HOSTS=backend `
+  -e PROFILE=smoke `
+  -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
+  -e RUN_ID=local-inspect `
+  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  /scripts/main.js
+```
+
+`storeSearch` local-baseline options:
+
+```powershell
+docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect `
+  -e TARGET_ENV=local `
+  -e BASE_URL=http://backend:8080 `
+  -e ALLOWED_HOSTS=backend `
+  -e PROFILE=local-baseline `
+  -e SCENARIOS=storeSearch `
+  -e MAX_VUS=2 `
+  -e DURATION_SECONDS=30 `
+  -e ARRIVAL_RATE=2 `
+  -e FIXTURE_PATH=/scripts/fixtures/test-data.example.json `
+  -e RUN_ID=local-baseline-inspect `
+  -e COMMIT_SHA=0123456789abcdef0123456789abcdef01234567 `
+  /scripts/main.js
+```
+
+두 명령 모두 exit 0이었다. example fixture는 schema 검증 전용이므로 이 결과는 실제 API smoke 또는 성능 증거가 아니다.
+
+### Compose 합성
+
+```powershell
+docker compose --env-file deploy/local/.env.example `
+  -f deploy/local/docker-compose.dev.yml `
+  -f deploy/local/docker-compose.loadtest.yml `
+  --profile loadtest config --services
+
+docker compose --env-file deploy/local/.env.example `
+  -f deploy/local/docker-compose.dev.yml `
+  config --services
+```
+
+첫 명령은 `mysql`, `valkey`, `backend`, `loadtest`, 두 번째 명령은 `mysql`, `backend`를 출력했다. Valkey command도 Compose 렌더 뒤 `$${MIRIYUM_VALKEY_PASSWORD}` 참조를 유지해 예시 password 값을 command 문자열에 펼치지 않았다.
+
+### Backend 회귀
+
+```powershell
+Push-Location backend
+.\gradlew.bat test
+.\gradlew.bat assemble
+.\gradlew.bat --no-daemon clean integrationTest
+.\gradlew.bat --no-daemon integrationTestShardA
+Pop-Location
+```
+
+`test`와 `assemble`은 exit 0이었다. `clean integrationTest`는 15분, `integrationTestShardA`는 10분 제한까지 종료되지 않았다. timeout 뒤 thread dump에서 test worker가 `JdbcDatabaseContainer.createConnection()` 재시도 또는 Spring test context lifecycle 종료 latch를 기다리는 상태를 확인했다. timeout으로 남은 해당 실행의 Java PID와 Testcontainers만 정리했고 저장소 파일은 수정하지 않았다. 이 PR은 backend 소스를 변경하지 않지만, 로컬 통합·전체 build를 성공으로 표시하지 않으며 PR의 `Backend CI` A~D shard 결과를 병합 gate로 사용한다.
+
+## 환경별 성능 결과
+
+### Local
+
+| scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| authRefresh | NOT CONFIGURED | — | — | — | — | — | — | — |
+| storeSearch | NOT CONFIGURED | — | — | — | — | — | — | — |
+| reservationCreate | NOT CONFIGURED | — | — | — | — | — | — | — |
+| notificationHistory | NOT CONFIGURED | — | — | — | — | — | — | — |
+
+### Staging
+
+| scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| authRefresh | NOT CONFIGURED | — | — | — | — | — | — | — |
+| storeSearch | NOT CONFIGURED | — | — | — | — | — | — | — |
+| reservationCreate | NOT CONFIGURED | — | — | — | — | — | — | — |
+| notificationHistory | NOT CONFIGURED | — | — | — | — | — | — | — |
+
+## 위험과 다음 실행 gate
+
+- local fixture가 없으므로 실제 API 계약, DB 상태와 Valkey·cursor 연결은 아직 검증되지 않았다.
+- 로컬 backend integration task가 Testcontainers readiness/context 종료에서 시간 초과됐다. 현재 변경과 독립적인 환경·suite 종료 문제지만 CI A~D shard가 성공하기 전에는 회귀 검증이 완료되지 않는다.
+- 공유 staging의 동시 트래픽과 데이터 상태는 측정 noise가 될 수 있다. 승인 시간과 실행 전후 CloudWatch 구간을 함께 기록해야 한다.
+- 예약 baseline은 배분된 `ARRIVAL_RATE × DURATION_SECONDS` 수만큼 충돌하지 않는 template을 소모한다. 반복 사용으로 예상 409 비율을 왜곡하지 않는다.
+- 인증은 IP rate limit을 의도된 429로 분리한다. 알림·예약 setup은 fixture에서 실제로 쓰는 계정만 로그인한다.
+- setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
+- raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
+
+다음 실행은 `performance/k6/README.md`의 local smoke 순서를 따르며, smoke 성공 전에는 local baseline을 수행하지 않는다. staging은 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, `STAGING_APPROVED=true`와 성공한 `STAGING_SMOKE_RUN_ID`가 모두 있을 때만 실행한다.
+
+## 후속 이슈 연결
+
+현재 SQL 실행 시간, rows examined 또는 실행 계획 증거가 없으므로 [#286](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/286)에 병목을 주장하거나 인덱스 변경을 제안하지 않는다. 실제 local/staging 결과에서 쿼리 병목이 관찰된 경우에만 환경·commit·scenario·부하 입력과 함께 #286으로 연결하고, 다른 병목은 소유 도메인 Issue로 분리한다.
