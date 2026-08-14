@@ -263,7 +263,7 @@ describe('NotificationHistoryPage', () => {
     }
   })
 
-  test('does not retain one consumer history after the page unmounts', async () => {
+  test('removes one consumer history immediately when the page unmounts', async () => {
     let title = '첫 번째 소비자의 예약 알림'
     server.use(
       http.get(NOTIFICATION_HISTORY_PATH, () =>
@@ -274,8 +274,15 @@ describe('NotificationHistoryPage', () => {
 
     const firstPage = await renderPage(queryClient)
     expect(await screen.findByText(title)).toBeVisible()
+    expect(
+      queryClient.getQueryData(['consumer', 'notification-history']),
+    ).toBeDefined()
+
     firstPage.unmount()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(
+      queryClient.getQueryData(['consumer', 'notification-history']),
+    ).toBeUndefined()
 
     title = '두 번째 소비자의 예약 알림'
     await renderPage(queryClient)

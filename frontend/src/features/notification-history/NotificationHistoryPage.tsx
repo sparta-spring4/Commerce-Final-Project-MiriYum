@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
 import type { ApiClient } from '../../shared/api/client'
 import {
@@ -114,7 +115,6 @@ export function NotificationHistoryPage({
   const queryClient = useQueryClient()
   const history = useInfiniteQuery({
     queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
-    gcTime: 0,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
       readNotificationHistoryPage(apiClient, {
@@ -126,6 +126,16 @@ export function NotificationHistoryPage({
         ? lastPage.nextCursor
         : undefined,
   })
+
+  useEffect(
+    () => () => {
+      queryClient.removeQueries({
+        queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
+        exact: true,
+      })
+    },
+    [queryClient],
+  )
 
   const resetToNewest = () => {
     void queryClient.resetQueries({
