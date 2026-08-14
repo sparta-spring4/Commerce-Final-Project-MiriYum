@@ -40,7 +40,7 @@ jobs:
             summary-contract.js
           )
           for test in "${tests[@]}"; do
-            docker run --rm \
+            docker run --rm --network none \
               -v "$PWD/performance/k6:/scripts:ro" \
               grafana/k6:2.1.0 \
               run "/scripts/tests/$test"
