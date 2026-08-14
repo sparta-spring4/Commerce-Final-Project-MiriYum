@@ -1768,6 +1768,35 @@ class ReservationHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("장기 체류 집계는 같은 Hold의 중복 대사 감사를 한 건으로 센다")
+    void reconciliationLongStayCountsDistinctHoldsWhenAuditsAreDuplicated() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "reconciliation-distinct-count-create");
+        Instant reconciledAt = active.createdAt().plusSeconds(60);
+        clock.set(reconciledAt);
+        transition(
+                active,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                "reconciliation-distinct-count-enter");
+        holdTransitionAuditRepository.save(ReservationHoldTransitionAudit.record(
+                active.reservationHoldId(),
+                "SYSTEM",
+                null,
+                reconciledAt.plusSeconds(1),
+                reconciledAt.plusSeconds(1),
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                1L,
+                1L,
+                "reconciliation-distinct-count-duplicate"));
+
+        clock.set(reconciledAt.plusSeconds(601));
+
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isOne();
+    }
+
+    @Test
     @DisplayName("두 만료 worker가 같은 후보를 조회해도 결정적 operation으로 한 번만 만료·복구한다")
     void concurrentExpirationWorkersConvergeToOneTransition() throws Exception {
         Scenario scenario = createScenario(10, 5, twoBuckets());

@@ -2173,8 +2173,8 @@ class ReservationHoldServiceTest {
     }
 
     @Test
-    @DisplayName("만료로 실행되지 않은 원 확정 operation replay는 현재 EXPIRED로 수렴한다")
-    void unexecutedConfirmationOperationReplayReturnsCurrentExpiredResult() {
+    @DisplayName("만료로 실행되지 않은 원 operation과 이후 새 명령은 현재 EXPIRED로 수렴한다")
+    void unexecutedAndNewOperationsReturnCurrentExpiredResult() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
         ReservationCapacityBucket bucket = bucketWithOccupancy(
                 301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
@@ -2187,9 +2187,14 @@ class ReservationHoldServiceTest {
 
         ReservationHoldContracts.Result first = service.transition(command);
         ReservationHoldContracts.Result replay = service.transition(command);
+        ReservationHoldContracts.Result newOperation = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                "new-operation-after-expiry"));
 
         assertThat(first.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
         assertThat(replay.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(newOperation.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
         then(auditRepository).should(times(1)).save(any());
         then(allocationRepository).should(times(1))
                 .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);

@@ -35,7 +35,7 @@ public interface ReservationHoldTransitionAuditRepository
      * @return 현재 장기 체류 선점 수
      */
     @Query("""
-            select count(audit)
+            select count(distinct hold.id)
             from ReservationHoldTransitionAudit audit, ReservationHold hold
             where hold.id = audit.reservationHoldId
               and hold.status = :status
