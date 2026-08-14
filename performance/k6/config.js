@@ -1,9 +1,16 @@
 import { assertSafeTarget, parsePositiveInt } from './lib/safety.js'
 
 const VALID_PROFILES = new Set(['smoke', 'local-baseline', 'staging-baseline'])
+export const SCENARIO_NAMES = Object.freeze([
+  'authRefresh',
+  'storeSearch',
+  'reservationCreate',
+  'notificationHistory',
+])
+const VALID_SCENARIOS = new Set(SCENARIO_NAMES)
 const HARD_LIMITS = Object.freeze({
   maxVus: 100,
-  durationSeconds: 3600,
+  durationSeconds: 600,
   arrivalRate: 1000,
 })
 
@@ -20,6 +27,14 @@ function requireRunId(rawValue) {
     throw new Error('RUN_ID must contain only safe identifier characters')
   }
   return runId
+}
+
+function requireCommitSha(rawValue) {
+  const commitSha = requireText('COMMIT_SHA', rawValue).toLowerCase()
+  if (!/^[0-9a-f]{40}$/.test(commitSha)) {
+    throw new Error('COMMIT_SHA must be a full 40-character Git SHA')
+  }
+  return commitSha
 }
 
 function parseAllowedHosts(rawValue) {
@@ -52,6 +67,19 @@ function loadLimits(profile, env) {
   })
 }
 
+function loadScenarioNames(rawValue) {
+  const names = rawValue === undefined || rawValue.trim() === ''
+    ? [...SCENARIO_NAMES]
+    : rawValue.split(',').map((name) => name.trim()).filter(Boolean)
+  if (names.length === 0 || names.some((name) => !VALID_SCENARIOS.has(name))) {
+    throw new Error('SCENARIOS contains an unknown scenario')
+  }
+  if (new Set(names).size !== names.length) {
+    throw new Error('SCENARIOS must not contain duplicates')
+  }
+  return Object.freeze(names)
+}
+
 export function loadConfig(env) {
   const targetEnv = requireText('TARGET_ENV', env.TARGET_ENV)
   const baseUrl = requireText('BASE_URL', env.BASE_URL).replace(/\/+$/, '')
@@ -80,6 +108,15 @@ export function loadConfig(env) {
     throw new Error('FIXTURE_PATH must reference a JSON file')
   }
 
+  const limits = loadLimits(profile, env)
+  const scenarioNames = loadScenarioNames(env.SCENARIOS)
+  if (profile !== 'smoke' && limits.maxVus < scenarioNames.length) {
+    throw new Error('MAX_VUS must cover every selected scenario')
+  }
+  if (profile !== 'smoke' && limits.arrivalRate < scenarioNames.length) {
+    throw new Error('ARRIVAL_RATE must cover every selected scenario')
+  }
+
   return Object.freeze({
     targetEnv,
     baseUrl,
@@ -87,6 +124,8 @@ export function loadConfig(env) {
     profile,
     fixturePath,
     runId: requireRunId(env.RUN_ID),
-    limits: loadLimits(profile, env),
+    commitSha: requireCommitSha(env.COMMIT_SHA),
+    limits,
+    scenarioNames,
   })
 }

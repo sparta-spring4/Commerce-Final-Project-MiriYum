@@ -31,6 +31,7 @@ services:
     profiles: [loadtest]
     volumes:
       - ../../performance/k6:/scripts:ro
+      - ../../performance/k6/results:/results
     working_dir: /scripts
     depends_on:
       backend:

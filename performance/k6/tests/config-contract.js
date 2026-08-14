@@ -25,6 +25,7 @@ const LOCAL_SMOKE_ENV = {
   PROFILE: 'smoke',
   FIXTURE_PATH: '/scripts/fixtures/test-data.local.json',
   RUN_ID: 'local-smoke-20260814',
+  COMMIT_SHA: '0123456789abcdef0123456789abcdef01234567',
 }
 
 export default function () {
@@ -46,6 +47,7 @@ export default function () {
       return smoke.profile === 'smoke'
         && smoke.targetEnv === 'local'
         && smoke.limits.maxVus === 1
+        && smoke.scenarioNames.length === 4
     },
     'local baseline requires explicit load inputs': () =>
       throws(() => loadConfig({ ...LOCAL_SMOKE_ENV, PROFILE: 'local-baseline' })),
@@ -67,6 +69,43 @@ export default function () {
         MAX_VUS: '2',
         DURATION_SECONDS: '30',
         ARRIVAL_RATE: '2',
+      })),
+    'missing commit SHA is rejected': () => {
+      const withoutCommit = { ...LOCAL_SMOKE_ENV }
+      delete withoutCommit.COMMIT_SHA
+      return throws(() => loadConfig(withoutCommit))
+    },
+    'duplicate scenario selection is rejected': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        SCENARIOS: 'storeSearch,storeSearch',
+      })),
+    'baseline VU ceiling covers every selected scenario': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'authRefresh,storeSearch',
+        MAX_VUS: '1',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '2',
+      })),
+    'baseline arrival rate covers every selected scenario': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'authRefresh,storeSearch',
+        MAX_VUS: '2',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '1',
+      })),
+    'baseline longer than the bearer validity safety window is rejected': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'storeSearch',
+        MAX_VUS: '1',
+        DURATION_SECONDS: '601',
+        ARRIVAL_RATE: '1',
       })),
   })
 }

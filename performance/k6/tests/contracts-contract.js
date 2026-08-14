@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { classifyStatus, parseEnvelope } from '../lib/contracts.js'
+import { classifyStatus, parseEnvelope, validateFixture } from '../lib/contracts.js'
 import { bearerHeaders, deterministicUuid, jsonHeaders, originHeaders } from '../lib/session.js'
 
 export const options = {
@@ -19,6 +19,29 @@ function throws(action) {
 }
 
 export default function () {
+  const validFixture = {
+    allowedOrigin: 'http://localhost:5173',
+    accounts: [
+      { alias: 'consumer-01', emailEnv: 'K6_CONSUMER_01_EMAIL', passwordEnv: 'K6_CONSUMER_01_PASSWORD' },
+      { alias: 'consumer-02', emailEnv: 'K6_CONSUMER_02_EMAIL', passwordEnv: 'K6_CONSUMER_02_PASSWORD' },
+    ],
+    search: { input: '서울 한식' },
+    reservationTemplates: [{
+      accountAlias: 'consumer-01',
+      storeId: '301',
+      serviceDate: '2099-08-20',
+      startTime: '18:00:00',
+      startOffset: '+09:00',
+      party: { adultCount: 2, childCount: 0, infantCount: 0 },
+      menuSelections: [],
+    }],
+    notification: {
+      accountAliases: ['consumer-01', 'consumer-02'],
+      pageSize: 2,
+      minimumDeliveredItemsPerAccount: 3,
+    },
+  }
+
   check(null, {
     'success envelope is parsed from a complete response': () => {
       const envelope = parseEnvelope({
@@ -59,5 +82,61 @@ export default function () {
         && bearer.Authorization === 'Bearer access-token'
         && origin.Origin === 'http://localhost:5173'
     },
+    'complete synthetic fixture contract is accepted': () =>
+      validateFixture(validFixture).accounts.length === 2,
+    'duplicate synthetic account alias is rejected': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        accounts: [validFixture.accounts[0], validFixture.accounts[0]],
+      })),
+    'reservation template must reference a declared account': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        reservationTemplates: [{
+          ...validFixture.reservationTemplates[0],
+          accountAlias: 'unknown-consumer',
+        }],
+      })),
+    'notification fixture must guarantee a second page': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        notification: {
+          ...validFixture.notification,
+          minimumDeliveredItemsPerAccount: 2,
+        },
+      })),
+    'notification fixture requires two distinct declared accounts': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        notification: {
+          ...validFixture.notification,
+          accountAliases: ['consumer-01', 'unknown-consumer'],
+        },
+      })),
+    'fixture rejects inline credentials': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        accounts: [{ ...validFixture.accounts[0], password: 'inline-secret' }, validFixture.accounts[1]],
+      })),
+    'fixture rejects malformed secret environment references': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        accounts: [{ ...validFixture.accounts[0], emailEnv: 'consumer.email' }, validFixture.accounts[1]],
+      })),
+    'fixture rejects non-public reservation identifiers': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        reservationTemplates: [{ ...validFixture.reservationTemplates[0], storeId: '0' }],
+      })),
+    'fixture rejects an empty reservation party': () =>
+      throws(() => validateFixture({
+        ...validFixture,
+        reservationTemplates: [{
+          ...validFixture.reservationTemplates[0],
+          party: { adultCount: 0, childCount: 0, infantCount: 0 },
+        }],
+      })),
+    'fixture rejects blank public search input': () =>
+      throws(() => validateFixture({ ...validFixture, search: { input: '   ' } })),
   })
 }
