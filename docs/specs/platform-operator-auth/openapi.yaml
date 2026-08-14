@@ -1,0 +1,359 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator Authentication API
+  version: 1.0.0
+  description: 플랫폼 운영자 전용 로그인·중앙 세션·최초 비밀번호 변경 계약이다.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/auth/sessions:
+    post:
+      tags: [Platform Operator Auth]
+      summary: 플랫폼 운영자 로그인
+      description: 공개 가입 없이 미리 발급된 플랫폼 운영자 자격을 검증하고 단일 중앙 세션을 만든다.
+      operationId: createPlatformOperatorSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformOperatorLoginRequest"
+      responses:
+        "200":
+          description: 제한 또는 정상 플랫폼 운영자 세션 생성
+          headers:
+            Set-Cookie:
+              description: Path=/api/v1/platform-operators/auth인 MIRIYUM_PLATFORM_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOperatorTokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/auth/token-refreshes:
+    post:
+      tags: [Platform Operator Auth]
+      summary: 플랫폼 운영자 토큰 회전
+      description: 동일 Origin의 JSON 요청에서 현재 Refresh Token을 한 번 소비하고 새 토큰으로 회전한다.
+      operationId: refreshPlatformOperatorToken
+      security:
+        - platformOperatorRefreshCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyJsonRequest"
+      responses:
+        "200":
+          description: 회전된 플랫폼 운영자 토큰
+          headers:
+            Set-Cookie:
+              description: 회전된 MIRIYUM_PLATFORM_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOperatorTokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/InvalidRefreshToken"
+        "403":
+          $ref: "#/components/responses/OriginRejected"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/auth/csrf-tokens/current:
+    get:
+      tags: [Platform Operator Auth]
+      summary: 플랫폼 운영자 CSRF 토큰 준비
+      operationId: getCurrentPlatformOperatorCsrfToken
+      responses:
+        "200":
+          description: 플랫폼 운영자 namespace 전용 CSRF 토큰
+          headers:
+            Set-Cookie:
+              description: MIRIYUM_PLATFORM_OPERATOR_XSRF_TOKEN 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenSuccessResponse"
+        "429":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
+  /api/v1/platform-operators/auth/sessions/current:
+    delete:
+      tags: [Platform Operator Auth]
+      summary: 현재 플랫폼 운영자 세션 로그아웃
+      description: CSRF 검증 뒤 중앙 세션 존재 여부와 무관하게 같은 종료 결과로 수렴한다.
+      operationId: deleteCurrentPlatformOperatorSession
+      security:
+        - platformOperatorRefreshCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: 중앙 세션 회수와 Refresh 쿠키 만료
+          headers:
+            Set-Cookie:
+              description: Max-Age=0인 MIRIYUM_PLATFORM_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoDataSuccessResponse"
+        "403":
+          $ref: "#/components/responses/CsrfRejected"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/platform-operators/auth/initial-password:
+    put:
+      tags: [Platform Operator Auth]
+      summary: 플랫폼 운영자 최초 비밀번호 변경
+      description: 제한 세션에서 현재 임시 비밀번호를 재확인하고 새 비밀번호로 원자적으로 전환한다.
+      operationId: replacePlatformOperatorInitialPassword
+      security:
+        - platformOperatorBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitialPasswordChangeRequest"
+      responses:
+        "200":
+          description: 최초 변경 완료와 새 정상 세션
+          headers:
+            Set-Cookie:
+              description: 새 정상 세션의 MIRIYUM_PLATFORM_OPERATOR_REFRESH 쿠키
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOperatorTokenSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/PlatformSessionUnauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+        "409":
+          $ref: "#/components/responses/ConcurrentInitialPasswordChange"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: audience와 namespace가 platform-operator인 Access JWT
+    platformOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_PLATFORM_OPERATOR_REFRESH
+      description: Path=/api/v1/platform-operators/auth인 HttpOnly Refresh JWT 쿠키
+  parameters:
+    CsrfToken:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+      description: MIRIYUM_PLATFORM_OPERATOR_XSRF_TOKEN 쿠키와 같은 값
+  schemas:
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+    Password:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 64
+      description: NFC 정규화 뒤 8~64 Unicode code point이며 대문자·소문자·숫자·특수문자 중 3종 이상을 포함한다.
+    PlatformOperatorLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/Password"
+    InitialPasswordChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword, newPasswordConfirm]
+      properties:
+        currentPassword:
+          $ref: "#/components/schemas/Password"
+        newPassword:
+          $ref: "#/components/schemas/Password"
+        newPasswordConfirm:
+          $ref: "#/components/schemas/Password"
+    EmptyJsonRequest:
+      type: object
+      additionalProperties: false
+    PlatformOperatorTokenData:
+      type: object
+      additionalProperties: false
+      required:
+        - accessToken
+        - tokenType
+        - expiresIn
+        - passwordChangeRequired
+        - idleExpiresAt
+        - absoluteExpiresAt
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+          description: platform-operator shell 메모리에만 보관할 Access JWT
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          const: 900
+          description: Access JWT 수명(초)
+        passwordChangeRequired:
+          type: boolean
+          description: true면 최초 비밀번호 변경 외 업무 API가 거부된다.
+        idleExpiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+        absoluteExpiresAt:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+    CsrfTokenData:
+      type: object
+      additionalProperties: false
+      required: [token, headerName]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        headerName:
+          type: string
+          const: X-CSRF-TOKEN
+    PlatformOperatorTokenSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/PlatformOperatorTokenData"
+    CsrfTokenSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "#/components/schemas/CsrfTokenData"
+    NoDataSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessCode"
+        message:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/SuccessMessage"
+        data:
+          $ref: "../mvp1-common/openapi.yaml#/components/schemas/NoData"
+  responses:
+    InvalidCredentials:
+      description: 이메일 또는 비밀번호 불일치, 임시 자격 만료 또는 실패 한도 초과
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_005
+            message: 이메일 또는 비밀번호가 올바르지 않습니다.
+    InvalidRefreshToken:
+      description: Refresh Token이 없거나 유효하지 않으며 상세 원인은 공개하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_008
+            message: 유효한 Refresh Token이 필요합니다.
+    PlatformSessionUnauthorized:
+      description: Access Token 또는 중앙 플랫폼 운영자 세션이 유효하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            AccessTokenRequired:
+              value:
+                code: AUTH_001
+                message: Access Token이 필요합니다.
+            SessionInvalid:
+              value:
+                code: AUTH_015
+                message: 플랫폼 운영자 세션이 더 이상 유효하지 않습니다.
+    AccountRestricted:
+      description: 플랫폼 운영자 계정이 중지됨
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_011
+            message: 현재 계정 상태로는 이용할 수 없습니다.
+    OriginRejected:
+      description: Origin 또는 Referer 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_010
+            message: Origin 또는 Referer 검증에 실패했습니다.
+    CsrfRejected:
+      description: CSRF cookie/header 불일치
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: AUTH_009
+            message: CSRF 토큰 검증에 실패했습니다.
+    ConcurrentInitialPasswordChange:
+      description: 다른 최초 비밀번호 변경 요청이 먼저 확정됨
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          example:
+            code: COMMON_008
+            message: 동시 요청 충돌로 처리하지 못했습니다. 다시 시도해 주세요.

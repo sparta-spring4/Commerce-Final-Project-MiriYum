@@ -14,12 +14,20 @@ public class AuthCookieFactory {
     private static final Duration REFRESH_TOKEN_MAX_AGE = Duration.ofDays(14);
 
     public ResponseCookie refreshCookie(TokenNamespace namespace, String refreshToken) {
+        return refreshCookie(namespace, refreshToken, REFRESH_TOKEN_MAX_AGE);
+    }
+
+    public ResponseCookie refreshCookie(
+            TokenNamespace namespace,
+            String refreshToken,
+            Duration maxAge
+    ) {
         return ResponseCookie.from(namespace.refreshCookieName(), refreshToken)
                 .httpOnly(true)
                 .secure(true)
                 .sameSite("Lax")
                 .path(namespace.cookiePath())
-                .maxAge(REFRESH_TOKEN_MAX_AGE)
+                .maxAge(maxAge)
                 .build();
     }
 
