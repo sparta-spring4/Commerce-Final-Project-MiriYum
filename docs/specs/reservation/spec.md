@@ -33,16 +33,16 @@
 
 | 사용자 목적 | 공개 API | 선택 이유 |
 | --- | --- | --- |
-| 예약 생성 | `POST /api/v1/consumers/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
-| 본인 상세 | `GET /api/v1/consumers/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
+| 예약 생성 | `POST /api/v1/consumers/me/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
+| 본인 상세 | `GET /api/v1/consumers/me/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
 | 운영자 목록·상세 | `/api/v1/store-operators/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
 | 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
-| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
-| 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellation` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
+| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publications` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
+| 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellations` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
 `PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이, 결제·노쇼 상태 선도입과 담당자별 중복 구현을 유발하므로 사용하지 않는다.
 

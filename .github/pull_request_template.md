@@ -30,6 +30,10 @@
 - [ ] 다른 도메인의 Entity·Repository를 직접 사용하지 않는다.
 - [ ] contract-first 선행 PR과 `blocks`/`blocked by` 관계를 확인했다.
 - [ ] API·DTO·오류·상태 계약을 임의로 추가하거나 중복 구현하지 않았다.
+- [ ] API URL이 audience namespace, `/me`, lowercase kebab-case, 복수 사건 리소스 규칙을 따른다.
+- [ ] URL 변경 시 Controller, Security·cookie·rate limit, 멱등 fingerprint, feature OpenAPI와 audience `$ref`를 함께 변경했다.
+- [ ] 계약 우선 path는 `contract-only`와 소유 Issue를 함께 선언했고, 구현된 path에는 해당 메타데이터가 남아 있지 않다.
+- [ ] OpenAPI 생성 클라이언트를 재생성하고 `ApiUrlConventionTest`·`ControllerOpenApiContractTest`를 실행했다.
 - [ ] 제품·정책·아키텍처·품질 변경은 활성 정본을 갱신했다.
 
 ## 실행한 검증

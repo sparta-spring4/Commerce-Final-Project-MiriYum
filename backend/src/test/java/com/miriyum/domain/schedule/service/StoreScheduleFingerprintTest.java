@@ -7,6 +7,8 @@ import com.miriyum.domain.schedule.dto.storeoperator.DailyReservationSlotsReques
 import com.miriyum.domain.schedule.dto.storeoperator.TimeRangeRequest;
 import com.miriyum.domain.schedule.dto.storeoperator.WeeklyOperatingHoursRequest;
 import com.miriyum.domain.schedule.dto.storeoperator.WeeklyReservationTimeSlotsRequest;
+import com.miriyum.domain.schedule.dto.storeoperator.SchedulePublicationRequest;
+import com.miriyum.domain.schedule.model.PublicationMode;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
@@ -82,6 +84,25 @@ class StoreScheduleFingerprintTest {
                 .isEqualTo(StoreScheduleFingerprint.forReservation(
                         7L,
                         new WeeklyReservationTimeSlotsRequest(reversed)));
+    }
+
+    @Test
+    void publicationFingerprintsUsePluralLifecycleRoute() {
+        SchedulePublicationRequest request = new SchedulePublicationRequest(
+                PublicationMode.IMMEDIATE, null, "publish now");
+
+        assertThat(StoreScheduleFingerprint.forOperatingPublication(7L, 3L, request))
+                .isEqualTo(RequestFingerprint.of(
+                        "POST|/api/v1/store-operators/stores/{storeId}"
+                                + "/operating-hours/{version}/publications|"
+                                + "storeId=1:7|version=1:3|publicationMode=9:IMMEDIATE|"
+                                + "effectiveAt=0:|changeReason=11:publish now|"));
+        assertThat(StoreScheduleFingerprint.forReservationPublication(7L, 3L, request))
+                .isEqualTo(RequestFingerprint.of(
+                        "POST|/api/v1/store-operators/stores/{storeId}/"
+                                + "reservation-time-slots/{version}/publications|"
+                                + "storeId=1:7|version=1:3|publicationMode=9:IMMEDIATE|"
+                                + "effectiveAt=0:|changeReason=11:publish now|"));
     }
 
     private WeeklyOperatingHoursRequest operatingRequest(

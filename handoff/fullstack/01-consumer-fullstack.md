@@ -19,7 +19,7 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 - 공개 셸: 현재 등록된 매장 검색을 제공한다. 상세·catalog 화면은 담당 Issue가 경로와 테스트를 등록한 뒤 셸에 연결한다.
 - 인증 셸: 예약·픽업·마이페이지 화면의 경로와 테스트가 `routes.ts`에 등록된 뒤에만 해당 화면을 연결한다.
 - 라우트 가드: 등록된 보호 경로에만 적용한다. 미인증 사용자는 `SIGN_IN_PATH.consumer`인 `/sign-in`으로 보내고 등록된 원래 목적지만 보존한다.
-- API 경로군: `/api/v1/consumers/auth`, `/api/v1/stores`, `/api/v1/consumers/reservations`, `/api/v1/consumers/pickup-reservations`, `/api/v1/consumers/me`
+- API 경로군: `/api/v1/consumers/auth`, `/api/v1/stores`, `/api/v1/consumers/me/reservations`, `/api/v1/consumers/me/pickup-reservations`, `/api/v1/consumers/me`
 - 조회 상태·폼 상태·서버 업무 상태를 분리
 - 쓰기마다 같은 사용자 의도 재시도에는 안정적인 `Idempotency-Key` 사용
 - 오류 메시지 문자열이 아니라 HTTP와 `code`로 분기
@@ -81,15 +81,15 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 
 ### 7. 예약 최종 확인·생성
 
-- 생성: `POST /api/v1/consumers/reservations`; endTime·연락처·사용자 ID를 보내지 않는다.
+- 생성: `POST /api/v1/consumers/me/reservations`; endTime·연락처·사용자 ID를 보내지 않는다.
 - 프론트가 예약 생성 후 메뉴 홀드 쓰기를 별도로 호출하지 않는다.
-- 성공은 `CONFIRMED`만 허용하고 상세 `GET /api/v1/consumers/reservations/{reservationId}`로 이동
+- 성공은 `CONFIRMED`만 허용하고 상세 `GET /api/v1/consumers/me/reservations/{reservationId}`로 이동
 - 생성 `409`의 `RESERVATION_002/003/004/007/009`는 시간·수용량·중복·정책·인원 재선택으로, `MENU_HOLD_001/002`는 메뉴 재선택 또는 메뉴 없이 진행으로 복구한다.
 - `409 ACCOUNT_006`은 예약 draft와 `returnTo`를 보존하고 최초 연락처 등록 단계로 이어지는 복구 흐름을 사용한다. 마이페이지 이동·원래 예약 확인 화면 복귀는 두 화면 Issue가 `routes.ts`와 테스트에 경로를 등록한 뒤에만 연결한다. 그때 `PUT /api/v1/consumers/me/contact`에 `phoneNumber`와 별도 Idempotency-Key를 보내 성공하면 같은 예약 의도의 안정적인 Idempotency-Key로 생성 요청을 다시 제출한다.
 
 ### 8. 예약 상세·취소
 
-- 취소: `POST /api/v1/consumers/reservations/{reservationId}/cancellations`
+- 취소: `POST /api/v1/consumers/me/reservations/{reservationId}/cancellations`
 - 취소 `409`는 `RESERVATION_005` 현재 상태에서 전이 불가와 `RESERVATION_006` 취소 정책 불가로만 분기한다. 예약 생성 오류나 메뉴 재선택 UI를 취소 흐름에 표시하지 않는다.
 - 성공 후 매장 검색 가용성, 내 예약 목록, 해당 상세 캐시를 무효화한다.
 
@@ -105,12 +105,12 @@ Access JWT는 일반 사용자 셸 메모리에만 보관한다. Refresh는 `MIR
 
 - 화면 경로: 픽업 작성·상세 모두 현재 `routes.ts`에 미등록. 각 화면 Issue가 소유 파일과 테스트에 등록하기 전에는 URL을 추측하지 않는다.
 - 가용성: `GET /api/v1/stores/{storeId}/pickup-availability`
-- 생성: `POST /api/v1/consumers/pickup-reservations`; pickupDate·pickupTime·메뉴와 수량, endTime·partySize 제외
+- 생성: `POST /api/v1/consumers/me/pickup-reservations`; pickupDate·pickupTime·메뉴와 수량, endTime·partySize 제외
 
 ### 11. 픽업 상세·취소
 
-- 상세: `GET /api/v1/consumers/pickup-reservations/{pickupReservationId}`
-- 취소: `POST /api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations`
+- 상세: `GET /api/v1/consumers/me/pickup-reservations/{pickupReservationId}`
+- 취소: `POST /api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations`
 - 상태: `CONFIRMED/CANCELLED/PICKED_UP`만 사용
 - `PICKUP_002` 자격 없음, `_003` 구간, `_004` 수량, `_005` 전이, `_006` 취소 불가
 - 현재 일반 사용자 픽업 목록 Controller·OpenAPI가 없으므로 픽업 내역 route·query·menu를 만들지 않는다. 목록 계약이 승인되기 전에는 생성 성공 후 반환된 식별자로 상세에만 이동한다.

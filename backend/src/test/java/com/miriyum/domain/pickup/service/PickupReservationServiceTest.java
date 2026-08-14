@@ -281,7 +281,7 @@ class PickupReservationServiceTest {
                 ArgumentCaptor.forClass(IdempotencyCommand.class);
         then(idempotencyExecutor).should().execute(command.capture(), any());
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                "POST|/api/v1/consumers/pickup-reservations|"
+                "POST|/api/v1/consumers/me/pickup-reservations|"
                         + "22|2026-08-10|12:00|33:2"));
         assertThat(notificationEvents).singleElement().satisfies(event -> {
             assertThat(event.purpose())
@@ -536,7 +536,7 @@ class PickupReservationServiceTest {
                 ArgumentCaptor.forClass(IdempotencyCommand.class);
         then(idempotencyExecutor).should().execute(command.capture(), any());
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                "POST|/api/v1/consumers/pickup-reservations/77/cancellations|"
+                "POST|/api/v1/consumers/me/pickup-reservations/77/cancellations|"
                         + "일정 변경"));
         assertThat(restore.getValue().operationId())
                 .isEqualTo("pickup-cancel-11-" + KEY.value());

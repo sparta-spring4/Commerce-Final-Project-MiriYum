@@ -30,7 +30,7 @@ export function allowedCalls() {
   expectTypeOf<Data['items'][number]>().toHaveProperty('displayName')
 
   // 경로 변수와 필수 본문·멱등 키를 갖춘 호출
-  void api('/api/v1/consumers/reservations/{reservationId}', {
+  void api('/api/v1/consumers/me/reservations/{reservationId}', {
     method: 'get',
     pathParams: { reservationId: 1 },
   })
@@ -62,7 +62,7 @@ export function rejectedCalls() {
   })
 
   // @ts-expect-error reservationId가 필요하다
-  void api('/api/v1/consumers/reservations/{reservationId}', { method: 'get' })
+  void api('/api/v1/consumers/me/reservations/{reservationId}', { method: 'get' })
 
   // @ts-expect-error PATCH /consumers/me는 Idempotency-Key가 필수다
   void api('/api/v1/consumers/me', { method: 'patch', body: { nickname: '미리' } })

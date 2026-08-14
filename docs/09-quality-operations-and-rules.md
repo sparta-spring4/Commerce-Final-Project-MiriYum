@@ -25,7 +25,8 @@
 
 - 방식 A의 단일 Spring Boot·단일 MySQL 경계를 확인한다.
 - 모듈 간 repository/entity 직접 접근과 controller→repository 직접 호출을 구조 테스트로 차단한다. 순환 baseline은 빈 집합이며, 구조 테스트는 전체 도메인 그래프의 상호 도달 쌍과 실제 순환 edge가 모두 0건인지 검사한다.
-- `AudienceOpenApiContractTest`는 기능별 OpenAPI 원본을 자동 탐색해 public·consumer·store-operator path 집합의 무중복 분할과 전체 노출 또는 승인된 미노출을 검증한다. 1차 MVP aggregate와 명시된 이후 단계 audience path의 합집합은 전체 audience path와 일치해야 하며, 이후 단계 path는 aggregate에 포함될 수 없다. 진입점에는 구 URL이 없고 모든 path item은 단일 `$ref`여야 한다.
+- `AudienceOpenApiContractTest`는 기능별 OpenAPI 원본을 자동 탐색해 public·consumer·store-operator·platform-operator path 집합의 무중복 분할과 전체 노출을 검증한다. 1차 MVP aggregate와 명시된 이후 단계인 platform-operator audience path의 합집합은 전체 audience path와 일치해야 하며, platform-operator path는 aggregate에 포함될 수 없다. 진입점에는 구 URL이 없고 모든 path item은 단일 `$ref`여야 한다.
+- `ApiUrlConventionTest`는 실제 Spring mapping의 audience namespace, `/me` 범위, lowercase kebab-case와 복수 사건 리소스를 검증한다. `ControllerOpenApiContractTest`는 조건부 Controller를 포함한 Spring route와 feature OpenAPI operation을 양방향 비교하고, 누락·초과·method 차이·stale `contract-only` 또는 잘못된 소유 Issue 메타데이터가 있으면 실패한다.
 - 1차 MVP에서는 일반 사용자·매장 운영자의 테이블·PK·principal·토큰 namespace가 분리됐는지 확인한다. 플랫폼 운영자 계정·JWT 검증 gate는 해당 기능을 구현하는 고도화에서 추가한다.
 - 교차 namespace JWT, 클라이언트 역할 값, 이메일·외부 로그인에 의한 자가 승격을 거부한다.
 - 매장 명령이 현재 계정 상태, 대상 매장의 `store_operator_account_id` 일치와 매장 상태를 MySQL에서 재검증하는지 확인한다.

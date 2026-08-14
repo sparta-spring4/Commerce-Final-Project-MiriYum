@@ -14,11 +14,11 @@ class StoreClosureOpenApiContractTest {
         String yaml = Files.readString(Path.of("..", "docs", "specs", "store-search", "openapi.yaml"));
         assertThat(yaml).contains(
                 "/api/v1/store-operators/stores/{storeId}/regular-closures:",
-                "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication:",
-                "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellation:",
+                "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publications:",
+                "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellations:",
                 "/api/v1/store-operators/stores/{storeId}/temporary-closures:",
                 "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/end-at:",
-                "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation:");
+                "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellations:");
         assertThat(yaml).doesNotContain("validateServiceIntervals");
     }
 

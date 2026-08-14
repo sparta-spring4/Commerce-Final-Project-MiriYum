@@ -78,7 +78,7 @@ public class StoreScheduleController {
                         result.data()));
     }
 
-    @PostMapping("/operating-hours/{version}/publication")
+    @PostMapping("/operating-hours/{version}/publications")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> publishOperating(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -97,7 +97,7 @@ public class StoreScheduleController {
                         result.data()));
     }
 
-    @PostMapping("/operating-hours/{version}/publication-cancellation")
+    @PostMapping("/operating-hours/{version}/publication-cancellations")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>>
             cancelOperatingPublication(
                     @AuthenticationPrincipal AuthenticatedPrincipal principal,
@@ -118,7 +118,7 @@ public class StoreScheduleController {
                         result.data()));
     }
 
-    @PostMapping("/reservation-time-slots/{version}/publication")
+    @PostMapping("/reservation-time-slots/{version}/publications")
     public ResponseEntity<ApiResponse<ReservationTimeSlotsResponse>>
             publishReservation(
                     @AuthenticationPrincipal AuthenticatedPrincipal principal,
@@ -139,7 +139,7 @@ public class StoreScheduleController {
     }
 
     @PostMapping(
-            "/reservation-time-slots/{version}/publication-cancellation")
+            "/reservation-time-slots/{version}/publication-cancellations")
     public ResponseEntity<ApiResponse<ReservationTimeSlotsResponse>>
             cancelReservationPublication(
                     @AuthenticationPrincipal AuthenticatedPrincipal principal,

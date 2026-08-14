@@ -64,7 +64,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** FIFO 선두 WAITING 팀을 호출한다. */
-    @PostMapping("/waiting-teams/{waitingTeamId}/call")
+    @PostMapping("/waiting-teams/{waitingTeamId}/calls")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> call(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -78,7 +78,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 호출된 팀의 현장 도착을 확인한다. */
-    @PostMapping("/waiting-teams/{waitingTeamId}/arrive")
+    @PostMapping("/waiting-teams/{waitingTeamId}/arrivals")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> arrive(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -92,7 +92,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 도착 확인된 팀의 입장을 완료한다. */
-    @PostMapping("/waiting-teams/{waitingTeamId}/check-in")
+    @PostMapping("/waiting-teams/{waitingTeamId}/check-ins")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> checkIn(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -106,7 +106,7 @@ public class WaitingStoreOperatorController {
     }
 
     /** 활성 팀을 매장 운영자 요청으로 취소한다. */
-    @PostMapping("/waiting-teams/{waitingTeamId}/cancel")
+    @PostMapping("/waiting-teams/{waitingTeamId}/cancellations")
     public ResponseEntity<ApiResponse<WaitingTeamSnapshot>> cancel(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -119,7 +119,7 @@ public class WaitingStoreOperatorController {
                 IdempotencyKey.parse(rawKey), request), "웨이팅 팀을 취소했습니다.");
     }
 
-    @GetMapping("/waiting-close-jobs/{jobId}")
+    @GetMapping("/waiting-closure-jobs/{jobId}")
     public ApiResponse<WaitingClosureJobSnapshot> getClosureJob(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
