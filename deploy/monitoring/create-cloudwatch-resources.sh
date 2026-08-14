@@ -38,6 +38,14 @@ aws logs put-metric-filter \
   --metric-transformations \
     "metricName=RefreshTokenRiskEventDeliveryStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
 
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-reservation-hold-reconciliation-stalled \
+  --filter-pattern '"event=reservation_hold_reconciliation_stalled"' \
+  --metric-transformations \
+    "metricName=ReservationHoldReconciliationStalled,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
 topic_arn=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$TOPIC_NAME" \
@@ -123,6 +131,15 @@ put_alarm "miriyum-staging-deployment-health-failed" \
 put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled" \
   --namespace "$NAMESPACE" \
   --metric-name RefreshTokenRiskEventDeliveryStalled \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
+put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
+  --namespace "$NAMESPACE" \
+  --metric-name ReservationHoldReconciliationStalled \
   --statistic Sum \
   --period 300 \
   --evaluation-periods 1 \

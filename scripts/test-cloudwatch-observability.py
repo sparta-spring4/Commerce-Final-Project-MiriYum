@@ -120,6 +120,30 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
 
+    def test_staging_can_disable_reservation_hold_expiration_through_env_file(self):
+        staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
+            "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=true",
+            "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=false",
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".env", delete=False
+        ) as env_file:
+            env_file.write(staging_environment)
+            env_path = Path(env_file.name)
+
+        try:
+            compose_config = self.load_compose_config(env_path)
+        finally:
+            env_path.unlink(missing_ok=True)
+
+        backend_environment = compose_config["services"]["backend"]["environment"]
+        self.assertEqual(
+            "false",
+            backend_environment.get(
+                "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED"
+            ),
+        )
+
     def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
             "MIRIYUM_WAITING_CLOSURE_ENABLED=false",
@@ -241,6 +265,48 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn('grep -qx PONG', self.deploy_script)
         self.assertIn('port valkey 6379', self.deploy_script)
         self.assertIn('docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey', self.deploy_script)
+
+    def test_deployment_stops_before_registry_login_when_runtime_environment_is_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            command_log = temporary_path / "commands"
+            result = self.run_deploy_script(
+                """
+aws() {
+  echo "aws $*" >> "$PREFLIGHT_COMMAND_LOG"
+  return 1
+}
+docker() {
+  echo "docker $*" >> "$PREFLIGHT_COMMAND_LOG"
+  if [[ "$*" == *"config --quiet"* ]]; then
+    echo "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required" >&2
+    return 1
+  fi
+  return 1
+}
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "PREFLIGHT_COMMAND_LOG": self.to_bash_path(command_log),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required", result.stderr)
+            self.assertEqual(
+                [
+                    "docker compose --env-file "
+                    f"{self.to_bash_path(environment_file)} -f "
+                    f"{self.to_bash_path(temporary_path / 'docker-compose.yml')} config --quiet"
+                ],
+                command_log.read_text(encoding="utf-8").splitlines(),
+            )
 
     def test_deployment_backfills_existing_pending_risk_markers_before_scan_is_removed(self):
         function_start = self.deploy_script.index("backfill_pending_risk_event_index()")
@@ -591,6 +657,46 @@ main
         self.assertIn("--statistic Sum", alarm)
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
+class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.resource_script = RESOURCE_SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(
+            encoding="utf-8"
+        )
+
+    def test_reservation_hold_reconciliation_stall_log_becomes_a_cloudwatch_metric(self):
+        self.assertIn("aws logs put-metric-filter", self.resource_script)
+        self.assertIn(
+            'event=reservation_hold_reconciliation_stalled',
+            self.resource_script,
+        )
+        self.assertIn(
+            'metricName=ReservationHoldReconciliationStalled',
+            self.resource_script,
+        )
+
+    def test_reservation_hold_reconciliation_stall_metric_has_a_level_triggered_alarm(self):
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name ReservationHoldReconciliationStalled", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--period 300", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+        self.assertIn("--treat-missing-data notBreaching", self.resource_script)
+
+    def test_observability_document_describes_the_ten_minute_level_signal(self):
+        self.assertIn("`occurredAt`부터 10분", self.observability_document)
+        self.assertIn(
+            "event=reservation_hold_reconciliation_stalled long_stay_count=3",
+            self.observability_document,
+        )
+        self.assertIn("`ReservationHoldReconciliationStalled=1`", self.observability_document)
+        self.assertIn("`notBreaching`으로 복귀", self.observability_document)
 
 
 if __name__ == "__main__":
