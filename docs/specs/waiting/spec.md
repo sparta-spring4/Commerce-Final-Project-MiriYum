@@ -370,3 +370,24 @@ compensation. Payment reconciliation or an unknown provider outcome maps to comp
 reconciliation. The compensation runner is enabled when its property is absent and can be disabled
 with `miriyum.waiting.compensation.enabled=false`; its scheduling annotations default both initial
 delay and fixed delay to 5000 ms, so normal operation requires no additional configuration path.
+
+### Internal reservation conversion orchestration
+
+`WaitingReservationConversionService` is an internal boundary; it does not add a Waiting HTTP API.
+`begin` performs a short team/consumer preflight transaction, calls
+`PaymentService.prepareWaitingReservationDeposit` outside every Waiting transaction, and then locks
+the team for `WAITING -> RESERVATION_CONVERTING`. A matching `fail` locks the team and returns only
+`RESERVATION_CONVERTING -> WAITING`; it retains the active membership. Both transitions append one
+SYSTEM audit and public status event.
+
+`completeVerified` obtains a Payment-owned verified snapshot outside the locked completion
+transaction. A matching PAID conversion becomes `RESERVATION_CONVERTED`, removes exactly one active
+membership, and records only the caller-supplied positive Reservation scalar ID. Exact replay of the
+same payment/final scalar has no further membership, audit, or event effect. Waiting never imports or
+accesses a Reservation Entity, Repository, aggregate, or migration.
+
+Operator cancellation and claimed store closure serialize with completion on the same Waiting team
+row. The first terminal transition wins. If cancellation or closure wins, the preserved payment
+identity and verified historical-paid snapshot produce one deterministic compensation item with
+reason `WAITING_CANCELLED` or `WAITING_CLOSED_BY_STORE`; callback replay converges on that same item
+without changing the terminal version or final Reservation reference.

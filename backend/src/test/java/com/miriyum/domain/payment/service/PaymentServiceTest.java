@@ -1,6 +1,7 @@
 package com.miriyum.domain.payment.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,9 +15,13 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDeposit
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
+import com.miriyum.domain.payment.entity.Payment;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -113,6 +118,51 @@ class PaymentServiceTest {
         PaymentPreparation result = paymentService.prepareWaitingReservationDeposit(command);
 
         assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    void returnsOnlyVerifiedPaidWaitingReservationDeposit() {
+        VerifiedWaitingReservationDeposit expected =
+                new VerifiedWaitingReservationDeposit(
+                        PAYMENT_ID, 30_000L, "KRW", 7L, PaymentStatus.PAID, NOW);
+        when(transactions.getVerifiedWaitingReservationDeposit(
+                PAYMENT_ID, 123L, 11L)).thenReturn(expected);
+
+        VerifiedWaitingReservationDeposit result =
+                paymentService.getVerifiedWaitingReservationDeposit(
+                        PAYMENT_ID, 123L, 11L);
+
+        assertThat(result).isEqualTo(expected);
+        assertThat(recordComponentNames(VerifiedWaitingReservationDeposit.class)).containsExactly(
+                "paymentId", "amountMinor", "currency", "sourcePolicyVersion", "status", "paidAt");
+        verify(transactions).getVerifiedWaitingReservationDeposit(PAYMENT_ID, 123L, 11L);
+    }
+
+    @Test
+    void rejectsWrongWaitingSourceOwnerReferenceOrState() {
+        Payment valid = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        assertThat(PaymentTransactionService.requireVerifiedWaitingReservationDeposit(
+                valid, PAYMENT_ID, 123L, 11L)).isSameAs(valid);
+
+        Payment partiallyRefunded = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        partiallyRefunded.applyCompletedRefund(10_000L, NOW.plusSeconds(1));
+        assertThat(PaymentTransactionService.requireVerifiedWaitingReservationDeposit(
+                partiallyRefunded, PAYMENT_ID, 123L, 11L)).isSameAs(partiallyRefunded);
+
+        Payment refunded = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        refunded.applyCompletedRefund(30_000L, NOW.plusSeconds(1));
+        assertThat(PaymentTransactionService.requireVerifiedWaitingReservationDeposit(
+                refunded, PAYMENT_ID, 123L, 11L)).isSameAs(refunded);
+
+        Payment reconciliation = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        reconciliation.markRefundReconciliationRequired(NOW.plusSeconds(1));
+        assertThat(PaymentTransactionService.requireVerifiedWaitingReservationDeposit(
+                reconciliation, PAYMENT_ID, 123L, 11L)).isSameAs(reconciliation);
+
+        assertRejected(payment("RESERVATION_DEPOSIT", "123", 11L, true), 123L, 11L);
+        assertRejected(payment("WAITING_RESERVATION_DEPOSIT", "124", 11L, true), 123L, 11L);
+        assertRejected(payment("WAITING_RESERVATION_DEPOSIT", "123", 12L, true), 123L, 11L);
+        assertRejected(payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, false), 123L, 11L);
     }
 
     @Test
@@ -255,5 +305,44 @@ class PaymentServiceTest {
                 NOW,
                 List.of()
         );
+    }
+
+    private static Payment payment(
+            String sourceType,
+            String sourceReferenceId,
+            long consumerAccountId,
+            boolean paid
+    ) {
+        Payment payment = Payment.prepare(
+                PAYMENT_ID,
+                sourceType,
+                sourceReferenceId,
+                7L,
+                NOW.plusSeconds(600),
+                "550e8400-e29b-41d4-a716-446655440128",
+                "a".repeat(64),
+                consumerAccountId,
+                30_000L,
+                "KRW",
+                PORTONE_PAYMENT_ID,
+                "Waiting deposit",
+                NOW.minusSeconds(60));
+        if (paid) {
+            payment.beginConfirmation(NOW.minusSeconds(30));
+            payment.markPaid("transaction-1", NOW);
+        }
+        return payment;
+    }
+
+    private static void assertRejected(
+            Payment payment,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        assertThatThrownBy(() -> PaymentTransactionService.requireVerifiedWaitingReservationDeposit(
+                payment, PAYMENT_ID, waitingTeamId, consumerAccountId))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(PaymentErrorCode.PAYMENT_NOT_FOUND));
     }
 }

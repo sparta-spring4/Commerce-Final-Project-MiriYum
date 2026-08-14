@@ -91,6 +91,31 @@ public final class PaymentContracts {
     ) {
     }
 
+    public record VerifiedWaitingReservationDeposit(
+            String paymentId,
+            long amountMinor,
+            String currency,
+            long sourcePolicyVersion,
+            PaymentStatus status,
+            Instant paidAt
+    ) {
+        public VerifiedWaitingReservationDeposit {
+            requirePublicId(paymentId, "paymentId");
+            requirePositive(amountMinor, "amountMinor");
+            requireCurrency(currency);
+            requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
+            if (status != PaymentStatus.PAID
+                    && status != PaymentStatus.PARTIALLY_REFUNDED
+                    && status != PaymentStatus.REFUNDED
+                    && status != PaymentStatus.RECONCILIATION_REQUIRED) {
+                throw new IllegalArgumentException("status must describe a historically paid payment");
+            }
+            if (paidAt == null) {
+                throw new IllegalArgumentException("paidAt must not be null");
+            }
+        }
+    }
+
     public record ConfirmPaymentCommand(
             String paymentId,
             long consumerAccountId,

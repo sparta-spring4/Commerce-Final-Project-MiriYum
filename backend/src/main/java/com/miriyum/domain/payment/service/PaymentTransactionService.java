@@ -11,6 +11,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDeposit
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.config.PaymentSettings;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundSummary;
@@ -673,6 +674,48 @@ public class PaymentTransactionService {
         Payment payment = payments.findByPaymentIdAndConsumerAccountId(paymentId, consumerAccountId)
                 .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
         return toResult(payment);
+    }
+
+    @Transactional(readOnly = true)
+    public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        Payment payment = payments.findByPaymentIdAndConsumerAccountId(
+                        paymentId, consumerAccountId)
+                .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        requireVerifiedWaitingReservationDeposit(
+                payment, paymentId, waitingTeamId, consumerAccountId);
+        return new VerifiedWaitingReservationDeposit(
+                payment.getPaymentId(),
+                payment.getAmountMinor(),
+                payment.getCurrency(),
+                payment.getSourcePolicyVersion(),
+                PaymentStatus.valueOf(payment.getStatus().name()),
+                payment.getPaidAt());
+    }
+
+    static Payment requireVerifiedWaitingReservationDeposit(
+            Payment payment,
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        boolean verified = payment != null
+                && payment.getPaymentId().equals(paymentId)
+                && payment.getConsumerAccountId().equals(consumerAccountId)
+                && "WAITING_RESERVATION_DEPOSIT".equals(payment.getSourceType())
+                && Long.toString(waitingTeamId).equals(payment.getSourceReferenceId())
+                && payment.getPaidAt() != null
+                && (payment.getStatus() == Payment.Status.PAID
+                    || payment.getStatus() == Payment.Status.PARTIALLY_REFUNDED
+                    || payment.getStatus() == Payment.Status.REFUNDED
+                    || payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED);
+        if (!verified) {
+            throw new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND);
+        }
+        return payment;
     }
 
     @Transactional(readOnly = true)

@@ -2,8 +2,18 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
+import com.miriyum.domain.payment.port.PaymentProviderClient;
+import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
+import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
+import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
+import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.WaitingClosureCommandResult;
 import com.miriyum.domain.reservation.waiting.dto.WaitingCommandResult;
@@ -14,6 +24,8 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.domain.reservation.waiting.service.WaitingReservationConversionService.BeginCommand;
+import com.miriyum.domain.reservation.waiting.service.WaitingReservationConversionService.CompletionCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -47,6 +59,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -63,7 +76,12 @@ import org.testcontainers.utility.DockerImageName;
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.store.schedule.activation-enabled=false",
             "miriyum.reservation.time-policy.activation-enabled=false",
-            "miriyum.waiting.closure.initial-delay-ms=600000"
+            "miriyum.waiting.closure.initial-delay-ms=600000",
+            "miriyum.waiting.compensation.initial-delay-ms=600000",
+            "miriyum.payment.cursor-secret=test-history-cursor-secret-with-enough-entropy",
+            "miriyum.payment.portone.api-secret=test-api-secret",
+            "miriyum.payment.portone.webhook-secret=whsec_dGVzdC1zZWNyZXQ=",
+            "miriyum.payment.portone.store-id=store-1"
         })
 class WaitingLedgerConcurrencyIT {
 
@@ -82,16 +100,23 @@ class WaitingLedgerConcurrencyIT {
     @Autowired WaitingCreationService creationService;
     @Autowired WaitingCommandFacade commandFacade;
     @Autowired WaitingClosureService closureService;
+    @Autowired WaitingReservationConversionService conversionService;
+    @Autowired WaitingConversionCompensationService compensationService;
+    @Autowired PaymentService paymentService;
     @Autowired WaitingTeamRepository teams;
     @Autowired WaitingActiveMembershipRepository memberships;
     @Autowired StoreRepository stores;
     @Autowired StoreOperatorAccountRepository operators;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
+    @MockitoBean PaymentProviderClient providerClient;
 
     @BeforeEach
     void clean() {
-        for (String table : new String[]{"waiting_status_events", "waiting_transition_audits",
+        for (String table : new String[]{"waiting_conversion_compensations",
+                "payment_webhook_receipts", "payment_ledger_entries", "payment_refunds",
+                "payment_attempts", "payments",
+                "waiting_status_events", "waiting_transition_audits",
                 "waiting_closure_job_items", "waiting_closure_jobs", "waiting_active_memberships",
                 "waiting_teams", "waiting_queue_sequences", "idempotency_commands",
                 "store_tag_assignment", "stores", "store_operator_accounts", "consumer_accounts"}) {
@@ -281,6 +306,234 @@ class WaitingLedgerConcurrencyIT {
     }
 
     @Test
+    void paidConversionAndOperatorCancelRaceCommitExactlyOneTerminalTransition() throws Exception {
+        Fixture fixture = fixture(1);
+        WaitingCommandResult created = creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(460));
+        long teamId = Long.parseLong(created.data().waitingTeamId());
+        PaymentPreparation preparation = conversionService.begin(new BeginCommand(
+                teamId, 0L, 12_000L, "KRW", Instant.now().plusSeconds(3_600), 3L,
+                key(461).value()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(), "waiting-transaction-" + teamId,
+                        ProviderStatus.PAID, 12_000L, "KRW"));
+        paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(), fixture.consumerIds().getFirst(),
+                preparation.portOnePaymentId(), key(462).value()));
+
+        WaitingTeam converting = teams.findById(teamId).orElseThrow();
+        assertThat(converting.getStatus()).isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
+        assertThat(converting.getVersion()).isEqualTo(1L);
+
+        List<Attempt<Object>> attempts = runTogether(2, index -> index == 0
+                ? conversionService.completeVerified(
+                        new CompletionCommand(teamId, preparation.paymentId(), 9_001L))
+                : commandFacade.cancel(
+                        fixture.operatorId(), fixture.storeId(), teamId, key(463),
+                        new WaitingTeamTransitionRequest(1L)));
+
+        assertThat(attempts.stream().filter(attempt -> !attempt.succeeded()))
+                .allSatisfy(attempt -> assertThat(attempt.failure())
+                        .isInstanceOfSatisfying(ServiceException.class, failure ->
+                                assertThat(failure.getErrorCode())
+                                        .isEqualTo(ReservationErrorCode.WAITING_VERSION_CONFLICT)));
+        WaitingTeam stored = teams.findById(teamId).orElseThrow();
+        assertThat(stored.getStatus()).isIn(
+                WaitingTeamStatus.RESERVATION_CONVERTED, WaitingTeamStatus.CANCELLED);
+        assertThat(stored.getVersion()).isEqualTo(2L);
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_transition_audits
+                 WHERE waiting_team_id = ?
+                   AND after_status IN ('RESERVATION_CONVERTED', 'CANCELLED')
+                """, Long.class, teamId)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_status_events
+                 WHERE waiting_team_id = ?
+                   AND public_status IN ('RESERVATION_CONVERTED', 'CANCELLED')
+                """, Long.class, teamId)).isEqualTo(1L);
+        if (stored.getStatus() == WaitingTeamStatus.RESERVATION_CONVERTED) {
+            assertThat(stored.getReservationReferenceId()).isEqualTo(9_001L);
+            assertThat(count("waiting_conversion_compensations")).isZero();
+        } else {
+            assertThat(stored.getReservationReferenceId()).isNull();
+            assertThat(count("waiting_conversion_compensations")).isOne();
+        }
+    }
+
+    @Test
+    void cancelledPaidConversionCallbackConvergesOneCompensationAndRealRefundLedger() {
+        Fixture fixture = fixture(1);
+        WaitingCommandResult created = creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(470));
+        long teamId = Long.parseLong(created.data().waitingTeamId());
+        PaymentPreparation preparation = conversionService.begin(new BeginCommand(
+                teamId, 0L, 12_000L, "KRW", Instant.now().plusSeconds(3_600), 3L,
+                key(471).value()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(), "waiting-terminal-" + teamId,
+                        ProviderStatus.PAID, 12_000L, "KRW"));
+        paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(), fixture.consumerIds().getFirst(),
+                preparation.portOnePaymentId(), key(472).value()));
+        commandFacade.cancel(
+                fixture.operatorId(), fixture.storeId(), teamId, key(473),
+                new WaitingTeamTransitionRequest(1L));
+
+        CompletionCommand callback = new CompletionCommand(teamId, preparation.paymentId(), 9_002L);
+        assertThat(conversionService.completeVerified(callback)).isFalse();
+        assertThat(conversionService.completeVerified(callback)).isFalse();
+
+        WaitingTeam cancelled = teams.findById(teamId).orElseThrow();
+        assertThat(cancelled.getStatus()).isEqualTo(WaitingTeamStatus.CANCELLED);
+        assertThat(cancelled.getReservationReferenceId()).isNull();
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_transition_audits
+                 WHERE waiting_team_id = ? AND after_status = 'CANCELLED'
+                """, Long.class, teamId)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_status_events
+                 WHERE waiting_team_id = ? AND public_status = 'CANCELLED'
+                """, Long.class, teamId)).isEqualTo(1L);
+        assertThat(count("waiting_conversion_compensations")).isOne();
+        assertThat(jdbc.queryForMap("""
+                SELECT source_event_id, idempotency_key, payment_id,
+                       refund_amount_minor, currency, refund_policy_version, reason_code, status
+                  FROM waiting_conversion_compensations
+                 WHERE waiting_team_id = ?
+                """, teamId))
+                .containsEntry("source_event_id",
+                        "waiting-conversion-terminal:" + teamId + ":CANCELLED:"
+                                + preparation.paymentId())
+                .containsEntry("payment_id", preparation.paymentId())
+                .containsEntry("refund_amount_minor", 12_000L)
+                .containsEntry("currency", "KRW")
+                .containsEntry("refund_policy_version", 3L)
+                .containsEntry("reason_code", "WAITING_CANCELLED")
+                .containsEntry("status", "PENDING");
+        assertThat(jdbc.queryForObject(
+                "SELECT idempotency_key FROM waiting_conversion_compensations WHERE waiting_team_id=?",
+                String.class, teamId))
+                .matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+
+        when(providerClient.cancelPayment(
+                eq(preparation.portOnePaymentId()), anyString(), eq(12_000L),
+                eq("KRW"), eq("WAITING_CANCELLED")))
+                .thenReturn(new ProviderCancellation(
+                        "waiting-cancellation-" + teamId, ProviderStatus.CANCELLED,
+                        12_000L, "KRW"));
+        List<WaitingCompensationClaim> claims = compensationService.claimPending(
+                "cancelled-callback-it", 1, Duration.ofSeconds(30), 0L);
+
+        assertThat(claims).hasSize(1);
+        assertThat(compensationService.processClaim(claims.getFirst())).isTrue();
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_conversion_compensations WHERE waiting_team_id=?",
+                String.class, teamId)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM payments WHERE payment_id=?",
+                String.class, preparation.paymentId())).isEqualTo("REFUNDED");
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds WHERE status='COMPLETED'",
+                Long.class)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM payment_ledger_entries
+                 WHERE entry_type = 'REFUND_COMPLETED'
+                """, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void paidConversionAndClaimedClosureRaceCommitExactlyOneTerminalTransition() throws Exception {
+        Fixture fixture = fixture(1);
+        PaidConversion paid = paidConversion(fixture, 480);
+        new TransactionTemplate(transactionManager).execute(status ->
+                closureService.startClosure(
+                        fixture.operatorId(), fixture.storeId(), key(483), 7L));
+        WaitingClosureClaim closureClaim = closureService.claimPendingItems(
+                "paid-conversion-closure-race", 1, Duration.ofSeconds(30), 0L).getFirst();
+
+        List<Attempt<Boolean>> attempts = runTogether(2, index -> index == 0
+                ? conversionService.completeVerified(new CompletionCommand(
+                        paid.teamId(), paid.preparation().paymentId(), 9_003L))
+                : closureService.processClaimedItem(closureClaim));
+
+        assertThat(attempts).allMatch(Attempt::succeeded);
+        WaitingTeam stored = teams.findById(paid.teamId()).orElseThrow();
+        assertThat(stored.getStatus()).isIn(
+                WaitingTeamStatus.RESERVATION_CONVERTED, WaitingTeamStatus.CLOSED_BY_STORE);
+        assertThat(stored.getVersion()).isEqualTo(2L);
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_transition_audits
+                 WHERE waiting_team_id = ?
+                   AND after_status IN ('RESERVATION_CONVERTED', 'CLOSED_BY_STORE')
+                """, Long.class, paid.teamId())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_status_events
+                 WHERE waiting_team_id = ?
+                   AND public_status IN ('RESERVATION_CONVERTED', 'CLOSED_BY_STORE')
+                """, Long.class, paid.teamId())).isEqualTo(1L);
+        if (stored.getStatus() == WaitingTeamStatus.RESERVATION_CONVERTED) {
+            assertThat(stored.getReservationReferenceId()).isEqualTo(9_003L);
+            assertThat(count("waiting_conversion_compensations")).isZero();
+        } else {
+            assertThat(stored.getReservationReferenceId()).isNull();
+            assertThat(count("waiting_conversion_compensations")).isOne();
+        }
+    }
+
+    @Test
+    void closedPaidConversionCallbackReplayPreservesTerminalAndOneCompensation() {
+        Fixture fixture = fixture(1);
+        PaidConversion paid = paidConversion(fixture, 490);
+        new TransactionTemplate(transactionManager).execute(status ->
+                closureService.startClosure(
+                        fixture.operatorId(), fixture.storeId(), key(493), 7L));
+        WaitingClosureClaim closureClaim = closureService.claimPendingItems(
+                "paid-conversion-closed-first", 1, Duration.ofSeconds(30), 0L).getFirst();
+        assertThat(closureService.processClaimedItem(closureClaim)).isTrue();
+
+        CompletionCommand callback = new CompletionCommand(
+                paid.teamId(), paid.preparation().paymentId(), 9_004L);
+        assertThat(conversionService.completeVerified(callback)).isFalse();
+        assertThat(conversionService.completeVerified(callback)).isFalse();
+
+        WaitingTeam closed = teams.findById(paid.teamId()).orElseThrow();
+        assertThat(closed.getStatus()).isEqualTo(WaitingTeamStatus.CLOSED_BY_STORE);
+        assertThat(closed.getReservationReferenceId()).isNull();
+        assertThat(closed.getVersion()).isEqualTo(2L);
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_transition_audits
+                 WHERE waiting_team_id = ? AND after_status = 'CLOSED_BY_STORE'
+                """, Long.class, paid.teamId())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_status_events
+                 WHERE waiting_team_id = ? AND public_status = 'CLOSED_BY_STORE'
+                """, Long.class, paid.teamId())).isEqualTo(1L);
+        assertThat(count("waiting_conversion_compensations")).isOne();
+        assertThat(jdbc.queryForMap("""
+                SELECT source_event_id, idempotency_key, reason_code, status
+                  FROM waiting_conversion_compensations
+                 WHERE waiting_team_id = ?
+                """, paid.teamId()))
+                .containsEntry("source_event_id",
+                        "waiting-conversion-terminal:" + paid.teamId()
+                                + ":CLOSED_BY_STORE:" + paid.preparation().paymentId())
+                .containsEntry("reason_code", "WAITING_CLOSED_BY_STORE")
+                .containsEntry("status", "PENDING");
+        assertThat(jdbc.queryForObject(
+                "SELECT idempotency_key FROM waiting_conversion_compensations WHERE waiting_team_id=?",
+                String.class, paid.teamId()))
+                .matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    }
+
+    @Test
     void committedPartialBatchRetryResumesWithoutDuplicateEffects() {
         Fixture fixture = fixture(2);
         createTeams(fixture, 500);
@@ -316,6 +569,24 @@ class WaitingLedgerConcurrencyIT {
         assertThat(count("waiting_active_memberships")).isZero();
         assertThat(count("waiting_transition_audits")).isEqualTo(4);
         assertThat(count("waiting_status_events")).isEqualTo(4);
+    }
+
+    private PaidConversion paidConversion(Fixture fixture, int keyBase) {
+        WaitingCommandResult created = creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(keyBase));
+        long teamId = Long.parseLong(created.data().waitingTeamId());
+        PaymentPreparation preparation = conversionService.begin(new BeginCommand(
+                teamId, 0L, 12_000L, "KRW", Instant.now().plusSeconds(3_600), 3L,
+                key(keyBase + 1).value()));
+        when(providerClient.getPayment(preparation.portOnePaymentId())).thenReturn(
+                new ProviderPayment(
+                        preparation.portOnePaymentId(), "waiting-transaction-" + teamId,
+                        ProviderStatus.PAID, 12_000L, "KRW"));
+        paymentService.confirmPayment(new ConfirmPaymentCommand(
+                preparation.paymentId(), fixture.consumerIds().getFirst(),
+                preparation.portOnePaymentId(), key(keyBase + 2).value()));
+        return new PaidConversion(teamId, preparation);
     }
 
     private void createTeams(Fixture fixture, int keyBase) {
@@ -399,6 +670,8 @@ class WaitingLedgerConcurrencyIT {
     }
 
     private record Fixture(long operatorId, long storeId, List<Long> consumerIds) {}
+
+    private record PaidConversion(long teamId, PaymentPreparation preparation) {}
 
     private record Attempt<T>(T result, RuntimeException failure) {
         static <T> Attempt<T> success(T result) { return new Attempt<>(result, null); }

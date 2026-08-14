@@ -220,3 +220,19 @@ PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환
 - [PortOne V2 인증 결제 연동](https://developers.portone.io/opi/ko/integration/start/v2/checkout?v=v2)
 - [PortOne V2 Webhook 연동](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2)
 - [PortOne V2 결제 취소](https://developers.portone.io/opi/ko/integration/cancel/v2/readme)
+
+## Internal Waiting reservation deposit verification
+
+Waiting conversion uses the distinct source type `WAITING_RESERVATION_DEPOSIT`. The internal
+`getVerifiedWaitingReservationDeposit(paymentId, waitingTeamId, consumerAccountId)` query validates
+all Payment-owned identity: public payment ID, consumer owner, exact source type, and the decimal
+Waiting team source reference. A normal `RESERVATION_DEPOSIT` with the same numeric source reference
+is not interchangeable and is returned as not found.
+
+The query returns an immutable `VerifiedWaitingReservationDeposit` snapshot containing payment ID,
+amount, currency, source policy version, current status, and `paidAt`. It requires historical payment
+evidence (`paidAt`) and accepts PAID or the historically paid refund/reconciliation states needed for
+terminal callback replay. Waiting may complete a new `RESERVATION_CONVERTING` team only while the
+current snapshot status is PAID; later paid/refunded states are used only to create or replay a
+deterministic compensation refund. Payment provider calls remain outside the Waiting row-lock
+transaction, and Payment does not access Waiting or Reservation entities/repositories.
