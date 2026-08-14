@@ -1,0 +1,74 @@
+# opt-in 로컬 부하 테스트 override다. 반드시 docker-compose.dev.yml과 함께 사용한다.
+services:
+  backend:
+    environment:
+      MIRIYUM_VALKEY_HOST: valkey
+      MIRIYUM_VALKEY_PORT: 6379
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}
+      MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:?MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required}
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080;
+          printf 'GET /actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          IFS= read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    profiles: [loadtest]
+    environment:
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}
+    command:
+      - /bin/sh
+      - -ec
+      - exec valkey-server --requirepass "$${MIRIYUM_VALKEY_PASSWORD}"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  loadtest-proxy:
+    image: caddy:2.10.2-alpine
+    profiles: [loadtest]
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - https://loadtest-proxy:8443
+      - --to
+      - http://backend:8080
+      - --internal-certs
+      - --disable-redirects
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  loadtest:
+    image: grafana/k6:2.1.0
+    profiles: [loadtest]
+    volumes:
+      - ../../performance/k6:/scripts:ro
+      - ../../performance/k6/results:/results
+    working_dir: /scripts
+    depends_on:
+      loadtest-proxy:
+        condition: service_healthy
