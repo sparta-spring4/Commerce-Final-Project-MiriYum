@@ -204,6 +204,7 @@ feature OFF에서는 플랫폼 운영자 전체 경로 전용 permit-to-MVC chai
 - `backend/src/main/java/com/miriyum/domain/auth/exception/AuthErrorCode.java`
 - `backend/src/main/java/com/miriyum/domain/auth/jwt/JwtTokenProvider.java`
 - `backend/src/main/java/com/miriyum/domain/auth/jwt/ParsedToken.java`
+- `backend/src/main/java/com/miriyum/domain/auth/jwt/SessionTokenClaims.java`
 - `backend/src/main/java/com/miriyum/domain/auth/jwt/TokenNamespace.java`
 - `backend/src/main/java/com/miriyum/domain/auth/ratelimit/RateLimitFilter.java`
 
