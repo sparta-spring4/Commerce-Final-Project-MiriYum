@@ -20,6 +20,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
@@ -201,6 +202,39 @@ class PaymentPersistenceIT {
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(PaymentErrorCode.ACTIVE_SOURCE_CONFLICT);
+    }
+
+    @Test
+    @DisplayName("대기열 예약금은 일반 예약금과 같은 source 참조를 공유해도 별도 source type으로 준비한다")
+    void preparesWaitingReservationDepositWithSameSourceReferenceAsReservationDeposit() {
+        PrepareReservationDepositCommand reservationCommand = prepareCommand("123", 30_000L);
+        PaymentPreparation reservation = paymentService.prepareReservationDeposit(reservationCommand);
+        PrepareWaitingReservationDepositCommand waitingCommand =
+                new PrepareWaitingReservationDepositCommand(
+                        reservationCommand.sourceReferenceId(),
+                        reservationCommand.consumerAccountId(),
+                        reservationCommand.amountMinor(),
+                        reservationCommand.currency(),
+                        reservationCommand.sourceExpiresAt(),
+                        reservationCommand.sourcePolicyVersion(),
+                        reservationCommand.idempotencyKey()
+                );
+
+        PaymentPreparation waiting = paymentService.prepareWaitingReservationDeposit(waitingCommand);
+        PaymentPreparation replay = paymentService.prepareWaitingReservationDeposit(waitingCommand);
+
+        assertThat(waiting).isEqualTo(replay);
+        assertThat(waiting.paymentId()).isNotEqualTo(reservation.paymentId());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payments
+                WHERE source_reference_id = '123'
+                  AND source_type IN ('RESERVATION_DEPOSIT', 'WAITING_RESERVATION_DEPOSIT')
+                """, Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT source_type FROM payments
+                WHERE payment_id = ?
+                """, String.class, waiting.paymentId()))
+                .isEqualTo("WAITING_RESERVATION_DEPOSIT");
     }
 
     @Test

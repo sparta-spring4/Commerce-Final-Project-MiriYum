@@ -58,6 +58,28 @@ public final class PaymentContracts {
         }
     }
 
+    public record PrepareWaitingReservationDepositCommand(
+            String sourceReferenceId,
+            long consumerAccountId,
+            long amountMinor,
+            String currency,
+            Instant sourceExpiresAt,
+            long sourcePolicyVersion,
+            String idempotencyKey
+    ) {
+        public PrepareWaitingReservationDepositCommand {
+            requirePublicId(sourceReferenceId, "sourceReferenceId");
+            requirePositive(consumerAccountId, "consumerAccountId");
+            requirePositive(amountMinor, "amountMinor");
+            requireCurrency(currency);
+            if (sourceExpiresAt == null) {
+                throw new IllegalArgumentException("sourceExpiresAt must not be null");
+            }
+            requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
+            requireIdempotencyKey(idempotencyKey);
+        }
+    }
+
     public record PaymentPreparation(
             String paymentId,
             String portOnePaymentId,

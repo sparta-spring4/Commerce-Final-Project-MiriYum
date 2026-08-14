@@ -8,6 +8,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.config.PaymentSettings;
@@ -134,6 +135,7 @@ public class PaymentTransactionService {
     }
 
     private static final String RESERVATION_DEPOSIT = "RESERVATION_DEPOSIT";
+    private static final String WAITING_RESERVATION_DEPOSIT = "WAITING_RESERVATION_DEPOSIT";
     private static final Duration CONFIRMATION_PROCESSING_LEASE = Duration.ofMinutes(5);
     private static final Duration REFUND_PROCESSING_LEASE = Duration.ofMinutes(5);
 
@@ -165,13 +167,58 @@ public class PaymentTransactionService {
 
     @Transactional
     public PaymentPreparation prepare(PrepareReservationDepositCommand command, Instant now) {
-        if (!command.sourceExpiresAt().isAfter(now)) {
+        return prepare(
+                RESERVATION_DEPOSIT,
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion(),
+                command.idempotencyKey(),
+                preparationFingerprint(command),
+                now
+        );
+    }
+
+    /** Prepares a deposit using the Payment-owned waiting-reservation source type. */
+    @Transactional
+    public PaymentPreparation prepareWaitingReservationDeposit(
+            PrepareWaitingReservationDepositCommand command,
+            Instant now
+    ) {
+        return prepare(
+                WAITING_RESERVATION_DEPOSIT,
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion(),
+                command.idempotencyKey(),
+                preparationFingerprint(command),
+                now
+        );
+    }
+
+    private PaymentPreparation prepare(
+            String sourceType,
+            String sourceReferenceId,
+            long consumerAccountId,
+            long amountMinor,
+            String currency,
+            Instant sourceExpiresAt,
+            long sourcePolicyVersion,
+            String idempotencyKey,
+            String fingerprint,
+            Instant now
+    ) {
+        if (!sourceExpiresAt.isAfter(now)) {
             throw new ServiceException(PaymentErrorCode.SOURCE_EXPIRED);
         }
-        String fingerprint = preparationFingerprint(command);
         Payment idempotent = payments.findBySourceTypeAndPreparationIdempotencyKey(
-                RESERVATION_DEPOSIT,
-                command.idempotencyKey()
+                sourceType,
+                idempotencyKey
         ).orElse(null);
         if (idempotent != null) {
             if (idempotent.getPreparationRequestFingerprint().equals(fingerprint)) {
@@ -180,8 +227,8 @@ public class PaymentTransactionService {
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         }
         Payment existing = payments.findBySourceTypeAndSourceReferenceId(
-                RESERVATION_DEPOSIT,
-                command.sourceReferenceId()
+                sourceType,
+                sourceReferenceId
         ).orElse(null);
         if (existing != null) {
             throw new ServiceException(PaymentErrorCode.ACTIVE_SOURCE_CONFLICT);
@@ -190,17 +237,17 @@ public class PaymentTransactionService {
         String paymentId = references.nextPaymentId();
         Payment payment = Payment.prepare(
                 paymentId,
-                RESERVATION_DEPOSIT,
-                command.sourceReferenceId(),
-                command.sourcePolicyVersion(),
-                command.sourceExpiresAt(),
-                command.idempotencyKey(),
+                sourceType,
+                sourceReferenceId,
+                sourcePolicyVersion,
+                sourceExpiresAt,
+                idempotencyKey,
                 fingerprint,
-                command.consumerAccountId(),
-                command.amountMinor(),
-                command.currency(),
+                consumerAccountId,
+                amountMinor,
+                currency,
                 "payment-reservation-" + paymentId,
-                "MiriYum 예약금 " + command.sourceReferenceId(),
+                "MiriYum 예약금 " + sourceReferenceId,
                 now
         );
         payments.saveAndFlush(payment);
@@ -217,10 +264,36 @@ public class PaymentTransactionService {
 
     @Transactional(readOnly = true)
     public PaymentPreparation replayPreparation(PrepareReservationDepositCommand command) {
-        String fingerprint = preparationFingerprint(command);
-        Payment idempotent = payments.findBySourceTypeAndPreparationIdempotencyKey(
+        return replayPreparation(
                 RESERVATION_DEPOSIT,
-                command.idempotencyKey()
+                command.sourceReferenceId(),
+                command.idempotencyKey(),
+                preparationFingerprint(command)
+        );
+    }
+
+    /** Replays the stored waiting-reservation preparation after a duplicate-key race. */
+    @Transactional(readOnly = true)
+    public PaymentPreparation replayWaitingReservationDeposit(
+            PrepareWaitingReservationDepositCommand command
+    ) {
+        return replayPreparation(
+                WAITING_RESERVATION_DEPOSIT,
+                command.sourceReferenceId(),
+                command.idempotencyKey(),
+                preparationFingerprint(command)
+        );
+    }
+
+    private PaymentPreparation replayPreparation(
+            String sourceType,
+            String sourceReferenceId,
+            String idempotencyKey,
+            String fingerprint
+    ) {
+        Payment idempotent = payments.findBySourceTypeAndPreparationIdempotencyKey(
+                sourceType,
+                idempotencyKey
         ).orElse(null);
         if (idempotent != null) {
             if (idempotent.getPreparationRequestFingerprint().equals(fingerprint)) {
@@ -229,7 +302,7 @@ public class PaymentTransactionService {
             throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
         }
         if (payments.findBySourceTypeAndSourceReferenceId(
-                RESERVATION_DEPOSIT, command.sourceReferenceId()).isPresent()) {
+                sourceType, sourceReferenceId).isPresent()) {
             throw new ServiceException(PaymentErrorCode.ACTIVE_SOURCE_CONFLICT);
         }
         throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
@@ -769,10 +842,39 @@ public class PaymentTransactionService {
     }
 
     private static String preparationFingerprint(PrepareReservationDepositCommand command) {
-        return sha256(command.sourceReferenceId() + "\n" + command.consumerAccountId()
-                + "\n" + command.amountMinor() + "\n" + command.currency()
-                + "\n" + command.sourceExpiresAt().truncatedTo(ChronoUnit.MICROS)
-                + "\n" + command.sourcePolicyVersion());
+        return preparationFingerprint(
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion()
+        );
+    }
+
+    private static String preparationFingerprint(PrepareWaitingReservationDepositCommand command) {
+        return preparationFingerprint(
+                command.sourceReferenceId(),
+                command.consumerAccountId(),
+                command.amountMinor(),
+                command.currency(),
+                command.sourceExpiresAt(),
+                command.sourcePolicyVersion()
+        );
+    }
+
+    private static String preparationFingerprint(
+            String sourceReferenceId,
+            long consumerAccountId,
+            long amountMinor,
+            String currency,
+            Instant sourceExpiresAt,
+            long sourcePolicyVersion
+    ) {
+        return sha256(sourceReferenceId + "\n" + consumerAccountId
+                + "\n" + amountMinor + "\n" + currency
+                + "\n" + sourceExpiresAt.truncatedTo(ChronoUnit.MICROS)
+                + "\n" + sourcePolicyVersion);
     }
 
     private static String confirmationFingerprint(ConfirmPaymentCommand command) {

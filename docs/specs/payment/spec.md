@@ -45,6 +45,7 @@ PortOne  → Payment Webhook HTTP
 
 - Reservation은 임시 선점과 서버가 확정한 예약금 스냅샷을 만든 뒤 `PaymentService.prepareReservationDeposit(...)`를 호출한다. 이 snapshot은 Store 설정 revision인 `policyVersion`과 `PAY-002` 계산 알고리즘 version을 서로 다른 값으로 보존하며 Store의 기술적 `lockVersion`은 포함하지 않는다.
 - Payment는 Reservation을 역조회하거나 Reservation Entity·Repository를 참조하지 않는다. 준비 명령에 포함된 소유자·금액·통화·만료·정책 버전 스냅샷을 원장에 보존한다.
+- 내부 source boundary에서 일반 예약금은 `RESERVATION_DEPOSIT`, 대기열 예약금은 `WAITING_RESERVATION_DEPOSIT`를 사용한다. 두 source type은 같은 `sourceReferenceId`와 준비 멱등 키를 독립적으로 보유하며, 이 구분은 Payment 내부 원장·공개 Service 경계에만 적용되고 Payment HTTP/OpenAPI를 변경하지 않는다.
 - 별도의 브라우저용 결제 준비 HTTP API는 만들지 않는다. 예약 조정 응답이 Payment 준비 DTO를 포함하는 계약은 #238의 Reservation OpenAPI가 소유한다.
 - Payment는 결제 확정·본인 조회·PortOne Webhook HTTP를 소유한다.
 - Payment는 검증된 결제 결과 DTO만 반환한다. Reservation의 최종 확정 또는 보상 전이는 Reservation이 소유한다.

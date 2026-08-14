@@ -6,6 +6,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistorySlice;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
@@ -49,6 +50,22 @@ public class PaymentService {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }
             return transactions.replayPreparation(command);
+        }
+    }
+
+    /** Prepares a Payment-owned deposit source for a waiting reservation without Reservation access. */
+    public PaymentPreparation prepareWaitingReservationDeposit(
+            PrepareWaitingReservationDepositCommand command
+    ) {
+        boolean callerTransactionActive =
+                TransactionSynchronizationManager.isActualTransactionActive();
+        try {
+            return transactions.prepareWaitingReservationDeposit(command, now());
+        } catch (DataIntegrityViolationException race) {
+            if (callerTransactionActive) {
+                throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
+            return transactions.replayWaitingReservationDeposit(command);
         }
     }
 

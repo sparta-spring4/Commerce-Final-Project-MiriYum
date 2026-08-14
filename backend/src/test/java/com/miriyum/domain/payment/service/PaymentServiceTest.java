@@ -11,6 +11,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
@@ -79,6 +80,37 @@ class PaymentServiceTest {
         when(transactions.replayPreparation(command)).thenReturn(expected);
 
         PaymentPreparation result = paymentService.prepareReservationDeposit(command);
+
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("대기열 예약금 준비 경합은 대기열 source에 저장된 동일 결과를 재생한다")
+    void replaysWaitingReservationPreparationRaceWithoutCallerTransaction() {
+        PrepareWaitingReservationDepositCommand command =
+                new PrepareWaitingReservationDepositCommand(
+                        "123",
+                        11L,
+                        30_000L,
+                        "KRW",
+                        NOW.plusSeconds(600),
+                        7L,
+                        "550e8400-e29b-41d4-a716-446655440124"
+                );
+        PaymentPreparation expected = new PaymentPreparation(
+                PAYMENT_ID,
+                PORTONE_PAYMENT_ID,
+                "MiriYum 예약금 123",
+                30_000L,
+                "KRW",
+                command.sourceExpiresAt(),
+                PaymentStatus.READY
+        );
+        when(transactions.prepareWaitingReservationDeposit(command, NOW))
+                .thenThrow(new DataIntegrityViolationException("uk_payments_source"));
+        when(transactions.replayWaitingReservationDeposit(command)).thenReturn(expected);
+
+        PaymentPreparation result = paymentService.prepareWaitingReservationDeposit(command);
 
         assertThat(result).isEqualTo(expected);
     }
