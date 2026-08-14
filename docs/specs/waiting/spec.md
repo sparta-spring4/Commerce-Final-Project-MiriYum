@@ -351,3 +351,22 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 `STORE_005`, `STORE_007`, `COMMON_007`, `COMMON_008`, `COMMON_010`의 의미는 변경하지
 않는다. 각 ledger operation의 response status 집합은 `200`, `400`, `401`, `403`, `404`,
 `409`, `429`로 고정한다.
+
+### Reservation conversion compensation runtime
+
+When a paid waiting conversion loses to cancellation or store closure, Waiting records one durable
+compensation item for the `(waitingTeamId, paymentId)` pair. The item preserves the refund amount,
+currency, policy version, deterministic source event, normalized UUID idempotency key, and reason;
+an exact retry replays the existing item, while conflicting immutable input is rejected.
+
+Workers claim due items with `FOR UPDATE SKIP LOCKED`. Each claim has a lease owner, expiry, and a
+monotonically increasing fencing token. An expired lease may be reclaimed, and a stale owner/token
+cannot complete, requeue, or reconcile the reclaimed item. Failed results use a bounded three-attempt
+policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRED`.
+
+The provider call is made outside the Waiting database transaction and only through
+`PaymentService.requestRefund(RequestRefundCommand)`. Only `RefundStatus.COMPLETED` completes the
+compensation. Payment reconciliation or an unknown provider outcome maps to compensation
+reconciliation. The compensation runner is disabled unless
+`miriyum.waiting.compensation.enabled=true`; its scheduling annotations default both initial delay and
+fixed delay to 5000 ms, so enabling it requires no additional configuration path.
