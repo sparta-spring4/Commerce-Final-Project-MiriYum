@@ -8,6 +8,8 @@ The production ECS task must not contain application secret values. The task def
 
 `deploy/ecs/production-secret-contract.json` is the reviewed list of required keys. `deploy/ecs/production-task-definition.json` is a value-free template. Backend CI verifies that the template references every required key before the template can be used for deployment.
 
+Backend CI also extracts `MIRIYUM_*` references without a default value from `backend/src/main/resources/application.yml`. Every such setting must be listed in `requiredSecrets`; adding a new mandatory application secret without updating the reviewed contract fails CI. Settings with a default value and profile-specific configuration remain a separate follow-up decision.
+
 ## Secret structure
 
 Create one JSON secret named `miriyum/production/application` after team approval. Its JSON keys must match the task definition exactly.
@@ -54,7 +56,8 @@ The execution role needs `secretsmanager:GetSecretValue` only for the applicatio
 python3 scripts/test-verify-production-task-definition.py
 python3 scripts/verify-production-task-definition.py \
   deploy/ecs/production-secret-contract.json \
-  deploy/ecs/production-task-definition.json
+  deploy/ecs/production-task-definition.json \
+  --application-config backend/src/main/resources/application.yml
 ```
 
 Expected result: both commands exit with code `0` and print no secret value.

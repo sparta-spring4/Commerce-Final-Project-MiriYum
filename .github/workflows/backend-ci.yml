@@ -190,9 +190,10 @@ jobs:
       - name: Verify production task definition secret contract
         run: |
           python3 scripts/test-verify-production-task-definition.py
-          python3 scripts/verify-production-task-definition.py \
-            deploy/ecs/production-secret-contract.json \
-            deploy/ecs/production-task-definition.json
+    python3 scripts/verify-production-task-definition.py \
+      deploy/ecs/production-secret-contract.json \
+      deploy/ecs/production-task-definition.json \
+      --application-config backend/src/main/resources/application.yml
 
       - name: Verify backend CD workflow contract
         shell: pwsh

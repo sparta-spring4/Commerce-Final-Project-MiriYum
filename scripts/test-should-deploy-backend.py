@@ -86,6 +86,7 @@ class ShouldDeployBackendTest(unittest.TestCase):
         self.assertIn("Verify production task definition secret contract", backend_ci)
         self.assertIn("scripts/test-verify-production-task-definition.py", backend_ci)
         self.assertIn("scripts/verify-production-task-definition.py", backend_ci)
+        self.assertIn("--application-config backend/src/main/resources/application.yml", backend_ci)
 
 
 if __name__ == "__main__":

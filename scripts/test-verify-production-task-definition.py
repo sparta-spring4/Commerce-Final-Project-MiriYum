@@ -21,6 +21,11 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
         path.write_text(json.dumps(content), encoding="utf-8")
         return path
 
+    def write_text(self, directory, name, content):
+        path = Path(directory, name)
+        path.write_text(content, encoding="utf-8")
+        return path
+
     def test_accepts_required_secret_references_and_disabled_optional_features(self):
         validate = load_validator()
 
@@ -131,6 +136,88 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
             self.assertEqual(
                     ["Task definition must declare ARM64 Fargate runtime"],
                     validate(contract, task_definition),
+            )
+
+    def test_rejects_secret_reference_that_selects_a_different_json_key(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {"requiredSecrets": ["MIRIYUM_DB_PASSWORD"]},
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "MIRIYUM_DB_PASSWORD",
+                                        "valueFrom": "REPLACE:MIRIYUM_JWT_SECRET::",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual(
+                    [
+                        "Secret reference must select its matching JSON key: "
+                        "MIRIYUM_DB_PASSWORD"
+                    ],
+                    validate(contract, task_definition),
+            )
+
+    def test_requires_contract_entry_for_application_setting_without_default(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {"requiredSecrets": ["MIRIYUM_DB_URL"]},
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "MIRIYUM_DB_URL",
+                                        "valueFrom": "REPLACE:MIRIYUM_DB_URL::",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+            )
+            application_config = self.write_text(
+                    directory,
+                    "application.yml",
+                    "url: ${MIRIYUM_DB_URL}\nsecret: ${MIRIYUM_NEW_REQUIRED_SECRET}\n"
+                    "optional: ${MIRIYUM_OPTIONAL_SECRET:default-value}\n",
+            )
+
+            self.assertEqual(
+                    [
+                        "Missing required secret contract entry for application setting: "
+                        "MIRIYUM_NEW_REQUIRED_SECRET"
+                    ],
+                    validate(contract, task_definition, application_config),
             )
 
 
