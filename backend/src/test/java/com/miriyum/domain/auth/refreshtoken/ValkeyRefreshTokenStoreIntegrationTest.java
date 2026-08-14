@@ -491,8 +491,8 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
-    @DisplayName("재사용 위험 marker는 MySQL 전달 성공 전까지 family 만료와 무관하게 보존한다")
-    void keepsPendingRiskEventUntilDeliverySucceeds() {
+    @DisplayName("재사용 위험 marker는 최초 생성 기준 7일 동안 보존하고 재사용으로 TTL을 연장하지 않는다")
+    void keepsPendingRiskEventForSevenDaysWithoutExtendingItsTtlOnReuse() {
         Instant now = Instant.now();
         RefreshTokenState state = state("family-risk-retention", "token-first", now);
         create(state);
@@ -504,7 +504,14 @@ class ValkeyRefreshTokenStoreIntegrationTest {
 
         String markerKey = RefreshTokenRiskEventKey.forReuse(
                 state.namespace(), state.familyId(), state.currentTokenHash());
-        assertThat(redisTemplate.getExpire(markerKey, TimeUnit.SECONDS)).isEqualTo(-1L);
+        long firstTtl = redisTemplate.getExpire(markerKey, TimeUnit.SECONDS);
+        assertThat(firstTtl).isBetween(604_795L, 604_802L);
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        long repeatedReuseTtl = redisTemplate.getExpire(markerKey, TimeUnit.SECONDS);
+        assertThat(repeatedReuseTtl).isPositive().isLessThanOrEqualTo(firstTtl);
     }
 
     @Test

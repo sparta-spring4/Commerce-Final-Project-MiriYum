@@ -41,6 +41,14 @@ aws logs put-metric-filter \
 aws logs put-metric-filter \
   --region "$AWS_REGION" \
   --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-long-stay \
+  --filter-pattern '[..., marker = refresh_token_risk_event_marker_long_stay, label = long_stay_count, long_stay_count]' \
+  --metric-transformations \
+    'metricName=RefreshTokenRiskEventMarkerLongStay,metricNamespace='"$NAMESPACE"',metricValue=$long_stay_count'
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
   --filter-name miriyum-staging-refresh-risk-event-pending-count \
   --filter-pattern '[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]' \
   --metric-transformations \
@@ -177,6 +185,15 @@ put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled" \
   --threshold 0 \
   --comparison-operator GreaterThanThreshold
 
+put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay" \
+  --namespace "$NAMESPACE" \
+  --metric-name RefreshTokenRiskEventMarkerLongStay \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
 put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
   --namespace "$NAMESPACE" \
   --metric-name ReservationHoldReconciliationStalled \
@@ -256,7 +273,8 @@ dashboard_body=$(cat <<EOF
         "period": 300,
         "stat": "Maximum",
         "metrics": [
-          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"]
+          ["MiriYum/Staging", "RefreshTokenRiskEventPendingCount"],
+          [".", "RefreshTokenRiskEventMarkerLongStay"]
         ]
       }
     },

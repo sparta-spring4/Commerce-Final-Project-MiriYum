@@ -874,6 +874,24 @@ main
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
 
+    def test_refresh_risk_marker_long_stay_log_becomes_a_cloudwatch_metric_and_alarm(self):
+        self.assertIn(
+            'refresh_token_risk_event_marker_long_stay',
+            self.resource_script,
+        )
+        self.assertIn(
+            'metricName=RefreshTokenRiskEventMarkerLongStay',
+            self.resource_script,
+        )
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name RefreshTokenRiskEventMarkerLongStay", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
 class ReservationHoldReconciliationAlarmTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
