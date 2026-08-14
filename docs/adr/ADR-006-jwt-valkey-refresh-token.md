@@ -110,7 +110,9 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 배포 전에 생성되어 `familyCreatedAt`이 없는 legacy family는 backfill하지 않는다. 첫 회전에도 기존 family의 남은 만료 시각을 유지하고 만료를 다시 연장하지 않아, legacy family의 sliding 만료는 배포 직후부터 중지된다. 사용자는 갱신해도 기존 만료 시각에 재로그인해야 하며, 배포 시점의 잔여 수명에 따라 즉시 또는 최대 14일 안에 자연 종료된다. 이후 새 로그인으로 생성된 family에만 30일 절대 상한이 적용된다.
 - 구현 통합 테스트에는 `familyCreatedAt`이 없는 legacy family의 회전이 기존 만료 시각을 넘기지 않는 경계값, 새 Refresh 만료가 30일 상한으로 잘리는 경계값, 상한 적용 관측, 만료 Refresh JWT의 `AUTH_008`과 위험 사건 미생성을 포함한다.
 
-완전 sliding 만료는 사용자가 14일 안에 한 번만 갱신해도 세션이 끝나지 않는 장점이 있지만, 탈취되거나 잊힌 로그인 상태가 무기한 남을 수 있다. 반대로 고정 14일 만료는 구현이 단순하지만 정상 사용자가 갱신해도 정확히 14일 뒤 재로그인해야 한다. 이번에는 두 방식의 장단점을 함께 고려해 sliding 14일과 절대 30일 상한을 결합한다.`r`n`r`n### 위험 사건 marker 인덱스와 Valkey Cluster 경계
+완전 sliding 만료는 사용자가 14일 안에 한 번만 갱신해도 세션이 끝나지 않는 장점이 있지만, 탈취되거나 잊힌 로그인 상태가 무기한 남을 수 있다. 반대로 고정 14일 만료는 구현이 단순하지만 정상 사용자가 갱신해도 정확히 14일 뒤 재로그인해야 한다. 이번에는 두 방식의 장단점을 함께 고려해 sliding 14일과 절대 30일 상한을 결합한다.
+
+### 위험 사건 marker 인덱스와 Valkey Cluster 경계
 
 - Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
 - Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
