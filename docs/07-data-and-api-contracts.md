@@ -12,7 +12,7 @@ V40의 역할·직접 권한 grant, 사건 배정과 재인증 승인 원장이 
 
 ## 플랫폼 운영자 관리·감사 계약
 
-V43은 `SUPER_ADMIN` role grant의 singleton 제약과 관리 명령 멱등 원장, 수정·삭제를 trigger로 거부하는 `platform_operator_audit_events`를 추가한다. 기존 인증 원장과 신규 관리 원장은 각각 `AUTH:*`, `ADMIN:*` event key의 안전 projection으로 통합 조회하고 원 사건은 연결 보정 사건으로만 바로잡는다. 공통 보존기간·TTL·cleanup은 ADMIN-009가 확정되기 전까지 구성하지 않는다. 상세 계약은 [운영자 관리·감사 명세](specs/platform-operator-management-audit/spec.md)를 따른다.
+V43은 `SUPER_ADMIN` role grant의 singleton 제약과 수정·삭제를 trigger로 거부하는 `platform_operator_audit_events`를 추가한다. 관리 명령 멱등성은 V4 공통 원장을 재사용한다. 기존 인증 원장과 신규 관리 원장은 각각 `AUTH:*`, `ADMIN:*` event key의 안전 projection으로 통합 조회하고 원 사건은 연결 보정 사건으로만 바로잡는다. 공통 보존기간·TTL·cleanup은 ADMIN-009가 확정되기 전까지 구성하지 않는다. 상세 계약은 [운영자 관리·감사 명세](specs/platform-operator-management-audit/spec.md)를 따른다.
 
 ## OpenAPI 소유권과 진입점
 

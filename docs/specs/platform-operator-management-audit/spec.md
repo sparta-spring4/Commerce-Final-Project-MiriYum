@@ -114,7 +114,7 @@
 ## migration
 
 - `V43__create_platform_operator_management_audit.sql`로 고정한다. V41·V42와 기존 migration은 변경하지 않는다.
-- V43은 `SUPER_ADMIN` 조건부 singleton unique index, 관리 명령 멱등 원장, 감사 테이블·검색 인덱스·불변 trigger를 추가한다.
+- V43은 `SUPER_ADMIN` 조건부 singleton unique index와 감사 테이블·검색 인덱스·불변 trigger를 추가한다. 관리 명령 멱등성은 V4 공통 `idempotency_commands` 원장을 재사용하고 별도 중복 원장을 만들지 않는다.
 - ADMIN-009 공통 기간이 확정되기 전에는 자동 파기를 구현하지 않는다.
 
 ## 정확한 변경 allowlist
