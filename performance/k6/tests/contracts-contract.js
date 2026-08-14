@@ -66,6 +66,16 @@ export default function () {
         status: 200,
         body: JSON.stringify({ code: 'SUCCESS', data: {} }),
       })),
+    'success envelope rejects a non-success code': () =>
+      throws(() => parseEnvelope({
+        status: 200,
+        body: JSON.stringify({ code: 'STORE_001', message: 'not found', data: null }),
+      })),
+    'success envelope rejects unsupported top-level fields': () =>
+      throws(() => parseEnvelope({
+        status: 200,
+        body: JSON.stringify({ code: 'SUCCESS', message: 'ok', data: {}, debug: true }),
+      })),
     'expected 429 is separated from unexpected failures': () =>
       classifyStatus(429, [409, 429]) === 'expected_4xx',
     'unexpected 401 is classified separately': () =>

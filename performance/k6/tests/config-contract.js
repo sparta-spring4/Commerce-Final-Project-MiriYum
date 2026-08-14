@@ -66,8 +66,8 @@ export default function () {
         DURATION_SECONDS: '10',
         ARRIVAL_RATE: '1',
       })),
-    'local baseline retains prior local smoke evidence': () =>
-      loadConfig({
+    'local baseline rejects a smoke run ID without its artifact': () =>
+      throws(() => loadConfig({
         ...LOCAL_SMOKE_ENV,
         PROFILE: 'local-baseline',
         SCENARIOS: 'storeSearch',
@@ -75,7 +75,21 @@ export default function () {
         DURATION_SECONDS: '10',
         ARRIVAL_RATE: '1',
         LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
-      }).prerequisiteSmokeRunId === 'local-smoke-approved',
+      })),
+    'local baseline requires a JSON smoke proof artifact path': () => {
+      const baseline = loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'storeSearch',
+        MAX_VUS: '1',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '1',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
+        SMOKE_PROOF_PATH: '/results/local-smoke-approved.json',
+      })
+      return baseline.prerequisiteSmokeRunId === 'local-smoke-approved'
+        && baseline.smokeProofPath === '/results/local-smoke-approved.json'
+    },
     'staging requires an explicit approval gate': () =>
       throws(() => loadConfig({
         ...LOCAL_SMOKE_ENV,

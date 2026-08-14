@@ -5,7 +5,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 ## 안전 경계
 
 - `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
-- staging은 `STAGING_APPROVED=true`가 필요하고, baseline은 성공한 smoke의 `STAGING_SMOKE_RUN_ID`도 요구한다.
+- staging은 `STAGING_APPROVED=true`가 필요하다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·commit·fixture·threshold를 현재 실행과 대조한다.
 - staging host는 저장소의 신뢰 allowlist가 비어 있는 동안 fail-closed다. 실제 host는 별도 리뷰 변경으로 먼저 고정해야 한다.
 - `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
@@ -113,6 +113,7 @@ docker compose --env-file deploy/local/.env `
   -e ALLOWED_HOSTS=loadtest-proxy `
   -e PROFILE=local-baseline `
   -e LOCAL_SMOKE_RUN_ID=$localSmokeRunId `
+  -e SMOKE_PROOF_PATH=/results/$localSmokeRunId.json `
   -e SCENARIOS=storeSearch `
   -e MAX_VUS=2 `
   -e DURATION_SECONDS=30 `
@@ -125,6 +126,8 @@ docker compose --env-file deploy/local/.env `
 
 `SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이며 인증과 알림 iteration은 최대 두 요청을 보낸다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록한다.
 
+`SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, full commit SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·commit·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
+
 ## staging gate
 
 다음 값이 PR 또는 팀 기록에서 모두 확인되지 않으면 staging 요청을 보내지 않는다.
@@ -134,7 +137,7 @@ docker compose --env-file deploy/local/.env `
 3. 팀 공지·실행 시간·최대 VU·duration·arrival rate 승인
 4. 같은 SHA의 staging smoke 성공 `RUN_ID`
 
-staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`과 `STAGING_SMOKE_RUN_ID`를 전달한다. 현재 신뢰 staging host allowlist는 의도적으로 비어 있으므로 승인된 hostname을 저장소 변경으로 먼저 고정하기 전에는 실행되지 않는다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
+staging smoke에는 `TARGET_ENV=staging`, HTTPS `BASE_URL`, `STAGING_APPROVED=true`를 전달한다. baseline에는 추가로 `PROFILE=staging-baseline`, `STAGING_SMOKE_RUN_ID`, `SMOKE_PROOF_PATH=/results/{STAGING_SMOKE_RUN_ID}.json`을 전달한다. 현재 신뢰 staging host allowlist는 의도적으로 비어 있으므로 승인된 hostname을 저장소 변경으로 먼저 고정하기 전에는 실행되지 않는다. production hostname, 실사용자 계정 또는 운영 데이터는 어떤 값으로도 실행하지 않는다.
 
 ## 종료와 결과 취급
 

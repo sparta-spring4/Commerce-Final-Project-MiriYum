@@ -10,6 +10,12 @@ export const options = {
 
 const SUMMARY_INPUT = {
   metrics: {
+    'checks{phase:measured,scenario:notificationHistory}': {
+      type: 'rate',
+      contains: 'default',
+      values: { rate: 1, passes: 3, fails: 0 },
+      thresholds: { 'rate==1': { ok: true } },
+    },
     'http_req_duration{phase:measured,scenario:notificationHistory}': {
       type: 'trend',
       contains: 'time',
@@ -40,6 +46,9 @@ export default function () {
     runId: 'safe-run',
     prerequisiteSmokeRunId: 'local-smoke-approved',
     commitSha: '0123456789abcdef0123456789abcdef01234567',
+    scenarioNames: ['notificationHistory'],
+    targetFingerprint: 'a'.repeat(64),
+    fixtureSha256: 'b'.repeat(64),
     limits: { maxVus: 1, durationSeconds: 1, arrivalRate: 1 },
     forbiddenProbe: 'Bearer secret-token cursor-secret response-body',
   })
@@ -50,7 +59,12 @@ export default function () {
     'summary keeps approved run metadata': () =>
       parsed.runId === 'safe-run'
       && parsed.targetEnv === 'local'
-      && parsed.prerequisiteSmokeRunId === 'local-smoke-approved',
+      && parsed.prerequisiteSmokeRunId === 'local-smoke-approved'
+      && parsed.schemaVersion === 'miriyum-k6-summary-v1'
+      && parsed.thresholdsPassed === true
+      && parsed.targetFingerprint === 'a'.repeat(64)
+      && parsed.fixtureSha256 === 'b'.repeat(64)
+      && parsed.scenarioNames.join(',') === 'notificationHistory',
     'summary keeps measured scenario percentiles': () =>
       parsed.metrics.notificationHistory.httpReqDuration.p95 === 20.2,
     'summary discloses dropped configured arrivals': () =>

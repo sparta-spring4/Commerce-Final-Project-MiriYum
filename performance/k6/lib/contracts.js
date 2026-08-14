@@ -197,13 +197,21 @@ export function parseEnvelope(response) {
     throw new Error('response body must contain valid JSON')
   }
   requireObject(envelope, 'response envelope')
+  const envelopeKeys = Object.keys(envelope)
+  if (envelopeKeys.length !== 3
+      || envelopeKeys.some((field) => !['code', 'message', 'data'].includes(field))) {
+    throw new Error('response envelope contains an unsupported field')
+  }
   for (const field of ['code', 'message', 'data']) {
     if (!Object.prototype.hasOwnProperty.call(envelope, field)) {
       throw new Error(`response envelope must contain ${field}`)
     }
   }
-  if (typeof envelope.code !== 'string' || typeof envelope.message !== 'string') {
-    throw new Error('response envelope code and message must be strings')
+  if (envelope.code !== 'SUCCESS') {
+    throw new Error('response envelope code must be SUCCESS')
+  }
+  if (typeof envelope.message !== 'string' || envelope.message.length < 1) {
+    throw new Error('response envelope message must be a non-empty string')
   }
   return {
     code: envelope.code,

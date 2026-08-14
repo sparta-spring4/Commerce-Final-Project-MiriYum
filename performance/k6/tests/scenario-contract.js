@@ -49,6 +49,74 @@ function reservationConflictClient(code) {
   }
 }
 
+function validSearchData() {
+  return {
+    items: [{
+      storeId: '301',
+      name: 'Synthetic Store',
+      region: 'SEOUL',
+      address: 'Synthetic address 1',
+      storeCategoryCode: 'KOREAN_FOOD',
+      operationStatus: 'OPEN',
+      modes: {
+        reservationEnabled: true,
+        menuHoldEnabled: true,
+        pickupEnabled: false,
+      },
+      reservationAvailability: 'NOT_REQUESTED',
+      coordinates: null,
+      recommendationReason: null,
+    }],
+    normalizedCondition: {
+      regionCodes: ['SEOUL'],
+      storeCategoryCodes: [],
+      menuCategoryCodes: [],
+      tagCodes: [],
+      minimumPrice: null,
+      maximumPrice: null,
+      partySize: null,
+      reservationDate: null,
+      reservationTime: null,
+      remainingKeyword: '',
+    },
+    warnings: [],
+    ruleVersion: 'rules-v1',
+    vocabularyVersion: 'vocabulary-v1',
+    rankingRuleVersion: null,
+    nextCursor: null,
+  }
+}
+
+function validReservationData() {
+  return {
+    reservationId: '9001',
+    storeId: '301',
+    storeName: 'Synthetic Store',
+    serviceDate: '2026-08-20',
+    timeStatus: 'RESOLVED',
+    startAt: '2026-08-20T18:00:00+09:00',
+    serviceEndAt: '2026-08-20T19:00:00+09:00',
+    timeZoneId: 'Asia/Seoul',
+    party: { adultCount: 2, childCount: 0, infantCount: 0, totalCount: 2 },
+    status: 'CONFIRMED',
+    menuSelections: [],
+    createdAt: '2026-08-14T12:00:00+09:00',
+    cancelledBy: null,
+    cancellationReason: null,
+  }
+}
+
+function responseClient(status, data) {
+  return {
+    get() {
+      return { status, body: envelope(data), headers: {} }
+    },
+    post() {
+      return { status, body: envelope(data), headers: {} }
+    },
+  }
+}
+
 function rateLimitedAuthClient() {
   return {
     post() {
@@ -118,7 +186,7 @@ class RecordingClient {
     if (url.endsWith('/api/v1/consumers/me/reservations')) {
       return {
         status: 201,
-        body: envelope({ reservationId: '9001', storeId: '301', status: 'CONFIRMED' }),
+        body: envelope(validReservationData()),
         headers: {},
       }
     }
@@ -143,15 +211,7 @@ class RecordingClient {
     }
     return {
       status: 200,
-      body: envelope({
-        items: [],
-        normalizedCondition: {},
-        warnings: [],
-        ruleVersion: 'rules-v1',
-        vocabularyVersion: 'vocabulary-v1',
-        rankingRuleVersion: null,
-        nextCursor: null,
-      }),
+      body: envelope(validSearchData()),
       headers: {},
     }
   }
@@ -200,6 +260,10 @@ export default function () {
     client: reservationConflictClient('NOTIFICATION_002'),
     ...RESERVATION_INPUT,
   })
+  const duplicateReservationConflict = runReservationCreate({
+    client: reservationConflictClient('RESERVATION_004'),
+    ...RESERVATION_INPUT,
+  })
   const rateLimitedAuth = runAuthRefresh({
     client: rateLimitedAuthClient(),
     baseUrl: 'https://loadtest-proxy:8443',
@@ -240,6 +304,32 @@ export default function () {
       reservationResult.status === 201 && !combinedResult.includes('9001'),
     'approved capacity conflict is an expected 4xx': () =>
       capacityConflict.classification === 'expected_4xx',
+    'reservation duplicate conflict is not hidden as an expected baseline result': () =>
+      duplicateReservationConflict.classification === 'unexpected_4xx',
+    'store search rejects an empty normalized condition': () =>
+      throws(() => runStoreSearch({
+        client: responseClient(200, { ...validSearchData(), normalizedCondition: {} }),
+        baseUrl: 'http://backend:8080',
+        search: { input: 'synthetic' },
+      })),
+    'store search rejects an item that violates the OpenAPI shape': () => {
+      const invalidItem = { ...validSearchData().items[0] }
+      delete invalidItem.address
+      return throws(() => runStoreSearch({
+        client: responseClient(200, { ...validSearchData(), items: [invalidItem] }),
+        baseUrl: 'http://backend:8080',
+        search: { input: 'synthetic' },
+      }))
+    },
+    'reservation creation rejects a compact non-OpenAPI success response': () =>
+      throws(() => runReservationCreate({
+        client: responseClient(201, {
+          reservationId: '9001',
+          storeId: '301',
+          status: 'CONFIRMED',
+        }),
+        ...RESERVATION_INPUT,
+      })),
     'rate-limited login is classified but does not complete auth refresh': () =>
       rateLimitedAuth.classification === 'expected_4xx'
       && rateLimitedAuth.completed === false,

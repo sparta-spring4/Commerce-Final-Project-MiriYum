@@ -37,6 +37,14 @@ function requireCommitSha(rawValue) {
   return commitSha
 }
 
+function requireJsonPath(name, rawValue) {
+  const path = requireText(name, rawValue)
+  if (!path.endsWith('.json')) {
+    throw new Error(`${name} must reference a JSON file`)
+  }
+  return path
+}
+
 function parseAllowedHosts(rawValue) {
   const hosts = requireText('ALLOWED_HOSTS', rawValue)
     .split(',')
@@ -104,11 +112,11 @@ export function loadConfig(env) {
     : profile === 'staging-baseline'
       ? requireRunId(env.STAGING_SMOKE_RUN_ID)
       : null
+  const smokeProofPath = profile === 'smoke'
+    ? null
+    : requireJsonPath('SMOKE_PROOF_PATH', env.SMOKE_PROOF_PATH)
 
-  const fixturePath = requireText('FIXTURE_PATH', env.FIXTURE_PATH)
-  if (!fixturePath.endsWith('.json')) {
-    throw new Error('FIXTURE_PATH must reference a JSON file')
-  }
+  const fixturePath = requireJsonPath('FIXTURE_PATH', env.FIXTURE_PATH)
 
   const limits = loadLimits(profile, env)
   const scenarioNames = loadScenarioNames(env.SCENARIOS)
@@ -127,6 +135,7 @@ export function loadConfig(env) {
     fixturePath,
     runId: requireRunId(env.RUN_ID),
     prerequisiteSmokeRunId,
+    smokeProofPath,
     commitSha: requireCommitSha(env.COMMIT_SHA),
     limits,
     scenarioNames,

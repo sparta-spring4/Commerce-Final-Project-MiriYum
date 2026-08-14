@@ -49,17 +49,33 @@ function copyMetricValues(values, allowedValueNames) {
 function safeMetadata(metadata) {
   const limits = metadata.limits || {}
   return {
+    schemaVersion: 'miriyum-k6-summary-v1',
     targetEnv: metadata.targetEnv,
     profile: metadata.profile,
     runId: metadata.runId,
     prerequisiteSmokeRunId: metadata.prerequisiteSmokeRunId || null,
     commitSha: metadata.commitSha,
+    scenarioNames: Array.isArray(metadata.scenarioNames) ? [...metadata.scenarioNames] : [],
+    targetFingerprint: metadata.targetFingerprint,
+    fixtureSha256: metadata.fixtureSha256,
     limits: {
       maxVus: limits.maxVus,
       durationSeconds: limits.durationSeconds,
       arrivalRate: limits.arrivalRate,
     },
   }
+}
+
+function allThresholdsPassed(data) {
+  const results = []
+  const metrics = data && data.metrics ? data.metrics : {}
+  for (const metric of Object.values(metrics)) {
+    if (metric === null || typeof metric !== 'object') continue
+    const thresholds = metric.thresholds
+    if (thresholds === null || typeof thresholds !== 'object') continue
+    for (const result of Object.values(thresholds)) results.push(result)
+  }
+  return results.length > 0 && results.every((result) => result && result.ok === true)
 }
 
 function collectMetrics(data) {
@@ -105,6 +121,7 @@ function renderMarkdown(summary) {
 export function renderSafeSummary(data, metadata) {
   const summary = {
     ...safeMetadata(metadata),
+    thresholdsPassed: allThresholdsPassed(data),
     metrics: collectMetrics(data),
   }
   const json = `${JSON.stringify(summary, null, 2)}\n`

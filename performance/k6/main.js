@@ -4,6 +4,11 @@ import http from 'k6/http'
 
 import { loadConfig } from './config.js'
 import { validateAuthPoolCapacity, validateFixture } from './lib/contracts.js'
+import {
+  createFixtureFingerprint,
+  createTargetFingerprint,
+  validateSmokeProof,
+} from './lib/smoke-proof.js'
 import { renderSafeSummary } from './lib/summary.js'
 import { loginConsumer, runAuthRefresh } from './scenarios/auth-refresh.js'
 import { runNotificationHistory } from './scenarios/notification-history.js'
@@ -11,7 +16,20 @@ import { runReservationCreate } from './scenarios/reservation-create.js'
 import { runStoreSearch } from './scenarios/store-search.js'
 
 const config = loadConfig(__ENV)
-const fixture = validateFixture(JSON.parse(open(config.fixturePath)))
+const fixtureText = open(config.fixturePath)
+const fixture = validateFixture(JSON.parse(fixtureText))
+const targetFingerprint = createTargetFingerprint(config.targetEnv, config.baseUrl)
+const fixtureSha256 = createFixtureFingerprint(fixtureText)
+const prerequisiteSmokeProof = config.profile === 'smoke'
+  ? null
+  : validateSmokeProof(JSON.parse(open(config.smokeProofPath)), {
+    targetEnv: config.targetEnv,
+    baseUrl: config.baseUrl,
+    commitSha: config.commitSha,
+    fixtureText,
+    smokeRunId: config.prerequisiteSmokeRunId,
+    scenarioNames: config.scenarioNames,
+  })
 
 function allocate(total, index, count) {
   return Math.floor(total / count) + (index < total % count ? 1 : 0)
@@ -220,8 +238,11 @@ export function handleSummary(data) {
     targetEnv: config.targetEnv,
     profile: config.profile,
     runId: config.runId,
-    prerequisiteSmokeRunId: config.prerequisiteSmokeRunId,
+    prerequisiteSmokeRunId: prerequisiteSmokeProof === null ? null : prerequisiteSmokeProof.runId,
     commitSha: config.commitSha,
+    scenarioNames: config.scenarioNames,
+    targetFingerprint,
+    fixtureSha256,
     limits: config.limits,
   })
   return {
