@@ -220,6 +220,32 @@ class S3FileStorageAdapterTest {
     }
 
     @Test
+    @DisplayName("S3 어댑터는 suspended 버킷의 null 버전을 다른 요청의 객체로 삭제하지 않는다")
+    void doesNotDeleteByKeyWhenUploadVersionIsSuspendedNullVersion() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().versionId("null").build());
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength(6L)
+                        .contentType("image/jpeg")
+                        .checksumSHA256("LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+        FileStorageRequest request = new FileStorageRequest(
+                "public/store/10/menu-image/sample.jpg",
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> adapter.save(request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stored file size");
+
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
     @DisplayName("S3 어댑터는 객체 키로 삭제를 요청한다")
     void deletesObjectByKey() {
         S3Client s3Client = mock(S3Client.class);

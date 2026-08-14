@@ -77,7 +77,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
             );
         } catch (RuntimeException exception) {
             failure = exception;
-            if (uploaded && uploadedVersionId != null && !uploadedVersionId.isBlank()) {
+            if (uploaded && isCompensatableVersionId(uploadedVersionId)) {
                 deleteUploadedObject(request.objectKey(), uploadedVersionId, exception);
             }
             throw exception;
@@ -209,6 +209,10 @@ public class S3FileStorageAdapter implements FileStoragePort {
         } catch (RuntimeException cleanupException) {
             failure.addSuppressed(cleanupException);
         }
+    }
+
+    private boolean isCompensatableVersionId(String versionId) {
+        return versionId != null && !versionId.isBlank() && !"null".equals(versionId);
     }
 
     private void deleteTemporaryFile(Path temporaryFile, RuntimeException failure) {
