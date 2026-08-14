@@ -77,6 +77,7 @@ class JwtTokenProviderTest {
 
         assertThat(parsed.familyId()).isEqualTo("family-1");
         assertThat(parsed.tokenId()).isEqualTo("token-1");
+        assertThat(parsed.familyCreatedAt()).isEqualTo(Instant.parse("2026-07-29T00:00:00Z"));
     }
 
     @Test

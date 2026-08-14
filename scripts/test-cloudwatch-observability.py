@@ -168,6 +168,14 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.assertIn(metric, self.resource_script)
         self.assertIn("MiriYum refresh risk marker integrity failures", self.resource_script)
 
+    def test_refresh_token_absolute_lifetime_cap_is_observable(self):
+        self.assertIn(
+            "miriyum-staging-refresh-token-absolute-lifetime-cap-applied",
+            self.resource_script,
+        )
+        self.assertIn("RefreshTokenAbsoluteLifetimeCapApplied", self.resource_script)
+        self.assertIn("refresh_token_absolute_lifetime_cap_applied", self.resource_script)
+
     def test_resource_script_preserves_pending_count_field_reference_for_cloudwatch(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)

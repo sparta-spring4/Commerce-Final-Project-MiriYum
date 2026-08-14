@@ -107,6 +107,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
         assertThat(redisTemplate.<String, String>opsForHash()
                 .entries(RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId)))
                 .containsEntry("status", "REVOKED")
+                .containsEntry("familyCreatedAt", Long.toString(now.getEpochSecond()))
                 .containsEntry("currentTokenId", "token-2");
     }
 
@@ -143,6 +144,76 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, familyId));
         long expectedTtl = nextExpiresAt.getEpochSecond() - Instant.now().getEpochSecond();
         assertThat(actualTtl).isBetween(expectedTtl - 2, expectedTtl + 1);
+    }
+
+    @Test
+    @DisplayName("새 family는 최초 로그인 30일 뒤를 넘어 Refresh Token TTL을 연장하지 않는다")
+    void capsFamilyTtlAtAbsoluteLifetime() {
+        Instant now = Instant.now();
+        Instant familyCreatedAt = now.minusSeconds(2_592_000 - 60);
+        String familyId = "family-absolute-cap";
+        RefreshTokenState state = new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                "token-1",
+                RefreshTokenHash.sha256("refresh-token-1"),
+                familyCreatedAt,
+                now.plusSeconds(1_209_600),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+        create(state);
+
+        RefreshTokenRotationResult result = store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                "token-2",
+                RefreshTokenHash.sha256("refresh-token-2"),
+                now.plusSeconds(1),
+                familyCreatedAt.plusSeconds(2_592_000));
+
+        assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(redisTemplate.getExpire(RefreshTokenKey.forFamily(state.namespace(), state.familyId())))
+                .isBetween(57L, 61L);
+        assertThat(markerStore.findPendingEvents()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("배포 전 legacy family는 회전해도 기존 TTL을 연장하지 않는다")
+    void doesNotExtendLegacyFamilyTtlOnRotation() {
+        Instant now = Instant.now();
+        String familyId = "family-legacy";
+        RefreshTokenState state = new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                "token-1",
+                RefreshTokenHash.sha256("refresh-token-1"),
+                now.plusSeconds(60),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+        create(state);
+        String familyKey = RefreshTokenKey.forFamily(state.namespace(), state.familyId());
+        redisTemplate.opsForHash().delete(familyKey, "familyCreatedAt");
+        long initialTtl = redisTemplate.getExpire(familyKey);
+
+        RefreshTokenRotationResult result = store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                "token-2",
+                RefreshTokenHash.sha256("refresh-token-2"),
+                now.plusSeconds(1),
+                now.plusSeconds(1_209_600));
+
+        assertThat(result.status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(redisTemplate.getExpire(familyKey)).isLessThanOrEqualTo(initialTtl);
+        assertThat(markerStore.findPendingEvents()).isEmpty();
     }
 
     @Test
