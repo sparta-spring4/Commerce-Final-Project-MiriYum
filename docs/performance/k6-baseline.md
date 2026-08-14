@@ -171,9 +171,9 @@ Pop-Location
 - 알림 200 응답도 OpenAPI의 cursor, pageSize, PublicId, purpose, title, resource, action, offset date-time 계약을 모두 만족해야 하며 두 번째 페이지에 실제 항목이 없으면 실패한다.
 - k6의 전역 VU ID가 다중 시나리오에서 연속적이지 않을 수 있으므로 auth pool은 전체 `MAX_VUS` 이상을 요구해 modulo 계정 선택이 동시에 같은 계정을 가리키지 않게 한다.
 - 인증 login 또는 refresh가 429로 끝나면 분류 counter에는 남기되 완성된 인증 iteration으로 인정하지 않는다. constant-arrival-rate의 `dropped_iterations`도 0이 아니면 실행을 실패시키고 안전 summary에 남긴다.
-- backend 기본 IP rate limit에서는 단일 k6 컨테이너의 login 성공 표본이 최대 5회/600초로 제한된다. [#331](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/331)의 local-only 정책 결정 전까지 `authRefresh` 결과는 rate-limit 동작 확인용이며 처리량 기준선이나 #286의 p50/p95/p99 최적화 근거가 아니다.
-- 공개 매장 검색은 단일 k6 컨테이너의 source IP를 기준으로 60회/60초 제한을 공유한다. `2 iterations/s × 30초` 예시는 한 창의 60회를 모두 소비하므로 동일 조건 반복 실행은 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 한 실행에서 제한을 넘기거나 같은 창에서 반복해 429가 섞인 결과는 검색 처리량·p50/p95/p99 기준선 또는 #286 근거로 사용하지 않는다. 검색 제한의 local-only 정책도 #331에서 함께 결정한다.
-- `MAX_VUS`는 기본 CSRF 준비 제한 60회/60초의 경계 실패를 피하도록 50 이하로 제한한다. 이 상한을 높이려면 #331에서 Auth·배포 소유자가 local loadtest 전용 제한값과 실행 조건을 먼저 승인해야 한다.
+- backend 기본 IP rate limit은 login 5회/600초, refresh 30회/60초다. local loadtest override는 하네스 최대 입력을 수용하도록 각각 `600,000회/600초`, `60,000회/60초`를 backend에만 주입한다. 이 조건의 결과는 순수 인증 지연시간·처리량 기준선이며 기본 보호 동작 검증이 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 근거로 사용하지 않는다.
+- 공개 매장 검색의 기본 한도는 source IP 기준 60회/60초이고 local loadtest override는 `60,000회/60초`를 주입한다. override가 없는 환경에서 `2 iterations/s × 30초`를 반복하려면 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량·p50/p95/p99 기준선 또는 #286 근거로 사용하지 않는다.
+- CSRF 준비 제한은 local loadtest override에 복제하지 않고 backend 기본 예산 60회/60초를 상속한다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택한 baseline은 이 예산 아래의 50으로 제한한다. 예약·알림처럼 auth refresh를 선택하지 않은 시나리오는 CSRF 예산 때문에 50으로 제한하지 않는다.
 - 성공한 인증 login은 refresh 결과와 관계없이 같은 cookie jar에서 CSRF 토큰을 준비한 뒤 현재 session을 logout한다. CSRF 토큰과 쿠키는 client별로 재사용해 IP당 준비 요청 제한을 iteration 수만큼 소비하지 않는다. setup의 Reservation·Notification bearer 준비 로그인도 Access Token을 반환하기 전에 Refresh Token family를 회수한다. CSRF·logout 요청은 `phase=cleanup`이라 성능 threshold와 summary에서 제외되며, cleanup 실패는 실행 실패다. 정상 종료에서는 k6가 만든 Valkey family가 남지 않는다. 강제 중단으로 cleanup이 실행되지 못하면 합성 계정 전체 로그인 종료 또는 환경 소유자가 승인한 Valkey 정리 절차로 잔존 family를 회수한 뒤 다음 실행을 허용한다.
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
