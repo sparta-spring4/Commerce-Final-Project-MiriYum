@@ -1,0 +1,47 @@
+name: k6 Contract
+
+on:
+  pull_request:
+    branches: [dev, mvp2, main]
+    paths:
+      - 'performance/k6/**'
+      - '.github/workflows/k6-contract.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'performance/k6/**'
+      - '.github/workflows/k6-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k6-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: k6-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run isolated k6 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            config-contract.js
+            contracts-contract.js
+            scenario-contract.js
+            smoke-proof-contract.js
+            summary-contract.js
+          )
+          for test in "${tests[@]}"; do
+            docker run --rm \
+              -v "$PWD/performance/k6:/scripts:ro" \
+              grafana/k6:2.1.0 \
+              run "/scripts/tests/$test"
+          done
