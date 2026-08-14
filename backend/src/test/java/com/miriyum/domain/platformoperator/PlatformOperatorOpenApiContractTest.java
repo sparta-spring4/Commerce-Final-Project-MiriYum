@@ -18,18 +18,23 @@ import org.yaml.snakeyaml.Yaml;
 
 class PlatformOperatorOpenApiContractTest {
     private static final Path SPECS = Path.of("..", "docs", "specs");
-    private static final Set<String> EXPECTED_PATHS = Set.of(
+    private static final Set<String> AUTH_PATHS = Set.of(
             "/api/v1/platform-operators/auth/sessions",
             "/api/v1/platform-operators/auth/token-refreshes",
             "/api/v1/platform-operators/auth/csrf-tokens/current",
             "/api/v1/platform-operators/auth/sessions/current",
             "/api/v1/platform-operators/auth/initial-password");
+    private static final String REAUTHENTICATION_PATH =
+            "/api/v1/platform-operators/reauthentication-approvals";
+    private static final Set<String> EXPECTED_AUDIENCE_PATHS = java.util.stream.Stream
+            .concat(AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     @Test
     void platformAudienceHasOnlyTheFiveApprovedOperationsAndNoSignup() throws Exception {
         Map<String, Object> feature = document("platform-operator-auth/openapi.yaml");
         Map<String, Object> paths = map(feature.get("paths"));
-        assertThat(paths.keySet()).containsExactlyInAnyOrderElementsOf(EXPECTED_PATHS);
+        assertThat(paths.keySet()).containsExactlyInAnyOrderElementsOf(AUTH_PATHS);
         assertThat(paths).doesNotContainKey("/api/v1/platform-operators/auth/accounts");
         assertThat(map(map(map(feature.get("components")).get("schemas"))
                 .get("PlatformOperatorTokenData")))
@@ -45,13 +50,17 @@ class PlatformOperatorOpenApiContractTest {
     @Test
     void audienceEntrypointUsesResolvingSingleRefsAndMvpAggregateExcludesIt() throws Exception {
         Map<String, Object> audiencePaths = map(document("platform-operator-openapi.yaml").get("paths"));
-        assertThat(audiencePaths.keySet()).containsExactlyInAnyOrderElementsOf(EXPECTED_PATHS);
+        assertThat(audiencePaths.keySet()).containsExactlyInAnyOrderElementsOf(EXPECTED_AUDIENCE_PATHS);
         assertThat(audiencePaths.values()).allSatisfy(value -> assertThat(map(value)).containsOnlyKeys("$ref"));
-        assertThat(map(document("mvp1-openapi.yaml").get("paths")).keySet()).doesNotContainAnyElementsOf(EXPECTED_PATHS);
+        assertThat(map(document("mvp1-openapi.yaml").get("paths")).keySet())
+                .doesNotContainAnyElementsOf(EXPECTED_AUDIENCE_PATHS);
         for (var entry : audiencePaths.entrySet()) {
             String ref = (String) map(entry.getValue()).get("$ref");
-            assertThat(ref).startsWith("./platform-operator-auth/openapi.yaml#/paths/");
-            assertThat(map(document("platform-operator-auth/openapi.yaml").get("paths"))).containsKey(entry.getKey());
+            String feature = entry.getKey().equals(REAUTHENTICATION_PATH)
+                    ? "platform-operator-authorization"
+                    : "platform-operator-auth";
+            assertThat(ref).startsWith("./" + feature + "/openapi.yaml#/paths/");
+            assertThat(map(document(feature + "/openapi.yaml").get("paths"))).containsKey(entry.getKey());
         }
     }
 

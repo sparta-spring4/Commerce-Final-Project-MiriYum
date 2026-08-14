@@ -1,0 +1,182 @@
+package com.miriyum.domain.platformoperator.service;
+
+import com.miriyum.domain.auth.exception.AuthErrorCode;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.logindelay.LoginAttempt;
+import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
+import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
+import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
+import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
+import com.miriyum.domain.platformoperator.entity.PlatformOperatorReauthenticationApproval;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPasswordState;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventOutcome;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuthEventType;
+import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
+import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
+import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/** 현재 비밀번호를 확인해 현재 세션과 명령에 결속된 5분 일회 승인을 발급한다. */
+@Service
+@ConditionalOnProperty(prefix = "miriyum.platform-operator", name = "enabled", havingValue = "true")
+public class ReauthenticationService {
+    private static final Duration APPROVAL_TTL = Duration.ofMinutes(5);
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private final PlatformOperatorAccountRepository accounts;
+    private final PlatformOperatorReauthenticationApprovalRepository approvals;
+    private final PasswordEncoder passwordEncoder;
+    private final PasswordPolicy passwordPolicy;
+    private final LoginDelayGuard delayGuard;
+    private final PlatformOperatorAuthEventRecorder events;
+    private final Clock clock;
+    private final byte[] fingerprintKey;
+
+    public ReauthenticationService(
+            PlatformOperatorAccountRepository accounts,
+            PlatformOperatorReauthenticationApprovalRepository approvals,
+            PasswordEncoder passwordEncoder,
+            PasswordPolicy passwordPolicy,
+            LoginDelayGuard delayGuard,
+            PlatformOperatorAuthEventRecorder events,
+            Clock clock,
+            @Value("${miriyum.platform-operator.reauthentication-fingerprint-secret}") String fingerprintSecret
+    ) {
+        this.accounts = accounts;
+        this.approvals = approvals;
+        this.passwordEncoder = passwordEncoder;
+        this.passwordPolicy = passwordPolicy;
+        this.delayGuard = delayGuard;
+        this.events = events;
+        this.clock = clock;
+        if (fingerprintSecret == null || fingerprintSecret.length() < 32) {
+            throw new IllegalArgumentException("reauthentication fingerprint secret must contain at least 32 characters");
+        }
+        this.fingerprintKey = fingerprintSecret.getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Transactional
+    public ReauthenticationApprovalResult issue(
+            PlatformOperatorPrincipal principal,
+            ReauthenticationApprovalRequest request
+    ) {
+        PlatformOperatorAccount account;
+        try {
+            account = accounts.findById(principal.accountId())
+                    .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
+                    .filter(candidate -> candidate.getPasswordState() == PlatformOperatorPasswordState.ACTIVE)
+                    .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        if (account.getAuthorityVersion() != principal.authorityVersion()
+                || account.getSessionVersion() != principal.sessionVersion()) {
+            throw new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
+        }
+        verifyCurrentPassword(account, request.currentPassword());
+
+        String plaintext = newApproval();
+        Instant issuedAt = clock.instant();
+        Instant expiresAt = issuedAt.plus(APPROVAL_TTL);
+        try {
+            approvals.saveAndFlush(PlatformOperatorReauthenticationApproval.issue(
+                    sha256(plaintext),
+                    principal.accountId(),
+                    request.purpose(),
+                    request.targetType(),
+                    request.targetId(),
+                    sessionFingerprint(principal.sessionId()),
+                    principal.authorityVersion(),
+                    issuedAt,
+                    expiresAt));
+        } catch (DataAccessException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        events.record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.SUCCESS);
+        return new ReauthenticationApprovalResult(plaintext, expiresAt);
+    }
+
+    private void verifyCurrentPassword(PlatformOperatorAccount account, String currentPassword) {
+        LoginAttempt attempt = delayGuard.tryAcquireAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId());
+        if (attempt.status() != LoginAttempt.Status.ACQUIRED) {
+            rejectAndAudit(account);
+        }
+        boolean completed = false;
+        try {
+            boolean passwordMatches = matches(passwordPolicy.toNfc(currentPassword), account.getPasswordHash());
+            completed = true;
+            boolean attemptCompleted = delayGuard.completeAttempt(
+                    TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt, passwordMatches);
+            if (!attemptCompleted || !passwordMatches) {
+                rejectAndAudit(account);
+            }
+        } finally {
+            if (!completed) {
+                delayGuard.releaseAttempt(TokenNamespace.PLATFORM_OPERATOR, account.getId(), attempt);
+            }
+        }
+    }
+
+    private void rejectAndAudit(PlatformOperatorAccount account) {
+        events.record(account, PlatformOperatorAuthEventType.REAUTHENTICATION,
+                PlatformOperatorAuthEventOutcome.FAILURE);
+        throw new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED);
+    }
+
+    String sessionFingerprint(String sessionId) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(fingerprintKey, "HmacSHA256"));
+            return hex(mac.doFinal(("platform-operator-reauth-session:" + sessionId)
+                    .getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("session fingerprint algorithm unavailable", exception);
+        }
+    }
+
+    static String sha256(String value) {
+        try {
+            return hex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private static String newApproval() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private boolean matches(String raw, String encoded) {
+        try {
+            return passwordEncoder.matches(raw, encoded);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private static String hex(byte[] bytes) {
+        return java.util.HexFormat.of().formatHex(bytes);
+    }
+}

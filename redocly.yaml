@@ -7,6 +7,8 @@ apis:
       no-unused-components: off
   platform-operator:
     root: docs/specs/platform-operator-openapi.yaml
+  platform-operator-authorization:
+    root: docs/specs/platform-operator-authorization/openapi.yaml
 extends:
   - recommended-strict
 telemetry: off
