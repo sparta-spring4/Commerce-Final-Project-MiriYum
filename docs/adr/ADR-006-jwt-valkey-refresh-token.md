@@ -100,8 +100,23 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 
 ## 2026-08-13 날짜별 개정
 
+### 절대 세션 수명 변경 검토
+
+- **상태: 변경 검토.** 기존 sliding 만료 결정을 재검토 중이며, 팀 합의 전까지 프로덕션 코드의 만료 계산은 변경하지 않는다.
+- Access JWT 15분과 Refresh JWT 최대 14일은 유지한다. Refresh Token 회전 시에는 sliding 만료를 적용하되, 새 Refresh JWT와 Valkey family TTL을 `min(회전 시각 + 14일, 최초 로그인 시각 + 30일)`까지만 연장하는 방안을 제안한다.
+- 절대 상한은 최초 로그인부터 30일 뒤의 **새 Access·Refresh 발급 권한**의 상한이다. 상한 직전 회전에서 이미 발급된 stateless Access JWT는 중앙에서 즉시 폐기하지 않으므로 최대 15분 동안 더 통과할 수 있다. 상한 이후에는 새 Access·Refresh를 발급하지 않고 기존 `AUTH_008`로 재로그인을 요구한다.
+- 절대 상한 뒤에 별도 tombstone 또는 전용 종료 상태를 보관하지 않는다. Refresh JWT와 Valkey family TTL의 만료 시각은 정확히 일치할 필요가 없다. Refresh JWT가 먼저 만료되면 JWT 검증이, family TTL이 먼저 만료되면 family 부재 결과가 각각 기존 `AUTH_008`로 종료하므로, 어느 순서에서도 정상적인 상한 만료·후속 재시도는 재사용 위험 사건을 만들지 않는다.
+- 새 만료 시각이 최초 로그인 + 30일에 의해 잘리는 회전은 민감 식별자 없는 `상한 적용 회전 수` 구조화 로그와 지표로 관측한다. 이 값은 30일 만료에 실제로 도달했거나 재로그인한 세션 수가 아니라, 절대 상한 계산이 적용된 회전 수다. 정책 적용 경로만 확인하며, 만료된 JWT를 다시 파싱하거나 상태를 되살려 종료 원인을 별도 집계하지 않는다.
+- 배포 전에 생성되어 `familyCreatedAt`이 없는 legacy family는 backfill하지 않는다. 첫 회전에도 기존 family의 남은 만료 시각을 유지하고 만료를 다시 연장하지 않아, legacy family의 sliding 만료는 배포 직후부터 중지된다. 사용자는 갱신해도 기존 만료 시각에 재로그인해야 하며, 배포 시점의 잔여 수명에 따라 즉시 또는 최대 14일 안에 자연 종료된다. 이후 새 로그인으로 생성된 family에만 30일 절대 상한이 적용된다.
+- 구현 통합 테스트에는 `familyCreatedAt`이 없는 legacy family의 회전이 기존 만료 시각을 넘기지 않는 경계값, 새 Refresh 만료가 30일 상한으로 잘리는 경계값, 상한 적용 관측, 만료 Refresh JWT의 `AUTH_008`과 위험 사건 미생성을 포함한다.
+
+완전 sliding 만료는 사용자가 14일 안에 한 번만 갱신해도 세션이 끝나지 않는 장점이 있지만, 탈취되거나 잊힌 로그인 상태가 무기한 남을 수 있다. 반대로 고정 14일 만료는 구현이 단순하지만 정상 사용자가 갱신해도 정확히 14일 뒤 재로그인해야 한다. 이번에는 두 방식의 장단점을 함께 고려해 sliding 14일과 절대 30일 상한을 결합한다.
+
 ### 위험 사건 marker 인덱스와 Valkey Cluster 경계
 
 - Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
 - Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
 - pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 매 전진 배포마다 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 멱등하게 이관한다. 구버전 롤백 중 생성된 marker도 다음 전진 배포에서 다시 등록되며, `SADD`는 이미 등록된 marker를 중복 생성하지 않는다. 후속 전달 경로는 Set만 조회해 평상시 전 keyspace `SCAN`을 사용하지 않는다.
+- 전달 작업은 `SSCAN` 커서를 이어서 읽고 한 주기에 marker 100개까지만 처리한다. 한 페이지의 남은 marker는 다음 주기에 먼저 처리해 특정 marker만 반복 조회하지 않는다. marker가 비어 보이면 Lua에서 marker 부재 확인과 `SREM`을 함께 수행하므로, 같은 키의 marker가 전달 중 다시 생성되어도 새 인덱스 연결을 삭제하지 않는다.
+- pending Set의 현재 크기는 민감 식별자 없이 `RefreshTokenRiskEventPendingCount` 지표로 관측한다. 이 값은 전달 가능한 이벤트 수가 아니라 stale member를 포함한 인덱스 멤버 수이며, 지속적으로 증가하면 전달 정체 알람과 함께 원인을 점검한다.
+- 필수 필드가 없거나 숫자 형식이 손상된 pending marker는 인덱스와 함께 제거하고 제한 로그만 남긴다. 손상 marker 하나가 정상 marker 전달을 반복적으로 막지 않게 하며, 계정·family·토큰 식별자는 로그에 넣지 않는다.

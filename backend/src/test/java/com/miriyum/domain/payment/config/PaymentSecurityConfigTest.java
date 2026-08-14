@@ -45,12 +45,12 @@ class PaymentSecurityConfigTest {
     @Test
     @DisplayName("Payment 기능을 끄면 Consumer와 Webhook HTTP 경로를 등록하지 않는다")
     void doesNotExposePaymentEndpointsWhenDisabled() throws Exception {
-        mockMvc.perform(get("/api/v1/consumers/payments"))
+        mockMvc.perform(get("/api/v1/consumers/me/payments"))
                 .andExpect(status().isNotFound());
-        mockMvc.perform(get("/api/v1/consumers/payments/900000000000000001"))
+        mockMvc.perform(get("/api/v1/consumers/me/payments/900000000000000001"))
                 .andExpect(status().isNotFound());
         mockMvc.perform(post(
-                        "/api/v1/consumers/payments/900000000000000001/confirmations")
+                        "/api/v1/consumers/me/payments/900000000000000001/confirmations")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"portOnePaymentId":"payment-reservation-900000000000000001"}

@@ -124,9 +124,9 @@ ID 단독 조회 뒤 소유권을 다시 조회하지 않는다. `paymentId + co
 
 | 사용자 목적 | API | 인증·멱등 |
 | --- | --- | --- |
-| 결제 확정 요청 | `POST /api/v1/consumers/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
-| 본인 결제 상세 | `GET /api/v1/consumers/payments/{paymentId}` | Consumer Access JWT |
-| 본인 결제·환불 이력 | `GET /api/v1/consumers/payments` | Consumer Access JWT, cursor pagination |
+| 결제 확정 요청 | `POST /api/v1/consumers/me/payments/{paymentId}/confirmations` | Consumer Access JWT, `Idempotency-Key` 필수 |
+| 본인 결제 상세 | `GET /api/v1/consumers/me/payments/{paymentId}` | Consumer Access JWT |
+| 본인 결제·환불 이력 | `GET /api/v1/consumers/me/payments` | Consumer Access JWT, cursor pagination |
 | PortOne Webhook | `POST /api/v1/payments/webhooks/portone` | Access JWT 없음, Webhook signature·원문 body 검증 |
 
 확정 요청 본문은 `portOnePaymentId` 외의 상태·금액·통화·`transactionId`를 받지 않는다. 확정 동기 조회가 최종 결론을 내리지 못하면 HTTP 202와 `RECONCILIATION_REQUIRED` 상태를 반환하며 완료로 표시하지 않는다.

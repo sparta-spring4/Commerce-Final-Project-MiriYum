@@ -28,11 +28,11 @@ class MenuOpenApiContractTest {
         assertThat(map(paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}")))
                 .containsKeys("get", "put");
         assertThat(paths).containsKeys(
-                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication",
-                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications",
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations",
                 "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/visibility",
                 "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/selling-status",
-                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement");
+                "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirements");
 
         Map<String, Object> components = map(document.get("components"));
         Map<String, Object> schemas = map(components.get("schemas"));

@@ -30,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** 인증된 소비자의 결제 확정과 본인 결제·환불 조회 HTTP 경계다. */
 @Validated
 @RestController
-@RequestMapping("/api/v1/consumers/payments")
+@RequestMapping("/api/v1/consumers/me/payments")
 @ConditionalOnProperty(name = "miriyum.payment.enabled", havingValue = "true")
 public class PaymentController {
 

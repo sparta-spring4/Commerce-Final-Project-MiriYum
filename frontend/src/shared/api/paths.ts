@@ -1,5 +1,6 @@
 import type { paths as AuthAccountPaths } from './generated/auth-account'
 import type { paths as MenuHoldPickupPaths } from './generated/menu-hold-pickup'
+import type { paths as NotificationPaths } from './generated/notification'
 import type { paths as ReservationPaths } from './generated/reservation'
 import type { paths as StoreSearchPaths } from './generated/store-search'
 
@@ -22,14 +23,19 @@ export type NoPathOverlap =
   | AssertNoOverlap<Overlap<AuthAccountPaths, StoreSearchPaths>>
   | AssertNoOverlap<Overlap<AuthAccountPaths, ReservationPaths>>
   | AssertNoOverlap<Overlap<AuthAccountPaths, MenuHoldPickupPaths>>
+  | AssertNoOverlap<Overlap<AuthAccountPaths, NotificationPaths>>
   | AssertNoOverlap<Overlap<StoreSearchPaths, ReservationPaths>>
   | AssertNoOverlap<Overlap<StoreSearchPaths, MenuHoldPickupPaths>>
+  | AssertNoOverlap<Overlap<StoreSearchPaths, NotificationPaths>>
   | AssertNoOverlap<Overlap<ReservationPaths, MenuHoldPickupPaths>>
+  | AssertNoOverlap<Overlap<ReservationPaths, NotificationPaths>>
+  | AssertNoOverlap<Overlap<MenuHoldPickupPaths, NotificationPaths>>
 
 export type ApiPaths = AuthAccountPaths &
   StoreSearchPaths &
   ReservationPaths &
-  MenuHoldPickupPaths
+  MenuHoldPickupPaths &
+  NotificationPaths
 
 /** OpenAPI에 존재하는 경로만 허용한다. */
 export type ApiPath = keyof ApiPaths & string

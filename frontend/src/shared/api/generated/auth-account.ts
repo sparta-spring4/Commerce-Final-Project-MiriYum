@@ -223,8 +223,11 @@ export interface components {
       accessToken?: string;
       /** @constant */
       tokenType?: "Bearer";
-      /** @constant */
-      expiresIn?: 3600;
+      /**
+       * @description Access JWT 수명(초)
+       * @constant
+       */
+      expiresIn?: 900;
       /** @description SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓 */
       signUpTicket?: string;
     };

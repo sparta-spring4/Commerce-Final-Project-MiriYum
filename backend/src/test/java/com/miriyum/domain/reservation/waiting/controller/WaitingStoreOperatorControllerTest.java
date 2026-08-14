@@ -118,7 +118,7 @@ class WaitingStoreOperatorControllerTest {
                 "91", "22", WaitingClosureJobStatus.PROCESSING, 3, 1, 0, 0,
                 Instant.parse("2026-08-12T08:00:00Z"), null));
 
-        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-close-jobs/91")
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-closure-jobs/91")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.jobId").value("91"))
@@ -134,7 +134,7 @@ class WaitingStoreOperatorControllerTest {
         authenticateStoreOperator();
         given(closureService.getClosureJob(33L, 22L, 91L))
                 .willThrow(new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
-        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-close-jobs/91")
+        mockMvc.perform(get("/api/v1/store-operators/stores/22/waiting-closure-jobs/91")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("WAITING_004"));
@@ -142,7 +142,7 @@ class WaitingStoreOperatorControllerTest {
 
     @Test
     void closureJobRouteRejectsMissingWrongTokenAndUnsupportedMethod() throws Exception {
-        String route = "/api/v1/store-operators/stores/22/waiting-close-jobs/91";
+        String route = "/api/v1/store-operators/stores/22/waiting-closure-jobs/91";
         mockMvc.perform(get(route)).andExpect(status().isUnauthorized());
         given(jwtTokenProvider.parseAccessToken("consumer-token"))
                 .willReturn(new ParsedToken(TokenNamespace.CONSUMER, 33L));
@@ -168,7 +168,7 @@ class WaitingStoreOperatorControllerTest {
         given(commandFacade.cancel(eq(33L), eq(22L), eq(77L), any(), any()))
                 .willReturn(new WaitingCommandResult(200, snapshot()));
 
-        for (String action : List.of("call", "arrive", "check-in", "cancel")) {
+        for (String action : List.of("calls", "arrivals", "check-ins", "cancellations")) {
             mockMvc.perform(post(DETAIL + "/" + action)
                             .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                             .header("Idempotency-Key", KEY)
@@ -199,13 +199,13 @@ class WaitingStoreOperatorControllerTest {
     @DisplayName("누락 또는 잘못된 멱등 키는 업무 Service 진입 전에 거절한다")
     void rejectsMissingAndMalformedIdempotencyKey() throws Exception {
         authenticateStoreOperator();
-        mockMvc.perform(post(DETAIL + "/call")
+        mockMvc.perform(post(DETAIL + "/calls")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedVersion\":0}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_003"));
-        mockMvc.perform(post(DETAIL + "/call")
+        mockMvc.perform(post(DETAIL + "/calls")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", "not-a-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -220,7 +220,7 @@ class WaitingStoreOperatorControllerTest {
     void rejectsInvalidExpectedVersion() throws Exception {
         authenticateStoreOperator();
         for (String body : List.of("{}", "{\"expectedVersion\":-1}")) {
-            mockMvc.perform(post(DETAIL + "/cancel")
+            mockMvc.perform(post(DETAIL + "/cancellations")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                             .header("Idempotency-Key", KEY)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -267,7 +267,7 @@ class WaitingStoreOperatorControllerTest {
         given(commandFacade.call(eq(33L), eq(22L), eq(77L), any(), any()))
                 .willThrow(new ServiceException(errorCode));
 
-        mockMvc.perform(post(DETAIL + "/call")
+        mockMvc.perform(post(DETAIL + "/calls")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", KEY)
                         .contentType(MediaType.APPLICATION_JSON)

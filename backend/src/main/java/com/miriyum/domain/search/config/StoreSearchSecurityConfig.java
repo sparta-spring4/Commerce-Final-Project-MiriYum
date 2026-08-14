@@ -51,7 +51,7 @@ public class StoreSearchSecurityConfig {
                                 "/api/v1/stores/{storeId}/menu-hold-availability")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,
-                                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search")
+                                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches")
                         .permitAll()
                         .anyRequest().denyAll())
                 .addFilterBefore(

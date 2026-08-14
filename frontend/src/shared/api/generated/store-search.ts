@@ -20,7 +20,7 @@ export interface paths {
     /** 매장 공개 메뉴 조회 */
     get: operations["getStoreMenus"];
   };
-  "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search": {
+  "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches": {
     /** 품절 메뉴 대안 검색 */
     post: operations["searchMenuAlternatives"];
   };
@@ -50,11 +50,11 @@ export interface paths {
     /** 주간 영업시간 전체 초안 저장 */
     put: operations["createOperatingHoursDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publications": {
     /** 영업시간 초안 즉시 또는 예약 게시 */
     post: operations["publishOperatingHoursDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellations": {
     /** 영업시간 예약 게시 취소 */
     post: operations["cancelOperatingHoursPublication"];
   };
@@ -62,11 +62,11 @@ export interface paths {
     /** 주간 예약 접수 시간대 전체 초안 저장 */
     put: operations["createReservationTimeSlotsDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publications": {
     /** 예약 접수 시간대 초안 즉시 또는 예약 게시 */
     post: operations["publishReservationTimeSlotsDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellations": {
     /** 예약 접수 시간대 예약 게시 취소 */
     post: operations["cancelReservationTimeSlotsPublication"];
   };
@@ -74,11 +74,11 @@ export interface paths {
     /** 정기 휴무 전체 초안 저장 */
     put: operations["createRegularClosureDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publications": {
     /** 정기 휴무 초안 즉시 또는 예약 게시 */
     post: operations["publishRegularClosureDraft"];
   };
-  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellations": {
     /** 정기 휴무 예약 게시 취소 */
     post: operations["cancelRegularClosurePublication"];
   };
@@ -90,7 +90,7 @@ export interface paths {
     /** 임시 휴무 종료 시각 변경 */
     put: operations["changeTemporaryClosureEndAt"];
   };
-  "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellations": {
     /** 임시 휴무 취소 */
     post: operations["cancelTemporaryClosure"];
   };
@@ -106,11 +106,11 @@ export interface paths {
     /** 메뉴 내용을 수정해 새 초안 등록 */
     put: operations["updateMenu"];
   };
-  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications": {
     /** 메뉴 초안 즉시 게시 또는 예약 게시 */
     post: operations["publishMenu"];
   };
-  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations": {
     /**
      * 메뉴 예약 게시 취소
      * @description 예약 이후 생성한 활성 초안이 이미 있으면 최신 초안을 보존하기 위해 STORE_010 충돌로 거부한다.
@@ -128,7 +128,7 @@ export interface paths {
      */
     patch: operations["changeMenuSellingStatus"];
   };
-  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirements": {
     /** 메뉴 운영 종료 */
     post: operations["retireMenu"];
   };
@@ -881,15 +881,17 @@ export interface external {
   };
   "../reservation/openapi.yaml": {
     paths: {
-      "/api/v1/consumers/reservations": {
+      "/api/v1/consumers/me/reservations": {
+        /** 내 예약 이력 조회 */
+        get: operations["getCurrentConsumerReservations"];
         /** 일반 예약과 선택 메뉴 홀드 생성 */
         post: operations["createReservation"];
       };
-      "/api/v1/consumers/reservations/{reservationId}": {
+      "/api/v1/consumers/me/reservations/{reservationId}": {
         /** 본인 예약 상세 조회 */
         get: operations["getReservation"];
       };
-      "/api/v1/consumers/reservations/{reservationId}/cancellations": {
+      "/api/v1/consumers/me/reservations/{reservationId}/cancellations": {
         /** 본인 예약 취소 */
         post: operations["cancelReservationByConsumer"];
       };
@@ -917,17 +919,13 @@ export interface external {
         /** 매장별 예약 시간 정책 초안 저장 */
         put: operations["createReservationTimePolicyDraft"];
       };
-      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publications": {
         /** 예약 시간 정책 초안 즉시 또는 예약 게시 */
         post: operations["publishReservationTimePolicyDraft"];
       };
-      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation": {
+      "/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations": {
         /** 예약 시간 정책 예약 게시 철회 */
         post: operations["cancelReservationTimePolicyPublication"];
-      };
-      "/api/v1/consumers/me/reservations": {
-        /** 내 예약 내역 조회 */
-        get: operations["getCurrentConsumerReservations"];
       };
     };
     webhooks: Record<string, never>;
@@ -2108,6 +2106,29 @@ export interface operations {
       409: components["responses"]["RepresentativeMenuConflict"];
     };
   };
+  /** 내 예약 이력 조회 */
+  getCurrentConsumerReservations: {
+    parameters: {
+      query?: {
+        status?: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationHistoryStatus"];
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 예약 이력 정렬. 아래 허용값 이외에는 400을 반환한다. */
+        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
+      };
+    };
+    responses: {
+      /** @description 본인 예약 이력 페이지 */
+      200: {
+        content: {
+          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationHistoryPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../reservation/openapi.yaml"]["components"]["responses"]["AccountRestricted"];
+    };
+  };
   /** 일반 예약과 선택 메뉴 홀드 생성 */
   createReservation: {
     parameters: {
@@ -2409,29 +2430,6 @@ export interface operations {
       403: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreAccessDenied"];
       404: external["../reservation/openapi.yaml"]["components"]["responses"]["StoreNotFound"];
       409: external["../reservation/openapi.yaml"]["components"]["responses"]["ReservationTimePolicyConflict"];
-    };
-  };
-  /** 내 예약 내역 조회 */
-  getCurrentConsumerReservations: {
-    parameters: {
-      query?: {
-        status?: external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationHistoryStatus"];
-        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
-        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
-        /** @description 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다. */
-        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
-      };
-    };
-    responses: {
-      /** @description 본인 예약 내역 페이지 */
-      200: {
-        content: {
-          "application/json": external["../reservation/openapi.yaml"]["components"]["schemas"]["ReservationHistoryPageSuccessResponse"];
-        };
-      };
-      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
-      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
-      403: external["../reservation/openapi.yaml"]["components"]["responses"]["AccountRestricted"];
     };
   };
 }

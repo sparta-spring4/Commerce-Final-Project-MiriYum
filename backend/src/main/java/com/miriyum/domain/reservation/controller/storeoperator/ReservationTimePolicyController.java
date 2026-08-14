@@ -46,7 +46,7 @@ public class ReservationTimePolicyController {
         return response(result, "예약 시간 정책 초안이 저장되었습니다.");
     }
 
-    @PostMapping("/{version}/publication")
+    @PostMapping("/{version}/publications")
     public ResponseEntity<ApiResponse<ReservationTimePolicyResponse>> publish(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,
@@ -65,7 +65,7 @@ public class ReservationTimePolicyController {
         return response(result, "예약 시간 정책 게시 요청이 처리되었습니다.");
     }
 
-    @PostMapping("/{version}/publication-cancellation")
+    @PostMapping("/{version}/publication-cancellations")
     public ResponseEntity<ApiResponse<ReservationTimePolicyResponse>> cancelPublication(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable @Positive long storeId,

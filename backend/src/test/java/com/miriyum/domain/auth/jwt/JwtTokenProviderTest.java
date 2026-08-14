@@ -8,6 +8,10 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -116,6 +120,59 @@ class JwtTokenProviderTest {
 
         // then
         assertThat(parsed.namespace()).isEqualTo(TokenNamespace.STORE_OPERATOR);
+    }
+
+    @Test
+    @DisplayName("플랫폼 운영자 Access JWT는 중앙 세션과 계정 버전 결속을 보존한다")
+    void parsesPlatformOperatorSessionClaims() {
+        JwtTokenProvider provider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+        SessionTokenClaims claims = new SessionTokenClaims("session-id", 7L, 11L, true);
+
+        String accessToken = provider.generateAccessToken(
+                TokenNamespace.PLATFORM_OPERATOR, 42L, claims);
+        ParsedToken parsed = provider.parseAccessToken(accessToken);
+
+        assertThat(parsed.namespace()).isEqualTo(TokenNamespace.PLATFORM_OPERATOR);
+        assertThat(parsed.accountId()).isEqualTo(42L);
+        assertThat(parsed.sessionClaims()).isEqualTo(claims);
+    }
+
+    @Test
+    @DisplayName("일반 사용자 토큰에는 플랫폼 운영자 세션 결속을 추가하지 않는다")
+    void consumerTokenHasNoPlatformOperatorSessionClaims() {
+        JwtTokenProvider provider =
+                new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+
+        ParsedToken parsed = provider.parseAccessToken(
+                provider.generateAccessToken(TokenNamespace.CONSUMER, 42L));
+
+        assertThat(parsed.sessionClaims()).isNull();
+    }
+
+    @Test
+    void rejectsSignedTokenWithWrongIssuerAudienceOrSubjectNamespace() {
+        JwtTokenProvider provider = new JwtTokenProvider(SECRET, ISSUER, fixedClock("2026-07-29T00:00:00Z"));
+
+        assertInvalid(provider, forged("other-issuer", "consumer", "consumer:42", "consumer"));
+        assertInvalid(provider, forged(ISSUER, "store-operator", "consumer:42", "consumer"));
+        assertInvalid(provider, forged(ISSUER, "consumer", "store-operator:42", "consumer"));
+        assertInvalid(provider, forged(ISSUER, "consumer", "consumer:unexpected:42", "consumer"));
+    }
+
+    private void assertInvalid(JwtTokenProvider provider, String token) {
+        assertThatThrownBy(() -> provider.parseAccessToken(token))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_TOKEN_INVALID);
+    }
+
+    private String forged(String issuer, String audience, String subject, String namespace) {
+        Instant now = Instant.parse("2026-07-29T00:00:00Z");
+        return Jwts.builder().issuer(issuer).audience().add(audience).and().subject(subject)
+                .claim("namespace", namespace).claim("tokenType", "ACCESS")
+                .issuedAt(Date.from(now)).expiration(Date.from(now.plusSeconds(900)))
+                .signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8))).compact();
     }
 
     private Clock fixedClock(String instant) {

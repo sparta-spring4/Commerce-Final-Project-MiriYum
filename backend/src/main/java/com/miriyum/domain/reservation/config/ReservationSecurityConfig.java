@@ -22,7 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class ReservationSecurityConfig {
 
-    private static final String RESERVATION_ROOT = "/api/v1/consumers/reservations";
+    private static final String RESERVATION_ROOT = "/api/v1/consumers/me/reservations";
     private static final String RESERVATION_FAMILY = RESERVATION_ROOT + "/**";
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
     private static final String RESERVATION_CANCELLATION =
@@ -41,12 +41,12 @@ public class ReservationSecurityConfig {
             "/api/v1/store-operators/stores/*/waiting-teams";
     private static final String WAITING_TEAM_FAMILY = WAITING_TEAM_ROOT + "/**";
     private static final String WAITING_TEAM_DETAIL = WAITING_TEAM_ROOT + "/*";
-    private static final String WAITING_TEAM_CALL = WAITING_TEAM_ROOT + "/*/call";
-    private static final String WAITING_TEAM_ARRIVE = WAITING_TEAM_ROOT + "/*/arrive";
-    private static final String WAITING_TEAM_CHECK_IN = WAITING_TEAM_ROOT + "/*/check-in";
-    private static final String WAITING_TEAM_CANCEL = WAITING_TEAM_ROOT + "/*/cancel";
+    private static final String WAITING_TEAM_CALL = WAITING_TEAM_ROOT + "/*/calls";
+    private static final String WAITING_TEAM_ARRIVE = WAITING_TEAM_ROOT + "/*/arrivals";
+    private static final String WAITING_TEAM_CHECK_IN = WAITING_TEAM_ROOT + "/*/check-ins";
+    private static final String WAITING_TEAM_CANCEL = WAITING_TEAM_ROOT + "/*/cancellations";
     private static final String WAITING_CLOSE_JOB_ROOT =
-            "/api/v1/store-operators/stores/*/waiting-close-jobs";
+            "/api/v1/store-operators/stores/*/waiting-closure-jobs";
     private static final String WAITING_CLOSE_JOB_FAMILY = WAITING_CLOSE_JOB_ROOT + "/**";
     private static final String WAITING_CLOSE_JOB_DETAIL = WAITING_CLOSE_JOB_ROOT + "/*";
 

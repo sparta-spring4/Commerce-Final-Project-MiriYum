@@ -79,7 +79,7 @@ public class MenuController {
                         IdempotencyKey.parse(rawKey), request));
     }
 
-    @PostMapping("/{menuId}/publication")
+    @PostMapping("/{menuId}/publications")
     public ResponseEntity<ApiResponse<ManagedMenuResponse>> publish(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long storeId,
@@ -92,7 +92,7 @@ public class MenuController {
                         IdempotencyKey.parse(rawKey), request));
     }
 
-    @PostMapping("/{menuId}/publication-cancellation")
+    @PostMapping("/{menuId}/publication-cancellations")
     public ResponseEntity<ApiResponse<ManagedMenuResponse>> cancelPublication(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long storeId,
@@ -131,7 +131,7 @@ public class MenuController {
                         IdempotencyKey.parse(rawKey), request));
     }
 
-    @PostMapping("/{menuId}/retirement")
+    @PostMapping("/{menuId}/retirements")
     public ResponseEntity<ApiResponse<ManagedMenuResponse>> retire(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @PathVariable long storeId,

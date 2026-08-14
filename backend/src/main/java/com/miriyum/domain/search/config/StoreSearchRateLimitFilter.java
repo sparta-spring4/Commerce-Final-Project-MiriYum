@@ -29,7 +29,7 @@ public class StoreSearchRateLimitFilter extends OncePerRequestFilter {
     private static final Pattern MENU_HOLD_AVAILABILITY =
             Pattern.compile("^/api/v1/stores/[^/]+/menu-hold-availability$");
     private static final Pattern MENU_ALTERNATIVE_SEARCH = Pattern.compile(
-            "^/api/v1/stores/[^/]+/menus/[^/]+/alternatives/search$");
+            "^/api/v1/stores/[^/]+/menus/[^/]+/alternative-searches$");
 
     private final RateLimiter rateLimiter;
     private final ObjectMapper objectMapper;

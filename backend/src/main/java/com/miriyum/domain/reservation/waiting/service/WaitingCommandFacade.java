@@ -69,7 +69,7 @@ public class WaitingCommandFacade {
     ) {
         return execute(
                 operatorAccountId, storeId, waitingTeamId, key, request,
-                "WAITING_TEAM_CALL", "call", ledgerService::call
+                "WAITING_TEAM_CALL", "calls", ledgerService::call
         );
     }
 
@@ -82,7 +82,7 @@ public class WaitingCommandFacade {
     ) {
         return execute(
                 operatorAccountId, storeId, waitingTeamId, key, request,
-                "WAITING_TEAM_ARRIVE", "arrive", ledgerService::arrive
+                "WAITING_TEAM_ARRIVE", "arrivals", ledgerService::arrive
         );
     }
 
@@ -95,7 +95,7 @@ public class WaitingCommandFacade {
     ) {
         return execute(
                 operatorAccountId, storeId, waitingTeamId, key, request,
-                "WAITING_TEAM_CHECK_IN", "check-in", ledgerService::checkIn
+                "WAITING_TEAM_CHECK_IN", "check-ins", ledgerService::checkIn
         );
     }
 
@@ -108,7 +108,7 @@ public class WaitingCommandFacade {
     ) {
         return execute(
                 operatorAccountId, storeId, waitingTeamId, key, request,
-                "WAITING_TEAM_CANCEL", "cancel", ledgerService::cancel
+                "WAITING_TEAM_CANCEL", "cancellations", ledgerService::cancel
         );
     }
 
