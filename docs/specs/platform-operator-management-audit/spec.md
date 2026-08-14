@@ -64,7 +64,7 @@
 - 기존 원장을 수정·삭제하거나 한 테이블로 복사하지 않는다. 통합 조회는 두 원장의 안전 projection을 합성한다.
 - 신규 사건은 action, outcome, actor ID, 당시 authority version·역할·권한, target type·opaque ID, 허용된 전후 snapshot, 구조화 reason, correlation ID, 원 사건 source·ID와 중앙 시각만 저장한다.
 - 비밀번호·토큰·세션·승인 원문, 결제수단, 증빙, 원문 개인정보, 자유형 JSON과 전체 대상 목록을 저장하지 않는다.
-- V42 `BEFORE UPDATE`·`BEFORE DELETE` trigger가 직접 SQL 변경·삭제도 거부한다. UPDATE·DELETE repository는 만들지 않는다.
+- V43 `BEFORE UPDATE`·`BEFORE DELETE` trigger가 직접 SQL 변경·삭제도 거부한다. UPDATE·DELETE repository는 만들지 않는다.
 - ADMIN-009 공통 보존기간은 미정이다. retention 열, TTL, cleanup job, 파기 API와 자동 삭제를 만들지 않는다.
 
 ## 최소 권한 감사 조회
@@ -113,8 +113,8 @@
 
 ## migration
 
-- `V42__create_platform_operator_management_audit.sql`로 고정한다. V41과 기존 migration은 변경하지 않는다.
-- V42는 `SUPER_ADMIN` 조건부 singleton unique index, 관리 명령 멱등 원장, 감사 테이블·검색 인덱스·불변 trigger를 추가한다.
+- `V43__create_platform_operator_management_audit.sql`로 고정한다. V41·V42와 기존 migration은 변경하지 않는다.
+- V43은 `SUPER_ADMIN` 조건부 singleton unique index, 관리 명령 멱등 원장, 감사 테이블·검색 인덱스·불변 trigger를 추가한다.
 - ADMIN-009 공통 기간이 확정되기 전에는 자동 파기를 구현하지 않는다.
 
 ## 정확한 변경 allowlist
@@ -136,7 +136,7 @@
 
 ### Backend
 
-- `backend/src/main/resources/db/migration/V42__create_platform_operator_management_audit.sql`
+- `backend/src/main/resources/db/migration/V43__create_platform_operator_management_audit.sql`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/audit/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/dto/management/**`
@@ -158,7 +158,7 @@
 ## TDD 구현 순서
 
 1. spec/OpenAPI·오류·migration 계약 테스트를 실패시킨다.
-2. V42와 실제 MySQL singleton·UPDATE/DELETE trigger 테스트를 구현한다.
+2. V43과 실제 MySQL singleton·UPDATE/DELETE trigger 테스트를 구현한다.
 3. 계정 생성의 singleton·금지 grant·비밀 비노출 테스트와 구현을 추가한다.
 4. 권한 교체·중지의 version·세션 회수·동시 경합 테스트와 구현을 추가한다.
 5. append-only writer와 관리 명령 원자성 테스트를 추가한다.
