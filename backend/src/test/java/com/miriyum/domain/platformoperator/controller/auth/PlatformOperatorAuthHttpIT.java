@@ -9,8 +9,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
+import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import java.time.Instant;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +45,10 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
         "miriyum.platform-operator.enabled=true",
         "miriyum.platform-operator.temporary-password.validity=PT10M",
-        "miriyum.platform-operator.temporary-password.max-failures=3"
+        "miriyum.platform-operator.temporary-password.max-failures=3",
+        "miriyum.store.schedule.activation-enabled=false",
+        "miriyum.reservation.hold-expiration.enabled=false",
+        "miriyum.menu.schedule.enabled=false"
 })
 @AutoConfigureMockMvc
 @Import(PlatformOperatorAuthHttpIT.BusinessController.class)
@@ -60,13 +67,72 @@ class PlatformOperatorAuthHttpIT {
 
     @Autowired MockMvc mvc;
     @Autowired PlatformOperatorAccountRepository accounts;
+    @Autowired PlatformOperatorReauthenticationApprovalRepository approvals;
+    @Autowired PlatformOperatorAuthEventRepository authEvents;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired JwtTokenProvider jwt;
 
     @BeforeEach
     void seed() {
+        approvals.deleteAll();
+        authEvents.deleteAll();
         accounts.deleteAll();
         accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
                 "operator@example.com", passwordEncoder.encode("Password1!"), "operator", Instant.now().plusSeconds(600)));
+    }
+
+    @Test
+    void reauthenticationApprovalRequiresAnActivePlatformOperatorSessionAndCurrentPassword() throws Exception {
+        MvcResult login = mvc.perform(post("/api/v1/platform-operators/auth/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"operator@example.com\",\"password\":\"Password1!\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String limitedAccess = com.jayway.jsonpath.JsonPath.read(
+                login.getResponse().getContentAsString(), "$.data.accessToken");
+        String body = """
+                {"currentPassword":"Changed2@","purpose":"PAYMENT_RECOVERY",
+                 "targetType":"PAYMENT_RECOVERY_CASE","targetId":"recovery-1"}
+                """;
+
+        mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                        .header("Authorization", "Bearer " + limitedAccess)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_012"));
+
+        MvcResult changed = mvc.perform(put("/api/v1/platform-operators/auth/initial-password")
+                        .header("Authorization", "Bearer " + limitedAccess)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Password1!","newPassword":"Changed2@",
+                                 "newPasswordConfirm":"Changed2@"}
+                                """))
+                .andExpect(status().isOk()).andReturn();
+        String activeAccess = com.jayway.jsonpath.JsonPath.read(
+                changed.getResponse().getContentAsString(), "$.data.accessToken");
+
+        mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                        .header("Authorization", "Bearer " + activeAccess)
+                        .contentType(MediaType.APPLICATION_JSON).content(body.replace("Changed2@", "Wrong3#!")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ADMIN_002"));
+        mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                        .header("Authorization", "Bearer " + activeAccess)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.approval").isString())
+                .andExpect(jsonPath("$.data.expiresAt").isString());
+        mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                        .header("Authorization", "Bearer " + activeAccess)
+                        .contentType(MediaType.APPLICATION_JSON).content(body.replace("}", ",\"unexpected\":true}")))
+                .andExpect(status().isBadRequest());
+
+        for (TokenNamespace namespace : new TokenNamespace[]{TokenNamespace.CONSUMER, TokenNamespace.STORE_OPERATOR}) {
+            mvc.perform(post("/api/v1/platform-operators/reauthentication-approvals")
+                            .header("Authorization", "Bearer " + jwt.generateAccessToken(namespace, 1L))
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 
     @Test
