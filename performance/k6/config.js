@@ -8,8 +8,9 @@ export const SCENARIO_NAMES = Object.freeze([
   'notificationHistory',
 ])
 const VALID_SCENARIOS = new Set(SCENARIO_NAMES)
+const AUTH_MAX_VUS = 50
 const HARD_LIMITS = Object.freeze({
-  maxVus: 50,
+  maxVus: 100,
   durationSeconds: 600,
   arrivalRate: 1000,
 })
@@ -125,6 +126,11 @@ export function loadConfig(env) {
   }
   if (profile !== 'smoke' && limits.arrivalRate < scenarioNames.length) {
     throw new Error('ARRIVAL_RATE must cover every selected scenario')
+  }
+  if (profile !== 'smoke'
+    && scenarioNames.includes('authRefresh')
+    && limits.maxVus > AUTH_MAX_VUS) {
+    throw new Error(`MAX_VUS must not exceed ${AUTH_MAX_VUS} when authRefresh is selected`)
   }
 
   return Object.freeze({
