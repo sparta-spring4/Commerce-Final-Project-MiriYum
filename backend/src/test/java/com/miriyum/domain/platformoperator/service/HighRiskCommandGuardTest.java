@@ -54,6 +54,7 @@ class HighRiskCommandGuardTest {
         request = new HighRiskCommandRequest(principal, PAYMENT_RECOVERY_EXECUTE,
                 com.miriyum.domain.platformoperator.enums.AdminCaseType.PAYMENT_RECOVERY,
                 "case-1", 4L, PAYMENT_RECOVERY, PAYMENT_RECOVERY_CASE, "target-1", "approval-raw", "corr-1");
+        assertThat(request.toString()).doesNotContain("approval-raw", "session-raw");
         PlatformOperatorAccount account = mock(PlatformOperatorAccount.class);
         when(account.getId()).thenReturn(7L);
         when(account.getStatus()).thenReturn(PlatformOperatorAccountStatus.ACTIVE);

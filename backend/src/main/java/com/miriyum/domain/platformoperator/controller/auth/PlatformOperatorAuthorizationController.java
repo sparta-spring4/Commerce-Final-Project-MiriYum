@@ -1,4 +1,4 @@
-package com.miriyum.domain.platformoperator.controller.authorization;
+package com.miriyum.domain.platformoperator.controller.auth;
 
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResponse;

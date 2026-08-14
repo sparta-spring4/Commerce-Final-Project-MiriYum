@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorReauthenticationApproval;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
@@ -72,6 +73,8 @@ class ReauthenticationServiceTest {
         ReauthenticationApprovalResult result = service.issue(principal, request);
 
         assertThat(result.approval()).hasSizeGreaterThanOrEqualTo(43);
+        assertThat(request.toString()).doesNotContain("Password1!");
+        assertThat(result.toString()).doesNotContain(result.approval());
         assertThat(result.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
         ArgumentCaptor<PlatformOperatorReauthenticationApproval> captor =
                 ArgumentCaptor.forClass(PlatformOperatorReauthenticationApproval.class);
@@ -96,5 +99,17 @@ class ReauthenticationServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+    }
+
+    @Test
+    void rejectsAStaleAuthorityVersionWithTheSessionInvalidationContract() {
+        when(account.getAuthorityVersion()).thenReturn(4L);
+        ReauthenticationApprovalRequest request = new ReauthenticationApprovalRequest(
+                "Password1!", PAYMENT_RECOVERY, PAYMENT_RECOVERY_CASE, "recovery-1");
+
+        assertThatThrownBy(() -> service.issue(principal, request))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID));
     }
 }

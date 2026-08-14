@@ -1,5 +1,6 @@
 package com.miriyum.domain.platformoperator.service;
 
+import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalRequest;
 import com.miriyum.domain.platformoperator.dto.authorization.ReauthenticationApprovalResult;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
@@ -61,9 +62,11 @@ public class ReauthenticationService {
         PlatformOperatorAccount account = accounts.findById(principal.accountId())
                 .filter(candidate -> candidate.getStatus() == PlatformOperatorAccountStatus.ACTIVE)
                 .filter(candidate -> candidate.getPasswordState() == PlatformOperatorPasswordState.ACTIVE)
-                .filter(candidate -> candidate.getAuthorityVersion() == principal.authorityVersion())
-                .filter(candidate -> candidate.getSessionVersion() == principal.sessionVersion())
                 .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED));
+        if (account.getAuthorityVersion() != principal.authorityVersion()
+                || account.getSessionVersion() != principal.sessionVersion()) {
+            throw new ServiceException(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
+        }
         if (!matches(request.currentPassword(), account.getPasswordHash())) {
             throw new ServiceException(AdminAuthorizationErrorCode.REAUTHENTICATION_FAILED);
         }

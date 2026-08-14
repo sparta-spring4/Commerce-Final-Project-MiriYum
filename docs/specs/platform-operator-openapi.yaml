@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: MiriYum Platform Operator API
   version: 1.0.0
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
   description: 고도화 feature flag로 활성화하는 플랫폼 운영자 전용 audience entrypoint다.
 servers:
   - url: /
@@ -19,3 +22,15 @@ paths:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
   /api/v1/platform-operators/reauthentication-approvals:
     $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
+components:
+  securitySchemes:
+    platformOperatorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Platform operator access JWT
+    platformOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_PLATFORM_OPERATOR_REFRESH
+      description: HttpOnly platform operator refresh JWT cookie

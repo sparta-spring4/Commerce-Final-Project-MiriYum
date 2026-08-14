@@ -6,4 +6,9 @@ public record ReauthenticationApprovalResponse(String approval, Instant expiresA
     public static ReauthenticationApprovalResponse from(ReauthenticationApprovalResult result) {
         return new ReauthenticationApprovalResponse(result.approval(), result.expiresAt());
     }
+
+    @Override
+    public String toString() {
+        return "ReauthenticationApprovalResponse[approval=<redacted>, expiresAt=" + expiresAt + "]";
+    }
 }

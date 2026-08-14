@@ -35,4 +35,13 @@ public record HighRiskCommandRequest(
     private static void requireText(String value, String field) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " must not be blank");
     }
+
+    @Override
+    public String toString() {
+        return "HighRiskCommandRequest[operatorId=" + principal.accountId()
+                + ", requiredPermission=" + requiredPermission + ", caseType=" + caseType
+                + ", caseId=" + caseId + ", caseVersion=" + caseVersion + ", purpose=" + purpose
+                + ", targetType=" + targetType + ", targetId=" + targetId
+                + ", approval=<redacted>, correlationId=" + correlationId + "]";
+    }
 }
