@@ -20,7 +20,7 @@ const PURPOSE_LABELS = {
 } satisfies Record<NotificationPurpose, string>
 
 export function getNotificationPurposeLabel(purpose: string): string {
-  return purpose in PURPOSE_LABELS
+  return Object.hasOwn(PURPOSE_LABELS, purpose)
     ? PURPOSE_LABELS[purpose as NotificationPurpose]
     : '알림'
 }

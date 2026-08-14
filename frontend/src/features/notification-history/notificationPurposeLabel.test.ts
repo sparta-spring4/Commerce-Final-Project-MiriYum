@@ -31,4 +31,15 @@ describe('getNotificationPurposeLabel', () => {
 
     expect(getNotificationPurposeLabel('FUTURE_INTERNAL_PURPOSE')).toBe('알림')
   })
+
+  test.each(['__proto__', 'toString'])(
+    'treats inherited object property %s as an unknown purpose',
+    async (purpose) => {
+      const { getNotificationPurposeLabel } = await import(
+        './notificationPurposeLabel'
+      )
+
+      expect(getNotificationPurposeLabel(purpose)).toBe('알림')
+    },
+  )
 })
