@@ -321,12 +321,40 @@ export default function () {
         search: { input: 'synthetic' },
       }))
     },
+    'store search rejects a non-calendar reservation date': () =>
+      throws(() => runStoreSearch({
+        client: responseClient(200, {
+          ...validSearchData(),
+          normalizedCondition: {
+            ...validSearchData().normalizedCondition,
+            reservationDate: '2026-99-99',
+          },
+        }),
+        baseUrl: 'http://backend:8080',
+        search: { input: 'synthetic' },
+      })),
     'reservation creation rejects a compact non-OpenAPI success response': () =>
       throws(() => runReservationCreate({
         client: responseClient(201, {
           reservationId: '9001',
           storeId: '301',
           status: 'CONFIRMED',
+        }),
+        ...RESERVATION_INPUT,
+      })),
+    'reservation creation rejects a non-calendar service date': () =>
+      throws(() => runReservationCreate({
+        client: responseClient(201, {
+          ...validReservationData(),
+          serviceDate: '2026-02-30',
+        }),
+        ...RESERVATION_INPUT,
+      })),
+    'reservation creation rejects a non-RFC3339 timestamp': () =>
+      throws(() => runReservationCreate({
+        client: responseClient(201, {
+          ...validReservationData(),
+          createdAt: '2026-08-14T25:00:00+99:99',
         }),
         ...RESERVATION_INPUT,
       })),
