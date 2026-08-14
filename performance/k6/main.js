@@ -103,7 +103,6 @@ function validateExecutionCapacity() {
 validateExecutionCapacity()
 
 export const options = {
-  ...COOKIE_LIFETIME_OPTIONS,
   scenarios: buildScenarios(),
   thresholds: buildThresholds(),
   insecureSkipTLSVerify: config.targetEnv === 'local',
@@ -111,6 +110,7 @@ export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
   userAgent: `miriyum-k6-baseline/${config.commitSha.slice(0, 12)}`,
+  ...COOKIE_LIFETIME_OPTIONS,
 }
 
 function resolveCredentials(reference) {
