@@ -146,7 +146,6 @@ public class ConsumerAuthService {
         }
     }
 
-    @Transactional(readOnly = true)
     public TokenPair refresh(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
