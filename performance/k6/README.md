@@ -126,7 +126,7 @@ docker compose --env-file deploy/local/.env `
 
 `SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록하되, 아래 IP rate-limit 창을 공유하는 반복 실행은 새 창에서 시작해야 한다.
 
-backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5회/600초로 제한한다. `docker-compose.loadtest.yml`은 local baseline에서만 login `600,000회/600초`, refresh `60,000회/60초`를 주입해 하네스 최대 `1,000 iterations/s × 600초`가 보호 기본값 때문에 잘리지 않게 한다. 이 override를 사용한 결과는 순수 인증 지연시간·처리량 기준선이며 기본 rate-limit 보호 동작의 검증 결과가 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 최적화 근거로 사용하지 않는다.
+backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5회/600초로 제한한다. `docker-compose.loadtest.yml`은 local baseline에서만 login `600,000회/600초`, refresh `60,000회/60초`를 주입해 하네스 최대 `1,000 iterations/s × 600초`가 보호 기본값 때문에 잘리지 않게 한다. CSRF preparation은 별도 값을 주입하지 않고 backend 기본 예산을 상속하며, 이 예산이 `authRefresh`의 `AUTH_MAX_VUS` 상한을 정한다. 이 override를 사용한 결과는 순수 인증 지연시간·처리량 기준선이며 기본 rate-limit 보호 동작의 검증 결과가 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 최적화 근거로 사용하지 않는다.
 
 공개 매장 검색의 기본 한도도 source IP 기준 60회/60초지만 local loadtest override는 `60,000회/60초`를 주입한다. override를 사용하지 않는 실행에서는 위 `storeSearch` 예시의 `2 iterations/s × 30초`가 한 창의 60회를 모두 소비하므로 다음 실행은 이전 실행 종료 후 최소 60초를 기다린다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량 또는 p50/p95/p99 기준선으로 사용하지 않으며 #286에 전달하지 않는다.
 
