@@ -73,6 +73,37 @@ class RefreshTokenRiskEventDeliveryTest {
     }
 
     @Test
+    @DisplayName("pending marker가 없어도 0건을 운영 로그에 남긴다")
+    void logsZeroPendingMarkerCountWithoutSensitiveIdentifiers() {
+        given(markerStore.findPendingEvents()).willReturn(List.of());
+        given(markerStore.pendingEventCount()).willReturn(0L);
+
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("refresh_token_risk_event_pending_count pending_count 0");
+    }
+
+    @Test
+    @DisplayName("pending marker 수 관측이 실패해도 이미 조회한 위험 사건은 전달한다")
+    void deliversEventsWhenPendingMarkerCountObservationFails() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        given(markerStore.pendingEventCount()).willThrow(new com.miriyum.global.exception.ServiceException(
+                com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE));
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
+
+        int delivered = delivery.deliverPendingEvents();
+
+        assertThat(delivered).isEqualTo(1);
+        verify(authRiskEventStore).record(event);
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("event=refresh_token_risk_event_pending_count_observation_failed");
+    }
+
+    @Test
     @DisplayName("전달 중 재사용 횟수가 증가한 marker는 삭제하지 않고 다음 전달에 남긴다")
     void keepsMarkerWhenOccurrenceCountChangedDuringDelivery() {
         PendingRefreshTokenRiskEvent event = event();
@@ -100,6 +131,7 @@ class RefreshTokenRiskEventDeliveryTest {
 
         List<String> messages = logAppender.list.stream()
                 .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
                 .toList();
         assertThat(messages).containsExactly(
                 "event=refresh_token_risk_event_delivery_stalled "
@@ -121,6 +153,7 @@ class RefreshTokenRiskEventDeliveryTest {
 
         assertThat(logAppender.list)
                 .extracting(ILoggingEvent::getFormattedMessage)
+                .filteredOn(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
                 .containsExactly(
                         "event=refresh_token_risk_event_delivery_stalled "
                                 + "consecutive_failures=3 failure_stage=valkey_read");
@@ -142,6 +175,7 @@ class RefreshTokenRiskEventDeliveryTest {
 
         assertThat(logAppender.list)
                 .extracting(ILoggingEvent::getFormattedMessage)
+                .filteredOn(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
                 .containsExactly(
                         "event=refresh_token_risk_event_delivery_stalled "
                                 + "consecutive_failures=3 failure_stage=valkey_delete");
@@ -163,7 +197,9 @@ class RefreshTokenRiskEventDeliveryTest {
             delivery.deliverPendingEvents();
         }
 
-        assertThat(logAppender.list).isEmpty();
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .noneMatch(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"));
     }
 
     private PendingRefreshTokenRiskEvent event() {
