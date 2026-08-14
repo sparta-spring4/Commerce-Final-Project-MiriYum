@@ -1,8 +1,14 @@
 import { classifyStatus, parseEnvelope, recordClassification } from '../lib/contracts.js'
 import { jsonHeaders, originHeaders } from '../lib/session.js'
 
+const CSRF_TOKENS_BY_CLIENT = new WeakMap()
+
 function requestTags(tags, request) {
   return { phase: 'measured', ...tags, request }
+}
+
+function cleanupTags(tags, request) {
+  return { ...tags, phase: 'cleanup', request }
 }
 
 function requireCredentials(account) {
@@ -31,6 +37,70 @@ function parseTokenData(response) {
   return data.accessToken
 }
 
+function parseCsrfTokenData(response) {
+  const data = parseEnvelope(response).data
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('CSRF token response data must be an object')
+  }
+  const fields = Object.keys(data)
+  if (fields.length !== 2 || fields.some((field) => !['token', 'headerName'].includes(field))) {
+    throw new Error('CSRF token response data must match the OpenAPI fields')
+  }
+  if (typeof data.token !== 'string' || data.token === '' || data.headerName !== 'X-CSRF-TOKEN') {
+    throw new Error('CSRF token response contract is invalid')
+  }
+  return data.token
+}
+
+function revokeConsumerSession({ client, baseUrl, tags }) {
+  let csrfToken = CSRF_TOKENS_BY_CLIENT.get(client)
+  let csrfStatus = null
+  if (csrfToken === undefined) {
+    const csrfTagSet = cleanupTags(tags, 'consumerCsrfToken')
+    const csrfResponse = client.get(
+      `${baseUrl}/api/v1/consumers/auth/csrf-tokens/current`,
+      { headers: jsonHeaders(), tags: csrfTagSet, redirects: 0 },
+    )
+    csrfStatus = csrfResponse.status
+    const csrfClassification = recordClassification(
+      classifyStatus(csrfResponse.status, [429]),
+      csrfTagSet,
+    )
+    if (csrfClassification !== 'success') {
+      return {
+        csrfStatus,
+        logoutStatus: null,
+        completed: false,
+      }
+    }
+    csrfToken = parseCsrfTokenData(csrfResponse)
+    CSRF_TOKENS_BY_CLIENT.set(client, csrfToken)
+  }
+
+  const logoutTagSet = cleanupTags(tags, 'consumerLogout')
+  const logoutResponse = client.del(
+    `${baseUrl}/api/v1/consumers/auth/sessions/current`,
+    null,
+    {
+      headers: jsonHeaders({ 'X-CSRF-TOKEN': csrfToken }),
+      tags: logoutTagSet,
+      redirects: 0,
+    },
+  )
+  const logoutClassification = recordClassification(
+    classifyStatus(logoutResponse.status, []),
+    logoutTagSet,
+  )
+  if (logoutClassification === 'success' && parseEnvelope(logoutResponse).data !== null) {
+    throw new Error('logout response data must be null')
+  }
+  return {
+    csrfStatus,
+    logoutStatus: logoutResponse.status,
+    completed: logoutClassification === 'success',
+  }
+}
+
 function requestConsumerSession({ client, baseUrl, account, tags }) {
   requireCredentials(account)
   const requestTagSet = requestTags(tags, 'consumerLogin')
@@ -54,6 +124,10 @@ export function loginConsumer({ client, baseUrl, account, tags = {} }) {
   const result = requestConsumerSession({ client, baseUrl, account, tags })
   if (result.classification !== 'success') {
     throw new Error(`synthetic consumer login failed with HTTP ${result.status}`)
+  }
+  const cleanup = revokeConsumerSession({ client, baseUrl, tags })
+  if (!cleanup.completed) {
+    throw new Error(`synthetic consumer session cleanup failed with HTTP ${cleanup.logoutStatus}`)
   }
   return result.accessToken
 }
@@ -79,12 +153,15 @@ export function runAuthRefresh({ client, baseUrl, allowedOrigin, account, tags =
     classifyStatus(response.status, [429]),
     requestTagSet,
   )
+  const cleanup = revokeConsumerSession({ client, baseUrl, tags })
   if (classification === 'success') parseTokenData(response)
 
   return {
     loginStatus: login.status,
     refreshStatus: response.status,
+    csrfStatus: cleanup.csrfStatus,
+    logoutStatus: cleanup.logoutStatus,
     classification,
-    completed: classification === 'success',
+    completed: classification === 'success' && cleanup.completed,
   }
 }

@@ -1,6 +1,6 @@
 import { check } from 'k6'
 
-import { runAuthRefresh } from '../scenarios/auth-refresh.js'
+import { loginConsumer, runAuthRefresh } from '../scenarios/auth-refresh.js'
 import { runNotificationHistory } from '../scenarios/notification-history.js'
 import { runReservationCreate } from '../scenarios/reservation-create.js'
 import { runStoreSearch } from '../scenarios/store-search.js'
@@ -199,6 +199,13 @@ class RecordingClient {
 
   get(url, params) {
     this.calls.push({ method: 'GET', url, ...params })
+    if (url.endsWith('/api/v1/consumers/auth/csrf-tokens/current')) {
+      return {
+        status: 200,
+        body: envelope({ token: 'csrf-token-value', headerName: 'X-CSRF-TOKEN' }),
+        headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_CSRF=csrf-token-value' },
+      }
+    }
     if (url.includes('/api/v1/consumers/me/notifications')) {
       this.notificationPage += 1
       return {
@@ -213,6 +220,17 @@ class RecordingClient {
       status: 200,
       body: envelope(validSearchData()),
       headers: {},
+    }
+  }
+
+  del(url, body, params) {
+    this.calls.push({ method: 'DELETE', url, body, ...params })
+    return {
+      status: 200,
+      body: envelope(null),
+      headers: {
+        'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=; Max-Age=0',
+      },
     }
   }
 }
@@ -245,7 +263,18 @@ export default function () {
     tags: { phase: 'measured' },
   })
 
-  const [loginCall, refreshCall, searchCall, reservationCall, firstNotificationCall, secondNotificationCall] = client.calls
+  const loginCall = client.calls.find((call) => call.tags.request === 'consumerLogin')
+  const refreshCall = client.calls.find((call) => call.tags.request === 'consumerTokenRefresh')
+  const csrfCall = client.calls.find((call) => call.tags.request === 'consumerCsrfToken')
+  const logoutCall = client.calls.find((call) => call.tags.request === 'consumerLogout')
+  const searchCall = client.calls.find((call) => call.tags.request === 'storeSearch')
+  const reservationCall = client.calls.find((call) => call.tags.request === 'reservationCreate')
+  const firstNotificationCall = client.calls.find(
+    (call) => call.tags.request === 'notificationHistoryFirstPage',
+  )
+  const secondNotificationCall = client.calls.find(
+    (call) => call.tags.request === 'notificationHistoryNextPage',
+  )
   const combinedResult = JSON.stringify({
     authResult,
     searchResult,
@@ -271,6 +300,23 @@ export default function () {
     account: { email: 'consumer@example.test', password: 'synthetic-password' },
     tags: { phase: 'measured' },
   })
+  runAuthRefresh({
+    client,
+    baseUrl: 'http://backend:8080',
+    allowedOrigin: 'http://localhost:5173',
+    account: { email: 'consumer@example.test', password: 'synthetic-password' },
+    tags: { phase: 'measured' },
+  })
+  const preparationClient = new RecordingClient()
+  const preparedToken = loginConsumer({
+    client: preparationClient,
+    baseUrl: 'http://backend:8080',
+    account: { email: 'prepared@example.test', password: 'synthetic-password' },
+    tags: { phase: 'preparation' },
+  })
+  const preparationLogoutCall = preparationClient.calls.find(
+    (call) => call.tags.request === 'consumerLogout',
+  )
 
   check(null, {
     'login uses the consumer session resource': () =>
@@ -283,11 +329,29 @@ export default function () {
       && refreshCall.url === 'http://backend:8080/api/v1/consumers/auth/token-refreshes'
       && refreshCall.body === '{}'
       && refreshCall.headers.Origin === 'http://localhost:5173',
+    'auth refresh obtains a CSRF token before logout': () =>
+      csrfCall !== undefined
+      && csrfCall.method === 'GET'
+      && csrfCall.url === 'http://backend:8080/api/v1/consumers/auth/csrf-tokens/current'
+      && csrfCall.tags.phase === 'cleanup',
+    'auth refresh revokes the current session outside measured traffic': () =>
+      logoutCall !== undefined
+      && logoutCall.method === 'DELETE'
+      && logoutCall.url === 'http://backend:8080/api/v1/consumers/auth/sessions/current'
+      && logoutCall.body === null
+      && logoutCall.headers['X-CSRF-TOKEN'] === 'csrf-token-value'
+      && logoutCall.tags.phase === 'cleanup',
+    'auth refresh reuses one CSRF token per client cookie jar': () =>
+      client.calls.filter((call) => call.tags.request === 'consumerCsrfToken').length === 1
+      && client.calls.filter((call) => call.tags.request === 'consumerLogout').length === 2,
     'search uses an encoded public searchInput': () =>
       searchCall.method === 'GET'
       && searchCall.url === 'http://backend:8080/api/v1/stores?searchInput=%EC%84%9C%EC%9A%B8%20%ED%95%9C%EC%8B%9D',
-    'all measured requests carry phase tags': () =>
-      client.calls.every((call) => call.tags.phase === 'measured'),
+    'measurement and cleanup requests use separate phase tags': () =>
+      client.calls.every((call) =>
+        call.tags.phase === (['consumerCsrfToken', 'consumerLogout'].includes(call.tags.request)
+          ? 'cleanup'
+          : 'measured')),
     'scenario results expose statuses but not tokens or cookies': () =>
       authResult.loginStatus === 200
       && authResult.refreshStatus === 200
@@ -361,6 +425,10 @@ export default function () {
     'rate-limited login is classified but does not complete auth refresh': () =>
       rateLimitedAuth.classification === 'expected_4xx'
       && rateLimitedAuth.completed === false,
+    'prepared bearer login revokes its refresh family before returning the access token': () =>
+      preparedToken === 'access-token-value'
+      && preparationLogoutCall !== undefined
+      && preparationLogoutCall.tags.phase === 'cleanup',
     'notification invariant conflict is an unexpected 4xx': () =>
       notificationConflict.classification === 'unexpected_4xx',
     'notification first page omits the cursor': () =>
