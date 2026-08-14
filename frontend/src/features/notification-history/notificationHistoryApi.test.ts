@@ -79,4 +79,41 @@ describe('readNotificationHistoryPage', () => {
       violation: 'notificationHistoryData',
     })
   })
+
+  test('rejects a history item without its required delivery time', async () => {
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json({
+          code: 'SUCCESS',
+          message: '알림 이력을 조회했습니다.',
+          data: {
+            items: [
+              {
+                notificationId: '1001',
+                purpose: 'RESERVATION_CONFIRMED',
+                title: '예약이 확정되었습니다.',
+                resource: { type: 'RESERVATION', id: '501' },
+                occurredAt: '2026-08-13T10:00:00+09:00',
+                createdAt: '2026-08-13T10:00:01+09:00',
+                action: null,
+              },
+            ],
+            hasNext: false,
+            nextCursor: null,
+          },
+        }),
+      ),
+    )
+
+    const { readNotificationHistoryPage } = await import(
+      './notificationHistoryApi'
+    )
+
+    await expect(
+      readNotificationHistoryPage(createApiClient()),
+    ).rejects.toMatchObject({
+      name: 'ApiContractError',
+      violation: 'notificationHistoryData',
+    })
+  })
 })

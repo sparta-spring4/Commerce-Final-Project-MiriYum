@@ -14,18 +14,73 @@ type ReadNotificationHistoryPageOptions = {
   signal?: AbortSignal
 }
 
-function isNotificationHistoryPage(
-  value: unknown,
-): value is NotificationHistoryPage {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isResource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.type === 'string' &&
+    typeof value.id === 'string'
+  )
+}
+
+function isAction(value: unknown): boolean {
+  if (value === null) {
+    return true
+  }
+  if (
+    !isRecord(value) ||
+    !isResource(value.resource) ||
+    !['AVAILABLE', 'EXPIRED', 'SUPERSEDED', 'UNAVAILABLE'].includes(
+      String(value.availability),
+    ) ||
+    !(value.expiresAt === null || typeof value.expiresAt === 'string')
+  ) {
     return false
   }
 
-  const page = value as Record<string, unknown>
+  const resource = value.resource as Record<string, unknown>
   return (
-    Array.isArray(page.items) &&
-    typeof page.hasNext === 'boolean' &&
-    (typeof page.nextCursor === 'string' || page.nextCursor === null)
+    (value.type === 'RESERVATION_DETAIL' &&
+      resource.type === 'RESERVATION') ||
+    (value.type === 'PICKUP_RESERVATION_DETAIL' &&
+      resource.type === 'PICKUP_RESERVATION') ||
+    (value.type === 'MENU_SUBSTITUTION_REVIEW' &&
+      resource.type === 'MENU_SUBSTITUTION_PROPOSAL')
+  )
+}
+
+function isNotificationHistoryItem(
+  value: unknown,
+): value is NotificationHistoryItem {
+  return (
+    isRecord(value) &&
+    typeof value.notificationId === 'string' &&
+    typeof value.purpose === 'string' &&
+    typeof value.title === 'string' &&
+    isResource(value.resource) &&
+    typeof value.occurredAt === 'string' &&
+    typeof value.createdAt === 'string' &&
+    typeof value.deliveredAt === 'string' &&
+    !Number.isNaN(Date.parse(value.deliveredAt)) &&
+    isAction(value.action)
+  )
+}
+
+function isNotificationHistoryPage(
+  value: unknown,
+): value is NotificationHistoryPage {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every(isNotificationHistoryItem) &&
+    typeof value.hasNext === 'boolean' &&
+    (typeof value.nextCursor === 'string' || value.nextCursor === null)
   )
 }
 
