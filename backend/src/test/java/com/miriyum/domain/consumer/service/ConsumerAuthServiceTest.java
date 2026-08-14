@@ -61,6 +61,7 @@ class ConsumerAuthServiceTest {
     void 리프레시_호출에는_서비스_트랜잭션을_적용하지_않는다() throws NoSuchMethodException {
         Method refresh = ConsumerAuthService.class.getMethod("refresh", String.class);
 
+        assertThat(ConsumerAuthService.class.getAnnotation(Transactional.class)).isNull();
         assertThat(refresh.getAnnotation(Transactional.class)).isNull();
     }
 
