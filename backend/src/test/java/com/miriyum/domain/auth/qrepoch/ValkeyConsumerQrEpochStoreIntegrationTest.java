@@ -3,6 +3,9 @@ package com.miriyum.domain.auth.qrepoch;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.domain.auth.jwt.ParsedToken;
@@ -27,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -352,6 +356,74 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
     }
 
     @Test
+    void activeRefreshMissingFromIndexFailsClosedWithDedicatedSignal() {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-missing-index", "token-current", "raw-refresh-token");
+        ConsumerQrEpochSnapshot beforeEpoch = store.captureCurrent(7L);
+        Map<Object, Object> beforeFamily = redisTemplate.opsForHash().entries(refresh.familyKey());
+        redisTemplate.opsForSet().remove(refresh.accountFamiliesKey(), refresh.familyKey());
+
+        String message = captureUnavailableLog(() -> store.advanceForLogout(
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now()));
+
+        assertThat(message)
+                .contains("event=qr_epoch_refresh_index_mismatch", "expected=present")
+                .doesNotContain(refresh.parsed().familyId(), refresh.parsed().tokenId(), refresh.rawToken());
+        assertThat(redisTemplate.opsForHash().entries(refresh.familyKey())).isEqualTo(beforeFamily);
+        assertThat(redisTemplate.opsForSet().members(refresh.accountFamiliesKey())).isEmpty();
+        assertThat(store.captureCurrent(7L)).isEqualTo(beforeEpoch);
+    }
+
+    @Test
+    void completedMarkerWithStaleIndexMemberFailsClosedWithDedicatedSignal() {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-stale-index", "token-current", "raw-refresh-token");
+        store.advanceForLogout(
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now());
+        ConsumerQrEpochSnapshot beforeEpoch = store.captureCurrent(7L);
+        Map<Object, Object> beforeFamily = redisTemplate.opsForHash().entries(refresh.familyKey());
+        redisTemplate.opsForSet().add(refresh.accountFamiliesKey(), refresh.familyKey());
+
+        String message = captureUnavailableLog(() -> store.advanceForLogout(
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now()));
+
+        assertThat(message)
+                .contains("event=qr_epoch_refresh_index_mismatch", "expected=absent")
+                .doesNotContain(refresh.parsed().familyId(), refresh.parsed().tokenId(), refresh.rawToken());
+        assertThat(redisTemplate.opsForHash().entries(refresh.familyKey())).isEqualTo(beforeFamily);
+        assertThat(redisTemplate.opsForSet().members(refresh.accountFamiliesKey()))
+                .containsExactly(refresh.familyKey());
+        assertThat(store.captureCurrent(7L)).isEqualTo(beforeEpoch);
+    }
+
+    @Test
+    void familyWithoutTtlFailsClosedWithoutMutation() {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-no-ttl", "token-current", "raw-refresh-token");
+        redisTemplate.persist(refresh.familyKey());
+
+        assertLogoutFailureDoesNotMutate(refresh);
+    }
+
+    @Test
+    void activeIndexWithoutTtlFailsClosedWithoutMutation() {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-index-no-ttl", "token-current", "raw-refresh-token");
+        redisTemplate.persist(refresh.accountFamiliesKey());
+
+        assertLogoutFailureDoesNotMutate(refresh);
+    }
+
+    @Test
+    void activeIndexExpiringBeforeFamilyFailsClosedWithoutMutation() {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-index-short-ttl", "token-current", "raw-refresh-token");
+        redisTemplate.expire(refresh.accountFamiliesKey(), Duration.ofMinutes(1));
+
+        assertLogoutFailureDoesNotMutate(refresh);
+    }
+
+    @Test
     void counterOverflowDoesNotPartiallyRevokeRefresh() {
         RefreshFixture refresh = createActiveRefresh("family-overflow", "token-current", "raw-refresh-token");
         String epochKey = ConsumerQrEpochKey.forAccount(GENERATION, 7L);
@@ -439,6 +511,36 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+    }
+
+    private void assertLogoutFailureDoesNotMutate(RefreshFixture refresh) {
+        ConsumerQrEpochSnapshot beforeEpoch = store.captureCurrent(7L);
+        Map<Object, Object> beforeFamily = redisTemplate.opsForHash().entries(refresh.familyKey());
+        Set<String> beforeIndex = redisTemplate.opsForSet().members(refresh.accountFamiliesKey());
+
+        assertUnavailable(() -> store.advanceForLogout(
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now()));
+
+        assertThat(redisTemplate.opsForHash().entries(refresh.familyKey())).isEqualTo(beforeFamily);
+        assertThat(redisTemplate.opsForSet().members(refresh.accountFamiliesKey())).isEqualTo(beforeIndex);
+        assertThat(store.captureCurrent(7L)).isEqualTo(beforeEpoch);
+    }
+
+    private String captureUnavailableLog(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ValkeyConsumerQrEpochStore.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertUnavailable(action);
+            return appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("expected an index mismatch log"));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private ConsumerQrEpochSnapshot get(Future<ConsumerQrEpochSnapshot> future) {

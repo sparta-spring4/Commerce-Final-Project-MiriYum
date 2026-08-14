@@ -56,6 +56,8 @@ After #140 is deployed, Access JWT validation remains stateless, while Refresh T
 
 `MIRIYUM_QR_STORAGE_GENERATION` fences account QR epochs from restored Valkey data. Keep the same value for ordinary backend or Valkey restarts. Before restoring any older Valkey snapshot, stop the backend, choose a value that has never been used in that environment, update every backend instance, restore the snapshot, and only then resume the backend. Never reopen an earlier generation value. A missing or invalid value leaves non-QR Access JWT traffic available but makes QR capture/check and a Refresh-authorized Consumer logout mutation fail closed with `COMMON_012`; it must not be treated as a successful server logout or QR revocation.
 
+Alert on `event=qr_epoch_refresh_index_mismatch`. `expected=present` means an ACTIVE family was not found in its account index, while `expected=absent` means an exact completed logout marker still has a stale index member. The application log intentionally omits account, family, token, raw token, Valkey key, and generation values. With restricted Valkey access, inspect only the relevant key types, PTTL values, membership, and family status; preserve a snapshot or equivalent incident evidence, isolate the affected logout path if signals continue, and escalate to the Auth owner. Do not attempt ad hoc repair with standalone `SADD`, `DEL`, or `HSET`: cookie expiry can prevent a user retry while the server family remains ACTIVE, and non-atomic edits can create a second inconsistency. Resume normal mutation only through an owner-approved atomic repair procedure or a known-good recovery path.
+
 After the first staging deployment that includes Valkey, verify the service from the EC2 instance:
 
 ```bash

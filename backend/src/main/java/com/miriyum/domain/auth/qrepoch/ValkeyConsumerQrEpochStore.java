@@ -28,6 +28,8 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
     private static final Logger log = LoggerFactory.getLogger(ValkeyConsumerQrEpochStore.class);
     private static final String OK_PREFIX = "OK|";
     private static final String CORRUPT = "CORRUPT";
+    private static final long ACTIVE_INDEX_MEMBER_MISSING = -2L;
+    private static final long REVOKED_INDEX_MEMBER_PRESENT = -3L;
     private static final int SALT_BYTES = 16;
     private static final Pattern SALT_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{22}$");
     private static final Pattern COUNTER_PATTERN = Pattern.compile("^(0|[1-9][0-9]*)$");
@@ -190,6 +192,11 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
                 return -1
             end
 
+            local familyExpireAt = redis.call('PEXPIRETIME', KEYS[1])
+            if familyExpireAt < 0 then
+                return -1
+            end
+
             local epochType = redis.call('TYPE', KEYS[3]).ok
             if epochType ~= 'none' and epochType ~= 'hash' then
                 return -1
@@ -219,12 +226,16 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
 
             if markerExact then
                 if indexType == 'set' and redis.call('SISMEMBER', KEYS[2], KEYS[1]) == 1 then
-                    return -1
+                    return -3
                 end
                 return 2
             end
 
             if indexType ~= 'set' or redis.call('SISMEMBER', KEYS[2], KEYS[1]) ~= 1 then
+                return -2
+            end
+            local indexExpireAt = redis.call('PEXPIRETIME', KEYS[2])
+            if indexExpireAt < 0 or indexExpireAt < familyExpireAt then
                 return -1
             end
             if string.len(ARGV[8]) ~= 22 or string.match(ARGV[8], '^[A-Za-z0-9_-]+$') == nil
@@ -334,6 +345,16 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
         }
         if (result.equals(3L)) {
             return new ConsumerQrEpochAdvanceResult(ConsumerQrEpochAdvanceResult.Status.SUBJECT_MISMATCH);
+        }
+        if (result.equals(ACTIVE_INDEX_MEMBER_MISSING)) {
+            log.error("event=qr_epoch_refresh_index_mismatch operation=advanceForLogout namespace={} expected=present",
+                    namespace.value());
+            throw unavailable();
+        }
+        if (result.equals(REVOKED_INDEX_MEMBER_PRESENT)) {
+            log.error("event=qr_epoch_refresh_index_mismatch operation=advanceForLogout namespace={} expected=absent",
+                    namespace.value());
+            throw unavailable();
         }
         log.error("event=qr_epoch_script_unexpected_result operation=advanceForLogout namespace={} result={}",
                 namespace.value(), result);
