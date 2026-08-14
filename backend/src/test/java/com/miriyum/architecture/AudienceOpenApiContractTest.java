@@ -19,25 +19,25 @@ class AudienceOpenApiContractTest {
     private static final Path SPECS = Path.of("..", "docs", "specs");
     private static final Set<String> NON_FEATURE_OPENAPI_FILES =
             Set.of("mvp1-common/openapi.yaml");
-    private static final Set<String> APPROVED_UNEXPOSED_FEATURE_PATHS = Set.of(
-            "/api/v1/consumers/payments",
-            "/api/v1/consumers/payments/{paymentId}",
-            "/api/v1/consumers/payments/{paymentId}/confirmations",
+    private static final Set<String> PAYMENT_PATHS = Set.of(
+            "/api/v1/consumers/me/payments",
+            "/api/v1/consumers/me/payments/{paymentId}",
+            "/api/v1/consumers/me/payments/{paymentId}/confirmations",
             "/api/v1/payments/webhooks/portone"
     );
     private static final String MENU_ALTERNATIVE_SEARCH_PATH =
-            "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search";
+            "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches";
     private static final Set<String> WAITING_SETTINGS_PATHS = Set.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-settings",
-            "/api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact");
+            "/api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact");
     private static final Set<String> WAITING_LEDGER_PATHS = Set.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-teams",
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
-            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
+            "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
     private static final String NOTIFICATION_HISTORY_PATH =
             "/api/v1/consumers/me/notifications";
     private static final String REPRESENTATIVE_MENUS_PATH =
@@ -58,7 +58,9 @@ class AudienceOpenApiContractTest {
                             "/api/v1/store-operators/auth/kakao/accounts",
                             "/api/v1/store-operators/me/kakao/authorizations",
                             "/api/v1/store-operators/me/kakao-links"),
-                    Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream()))
+                    Stream.concat(
+                            PAYMENT_PATHS.stream(),
+                            Stream.concat(WAITING_SETTINGS_PATHS.stream(), WAITING_LEDGER_PATHS.stream())))
                     .collect(Collectors.toUnmodifiableSet());
     private static final Set<String> LEGACY_PREFIXES = Set.of(
             "/api/v1/consumer-auth",
@@ -74,6 +76,7 @@ class AudienceOpenApiContractTest {
         Set<String> publicPaths = paths("public-openapi.yaml").keySet();
         Set<String> consumerPaths = paths("consumer-openapi.yaml").keySet();
         Set<String> operatorPaths = paths("store-operator-openapi.yaml").keySet();
+        Set<String> platformOperatorPaths = paths("platform-operator-openapi.yaml").keySet();
         Set<String> aggregatePaths = paths("mvp1-openapi.yaml").keySet();
 
         assertThat(consumerPaths)
@@ -85,13 +88,20 @@ class AudienceOpenApiContractTest {
         assertThat(intersection(publicPaths, consumerPaths)).isEmpty();
         assertThat(intersection(publicPaths, operatorPaths)).isEmpty();
         assertThat(intersection(consumerPaths, operatorPaths)).isEmpty();
+        assertThat(platformOperatorPaths).allMatch(path -> path.startsWith("/api/v1/platform-operators/"));
+        assertThat(intersection(publicPaths, platformOperatorPaths)).isEmpty();
+        assertThat(intersection(consumerPaths, platformOperatorPaths)).isEmpty();
+        assertThat(intersection(operatorPaths, platformOperatorPaths)).isEmpty();
 
         Set<String> allAudiencePaths = new HashSet<>(publicPaths);
         allAudiencePaths.addAll(consumerPaths);
         allAudiencePaths.addAll(operatorPaths);
+        allAudiencePaths.addAll(platformOperatorPaths);
         assertThat(intersection(aggregatePaths, POST_MVP1_AUDIENCE_PATHS)).isEmpty();
+        assertThat(intersection(aggregatePaths, platformOperatorPaths)).isEmpty();
         Set<String> mvp1AndLaterStagePaths = new HashSet<>(aggregatePaths);
         mvp1AndLaterStagePaths.addAll(POST_MVP1_AUDIENCE_PATHS);
+        mvp1AndLaterStagePaths.addAll(platformOperatorPaths);
         assertThat(mvp1AndLaterStagePaths).isEqualTo(allAudiencePaths);
     }
 
@@ -105,11 +115,9 @@ class AudienceOpenApiContractTest {
         Set<String> audiencePaths = new HashSet<>(paths("public-openapi.yaml").keySet());
         audiencePaths.addAll(paths("consumer-openapi.yaml").keySet());
         audiencePaths.addAll(paths("store-operator-openapi.yaml").keySet());
+        audiencePaths.addAll(paths("platform-operator-openapi.yaml").keySet());
 
-        assertThat(intersection(audiencePaths, APPROVED_UNEXPOSED_FEATURE_PATHS)).isEmpty();
-        Set<String> exposedOrApprovedPaths = new HashSet<>(audiencePaths);
-        exposedOrApprovedPaths.addAll(APPROVED_UNEXPOSED_FEATURE_PATHS);
-        assertThat(exposedOrApprovedPaths).isEqualTo(featurePaths);
+        assertThat(audiencePaths).isEqualTo(featurePaths);
     }
 
     @Test
@@ -129,6 +137,7 @@ class AudienceOpenApiContractTest {
                 "public-openapi.yaml",
                 "consumer-openapi.yaml",
                 "store-operator-openapi.yaml",
+                "platform-operator-openapi.yaml",
                 "mvp1-openapi.yaml")) {
             Map<String, Object> paths = paths(file);
             assertThat(paths).isNotEmpty();

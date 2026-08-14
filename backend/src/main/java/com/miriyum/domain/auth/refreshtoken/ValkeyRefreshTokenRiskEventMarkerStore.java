@@ -140,9 +140,13 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
         try {
             scanResult = redisTemplate.execute(
                     (RedisCallback<ValueScanCursor<byte[]>>) connection -> {
+                        Object nativeConnection = connection.getNativeConnection();
+                        if (!(nativeConnection instanceof RedisClusterAsyncCommands<?, ?>)) {
+                            throw unavailable();
+                        }
                         @SuppressWarnings("unchecked")
                         RedisClusterAsyncCommands<byte[], byte[]> commands =
-                                (RedisClusterAsyncCommands<byte[], byte[]>) connection.getNativeConnection();
+                                (RedisClusterAsyncCommands<byte[], byte[]>) nativeConnection;
                         return commands.sscan(
                                         utf8(RefreshTokenRiskEventKey.pendingIndex()),
                                         ScanCursor.of(pendingIndexScanCursor),

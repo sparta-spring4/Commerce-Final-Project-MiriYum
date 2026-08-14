@@ -51,7 +51,7 @@ class MenuAlternativeSearchControllerTest {
                         OffsetDateTime.parse("2026-08-15T20:00+09:00"), "Asia/Seoul",
                         MenuAlternativeMode.NO_ALTERNATIVE, List.of()));
 
-        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternatives/search")
+        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternative-searches")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity":2,"serviceDate":"2026-08-15","startTime":"18:30",
@@ -68,7 +68,7 @@ class MenuAlternativeSearchControllerTest {
 
     @Test
     void rejectsSecondPrecisionAndUnknownAllergenBeforeService() throws Exception {
-        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternatives/search")
+        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternative-searches")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity":2,"serviceDate":"2026-08-15","startTime":"18:30:01",
@@ -83,7 +83,7 @@ class MenuAlternativeSearchControllerTest {
         given(service.search(anyLong(), anyLong(), any())).willThrow(
                 new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW));
 
-        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternatives/search")
+        mockMvc.perform(post("/api/v1/stores/7/menus/9/alternative-searches")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"quantity":2,"serviceDate":"2026-08-15","startTime":"18:30",

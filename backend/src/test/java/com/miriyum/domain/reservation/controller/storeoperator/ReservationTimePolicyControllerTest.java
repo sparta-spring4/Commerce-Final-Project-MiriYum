@@ -142,7 +142,7 @@ class ReservationTimePolicyControllerTest {
     void scheduledPublicationRequiresEffectiveAt() throws Exception {
         authenticateStoreOperator();
 
-        mockMvc.perform(post(BASE_URL + "/1/publication")
+        mockMvc.perform(post(BASE_URL + "/1/publications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,7 +162,7 @@ class ReservationTimePolicyControllerTest {
     void immediatePublicationRejectsExplicitNullEffectiveAt() throws Exception {
         authenticateStoreOperator();
 
-        mockMvc.perform(post(BASE_URL + "/1/publication")
+        mockMvc.perform(post(BASE_URL + "/1/publications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -183,7 +183,7 @@ class ReservationTimePolicyControllerTest {
     void publicationRejectsUnknownRequestField() throws Exception {
         authenticateStoreOperator();
 
-        mockMvc.perform(post(BASE_URL + "/1/publication")
+        mockMvc.perform(post(BASE_URL + "/1/publications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -236,7 +236,7 @@ class ReservationTimePolicyControllerTest {
                 .andExpect(jsonPath("$.data.version").value(1))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"));
 
-        mockMvc.perform(post(BASE_URL + "/1/publication")
+        mockMvc.perform(post(BASE_URL + "/1/publications")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -252,7 +252,7 @@ class ReservationTimePolicyControllerTest {
                 .andExpect(jsonPath("$.data.effectiveAt")
                         .value("2026-08-05T12:00:00+09:00"));
 
-        mockMvc.perform(post(BASE_URL + "/1/publication-cancellation")
+        mockMvc.perform(post(BASE_URL + "/1/publication-cancellations")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", TEST_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -316,7 +316,7 @@ class ReservationTimePolicyControllerTest {
             case "draft" -> put(BASE_URL)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(validDraftJson());
-            case "publication" -> post(BASE_URL + "/1/publication")
+            case "publication" -> post(BASE_URL + "/1/publications")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""
                             {
@@ -324,7 +324,7 @@ class ReservationTimePolicyControllerTest {
                               "changeReason": "즉시 적용"
                             }
                             """);
-            case "cancellation" -> post(BASE_URL + "/1/publication-cancellation")
+            case "cancellation" -> post(BASE_URL + "/1/publication-cancellations")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""
                             {"changeReason": "적용 보류"}

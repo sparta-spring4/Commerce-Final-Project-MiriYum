@@ -11,7 +11,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - AWS 기본 지표: `CPUUtilization`, `StatusCheckFailed`
 - CloudWatch Agent 지표: 루트 디스크 사용률, 메모리 사용률
 - CloudWatch Logs: Docker `awslogs` 드라이버로 서비스별 표준 출력 로그
-- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`
+- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
 - 로그 보존: 7일
 
 CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
@@ -44,7 +44,7 @@ Agent가 설치된 뒤 CD가 실행되면 최신 설정 파일을 다시 전송�
 
 ## 알람·Dashboard·이메일
 
-AWS CLI 권한이 있는 CloudShell 또는 관리자 PC에서 실행한다. 이 스크립트는 7일 보존 로그 그룹·SNS 주제·이메일 구독·알람 6개·Dashboard를 생성하거나 갱신한다.
+AWS CLI 권한이 있는 CloudShell 또는 관리자 PC에서 실행한다. 이 스크립트는 7일 보존 로그 그룹·SNS 주제·이메일 구독·알람 7개·Dashboard를 생성하거나 갱신한다.
 
 ```bash
 chmod +x deploy/monitoring/create-cloudwatch-resources.sh
@@ -64,6 +64,7 @@ deploy/monitoring/create-cloudwatch-resources.sh
 | 인스턴스 상태 | EC2 status check 실패 1회 |
 | 배포 health | 최근 배포 결과가 0 |
 | Refresh Token 위험 사건 전달 | 30초 주기 전달이 10회 연속 실패해 정체 로그가 발생하면 경보 |
+| ReservationHold 대사 장기 체류 | `RECONCILIATION_REQUIRED` 전이 감사의 `occurredAt` 후 10분부터 현재 장기 체류 집계 로그가 발생하면 경보 |
 
 SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링크를 눌러야 실제 알림을 받는다. 이메일 주소와 AWS 계정 ID는 블로그 캡처에 노출하지 않는다.
 
@@ -81,7 +82,7 @@ CloudWatch 전송 실패가 배포 자체를 실패시키지는 않는다. 배�
 
 ## 위험 사건 전달 정체 지표
 
-pending marker 전달 작업은 `SSCAN` 커서를 이어서 읽고, 한 주기에 최대 100개만 조회한다. 한 페이지가 100개를 넘으면 남은 marker는 메모리 buffer에 보관해 다음 주기에 먼저 처리하므로 특정 marker만 반복 조회하지 않는다. `RefreshTokenRiskEventPendingCount`는 0을 포함한 현재 pending 인덱스 멤버 수를 기록하며, 아직 정리되지 않은 stale member도 포함할 수 있다. 계정·family·토큰 식별자는 포함하지 않는다. 지표 조회가 실패해도 위험 사건 전달은 중단하지 않고 관측 실패 로그만 남긴다. 이 값이 지속적으로 증가하면 전달 작업이 처리 속도를 따라가지 못하는지 점검한다.
+pending marker 전달 작업은 `SSCAN` 커서를 이어서 읽고, 한 주기에 최대 100개만 조회한다. 한 페이지가 100개를 넘으면 남은 marker는 메모리 buffer에 보관해 다음 주기에 먼저 처리하므로 특정 marker만 반복 조회하지 않는다. `RefreshTokenRiskEventPendingCount`는 `refresh_token_risk_event_pending_count pending_count <숫자>` 형식의 로그에서 현재 pending 인덱스 멤버 수를 추출한다. 0을 포함하며, 아직 정리되지 않은 stale member도 포함할 수 있다. 계정·family·토큰 식별자는 포함하지 않는다. 지표 조회가 실패해도 위험 사건 전달은 중단하지 않고 관측 실패 로그만 남긴다. 이 값이 지속적으로 증가하면 전달 작업이 처리 속도를 따라가지 못하는지 점검한다.
 
 Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 반대로 필수 필드가 없는 손상 marker는 전달 대상에서 제거하고 식별자 없는 제한 로그만 남겨, 한 건의 저장 상태 이상이 정상 위험 사건 전달 전체를 막지 않게 한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
 
@@ -90,6 +91,16 @@ event=refresh_token_risk_event_delivery_stalled consecutive_failures=10 failure_
 ```
 
 로그에는 계정 ID, family ID, token ID, token hash와 원문 토큰을 넣지 않는다. CloudWatch Logs metric filter는 이 이벤트 이름만 `RefreshTokenRiskEventDeliveryStalled=1`로 변환하고, 5분 합계가 0보다 크면 SNS 알람을 보낸다. 정상 전달이 한 번 완료되면 애플리케이션의 연속 실패 횟수는 0으로 초기화된다.
+
+## ReservationHold 대사 장기 체류 지표
+
+ReservationHold가 `RECONCILIATION_REQUIRED`로 전이한 append-only 감사의 `occurredAt`부터 10분이 지났고 현재도 같은 보호 상태이면 backend가 다음 집계 로그를 남긴다.
+
+```text
+event=reservation_hold_reconciliation_stalled long_stay_count=3
+```
+
+로그에는 Hold·계정·매장·명령 식별자와 연락처를 넣지 않는다. CloudWatch Logs metric filter는 이벤트 존재를 `ReservationHoldReconciliationStalled=1`로 변환하고, 5분 합계가 0보다 크면 기존 SNS 주제의 알람을 활성화한다. 장기 체류가 지속되는 동안 반복 관측하는 level-triggered 신호이며, 그룹이 해소되어 이벤트가 사라지면 `notBreaching`으로 복귀한다. 이 관측은 수용량·메뉴 수량을 유지하며 자동 만료·해제 또는 실제 Notification 발송을 수행하지 않는다.
 
 ## 로그 보안
 
@@ -115,4 +126,5 @@ CloudWatch Agent는 임의의 비밀값을 자동으로 마스킹해 주는 기�
 5. 알람 생성 스크립트를 실행하고 SNS 이메일을 승인한다.
 6. 테스트 임계치를 임시로 낮춰 이메일 수신을 확인한 뒤 원래 임계치로 되돌린다.
 7. 위험 사건 전달 실패 테스트에서 민감값 없는 정체 로그와 `RefreshTokenRiskEventDeliveryStalled` 알람 구성을 확인한다.
-8. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.
+8. ReservationHold 대사 장기 체류 경계 테스트에서 식별자 없는 집계 로그와 `ReservationHoldReconciliationStalled` 알람 구성을 확인한다.
+9. 테스트 후 생성한 AWS 리소스와 알람 상태를 정리한다.

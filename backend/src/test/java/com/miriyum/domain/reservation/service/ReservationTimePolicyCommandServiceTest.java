@@ -31,6 +31,7 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -228,6 +229,14 @@ class ReservationTimePolicyCommandServiceTest {
         assertThat(result.data().status()).isEqualTo(ReservationTimePolicyStatus.ACTIVE);
         then(storeService).should().requireManagementOwnership(OPERATOR_ID, STORE_ID);
         then(policyRepository).should().flush();
+        ArgumentCaptor<IdempotencyCommand> command =
+                ArgumentCaptor.forClass(IdempotencyCommand.class);
+        then(idempotencyExecutor).should().execute(command.capture(), any());
+        assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
+                "POST|/api/v1/store-operators/stores/{storeId}"
+                        + "/reservation-time-policies/{version}/publications|"
+                        + "storeId=1:7|version=1:2|publicationMode=9:IMMEDIATE|"
+                        + "effectiveAt=0:|changeReason=8:저녁 운영 확대|"));
     }
 
     @Test

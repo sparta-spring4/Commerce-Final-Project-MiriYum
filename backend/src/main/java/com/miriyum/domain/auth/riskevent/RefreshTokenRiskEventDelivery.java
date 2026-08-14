@@ -82,7 +82,7 @@ public class RefreshTokenRiskEventDelivery {
     private void logPendingEventCount() {
         try {
             log.info(
-                    "event=refresh_token_risk_event_pending_count pending_count={}",
+                    "refresh_token_risk_event_pending_count pending_count {}",
                     markerStore.pendingEventCount());
         } catch (DataAccessException | ServiceException exception) {
             // 전달 성공 여부와 분리된 관측 실패는 marker 전달을 중단시키지 않는다.

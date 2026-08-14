@@ -59,7 +59,7 @@
 - 종결 포트는 `lockForTransition`과 `applyTransition`으로 분리한다. 전자는 ReservationHold 잠금 직후 임시 MenuHold 루트만 잠그고 상태·수량을 바꾸지 않는다. 후자는 수용량 처리 뒤 같은 잠금 행에 상태를 적용하고, `RELEASED|EXPIRED`에서만 최초 확보 원장을 기준으로 메뉴 수량을 정확히 한 번 복구한다.
 - `ACTIVE`와 `RECONCILIATION_REQUIRED`는 수량을 유지한다. `CONFIRMED`는 수량을 유지하고 양의 최종 `reservationId`를 연결한다. 같은 확정 명령 replay는 같은 연결만 허용하며 다른 Reservation ID는 `COMMON_007`이다. 최종 Reservation에 연결된 임시 MenuHold는 이후 기존 예약 취소에서 `RELEASED`로 전이하며 최초 확보 원장을 기준으로 수량을 한 번만 복구하고, 방문 완료에서는 수량 복구 없이 `FULFILLED`로 전이한다. 최초 생성 명령 replay는 이 합법적인 후속 `RELEASED|FULFILLED` 상태와 최종 Reservation 연결을 최신 결과로 반환하며 추가 수량 변경을 만들지 않는다. 같은 확정 명령의 전이 replay도 최종 연결 ID가 같으면 이 후속 종결 상태를 허용하고, reconciliation replay는 이후 확정과 최종 예약 종결까지 진행된 최신 상태로 수렴한다. 최종 Reservation에 연결되지 않은 임시 상태는 이 경계에 합류하지 않는다. 기존 즉시 확정 MenuHold의 취소·이행·조회 의미와 응답은 바뀌지 않는다.
 - #267의 worker·명령 시점 자동 만료·대사 orchestration과 #238의 Payment/PG 판정·최종 Reservation 생성은 이 단계에서 구현하지 않는다.
-- `RECONCILIATION_REQUIRED`는 자동 만료하지 않고 수용량과 메뉴 수량을 유지한다. #266은 수렴 주체를 만들지 않으며, #267 runtime을 활성화하기 전에는 장기 체류 그룹을 탐지하는 지표·알람과 replay-safe confirm/release 수렴 절차를 함께 제공해야 한다.
+- `RECONCILIATION_REQUIRED`는 자동 만료하지 않고 수용량과 메뉴 수량을 유지한다. 이 상태로 전이한 감사의 `occurredAt`부터 10분이 지나면 장기 체류로 판정한다. #266은 수렴 주체를 만들지 않으며, #267 runtime을 활성화하기 전에는 현재 장기 체류 그룹의 존재를 식별자 없이 관측하는 지표·알람과 replay-safe confirm/release 수렴 절차를 함께 제공해야 한다. 지표·알람 관측은 상태나 수량을 변경하지 않으며 자동 만료·해제 근거가 아니다.
 
 ## 재고 버킷과 수량 풀
 
