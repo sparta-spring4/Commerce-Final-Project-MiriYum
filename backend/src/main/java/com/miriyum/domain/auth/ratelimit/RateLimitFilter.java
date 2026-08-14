@@ -39,7 +39,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             Map.entry("POST /api/v1/store-operators/auth/kakao/sessions", RateLimitCategory.LOGIN),
             Map.entry("POST /api/v1/store-operators/auth/kakao/accounts", RateLimitCategory.SIGN_UP),
             Map.entry("POST /api/v1/store-operators/auth/token-refreshes", RateLimitCategory.TOKEN_REFRESH),
-            Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION)
+            Map.entry("GET /api/v1/store-operators/auth/csrf-tokens/current", RateLimitCategory.CSRF_PREPARATION),
+            Map.entry("POST /api/v1/platform-operators/auth/sessions", RateLimitCategory.LOGIN),
+            Map.entry(
+                    "POST /api/v1/platform-operators/auth/token-refreshes",
+                    RateLimitCategory.TOKEN_REFRESH),
+            Map.entry(
+                    "GET /api/v1/platform-operators/auth/csrf-tokens/current",
+                    RateLimitCategory.CSRF_PREPARATION)
     );
 
     private final RateLimiter rateLimiter;

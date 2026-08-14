@@ -65,6 +65,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -859,6 +860,77 @@ class ReservationHoldServiceTest {
                 ReservationHoldStatus.CONFIRMED,
                 TRANSITION_OPERATION_ID,
                 91L).finalReservationId()).isEqualTo(91L);
+    }
+
+    @Test
+    @DisplayName("결정적 만료 namespace는 non-EXPIRED 명령이 사용할 수 없다")
+    void expirationOperationNamespaceRejectsNonExpirationTarget() {
+        ReservationHoldContracts.TransitionCommand command = transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                "reservation-hold-expire:" + HOLD_ID);
+
+        assertThatThrownBy(() -> service.transition(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expiration operation namespace");
+
+        then(auditRepository).shouldHaveNoInteractions();
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("nonCanonicalExpirationCommands")
+    @DisplayName("결정적 만료 namespace는 잠근 선점의 canonical 만료 명령만 허용한다")
+    void expirationOperationNamespaceRejectsNonCanonicalMeaning(
+            ReservationHoldContracts.TransitionCommand command
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        given(auditRepository.findByCommandId(command.operationId()))
+                .willReturn(Optional.empty());
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> service.transition(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("canonical expiration command");
+
+        then(holdRepository).should().findByIdForUpdate(HOLD_ID);
+        then(auditRepository).should(never()).save(any());
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    private static Stream<Arguments> nonCanonicalExpirationCommands() {
+        Instant expiresAt = NOW.minusSeconds(600);
+        return Stream.of(
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + (HOLD_ID + 1),
+                        "SYSTEM",
+                        null,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "OPERATOR",
+                        7L,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "SYSTEM",
+                        7L,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "SYSTEM",
+                        null,
+                        expiresAt.minusSeconds(1)))
+        );
     }
 
     @Test
@@ -2060,6 +2132,73 @@ class ReservationHoldServiceTest {
                 ReservationHoldStatus.ACTIVE,
                 ReservationHoldStatus.EXPIRED,
                 NOW);
+    }
+
+    @ParameterizedTest(name = "target={0}")
+    @EnumSource(
+            value = ReservationHoldStatus.class,
+            names = {"CONFIRMED", "RELEASED", "RECONCILIATION_REQUIRED"}
+    )
+    @DisplayName("만료 정각의 새 non-expiry 명령은 원 operation을 소비하지 않고 결정적 EXPIRED로 치환한다")
+    void nonExpiryCommandAtBoundaryUsesDeterministicExpirationCommand(
+            ReservationHoldStatus requestedTarget
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                requestedTarget,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(bucket.getOccupiedPeople()).isZero();
+        assertThat(bucket.getOccupiedTeams()).isZero();
+        ArgumentCaptor<ReservationHoldTransitionAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationHoldTransitionAudit.class);
+        then(auditRepository).should().save(auditCaptor.capture());
+        ReservationHoldTransitionAudit audit = auditCaptor.getValue();
+        assertThat(audit.getBeforeStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        assertThat(audit.getAfterStatus()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(audit.getActorType()).isEqualTo("SYSTEM");
+        assertThat(audit.getActorId()).isNull();
+        assertThat(audit.getRequestedAt()).isEqualTo(hold.getExpiresAt());
+        assertThat(audit.getOccurredAt()).isEqualTo(NOW);
+        assertThat(audit.getCommandId())
+                .isEqualTo("reservation-hold-expire:" + HOLD_ID);
+        assertThat(audit.getCommandId()).isNotEqualTo(TRANSITION_OPERATION_ID);
+    }
+
+    @Test
+    @DisplayName("만료로 실행되지 않은 원 operation과 이후 새 명령은 현재 EXPIRED로 수렴한다")
+    void unexecutedAndNewOperationsReturnCurrentExpiredResult() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+        ReservationHoldContracts.TransitionCommand command = transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+
+        ReservationHoldContracts.Result first = service.transition(command);
+        ReservationHoldContracts.Result replay = service.transition(command);
+        ReservationHoldContracts.Result newOperation = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                "new-operation-after-expiry"));
+
+        assertThat(first.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(replay.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(newOperation.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        then(auditRepository).should(times(1)).save(any());
+        then(allocationRepository).should(times(1))
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
     }
 
     @Test
