@@ -277,10 +277,16 @@ cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 
 ### 상태와 전이
 
 원장 상태 enum은 `WAITING`, `CALLED`, `ARRIVED`, `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
-`CLOSED_BY_STORE`, `RESERVATION_CONVERTING`으로 고정한다. `CHECKED_IN`, `CANCELLED`,
-`NO_SHOW`, `CLOSED_BY_STORE`는 종결 상태다. `RESERVATION_CONVERTING`은 예약 선점·결제 결과를
-기다리는 비종결 상태이며 계정 활성 membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도
-같은 활성 membership을 유지한다.
+`CLOSED_BY_STORE`, `RESERVATION_CONVERTING`, `RESERVATION_CONVERTED`로 고정한다. `CHECKED_IN`,
+`CANCELLED`, `NO_SHOW`, `CLOSED_BY_STORE`, `RESERVATION_CONVERTED`는 종결 상태다.
+`RESERVATION_CONVERTING`은 예약 선점·결제 결과를 기다리는 비종결 상태이며 계정 활성
+membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도 같은 활성 membership을 유지한다.
+
+Waiting 원장은 전환 시작 시각 `reservationConvertingAt`, Payment 공개 ID 문자열
+`waitingPaymentId`, 최종 Reservation 양의 scalar ID `reservationReferenceId`, 완료 시각
+`reservationConvertedAt`만 소유한다. Reservation Entity·Repository·JPA 연관관계·외래 키를
+참조하지 않는다. 완료 시 활성 membership 삭제는 application service가 원자적으로 조정하며
+entity 전이 자체의 부작용이 아니다.
 
 | 현재 상태 | 허용 운영자 명령 | 다음 상태 | 조건 |
 |---|---|---|---|
@@ -290,10 +296,16 @@ cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 
 | `CALLED` | cancel | `CANCELLED` | 현재 version 일치 |
 | `ARRIVED` | check-in | `CHECKED_IN` | 현재 version 일치 |
 | `ARRIVED` | cancel | `CANCELLED` | 현재 version 일치 |
+| `WAITING` | 예약 전환 시작 | `RESERVATION_CONVERTING` | 현재 version, Payment 공개 ID, 발생 시각 일치; 활성 membership 유지 |
+| `RESERVATION_CONVERTING` | 예약 전환 실패 | `WAITING` | 현재 version과 같은 Payment 공개 ID 일치; 시도 필드를 지우고 활성 membership 유지 |
+| `RESERVATION_CONVERTING` | 예약 전환 완료 | `RESERVATION_CONVERTED` | 현재 version과 같은 Payment 공개 ID 일치; 양의 최종 Reservation scalar ID와 완료 시각 기록 |
 | `RESERVATION_CONVERTING` | cancel | `CANCELLED` | 현재 version 일치, 예약 선점·결제 성공·매장 종료와 경합 시 먼저 확정된 결과 하나만 유지하고 필요한 보상 후속 작업 기록 |
 | 종결 상태 | 없음 | 없음 | 새 전이는 거부 |
 
 `RESERVATION_CONVERTING`에서는 cancel 외 call·arrive·check-in을 `409 WAITING_006`으로 거부한다.
+전환 중 cancel 또는 매장 종료가 먼저 확정되면 `waitingPaymentId`와
+`reservationConvertingAt`을 보존하고 최종 Reservation 참조는 설정하지 않아, 검증된 paid
+callback이 후속 보상을 식별할 수 있게 한다.
 명령은 다른 매장의 팀을 읽거나 전이할 수 없고, stale version·비선두 call·이미 종결된 팀은
 성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들고, 전환 중
 취소가 먼저 확정되면 예약 선점 해제 또는 뒤늦은 결제 승인 취소·환불 후속 작업을 기록하도록
