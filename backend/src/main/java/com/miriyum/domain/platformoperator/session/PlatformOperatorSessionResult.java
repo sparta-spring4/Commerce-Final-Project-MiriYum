@@ -13,6 +13,7 @@ public record PlatformOperatorSessionResult(
     public enum Status {
         CREATED,
         REPLACED,
+        STALE,
         VALID,
         ROTATED,
         INVALID,

@@ -54,4 +54,15 @@ class PlatformOperatorSessionManagerTest {
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
     }
+
+    @Test
+    void refusesStaleSessionIssueThatWouldDowngradeAnActiveSession() {
+        when(store.replaceActiveSession(any()))
+                .thenReturn(PlatformOperatorSessionResult.of(PlatformOperatorSessionResult.Status.STALE));
+
+        assertThatThrownBy(() -> manager.issue(7L, 3L, 5L, true))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID);
+    }
 }

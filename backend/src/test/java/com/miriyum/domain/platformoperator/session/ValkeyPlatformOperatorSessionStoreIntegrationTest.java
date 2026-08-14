@@ -69,6 +69,28 @@ class ValkeyPlatformOperatorSessionStoreIntegrationTest {
     }
 
     @Test
+    void lowerVersionLoginCannotReplaceSessionIssuedAfterPasswordChange() {
+        Instant now = Instant.now();
+        PlatformOperatorSessionState changedPasswordSession = state(
+                "changed-password-session", "token-v2", "refresh-v2", now, 4L, 6L, false);
+        PlatformOperatorSessionState staleLoginSession = state(
+                "stale-login-session", "token-v1", "refresh-v1", now, 3L, 5L, true);
+
+        assertThat(store.replaceActiveSession(changedPasswordSession).status())
+                .isEqualTo(PlatformOperatorSessionResult.Status.CREATED);
+        assertThat(store.replaceActiveSession(staleLoginSession).status())
+                .isEqualTo(PlatformOperatorSessionResult.Status.STALE);
+
+        assertThat(store.validateAndTouch(proof(
+                "changed-password-session", "token-v2", "refresh-v2", 4L, 6L),
+                now, now.plusSeconds(1800)).status()).isEqualTo(PlatformOperatorSessionResult.Status.VALID);
+        assertThat(store.validateAndTouch(proof(
+                "stale-login-session", "token-v1", "refresh-v1", 3L, 5L),
+                now, now.plusSeconds(1800)).status()).isEqualTo(PlatformOperatorSessionResult.Status.INVALID);
+        assertThat(redis.keys("miriyum:auth:platform-operator:*")).hasSize(2);
+    }
+
+    @Test
     void concurrentLoginsLeaveExactlyOneActiveSession() throws Exception {
         Instant now = Instant.now();
         CountDownLatch ready = new CountDownLatch(2);
@@ -133,11 +155,24 @@ class ValkeyPlatformOperatorSessionStoreIntegrationTest {
     }
 
     private PlatformOperatorSessionState state(String session, String tokenId, String refresh, Instant now) {
+        return state(session, tokenId, refresh, now, 3L, 5L, true);
+    }
+
+    private PlatformOperatorSessionState state(
+            String session, String tokenId, String refresh, Instant now,
+            long authorityVersion, long sessionVersion, boolean passwordChangeRequired) {
         return new PlatformOperatorSessionState(7L, session, tokenId, refresh, now, now,
-                now.plusSeconds(1800), now.plusSeconds(28800), 3L, 5L, true);
+                now.plusSeconds(1800), now.plusSeconds(28800), authorityVersion, sessionVersion,
+                passwordChangeRequired);
     }
 
     private PlatformOperatorSessionProof proof(String session, String tokenId, String refresh) {
-        return new PlatformOperatorSessionProof(7L, session, tokenId, refresh, 3L, 5L);
+        return proof(session, tokenId, refresh, 3L, 5L);
+    }
+
+    private PlatformOperatorSessionProof proof(
+            String session, String tokenId, String refresh, long authorityVersion, long sessionVersion) {
+        return new PlatformOperatorSessionProof(
+                7L, session, tokenId, refresh, authorityVersion, sessionVersion);
     }
 }

@@ -18,7 +18,15 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
 
     private static final RedisScript<Long> REPLACE = new DefaultRedisScript<>("""
             local previous = redis.call('GET', KEYS[1])
-            if previous ~= false then redis.call('DEL', previous) end
+            if previous ~= false then
+                local previousAuthorityVersion = redis.call('HGET', previous, 'authorityVersion')
+                local previousSessionVersion = redis.call('HGET', previous, 'sessionVersion')
+                if (previousAuthorityVersion ~= false and tonumber(previousAuthorityVersion) > tonumber(ARGV[9]))
+                        or (previousSessionVersion ~= false and tonumber(previousSessionVersion) > tonumber(ARGV[10])) then
+                    return 3
+                end
+                redis.call('DEL', previous)
+            end
             redis.call('HSET', KEYS[2],
                 'accountId', ARGV[1], 'sessionHash', ARGV[2],
                 'refreshTokenId', ARGV[3], 'refreshTokenHash', ARGV[4],
@@ -92,10 +100,14 @@ public class ValkeyPlatformOperatorSessionStore implements PlatformOperatorSessi
                 epoch(state.absoluteExpiresAt()), Long.toString(state.authorityVersion()),
                 Long.toString(state.sessionVersion()), Boolean.toString(state.passwordChangeRequired()),
                 Long.toString(expiry));
-        PlatformOperatorSessionResult.Status status = result == 2
-                ? PlatformOperatorSessionResult.Status.REPLACED
-                : PlatformOperatorSessionResult.Status.CREATED;
-        return new PlatformOperatorSessionResult(status, state);
+        PlatformOperatorSessionResult.Status status = switch ((int) result) {
+            case 1 -> PlatformOperatorSessionResult.Status.CREATED;
+            case 2 -> PlatformOperatorSessionResult.Status.REPLACED;
+            case 3 -> PlatformOperatorSessionResult.Status.STALE;
+            default -> throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        };
+        return new PlatformOperatorSessionResult(status,
+                status == PlatformOperatorSessionResult.Status.STALE ? null : state);
     }
 
     @Override
