@@ -120,3 +120,12 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 전달 작업은 `SSCAN` 커서를 이어서 읽고 한 주기에 marker 100개까지만 처리한다. 한 페이지의 남은 marker는 다음 주기에 먼저 처리해 특정 marker만 반복 조회하지 않는다. marker가 비어 보이면 Lua에서 marker 부재 확인과 `SREM`을 함께 수행하므로, 같은 키의 marker가 전달 중 다시 생성되어도 새 인덱스 연결을 삭제하지 않는다.
 - pending Set의 현재 크기는 민감 식별자 없이 `RefreshTokenRiskEventPendingCount` 지표로 관측한다. 이 값은 전달 가능한 이벤트 수가 아니라 stale member를 포함한 인덱스 멤버 수이며, 지속적으로 증가하면 전달 정체 알람과 함께 원인을 점검한다.
 - 필수 필드가 없거나 숫자 형식이 손상된 pending marker는 인덱스와 함께 제거하고 제한 로그만 남긴다. 손상 marker 하나가 정상 marker 전달을 반복적으로 막지 않게 하며, 계정·family·토큰 식별자는 로그에 넣지 않는다.
+
+### Consumer QR epoch와 restore generation fence
+
+- CHECK 회전형 QR은 Refresh session epoch와 분리된 일반 사용자 계정 QR epoch를 Auth 공개 계약으로 소비한다. backend가 Java `SecureRandom`으로 만든 128-bit 후보 salt를 Lua에 전달하고, Lua는 계정별 TTL 없는 hash가 없을 때 최초 후보만 원자적으로 선점한다. Lua 자체 난수는 사용하지 않는다. hash에는 salt와 signed 64-bit 범위의 non-negative counter를 저장하고, 외부에는 비공개 salt를 포함한 storage generation·accountId·salt·counter 직렬화의 SHA-256 결과를 `v1.` base64url digest로만 공개한다. 원문 연결값이나 단순 Base64 인코딩은 사용하지 않는다.
+- 현재 ACTIVE Consumer Refresh와 요청 원문 hash가 정확히 일치할 때만 family 폐기·account index 제거·generation/token marker·QR counter 증가를 한 Lua에서 확정한다. Lua는 key type, 필수 field, 숫자 형식·overflow를 쓰기 전에 검사하며 선형화 뒤 실패 가능한 명령을 두지 않는다. 같은 자격의 재요청은 `ALREADY_APPLIED`로 수렴한다.
+- `MIRIYUM_QR_STORAGE_GENERATION`은 Valkey snapshot에 포함되지 않는 배포 구성이다. 모든 backend instance가 같은 값을 사용하고 정상 재시작에는 유지한다. 과거 snapshot 복원 전에는 새 값을 선택하며 이전 generation을 다시 사용하지 않는다. generation은 QR key namespace와 opaque digest에 모두 들어가 복원된 과거 state를 열지 않는다.
+- Consumer `/auth/**` 공개 SecurityFilterChain은 선택적 Authorization을 인증하지 않는다. 로그아웃 controller가 원문 Authorization 헤더를 Auth service에 전달하고 service가 `JwtTokenProvider`로 직접 선택 파싱한다. 없거나 형식 오류·손상·만료된 Access는 교차 확인값 없이 현재 Refresh를 판정하며, 각각 유효한 Access·Refresh subject가 다를 때만 `AUTH_016`으로 mutation 전에 거부한다.
+- generation 누락·오류, Valkey unavailable/corruption, Lua null·unexpected·overflow는 `COMMON_012`로 실패 폐쇄한다. 일반 stateless Access 검증은 QR epoch를 조회하지 않는다.
+- 이 원자 연산도 현재 single-node Valkey만 지원한다. Cluster 지원은 관련 모든 key를 같은 hash slot에 두는 별도 ADR 변경 뒤에만 활성화한다.

@@ -43,7 +43,7 @@ These are staging Environment variables, not application secrets. Application an
 ## EC2 runtime setup
 
 1. Copy `deploy/.env.example` to `/opt/miriyum/.env` without committing the copied file.
-2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD` and `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`.
+2. Replace every `replace-with-...` value with a staging value, including `MIRIYUM_VALKEY_PASSWORD`, `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`, and `MIRIYUM_QR_STORAGE_GENERATION`. The QR storage generation must match `^[A-Za-z0-9._-]{1,64}$` on every backend instance.
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
@@ -53,6 +53,8 @@ Before logging in to ECR or restarting containers, `deploy.sh` runs `docker comp
 The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Validation includes staging `healthy`, unauthenticated `NOAUTH`, authenticated `PONG`, and no host port exposure. Valkey joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
 
 After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication use Valkey through Spring Data Redis/Lettuce. Compose waits for MySQL health before starting the backend, but does not wait for Valkey health. If Valkey is unavailable, the backend still starts and deployment health remains available; only Refresh Token operations fail closed with `503`. Existing Access JWT requests and public endpoints continue without Valkey. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
+
+`MIRIYUM_QR_STORAGE_GENERATION` fences account QR epochs from restored Valkey data. Keep the same value for ordinary backend or Valkey restarts. Before restoring any older Valkey snapshot, stop the backend, choose a value that has never been used in that environment, update every backend instance, restore the snapshot, and only then resume the backend. Never reopen an earlier generation value. A missing or invalid value leaves non-QR Access JWT traffic available but makes QR capture/check and a Refresh-authorized Consumer logout mutation fail closed with `COMMON_012`; it must not be treated as a successful server logout or QR revocation.
 
 After the first staging deployment that includes Valkey, verify the service from the EC2 instance:
 

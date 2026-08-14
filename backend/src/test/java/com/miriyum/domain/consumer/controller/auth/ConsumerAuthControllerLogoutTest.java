@@ -3,6 +3,7 @@ package com.miriyum.domain.consumer.controller.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.auth.cookie.AuthCookieFactory;
@@ -75,15 +76,35 @@ class ConsumerAuthControllerLogoutTest {
         request.setCookies(
                 new Cookie(NAMESPACE.refreshCookieName(), "refresh-token"),
                 new Cookie(NAMESPACE.csrfCookieName(), CSRF_TOKEN));
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer access-token");
         willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE))
                 .given(consumerAuthService)
-                .logout("refresh-token");
+                .logout("refresh-token", "Bearer access-token");
 
         // when & then
         assertThatThrownBy(() -> controller.logout(request, response, CSRF_TOKEN))
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(CommonErrorCode.SERVICE_UNAVAILABLE);
+
+        assertThat(expiredRefreshCookieHeader()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Access·Refresh subject 불일치로 401이어도 Refresh 쿠키 만료 헤더를 유지한다")
+    void logoutExpiresRefreshCookieEvenWhenSubjectsMismatch() {
+        request.setCookies(
+                new Cookie(NAMESPACE.refreshCookieName(), "refresh-token"),
+                new Cookie(NAMESPACE.csrfCookieName(), CSRF_TOKEN));
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer other-account-access-token");
+        willThrow(new ServiceException(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH))
+                .given(consumerAuthService)
+                .logout("refresh-token", "Bearer other-account-access-token");
+
+        assertThatThrownBy(() -> controller.logout(request, response, CSRF_TOKEN))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH);
 
         assertThat(expiredRefreshCookieHeader()).isTrue();
     }
@@ -101,6 +122,7 @@ class ConsumerAuthControllerLogoutTest {
 
         // then
         assertThat(expiredRefreshCookieHeader()).isTrue();
+        verify(consumerAuthService).logout("refresh-token", null);
     }
 
     @Test

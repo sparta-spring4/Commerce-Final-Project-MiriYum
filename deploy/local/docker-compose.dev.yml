@@ -56,6 +56,10 @@ services:
       MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_KEY_VERSION: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_KEY_VERSION:-}
       MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_SECRET: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_SECRET:-}
       MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:-false}
+      MIRIYUM_VALKEY_HOST: valkey
+      MIRIYUM_VALKEY_PORT: 6379
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
+      MIRIYUM_QR_STORAGE_GENERATION: ${MIRIYUM_QR_STORAGE_GENERATION}
     depends_on:
       mysql:
         condition: service_healthy
@@ -64,5 +68,27 @@ services:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    environment:
+      MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        exec valkey-server \
+          --appendonly yes \
+          --requirepass "$$MIRIYUM_VALKEY_PASSWORD"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$MIRIYUM_VALKEY_PASSWORD\" valkey-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   mysql-data:
+  valkey-data:

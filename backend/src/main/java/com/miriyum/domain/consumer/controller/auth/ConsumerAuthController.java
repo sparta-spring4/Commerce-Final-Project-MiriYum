@@ -152,8 +152,8 @@ public class ConsumerAuthController {
         // Valkey 장애로 logout()이 COMMON_012를 던지면 이 헤더가 응답에 실리지 않아
         // 503과 함께 유효한 Refresh Token이 브라우저에 남는다.
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieFactory.expiredRefreshCookie(NAMESPACE).toString());
-        consumerAuthService.logout(refreshToken);
-        return ApiResponse.success("로그아웃했습니다.", null);
+        consumerAuthService.logout(refreshToken, request.getHeader(HttpHeaders.AUTHORIZATION));
+        return ApiResponse.success("로그아웃 요청을 처리했습니다.", null);
     }
 
     private void requireSameOrigin(HttpServletRequest request) {

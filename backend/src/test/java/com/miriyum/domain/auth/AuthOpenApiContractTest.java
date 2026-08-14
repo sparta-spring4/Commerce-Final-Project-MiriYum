@@ -27,6 +27,22 @@ class AuthOpenApiContractTest {
     }
 
     @Test
+    @DisplayName("일반 사용자 로그아웃은 선택적 Access 교차 확인과 서버 실패 응답을 공개한다")
+    void consumerLogoutPublishesQrRevocationCredentialOutcomes() throws IOException {
+        String openApi = Files.readString(AUTH_OPEN_API).replace("\r\n", "\n");
+        String logout = operation(openApi, "/api/v1/consumers/auth/sessions/current:");
+
+        assertThat(logout)
+                .contains("security:\n        - {}\n        - bearerAuth: []")
+                .contains("\"401\":\n          $ref: \"#/components/responses/AccessRefreshSubjectMismatch\"")
+                .contains("\"503\":\n          $ref: \"#/components/responses/ConsumerLogoutServiceUnavailable\"");
+        assertThat(openApi)
+                .doesNotContain("OptionalAuthorization:")
+                .contains("AccessRefreshSubjectMismatch:")
+                .contains("code: AUTH_016");
+    }
+
+    @Test
     @DisplayName("일반 로그인과 카카오 로그인은 같은 15분 Access Token 수명을 안내한다")
     void tokenResponsesUseTheSameAccessTokenExpiry() throws IOException {
         String openApi = Files.readString(AUTH_OPEN_API).replace("\r\n", "\n");
