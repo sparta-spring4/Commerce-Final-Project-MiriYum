@@ -215,7 +215,7 @@ paths:
         "404":
           $ref: "#/components/responses/MenuNotFound"
         "409":
-          $ref: "../reservation/openapi.yaml#/components/responses/ReservationConflict"
+          $ref: "#/components/responses/MenuAlternativeReservationConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
         "503":
@@ -2583,6 +2583,33 @@ components:
               value: { code: COMMON_008, message: 다른 요청이 먼저 반영되었습니다. 최신 상태를 확인한 뒤 다시 시도해 주세요. }
             invalidMenuState:
               value: { code: STORE_010, message: 현재 메뉴 상태에서 요청한 전이를 수행할 수 없습니다. }
+    MenuAlternativeReservationConflict:
+      description: 예약 시간·수용량·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            capacityConflict:
+              value:
+                code: RESERVATION_003
+                message: 요청한 시간의 예약 수용량이 부족합니다.
+            contactMissing:
+              value:
+                code: ACCOUNT_006
+                message: 예약에 사용할 연락처를 먼저 등록해 주세요.
+            menuHoldStateConflict:
+              value:
+                code: MENU_HOLD_001
+                message: 현재 메뉴 상태 또는 자격에서 홀드할 수 없습니다.
+            insufficientMenuQuantity:
+              value:
+                code: MENU_HOLD_002
+                message: 요청한 구간의 온라인 메뉴 수량이 부족합니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     MenuNotFound:
       description: 메뉴를 찾을 수 없음
       content:

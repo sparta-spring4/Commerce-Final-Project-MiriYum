@@ -331,13 +331,18 @@ class ReservationOpenApiContractTest {
     }
 
     @Test
-    void reservationCreationConflictDocumentsMenuHoldRuntimeErrors() throws IOException {
+    void reservationCreationConflictKeepsPaymentErrorsOutOfSharedConsumers() throws IOException {
         Map<String, Object> document = load(
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
         Map<String, Object> operation = map(map(map(document.get("paths")).get(
                 "/api/v1/consumers/me/reservations"
         )).get("post"));
+        assertThat(map(map(operation.get("responses")).get("409")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/ReservationCreationConflict"
+                );
         Map<String, Object> conflict = resolveLocalResponse(document, operation, "409");
         Map<String, Object> examples = map(
                 map(map(conflict.get("content")).get("application/json")).get("examples")
@@ -356,6 +361,40 @@ class ReservationOpenApiContractTest {
                         "PAYMENT_008",
                         "COMMON_007",
                         "COMMON_008"
+                );
+
+        assertThat(map(map(document.get("components")).get("responses")))
+                .doesNotContainKey("ReservationConflict");
+
+        Map<String, Object> storeSearch = load(
+                Path.of("..", "docs", "specs", "store-search", "openapi.yaml")
+        );
+        Map<String, Object> alternativeSearch = map(map(map(storeSearch.get("paths")).get(
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches"
+        )).get("post"));
+        assertThat(map(map(alternativeSearch.get("responses")).get("409")))
+                .containsEntry(
+                        "$ref",
+                        "#/components/responses/MenuAlternativeReservationConflict"
+                );
+        Map<String, Object> alternativeConflict = resolveLocalResponse(
+                storeSearch,
+                alternativeSearch,
+                "409"
+        );
+        Map<String, Object> alternativeExamples = map(
+                map(map(alternativeConflict.get("content")).get("application/json"))
+                        .get("examples")
+        );
+        assertThat(alternativeExamples.values().stream()
+                .map(ReservationOpenApiContractTest::map)
+                .map(example -> map(example.get("value")).get("code")))
+                .containsExactlyInAnyOrder(
+                        "RESERVATION_003",
+                        "ACCOUNT_006",
+                        "MENU_HOLD_001",
+                        "MENU_HOLD_002",
+                        "NOTIFICATION_002"
                 );
     }
 

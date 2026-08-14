@@ -353,7 +353,7 @@ export interface components {
       };
     };
     /** @description 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록 */
-    ReservationConflict: {
+    ReservationCreationConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -812,7 +812,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
       404: components["responses"]["ReservationCreationNotFound"];
-      409: components["responses"]["ReservationConflict"];
+      409: components["responses"]["ReservationCreationConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };

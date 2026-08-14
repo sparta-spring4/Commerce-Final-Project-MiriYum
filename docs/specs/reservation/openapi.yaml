@@ -61,7 +61,7 @@ paths:
         "404":
           $ref: "#/components/responses/ReservationCreationNotFound"
         "409":
-          $ref: "#/components/responses/ReservationConflict"
+          $ref: "#/components/responses/ReservationCreationConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
     get:
@@ -1303,7 +1303,7 @@ components:
               value:
                 code: RESERVATION_001
                 message: 예약을 찾을 수 없습니다.
-    ReservationConflict:
+    ReservationCreationConflict:
       description: 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록
       content:
         application/json:
