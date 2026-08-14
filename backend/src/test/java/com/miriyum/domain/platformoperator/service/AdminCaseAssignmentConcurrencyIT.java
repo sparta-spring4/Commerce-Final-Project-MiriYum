@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentRequest;
+import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignmentCommand;
 import com.miriyum.domain.platformoperator.entity.AdminCaseAssignment;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
@@ -12,10 +13,12 @@ import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,6 +97,46 @@ class AdminCaseAssignmentConcurrencyIT {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED));
+    }
+
+    @Test
+    void exactlyOneConcurrentInitialAssignmentWins() throws Exception {
+        assignments.deleteAll();
+        accounts.deleteAll();
+        Instant now = Instant.now();
+        PlatformOperatorAccount firstAccount = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "assignment-first@example.com", encoder.encode("Password1!"),
+                "assignment-first", now.plusSeconds(600)));
+        PlatformOperatorAccount secondAccount = accounts.saveAndFlush(PlatformOperatorAccount.createTemporary(
+                "assignment-second@example.com", encoder.encode("Password1!"),
+                "assignment-second", now.plusSeconds(600)));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        List<Boolean> outcomes;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> assign(firstAccount.getId(), ready, start, now));
+            var second = executor.submit(() -> assign(secondAccount.getId(), ready, start, now));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            outcomes = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+        }
+
+        assertThat(outcomes).containsExactlyInAnyOrder(true, false);
+        assertThat(assignments.count()).isEqualTo(1L);
+    }
+
+    private boolean assign(long operatorId, CountDownLatch ready, CountDownLatch start, Instant now) {
+        ready.countDown();
+        await(start);
+        try {
+            manager.assign(new AdminCaseAssignmentCommand(
+                    AdminCaseType.ONBOARDING_REVIEW, "initial-race", 1L, operatorId, now.plusSeconds(600)));
+            return true;
+        } catch (ServiceException exception) {
+            assertThat(exception.getErrorCode()).isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+            return false;
+        }
     }
 
     private static void await(CountDownLatch latch) {

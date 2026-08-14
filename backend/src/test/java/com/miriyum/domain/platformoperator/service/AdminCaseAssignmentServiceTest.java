@@ -14,6 +14,7 @@ import com.miriyum.domain.platformoperator.entity.AdminCaseAssignment;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.AdminCaseAssignmentRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -21,6 +22,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
 
 class AdminCaseAssignmentServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-14T00:00:00Z");
@@ -93,6 +95,18 @@ class AdminCaseAssignmentServiceTest {
         service.close(request(3L, 7L));
 
         assertThat(assignment.isActiveAt(NOW)).isFalse();
+    }
+
+    @Test
+    void mapsConcurrentInitialAssignmentLockFailureToConflict() {
+        when(assignments.findByCaseForUpdate(ONBOARDING_REVIEW, "case-1", 3L))
+                .thenThrow(new CannotAcquireLockException("deadlock"));
+
+        assertThatThrownBy(() -> service.assign(new AdminCaseAssignmentCommand(
+                ONBOARDING_REVIEW, "case-1", 3L, 7L, NOW.plusSeconds(60))))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
     }
 
     private static AdminCaseAssignmentRequest request(long caseVersion, long operatorId) {

@@ -10,6 +10,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,16 +41,16 @@ public class AdminCaseAssignmentService implements AdminCaseAssignmentVerifier, 
     @Override
     @Transactional
     public void assign(AdminCaseAssignmentCommand command) {
-        if (!command.expiresAt().isAfter(clock.instant())
-                || assignments.findByCaseForUpdate(command.caseType(), command.caseId(), command.caseVersion())
-                .isPresent()) {
-            throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
-        }
         try {
+            if (!command.expiresAt().isAfter(clock.instant())
+                    || assignments.findByCaseForUpdate(command.caseType(), command.caseId(), command.caseVersion())
+                    .isPresent()) {
+                throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
             assignments.saveAndFlush(AdminCaseAssignment.assign(
                     command.caseType(), command.caseId(), command.caseVersion(), command.operatorId(),
                     command.expiresAt(), clock.instant()));
-        } catch (DataIntegrityViolationException exception) {
+        } catch (DataIntegrityViolationException | ConcurrencyFailureException exception) {
             throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
         }
     }
