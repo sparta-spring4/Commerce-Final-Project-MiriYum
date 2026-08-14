@@ -235,6 +235,20 @@ class RecordingClient {
   }
 }
 
+class MalformedLoginClient extends RecordingClient {
+  post(url, body, params) {
+    if (url.endsWith('/api/v1/consumers/auth/sessions')) {
+      this.calls.push({ method: 'POST', url, body, ...params })
+      return {
+        status: 200,
+        body: envelope({ tokenType: 'Bearer', expiresIn: 900 }),
+        headers: { 'Set-Cookie': 'MIRIYUM_CONSUMER_REFRESH=refresh-cookie-value' },
+      }
+    }
+    return super.post(url, body, params)
+  }
+}
+
 export default function () {
   const client = new RecordingClient()
   const authResult = runAuthRefresh({
@@ -317,6 +331,21 @@ export default function () {
   const preparationLogoutCall = preparationClient.calls.find(
     (call) => call.tags.request === 'consumerLogout',
   )
+  const malformedScenarioClient = new MalformedLoginClient()
+  const malformedScenarioRejected = throws(() => runAuthRefresh({
+    client: malformedScenarioClient,
+    baseUrl: 'http://backend:8080',
+    allowedOrigin: 'http://localhost:5173',
+    account: { email: 'malformed@example.test', password: 'synthetic-password' },
+    tags: { phase: 'measured' },
+  }))
+  const malformedPreparationClient = new MalformedLoginClient()
+  const malformedPreparationRejected = throws(() => loginConsumer({
+    client: malformedPreparationClient,
+    baseUrl: 'http://backend:8080',
+    account: { email: 'malformed-prepared@example.test', password: 'synthetic-password' },
+    tags: { phase: 'preparation' },
+  }))
 
   check(null, {
     'login uses the consumer session resource': () =>
@@ -429,6 +458,15 @@ export default function () {
       preparedToken === 'access-token-value'
       && preparationLogoutCall !== undefined
       && preparationLogoutCall.tags.phase === 'cleanup',
+    'malformed successful auth login is rejected after session cleanup': () =>
+      malformedScenarioRejected
+      && malformedScenarioClient.calls.some((call) => call.tags.request === 'consumerLogout')
+      && !malformedScenarioClient.calls.some(
+        (call) => call.tags.request === 'consumerTokenRefresh',
+      ),
+    'malformed successful prepared login is rejected after session cleanup': () =>
+      malformedPreparationRejected
+      && malformedPreparationClient.calls.some((call) => call.tags.request === 'consumerLogout'),
     'notification invariant conflict is an unexpected 4xx': () =>
       notificationConflict.classification === 'unexpected_4xx',
     'notification first page omits the cursor': () =>

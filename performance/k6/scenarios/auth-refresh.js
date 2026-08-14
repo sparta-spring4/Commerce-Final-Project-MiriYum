@@ -101,6 +101,28 @@ function revokeConsumerSession({ client, baseUrl, tags }) {
   }
 }
 
+function runWithConsumerSessionCleanup({ client, baseUrl, tags }, action) {
+  let value
+  let actionError
+  try {
+    value = action()
+  } catch (error) {
+    actionError = error
+  }
+
+  let cleanup
+  let cleanupError
+  try {
+    cleanup = revokeConsumerSession({ client, baseUrl, tags })
+  } catch (error) {
+    cleanupError = error
+  }
+
+  if (actionError !== undefined) throw actionError
+  if (cleanupError !== undefined) throw cleanupError
+  return { value, cleanup }
+}
+
 function requestConsumerSession({ client, baseUrl, account, tags }) {
   requireCredentials(account)
   const requestTagSet = requestTags(tags, 'consumerLogin')
@@ -116,7 +138,7 @@ function requestConsumerSession({ client, baseUrl, account, tags }) {
   return {
     status: response.status,
     classification,
-    accessToken: classification === 'success' ? parseTokenData(response) : null,
+    response,
   }
 }
 
@@ -125,11 +147,14 @@ export function loginConsumer({ client, baseUrl, account, tags = {} }) {
   if (result.classification !== 'success') {
     throw new Error(`synthetic consumer login failed with HTTP ${result.status}`)
   }
-  const cleanup = revokeConsumerSession({ client, baseUrl, tags })
+  const { value: accessToken, cleanup } = runWithConsumerSessionCleanup(
+    { client, baseUrl, tags },
+    () => parseTokenData(result.response),
+  )
   if (!cleanup.completed) {
     throw new Error(`synthetic consumer session cleanup failed with HTTP ${cleanup.logoutStatus}`)
   }
-  return result.accessToken
+  return accessToken
 }
 
 export function runAuthRefresh({ client, baseUrl, allowedOrigin, account, tags = {} }) {
@@ -143,25 +168,31 @@ export function runAuthRefresh({ client, baseUrl, allowedOrigin, account, tags =
     }
   }
 
-  const requestTagSet = requestTags(tags, 'consumerTokenRefresh')
-  const response = client.post(
-    `${baseUrl}/api/v1/consumers/auth/token-refreshes`,
-    '{}',
-    { headers: originHeaders(allowedOrigin), tags: requestTagSet, redirects: 0 },
+  const { value: refresh, cleanup } = runWithConsumerSessionCleanup(
+    { client, baseUrl, tags },
+    () => {
+      parseTokenData(login.response)
+      const requestTagSet = requestTags(tags, 'consumerTokenRefresh')
+      const response = client.post(
+        `${baseUrl}/api/v1/consumers/auth/token-refreshes`,
+        '{}',
+        { headers: originHeaders(allowedOrigin), tags: requestTagSet, redirects: 0 },
+      )
+      const classification = recordClassification(
+        classifyStatus(response.status, [429]),
+        requestTagSet,
+      )
+      if (classification === 'success') parseTokenData(response)
+      return { status: response.status, classification }
+    },
   )
-  const classification = recordClassification(
-    classifyStatus(response.status, [429]),
-    requestTagSet,
-  )
-  const cleanup = revokeConsumerSession({ client, baseUrl, tags })
-  if (classification === 'success') parseTokenData(response)
 
   return {
     loginStatus: login.status,
-    refreshStatus: response.status,
+    refreshStatus: refresh.status,
     csrfStatus: cleanup.csrfStatus,
     logoutStatus: cleanup.logoutStatus,
-    classification,
-    completed: classification === 'success' && cleanup.completed,
+    classification: refresh.classification,
+    completed: refresh.classification === 'success' && cleanup.completed,
   }
 }
