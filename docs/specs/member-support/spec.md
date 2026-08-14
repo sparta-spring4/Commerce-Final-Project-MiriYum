@@ -37,7 +37,7 @@
 
 운영자 API는 권한을 먼저 검사하고 그 뒤 계정 유형별 public lookup service를 호출한다. 존재하지 않는 ID와 요청한 계정 유형에 속하지 않는 ID는 모두 `404 AUTH_016`으로 정규화한다. 권한 없는 요청은 조회 자체를 수행하지 않고 `403 ADMIN_001`을 반환하므로 다른 계정 유형의 동일 ID 존재 여부, 이메일, 전화번호, 제재 상세를 추론할 수 없다.
 
-사용자 복구·이의 접수 API는 계정 없음, 유형 불일치, 등록 정보 불일치, 증거 없음·만료·재사용을 모두 같은 `202 Accepted` envelope로 반환한다. 유효한 요청에만 내부 사건을 생성하며 응답으로 생성 여부나 사건 ID를 공개하지 않는다.
+사용자 복구·이의 접수 API는 계정 없음, 유형 불일치, 등록 정보 불일치, 증거 없음·만료·재사용을 모두 같은 `202 Accepted` envelope로 반환한다. 복구 확인 요청에는 유효 여부와 무관하게 같은 이름·속성·길이의 opaque 쿠키를 발급하고 유효한 요청의 digest만 저장한다. 유효한 요청에만 내부 사건을 생성하며 응답·헤더로 검증 성공, 생성 여부나 사건 ID를 공개하지 않는다.
 
 ## 회원 최소 조회
 
@@ -54,7 +54,7 @@
 ## 이메일 접근 불가 수동 복구
 
 1. 소비자 또는 식당 운영자는 자기 계정 유형 namespace에서 mock 확인을 요청한다. 소비자는 기존 등록 이메일, 등록 휴대전화, 새 이메일을 제출한다. 식당 운영자는 이에 더해 관리 중인 매장 한 곳의 사업자등록번호와 대표자명을 제출한다.
-2. mock verifier는 원문을 응답·로그·감사에 남기지 않고 조건이 맞을 때 목적 결속 증거 쿠키를 발급한다.
+2. mock verifier는 원문을 응답·로그·감사에 남기지 않고 모든 요청에 같은 형태의 목적 결속 증거 쿠키를 발급한다. 조건이 맞을 때에만 서버가 digest와 암호화된 새 이메일을 저장한다.
 3. 사용자가 사건 접수를 요청하면 유효한 증거를 한 번 소비하고 `SUBMITTED` 사건을 만든다. 겉으로는 항상 같은 202를 반환한다.
 4. `MEMBER_RECOVERY` 운영자가 사건을 자기에게 배정하고 승인 또는 거절한다.
 5. 승인은 한 MySQL transaction에서 새 이메일 교체, 모든 refresh state 폐기, `password_reset_required=true`, `support_version` 증가, 사건 종결, 고위험 감사 기록을 확정한다. 이후 카카오를 포함한 모든 로그인은 새 비밀번호 설정 전까지 차단한다.
@@ -135,8 +135,8 @@
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAccountService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAuthService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/**`
-- `backend/src/main/java/com/miriyum/domain/store/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/membersupport/**`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/config/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/dto/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/AdminCommandPurpose.java`
@@ -151,8 +151,9 @@
 - `backend/src/test/java/com/miriyum/domain/auth/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/consumer/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/storeoperator/membersupport/**`
-- `backend/src/test/java/com/miriyum/domain/store/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/**`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/config/membersupport/**`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorRoleTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorAuthorizationOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java`
@@ -177,6 +178,7 @@
 - `docs/specs/platform-operator-authorization/spec.md`
 - `docs/specs/member-support/spec.md`
 - `docs/specs/member-support/openapi.yaml`
+- `docs/specs/member-support/implementation-plan.md`
 - `redocly.yaml`
 
 `docs/superpowers/**`, 기존 migration, 다른 도메인의 Entity·Repository 직접 참조, frontend, 배포 파일, dev 직접 push는 allowlist 밖이다. 구현 중 새 파일 필요가 발견되면 먼저 이 명세의 allowlist와 계획을 갱신하고 별도 검토를 받는다.

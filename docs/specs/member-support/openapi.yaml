@@ -821,7 +821,7 @@ components:
       description: 계정·증거·사건 생성 여부와 무관하게 반환하는 동일 응답
       headers:
         Set-Cookie:
-          description: 유효한 mock 확인에만 설정되는 HttpOnly·Secure·SameSite=Strict 기능 전용 opaque cookie. 클라이언트는 존재 여부로 성공을 판단하지 않는다.
+          description: 계정·확인 유효 여부와 무관하게 같은 이름·속성·길이로 설정되는 HttpOnly·Secure·SameSite=Strict 기능 전용 opaque cookie. 유효한 요청의 digest만 서버에 저장되며 클라이언트는 cookie로 성공 여부를 판단할 수 없다.
           schema:
             type: string
       content:
