@@ -44,7 +44,7 @@ K6_CONSUMER_05_PASSWORD=replace-outside-the-repository
 저장소 루트에서 고정 이미지로 실행한다.
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run "/scripts/tests/$test"
 }

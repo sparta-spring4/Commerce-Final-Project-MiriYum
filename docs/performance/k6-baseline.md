@@ -1,5 +1,15 @@
 # 핵심 API k6 기준선
 
+## #338 authRefresh 반복 cleanup 회귀 검증
+
+- 검증 commit: `9302bb6c468514ad35b2ef9fc11bf047cd41e759`
+- smoke `local-auth-search-smoke-20260814-02`: `authRefresh` 1회와 `storeSearch` 1회가 통과했고 unexpected 4xx·5xx·dropped iteration은 모두 0이었다.
+- baseline 입력: local HTTPS proxy, `authRefresh`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`.
+- `local-auth-baseline-20260814-02`: 61 iterations, 122 measured requests, p50 40.247 ms, p95 68.365 ms, p99 76.349 ms, unexpected 4xx·5xx·dropped iteration 0.
+- `local-auth-baseline-20260814-03`: 61 iterations, 122 measured requests, p50 37.697 ms, p95 65.720 ms, p99 69.530 ms, unexpected 4xx·5xx·dropped iteration 0.
+- 잔여 family 비교 실행 `local-auth-baseline-20260814-04`: 60 iterations, 120 measured requests, p50 35.290 ms, p95 63.671 ms, p99 65.627 ms, unexpected 4xx·5xx·dropped iteration 0. 수정 전 실패 실행이 남긴 활성 family 기준값 62개가 실행 뒤에도 62개로 유지되어 새 활성 family가 누적되지 않았다. 기존 62개는 이 PR에서 직접 삭제하지 않는다.
+- 공개 매장 생성은 로컬 `MIRIYUM_KAKAO_LOCAL_REST_API_KEY`가 구성되지 않아 지오코딩 단계에서 HTTP 503으로 실패했다. 따라서 결과가 0건인 검색 smoke만 수행했으며 `storeSearch` baseline 수치나 #286 병목 증거로 사용하지 않는다.
+
 - 소유 Issue: [#285](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/285)
 - 기록일: 2026-08-14
 - 기준 `dev`: `bb46e4e140d964a53d19d1ab97ce90a300551a9f`
