@@ -37,10 +37,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
                 'status', 'ACTIVE',
-                'lastRotatedAt', ARGV[6])
+                'lastRotatedAt', ARGV[6],
+                'familyCreatedAt', ARGV[9])
             redis.call('EXPIREAT', KEYS[1], ARGV[7])
             redis.call('SADD', KEYS[2], KEYS[1])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+            if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            end
             return 1
             """, Long.class);
 
@@ -82,13 +86,19 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 recordRiskEvent('REUSED_REVOKED_TOKEN', 'REVOCATION')
                 return 3
             end
+            local familyCreatedAt = redis.call('HGET', KEYS[1], 'familyCreatedAt')
             redis.call('SADD', KEYS[2], KEYS[1])
             redis.call('HSET', KEYS[1],
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
                 'lastRotatedAt', ARGV[6])
-            redis.call('EXPIREAT', KEYS[1], ARGV[7])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            if familyCreatedAt ~= false and familyCreatedAt ~= nil then
+                redis.call('EXPIREAT', KEYS[1], ARGV[7])
+                local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+                if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                    redis.call('EXPIREAT', KEYS[2], ARGV[7])
+                end
+            end
             return 1
             """, Long.class);
 
@@ -144,7 +154,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 state.currentTokenHash(),
                 epochSeconds(state.lastRotatedAt()),
                 epochSeconds(state.familyExpiresAt()),
-                Long.toString(expectedSessionEpoch));
+                Long.toString(expectedSessionEpoch),
+                epochSeconds(state.familyCreatedAt()));
         // CREATE_SCRIPT는 0(familyId 충돌)·1(생성)·2(session epoch 변경)만 반환한다.
         int createResult = requireScriptResult(result, "create", state.namespace());
         return switch (createResult) {

@@ -57,6 +57,14 @@ aws logs put-metric-filter \
 aws logs put-metric-filter \
   --region "$AWS_REGION" \
   --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-token-absolute-lifetime-cap-applied \
+  --filter-pattern '"event=refresh_token_absolute_lifetime_cap_applied"' \
+  --metric-transformations \
+    "metricName=RefreshTokenAbsoluteLifetimeCapApplied,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
   --filter-name miriyum-staging-refresh-risk-event-marker-quarantine-failed \
   --filter-pattern '"event=refresh_token_risk_event_marker_quarantine_failed"' \
   --metric-transformations \
