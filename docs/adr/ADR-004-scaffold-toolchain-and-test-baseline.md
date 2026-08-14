@@ -144,11 +144,11 @@ pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShard
 
 Gradle user home의 dependency cache는 공유하지만 build directory와 project cache를 공유하지 않는다. init script는 child별 절대 build directory를 설정하며, runner는 `--project-cache-dir`에 child별 경로를 전달한다.
 
-process 실행은 `System.Diagnostics.ProcessStartInfo`를 사용한다. Ubuntu는 Wrapper 실행 파일과 각 인자를 `ArgumentList`로 전달한다. Windows는 `cmd.exe /d /s /c` 뒤 단일 command string을 구성하는 adapter를 사용하며, 공백·한글·`&`, `(`, `)`, `^`, `%`, `!`와 따옴표가 포함된 경로·인자를 보존하는 quoting·escaping 규칙을 contract fixture로 고정한다.
+Ubuntu process 실행은 `System.Diagnostics.ProcessStartInfo`를 사용하고 Wrapper 실행 파일과 각 인자를 `ArgumentList`로 전달한다. Windows는 `ProcessStartInfo`를 사용하지 않고 `CreateProcessW`와 `CREATE_SUSPENDED`를 사용하는 native launcher가 process 생성을 전담한다. native launcher는 stdout·stderr용 anonymous pipe를 만들고 parent read handle의 상속 flag를 제거한 뒤 `STARTUPINFOEX`의 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`와 `EXTENDED_STARTUPINFO_PRESENT`를 사용해 child-side write handle을 포함한 명시적 standard-handle allowlist만 상속시킨다. `CreateProcessW` 성공 직후 parent가 보유한 child-side write handle 복사본을 닫고, parent read handle의 비동기 pump를 시작한 뒤 Job 귀속과 resume을 수행한다. `ResumeThread` 성공 직후 thread handle을 닫고, process handle은 process 종료 대기와 `GetExitCodeProcess`가 끝날 때까지, parent read handle은 각 pump가 EOF를 받고 완료될 때까지, Job handle은 `ActiveProcesses == 0` 확인이 끝날 때까지 유지한 뒤 닫는다. 생성·귀속·resume·pump 중간 실패를 포함한 모든 경로가 동일한 소유권 순서로 handle을 회수하며, parent의 child-side write handle 잔존으로 EOF를 막아서는 안 된다. `cmd.exe /d /s /c` 뒤 단일 mutable command-line buffer를 구성하는 adapter는 공백·한글·`&`, `(`, `)`, `^`, `%`, `!`와 따옴표(`"`)가 포함된 경로·인자를 보존해야 한다. contract fixture는 따옴표 단독 입력과 따옴표가 공백·한글·각 meta character와 결합된 입력을 각각 child에 전달하고, child가 실제 수신한 argv가 원본과 byte-for-byte가 아니라 Unicode 문자열 값 기준으로 정확히 일치하는지 검증한다.
 
 stdout과 stderr는 child 시작 직후 서로 독립적인 비동기 pump로 child별 파일에 drain한다. runner는 process 종료와 두 pump 완료를 모두 기다린 뒤 실제 `ExitCode`와 로그를 판정한다. fixture는 pipe buffer보다 큰 stdout·stderr를 동시에 생성해 교착과 종료 직전 로그 유실이 없음을 검증한다.
 
-각 child timeout은 35분이다. Windows child는 `CREATE_SUSPENDED`로 생성해 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object에 귀속한 뒤 main thread를 resume하고, Ubuntu child는 `setsid`로 새 process group/session에서 시작한다. timeout·Ctrl-C·예외 시 Windows는 Job Object를 닫고, Ubuntu는 group 전체에 TERM을 보낸 뒤 유예 시간을 거쳐 KILL을 적용한다. PID와 process 시작 시각을 함께 기록하고 종료 뒤 job/group의 생존 process가 0건인지 확인한다. `Process.Kill(entireProcessTree)`는 정상 containment가 아니라 fallback으로만 사용한다. descendant가 남거나 정리 결과를 확인할 수 없으면 runner 전체를 실패로 기록하며, 이미 생성된 로그와 report는 삭제하지 않는다.
+각 child timeout은 35분이다. Windows native launcher는 `CreateProcessW(..., CREATE_SUSPENDED, ...)`로 child를 생성하고 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`가 설정된 Job Object에 `AssignProcessToJobObject`가 성공한 뒤에만 main thread를 `ResumeThread`한다. **Job 귀속 전 resume은 금지한다.** 생성·pipe 연결·Job 귀속 중 하나라도 실패하면 resume하지 않고 아직 보유한 process·thread·pipe handle을 정리한다. timeout·Ctrl-C·예외 시에는 Job handle을 유지한 상태에서 `TerminateJobObject`를 호출하고 `QueryInformationJobObject`의 `ActiveProcesses == 0`이 될 때까지 제한 시간 안에서 확인한 뒤 handle을 닫는다. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`는 handle 누수나 비정상 종료에 대비한 fail-safe이며 정상 cleanup 또는 orphan 0건 증거를 대신하지 않는다. Ubuntu child는 `setsid`로 새 process group/session에서 시작하고, timeout·Ctrl-C·예외 시 group 전체에 TERM을 보낸 뒤 유예 시간을 거쳐 KILL을 적용한다. PID와 process 시작 시각을 함께 기록하고 종료 뒤 job/group의 생존 process가 0건인지 확인한다. `Process.Kill(entireProcessTree)`는 정상 containment가 아니라 fallback으로만 사용한다. descendant가 남거나 정리 결과를 확인할 수 없으면 runner 전체를 실패로 기록하며, 이미 생성된 로그와 report는 삭제하지 않는다.
 
 ### 결과 판정과 보고서
 
@@ -163,7 +163,9 @@ exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 ch
 
 ### 플랫폼과 CI 경계
 
-첫 지원 범위는 Windows PowerShell 7과 GitHub Actions `ubuntu-24.04`의 `pwsh`다. Backend CI의 unit job은 실제 Gradle 전체 runner를 다시 실행하지 않고 PowerShell contract fixture만 실행한다. fixture는 다음 계약을 검증한다.
+첫 지원 범위는 Windows PowerShell 7과 GitHub Actions `ubuntu-24.04`의 `pwsh`다. Ubuntu Backend CI unit job은 실제 Gradle 전체 runner를 다시 실행하지 않고 플랫폼 공통·Ubuntu PowerShell contract fixture만 실행한다. Windows native launcher·contract test 구현과 같은 commit 또는 Pull Request 범위에서 `.github/workflows/backend-ci.yml`에 Gradle과 Testcontainers를 실행하지 않는 별도 Windows PowerShell contract job을 추가한다. 이 job은 runner의 실제 Windows native launcher를 사용해 suspend→Job 귀속→resume 순서, timeout·cleanup 뒤 orphan 0건, argv와 stdout·stderr 계약을 검증한다. 같은 변경에서 이름이 `backend-ci`인 기존 집계 job에 Windows contract job의 성공을 필수 `needs`로 연결한다. A~D integration matrix와 required check 이름 `backend-ci`는 유지한다.
+
+설계 문서만 수정하는 현재 변경에서는 아직 존재하지 않는 runner·native launcher·contract test보다 workflow gate를 먼저 활성화하지 않는다. 구현 전 `.github/workflows/backend-ci.yml`은 변경하지 않으며, 파일 존재 여부 조건이나 `continue-on-error`로 Windows contract job을 skip·완화하는 임시 우회도 금지한다. 다음 계약은 구현과 CI 활성화를 같은 commit 또는 Pull Request 범위에서 원자적으로 적용할 때 검증한다.
 
 - Auto 경계, 8GB 미만·탐지 실패의 최소 fallback 경고와 명시적 override
 - integration 동시 실행 상한 1·2·4와 별도 unit child
@@ -171,8 +173,11 @@ exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 ch
 - stdout·stderr 독립 비동기 drain, process와 두 stream 완료 뒤 실제 exit code 수집과 최종 non-zero 전파
 - XML 누락·malformed·tests=0·failure/error/skipped 거부
 - 한 child 실패와 timeout 뒤에도 남은 queue 실행
-- Windows Job Object와 Ubuntu process group을 통한 Ctrl-C·timeout descendant 종료와 orphan 0건
-- 공백·한글·`&`, `(`, `)`, `^`, `%`, `!` 경로·인자의 보존
+- Windows `CreateProcessW`의 `CREATE_SUSPENDED` 생성, Job 귀속 전 resume 금지, 귀속 후 resume 순서와 Ubuntu process group 시작
+- Windows `TerminateJobObject` 뒤 `ActiveProcesses == 0` 확인, Ubuntu group cleanup을 통한 Ctrl-C·timeout descendant 종료와 orphan 0건
+- Windows native launcher가 명시적 handle allowlist만 상속하고, `CreateProcessW` 직후 parent의 child-side write handle을 닫아 EOF를 보장하며, thread→process→read→Job handle을 각 완료 조건까지 유지·회수하는 계약
+- parent write handle 잔존 없이 stdout·stderr를 독립 drain해 pump가 EOF까지 완료되고 handle 누수가 없는 계약
+- 공백·한글·`&`, `(`, `)`, `^`, `%`, `!`, 따옴표(`"`)가 포함된 경로·인자의 argv round-trip 보존. 따옴표 단독과 따옴표+각 입력 조합 모두 child가 실제 받은 Unicode argv와 원본의 정확한 일치를 확인한다.
 - Windows Wrapper와 Ubuntu Wrapper 선택
 - `projectsEvaluated` 이후 설정과 각 Test `doFirst`의 runner-local 1GB/fork 1 최종 assertion
 - init script 없는 일반 Gradle configuration에서 저장소의 기존 Test JVM 설정이 유지되는 경계
