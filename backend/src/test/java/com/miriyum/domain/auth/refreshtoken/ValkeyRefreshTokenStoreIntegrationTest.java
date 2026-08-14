@@ -4,12 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -237,6 +242,114 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 state.namespace(), state.familyId(), state.currentTokenHash());
         assertThat(redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex()))
                 .containsExactly(markerKey);
+    }
+
+    @Test
+    @DisplayName("pending marker 101개는 두 번의 전달 조회에서 모두 탐색한다")
+    void continuesPendingIndexScanFromThePreviousBatch() {
+        for (int index = 0; index < 101; index++) {
+            String markerKey = "auth:risk:pending:batch:" + index;
+            redisTemplate.<String, String>opsForHash().put(markerKey, "namespace", TokenNamespace.CONSUMER.value());
+            redisTemplate.<String, String>opsForHash().put(markerKey, "accountId", "7");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "familyId", "family-" + index);
+            redisTemplate.<String, String>opsForHash().put(markerKey, "tokenHash", "a".repeat(64));
+            redisTemplate.<String, String>opsForHash().put(markerKey, "sourceEvent", "REUSED_ROTATED_TOKEN");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "originEvent", "ROTATION");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "policyVersion", "AUTH-012-v1");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "occurredAt", "0");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "occurrenceCount", "1");
+            redisTemplate.<String, String>opsForHash().put(markerKey, "lastOccurredAt", "0");
+            redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+        }
+
+        List<String> firstBatch = markerStore.findPendingEvents().stream()
+                .map(PendingRefreshTokenRiskEvent::eventKey)
+                .toList();
+        List<String> secondBatch = markerStore.findPendingEvents().stream()
+                .map(PendingRefreshTokenRiskEvent::eventKey)
+                .toList();
+
+        assertThat(firstBatch).hasSize(100);
+        assertThat(firstBatch).doesNotContainAnyElementsOf(secondBatch);
+        assertThat(Stream.concat(firstBatch.stream(), secondBatch.stream()).toList())
+                .hasSize(101)
+                .doesNotHaveDuplicates();
+        assertThat(redisTemplate.opsForSet().size(RefreshTokenRiskEventKey.pendingIndex())).isEqualTo(101);
+    }
+
+    @Test
+    @DisplayName("전달 조회 중 다시 생성된 marker의 pending 인덱스 연결은 제거하지 않는다")
+    void preservesRecreatedMarkerPendingIndexMembership() {
+        String markerKey = "auth:risk:pending:recreated";
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+
+        redisTemplate.<String, String>opsForHash().put(markerKey, "namespace", TokenNamespace.CONSUMER.value());
+
+        assertThat(markerStore.removeFromPendingIndexIfMarkerMissing(markerKey)).isFalse();
+        assertThat(redisTemplate.opsForSet().isMember(RefreshTokenRiskEventKey.pendingIndex(), markerKey)).isTrue();
+    }
+
+    @Test
+    @DisplayName("형식이 손상된 pending marker는 격리하고 같은 배치의 정상 사건 전달은 계속한다")
+    void quarantinesMalformedPendingMarkerWithoutBlockingValidEvent() {
+        String malformedMarkerKey = "auth:risk:pending:malformed";
+        String validMarkerKey = "auth:risk:pending:valid";
+        redisTemplate.opsForSet().add(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey, validMarkerKey);
+        redisTemplate.<String, String>opsForHash().putAll(malformedMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", "not-a-number",
+                "familyId", "family-malformed",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
+        redisTemplate.<String, String>opsForHash().putAll(validMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", "7",
+                "familyId", "family-valid",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
+
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> assertThat(event.eventKey()).isEqualTo(validMarkerKey));
+        assertThat(redisTemplate.opsForSet().isMember(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
+        assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1.0", " 7", "1e5", "0x1A", "99999999999999999999"})
+    @DisplayName("Java 정수 파싱에서 거부한 숫자 형식 marker는 pending 인덱스와 함께 제거한다")
+    void removesMalformedNumericMarkerRejectedByJava(String malformedAccountId) {
+        String malformedMarkerKey = "auth:risk:pending:malformed-" + malformedAccountId.hashCode();
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey);
+        redisTemplate.<String, String>opsForHash().putAll(malformedMarkerKey, Map.of(
+                "namespace", TokenNamespace.CONSUMER.value(),
+                "accountId", malformedAccountId,
+                "familyId", "family-malformed",
+                "tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "sourceEvent", "REUSED_ROTATED_TOKEN",
+                "originEvent", "ROTATION",
+                "policyVersion", "AUTH-012-v1",
+                "occurredAt", "1775952000",
+                "occurrenceCount", "1",
+                "lastOccurredAt", "1775952000"));
+
+        assertThat(markerStore.findPendingEvents()).isEmpty();
+        assertThat(redisTemplate.opsForSet().isMember(
+                RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
+        assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
+        assertThat(markerStore.pendingEventCount()).isZero();
     }
 
     @Test

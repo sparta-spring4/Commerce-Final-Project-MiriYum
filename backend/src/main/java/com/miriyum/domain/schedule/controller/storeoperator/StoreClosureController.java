@@ -30,7 +30,7 @@ public class StoreClosureController {
                 "정기 휴무 초안이 저장되었습니다.");
     }
 
-    @PostMapping("/regular-closures/{version}/publication")
+    @PostMapping("/regular-closures/{version}/publications")
     public ResponseEntity<ApiResponse<RegularClosureResponse>> publishRegular(
             @AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable @Positive long storeId,
             @PathVariable @Positive long version,
@@ -40,7 +40,7 @@ public class StoreClosureController {
                 "정기 휴무 게시 요청이 처리되었습니다.");
     }
 
-    @PostMapping("/regular-closures/{version}/publication-cancellation")
+    @PostMapping("/regular-closures/{version}/publication-cancellations")
     public ResponseEntity<ApiResponse<RegularClosureResponse>> cancelRegular(
             @AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable @Positive long storeId,
             @PathVariable @Positive long version,
@@ -69,7 +69,7 @@ public class StoreClosureController {
                 IdempotencyKey.parse(rawKey), request), "임시 휴무 종료 시각이 변경되었습니다.");
     }
 
-    @PostMapping("/temporary-closures/{closureId}/cancellation")
+    @PostMapping("/temporary-closures/{closureId}/cancellations")
     public ResponseEntity<ApiResponse<TemporaryClosureResponse>> cancelTemporary(
             @AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable @Positive long storeId,
             @PathVariable @Positive long closureId,

@@ -43,10 +43,12 @@ These are staging Environment variables, not application secrets. Application an
 ## EC2 runtime setup
 
 1. Copy `deploy/.env.example` to `/opt/miriyum/.env` without committing the copied file.
-2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD`.
+2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD` and `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`.
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
+
+Before logging in to ECR or restarting containers, `deploy.sh` runs `docker compose config --quiet` with the server-local `.env`. A missing required key therefore stops the deployment before image pull and container replacement. Compose prints only the missing key name; the workflow and deployment script never print secret values or create the `.env` file.
 
 The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Validation includes staging `healthy`, unauthenticated `NOAUTH`, authenticated `PONG`, and no host port exposure. Valkey joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
 

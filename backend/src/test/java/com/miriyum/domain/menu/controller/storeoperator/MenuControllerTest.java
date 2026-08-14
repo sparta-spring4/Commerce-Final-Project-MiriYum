@@ -109,10 +109,10 @@ class MenuControllerTest {
         given(commandService.retire(eq(11L), eq(7L), eq(21L), any(), any()))
                 .willReturn(new MenuCommandResult(200, menu()));
 
-        perform(post("/api/v1/store-operators/stores/7/menus/21/publication"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publications"),
                 "{\"mode\":\"IMMEDIATE\",\"changeReason\":\"가격 확정\"}")
                 .andExpect(status().isOk());
-        perform(post("/api/v1/store-operators/stores/7/menus/21/publication-cancellation"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publication-cancellations"),
                 "{\"changeReason\":\"게시 일정 변경\"}")
                 .andExpect(status().isOk());
         perform(patch("/api/v1/store-operators/stores/7/menus/21/visibility"),
@@ -121,14 +121,14 @@ class MenuControllerTest {
         perform(patch("/api/v1/store-operators/stores/7/menus/21/selling-status"),
                 "{\"sellingStatus\":\"SELLING\",\"changeReason\":\"판매 재개\"}")
                 .andExpect(status().isOk());
-        perform(post("/api/v1/store-operators/stores/7/menus/21/retirement"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/retirements"),
                 "{\"changeReason\":\"메뉴 종료\"}")
                 .andExpect(status().isOk());
     }
 
     @Test
     void publicationWithoutChangeReasonReturnsBadRequest() throws Exception {
-        perform(post("/api/v1/store-operators/stores/7/menus/21/publication"),
+        perform(post("/api/v1/store-operators/stores/7/menus/21/publications"),
                 "{\"mode\":\"IMMEDIATE\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"));

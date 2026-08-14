@@ -29,9 +29,9 @@ class StoreSearchOpenApiContractTest {
                 "/api/v1/stores",
                 "/api/v1/stores/{storeId}",
                 "/api/v1/stores/{storeId}/menus",
-                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search");
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches");
         Map<String, Object> alternativePath = map(paths.get(
-                "/api/v1/stores/{storeId}/menus/{menuId}/alternatives/search"));
+                "/api/v1/stores/{storeId}/menus/{menuId}/alternative-searches"));
         assertThat(alternativePath).containsOnlyKeys("post");
         Map<String, Object> alternativePost = map(alternativePath.get("post"));
         assertThat(map(map(map(alternativePost.get("requestBody")).get("content"))

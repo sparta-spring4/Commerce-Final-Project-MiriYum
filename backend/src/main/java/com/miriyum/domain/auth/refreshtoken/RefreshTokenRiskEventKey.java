@@ -20,6 +20,7 @@ public final class RefreshTokenRiskEventKey {
     }
 
     public static String pendingPattern() {
+        // deploy.sh의 전진 배포 backfill도 같은 marker 패턴을 사용한다.
         return PREFIX + "*";
     }
 

@@ -1,5 +1,8 @@
 # Backend 구현 가드레일
 
+- `platformoperator`는 일반 사용자·매장 운영자와 분리된 최상위 도메인이며 HTTP root는 `/api/v1/platform-operators/**`만 사용한다.
+- 플랫폼 운영자 Controller와 활성 보안 체인은 `miriyum.platform-operator.enabled=true`일 때만 등록한다. 기본값 OFF에서는 MVC 404로 수렴한다.
+
 계약 상태: ACTIVE
 
 ## 빌드 및 애플리케이션 경계

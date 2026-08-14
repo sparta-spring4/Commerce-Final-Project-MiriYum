@@ -10,3 +10,8 @@
 - 명령, 결과와 검증 증빙은 Pull Request와 CI가 소유한다.
 
 지속적인 아키텍처 결정은 [ADR](../adr/)에 기록한다. 기능 명세에는 해당 결정을 복제하지 말고 필요한 ADR과 정책을 연결한다.
+
+## 고도화 활성 기능 명세
+
+- [플랫폼 운영자 인증·세션·최초 비밀번호 변경](platform-operator-auth/spec.md): #275가 소유하는 독립 인증 namespace와 중앙 세션 계약
+- [플랫폼 운영자 권한·재인증·고위험 명령 공통 기반](platform-operator-authorization/spec.md): #276이 소유하는 RBAC·사건 배정·일회 승인·guard 계약

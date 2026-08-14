@@ -14,14 +14,14 @@ class PaymentOpenApiContractTest {
 
     private static final Path SPECS = Path.of("..", "docs", "specs");
     private static final Set<String> CONSUMER_PATHS = Set.of(
-            "/api/v1/consumers/payments",
-            "/api/v1/consumers/payments/{paymentId}",
-            "/api/v1/consumers/payments/{paymentId}/confirmations"
+            "/api/v1/consumers/me/payments",
+            "/api/v1/consumers/me/payments/{paymentId}",
+            "/api/v1/consumers/me/payments/{paymentId}/confirmations"
     );
     private static final String WEBHOOK_PATH = "/api/v1/payments/webhooks/portone";
 
     @Test
-    void featureContractRemainsOutsideMvp1AudienceAndAggregateEntrypoints() throws Exception {
+    void featureContractIsExposedByItsAudienceButRemainsOutsideMvp1Aggregate() throws Exception {
         Map<String, Object> payment = paths("payment/openapi.yaml");
         Map<String, Object> consumer = paths("consumer-openapi.yaml");
         Map<String, Object> publicApi = paths("public-openapi.yaml");
@@ -29,17 +29,17 @@ class PaymentOpenApiContractTest {
 
         assertThat(payment.keySet()).containsExactlyInAnyOrderElementsOf(
                 Set.of(
-                        "/api/v1/consumers/payments",
-                        "/api/v1/consumers/payments/{paymentId}",
-                        "/api/v1/consumers/payments/{paymentId}/confirmations",
+                        "/api/v1/consumers/me/payments",
+                        "/api/v1/consumers/me/payments/{paymentId}",
+                        "/api/v1/consumers/me/payments/{paymentId}/confirmations",
                         WEBHOOK_PATH
                 )
         );
-        assertThat(CONSUMER_PATHS).noneMatch(consumer::containsKey);
+        assertThat(consumer.keySet()).containsAll(CONSUMER_PATHS);
         assertThat(CONSUMER_PATHS).noneMatch(publicApi::containsKey);
         assertThat(CONSUMER_PATHS).noneMatch(aggregate::containsKey);
         assertThat(consumer).doesNotContainKey(WEBHOOK_PATH);
-        assertThat(publicApi).doesNotContainKey(WEBHOOK_PATH);
+        assertThat(publicApi).containsKey(WEBHOOK_PATH);
         assertThat(aggregate).doesNotContainKey(WEBHOOK_PATH);
     }
 
