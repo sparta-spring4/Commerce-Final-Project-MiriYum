@@ -38,6 +38,11 @@ management:
       show-details: never
 
 miriyum:
+  platform-operator:
+    enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
+    temporary-password:
+      validity: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_VALIDITY:}
+      max-failures: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_MAX_FAILURES:0}
   jwt:
     secret: ${MIRIYUM_JWT_SECRET}
     issuer: ${MIRIYUM_JWT_ISSUER:miriyum}

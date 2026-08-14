@@ -1,0 +1,19 @@
+openapi: 3.1.0
+info:
+  title: MiriYum Platform Operator API
+  version: 1.0.0
+  description: 고도화 feature flag로 활성화하는 플랫폼 운영자 전용 audience entrypoint다.
+servers:
+  - url: /
+security: []
+paths:
+  /api/v1/platform-operators/auth/sessions:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1sessions"
+  /api/v1/platform-operators/auth/token-refreshes:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1token-refreshes"
+  /api/v1/platform-operators/auth/csrf-tokens/current:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1csrf-tokens~1current"
+  /api/v1/platform-operators/auth/sessions/current:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1sessions~1current"
+  /api/v1/platform-operators/auth/initial-password:
+    $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
