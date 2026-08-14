@@ -676,24 +676,30 @@ public class PaymentTransactionService {
         return toResult(payment);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(
             String paymentId,
             long waitingTeamId,
             long consumerAccountId
     ) {
-        Payment payment = payments.findByPaymentIdAndConsumerAccountId(
-                        paymentId, consumerAccountId)
-                .orElseThrow(() -> new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        Payment payment = paymentForUpdate(paymentId);
         requireVerifiedWaitingReservationDeposit(
                 payment, paymentId, waitingTeamId, consumerAccountId);
-        return new VerifiedWaitingReservationDeposit(
-                payment.getPaymentId(),
-                payment.getAmountMinor(),
-                payment.getCurrency(),
-                payment.getSourcePolicyVersion(),
-                PaymentStatus.valueOf(payment.getStatus().name()),
-                payment.getPaidAt());
+        return toVerifiedWaitingReservationDeposit(payment);
+    }
+
+    @Transactional
+    public VerifiedWaitingReservationDeposit getCompletableWaitingReservationDeposit(
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        Payment payment = paymentForUpdate(paymentId);
+        boolean hasAnyRefund = !refunds.findByPayment_IdOrderByRequestedAtAsc(payment.getId())
+                .isEmpty();
+        requireCompletableWaitingReservationDeposit(
+                payment, paymentId, waitingTeamId, consumerAccountId, hasAnyRefund);
+        return toVerifiedWaitingReservationDeposit(payment);
     }
 
     static Payment requireVerifiedWaitingReservationDeposit(
@@ -714,6 +720,21 @@ public class PaymentTransactionService {
                     || payment.getStatus() == Payment.Status.RECONCILIATION_REQUIRED);
         if (!verified) {
             throw new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND);
+        }
+        return payment;
+    }
+
+    static Payment requireCompletableWaitingReservationDeposit(
+            Payment payment,
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId,
+            boolean hasAnyRefund
+    ) {
+        requireVerifiedWaitingReservationDeposit(
+                payment, paymentId, waitingTeamId, consumerAccountId);
+        if (payment.getStatus() != Payment.Status.PAID || hasAnyRefund) {
+            throw new ServiceException(PaymentErrorCode.INVALID_STATE_TRANSITION);
         }
         return payment;
     }
@@ -827,6 +848,18 @@ public class PaymentTransactionService {
                 payment.getSourceExpiresAt(),
                 PaymentStatus.valueOf(payment.getStatus().name())
         );
+    }
+
+    private VerifiedWaitingReservationDeposit toVerifiedWaitingReservationDeposit(
+            Payment payment
+    ) {
+        return new VerifiedWaitingReservationDeposit(
+                payment.getPaymentId(),
+                payment.getAmountMinor(),
+                payment.getCurrency(),
+                payment.getSourcePolicyVersion(),
+                PaymentStatus.valueOf(payment.getStatus().name()),
+                payment.getPaidAt());
     }
 
     private PaymentResult toResult(Payment payment) {

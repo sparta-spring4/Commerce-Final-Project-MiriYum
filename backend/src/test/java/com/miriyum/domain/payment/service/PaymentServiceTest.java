@@ -139,6 +139,37 @@ class PaymentServiceTest {
     }
 
     @Test
+    void returnsLockedCompletableWaitingDepositOnlyForCurrentPaidWithoutRefunds() {
+        VerifiedWaitingReservationDeposit expected =
+                new VerifiedWaitingReservationDeposit(
+                        PAYMENT_ID, 30_000L, "KRW", 7L, PaymentStatus.PAID, NOW);
+        when(transactions.getCompletableWaitingReservationDeposit(
+                PAYMENT_ID, 123L, 11L)).thenReturn(expected);
+
+        assertThat(paymentService.getCompletableWaitingReservationDeposit(
+                PAYMENT_ID, 123L, 11L)).isEqualTo(expected);
+
+        Payment paid = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        assertThat(PaymentTransactionService.requireCompletableWaitingReservationDeposit(
+                paid, PAYMENT_ID, 123L, 11L, false)).isSameAs(paid);
+        assertThatThrownBy(() ->
+                PaymentTransactionService.requireCompletableWaitingReservationDeposit(
+                        paid, PAYMENT_ID, 123L, 11L, true))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(PaymentErrorCode.INVALID_STATE_TRANSITION));
+
+        Payment partiallyRefunded = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
+        partiallyRefunded.applyCompletedRefund(10_000L, NOW.plusSeconds(1));
+        assertThatThrownBy(() ->
+                PaymentTransactionService.requireCompletableWaitingReservationDeposit(
+                        partiallyRefunded, PAYMENT_ID, 123L, 11L, false))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(PaymentErrorCode.INVALID_STATE_TRANSITION));
+    }
+
+    @Test
     void rejectsWrongWaitingSourceOwnerReferenceOrState() {
         Payment valid = payment("WAITING_RESERVATION_DEPOSIT", "123", 11L, true);
         assertThat(PaymentTransactionService.requireVerifiedWaitingReservationDeposit(

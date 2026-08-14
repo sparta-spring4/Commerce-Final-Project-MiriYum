@@ -230,9 +230,15 @@ Waiting team source reference. A normal `RESERVATION_DEPOSIT` with the same nume
 is not interchangeable and is returned as not found.
 
 The query returns an immutable `VerifiedWaitingReservationDeposit` snapshot containing payment ID,
-amount, currency, source policy version, current status, and `paidAt`. It requires historical payment
-evidence (`paidAt`) and accepts PAID or the historically paid refund/reconciliation states needed for
-terminal callback replay. Waiting may complete a new `RESERVATION_CONVERTING` team only while the
-current snapshot status is PAID; later paid/refunded states are used only to create or replay a
-deterministic compensation refund. Payment provider calls remain outside the Waiting row-lock
-transaction, and Payment does not access Waiting or Reservation entities/repositories.
+amount, currency, source policy version, current status, and `paidAt`. Both completion verifiers lock
+the Payment row after the caller has locked the Waiting row. The completable verifier additionally
+requires current `PAID` status and an empty refund ledger, including no `PROCESSING` refund. The
+historical verifier requires `paidAt` and accepts PAID or the historically paid
+refund/reconciliation states needed only for terminal compensation callback replay. Thus an
+in-flight refund cannot race a stale PAID snapshot into a new conversion, while a cancellation or
+closure winner can still converge on deterministic compensation after refund state changes.
+
+Payment preparation is invoked with any ambient caller transaction suspended, allowing its internal
+required transaction to commit independently before Waiting records `RESERVATION_CONVERTING`.
+Payment provider calls remain outside Waiting/Payment row-lock transactions, and Payment does not
+access Waiting or Reservation entities/repositories.

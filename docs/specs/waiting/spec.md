@@ -374,20 +374,26 @@ delay and fixed delay to 5000 ms, so normal operation requires no additional con
 ### Internal reservation conversion orchestration
 
 `WaitingReservationConversionService` is an internal boundary; it does not add a Waiting HTTP API.
-`begin` performs a short team/consumer preflight transaction, calls
-`PaymentService.prepareWaitingReservationDeposit` outside every Waiting transaction, and then locks
-the team for `WAITING -> RESERVATION_CONVERTING`. A matching `fail` locks the team and returns only
+`begin` performs a short team/consumer preflight transaction, suspends any ambient caller
+transaction while `PaymentService.prepareWaitingReservationDeposit` independently commits the
+Payment source, and then uses another short transaction to lock the team for
+`WAITING -> RESERVATION_CONVERTING`. Consequently an outer caller rollback cannot leave a committed
+converting team without its matching Payment row. A matching `fail` locks the team and returns only
 `RESERVATION_CONVERTING -> WAITING`; it retains the active membership. Both transitions append one
 SYSTEM audit and public status event.
 
-`completeVerified` obtains a Payment-owned verified snapshot outside the locked completion
-transaction. A matching PAID conversion becomes `RESERVATION_CONVERTED`, removes exactly one active
-membership, and records only the caller-supplied positive Reservation scalar ID. Exact replay of the
-same payment/final scalar has no further membership, audit, or event effect. Waiting never imports or
-accesses a Reservation Entity, Repository, aggregate, or migration.
+`completeVerified` first locks the Waiting team and, in that same transaction, locks and verifies the
+Payment row. The global lock order is Waiting then Payment. A matching conversion may become
+`RESERVATION_CONVERTED` only while Payment is currently `PAID` and its refund ledger is empty,
+including no in-flight `PROCESSING` refund; it then removes exactly one active membership and records
+only the caller-supplied positive Reservation scalar ID. Exact replay of the same payment/final
+scalar returns before Payment access and has no further membership, audit, or event effect. Waiting
+never imports or accesses a Reservation Entity, Repository, aggregate, or migration.
 
 Operator cancellation and claimed store closure serialize with completion on the same Waiting team
 row. The first terminal transition wins. If cancellation or closure wins, the preserved payment
 identity and verified historical-paid snapshot produce one deterministic compensation item with
 reason `WAITING_CANCELLED` or `WAITING_CLOSED_BY_STORE`; callback replay converges on that same item
-without changing the terminal version or final Reservation reference.
+without changing the terminal version or final Reservation reference. Terminal compensation uses
+the locked historical-paid verifier, so a paid payment that has since been partially or fully
+refunded can still converge without weakening the stricter new-conversion rule.

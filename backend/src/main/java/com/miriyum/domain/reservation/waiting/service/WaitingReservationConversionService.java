@@ -38,6 +38,7 @@ public class WaitingReservationConversionService {
     private final WaitingConversionCompensationService compensations;
     private final Clock clock;
     private final TransactionTemplate waitingTransaction;
+    private final TransactionTemplate paymentWithoutTransaction;
 
     public WaitingReservationConversionService(
             WaitingTeamRepository teams,
@@ -62,6 +63,9 @@ public class WaitingReservationConversionService {
         this.waitingTransaction.setIsolationLevel(
                 TransactionDefinition.ISOLATION_READ_COMMITTED);
         this.waitingTransaction.setTimeout(5);
+        this.paymentWithoutTransaction = new TransactionTemplate(transactionManager);
+        this.paymentWithoutTransaction.setPropagationBehavior(
+                TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
     }
 
     public PaymentPreparation begin(BeginCommand command) {
@@ -69,15 +73,16 @@ public class WaitingReservationConversionService {
             throw new IllegalArgumentException("command must not be null");
         }
         BeginPreflight preflight = inWaitingTransaction(() -> preflight(command));
-        PaymentPreparation preparation = payments.prepareWaitingReservationDeposit(
-                new PrepareWaitingReservationDepositCommand(
-                        Long.toString(preflight.waitingTeamId()),
-                        preflight.consumerAccountId(),
-                        command.amountMinor(),
-                        command.currency(),
-                        command.sourceExpiresAt(),
-                        command.policyVersion(),
-                        command.idempotencyKey()));
+        PaymentPreparation preparation = paymentWithoutTransaction.execute(status ->
+                payments.prepareWaitingReservationDeposit(
+                        new PrepareWaitingReservationDepositCommand(
+                                Long.toString(preflight.waitingTeamId()),
+                                preflight.consumerAccountId(),
+                                command.amountMinor(),
+                                command.currency(),
+                                command.sourceExpiresAt(),
+                                command.policyVersion(),
+                                command.idempotencyKey())));
         requireMatchingPreparation(command, preparation);
         return inWaitingTransaction(() -> startLocked(command, preflight, preparation));
     }
@@ -91,17 +96,7 @@ public class WaitingReservationConversionService {
         if (command == null) {
             throw new IllegalArgumentException("command must not be null");
         }
-        CompletionPreflight preflight = inWaitingTransaction(
-                () -> completionPreflight(command));
-        if (preflight.replay()) {
-            return true;
-        }
-        VerifiedWaitingReservationDeposit verified =
-                payments.getVerifiedWaitingReservationDeposit(
-                        command.paymentId(),
-                        command.waitingTeamId(),
-                        preflight.consumerAccountId());
-        return inWaitingTransaction(() -> completeLocked(command, verified));
+        return inWaitingTransaction(() -> completeLocked(command));
     }
 
     private BeginPreflight preflight(BeginCommand command) {
@@ -177,22 +172,7 @@ public class WaitingReservationConversionService {
         return true;
     }
 
-    private CompletionPreflight completionPreflight(CompletionCommand command) {
-        WaitingTeam team = teams.findById(command.waitingTeamId())
-                .orElseThrow(() -> new ServiceException(
-                        ReservationErrorCode.WAITING_TEAM_NOT_FOUND));
-        if (team.getStatus() == WaitingTeamStatus.RESERVATION_CONVERTED) {
-            requireExactConvertedReplay(team, command);
-            return new CompletionPreflight(team.getConsumerAccountId(), true);
-        }
-        requireMatchingCallbackState(team, command.paymentId());
-        return new CompletionPreflight(team.getConsumerAccountId(), false);
-    }
-
-    private boolean completeLocked(
-            CompletionCommand command,
-            VerifiedWaitingReservationDeposit verified
-    ) {
+    private boolean completeLocked(CompletionCommand command) {
         WaitingTeam team = teams.findByIdForUpdate(command.waitingTeamId())
                 .orElseThrow(() -> new ServiceException(
                         ReservationErrorCode.WAITING_TEAM_NOT_FOUND));
@@ -201,15 +181,28 @@ public class WaitingReservationConversionService {
             return true;
         }
         requireMatchingCallbackState(team, command.paymentId());
-        if (!verified.paymentId().equals(command.paymentId())) {
-            throw invalidTransition();
-        }
         if (team.getStatus() == WaitingTeamStatus.RESERVATION_CONVERTING) {
+            VerifiedWaitingReservationDeposit verified =
+                    payments.getCompletableWaitingReservationDeposit(
+                            command.paymentId(),
+                            command.waitingTeamId(),
+                            team.getConsumerAccountId());
+            if (!verified.paymentId().equals(command.paymentId())) {
+                throw invalidTransition();
+            }
             if (verified.status() != PaymentStatus.PAID) {
                 throw invalidTransition();
             }
             completeConversion(team, command);
             return true;
+        }
+        VerifiedWaitingReservationDeposit verified =
+                payments.getVerifiedWaitingReservationDeposit(
+                        command.paymentId(),
+                        command.waitingTeamId(),
+                        team.getConsumerAccountId());
+        if (!verified.paymentId().equals(command.paymentId())) {
+            throw invalidTransition();
         }
         recordCompensation(team, verified);
         return false;
@@ -356,5 +349,4 @@ public class WaitingReservationConversionService {
     }
 
     private record BeginPreflight(long waitingTeamId, Long consumerAccountId) { }
-    private record CompletionPreflight(long consumerAccountId, boolean replay) { }
 }

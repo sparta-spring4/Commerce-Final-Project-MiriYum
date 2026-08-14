@@ -9,6 +9,9 @@ import static org.mockito.Mockito.when;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.payment.dto.PaymentContracts.ConfirmPaymentCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
@@ -48,6 +51,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -531,6 +535,103 @@ class WaitingLedgerConcurrencyIT {
                 "SELECT idempotency_key FROM waiting_conversion_compensations WHERE waiting_team_id=?",
                 String.class, paid.teamId()))
                 .matches("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    }
+
+    @Test
+    void ambientRollbackDoesNotOrphanCommittedWaitingConversionPayment() {
+        Fixture fixture = fixture(1);
+        WaitingCommandResult created = creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(520));
+        long teamId = Long.parseLong(created.data().waitingTeamId());
+        AtomicReference<PaymentPreparation> captured = new AtomicReference<>();
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            captured.set(conversionService.begin(new BeginCommand(
+                    teamId, 0L, 12_000L, "KRW", Instant.now().plusSeconds(3_600), 3L,
+                    key(521).value())));
+            status.setRollbackOnly();
+        });
+
+        PaymentPreparation preparation = captured.get();
+        WaitingTeam converting = teams.findById(teamId).orElseThrow();
+        assertThat(converting.getStatus()).isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
+        assertThat(converting.getWaitingPaymentId()).isEqualTo(preparation.paymentId());
+        assertThat(jdbc.queryForMap("""
+                SELECT payment_id, consumer_account_id, source_type, source_reference_id
+                  FROM payments
+                 WHERE payment_id = ?
+                """, preparation.paymentId()))
+                .containsEntry("payment_id", preparation.paymentId())
+                .containsEntry("consumer_account_id", fixture.consumerIds().getFirst())
+                .containsEntry("source_type", "WAITING_RESERVATION_DEPOSIT")
+                .containsEntry("source_reference_id", Long.toString(teamId));
+    }
+
+    @Test
+    void processingRefundBlocksStalePaidSnapshotFromCompletingConversion() throws Exception {
+        Fixture fixture = fixture(1);
+        PaidConversion paid = paidConversion(fixture, 530);
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        when(providerClient.cancelPayment(
+                eq(paid.preparation().portOnePaymentId()), anyString(), eq(12_000L),
+                eq("KRW"), eq("WAITING_REVIEW_REFUND")))
+                .thenAnswer(invocation -> {
+                    providerEntered.countDown();
+                    if (!releaseProvider.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("provider release timed out");
+                    }
+                    return new ProviderCancellation(
+                            "waiting-review-cancellation-" + paid.teamId(),
+                            ProviderStatus.CANCELLED, 12_000L, "KRW");
+                });
+        RequestRefundCommand refundCommand = new RequestRefundCommand(
+                paid.preparation().paymentId(),
+                "waiting-review-refund:" + paid.teamId(),
+                12_000L,
+                "WAITING_REVIEW_REFUND",
+                3L,
+                key(533).value());
+
+        Throwable completionFailure = null;
+        RefundResult refundResult;
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<RefundResult> refund = executor.submit(
+                    () -> paymentService.requestRefund(refundCommand));
+            assertThat(providerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM payment_refunds WHERE status='PROCESSING'",
+                    Long.class)).isEqualTo(1L);
+            try {
+                conversionService.completeVerified(new CompletionCommand(
+                        paid.teamId(), paid.preparation().paymentId(), 9_005L));
+            } catch (Throwable failure) {
+                completionFailure = failure;
+            } finally {
+                releaseProvider.countDown();
+            }
+            refundResult = refund.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(completionFailure).isInstanceOf(ServiceException.class);
+        WaitingTeam converting = teams.findById(paid.teamId()).orElseThrow();
+        assertThat(converting.getStatus()).isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
+        assertThat(converting.getReservationReferenceId()).isNull();
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_transition_audits
+                 WHERE waiting_team_id = ? AND after_status = 'RESERVATION_CONVERTED'
+                """, Long.class, paid.teamId())).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM waiting_status_events
+                 WHERE waiting_team_id = ? AND public_status = 'RESERVATION_CONVERTED'
+                """, Long.class, paid.teamId())).isZero();
+        assertThat(count("waiting_conversion_compensations")).isZero();
+        assertThat(refundResult.status()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM payments WHERE payment_id=?",
+                String.class, paid.preparation().paymentId())).isEqualTo("REFUNDED");
     }
 
     @Test

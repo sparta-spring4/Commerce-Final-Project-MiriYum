@@ -151,6 +151,15 @@ public class PaymentService {
                 paymentId, waitingTeamId, consumerAccountId);
     }
 
+    public VerifiedWaitingReservationDeposit getCompletableWaitingReservationDeposit(
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        return transactions.getCompletableWaitingReservationDeposit(
+                paymentId, waitingTeamId, consumerAccountId);
+    }
+
     public PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query) {
         return transactions.getConsumerPaymentHistory(query);
     }

@@ -188,11 +188,10 @@ class WaitingReservationConversionServiceTest {
     @Test
     void paidMatchingConversionCompletesAndRemovesExactlyOneMembership() {
         WaitingTeam team = convertingTeam();
-        given(teams.findById(TEAM_ID)).willReturn(Optional.of(team));
         given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
-        given(payments.getVerifiedWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
+        given(payments.getCompletableWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
                 .willAnswer(invocation -> {
-                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
                     return verified(PaymentStatus.PAID);
                 });
         given(memberships.deleteByWaitingTeamId(TEAM_ID)).willReturn(1L);
@@ -219,7 +218,7 @@ class WaitingReservationConversionServiceTest {
     void exactConvertedReplaySkipsPaymentAndAllDuplicateEffects() {
         WaitingTeam team = convertingTeam();
         team.completeReservationConversion(1L, "101", 501L, NOW);
-        given(teams.findById(TEAM_ID)).willReturn(Optional.of(team));
+        given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
 
         assertThat(newService().completeVerified(
                 new WaitingReservationConversionService.CompletionCommand(
@@ -238,10 +237,12 @@ class WaitingReservationConversionServiceTest {
         WaitingTeam team = convertingTeam();
         team.cancel(1L, NOW);
         long terminalVersion = team.getVersion();
-        given(teams.findById(TEAM_ID)).willReturn(Optional.of(team));
         given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
         given(payments.getVerifiedWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
-                .willReturn(verified(PaymentStatus.REFUNDED));
+                .willAnswer(invocation -> {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+                    return verified(PaymentStatus.REFUNDED);
+                });
         given(compensations.recordRequired(
                 org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyString(),
@@ -286,7 +287,6 @@ class WaitingReservationConversionServiceTest {
         WaitingTeam team = convertingTeam();
         team.closeByStore(1L, NOW);
         long terminalVersion = team.getVersion();
-        given(teams.findById(TEAM_ID)).willReturn(Optional.of(team));
         given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
         given(payments.getVerifiedWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
                 .willReturn(verified(PaymentStatus.RECONCILIATION_REQUIRED));
@@ -315,13 +315,12 @@ class WaitingReservationConversionServiceTest {
     @Test
     void mismatchedPaymentAndNonPaidConversionAreRejectedWithoutMutation() {
         WaitingTeam team = convertingTeam();
-        given(teams.findById(TEAM_ID)).willReturn(Optional.of(team));
+        given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
 
         assertInvalidCompletion(new WaitingReservationConversionService.CompletionCommand(
                 TEAM_ID, "102", 501L));
 
-        given(teams.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(team));
-        given(payments.getVerifiedWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
+        given(payments.getCompletableWaitingReservationDeposit("101", TEAM_ID, CONSUMER_ID))
                 .willReturn(verified(PaymentStatus.PARTIALLY_REFUNDED));
         assertInvalidCompletion(new WaitingReservationConversionService.CompletionCommand(
                 TEAM_ID, "101", 501L));
