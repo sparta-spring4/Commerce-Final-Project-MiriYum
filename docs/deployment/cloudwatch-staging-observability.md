@@ -11,7 +11,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - AWS 기본 지표: `CPUUtilization`, `StatusCheckFailed`
 - CloudWatch Agent 지표: 루트 디스크 사용률, 메모리 사용률
 - CloudWatch Logs: Docker `awslogs` 드라이버로 서비스별 표준 출력 로그
-- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
+- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, 1시간 이상 pending marker 존재 신호 `RefreshTokenRiskEventMarkerLongStay`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
 - 로그 보존: 7일
 
 CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
@@ -64,6 +64,7 @@ deploy/monitoring/create-cloudwatch-resources.sh
 | 인스턴스 상태 | EC2 status check 실패 1회 |
 | 배포 health | 최근 배포 결과가 0 |
 | Refresh Token 위험 사건 전달 | 30초 주기 전달이 10회 연속 실패해 정체 로그가 발생하면 경보 |
+| Refresh Token 위험 marker 장기 체류 | 최초 위험 사건 생성 뒤 1시간 이상 pending marker가 있으면 경보 |
 | ReservationHold 대사 장기 체류 | `RECONCILIATION_REQUIRED` 전이 감사의 `occurredAt` 후 10분부터 현재 장기 체류 집계 로그가 발생하면 경보 |
 
 SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링크를 눌러야 실제 알림을 받는다. 이메일 주소와 AWS 계정 ID는 블로그 캡처에 노출하지 않는다.
@@ -95,6 +96,22 @@ aws logs test-metric-filter \
 ```
 
 정상 결과에는 `"$pending_count": "42"`가 포함된다.
+
+위험 marker는 최초 생성 시점부터 7일 뒤 자동 만료된다. 같은 marker 재사용은 발생 횟수만 누적하고 만료 시각을 연장하지 않는다. 1시간 이상 전달되지 않은 marker가 현재 전달 배치에 하나라도 있으면 backend가 식별자 없이 다음 로그를 남긴다. `long_stay_count`는 이번 배치에서 발견한 건수이며 전체 정체 규모가 아니다. CloudWatch는 이벤트 존재를 `1`로 기록해 5분 합계 알람을 발생시킨다.
+
+```text
+event=refresh_token_risk_event_marker_long_stay long_stay_count=2
+```
+
+```bash
+aws logs test-metric-filter \
+  --region ap-northeast-2 \
+  --filter-pattern '"event=refresh_token_risk_event_marker_long_stay"' \
+  --log-event-messages '2026-08-15T10:00:00.000+09:00  WARN 1 --- [risk-event-1] c.m.d.a.r.RefreshTokenRiskEventDelivery : event=refresh_token_risk_event_marker_long_stay long_stay_count=2' \
+  --output json --no-cli-pager
+```
+
+정상 결과에는 `"matches"` 배열에 입력 로그가 포함된다. 이 검증 화면은 로그 이벤트와 filter가 일치함을 보여 주므로 블로그 증빙으로 캡처할 수 있다. AWS 계정 ID, SNS Topic ARN, 이메일 주소는 가린다.
 
 Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 반대로 필수 필드가 없는 손상 marker는 전달 대상에서 제거하고 식별자 없는 제한 로그만 남겨, 한 건의 저장 상태 이상이 정상 위험 사건 전달 전체를 막지 않게 한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
 

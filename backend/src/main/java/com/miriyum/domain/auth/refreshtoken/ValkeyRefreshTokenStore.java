@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     private static final Logger log = LoggerFactory.getLogger(ValkeyRefreshTokenStore.class);
+    private static final long RISK_EVENT_MARKER_RETENTION_SECONDS = 604_800L;
 
     private static final RedisScript<Long> CREATE_SCRIPT = new DefaultRedisScript<>("""
             local currentSessionEpoch = redis.call('GET', KEYS[3])
@@ -62,6 +63,7 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'occurredAt', ARGV[6],
                         'occurrenceCount', '1',
                         'lastOccurredAt', ARGV[6])
+                    redis.call('EXPIREAT', KEYS[3], ARGV[10])
                 else
                     redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
                     redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
@@ -208,7 +210,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(now),
                 epochSeconds(nextFamilyExpiresAt),
                 namespace.value(),
-                familyId);
+                familyId,
+                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)));
         // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 0만 정상 업무 결과이고,
         // null과 그 밖의 값은 Valkey 실행 이상이므로 인증 오류로 감추지 않고 COMMON_012로 실패시킨다.
         int rotateResult = requireScriptResult(result, "rotate", namespace);
