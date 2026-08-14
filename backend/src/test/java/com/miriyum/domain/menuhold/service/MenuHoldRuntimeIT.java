@@ -92,7 +92,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @SpringBootTest(classes = MiriyumApplication.class, properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
-        "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes"
+        "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+        "miriyum.reservation.hold-expiration.enabled=false"
 })
 class MenuHoldRuntimeIT {
 

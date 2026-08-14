@@ -162,6 +162,21 @@
 - 메뉴가 있는 `CONFIRMED` 명령만 양의 `finalReservationId`를 요구한다. 메뉴 없는 그룹과 다른 목표 상태에는 이 값이 없어야 한다. 최초 audit replay와 Hold 잠금 후 concurrent replay도 임시 MenuHold의 영속 `reservationId`를 비교하며, 같은 operation ID를 다른 최종 Reservation에 재사용하면 `COMMON_007`이다.
 - #266은 호출자가 검증한 목표 상태와 이미 존재하는 최종 Reservation ID를 그룹에 적용하는 primitive만 소유한다. 자동 만료·명령 시점 만료 우선·중복 worker·대사 orchestration은 #267, Payment/PG 검증·목표 상태 결정·최종 Reservation 생성은 #238이 소유한다.
 
+### 임시 선점 만료·대사 runtime
+
+> 활성화 단계: Issue #267 — 중앙 만료 worker, 명령 시점 만료 우선, 대사 수렴과 장기 체류 관측 활성
+
+- 자동 만료 후보는 조회 시각 이하로 `expiresAt`이 지난 `ACTIVE` Hold ID다. 조회는 무잠금 힌트로만 사용하고 한 poll 안에서 `reservationHoldId` keyset pagination으로 전진한다. 각 후보의 최종 상태와 만료 경계는 Hold 행을 잠근 뒤 중앙 `Clock`으로 다시 판정하며, 한 후보의 실패가 다음 후보를 막지 않는다. 종료 interrupt를 관찰하면 남은 batch 처리를 중단한다.
+- job과 후보 조회·조정 service는 트랜잭션을 열지 않는다. 각 후보는 기존 `Propagation.NEVER` command facade를 거쳐 `ReservationHoldService.transition`의 새 트랜잭션 하나에서 처리한다. worker 또는 조정 service에 outer transaction을 두거나 같은 객체의 self-invocation으로 이 경계를 우회하지 않는다.
+- 자동 만료는 `SYSTEM` actor와 null actor ID, `reservation-hold-expire:{reservationHoldId}` operation ID, Hold의 영속 `expiresAt`을 `requestedAt`으로 사용한다. 이 값은 worker 재시작·중복 실행·명령 시점 만료에서 모두 같아야 하며 `reservation-hold-expire:` namespace는 `EXPIRED` 내부 명령 전용이다. 실제 잠금 뒤 판정·감사 발생 시각은 한 번 읽은 중앙 `Clock`의 값을 `occurredAt`으로 사용한다.
+- 모든 확정·해제·대사 명령은 기존 operation replay 판정을 먼저 수행하고 Hold와 임시 MenuHold를 기존 순서로 잠근다. replay가 아니고 `ACTIVE && now >= expiresAt`이면 원 요청의 operation ID를 소비하거나 EXPIRED 감사에 기록하지 않고, 위 결정적 만료 명령으로 치환해 기존 수용량·메뉴 수량 복구와 상태 전이·감사를 한 번 수행한 뒤 현재 `EXPIRED` 결과를 반환한다. 만료 때문에 실행되지 않은 원 operation ID의 재사용뿐 아니라 이미 `EXPIRED`인 Hold에 도착한 새 명령도 operation ID를 소비하거나 별도 감사를 추가하지 않는 no-op으로 현재 `EXPIRED` 결과를 반환한다. 호출자는 command의 목표 상태가 적용됐다고 추정하지 않고 반환된 Hold 상태를 최종 판단 근거로 사용한다.
+- `now < expiresAt`인 `ACTIVE`만 원래 확정·해제·대사 목표를 적용할 수 있다. `RECONCILIATION_REQUIRED`에는 자동 만료 치환을 적용하지 않고, 검증된 `CONFIRMED|RELEASED` 대사 명령만 기존 primitive로 실행한다. Payment/PG 원본 조회, 금전 결과 판정과 최종 Reservation 생성은 #238이 소유한다. #238 조정자는 만료에 밀린 원 operation의 감사 존재를 전제로 삼지 않고, 영속 process·Payment 결과와 Hold의 현재 상태 및 결정적 `SYSTEM` 만료 감사를 대조해 확정 또는 전액 환불로 수렴해야 한다.
+- 잠금 순서는 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK`를 유지한다. 후보 조회와 장기 체류 관측은 잠금 순서나 다른 Schedule·Payment·Waiting·Notification 도메인의 entity, repository 또는 API 계약을 추가하지 않는다.
+- `RECONCILIATION_REQUIRED` 장기 체류 기준 시각은 해당 상태로 전이한 append-only 감사의 `occurredAt`이며 경계는 정확히 10분이다. `now < occurredAt + 10분`은 대상이 아니고 `now >= occurredAt + 10분`부터 현재도 `RECONCILIATION_REQUIRED`인 그룹을 관측한다. 이 관측은 count만 포함한 `event=reservation_hold_reconciliation_stalled` 로그를 남기고 Hold·계정·매장·명령 식별자나 연락처를 기록하지 않는다.
+- CloudWatch Logs metric filter는 위 이벤트를 `ReservationHoldReconciliationStalled` 지표로 바꾸고 5분 합계가 0보다 크면 기존 staging SNS 주제의 알람을 활성화한다. 관측은 현재 위험 상태가 지속되는 동안 반복되는 level-triggered 신호이며 별도 발송 receipt를 영속하지 않는다. 중복 poll은 상태·수용량·메뉴 수량·감사를 변경하지 않고, 장기 체류가 사라져 이벤트가 없으면 `notBreaching`으로 복귀한다.
+- 만료와 장기 체류 관측은 이름이 지정된 전용 single-thread scheduler를 명시적으로 사용하고 scheduler bean은 다른 `@Scheduled` 작업의 기본 후보가 아니다. enabled, poll delay와 batch size는 양수 검증 가능한 운영 설정이며 기본 활성화하되 `enabled=false`로 중지할 수 있다. 구체 기본값은 구현 선택이지 제품 만료 정책이 아니다.
+- 선점별 `expiresAt - 2분` 경고 의무는 기존 unique 영속 계약을 유지한다. 실제 Notification 발송·채널·provider·재시도 부재 또는 실패는 만료 worker와 장기 체류 관측을 막지 않는다.
+
 ## 수용량
 
 - 자원은 개별 테이블·좌석이 아니라 매장·업무 날짜·시간 구간별 전체 예약 가능 인원과 팀 수다.
