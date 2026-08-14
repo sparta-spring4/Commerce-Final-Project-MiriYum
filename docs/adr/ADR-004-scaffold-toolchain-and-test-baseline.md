@@ -96,7 +96,7 @@ Spring 의존성 버전은 Spring Boot 의존성 관리가 단일 소유한다. 
 
 Issue [#330](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/330)은 CI의 unit job과 integration shard A~D 병렬 구조를 Windows 로컬에서도 안전하게 재현하는 선택적 PowerShell 7 runner를 도입한다. 이 runner는 기존 `root.verify.backend`의 순서와 첫 실패 중단 계약을 대체하지 않는다. 현재 `backend.build`가 소유한 compile·unit·integration·assemble 범위를 빠르게 확인하는 로컬 실행 표면이며, 최종 gate와 각 Pull Request의 CI 증거는 기존 정본을 따른다.
 
-설계는 승인됐지만 runtime 상태는 아직 `NOT CONFIGURED`다. 구현은 Test JVM heap과 fork를 소유한 [#306](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/306)에 의해 차단된다. 아래 Auto 기준은 #306이 Test JVM heap 1GB와 `maxParallelForks = 1`로 확정되어 `dev`에 병합되는 경우에만 유효하다. #306이 2GB 또는 다른 fork 계약을 선택하면 Auto 임계값과 25분 목표를 다시 측정하고 승인할 때까지 구현을 `BLOCKED`로 유지한다.
+설계는 승인됐지만 runtime 상태는 아직 `NOT CONFIGURED`다. #330은 다른 JVM 안정화 Issue에 의존하지 않으며 runner-local 실행 profile만 소유한다. 전용 init script를 전달한 child Gradle invocation에 한해 Test JVM heap 1GB와 `maxParallelForks = 1`을 적용하고, 저장소의 `backend/build.gradle.kts`, 일반 `backend.build` 실행과 기존 CI의 JVM 정책은 변경하지 않는다.
 
 ### 실행 구조와 명령
 
@@ -114,8 +114,10 @@ pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShard
 - unit child는 `test assemble`을 실행한다.
 - integration queue는 `integrationTestShardA`부터 `integrationTestShardD`까지 실행한다.
 - 모든 child는 `--no-daemon --rerun-tasks --console=plain`을 사용한다.
-- runner는 Gradle daemon heap을 1GB로 제한하지만 Test JVM heap과 fork는 재정의하지 않는다.
-- init script는 #306의 실제 Test task 설정이 기대한 1GB/fork 1인지 검증하고 다르면 실행을 중단한다.
+- runner는 Gradle daemon heap을 1GB로 제한하고 전용 init script를 모든 child invocation에 전달한다.
+- init script는 build evaluation 이후 `test`, `integrationTest`, `integrationTestShardA`~`integrationTestShardD`를 포함한 모든 `Test` task의 최종 `maxHeapSize`를 `1g`, `maxParallelForks`를 `1`로 설정한다.
+- init script는 위 유효값을 다시 검증해 로그에 출력하며, 값을 적용하거나 확인할 수 없으면 해당 child 실행을 중단한다.
+- init script를 사용하지 않는 일반 Gradle 실행은 저장소에 선언된 기존 Test JVM 설정을 그대로 사용한다.
 - 한 child가 실패하거나 timeout돼도 아직 시작하지 않은 integration shard를 계속 실행해 전체 진단을 모은다.
 
 `Auto`는 실행 시작 시 자원을 한 번만 읽고 실행 중 병렬도를 증감하지 않는다. Windows는 OS가 보고한 현재 가용 물리 메모리, GitHub Actions Ubuntu는 `/proc/meminfo`의 `MemAvailable`, CPU는 현재 프로세스에 제공되는 논리 processor 수를 사용한다.
@@ -126,7 +128,7 @@ pwsh -NoProfile -File .\scripts\run-backend-full-verification.ps1 -ParallelShard
 | 가용 RAM 12GB 이상, logical CPU 4 이상 | 2 | 3 |
 | 그 외 또는 자원 탐지 실패 | 1 | 2 |
 
-메모리 기준은 고정 여유 4GB와 integration worker당 4GB의 합이다. 고정 여유는 unit child와 OS·Docker 여유를 함께 보수적으로 다루며, 기존 5-child benchmark에서 관찰한 Java peak 약 7.1GB와 Docker peak 미측정 위험을 반영한다. 명시적 1·2·4 override는 기준 미달 경고를 출력하되 사용자가 선택한 값을 적용한다.
+메모리 기준은 runner-local Test JVM 1GB/fork 1과 Gradle daemon 1GB profile에서 고정 여유 4GB와 integration worker당 4GB의 합이다. 고정 여유는 unit child, Gradle process와 OS·Docker 여유를 함께 보수적으로 다루며, 기존 5-child benchmark에서 관찰한 Java peak 약 7.1GB와 Docker peak 미측정 위험을 반영한다. 명시적 1·2·4 override는 기준 미달 경고를 출력하되 사용자가 선택한 값을 적용한다.
 
 ### child 격리와 process 수명 주기
 
@@ -166,18 +168,20 @@ exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 ch
 - Ctrl-C·timeout의 descendant 종료와 orphan 0건
 - 공백·비ASCII 경로의 인자 보존
 - Windows Wrapper와 Ubuntu Wrapper 선택
+- build evaluation 이후 모든 대상 Test task에 runner-local 1GB/fork 1이 최종 적용되는 init script precedence
+- init script 없는 일반 Gradle configuration에서 저장소의 기존 Test JVM 설정이 유지되는 경계
 
 Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 해당 플랫폼 지원을 `CONFIGURED`라고 부르지 않는다. macOS는 이번 범위에 포함하지 않는다.
 
 ### 성능 목표와 검증 범위
 
-2026-08-14의 외부 실험에서는 Test JVM 1GB, fork 1, Gradle daemon 1GB로 unit+assemble과 A~D 다섯 child를 실행해 23분 0.828초 wall clock, unit 2,093개와 integration 544개, failure/error/skipped 0을 관찰했다. Java peak working set은 약 7.1GB였고 Docker peak는 측정하지 못했다. 실험 wrapper는 `Start-Process.ExitCode`를 안정적으로 수집하지 못했으므로 정식 runner의 성공 증거가 아니라 exit-code contract의 실패 fixture 근거로만 사용한다.
+2026-08-14의 외부 실험에서는 Test JVM 1GB, fork 1, Gradle daemon 1GB로 unit+assemble과 A~D 다섯 child를 실행해 23분 0.828초 wall clock, unit 2,093개와 integration 544개, failure/error/skipped 0을 관찰했다. Java peak working set은 약 7.1GB였고 Docker peak는 측정하지 못했다. 이 결과는 동일한 runner-local profile의 실행 가능성과 초기 Auto 기준을 뒷받침하는 설계 근거다. 실험 wrapper가 `Start-Process.ExitCode`를 안정적으로 수집하지 못했고 이후 테스트 소스도 변경됐으므로 #330의 성공 증거로 사용하지 않는다.
 
 구현 후 현재 34GB Windows 기준 머신에서 Auto 전체 실행을 한 번 수행해 unit+assemble+A~D, XML 무결성과 25분 이하 wall clock을 확인한다. 이는 해당 머신과 실행의 관찰 결과이며 모든 PC에 대한 보장이 아니다. 같은 코드·설정으로 기존 43~46분 전체 build를 설계 단계에서 반복하지 않는다. 로컬 runner 성공은 해당 commit의 Backend CI 성공을 대신하지 않는다.
 
 ### shard 재배치 경계
 
-현재 class-duration XML은 보존되지 않았고 benchmark 이후 통합 테스트 소스도 변경됐으므로 #330은 shard 태그를 수정하지 않는다. #306과 runner 완료 후 비교 가능한 최신 실행에서 같은 shard의 불균형이 최소 두 번 반복될 때만 별도 Issue를 연다.
+현재 class-duration XML은 보존되지 않았고 benchmark 이후 통합 테스트 소스도 변경됐으므로 #330은 shard 태그를 수정하지 않는다. runner 완료 후 비교 가능한 최신 실행에서 같은 shard의 불균형이 최소 두 번 반복될 때만 별도 Issue를 연다.
 
 재배치 Issue는 class-duration 중앙값과 실제 shard 총 시간을 함께 사용하고, 이동할 정확한 테스트 파일 allowlist를 변경 전에 확정한다. 클래스 수만으로 이동하지 않는다. context cache 재사용은 cache debug log 또는 동등한 실행 증거가 없으면 근거로 사용하지 않으며, 태그 이동 뒤 전체 runner로 실제 균형과 전체 통과를 다시 검증한다.
 
@@ -185,7 +189,9 @@ Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 �
 
 - 단일 Gradle invocation의 `--parallel` 또는 재귀 custom task는 실제 Test JVM 병렬 실행과 child별 report·cleanup 격리가 입증되지 않아 선택하지 않는다.
 - CI workflow만 유지하고 로컬 명령을 추가하지 않는 안은 43~46분 로컬 피드백 문제를 해결하지 않아 선택하지 않는다.
-- runner가 Test heap/fork를 강제로 덮어쓰는 안은 #306의 소유권과 중복되므로 금지한다.
+- runner 전용 init script가 Test heap/fork를 child invocation에만 적용하는 안을 선택한다. 저장소의 일반 Test JVM 정책을 변경하지 않으면서 기존 병렬 benchmark 조건을 재현한다.
+- `backend/build.gradle.kts`에서 Test heap/fork를 바꾸는 안은 일반 로컬 실행과 CI까지 영향을 넓히므로 선택하지 않는다.
+- 현재 저장소의 2GB/default fork를 runner가 그대로 소비하는 안은 기존 1GB/fork 1 benchmark와 Auto 기준을 재사용할 수 없어 선택하지 않는다.
 - 실패 즉시 다른 child를 종료하는 안은 전체 진단을 잃고 CI의 `fail-fast=false` 정책과 달라 선택하지 않는다.
 
-runner가 contract fixture, Windows 전체 실행과 Ubuntu CI 증거를 모두 통과한 뒤에만 backend 명령 레지스트리와 verification runner 상태를 `CONFIGURED`로 갱신한다. 그 전까지 계획, script 이름 또는 Issue만으로 활성 상태를 주장하지 않는다.
+runner가 contract fixture, Windows 전체 실행과 Ubuntu CI 증거를 모두 통과한 뒤에만 backend 명령 레지스트리와 verification 상태에서 선택적 Backend 로컬 full-verification runner를 `CONFIGURED`로 갱신한다. 범용 verification runner 전체 상태는 바꾸지 않는다. 그 전까지 계획, script 이름 또는 Issue만으로 활성 상태를 주장하지 않는다.
