@@ -82,7 +82,7 @@ class RefreshTokenRiskEventDeliveryTest {
 
         assertThat(logAppender.list)
                 .extracting(ILoggingEvent::getFormattedMessage)
-                .containsExactly("event=refresh_token_risk_event_pending_count pending_count=0");
+                .containsExactly("refresh_token_risk_event_pending_count pending_count 0");
     }
 
     @Test
