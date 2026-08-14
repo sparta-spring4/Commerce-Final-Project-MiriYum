@@ -7,7 +7,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 - `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
 - staging은 `STAGING_APPROVED=true`가 필요하다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·commit·fixture·threshold를 현재 실행과 대조한다.
 - staging host는 저장소의 신뢰 allowlist가 비어 있는 동안 fail-closed다. 실제 host는 별도 리뷰 변경으로 먼저 고정해야 한다.
-- `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. `MAX_VUS`는 backend 기본 CSRF 준비 제한 60회/60초와의 경계 실패를 피하도록 50 이하로 제한하며, duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
+- `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. 일반 `MAX_VUS` 상한은 100이지만 `authRefresh`를 선택하면 CSRF 준비 예산을 보존하도록 50 이하로 제한하며, duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
 - `test-data.example.json`은 schema 예시이며 실행 가능한 데이터가 아니다. 실제 local fixture는 ignored `fixtures/test-data.local.json`, staging fixture는 저장소 밖 승인 경로를 사용한다.
 - 기존 공개 API만으로 합성 계정·예약 슬롯·계정별 2페이지 이상의 전달 완료 알림을 준비할 수 없으면 실행을 중단하고 Issue #285를 `BLOCKED`로 보고한다. Repository 직접 seed나 production test endpoint를 추가하지 않는다.
@@ -126,9 +126,9 @@ docker compose --env-file deploy/local/.env `
 
 `SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록하되, 아래 IP rate-limit 창을 공유하는 반복 실행은 새 창에서 시작해야 한다.
 
-현재 backend 기본 IP rate limit은 login 성공 표본을 단일 k6 컨테이너 기준 5회/600초로 제한한다. 따라서 rate limit 완화가 결정되기 전의 `authRefresh` 결과는 보호 동작과 오류 분류 확인용일 뿐 처리량 기준선이 아니며, p50/p95/p99를 #286 최적화 근거로 사용하지 않는다. local loadtest 전용 제한값과 결과 해석 정책은 [#331](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/331)에서 Auth·배포 소유자 승인 후 결정한다.
+backend 기본 IP rate limit은 login 성공 표본을 단일 source IP 기준 5회/600초로 제한한다. `docker-compose.loadtest.yml`은 local baseline에서만 login `600,000회/600초`, refresh `60,000회/60초`를 주입해 하네스 최대 `1,000 iterations/s × 600초`가 보호 기본값 때문에 잘리지 않게 한다. 이 override를 사용한 결과는 순수 인증 지연시간·처리량 기준선이며 기본 rate-limit 보호 동작의 검증 결과가 아니다. override 없이 실행해 429가 섞인 `authRefresh` 결과는 p50/p95/p99 또는 #286 최적화 근거로 사용하지 않는다.
 
-공개 매장 검색도 단일 k6 컨테이너의 source IP를 기준으로 60회/60초 제한을 공유한다. 위 `storeSearch` 예시의 `2 iterations/s × 30초`는 한 창의 60회를 모두 소비하므로, 같은 조건의 다음 실행은 이전 실행 종료 후 최소 60초를 기다려 새 창에서 시작한다. 부하를 높여 한 실행에서 60회를 넘기거나 같은 창에서 반복해 429가 섞인 결과는 검색 처리량 또는 p50/p95/p99 기준선으로 사용하지 않으며 #286에 전달하지 않는다. 검색 제한의 local-only 정책도 #331에서 함께 결정한다.
+공개 매장 검색의 기본 한도도 source IP 기준 60회/60초지만 local loadtest override는 `60,000회/60초`를 주입한다. override를 사용하지 않는 실행에서는 위 `storeSearch` 예시의 `2 iterations/s × 30초`가 한 창의 60회를 모두 소비하므로 다음 실행은 이전 실행 종료 후 최소 60초를 기다린다. 어느 환경이든 예상 429가 발생한 결과는 검색 처리량 또는 p50/p95/p99 기준선으로 사용하지 않으며 #286에 전달하지 않는다.
 
 `SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, full commit SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·commit·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
 
