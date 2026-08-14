@@ -38,11 +38,14 @@ function successResponse(
   }
 }
 
-async function renderPage() {
-  const { NotificationHistoryPage } = await import('./NotificationHistoryPage')
-  const queryClient = new QueryClient({
+function createTestQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+}
+
+async function renderPage(queryClient = createTestQueryClient()) {
+  const { NotificationHistoryPage } = await import('./NotificationHistoryPage')
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -52,7 +55,7 @@ async function renderPage() {
     )
   }
 
-  render(<NotificationHistoryPage apiClient={createApiClient()} />, {
+  return render(<NotificationHistoryPage apiClient={createApiClient()} />, {
     wrapper: Wrapper,
   })
 }
@@ -258,5 +261,28 @@ describe('NotificationHistoryPage', () => {
     ]) {
       expect(screen.queryByText(forbiddenText)).not.toBeInTheDocument()
     }
+  })
+
+  test('does not retain one consumer history after the page unmounts', async () => {
+    let title = '첫 번째 소비자의 예약 알림'
+    server.use(
+      http.get(NOTIFICATION_HISTORY_PATH, () =>
+        HttpResponse.json(successResponse([historyItem({ title })])),
+      ),
+    )
+    const queryClient = createTestQueryClient()
+
+    const firstPage = await renderPage(queryClient)
+    expect(await screen.findByText(title)).toBeVisible()
+    firstPage.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    title = '두 번째 소비자의 예약 알림'
+    await renderPage(queryClient)
+
+    expect(
+      screen.queryByText('첫 번째 소비자의 예약 알림'),
+    ).not.toBeInTheDocument()
+    expect(await screen.findByText(title)).toBeVisible()
   })
 })

@@ -114,6 +114,7 @@ export function NotificationHistoryPage({
   const queryClient = useQueryClient()
   const history = useInfiniteQuery({
     queryKey: NOTIFICATION_HISTORY_QUERY_KEY,
+    gcTime: 0,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
       readNotificationHistoryPage(apiClient, {
