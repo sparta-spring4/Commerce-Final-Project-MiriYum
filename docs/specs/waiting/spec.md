@@ -367,6 +367,6 @@ policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRE
 The provider call is made outside the Waiting database transaction and only through
 `PaymentService.requestRefund(RequestRefundCommand)`. Only `RefundStatus.COMPLETED` completes the
 compensation. Payment reconciliation or an unknown provider outcome maps to compensation
-reconciliation. The compensation runner is disabled unless
-`miriyum.waiting.compensation.enabled=true`; its scheduling annotations default both initial delay and
-fixed delay to 5000 ms, so enabling it requires no additional configuration path.
+reconciliation. The compensation runner is enabled when its property is absent and can be disabled
+with `miriyum.waiting.compensation.enabled=false`; its scheduling annotations default both initial
+delay and fixed delay to 5000 ms, so normal operation requires no additional configuration path.

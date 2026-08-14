@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
@@ -44,6 +45,19 @@ class WaitingConversionCompensationServiceTest {
         clock = new MutableClock(BASE_TIME);
         service = new WaitingConversionCompensationService(
                 repository, paymentService, clock, new TestTransactionManager());
+    }
+
+    @Test
+    void defaultConfigurationConstructsAndRegistersCompensationRunner() {
+        new ApplicationContextRunner()
+                .withBean(
+                        WaitingConversionCompensationService.class,
+                        () -> mock(WaitingConversionCompensationService.class))
+                .withUserConfiguration(WaitingConversionCompensationRunner.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(WaitingConversionCompensationRunner.class);
+                });
     }
 
     @Test

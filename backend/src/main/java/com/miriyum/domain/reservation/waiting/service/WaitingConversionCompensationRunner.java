@@ -8,6 +8,7 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
@@ -18,7 +19,8 @@ import org.springframework.transaction.TransactionTimedOutException;
 @Component
 @ConditionalOnProperty(
         name = "miriyum.waiting.compensation.enabled",
-        havingValue = "true")
+        havingValue = "true",
+        matchIfMissing = true)
 @Slf4j
 public class WaitingConversionCompensationRunner {
     private static final int MAX_ITEMS_PER_POLL = 100;
@@ -27,6 +29,7 @@ public class WaitingConversionCompensationRunner {
     private final String owner;
     private final Duration leaseDuration;
 
+    @Autowired
     public WaitingConversionCompensationRunner(
             WaitingConversionCompensationService service
     ) {
