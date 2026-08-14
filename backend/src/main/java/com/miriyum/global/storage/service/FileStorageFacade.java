@@ -7,12 +7,8 @@ import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.entity.FileMetadata;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Service;
 
 /** 파일 저장 결과와 메타데이터 상태 전이를 순서대로 조정한다. */
-@Service
-@ConditionalOnBean(FileStoragePort.class)
 @RequiredArgsConstructor
 public class FileStorageFacade {
 
