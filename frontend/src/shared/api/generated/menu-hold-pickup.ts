@@ -13,15 +13,15 @@ export interface paths {
     /** 픽업 가능 시간과 메뉴 수량 조회 */
     get: operations["getPickupAvailability"];
   };
-  "/api/v1/consumers/pickup-reservations": {
+  "/api/v1/consumers/me/pickup-reservations": {
     /** 픽업 예약 생성 */
     post: operations["createPickupReservation"];
   };
-  "/api/v1/consumers/pickup-reservations/{pickupReservationId}": {
+  "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}": {
     /** 본인 픽업 예약 상세 조회 */
     get: operations["getPickupReservation"];
   };
-  "/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations": {
+  "/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations": {
     /** 본인 픽업 예약 취소 */
     post: operations["cancelPickupReservation"];
   };
@@ -283,6 +283,12 @@ export interface components {
     };
     /** @description 현재 픽업 상태에서 명령 불가 */
     PickupStateConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 픽업 상태 또는 알림 원 사건 충돌로 운영자 취소 불가 */
+    PickupOperatorCancellationConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -671,7 +677,7 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StorePickupNotFound"];
-      409: components["responses"]["PickupStateConflict"];
+      409: components["responses"]["PickupOperatorCancellationConflict"];
     };
   };
   /** 운영자 메뉴 재고 버킷 목록 조회 */

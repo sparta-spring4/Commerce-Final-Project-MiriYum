@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
@@ -33,6 +34,10 @@ import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditR
 import com.miriyum.domain.reservation.repository.ReservationHoldWarningTaskRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
+import com.miriyum.domain.reservation.port.ReservationTemporaryMenuHoldPort;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldCommand;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldResult;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
 import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
@@ -60,6 +65,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -100,6 +106,9 @@ class ReservationHoldServiceTest {
     private ReservationCapacityBucketRepository capacityBucketRepository;
 
     @Mock
+    private ReservationTemporaryMenuHoldPort temporaryMenuHoldPort;
+
+    @Mock
     private ConsumerAccountService consumerAccountService;
 
     @Mock
@@ -136,6 +145,7 @@ class ReservationHoldServiceTest {
                 auditRepository,
                 warningTaskRepository,
                 capacityBucketRepository,
+                temporaryMenuHoldPort,
                 consumerAccountService,
                 storeEligibilityService,
                 timeResolutionService,
@@ -145,8 +155,230 @@ class ReservationHoldServiceTest {
                     auditIdGenerationCount.incrementAndGet();
                     return AUDIT_UUID;
                 });
+        lenient().when(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .thenReturn(noTemporaryMenuHold());
     }
 
+    @Test
+    @DisplayName("생성 명령은 메뉴 선택을 정규화해 불변 오름차순 목록으로 보관한다")
+    void createCommandCanonicalizesMenuSelectionsAtItsBoundary() {
+        ReservationHoldContracts.CreateCommand command = commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(9L, 2),
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 4)));
+
+        List<ReservationTemporaryMenuHoldSelection> selections = command.menuSelections();
+
+        assertThat(selections).containsExactly(
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 6));
+        assertThatThrownBy(() -> selections.add(
+                new ReservationTemporaryMenuHoldSelection(10L, 1)))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("null과 빈 메뉴 선택은 같은 불변 빈 목록으로 정규화한다")
+    void createCommandCanonicalizesNullAndEmptyMenuSelections() {
+        ReservationHoldContracts.CreateCommand nullSelections = commandWithSelections(null);
+        ReservationHoldContracts.CreateCommand emptySelections = commandWithSelections(List.of());
+
+        assertThat(nullSelections.menuSelections()).isEmpty();
+        assertThat(emptySelections.menuSelections()).isEmpty();
+        assertThatThrownBy(() -> nullSelections.menuSelections().add(
+                new ReservationTemporaryMenuHoldSelection(3L, 1)))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("메뉴별 합계 100 초과와 int overflow는 replay 조회 전에 거절한다")
+    void createCommandRejectsExcessAndOverflowBeforeCollaborators() {
+        assertThatThrownBy(() -> commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 60),
+                new ReservationTemporaryMenuHoldSelection(3L, 41))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, Integer.MAX_VALUE),
+                new ReservationTemporaryMenuHoldSelection(3L, 1))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasCauseInstanceOf(ArithmeticException.class);
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("null 메뉴 항목과 양수가 아닌 메뉴 ID·수량은 collaborator 전에 거절한다")
+    void createCommandRejectsNullAndNonPositiveSelectionsBeforeCollaborators() {
+        assertThatThrownBy(() -> commandWithSelections(java.util.Arrays.asList(
+                new ReservationTemporaryMenuHoldSelection(3L, 1), null)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldSelection(0L, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldSelection(3L, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("초기 생성 replay는 fresh 검증 전에 저장된 메뉴 의미를 확인한다")
+    void initialCreationReplayVerifiesPersistedMenuMeaningBeforeFreshWork() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        List<ReservationTemporaryMenuHoldSelection> selections = List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2));
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willReturn(presentTemporaryMenuHold());
+
+        ReservationHoldContracts.Result result = service.create(
+                commandWithSelections(selections));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        ArgumentCaptor<ReservationTemporaryMenuHoldCommand.Replay> replayCaptor =
+                ArgumentCaptor.forClass(ReservationTemporaryMenuHoldCommand.Replay.class);
+        InOrder order = inOrder(holdRepository, temporaryMenuHoldPort);
+        order.verify(holdRepository).findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID);
+        order.verify(temporaryMenuHoldPort).verifyCreationReplay(replayCaptor.capture());
+        assertThat(replayCaptor.getValue().reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(replayCaptor.getValue().selections()).containsExactlyElementsOf(selections);
+        verifyNoFreshInteractions();
+    }
+
+    @Test
+    @DisplayName("Store 잠금 뒤 동시 생성 replay도 저장된 메뉴 의미를 확인한다")
+    void concurrentCreationReplayVerifiesPersistedMenuMeaning() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        List<ReservationTemporaryMenuHoldSelection> selections = List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2));
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID))
+                .willReturn(Optional.empty(), Optional.of(existing));
+        given(consumerAccountService.getReservationContact(CONSUMER_ID))
+                .willReturn(new ReservationContactResult("opaque-contact-ref", true));
+        given(storeEligibilityService.requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(STORE_ID, "store"));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willReturn(presentTemporaryMenuHold());
+
+        ReservationHoldContracts.Result result = service.create(
+                commandWithSelections(selections));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        then(temporaryMenuHoldPort).should().verifyCreationReplay(
+                new ReservationTemporaryMenuHoldCommand.Replay(HOLD_ID, selections));
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).shouldHaveNoInteractions();
+        then(warningTaskRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("replay 메뉴 의미 불일치는 COMMON_007이고 fresh 효과가 없다")
+    void replayMenuMismatchReturnsCommon007WithoutFreshEffects() {
+        ReservationHold existing = existingHold(CREATION_COMMAND_ID);
+        given(holdRepository.findByConsumerAccountIdAndCreationCommandId(
+                CONSUMER_ID, CREATION_COMMAND_ID)).willReturn(Optional.of(existing));
+        given(temporaryMenuHoldPort.verifyCreationReplay(any()))
+                .willThrow(new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        assertThatThrownBy(() -> service.create(commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2)))))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        verifyNoFreshInteractions();
+        then(temporaryMenuHoldPort).should(never()).create(any());
+    }
+
+    @Test
+    @DisplayName("fresh 빈 메뉴 선택은 임시 MenuHold 포트에 영속 효과를 요청하지 않는다")
+    void freshEmptyMenuSelectionsHaveNoTemporaryMenuHoldEffects() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+
+        ReservationHoldContracts.Result result = service.create(commandWithSelections(List.of()));
+
+        assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("fresh 메뉴 선택은 모든 capacity 점유 뒤 저장된 Hold ID·만료와 정규화 선택을 전달한다")
+    void freshMenuSelectionsCreateTemporaryMenuHoldAfterCapacityOccupation() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+        given(temporaryMenuHoldPort.create(any())).willReturn(presentTemporaryMenuHold());
+        List<ReservationTemporaryMenuHoldSelection> input = List.of(
+                new ReservationTemporaryMenuHoldSelection(9L, 2),
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 4));
+
+        ReservationHoldContracts.Result result = service.create(commandWithSelections(input));
+
+        ArgumentCaptor<ReservationTemporaryMenuHoldCommand.Create> createCaptor =
+                ArgumentCaptor.forClass(ReservationTemporaryMenuHoldCommand.Create.class);
+        InOrder order = inOrder(capacityBucketRepository, holdRepository,
+                allocationRepository, temporaryMenuHoldPort, auditRepository,
+                warningTaskRepository);
+        order.verify(capacityBucketRepository).findLatestPolicyBucketsOverlappingForUpdate(
+                STORE_ID, SERVICE_DATE, START_TIME, LocalTime.of(19, 15));
+        order.verify(holdRepository).saveAndFlush(any(ReservationHold.class));
+        order.verify(allocationRepository).saveAll(anyList());
+        order.verify(temporaryMenuHoldPort).create(createCaptor.capture());
+        order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
+        order.verify(warningTaskRepository).save(any(ReservationHoldWarningTask.class));
+        ReservationTemporaryMenuHoldCommand.Create sent = createCaptor.getValue();
+        assertThat(sent.reservationHoldId()).isEqualTo(HOLD_ID);
+        assertThat(sent.storeId()).isEqualTo(STORE_ID);
+        assertThat(sent.consumerAccountId()).isEqualTo(CONSUMER_ID);
+        assertThat(sent.serviceDate()).isEqualTo(SERVICE_DATE);
+        assertThat(sent.startTime()).isEqualTo(START_TIME);
+        assertThat(sent.endDate()).isEqualTo(SERVICE_DATE);
+        assertThat(sent.endTime()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(sent.startAt()).isEqualTo(result.startAt());
+        assertThat(sent.serviceEndAt()).isEqualTo(result.serviceEndAt());
+        assertThat(sent.expiresAt()).isEqualTo(result.expiresAt());
+        assertThat(sent.selections()).containsExactly(
+                new ReservationTemporaryMenuHoldSelection(3L, 1),
+                new ReservationTemporaryMenuHoldSelection(9L, 6));
+    }
+
+    @Test
+    @DisplayName("MenuHold 실패는 audit·warning을 막고 앞선 capacity는 transaction rollback에 맡긴다")
+    void temporaryMenuHoldFailureStopsAuditAndWarningWithoutManualCompensation() {
+        List<ReservationCapacityBucket> buckets = List.of(
+                bucket(301L, LocalTime.of(18, 0), LocalTime.of(19, 0)),
+                bucket(302L, LocalTime.of(19, 0), LocalTime.of(19, 30)));
+        stubFreshPath(buckets);
+        stubHoldSaveWithGeneratedId();
+        ServiceException failure = new ServiceException(
+                com.miriyum.domain.menuhold.error.MenuHoldErrorCode.INSUFFICIENT_QUANTITY);
+        given(temporaryMenuHoldPort.create(any())).willThrow(failure);
+
+        assertThatThrownBy(() -> service.create(commandWithSelections(List.of(
+                new ReservationTemporaryMenuHoldSelection(3L, 2)))))
+                .isSameAs(failure);
+
+        assertThat(buckets).allSatisfy(bucket -> {
+            assertThat(bucket.getOccupiedPeople()).isEqualTo(3);
+            assertThat(bucket.getOccupiedTeams()).isOne();
+        });
+        then(auditRepository).shouldHaveNoInteractions();
+        then(warningTaskRepository).shouldHaveNoInteractions();
+    }
     @ParameterizedTest(name = "{0}")
     @MethodSource("sameMeaningReplayOffsets")
     @DisplayName("같은 생성 명령의 같은 의미 replay는 현재 선점을 반환하고 fresh 부작용을 만들지 않는다")
@@ -588,6 +820,535 @@ class ReservationHoldServiceTest {
     }
 
     @Test
+    @DisplayName("종결 명령은 trailing finalReservationId scalar 계약을 공개한다")
+    void transitionCommandExposesTrailingFinalReservationIdContract() {
+        assertThat(ReservationHoldContracts.TransitionCommand.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .containsExactly(
+                        "reservationHoldId",
+                        "targetStatus",
+                        "operationId",
+                        "actorType",
+                        "actorId",
+                        "requestedAt",
+                        "finalReservationId");
+    }
+
+    @Test
+    @DisplayName("종결 DTO는 non-confirm 연결과 양수가 아닌 confirm 연결을 직접 거절한다")
+    void transitionCommandRejectsMalformedFinalLinkageAtItsBoundary() {
+        assertThatThrownBy(() -> transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                TRANSITION_OPERATION_ID,
+                91L))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                0L))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                null).finalReservationId()).isNull();
+        assertThat(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L).finalReservationId()).isEqualTo(91L);
+    }
+
+    @Test
+    @DisplayName("결정적 만료 namespace는 non-EXPIRED 명령이 사용할 수 없다")
+    void expirationOperationNamespaceRejectsNonExpirationTarget() {
+        ReservationHoldContracts.TransitionCommand command = transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                "reservation-hold-expire:" + HOLD_ID);
+
+        assertThatThrownBy(() -> service.transition(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expiration operation namespace");
+
+        then(auditRepository).shouldHaveNoInteractions();
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @MethodSource("nonCanonicalExpirationCommands")
+    @DisplayName("결정적 만료 namespace는 잠근 선점의 canonical 만료 명령만 허용한다")
+    void expirationOperationNamespaceRejectsNonCanonicalMeaning(
+            ReservationHoldContracts.TransitionCommand command
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        given(auditRepository.findByCommandId(command.operationId()))
+                .willReturn(Optional.empty());
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> service.transition(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("canonical expiration command");
+
+        then(holdRepository).should().findByIdForUpdate(HOLD_ID);
+        then(auditRepository).should(never()).save(any());
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    private static Stream<Arguments> nonCanonicalExpirationCommands() {
+        Instant expiresAt = NOW.minusSeconds(600);
+        return Stream.of(
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + (HOLD_ID + 1),
+                        "SYSTEM",
+                        null,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "OPERATOR",
+                        7L,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "SYSTEM",
+                        7L,
+                        expiresAt)),
+                Arguments.of(new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + HOLD_ID,
+                        "SYSTEM",
+                        null,
+                        expiresAt.minusSeconds(1)))
+        );
+    }
+
+    @Test
+    @DisplayName("종결은 ReservationHold 잠금 직후 MenuHold를 선잠그고 capacity를 조회한다")
+    void transitionPrelocksMenuImmediatelyAfterHoldLockBeforeCapacityLookup() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+
+        service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        InOrder order = inOrder(
+                holdRepository, auditRepository, temporaryMenuHoldPort,
+                allocationRepository, capacityBucketRepository);
+        order.verify(holdRepository).findByIdForUpdate(HOLD_ID);
+        order.verify(auditRepository).findByCommandId(TRANSITION_OPERATION_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        order.verify(allocationRepository)
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
+    }
+
+    @Test
+    @DisplayName("menu-present release restores capacity before applying the MenuHold release")
+    void menuPresentReleaseOrdersHoldMenuCapacityRestoreThenMenuApply() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+        given(temporaryMenuHoldPort.applyTransition(any())).willAnswer(invocation -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+            return new ReservationTemporaryMenuHoldResult(
+                    ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                    ReservationTemporaryMenuHoldResult.State.RELEASED,
+                    null);
+        });
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.RELEASED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        InOrder order = inOrder(
+                holdRepository,
+                temporaryMenuHoldPort,
+                allocationRepository,
+                capacityBucketRepository);
+        order.verify(holdRepository).findByIdForUpdate(HOLD_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        order.verify(allocationRepository)
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
+        order.verify(capacityBucketRepository).findAllByIdInForUpdate(List.of(301L));
+        order.verify(temporaryMenuHoldPort).applyTransition(any());
+        order.verify(holdRepository).saveAndFlush(hold);
+    }
+
+    @Test
+    @DisplayName("menu-present expiry restores capacity before applying the MenuHold expiry")
+    void menuPresentExpiryOrdersHoldMenuCapacityRestoreThenMenuApply() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(
+                hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+        given(temporaryMenuHoldPort.applyTransition(any())).willAnswer(invocation -> {
+            assertThat(bucket.getOccupiedPeople()).isZero();
+            assertThat(bucket.getOccupiedTeams()).isZero();
+            return new ReservationTemporaryMenuHoldResult(
+                    ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                    ReservationTemporaryMenuHoldResult.State.EXPIRED,
+                    null);
+        });
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID, ReservationHoldStatus.EXPIRED, TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        InOrder order = inOrder(
+                holdRepository,
+                temporaryMenuHoldPort,
+                allocationRepository,
+                capacityBucketRepository);
+        order.verify(holdRepository).findByIdForUpdate(HOLD_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        order.verify(allocationRepository)
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
+        order.verify(capacityBucketRepository).findAllByIdInForUpdate(List.of(301L));
+        order.verify(temporaryMenuHoldPort).applyTransition(any());
+        order.verify(holdRepository).saveAndFlush(hold);
+    }
+
+    @Test
+    @DisplayName("메뉴 없는 점유 유지 전이는 MenuHold 부재를 잠그고 apply와 capacity를 생략한다")
+    void retainingNoMenuTransitionLocksPresenceAndSkipsApplyAndCapacity() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED);
+        then(temporaryMenuHoldPort).should().lockForTransition(HOLD_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("audit replay는 반환 전에 영속 MenuHold 부재를 확인하고 어떤 상태도 추가하지 않는다")
+    void transitionReplayVerifiesPersistentMenuAbsenceBeforeReturning() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        InOrder order = inOrder(auditRepository, temporaryMenuHoldPort);
+        order.verify(auditRepository).findByCommandId(TRANSITION_OPERATION_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("MenuHold apply 실패는 그대로 전파되어 Hold 전이와 audit을 커밋하지 않는다")
+    void temporaryMenuHoldApplyFailureStopsHoldTransitionAndAudit() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+        ServiceException failure = new ServiceException(
+                com.miriyum.domain.menuhold.error.MenuHoldErrorCode.INVENTORY_STATE_CONFLICT);
+        given(temporaryMenuHoldPort.applyTransition(any())).willThrow(failure);
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID)))
+                .isSameAs(failure);
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(auditRepository).should(never()).save(any());
+        then(holdRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("허용되지 않은 점유 유지 전이는 MenuHold apply 전에 Hold 상태로 거절한다")
+    void invalidRetainingTransitionFailsBeforeTemporaryMenuHoldApply() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        stubFreshTransition(hold);
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        ReservationTemporaryMenuHoldResult.State.RECONCILIATION_REQUIRED,
+                        null));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("메뉴가 있는 확정은 공급된 기존 Reservation ID를 그대로 연결하고 Reservation을 만들지 않는다")
+    void menuConfirmationLinksSuppliedExistingReservationIdWithoutCreatingReservation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+        given(temporaryMenuHoldPort.applyTransition(any()))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        ArgumentCaptor<ReservationTemporaryMenuHoldCommand.ApplyTransition> captor =
+                ArgumentCaptor.forClass(
+                        ReservationTemporaryMenuHoldCommand.ApplyTransition.class);
+        then(temporaryMenuHoldPort).should().applyTransition(captor.capture());
+        assertThat(captor.getValue().target())
+                .isEqualTo(ReservationTemporaryMenuHoldCommand.Target.CONFIRM);
+        assertThat(captor.getValue().finalReservationId()).isEqualTo(91L);
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("메뉴가 있는 확정은 양의 final Reservation ID 없이는 상태를 바꾸지 않는다")
+    void menuConfirmationRequiresPositiveFinalReservationIdBeforeMutation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("메뉴 없는 확정은 final Reservation ID를 거절하고 inventory apply를 호출하지 않는다")
+    void noMenuConfirmationRequiresNullFinalReservationIdWithoutInventoryMutation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        stubFreshTransition(hold);
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("non-confirm 목표의 final Reservation ID는 replay 조회 전에 거절한다")
+    void nonConfirmTransitionRejectsFinalReservationIdBeforeCollaborators() {
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                TRANSITION_OPERATION_ID,
+                91L)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        then(auditRepository).shouldHaveNoInteractions();
+        then(holdRepository).shouldHaveNoInteractions();
+        then(temporaryMenuHoldPort).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("초기 audit replay는 다른 최종 Reservation 연결을 COMMON_007로 거절한다")
+    void initialAuditReplayRejectsDifferentFinalReservationLinkage() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.confirm();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                92L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Hold 잠금 후 concurrent replay도 다른 최종 Reservation 연결을 COMMON_007로 거절한다")
+    void concurrentAuditReplayRejectsDifferentFinalReservationLinkage() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.confirm();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty(), Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                92L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("audit replay의 영속 메뉴 부재는 non-null 최종 연결과 같지 않다")
+    void auditReplayRejectsFinalLinkageWhenMenuIsPersistentlyAbsent() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.confirm();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+    }
+
+    @Test
+    @DisplayName("audit replay는 영속 MenuHold가 목표 상태에 수렴하지 않았으면 COMMON_007이다")
+    void auditReplayRejectsMenuHoldStateThatDidNotConvergeToTarget() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.release();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RELEASED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("replay rejects a group state that precedes the audited transition")
+    void auditReplayRejectsGroupStateThatPrecedesAuditedTransition() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(presentTemporaryMenuHold());
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
     @DisplayName("같은 operation의 같은 Hold와 목표 상태 replay는 현재 결과만 반환한다")
     void transitionReplayReturnsCurrentHoldWithoutLockOrMutation() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID);
@@ -599,7 +1360,7 @@ class ReservationHoldServiceTest {
         hold.confirm();
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.of(audit));
-        given(holdRepository.findById(HOLD_ID)).willReturn(Optional.of(hold));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
 
         ReservationHoldContracts.Result result = service.transition(transitionCommand(
                 HOLD_ID,
@@ -609,8 +1370,276 @@ class ReservationHoldServiceTest {
         assertThat(result.reservationHoldId()).isEqualTo(HOLD_ID);
         assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
         assertThat(hold.getStatus()).isEqualTo(ReservationHoldStatus.CONFIRMED);
-        then(holdRepository).should().findById(HOLD_ID);
-        then(holdRepository).should(never()).findByIdForUpdate(any());
+        then(holdRepository).should().findByIdForUpdate(HOLD_ID);
+        then(holdRepository).should(never()).findById(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("initial replay of reconciliation returns a later menu-present confirmation")
+    void initialReconciliationReplayReturnsLaterMenuPresentConfirmation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(holdRepository).should(never()).findById(any());
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("confirm replay는 최종 예약의 합법적인 후속 MenuHold 종결 상태를 반환한다")
+    void confirmationReplayReturnsFinalLinkedTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                91L));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("종결된 MenuHold의 confirm replay도 다른 최종 Reservation 연결은 거절한다")
+    void confirmationReplayRejectsDifferentFinalLinkageInTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        assertThatThrownBy(() -> service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID,
+                92L)))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_REUSED));
+
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("finalLinkedTerminalMenuStates")
+    @DisplayName("reconciliation replay는 확정 뒤 최종 예약의 후속 MenuHold 종결 상태를 반환한다")
+    void reconciliationReplayReturnsFinalLinkedTerminalMenuState(
+            ReservationTemporaryMenuHoldResult.State terminalState
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        terminalState,
+                        91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("initial replay locks the latest Hold before the MenuHold snapshot")
+    void initialReplayLocksLatestHoldBeforeMenuHoldSnapshot() {
+        ReservationHold staleHold = existingHold(CREATION_COMMAND_ID);
+        staleHold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                staleHold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        ReservationHold latestHold = existingHold(CREATION_COMMAND_ID);
+        latestHold.requireReconciliation();
+        latestHold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(latestHold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        InOrder order = inOrder(auditRepository, holdRepository, temporaryMenuHoldPort);
+        order.verify(auditRepository).findByCommandId(TRANSITION_OPERATION_ID);
+        order.verify(holdRepository).findByIdForUpdate(HOLD_ID);
+        order.verify(temporaryMenuHoldPort).lockForTransition(HOLD_ID);
+        then(holdRepository).should(never()).findById(any());
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+        then(holdRepository).should(never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("initial replay of reconciliation returns a later menu-present release")
+    void initialReconciliationReplayReturnsLaterMenuPresentRelease() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.release();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        ReservationTemporaryMenuHoldResult.State.RELEASED,
+                        null));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        then(holdRepository).should(never()).findById(any());
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("concurrent replay of reconciliation returns a later menu-present confirmation")
+    void concurrentReconciliationReplayReturnsLaterMenuPresentConfirmation() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.confirm();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty(), Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(confirmedTemporaryMenuHold(91L));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.CONFIRMED);
+        then(auditRepository).should(times(2)).findByCommandId(TRANSITION_OPERATION_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+        then(allocationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(auditRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("concurrent replay of reconciliation returns a later menu-present release")
+    void concurrentReconciliationReplayReturnsLaterMenuPresentRelease() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        hold.requireReconciliation();
+        ReservationHoldTransitionAudit audit = transitionAudit(
+                hold,
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID);
+        hold.release();
+        given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
+                .willReturn(Optional.empty(), Optional.of(audit));
+        given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        given(temporaryMenuHoldPort.lockForTransition(HOLD_ID))
+                .willReturn(new ReservationTemporaryMenuHoldResult(
+                        ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                        ReservationTemporaryMenuHoldResult.State.RELEASED,
+                        null));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        then(auditRepository).should(times(2)).findByCommandId(TRANSITION_OPERATION_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
         then(allocationRepository).shouldHaveNoInteractions();
         then(capacityBucketRepository).shouldHaveNoInteractions();
         then(auditRepository).should(never()).save(any());
@@ -734,6 +1763,13 @@ class ReservationHoldServiceTest {
                 Arguments.of("different requested at", "PAYMENT", 41L,
                         requestedAt.plus(1, ChronoUnit.MICROS))
         );
+    }
+
+    private static Stream<ReservationTemporaryMenuHoldResult.State>
+            finalLinkedTerminalMenuStates() {
+        return Stream.of(
+                ReservationTemporaryMenuHoldResult.State.RELEASED,
+                ReservationTemporaryMenuHoldResult.State.FULFILLED);
     }
 
     @Test
@@ -1098,6 +2134,73 @@ class ReservationHoldServiceTest {
                 NOW);
     }
 
+    @ParameterizedTest(name = "target={0}")
+    @EnumSource(
+            value = ReservationHoldStatus.class,
+            names = {"CONFIRMED", "RELEASED", "RECONCILIATION_REQUIRED"}
+    )
+    @DisplayName("만료 정각의 새 non-expiry 명령은 원 operation을 소비하지 않고 결정적 EXPIRED로 치환한다")
+    void nonExpiryCommandAtBoundaryUsesDeterministicExpirationCommand(
+            ReservationHoldStatus requestedTarget
+    ) {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+
+        ReservationHoldContracts.Result result = service.transition(transitionCommand(
+                HOLD_ID,
+                requestedTarget,
+                TRANSITION_OPERATION_ID));
+
+        assertThat(result.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(bucket.getOccupiedPeople()).isZero();
+        assertThat(bucket.getOccupiedTeams()).isZero();
+        ArgumentCaptor<ReservationHoldTransitionAudit> auditCaptor =
+                ArgumentCaptor.forClass(ReservationHoldTransitionAudit.class);
+        then(auditRepository).should().save(auditCaptor.capture());
+        ReservationHoldTransitionAudit audit = auditCaptor.getValue();
+        assertThat(audit.getBeforeStatus()).isEqualTo(ReservationHoldStatus.ACTIVE);
+        assertThat(audit.getAfterStatus()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(audit.getActorType()).isEqualTo("SYSTEM");
+        assertThat(audit.getActorId()).isNull();
+        assertThat(audit.getRequestedAt()).isEqualTo(hold.getExpiresAt());
+        assertThat(audit.getOccurredAt()).isEqualTo(NOW);
+        assertThat(audit.getCommandId())
+                .isEqualTo("reservation-hold-expire:" + HOLD_ID);
+        assertThat(audit.getCommandId()).isNotEqualTo(TRANSITION_OPERATION_ID);
+    }
+
+    @Test
+    @DisplayName("만료로 실행되지 않은 원 operation과 이후 새 명령은 현재 EXPIRED로 수렴한다")
+    void unexecutedAndNewOperationsReturnCurrentExpiredResult() {
+        ReservationHold hold = existingHold(CREATION_COMMAND_ID, NOW.minusSeconds(600));
+        ReservationCapacityBucket bucket = bucketWithOccupancy(
+                301L, LocalTime.of(18, 0), LocalTime.of(19, 15), 7L, 3, 1);
+        stubFreshTransition(hold);
+        stubCapacityRelease(hold, List.of(allocation(301L)), List.of(301L), List.of(bucket));
+        ReservationHoldContracts.TransitionCommand command = transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.CONFIRMED,
+                TRANSITION_OPERATION_ID);
+
+        ReservationHoldContracts.Result first = service.transition(command);
+        ReservationHoldContracts.Result replay = service.transition(command);
+        ReservationHoldContracts.Result newOperation = service.transition(transitionCommand(
+                HOLD_ID,
+                ReservationHoldStatus.RELEASED,
+                "new-operation-after-expiry"));
+
+        assertThat(first.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(replay.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(newOperation.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        then(auditRepository).should(times(1)).save(any());
+        then(allocationRepository).should(times(1))
+                .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
+        then(temporaryMenuHoldPort).should(never()).applyTransition(any());
+    }
+
     @Test
     @DisplayName("만료 직전 EXPIRED는 RESERVATION_005이고 allocation과 audit를 건드리지 않는다")
     void expiryBeforeBoundaryRejectsWithoutCapacityOrAudit() {
@@ -1154,22 +2257,24 @@ class ReservationHoldServiceTest {
     }
 
     @Test
-    @DisplayName("fresh transition은 audit 저장 뒤 Hold를 flush하고 갱신된 statusVersion을 반환한다")
-    void freshTransitionFlushesManagedHoldBeforeResultExtraction() {
+    @DisplayName("fresh transition은 audit 저장 뒤 Hold를 merge하고 영속 statusVersion을 반환한다")
+    void freshTransitionMergesHoldAfterAuditBeforeResultExtraction() {
         ReservationHold hold = existingHold(CREATION_COMMAND_ID);
+        ReservationHold persisted = existingHold(CREATION_COMMAND_ID);
+        persisted.confirm();
+        ReflectionTestUtils.setField(persisted, "statusVersion", 1L);
         stubFreshTransition(hold);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            ReflectionTestUtils.setField(hold, "statusVersion", 1L);
-            return null;
-        }).when(holdRepository).flush();
+        given(holdRepository.saveAndFlush(hold)).willReturn(persisted);
 
         ReservationHoldContracts.Result result = service.transition(transitionCommand(
                 HOLD_ID, ReservationHoldStatus.CONFIRMED, TRANSITION_OPERATION_ID));
 
+        assertThat(persisted).isNotSameAs(hold);
+        assertThat(hold.getStatusVersion()).isZero();
         assertThat(result.statusVersion()).isEqualTo(1L);
         InOrder order = inOrder(auditRepository, holdRepository);
         order.verify(auditRepository).save(any(ReservationHoldTransitionAudit.class));
-        order.verify(holdRepository).flush();
+        order.verify(holdRepository).saveAndFlush(hold);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -1248,6 +2353,7 @@ class ReservationHoldServiceTest {
                 auditRepository,
                 warningTaskRepository,
                 capacityBucketRepository,
+                temporaryMenuHoldPort,
                 consumerAccountService,
                 storeEligibilityService,
                 timeResolutionService,
@@ -1264,6 +2370,7 @@ class ReservationHoldServiceTest {
         given(auditRepository.findByCommandId(TRANSITION_OPERATION_ID))
                 .willReturn(Optional.empty());
         given(holdRepository.findByIdForUpdate(HOLD_ID)).willReturn(Optional.of(hold));
+        lenient().when(holdRepository.saveAndFlush(hold)).thenReturn(hold);
     }
 
     private void stubCapacityRelease(
@@ -1328,13 +2435,23 @@ class ReservationHoldServiceTest {
             ReservationHoldStatus target,
             String operationId
     ) {
+        return transitionCommand(holdId, target, operationId, null);
+    }
+
+    private static ReservationHoldContracts.TransitionCommand transitionCommand(
+            long holdId,
+            ReservationHoldStatus target,
+            String operationId,
+            Long finalReservationId
+    ) {
         return new ReservationHoldContracts.TransitionCommand(
                 holdId,
                 target,
                 operationId,
                 "SYSTEM",
                 null,
-                NOW.minusSeconds(1));
+                NOW.minusSeconds(1),
+                finalReservationId);
     }
 
     private static ReservationHoldTransitionAudit transitionAudit(
@@ -1510,6 +2627,45 @@ class ReservationHoldServiceTest {
         then(allocationRepository).shouldHaveNoInteractions();
         then(auditRepository).shouldHaveNoInteractions();
         then(warningTaskRepository).shouldHaveNoInteractions();
+    }
+
+    private static ReservationTemporaryMenuHoldResult presentTemporaryMenuHold() {
+        return new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.ACTIVE,
+                null);
+    }
+
+    private static ReservationTemporaryMenuHoldResult noTemporaryMenuHold() {
+        return new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.NO_HOLD,
+                null,
+                null);
+    }
+
+    private static ReservationTemporaryMenuHoldResult confirmedTemporaryMenuHold(
+            long finalReservationId
+    ) {
+        return new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.CONFIRMED,
+                finalReservationId);
+    }
+
+    private static ReservationHoldContracts.CreateCommand commandWithSelections(
+            List<ReservationTemporaryMenuHoldSelection> selections
+    ) {
+        return new ReservationHoldContracts.CreateCommand(
+                CONSUMER_ID,
+                STORE_ID,
+                SERVICE_DATE,
+                START_TIME,
+                null,
+                2,
+                1,
+                0,
+                CREATION_COMMAND_ID,
+                selections);
     }
 
     private static ReservationHoldContracts.CreateCommand command(

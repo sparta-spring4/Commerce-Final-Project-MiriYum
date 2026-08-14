@@ -20,7 +20,7 @@ tags:
   - name: Reservation Time Policy
     description: 매장 운영자 예약 시간 정책 버전 lifecycle
 paths:
-  /api/v1/consumers/reservations:
+  /api/v1/consumers/me/reservations:
     post:
       tags: [Reservation]
       summary: 일반 예약과 선택 메뉴 홀드 생성
@@ -54,7 +54,47 @@ paths:
           $ref: "#/components/responses/ReservationConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/consumers/reservations/{reservationId}:
+    get:
+      tags: [My Page]
+      summary: 내 예약 이력 조회
+      operationId: getCurrentConsumerReservations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReservationHistoryStatus"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+        - name: sort
+          in: query
+          description: 예약 이력 정렬. 아래 허용값 이외에는 400을 반환한다.
+          schema:
+            type: string
+            enum:
+              - "createdAt,desc"
+              - "createdAt,asc"
+              - "serviceDate,desc"
+              - "serviceDate,asc"
+              - "startAt,desc"
+              - "startAt,asc"
+            default: "createdAt,desc"
+      responses:
+        "200":
+          description: 본인 예약 이력 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationHistoryPageSuccessResponse"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AccountRestricted"
+  /api/v1/consumers/me/reservations/{reservationId}:
     get:
       tags: [Reservation]
       summary: 본인 예약 상세 조회
@@ -76,7 +116,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/ReservationNotFound"
-  /api/v1/consumers/reservations/{reservationId}/cancellations:
+  /api/v1/consumers/me/reservations/{reservationId}/cancellations:
     post:
       tags: [Reservation]
       summary: 본인 예약 취소
@@ -317,7 +357,7 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/ReservationTimePolicyConflict"
-  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication:
+  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publications:
     post:
       tags: [Reservation Time Policy]
       summary: 예약 시간 정책 초안 즉시 또는 예약 게시
@@ -351,7 +391,7 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/ReservationTimePolicyConflict"
-  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation:
+  /api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations:
     post:
       tags: [Reservation Time Policy]
       summary: 예약 시간 정책 예약 게시 철회
@@ -385,47 +425,6 @@ paths:
           $ref: "#/components/responses/StoreNotFound"
         "409":
           $ref: "#/components/responses/ReservationTimePolicyConflict"
-  /api/v1/consumers/me/reservations:
-    get:
-      tags: [My Page]
-      summary: 내 예약 내역 조회
-      operationId: getCurrentConsumerReservations
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/ReservationHistoryStatus"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
-        - name: sort
-          in: query
-          description: 예약 내역 정렬. 아래 허용값 외에는 400을 반환한다.
-          schema:
-            type: string
-            enum:
-              - "createdAt,desc"
-              - "createdAt,asc"
-              - "serviceDate,desc"
-              - "serviceDate,asc"
-              - "startAt,desc"
-              - "startAt,asc"
-            default: "createdAt,desc"
-      responses:
-        "200":
-          description: 본인 예약 내역 페이지
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReservationHistoryPageSuccessResponse"
-        "400":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/AccountRestricted"
 components:
   securitySchemes:
     bearerAuth:
@@ -1107,6 +1106,10 @@ components:
               value:
                 code: MENU_HOLD_002
                 message: 요청한 구간의 온라인 메뉴 수량이 부족합니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     ReservationStateConflict:
       description: 현재 상태 또는 취소 정책에서 명령 불가
       content:
@@ -1122,6 +1125,10 @@ components:
               value:
                 code: RESERVATION_006
                 message: 현재 취소 정책에서 처리할 수 없습니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     ReservationFulfillmentForbidden:
       description: 비활성 운영자 계정 또는 대상 매장의 대표 운영자 권한 없음
       content:

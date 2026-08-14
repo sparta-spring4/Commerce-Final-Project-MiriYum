@@ -122,6 +122,8 @@ PickupNotificationSource.readContext(resourceId, expectedVersion, recipientAccou
 
 Pickup은 자신의 픽업 예약 확정·취소 사건을 같은 업무 트랜잭션에서 `NotificationTaskRecorder`에 직접 기록한다. `MenuHoldNotificationSource`는 `PICKUP_RESERVATION`을 처리하지 않으며 MenuHold → Pickup 역방향 의존을 만들지 않는다. 메뉴 이행 위험과 대체 제안·결과의 원 사건은 MenuHold가 소유하고, 연결된 `PICKUP_RESERVATION`은 `actionResourceType`·`actionResourceId`로만 반환할 수 있다.
 
+Reservation·Pickup producer 연동에서 `resourceVersion`은 상태 enum ordinal이 아니라 확정 알림 원 사건 revision이다. 확정 사건은 `1`, 취소 사건은 `2`이며 새 원 사건을 만들지 않는 Reservation `FULFILLED`와 Pickup `PICKED_UP`은 최신 revision `2`를 유지한다. 조회 소비자는 version 값만으로 상태를 추론하지 않고 `sourceState`와 `result=SUPERSEDED`를 함께 사용한다. 두 자원의 소유 일반 사용자 계정 관계는 현재 변경 불가능하므로 `recipientRelationVersion=1`로 고정하며, 이 값은 연락처나 채널 주소의 version이 아니다.
+
 `NotificationSourceContextV1`은 다음 안전 필드만 반환한다.
 
 - 현재 `resourceVersion`, `recipientRelationVersion`, `sourceState`

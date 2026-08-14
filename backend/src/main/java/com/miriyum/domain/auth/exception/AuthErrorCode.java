@@ -20,8 +20,13 @@ public enum AuthErrorCode implements ErrorCode {
     CSRF_TOKEN_INVALID(HttpStatus.FORBIDDEN, "AUTH_009", "CSRF 토큰 검증에 실패했습니다."),
     ORIGIN_REJECTED(HttpStatus.FORBIDDEN, "AUTH_010", "Origin 또는 Referer 검증에 실패했습니다."),
     ACCOUNT_RESTRICTED(HttpStatus.FORBIDDEN, "AUTH_011", "현재 계정 상태로는 이용할 수 없습니다."),
+    INITIAL_PASSWORD_CHANGE_REQUIRED(HttpStatus.FORBIDDEN, "AUTH_012", "최초 비밀번호 변경이 필요합니다."),
     KAKAO_OAUTH_INVALID(HttpStatus.BAD_REQUEST, "AUTH_013", "카카오 로그인 요청이 유효하지 않습니다."),
-    KAKAO_ALREADY_LINKED(HttpStatus.CONFLICT, "AUTH_014", "해당 카카오 계정은 다른 계정에 연결돼 있습니다.");
+    KAKAO_ALREADY_LINKED(HttpStatus.CONFLICT, "AUTH_014", "해당 카카오 계정은 다른 계정에 연결돼 있습니다."),
+    PLATFORM_OPERATOR_SESSION_INVALID(
+            HttpStatus.UNAUTHORIZED,
+            "AUTH_015",
+            "플랫폼 운영자 세션이 더 이상 유효하지 않습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

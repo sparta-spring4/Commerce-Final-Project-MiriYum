@@ -17,19 +17,21 @@ class WaitingOpenApiContractTest {
 
     private static final Path CONTRACT = Path.of(
             "..", "docs", "specs", "waiting", "openapi.yaml");
+    private static final Path SPEC = Path.of(
+            "..", "docs", "specs", "waiting", "spec.md");
     private static final String SETTINGS_PATH =
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
-    private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/disable-impact";
+    private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/deactivation-impact";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
     private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
             "/api/v1/store-operators/stores/{storeId}/waiting-teams", Set.of("get"),
             "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}", Set.of("get"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel", Set.of("post"),
-            "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}", Set.of("get"));
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations", Set.of("post"),
+            "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}", Set.of("get"));
 
     @Test
     void storeOperatorWaitingSettingsKeepTheApprovedContract() throws IOException {
@@ -42,14 +44,15 @@ class WaitingOpenApiContractTest {
                         DISABLE_IMPACT_PATH,
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}");
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
+                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
-        assertThat(settingsPath).containsOnlyKeys("get", "put");
+        assertThat(settingsPath).containsOnlyKeys(
+                "get", "put", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
 
         Map<String, Object> settingsQuery = map(settingsPath.get("get"));
         assertThat(map(settingsQuery.get("responses")).keySet())
@@ -57,7 +60,8 @@ class WaitingOpenApiContractTest {
                         "200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> disableImpactPath = map(paths.get(DISABLE_IMPACT_PATH));
-        assertThat(disableImpactPath).containsOnlyKeys("get");
+        assertThat(disableImpactPath).containsOnlyKeys(
+                "get", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
         Map<String, Object> disableImpactQuery = map(disableImpactPath.get("get"));
         assertThat(map(disableImpactQuery.get("responses")).keySet())
                 .containsExactlyInAnyOrder(
@@ -169,6 +173,71 @@ class WaitingOpenApiContractTest {
                 .containsExactlyInAnyOrder(
                         "WAITING_005", "WAITING_006", "WAITING_007", "WAITING_008", "WAITING_009",
                         "WAITING_010", "COMMON_007", "COMMON_008");
+    }
+
+    @Test
+    void waitingLedgerConflictDoesNotExposeTheAccountActiveWaitingBusinessRule()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> responses = map(map(document.get("components")).get("responses"));
+        Map<String, Object> conflict = map(responses.get("WaitingLedgerConflict"));
+        Map<String, Object> json = map(map(conflict.get("content")).get("application/json"));
+        Map<String, Object> examples = map(json.get("examples"));
+
+        assertThat(responseExampleCodes(conflict))
+                .containsExactlyInAnyOrder(
+                        "WAITING_005", "WAITING_006", "WAITING_007", "WAITING_008", "WAITING_009",
+                        "WAITING_010", "COMMON_007", "COMMON_008")
+                .doesNotContain("WAITING_011");
+        assertThat(paths.toString())
+                .doesNotContain("WAITING_011", "ACCOUNT_ACTIVE_WAITING_EXISTS");
+
+        Map<String, Object> value = map(
+                map(examples.get("activeMembershipConflict")).get("value"));
+        assertThat(value)
+                .containsOnlyKeys("code", "message")
+                .containsEntry("code", "WAITING_008");
+    }
+
+    @Test
+    void accountWideMembershipMigrationHandoffIsCanonicalAndFailClosed()
+            throws IOException {
+        String spec = Files.readString(SPEC);
+
+        assertThat(spec).contains(
+                "uk_waiting_active_memberships_store_consumer",
+                "UNIQUE (consumer_account_id)",
+                "SELECT consumer_account_id, COUNT(*) AS active_membership_count",
+                "HAVING COUNT(*) > 1",
+                "migration과 배포를 차단",
+                "자동 취소·삭제·병합하지 않는다",
+                "0건을 재확인");
+        assertThat(spec).contains(
+                "`WAITING_011`은 응답 `code`의 wire 값",
+                "`ACCOUNT_ACTIVE_WAITING_EXISTS`는 서버 오류 식별자 이름",
+                "`code`, `message` 두 필드만");
+    }
+
+    @Test
+    void reservationConvertingCanBeCancelledAndCountsAsActive()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> cancel = map(map(paths.get(
+                "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations"))
+                .get("post"));
+
+        assertThat(list(cancel.get("x-allowed-source-statuses")))
+                .containsExactly("WAITING", "CALLED", "ARRIVED", "RESERVATION_CONVERTING");
+        assertThat(cancel).containsEntry("x-result-status", "CANCELLED");
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> impact = map(schemas.get("WaitingDisableImpact"));
+        Map<String, Object> activeTeamCount = map(map(impact.get("properties")).get("activeTeamCount"));
+
+        assertThat(list(activeTeamCount.get("x-counted-statuses")))
+                .containsExactly("WAITING", "CALLED", "ARRIVED", "RESERVATION_CONVERTING");
     }
 
     @Test

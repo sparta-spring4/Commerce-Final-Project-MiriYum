@@ -18,7 +18,7 @@ tags:
   - name: Payment Webhook
     description: PortOne V2가 호출하는 서명 검증 Webhook
 paths:
-  /api/v1/consumers/payments:
+  /api/v1/consumers/me/payments:
     get:
       tags: [Payment]
       summary: 본인 결제·환불 이력 조회
@@ -60,7 +60,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/consumers/payments/{paymentId}:
+  /api/v1/consumers/me/payments/{paymentId}:
     get:
       tags: [Payment]
       summary: 본인 결제 상세 조회
@@ -90,7 +90,7 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/InternalServerError"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-  /api/v1/consumers/payments/{paymentId}/confirmations:
+  /api/v1/consumers/me/payments/{paymentId}/confirmations:
     post:
       tags: [Payment]
       summary: PortOne 서버 조회 기반 결제 확정

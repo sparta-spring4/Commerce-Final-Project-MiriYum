@@ -16,6 +16,8 @@ tags:
     description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
 paths:
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
+    x-miriyum-runtime-status: contract-only
+    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 운영 설정 조회
@@ -83,7 +85,9 @@ paths:
           $ref: "#/components/responses/WaitingSettingConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-settings/disable-impact:
+  /api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact:
+    x-miriyum-runtime-status: contract-only
+    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 기능 비활성화 영향 조회
@@ -174,7 +178,7 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/call:
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/calls:
     post:
       tags: [Waiting Ledger]
       summary: FIFO 선두 웨이팅 팀 호출
@@ -206,7 +210,7 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrive:
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals:
     post:
       tags: [Waiting Ledger]
       summary: 호출된 웨이팅 팀 도착 처리
@@ -238,7 +242,7 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-in:
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins:
     post:
       tags: [Waiting Ledger]
       summary: 도착한 웨이팅 팀 입장 처리
@@ -270,10 +274,16 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancel:
+  /api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations:
     post:
       tags: [Waiting Ledger]
       summary: 웨이팅 팀 취소 처리
+      description: >-
+        WAITING, CALLED, ARRIVED 또는 비종결 RESERVATION_CONVERTING 팀을 CANCELLED로 종결한다.
+        RESERVATION_CONVERTING에서는 예약 선점·결제 성공·매장 종료와 조건부 갱신으로 한 결과만
+        확정하고 취소가 먼저 확정되면 필요한 선점 해제 또는 승인 취소·환불 후속 작업을 기록한다.
+      x-allowed-source-statuses: [WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING]
+      x-result-status: CANCELLED
       operationId: cancelWaitingTeam
       security:
         - bearerAuth: []
@@ -302,7 +312,7 @@ paths:
           $ref: "#/components/responses/WaitingLedgerConflict"
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
-  /api/v1/store-operators/stores/{storeId}/waiting-close-jobs/{jobId}:
+  /api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}:
     get:
       tags: [Waiting Ledger]
       summary: 활성 웨이팅 팀 종결 작업 조회
@@ -491,6 +501,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING 상태의 현재 팀 수
+          x-counted-statuses: [WAITING, CALLED, ARRIVED, RESERVATION_CONVERTING]
     WaitingSettingSuccessResponse:
       type: object
       additionalProperties: false
@@ -524,7 +536,11 @@ components:
         - NO_SHOW
         - CLOSED_BY_STORE
         - RESERVATION_CONVERTING
-      description: 웨이팅 원장의 팀 상태. 종결 상태는 새 운영자 전이를 받지 않는다.
+      description: >-
+        웨이팅 원장의 팀 상태. RESERVATION_CONVERTING은 비종결이며 예약 전환 결과가 확정될
+        때까지 계정 활성 membership 유지 상태다. 전환 실패로 WAITING 복귀해도 같은 membership을
+        유지한다. RESERVATION_CONVERTING은 운영자 cancel만 허용하고, 실제 종결 상태는 새 운영자
+        전이를 받지 않는다.
     WaitingTeamTransitionRequest:
       type: object
       additionalProperties: false
@@ -883,7 +899,7 @@ components:
             activeMembershipConflict:
               value:
                 code: WAITING_008
-                message: 활성 웨이팅 membership 상태가 변경되었습니다. 다시 확인해 주세요.
+                message: 활성 웨이팅 멤버십과 요청 전제가 충돌합니다.
             closureJobFailed:
               value:
                 code: WAITING_010

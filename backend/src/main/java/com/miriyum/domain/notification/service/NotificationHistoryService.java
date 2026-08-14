@@ -6,7 +6,7 @@ import com.miriyum.domain.notification.dto.response.NotificationHistoryPageRespo
 import com.miriyum.domain.notification.dto.response.NotificationResourceResponse;
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
-import com.miriyum.domain.notification.entity.NotificationActionAvailability;
+import com.miriyum.domain.notification.dto.source.NotificationActionAvailability;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryBoundary;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryTask;

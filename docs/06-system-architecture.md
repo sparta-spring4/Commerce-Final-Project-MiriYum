@@ -15,6 +15,8 @@ MiriYum은 `1차 MVP`, `2차 MVP`와 `고도화`까지 **방식 A**를 유지한
 
 React·TypeScript·Vite 프런트엔드는 HTTP API로 Spring Boot와 통신한다. Spring MVC는 웹 경계, Spring Security는 계정 유형별 인증·인가, Spring Data JPA와 좁은 명시적 SQL은 MySQL 접근, Flyway는 스키마 이력을 담당한다.
 
+기능별 OpenAPI가 HTTP 계약의 정본이다. 테스트 경계의 Spring MVC route inventory는 실제 `RequestMappingHandlerMapping` 규칙으로 class-level과 method-level mapping을 결합하며, 조건부 Controller도 활성 설정과 무관하게 수집한다. feature OpenAPI의 `HTTP method + path`와 Spring route를 양방향 비교하고, 계약 우선 path만 소유 Issue가 있는 `contract-only` 예외로 분리한다.
+
 `1차 MVP`의 최종 사용자 배포는 하나의 Vite 빌드와 하나의 Spring Boot 애플리케이션을 같은 Origin에서 제공하고 백엔드 API를 `/api` 아래에 둔다. 교차 Origin 자격 증명 요청은 허용하지 않으며, 실제 배포 단위를 분리해야 하는 근거가 생기면 CORS·쿠키·CSRF 경계를 함께 재검토한다.
 
 프론트엔드 배포 범위가 아직 승인되지 않은 동안 [#120](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/120)은 1차 MVP의 **staging 백엔드 API 사전 배포**만 구성한다. 이 경로는 `dev`에 통합되고 CI가 성공한 SHA만 staging EC2에 배포한다. Nginx가 `/api`만 Spring Boot에 프록시하고, Vite 정적 파일·사용자 shell·최종 same-origin 사용자 흐름은 제공하지 않는다. 따라서 이 경로의 성공은 최종 사용자 배포나 핵심 흐름 E2E 성공을 뜻하지 않는다. 프론트엔드 소유자가 배포 범위를 승인하는 후속 Issue에서 Nginx의 `/` 정적 제공과 `/api` 프록시를 함께 구성해 same-origin 배포를 완성한다. 운영 배포는 별도 EC2·IAM 역할·GitHub Environment 승인과 `main` 전용 workflow로 분리한다.
@@ -53,7 +55,7 @@ HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicap
 
 구조 테스트는 controller→repository 직접 호출, 모듈 간 repository/entity 직접 접근과 순환 의존을 거부한다.
 
-도메인 의존 그래프의 순환 baseline은 빈 집합이다. 예약 내역 HTTP 경계는 `reservation.controller.consumer`가 소유하고, 예약은 `ReservationMenuHoldPort`만 의존하며 `ReservationMenuHoldAdapter`가 MenuHold 기능을 연결한다. MenuHold의 예약 시간 해석은 `ReservationTimeResolutionService`로 좁혀 역방향 Service 의존을 만들지 않는다. 구조 테스트는 전체 도메인 그래프에서 순환 pair와 edge가 모두 0건인지 검사한다.
+도메인 의존 그래프의 순환 baseline은 빈 집합이다. 예약 내역 HTTP 경계는 `reservation.controller.consumer`가 소유한다. 1차 MVP의 즉시 확정 메뉴 결합은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`가 연결하고, 고도화 10분 임시 선점 결합은 예약 소유 `ReservationTemporaryMenuHoldPort`와 MenuHold 소유 `ReservationTemporaryMenuHoldAdapter`가 연결한다. 두 포트는 scalar DTO만 교환하고 Reservation은 MenuHold Entity·Repository를 직접 참조하지 않는다. MenuHold의 예약 시간 해석은 `ReservationTimeResolutionService`로 좁혀 역방향 Service 의존을 만들지 않는다. 구조 테스트는 전체 도메인 그래프에서 순환 pair와 edge가 모두 0건인지 검사한다.
 
 공통 Store→Menu 잠금·검증 흐름은 `MenuTransactionFacade`가 소유하고 MenuHold와 Pickup이 사용한다. 이 Facade는 트랜잭션 조정 경계를 명시하며, 도메인 간 순환을 허용하는 예외가 아니다.
 

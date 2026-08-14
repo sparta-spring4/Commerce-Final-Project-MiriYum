@@ -1,5 +1,8 @@
 # Backend 구현 가드레일
 
+- `platformoperator`는 일반 사용자·매장 운영자와 분리된 최상위 도메인이며 HTTP root는 `/api/v1/platform-operators/**`만 사용한다.
+- 플랫폼 운영자 Controller와 활성 보안 체인은 `miriyum.platform-operator.enabled=true`일 때만 등록한다. 기본값 OFF에서는 MVC 404로 수렴한다.
+
 계약 상태: ACTIVE
 
 ## 빌드 및 애플리케이션 경계
@@ -54,7 +57,7 @@ com.miriyum
 - `PickupService`
 - `PaymentService`
 
-예약과 MenuHold의 교차 트랜잭션은 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`로 연결한다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
+예약과 MenuHold의 교차 트랜잭션은 예약 소유 포트와 MenuHold 소유 adapter로만 연결한다. 1차 MVP 즉시 확정 흐름은 `ReservationMenuHoldPort`·`ReservationMenuHoldAdapter`, 고도화 10분 임시 선점 흐름은 `ReservationTemporaryMenuHoldPort`·`ReservationTemporaryMenuHoldAdapter`를 사용한다. 두 경계는 scalar DTO만 교환하며 Reservation에서 MenuHold Entity·Repository를 직접 참조하지 않는다. 임시 선점 종결은 ReservationHold를 잠근 뒤 임시 MenuHold 루트만 선잠그는 계약과, 수용량 처리 뒤 MenuHold 상태·재고를 적용하는 계약을 분리해 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK` 순서를 지킨다. MenuHold가 예약 시간을 해석할 때는 `ReservationService` 전체가 아니라 `ReservationTimeResolutionService`만 의존한다. 도메인 의존 그래프의 순환 baseline은 0건이다.
 
 API·유스케이스 소유 Service가 교차 도메인 transaction을 조정한다. 다른 도메인은 소유자의 공개 Service 메서드와 DTO만 사용하며 Entity·Repository·내부 구현에 직접 접근하지 않는다.
 

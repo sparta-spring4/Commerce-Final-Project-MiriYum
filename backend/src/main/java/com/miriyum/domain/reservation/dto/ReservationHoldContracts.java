@@ -1,10 +1,13 @@
 package com.miriyum.domain.reservation.dto;
 
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.TreeMap;
 
 /** 수용량 임시 선점 생성·종결 service가 사용하는 내부 명령과 replay 결과 계약이다. */
 public final class ReservationHoldContracts {
@@ -26,8 +29,68 @@ public final class ReservationHoldContracts {
             int adultCount,
             int childCount,
             int infantCount,
-            String creationCommandId
+            String creationCommandId,
+            List<ReservationTemporaryMenuHoldSelection> menuSelections
     ) {
+        public CreateCommand {
+            menuSelections = canonicalMenuSelections(menuSelections);
+        }
+
+        public CreateCommand(
+                long consumerAccountId,
+                long storeId,
+                LocalDate serviceDate,
+                LocalTime startTime,
+                ZoneOffset startOffset,
+                int adultCount,
+                int childCount,
+                int infantCount,
+                String creationCommandId
+        ) {
+            this(
+                    consumerAccountId,
+                    storeId,
+                    serviceDate,
+                    startTime,
+                    startOffset,
+                    adultCount,
+                    childCount,
+                    infantCount,
+                    creationCommandId,
+                    List.of());
+        }
+    }
+
+    private static List<ReservationTemporaryMenuHoldSelection> canonicalMenuSelections(
+            List<ReservationTemporaryMenuHoldSelection> selections
+    ) {
+        if (selections == null || selections.isEmpty()) {
+            return List.of();
+        }
+        TreeMap<Long, Integer> quantities = new TreeMap<>();
+        for (ReservationTemporaryMenuHoldSelection selection : selections) {
+            if (selection == null) {
+                throw new IllegalArgumentException("menuSelections must not contain null");
+            }
+            if (selection.menuId() <= 0 || selection.quantity() <= 0) {
+                throw new IllegalArgumentException(
+                        "menu IDs and quantities must be positive");
+            }
+            try {
+                quantities.merge(selection.menuId(), selection.quantity(), Math::addExact);
+            } catch (ArithmeticException exception) {
+                throw new IllegalArgumentException(
+                        "menu selection quantity sum exceeds integer range", exception);
+            }
+        }
+        if (quantities.values().stream().anyMatch(quantity -> quantity > 100)) {
+            throw new IllegalArgumentException(
+                    "summed menu selection quantity must be between 1 and 100");
+        }
+        return quantities.entrySet().stream()
+                .map(entry -> new ReservationTemporaryMenuHoldSelection(
+                        entry.getKey(), entry.getValue()))
+                .toList();
     }
 
     /**
@@ -41,8 +104,38 @@ public final class ReservationHoldContracts {
             String operationId,
             String actorType,
             Long actorId,
-            Instant requestedAt
+            Instant requestedAt,
+            Long finalReservationId
     ) {
+        public TransitionCommand {
+            if (targetStatus == ReservationHoldStatus.CONFIRMED) {
+                if (finalReservationId != null && finalReservationId <= 0) {
+                    throw new IllegalArgumentException(
+                            "finalReservationId must be positive when present");
+                }
+            } else if (finalReservationId != null) {
+                throw new IllegalArgumentException(
+                        "finalReservationId is allowed only for CONFIRMED");
+            }
+        }
+
+        public TransitionCommand(
+                long reservationHoldId,
+                ReservationHoldStatus targetStatus,
+                String operationId,
+                String actorType,
+                Long actorId,
+                Instant requestedAt
+        ) {
+            this(
+                    reservationHoldId,
+                    targetStatus,
+                    operationId,
+                    actorType,
+                    actorId,
+                    requestedAt,
+                    null);
+        }
     }
 
     /** Entity를 노출하지 않고 생성·종결 replay에 재사용하는 선점 결과 스냅샷이다. */

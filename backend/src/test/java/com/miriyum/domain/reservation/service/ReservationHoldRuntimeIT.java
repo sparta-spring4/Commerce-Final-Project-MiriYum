@@ -7,10 +7,21 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.menu.entity.Menu;
+import com.miriyum.domain.menu.model.AllergenDisclosure;
+import com.miriyum.domain.menu.model.AllergenDisclosureStatus;
+import com.miriyum.domain.menu.model.AllergenIngredientCode;
+import com.miriyum.domain.menu.model.DisclosureRegistrationStatus;
+import com.miriyum.domain.menu.model.MenuContent;
+import com.miriyum.domain.menu.repository.MenuRepository;
+import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.menuhold.inventory.entity.MenuInventoryBucket;
+import com.miriyum.domain.menuhold.inventory.repository.MenuInventoryBucketRepository;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.dto.request.CapacityBucketRequest;
 import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCapacitiesRequest;
+import com.miriyum.domain.reservation.dto.request.ReservationFulfillmentRequest;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -19,14 +30,17 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
+import com.miriyum.domain.reservation.entity.ReservationHoldTransitionAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
+import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.schedule.closure.entity.RegularClosureVersion;
 import com.miriyum.domain.schedule.closure.repository.RegularClosureVersionRepository;
 import com.miriyum.domain.schedule.entity.OperatingScheduleVersion;
@@ -107,7 +121,8 @@ import org.testcontainers.utility.DockerImageName;
             "spring.jpa.hibernate.ddl-auto=validate",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.store.schedule.activation-enabled=false",
-            "miriyum.reservation.time-policy.activation-enabled=false"
+            "miriyum.reservation.time-policy.activation-enabled=false",
+            "miriyum.reservation.hold-expiration.enabled=false"
         }
 )
 @Import(ReservationHoldRuntimeIT.MutableClockConfig.class)
@@ -140,13 +155,25 @@ class ReservationHoldRuntimeIT {
     private ReservationHoldCommandFacade holdFacade;
 
     @Autowired
+    private ReservationHoldService holdService;
+
+    @Autowired
+    private ReservationHoldExpirationService holdExpirationService;
+
+    @Autowired
     private ReservationCapacityCommandFacade capacityFacade;
 
     @Autowired
     private ReservationCancellationCommandFacade cancellationFacade;
 
     @Autowired
+    private ReservationFulfillmentCommandFacade fulfillmentFacade;
+
+    @Autowired
     private ReservationHoldRepository holdRepository;
+
+    @Autowired
+    private ReservationHoldTransitionAuditRepository holdTransitionAuditRepository;
 
     @Autowired
     private ReservationRepository reservationRepository;
@@ -182,6 +209,12 @@ class ReservationHoldRuntimeIT {
     private ReservationTimePolicyVersionRepository timePolicyRepository;
 
     @Autowired
+    private MenuRepository menuRepository;
+
+    @Autowired
+    private MenuInventoryBucketRepository menuInventoryBucketRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -193,17 +226,26 @@ class ReservationHoldRuntimeIT {
     @BeforeEach
     void cleanRowsInForeignKeyOrder() {
         clock.set(BASE_NOW);
+        dropCreationAuditFailureTrigger();
         for (CreationFailurePoint point : CreationFailurePoint.values()) {
             dropFailureTrigger(point);
         }
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
         jdbcTemplate.execute("DELETE FROM reservation_hold_warning_tasks");
         jdbcTemplate.execute("DELETE FROM reservation_hold_transition_audits");
+        jdbcTemplate.execute("DELETE FROM menu_hold_items");
+        jdbcTemplate.execute("DELETE FROM menu_holds");
+        jdbcTemplate.execute("DELETE FROM menu_inventory_ledger");
         jdbcTemplate.execute("DELETE FROM reservation_hold_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservation_holds");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_fulfillment_audits");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
         jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
+        jdbcTemplate.execute("DELETE FROM menu_inventory_buckets");
         jdbcTemplate.execute("DELETE FROM reservation_time_policy_audits");
         jdbcTemplate.execute("DELETE FROM reservation_time_policy_versions");
         jdbcTemplate.execute("DELETE FROM store_closure_audit_events");
@@ -217,6 +259,13 @@ class ReservationHoldRuntimeIT {
         jdbcTemplate.execute("DELETE FROM store_operating_schedule_entries");
         jdbcTemplate.execute("DELETE FROM store_operating_schedule_versions");
         jdbcTemplate.execute("DELETE FROM idempotency_commands");
+        jdbcTemplate.execute("DELETE FROM menu_publication_events");
+        jdbcTemplate.execute("DELETE FROM menu_version_origin_disclosures");
+        jdbcTemplate.execute("DELETE FROM menu_version_allergen_disclosures");
+        jdbcTemplate.execute("DELETE FROM menu_version_local_tags");
+        jdbcTemplate.execute("DELETE FROM menu_version_secondary_categories");
+        jdbcTemplate.execute("DELETE FROM menu_versions");
+        jdbcTemplate.execute("DELETE FROM menus");
         jdbcTemplate.execute("DELETE FROM store_tag_assignment");
         jdbcTemplate.execute("DELETE FROM stores");
         jdbcTemplate.execute("DELETE FROM store_operator_accounts");
@@ -232,6 +281,143 @@ class ReservationHoldRuntimeIT {
         assertThatThrownBy(() -> transactions.executeWithoutResult(status ->
                 holdFacade.transition(null)))
                 .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    @DisplayName("Task 3 메뉴 선택 생성은 capacity·inventory를 함께 commit·rollback하고 replay 의미를 보존한다")
+    void task3MenuSelectionsCommitRollbackAndReplayAtomically() {
+        Scenario noMenuScenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result noMenu = createHold(
+                noMenuScenario, createConsumer(), "task3-no-menu");
+        assertAllBucketOccupancy(noMenuScenario.originalBucketIds(), 2, 1);
+        assertThat(countWhere("menu_holds", "reservation_hold_id", noMenu.reservationHoldId()))
+                .isZero();
+        assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
+        assertThat(countTransitionAudits(noMenu.reservationHoldId())).isOne();
+        assertThat(count("reservation_hold_warning_tasks")).isOne();
+
+        Scenario multipleScenario = createScenario(10, 5, twoBuckets());
+        MenuFixture firstMenu = createMenuFixture(multipleScenario, "Task 3 first", 5);
+        MenuFixture secondMenu = createMenuFixture(multipleScenario, "Task 3 second", 7);
+        long multipleConsumer = createConsumer();
+        ReservationHoldContracts.CreateCommand multipleCommand = createCommand(
+                multipleScenario,
+                multipleConsumer,
+                SERVICE_DATE,
+                "task3-multiple",
+                List.of(
+                        new ReservationTemporaryMenuHoldSelection(secondMenu.menuId(), 3),
+                        new ReservationTemporaryMenuHoldSelection(firstMenu.menuId(), 2)));
+
+        ReservationHoldContracts.Result multiple = holdFacade.create(multipleCommand);
+
+        assertAllBucketOccupancy(multipleScenario.originalBucketIds(), 2, 1);
+        assertThat(onlineRemaining(firstMenu.bucketId())).isEqualTo(3);
+        assertThat(onlineRemaining(secondMenu.bucketId())).isEqualTo(4);
+        assertThat(countWhere("menu_holds", "reservation_hold_id", multiple.reservationHoldId()))
+                .isOne();
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT item.menu_id, item.quantity
+                  FROM menu_hold_items item
+                  JOIN menu_holds hold ON hold.menu_hold_id = item.menu_hold_id
+                 WHERE hold.reservation_hold_id = ?
+                 ORDER BY item.menu_id
+                """, multiple.reservationHoldId()))
+                .extracting(row -> List.of(row.get("menu_id"), row.get("quantity")))
+                .containsExactly(
+                        List.of(firstMenu.menuId(), 2),
+                        List.of(secondMenu.menuId(), 3));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT expires_at = (SELECT expires_at FROM reservation_holds
+                                      WHERE reservation_hold_id = ?)
+                  FROM menu_holds
+                 WHERE reservation_hold_id = ?
+                """, Boolean.class, multiple.reservationHoldId(),
+                multiple.reservationHoldId())).isTrue();
+        assertThat(ledgerCountFor(List.of(firstMenu.bucketId(), secondMenu.bucketId())))
+                .isEqualTo(2);
+        assertThat(countHoldAllocations(multiple.reservationHoldId())).isEqualTo(2);
+        assertThat(countTransitionAudits(multiple.reservationHoldId())).isOne();
+        assertThat(countWarningTasks(multiple.reservationHoldId())).isOne();
+
+        Scenario insufficientScenario = createScenario(10, 5, twoBuckets());
+        MenuFixture sufficient = createMenuFixture(insufficientScenario, "Task 3 enough", 5);
+        MenuFixture insufficient = createMenuFixture(insufficientScenario, "Task 3 short", 1);
+        GroupArtifactCounts beforeInsufficient = groupArtifactCounts();
+        assertThatThrownBy(() -> holdFacade.create(createCommand(
+                insufficientScenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "task3-insufficient",
+                List.of(
+                        new ReservationTemporaryMenuHoldSelection(sufficient.menuId(), 2),
+                        new ReservationTemporaryMenuHoldSelection(insufficient.menuId(), 2)))))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(MenuHoldErrorCode.INSUFFICIENT_QUANTITY));
+        assertAllBucketOccupancy(insufficientScenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(sufficient.bucketId())).isEqualTo(5);
+        assertThat(onlineRemaining(insufficient.bucketId())).isOne();
+        assertThat(ledgerCountFor(List.of(sufficient.bucketId(), insufficient.bucketId())))
+                .isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_holds WHERE creation_command_id = ?",
+                Integer.class, "task3-insufficient")).isZero();
+        assertThat(groupArtifactCounts()).isEqualTo(beforeInsufficient);
+
+        Scenario persistenceFailureScenario = createScenario(10, 5, twoBuckets());
+        MenuFixture persistenceMenu = createMenuFixture(
+                persistenceFailureScenario, "Task 3 persistence", 5);
+        GroupArtifactCounts beforePersistenceFailure = groupArtifactCounts();
+        createFailureTrigger(CreationFailurePoint.MENU_HOLD_INSERT);
+        try {
+            assertThatThrownBy(() -> holdFacade.create(createCommand(
+                    persistenceFailureScenario,
+                    createConsumer(),
+                    SERVICE_DATE,
+                    "task3-persistence-failure",
+                    List.of(new ReservationTemporaryMenuHoldSelection(
+                            persistenceMenu.menuId(), 2)))))
+                    .isInstanceOf(RuntimeException.class);
+        } finally {
+            dropFailureTrigger(CreationFailurePoint.MENU_HOLD_INSERT);
+        }
+        assertAllBucketOccupancy(persistenceFailureScenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(persistenceMenu.bucketId())).isEqualTo(5);
+        assertThat(ledgerCountFor(List.of(persistenceMenu.bucketId()))).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_holds WHERE creation_command_id = ?",
+                Integer.class, "task3-persistence-failure")).isZero();
+        assertThat(groupArtifactCounts()).isEqualTo(beforePersistenceFailure);
+
+        Task3CreationSnapshot beforeStableReplay = task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
+                List.of(firstMenu.bucketId(), secondMenu.bucketId()));
+        ReservationHoldContracts.Result replay = holdFacade.create(multipleCommand);
+        assertThat(replay).isEqualTo(multiple);
+        assertThat(task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
+                List.of(firstMenu.bucketId(), secondMenu.bucketId())))
+                .isEqualTo(beforeStableReplay);
+        assertThatThrownBy(() -> holdFacade.create(createCommand(
+                multipleScenario,
+                multipleConsumer,
+                SERVICE_DATE,
+                "task3-multiple",
+                List.of(new ReservationTemporaryMenuHoldSelection(firstMenu.menuId(), 3)))))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(
+                                com.miriyum.global.exception.CommonErrorCode
+                                        .IDEMPOTENCY_KEY_REUSED));
+        assertThat(onlineRemaining(firstMenu.bucketId())).isEqualTo(3);
+        assertThat(onlineRemaining(secondMenu.bucketId())).isEqualTo(4);
+        assertThat(task3CreationSnapshot(
+                multipleScenario,
+                multiple.reservationHoldId(),
+                List.of(firstMenu.bucketId(), secondMenu.bucketId())))
+                .isEqualTo(beforeStableReplay);
     }
 
     @Test
@@ -527,7 +713,10 @@ class ReservationHoldRuntimeIT {
     }
 
     @ParameterizedTest
-    @EnumSource(CreationFailurePoint.class)
+    @EnumSource(
+            value = CreationFailurePoint.class,
+            names = {"ALLOCATION_INSERT", "WARNING_INSERT"}
+    )
     @DisplayName("allocation 또는 warning DB 저장 실패는 점유와 Hold를 포함한 생성 전체를 롤백한다")
     void allocationOrWarningPersistenceFailureRollsBackAllCreationEffects(
             CreationFailurePoint point
@@ -700,6 +889,374 @@ class ReservationHoldRuntimeIT {
         assertThat(count("reservation_holds")).isOne();
         assertThat(count("reservation_hold_capacity_allocations")).isEqualTo(2);
         assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+    }
+
+    @Test
+    @DisplayName("마지막 수용량과 메뉴 수량 경합은 완전한 선점 그룹 하나만 commit한다")
+    void concurrentConsumersCompetingForLastCapacityAndMenuCommitOneCompleteGroup()
+            throws Exception {
+        Scenario scenario = createScenario(2, 1, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Task 5 last group", 1);
+        ReservationHoldContracts.CreateCommand first = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "task5-last-group-first",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        ReservationHoldContracts.CreateCommand second = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "task5-last-group-second",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowLocked(
+                "stores",
+                "store_id",
+                scenario.storeId(),
+                () -> invokeCreate(first),
+                () -> invokeCreate(second));
+
+        HoldAttempt winner = attempts.stream()
+                .filter(attempt -> attempt.result() != null)
+                .findFirst()
+                .orElseThrow();
+        assertThat(attempts).filteredOn(attempt -> attempt.result() != null).hasSize(1);
+        assertThat(attempts)
+                .filteredOn(attempt -> attempt.errorCode() != null)
+                .singleElement()
+                .extracting(HoldAttempt::errorCode)
+                .isEqualTo(ReservationErrorCode.INSUFFICIENT_CAPACITY);
+        assertThat(groupArtifactCounts()).isEqualTo(
+                new GroupArtifactCounts(1, 2, 1, 1, 1, 1, 1));
+        assertAllBucketOccupancy(scenario.originalBucketIds(), PARTY_SIZE, 1);
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(temporaryMenuHoldStatus(winner.result().reservationHoldId()))
+                .isEqualTo("ACTIVE");
+        assertThat(acquireLedgerCount(winner.result().reservationHoldId())).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_holds
+                 WHERE creation_command_id IN (?, ?)
+                """, Integer.class,
+                first.creationCommandId(), second.creationCommandId())).isOne();
+    }
+
+    @Test
+    @DisplayName("메뉴가 있는 같은 생성 command 경합은 하나의 그룹과 stable replay로 수렴한다")
+    void concurrentSameCreateCommandWithMenuConvergesToStableReplay() throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Task 5 replay", 2);
+        ReservationHoldContracts.CreateCommand command = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "task5-same-menu-command",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowLocked(
+                "stores",
+                "store_id",
+                scenario.storeId(),
+                () -> invokeCreate(command),
+                () -> invokeCreate(command));
+
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(attempt.errorCode()).isNull();
+            assertThat(attempt.result()).isNotNull();
+        });
+        assertThat(attempts).extracting(HoldAttempt::result)
+                .containsOnly(attempts.getFirst().result());
+        ReservationHoldContracts.Result result = attempts.getFirst().result();
+        assertThat(groupArtifactCounts()).isEqualTo(
+                new GroupArtifactCounts(1, 2, 1, 1, 1, 1, 1));
+        assertThat(acquireLedgerCount(result.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), PARTY_SIZE, 1);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        Task3CreationSnapshot beforeReplay = task3CreationSnapshot(
+                scenario, result.reservationHoldId(), List.of(menu.bucketId()));
+
+        ReservationHoldContracts.Result replay = holdFacade.create(command);
+
+        assertThat(replay).isEqualTo(result);
+        assertThat(task3CreationSnapshot(
+                scenario, result.reservationHoldId(), List.of(menu.bucketId())))
+                .isEqualTo(beforeReplay);
+    }
+
+    @Test
+    @DisplayName("메뉴 재고 mutation 뒤 caller 실패는 선점 그룹 전체를 rollback한다")
+    void callerFailureAfterInventoryMutationRollsBackWholeGroup() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Task 5 caller rollback", 2);
+        ReservationHoldContracts.CreateCommand command = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "task5-post-inventory-failure",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        createCreationAuditFailureTrigger();
+        Throwable failure;
+        try {
+            failure = catchThrowable(() -> holdFacade.create(command));
+        } finally {
+            dropCreationAuditFailureTrigger();
+        }
+
+        assertThat(failure).isNotNull();
+        assertThat(requireCause(failure, SQLException.class).getSQLState()).isEqualTo("45000");
+        assertThat(groupArtifactCounts()).isEqualTo(
+                new GroupArtifactCounts(0, 0, 0, 0, 0, 0, 0));
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(menu.bucketId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_holds
+                 WHERE creation_command_id = ?
+                """, Integer.class, command.creationCommandId())).isZero();
+    }
+
+    @Test
+    @DisplayName("만료 정각의 release와 expire 경합은 같은 완전 만료 결과로 수렴한다")
+    void releaseAndExpireRaceCommitsOneTerminalGroupAndRestoresOnce() throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Task 5 release expire", 1);
+        ReservationHoldContracts.Result active = createMenuHoldGroup(
+                scenario, menu, "task5-release-expire-create");
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand release = transitionCommand(
+                active, ReservationHoldStatus.RELEASED, "task5-release-race");
+        ReservationHoldContracts.TransitionCommand expire = transitionCommand(
+                active, ReservationHoldStatus.EXPIRED, "task5-expire-race");
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> invokeTransition(release),
+                () -> invokeTransition(expire));
+
+        assertThat(attempts)
+                .extracting(HoldAttempt::result)
+                .doesNotContainNull()
+                .extracting(ReservationHoldContracts.Result::status)
+                .containsOnly(ReservationHoldStatus.EXPIRED);
+        assertThat(attempts)
+                .extracting(HoldAttempt::errorCode)
+                .containsOnlyNulls();
+        assertThat(currentStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(terminalAuditCount(active.reservationHoldId())).isOne();
+    }
+
+    @Test
+    @DisplayName("만료 정각의 confirm과 expire 경합은 같은 완전 만료 결과로 수렴한다")
+    void confirmAndExpireRaceNeverCommitsMixedGroupState() throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Task 5 confirm expire", 1);
+        ReservationHoldContracts.Result active = createMenuHoldGroup(
+                scenario, menu, "task5-confirm-expire-create");
+        long finalReservationId = seedFinalReservation(scenario);
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand confirm = transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "task5-confirm-race",
+                finalReservationId);
+        ReservationHoldContracts.TransitionCommand expire = transitionCommand(
+                active, ReservationHoldStatus.EXPIRED, "task5-confirm-expire-race");
+
+        List<HoldAttempt> attempts = invokeTwoWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> invokeTransition(confirm),
+                () -> invokeTransition(expire));
+
+        assertThat(attempts)
+                .extracting(HoldAttempt::result)
+                .doesNotContainNull()
+                .extracting(ReservationHoldContracts.Result::status)
+                .containsOnly(ReservationHoldStatus.EXPIRED);
+        assertThat(attempts)
+                .extracting(HoldAttempt::errorCode)
+                .containsOnlyNulls();
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(terminalAuditCount(active.reservationHoldId())).isOne();
+        assertThat(currentStatus(active.reservationHoldId())).isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("EXPIRED");
+        assertThat(temporaryMenuHoldReservationId(active.reservationHoldId())).isNull();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+    }
+
+    @Test
+    @DisplayName("확정된 임시 MenuHold는 최종 예약 취소에서 수량을 한 번만 복구한다")
+    void confirmedTemporaryMenuHoldCancellationRestoresInventoryExactlyOnce() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary cancellation", 1);
+        ReservationHoldContracts.CreateCommand creationCommand = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "confirmed-temporary-cancellation-create",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
+        long finalReservationId = seedFinalReservation(
+                scenario, active.consumerAccountId());
+        ReservationHoldContracts.TransitionCommand confirmationCommand = transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "confirmed-temporary-cancellation-confirm",
+                finalReservationId);
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(confirmationCommand);
+        transferCapacityToFinalReservation(active, scenario, finalReservationId);
+        IdempotencyKey cancellationKey = key(201);
+        ConsumerCancellationRequest request =
+                new ConsumerCancellationRequest("confirmed temporary hold cancellation");
+
+        ReservationCancellationCommandResult cancelled = cancellationFacade.cancelByConsumer(
+                active.consumerAccountId(),
+                finalReservationId,
+                cancellationKey,
+                request);
+
+        assertThat(cancelled.httpStatus()).isEqualTo(200);
+        assertThat(cancelled.data().status()).isEqualTo("CANCELLED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("RELEASED");
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
+        ReservationHoldContracts.Result confirmationReplay =
+                holdFacade.transition(confirmationCommand);
+
+        assertThat(confirmationReplay).isEqualTo(confirmed);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
+        ReservationHoldContracts.Result creationReplay = holdFacade.create(creationCommand);
+
+        assertThat(creationReplay).isEqualTo(confirmed);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+
+        ReservationCancellationCommandResult replay = cancellationFacade.cancelByConsumer(
+                active.consumerAccountId(),
+                finalReservationId,
+                cancellationKey,
+                request);
+
+        assertThat(replay).isEqualTo(cancelled);
+        assertThat(onlineRemaining(menu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isOne();
+    }
+
+    @Test
+    @DisplayName("확정된 임시 MenuHold는 최종 예약 방문 완료에서 수량을 복구하지 않는다")
+    void confirmedTemporaryMenuHoldFulfillmentDoesNotRestoreInventory() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        MenuFixture menu = createMenuFixture(scenario, "Confirmed temporary fulfillment", 1);
+        ReservationHoldContracts.CreateCommand creationCommand = createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                "confirmed-temporary-fulfillment-create",
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1)));
+        ReservationHoldContracts.Result active = holdFacade.create(creationCommand);
+        long finalReservationId = seedFinalReservation(
+                scenario, active.consumerAccountId());
+        ReservationHoldContracts.TransitionCommand confirmationCommand = transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "confirmed-temporary-fulfillment-confirm",
+                finalReservationId);
+        ReservationHoldContracts.Result confirmed = holdFacade.transition(confirmationCommand);
+        transferCapacityToFinalReservation(active, scenario, finalReservationId);
+
+        ReservationFulfillmentCommandResult fulfilled = fulfillmentFacade.fulfill(
+                scenario.operatorId(),
+                scenario.storeId(),
+                finalReservationId,
+                key(202),
+                new ReservationFulfillmentRequest());
+
+        assertThat(fulfilled.httpStatus()).isEqualTo(200);
+        assertThat(fulfilled.data().status()).isEqualTo("FULFILLED");
+        assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                .isEqualTo("FULFILLED");
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+
+        ReservationHoldContracts.Result confirmationReplay =
+                holdFacade.transition(confirmationCommand);
+
+        assertThat(confirmationReplay).isEqualTo(confirmed);
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+
+        ReservationHoldContracts.Result creationReplay = holdFacade.create(creationCommand);
+
+        assertThat(creationReplay).isEqualTo(confirmed);
+        assertThat(onlineRemaining(menu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+    }
+
+    @Test
+    @DisplayName("reconciliation이 release·confirm보다 먼저 잠그면 자원을 유지한 뒤 그룹으로 수렴한다")
+    void reconciliationBeforeReleaseOrConfirmRetainsThenConvergesAsOneGroup()
+            throws Exception {
+        Scenario releaseScenario = createScenario(10, 5, twoBuckets());
+        MenuFixture releaseMenu = createMenuFixture(
+                releaseScenario, "Task 5 reconcile release", 1);
+        ReservationHoldContracts.Result releaseActive = createMenuHoldGroup(
+                releaseScenario, releaseMenu, "task5-reconcile-release-create");
+        runReconciliationBeforeTerminal(
+                releaseScenario,
+                releaseMenu,
+                releaseActive,
+                transitionCommand(
+                        releaseActive,
+                        ReservationHoldStatus.RELEASED,
+                        "task5-after-reconcile-release"));
+        assertThat(currentStatus(releaseActive.reservationHoldId())).isEqualTo("RELEASED");
+        assertThat(temporaryMenuHoldStatus(releaseActive.reservationHoldId()))
+                .isEqualTo("RELEASED");
+        assertAllBucketOccupancy(releaseScenario.originalBucketIds(), 0, 0);
+        assertThat(onlineRemaining(releaseMenu.bucketId())).isOne();
+        assertThat(restoreLedgerCount(releaseActive.reservationHoldId())).isOne();
+        assertThat(countTransitionAudits(releaseActive.reservationHoldId())).isEqualTo(3);
+
+        Scenario confirmScenario = createScenario(10, 5, twoBuckets());
+        MenuFixture confirmMenu = createMenuFixture(
+                confirmScenario, "Task 5 reconcile confirm", 1);
+        ReservationHoldContracts.Result confirmActive = createMenuHoldGroup(
+                confirmScenario, confirmMenu, "task5-reconcile-confirm-create");
+        long finalReservationId = seedFinalReservation(confirmScenario);
+        runReconciliationBeforeTerminal(
+                confirmScenario,
+                confirmMenu,
+                confirmActive,
+                transitionCommand(
+                        confirmActive,
+                        ReservationHoldStatus.CONFIRMED,
+                        "task5-after-reconcile-confirm",
+                        finalReservationId));
+        assertThat(currentStatus(confirmActive.reservationHoldId())).isEqualTo("CONFIRMED");
+        assertThat(temporaryMenuHoldStatus(confirmActive.reservationHoldId()))
+                .isEqualTo("CONFIRMED");
+        assertThat(temporaryMenuHoldReservationId(confirmActive.reservationHoldId()))
+                .isEqualTo(finalReservationId);
+        assertAllBucketOccupancy(confirmScenario.originalBucketIds(), PARTY_SIZE, 1);
+        assertThat(onlineRemaining(confirmMenu.bucketId())).isZero();
+        assertThat(restoreLedgerCount(confirmActive.reservationHoldId())).isZero();
+        assertThat(countTransitionAudits(confirmActive.reservationHoldId())).isEqualTo(3);
     }
 
     @Test
@@ -1139,6 +1696,200 @@ class ReservationHoldRuntimeIT {
         assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
     }
 
+    @Test
+    @DisplayName("만료 정각의 확정은 결정적 EXPIRED 감사로 치환되고 원 operation replay도 수렴한다")
+    void confirmationAtExpiryBoundaryPersistsDeterministicExpirationAudit() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "command-time-expiry-create");
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand confirmation = transitionCommand(
+                active,
+                ReservationHoldStatus.CONFIRMED,
+                "late-confirm-operation");
+
+        ReservationHoldContracts.Result expired = holdFacade.transition(confirmation);
+        ReservationHoldContracts.Result replay = holdFacade.transition(confirmation);
+
+        assertThat(expired.status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(replay).isEqualTo(expired);
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT command_id
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, String.class, active.reservationHoldId()))
+                .isEqualTo("reservation-hold-expire:" + active.reservationHoldId());
+        assertThat(holdTransitionAuditRepository
+                .findAllByReservationHoldIdOrderByIdAsc(active.reservationHoldId()))
+                .filteredOn(audit -> audit.getAfterStatus() == ReservationHoldStatus.EXPIRED)
+                .extracting(ReservationHoldTransitionAudit::getRequestedAt)
+                .containsExactly(active.expiresAt());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE command_id = 'late-confirm-operation'
+                """, Long.class)).isZero();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("RECONCILIATION_REQUIRED 전이 감사 후 10분 경계부터 현재 장기 체류만 센다")
+    void reconciliationLongStayUsesTransitionAuditBoundaryAndCurrentStatus() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "reconciliation-long-stay-create");
+        Instant reconciledAt = active.createdAt().plusSeconds(60);
+        clock.set(reconciledAt);
+        ReservationHoldContracts.Result reconciliation = transition(
+                active,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                "reconciliation-long-stay-enter");
+
+        clock.set(reconciledAt.plusSeconds(599));
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isZero();
+
+        clock.set(reconciledAt.plusSeconds(600));
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isOne();
+        assertThat(holdExpirationService.expireDueHolds(100)).isZero();
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED.name());
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 2, 1);
+
+        ReservationHoldContracts.Result released = transition(
+                reconciliation,
+                ReservationHoldStatus.RELEASED,
+                "reconciliation-long-stay-release");
+
+        assertThat(released.status()).isEqualTo(ReservationHoldStatus.RELEASED);
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isZero();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("장기 체류 집계는 같은 Hold의 중복 대사 감사를 한 건으로 센다")
+    void reconciliationLongStayCountsDistinctHoldsWhenAuditsAreDuplicated() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "reconciliation-distinct-count-create");
+        Instant reconciledAt = active.createdAt().plusSeconds(60);
+        clock.set(reconciledAt);
+        transition(
+                active,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                "reconciliation-distinct-count-enter");
+        holdTransitionAuditRepository.save(ReservationHoldTransitionAudit.record(
+                active.reservationHoldId(),
+                "SYSTEM",
+                null,
+                reconciledAt.plusSeconds(1),
+                reconciledAt.plusSeconds(1),
+                ReservationHoldStatus.ACTIVE,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                1L,
+                1L,
+                "reconciliation-distinct-count-duplicate"));
+
+        clock.set(reconciledAt.plusSeconds(601));
+
+        assertThat(holdExpirationService.countLongStayingReconciliations()).isOne();
+    }
+
+    @Test
+    @DisplayName("두 만료 worker가 같은 후보를 조회해도 결정적 operation으로 한 번만 만료·복구한다")
+    void concurrentExpirationWorkersConvergeToOneTransition() throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario, createConsumer(), "worker-worker-expiry-create");
+        clock.set(active.expiresAt());
+
+        RacePair<Integer, Integer> workers = invokePairWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> holdExpirationService.expireDueHolds(1),
+                () -> holdExpirationService.expireDueHolds(1));
+
+        assertThat(workers.first()).isOne();
+        assertThat(workers.second()).isOne();
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.EXPIRED.name());
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, Long.class, active.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @Test
+    @DisplayName("만료 service는 실제 keyset page를 끝까지 소진해 모든 due Hold를 한 번씩 만료한다")
+    void expirationServiceConsumesAllKeysetPages() {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        List<ReservationHoldContracts.Result> active = List.of(
+                createHold(scenario, createConsumer(), "keyset-expiry-create-1"),
+                createHold(scenario, createConsumer(), "keyset-expiry-create-2"),
+                createHold(scenario, createConsumer(), "keyset-expiry-create-3"));
+        clock.set(active.getFirst().expiresAt());
+
+        int completed = holdExpirationService.expireDueHolds(2);
+
+        assertThat(completed).isEqualTo(3);
+        assertThat(active)
+                .extracting(result -> currentStatus(result.reservationHoldId()))
+                .containsOnly(ReservationHoldStatus.EXPIRED.name());
+        assertThat(active)
+                .allSatisfy(result ->
+                        assertThat(countTransitionAudits(result.reservationHoldId()))
+                                .isEqualTo(2));
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
+    @ParameterizedTest(name = "target={0}")
+    @EnumSource(
+            value = ReservationHoldStatus.class,
+            names = {"CONFIRMED", "RELEASED"}
+    )
+    @DisplayName("만료 정각의 명령과 worker 경합은 단일 EXPIRED와 한 번의 복구로 수렴한다")
+    void commandAndWorkerAtExpiryBoundaryConvergeToSingleExpiration(
+            ReservationHoldStatus requestedTarget
+    ) throws Exception {
+        Scenario scenario = createScenario(10, 5, twoBuckets());
+        ReservationHoldContracts.Result active = createHold(
+                scenario,
+                createConsumer(),
+                "command-worker-expiry-" + requestedTarget.name().toLowerCase(Locale.ROOT));
+        clock.set(active.expiresAt());
+        ReservationHoldContracts.TransitionCommand requested = transitionCommand(
+                active,
+                requestedTarget,
+                "command-worker-operation-"
+                        + requestedTarget.name().toLowerCase(Locale.ROOT));
+
+        RacePair<Integer, ReservationHoldContracts.Result> race = invokePairWhileRowLocked(
+                "reservation_holds",
+                "reservation_hold_id",
+                active.reservationHoldId(),
+                () -> holdExpirationService.expireDueHolds(100),
+                () -> holdFacade.transition(requested));
+
+        assertThat(race.first()).isOne();
+        assertThat(race.second().status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(currentStatus(active.reservationHoldId()))
+                .isEqualTo(ReservationHoldStatus.EXPIRED.name());
+        assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status = 'EXPIRED'
+                """, Long.class, active.reservationHoldId())).isOne();
+        assertAllBucketOccupancy(scenario.originalBucketIds(), 0, 0);
+    }
+
     private Scenario createScenario(
             int maxPeople,
             int maxTeams,
@@ -1308,12 +2059,75 @@ class ReservationHoldRuntimeIT {
         });
     }
 
+    private long seedFinalReservation(Scenario scenario) {
+        return seedFinalReservation(scenario, createConsumer());
+    }
+
+    private long seedFinalReservation(Scenario scenario, long consumerId) {
+        return transactions.execute(status -> {
+            Store store = storeRepository.findById(scenario.storeId()).orElseThrow();
+            ReservationTimePolicyVersion policy = timePolicyRepository
+                    .findByStoreIdAndVersionNumberForUpdate(scenario.storeId(), 1L)
+                    .orElseThrow();
+            ReservationTimeSnapshot timeSnapshot = ReservationTimeSnapshot.calculate(
+                    policy,
+                    LocalDateTime.of(SERVICE_DATE, START_TIME),
+                    ZoneId.of(TIME_ZONE_ID),
+                    null);
+            return reservationRepository.saveAndFlush(Reservation.confirm(
+                    consumerId,
+                    scenario.storeId(),
+                    store.getName(),
+                    timeSnapshot,
+                    PartyComposition.of(PARTY_SIZE, 0, 0),
+                    ReservationContactSnapshot.contactable(
+                            "opaque-task5-final-reservation-" + consumerId),
+                    1L,
+                    new ReservationCancellationPolicyVersion(1L),
+                    BASE_NOW.minusSeconds(60))).getId();
+        });
+    }
+
+    private void transferCapacityToFinalReservation(
+            ReservationHoldContracts.Result hold,
+            Scenario scenario,
+            long finalReservationId
+    ) {
+        transactions.executeWithoutResult(status -> {
+            capacityAllocationRepository.saveAllAndFlush(
+                    scenario.originalBucketIds().stream()
+                            .map(bucketId -> ReservationCapacityAllocation.allocate(
+                                    finalReservationId,
+                                    bucketId,
+                                    PARTY_SIZE,
+                                    hold.capacityPolicyVersion()))
+                            .toList());
+            jdbcTemplate.update(
+                    "DELETE FROM reservation_hold_capacity_allocations "
+                            + "WHERE reservation_hold_id = ?",
+                    hold.reservationHoldId());
+        });
+    }
+
     private ReservationHoldContracts.Result createHold(
             Scenario scenario,
             long consumerId,
             String commandId
     ) {
         return holdFacade.create(createCommand(scenario, consumerId, commandId));
+    }
+
+    private ReservationHoldContracts.Result createMenuHoldGroup(
+            Scenario scenario,
+            MenuFixture menu,
+            String commandId
+    ) {
+        return holdFacade.create(createCommand(
+                scenario,
+                createConsumer(),
+                SERVICE_DATE,
+                commandId,
+                List.of(new ReservationTemporaryMenuHoldSelection(menu.menuId(), 1))));
     }
 
     private static ReservationHoldContracts.CreateCommand createCommand(
@@ -1330,6 +2144,16 @@ class ReservationHoldRuntimeIT {
             LocalDate serviceDate,
             String commandId
     ) {
+        return createCommand(scenario, consumerId, serviceDate, commandId, List.of());
+    }
+
+    private static ReservationHoldContracts.CreateCommand createCommand(
+            Scenario scenario,
+            long consumerId,
+            LocalDate serviceDate,
+            String commandId,
+            List<ReservationTemporaryMenuHoldSelection> menuSelections
+    ) {
         return new ReservationHoldContracts.CreateCommand(
                 consumerId,
                 scenario.storeId(),
@@ -1339,7 +2163,251 @@ class ReservationHoldRuntimeIT {
                 PARTY_SIZE,
                 0,
                 0,
-                commandId);
+                commandId,
+                menuSelections);
+    }
+
+    private MenuFixture createMenuFixture(
+            Scenario scenario,
+            String name,
+            int onlineQuantity
+    ) {
+        return transactions.execute(status -> {
+            Menu menu = Menu.create(
+                    scenario.storeId(),
+                    menuContent(name),
+                    scenario.operatorId(),
+                    ACTIVATED_AT);
+            menu.publish(ACTIVATED_AT);
+            menu = menuRepository.saveAndFlush(menu);
+            MenuInventoryBucket bucket = menuInventoryBucketRepository.saveAndFlush(
+                    MenuInventoryBucket.create(
+                            menu.getId(),
+                            SERVICE_DATE,
+                            START_TIME,
+                            SERVICE_DATE,
+                            LocalTime.of(13, 0),
+                            TIME_ZONE_ID,
+                            1L,
+                            onlineQuantity,
+                            onlineQuantity,
+                            0,
+                            0,
+                            false));
+            return new MenuFixture(menu.getId(), bucket.getId());
+        });
+    }
+
+    private static MenuContent menuContent(String name) {
+        return new MenuContent(
+                name,
+                "",
+                5_000,
+                false,
+                "BEVERAGE",
+                List.of(),
+                List.of(),
+                true,
+                false,
+                DisclosureRegistrationStatus.REGISTERED,
+                List.of(new AllergenDisclosure(
+                        AllergenIngredientCode.MILK,
+                        AllergenDisclosureStatus.CONTAINS)),
+                DisclosureRegistrationStatus.NOT_APPLICABLE,
+                List.of(),
+                false);
+    }
+
+    private int onlineRemaining(long bucketId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT online_hold_remaining FROM menu_inventory_buckets "
+                        + "WHERE menu_inventory_bucket_id = ?",
+                Integer.class,
+                bucketId);
+    }
+
+    private int ledgerCountFor(List<Long> bucketIds) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM menu_inventory_ledger "
+                        + "WHERE menu_inventory_bucket_id IN ("
+                        + placeholders(bucketIds.size()) + ")",
+                Integer.class,
+                bucketIds.toArray());
+    }
+
+    private int acquireLedgerCount(long reservationHoldId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM menu_inventory_ledger
+                 WHERE operation_id = ?
+                   AND operation_type = 'ACQUIRE'
+                """, Integer.class, acquireOperationId(reservationHoldId));
+    }
+
+    private int restoreLedgerCount(long reservationHoldId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM menu_inventory_ledger
+                 WHERE source_operation_id = ?
+                   AND operation_type = 'RESTORE'
+                """, Integer.class, acquireOperationId(reservationHoldId));
+    }
+
+    private static String acquireOperationId(long reservationHoldId) {
+        return "reservation-temp-menu-acquire:" + reservationHoldId;
+    }
+
+    private String temporaryMenuHoldStatus(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_hold_id = ?",
+                String.class,
+                reservationHoldId);
+    }
+
+    private Long temporaryMenuHoldReservationId(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT reservation_id FROM menu_holds WHERE reservation_hold_id = ?",
+                Long.class,
+                reservationHoldId);
+    }
+
+    private int countHoldAllocations(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_hold_capacity_allocations "
+                        + "WHERE reservation_hold_id = ?",
+                Integer.class,
+                reservationHoldId);
+    }
+
+    private int countWarningTasks(long reservationHoldId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_hold_warning_tasks "
+                        + "WHERE reservation_hold_id = ?",
+                Integer.class,
+                reservationHoldId);
+    }
+
+    private GroupArtifactCounts groupArtifactCounts() {
+        return new GroupArtifactCounts(
+                count("reservation_holds"),
+                count("reservation_hold_capacity_allocations"),
+                count("menu_holds"),
+                count("menu_hold_items"),
+                count("menu_inventory_ledger"),
+                count("reservation_hold_transition_audits"),
+                count("reservation_hold_warning_tasks"));
+    }
+
+    private Task3CreationSnapshot task3CreationSnapshot(
+            Scenario scenario,
+            long reservationHoldId,
+            List<Long> inventoryBucketIds
+    ) {
+        List<Long> orderedCapacityIds = scenario.originalBucketIds().stream().sorted().toList();
+        List<Long> orderedInventoryIds = inventoryBucketIds.stream().sorted().toList();
+        return new Task3CreationSnapshot(
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_capacity_bucket_id,
+                               occupied_people,
+                               occupied_teams
+                          FROM reservation_capacity_buckets
+                         WHERE reservation_capacity_bucket_id IN (%s)
+                         ORDER BY reservation_capacity_bucket_id
+                        """.formatted(placeholders(orderedCapacityIds.size())),
+                        orderedCapacityIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT menu_inventory_bucket_id,
+                               online_hold_remaining,
+                               shared_remaining,
+                               availability_status,
+                               lock_version
+                          FROM menu_inventory_buckets
+                         WHERE menu_inventory_bucket_id IN (%s)
+                         ORDER BY menu_inventory_bucket_id
+                        """.formatted(placeholders(orderedInventoryIds.size())),
+                        orderedInventoryIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT operation_id,
+                               menu_inventory_bucket_id,
+                               operation_type,
+                               pool_type,
+                               quantity_delta,
+                               quantity_before,
+                               quantity_after
+                          FROM menu_inventory_ledger
+                         WHERE menu_inventory_bucket_id IN (%s)
+                         ORDER BY menu_inventory_ledger_id
+                        """.formatted(placeholders(orderedInventoryIds.size())),
+                        orderedInventoryIds.toArray()),
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_hold_id,
+                               status,
+                               status_version,
+                               creation_command_id,
+                               capacity_policy_version,
+                               created_at,
+                               expires_at
+                          FROM reservation_holds
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT reservation_hold_id,
+                               reservation_capacity_bucket_id,
+                               occupied_people,
+                               occupied_teams,
+                               capacity_policy_version
+                          FROM reservation_hold_capacity_allocations
+                         WHERE reservation_hold_id = ?
+                         ORDER BY reservation_capacity_bucket_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT menu_hold_id,
+                               reservation_hold_id,
+                               expires_at,
+                               acquire_operation_id,
+                               status,
+                               created_at,
+                               updated_at
+                          FROM menu_holds
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT item.menu_id,
+                               item.menu_inventory_bucket_id,
+                               item.menu_policy_version,
+                               item.inventory_policy_version,
+                               item.quantity
+                          FROM menu_hold_items item
+                          JOIN menu_holds hold ON hold.menu_hold_id = item.menu_hold_id
+                         WHERE hold.reservation_hold_id = ?
+                         ORDER BY item.menu_id, item.menu_inventory_bucket_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT before_status,
+                               after_status,
+                               command_id,
+                               requested_at,
+                               occurred_at
+                          FROM reservation_hold_transition_audits
+                         WHERE reservation_hold_id = ?
+                         ORDER BY reservation_hold_transition_audit_id
+                        """, reservationHoldId),
+                jdbcTemplate.queryForList("""
+                        SELECT created_at,
+                               warning_due_at
+                          FROM reservation_hold_warning_tasks
+                         WHERE reservation_hold_id = ?
+                        """, reservationHoldId));
+    }
+
+    private int countWhere(String tableName, String idColumn, long id) {
+        if (!tableName.equals("menu_holds") || !idColumn.equals("reservation_hold_id")) {
+            throw new IllegalArgumentException("unsupported count target");
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + tableName + " WHERE " + idColumn + " = ?",
+                Integer.class,
+                id);
     }
 
     private ReservationHoldContracts.Result transition(
@@ -1362,6 +2430,108 @@ class ReservationHoldRuntimeIT {
                 "SYSTEM",
                 null,
                 clock.instant());
+    }
+
+    private ReservationHoldContracts.TransitionCommand transitionCommand(
+            ReservationHoldContracts.Result hold,
+            ReservationHoldStatus targetStatus,
+            String operationId,
+            long finalReservationId
+    ) {
+        return new ReservationHoldContracts.TransitionCommand(
+                hold.reservationHoldId(),
+                targetStatus,
+                operationId,
+                "SYSTEM",
+                null,
+                clock.instant(),
+                finalReservationId);
+    }
+
+    private void runReconciliationBeforeTerminal(
+            Scenario scenario,
+            MenuFixture menu,
+            ReservationHoldContracts.Result active,
+            ReservationHoldContracts.TransitionCommand terminalCommand
+    ) throws Exception {
+        ReservationHoldContracts.TransitionCommand reconciliationCommand = transitionCommand(
+                active,
+                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                terminalCommand.operationId() + "-precondition");
+        CountDownLatch reconciliationApplied = new CountDownLatch(1);
+        CountDownLatch allowReconciliationCommit = new CountDownLatch(1);
+        AtomicLong reconciliationConnectionId = new AtomicLong();
+        AtomicReference<Map<String, Object>> terminalObservation = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2, workerFactory());
+        Future<ReservationHoldContracts.Result> reconciliation = null;
+        Future<HoldAttempt> terminal = null;
+        try {
+            reconciliation = executor.submit(() -> transactions.execute(status -> {
+                ReservationHoldContracts.Result result =
+                        holdService.transition(reconciliationCommand);
+                reconciliationConnectionId.set(jdbcTemplate.queryForObject(
+                        "SELECT CONNECTION_ID()", Long.class));
+                assertThat(result.status())
+                        .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED);
+                assertThat(currentStatus(active.reservationHoldId()))
+                        .isEqualTo("RECONCILIATION_REQUIRED");
+                assertThat(temporaryMenuHoldStatus(active.reservationHoldId()))
+                        .isEqualTo("RECONCILIATION_REQUIRED");
+                assertAllBucketOccupancy(scenario.originalBucketIds(), PARTY_SIZE, 1);
+                assertThat(onlineRemaining(menu.bucketId())).isZero();
+                assertThat(restoreLedgerCount(active.reservationHoldId())).isZero();
+                assertThat(countTransitionAudits(active.reservationHoldId())).isEqualTo(2);
+                reconciliationApplied.countDown();
+                awaitLatch(allowReconciliationCommit, "reconciliation commit release");
+                return result;
+            }));
+            if (!reconciliationApplied.await(10, TimeUnit.SECONDS)) {
+                reconciliation.get(1, TimeUnit.SECONDS);
+                throw new AssertionError("reconciliation worker did not reach commit gate");
+            }
+            terminal = executor.submit(() -> {
+                HoldAttempt attempt = invokeTransition(terminalCommand);
+                terminalObservation.set(jdbcTemplate.queryForMap("""
+                        SELECT hold.status AS hold_status,
+                               hold.status_version,
+                               menu.status AS menu_status,
+                               (SELECT COUNT(*)
+                                  FROM reservation_hold_transition_audits audit
+                                 WHERE audit.reservation_hold_id = hold.reservation_hold_id)
+                                   AS audit_count
+                          FROM reservation_holds hold
+                          LEFT JOIN menu_holds menu
+                            ON menu.reservation_hold_id = hold.reservation_hold_id
+                         WHERE hold.reservation_hold_id = ?
+                        """, active.reservationHoldId()));
+                return attempt;
+            });
+            assertFutureBlocked(terminal);
+            awaitBlockingWaits(
+                    reconciliationConnectionId.get(), "reservation_holds", "PRIMARY", 1);
+            allowReconciliationCommit.countDown();
+            assertThat(reconciliation.get(10, TimeUnit.SECONDS).status())
+                    .isEqualTo(ReservationHoldStatus.RECONCILIATION_REQUIRED);
+            HoldAttempt terminalAttempt = terminal.get(30, TimeUnit.SECONDS);
+            assertThat(terminalAttempt.errorCode()).isNull();
+            assertThat(terminalAttempt.result().status())
+                    .isEqualTo(terminalCommand.targetStatus());
+            assertThat(terminalObservation.get())
+                    .as("the committed terminal transaction must be externally visible")
+                    .containsEntry("hold_status", terminalCommand.targetStatus().name())
+                    .containsEntry("menu_status", terminalCommand.targetStatus().name())
+                    .containsEntry("status_version", 2L)
+                    .containsEntry("audit_count", 3L);
+            assertThat(terminalAttempt.result().statusVersion())
+                    .isEqualTo(((Number) terminalObservation.get()
+                            .get("status_version")).longValue());
+        } finally {
+            reconciliationApplied.countDown();
+            allowReconciliationCommit.countDown();
+            cancelIfRunning(reconciliation);
+            cancelIfRunning(terminal);
+            shutdownAndAwait(executor);
+        }
     }
 
     private HoldAttempt invokeCreate(ReservationHoldContracts.CreateCommand command) {
@@ -1613,12 +2783,24 @@ class ReservationHoldRuntimeIT {
                 """, Integer.class, holdId);
     }
 
+    private int terminalAuditCount(long holdId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = ?
+                   AND after_status IN ('CONFIRMED', 'RELEASED', 'EXPIRED')
+                """, Integer.class, holdId);
+    }
+
     private int count(String tableName) {
         Set<String> allowed = Set.of(
                 "reservation_holds",
                 "reservation_hold_capacity_allocations",
                 "reservation_hold_transition_audits",
-                "reservation_hold_warning_tasks");
+                "reservation_hold_warning_tasks",
+                "menu_holds",
+                "menu_hold_items",
+                "menu_inventory_ledger");
         if (!allowed.contains(tableName)) {
             throw new IllegalArgumentException("unsupported count table");
         }
@@ -1641,13 +2823,33 @@ class ReservationHoldRuntimeIT {
                     FOR EACH ROW SIGNAL SQLSTATE '45000'
                     SET MESSAGE_TEXT = 'hold warning insert failure'
                     """;
+            case MENU_HOLD_INSERT -> """
+                    CREATE TRIGGER trg_temporary_menu_hold_failure
+                    BEFORE INSERT ON menu_holds
+                    FOR EACH ROW SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'temporary menu hold insert failure'
+                    """;
         });
+    }
+
+    private void createCreationAuditFailureTrigger() {
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_hold_creation_audit_failure
+                BEFORE INSERT ON reservation_hold_transition_audits
+                FOR EACH ROW SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'hold creation audit insert failure'
+                """);
+    }
+
+    private void dropCreationAuditFailureTrigger() {
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_hold_creation_audit_failure");
     }
 
     private void dropFailureTrigger(CreationFailurePoint point) {
         String name = switch (point) {
             case ALLOCATION_INSERT -> "trg_hold_allocation_failure";
             case WARNING_INSERT -> "trg_hold_warning_failure";
+            case MENU_HOLD_INSERT -> "trg_temporary_menu_hold_failure";
         };
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + name);
     }
@@ -1759,10 +2961,38 @@ class ReservationHoldRuntimeIT {
 
     private enum CreationFailurePoint {
         ALLOCATION_INSERT,
-        WARNING_INSERT
+        WARNING_INSERT,
+        MENU_HOLD_INSERT
     }
 
     private record Scenario(long operatorId, long storeId, List<Long> originalBucketIds) {
+    }
+
+    private record MenuFixture(long menuId, long bucketId) {
+    }
+
+    private record GroupArtifactCounts(
+            int reservationHolds,
+            int holdAllocations,
+            int menuHolds,
+            int menuHoldItems,
+            int inventoryLedgers,
+            int transitionAudits,
+            int warningTasks
+    ) {
+    }
+
+    private record Task3CreationSnapshot(
+            List<Map<String, Object>> capacityBuckets,
+            List<Map<String, Object>> inventoryBuckets,
+            List<Map<String, Object>> inventoryLedger,
+            List<Map<String, Object>> reservationHolds,
+            List<Map<String, Object>> holdAllocations,
+            List<Map<String, Object>> menuHolds,
+            List<Map<String, Object>> menuHoldItems,
+            List<Map<String, Object>> transitionAudits,
+            List<Map<String, Object>> warningTasks
+    ) {
     }
 
     private record ConfirmedReservationFixture(long consumerId, long reservationId) {

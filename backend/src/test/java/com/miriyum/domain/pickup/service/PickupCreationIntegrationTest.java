@@ -105,6 +105,9 @@ class PickupCreationIntegrationTest {
 
     @BeforeEach
     void resetAndSeed() {
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
         jdbcTemplate.execute("DELETE FROM pickup_reservation_items");
         jdbcTemplate.execute("DELETE FROM pickup_reservations");
         jdbcTemplate.execute("DELETE FROM menu_hold_items");

@@ -1,27 +1,18 @@
 package com.miriyum.architecture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.RequestMethod;
 
 class HttpApiNamespaceContractTest {
 
-    private static final Path DOMAIN_SOURCE_ROOT =
-            Path.of("src", "main", "java", "com", "miriyum", "domain");
-    private static final Pattern PACKAGE_PATTERN =
-            Pattern.compile("(?m)^package\\s+([\\w.]+);");
-    private static final Pattern ROOT_MAPPING_PATTERN =
-            Pattern.compile("@RequestMapping\\s*\\(\\s*\"([^\"]+)\"");
+    private static final String CONSUMER_ROOT = "/api/v1/consumers";
+    private static final String STORE_OPERATOR_ROOT = "/api/v1/store-operators";
+    private static final String PLATFORM_OPERATOR_ROOT = "/api/v1/platform-operators";
     private static final Set<String> LEGACY_ROOTS = Set.of(
             "/api/v1/consumer-auth",
             "/api/v1/consumer-accounts",
@@ -33,52 +24,118 @@ class HttpApiNamespaceContractTest {
 
     @Test
     void audienceControllersUseOnlyCanonicalRoots() {
-        List<ControllerMapping> mappings = controllerMappings();
+        Set<ControllerRoute> routes = SpringMvcRouteInventory.routes();
 
-        assertThat(mappings).isNotEmpty();
-        assertThat(mappings).noneMatch(mapping -> LEGACY_ROOTS.stream()
-                .anyMatch(legacy -> mapping.path().equals(legacy)
-                        || mapping.path().startsWith(legacy + "/")));
-        assertThat(mappings.stream().filter(ControllerMapping::isConsumer))
-                .allMatch(mapping -> mapping.path().startsWith("/api/v1/consumers"));
-        assertThat(mappings.stream().filter(ControllerMapping::isStoreOperator))
-                .allMatch(mapping -> mapping.path().startsWith("/api/v1/store-operators"));
+        assertAudienceNamespaces(routes);
     }
 
-    private static List<ControllerMapping> controllerMappings() {
-        try (Stream<Path> paths = Files.walk(DOMAIN_SOURCE_ROOT)) {
-            return paths.filter(path -> path.getFileName().toString().endsWith("Controller.java"))
-                    .map(HttpApiNamespaceContractTest::mapping)
-                    .toList();
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
+    @Test
+    @DisplayName("consumer namespace는 consumer audience 패키지만 선언할 수 있다")
+    void consumerNamespaceIsOwnedByConsumerAudiencePackage() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.publicapi",
+                new ApiRoute(RequestMethod.GET, "/api/v1/consumers/me/widgets")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("consumer namespace owner");
     }
 
-    private static ControllerMapping mapping(Path path) {
-        try {
-            String source = Files.readString(path, StandardCharsets.UTF_8);
-            Matcher packageMatcher = PACKAGE_PATTERN.matcher(source);
-            Matcher mappingMatcher = ROOT_MAPPING_PATTERN.matcher(source);
-            if (!packageMatcher.find() || !mappingMatcher.find()) {
-                throw new AssertionError("Controller package or root mapping missing: " + path);
-            }
-            return new ControllerMapping(packageMatcher.group(1), mappingMatcher.group(1));
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
+    @Test
+    @DisplayName("store-operator namespace는 storeoperator audience 패키지만 선언할 수 있다")
+    void storeOperatorNamespaceIsOwnedByStoreOperatorAudiencePackage() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.publicapi",
+                new ApiRoute(RequestMethod.GET, "/api/v1/store-operators/stores")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("store-operator namespace owner");
     }
 
-    private record ControllerMapping(String packageName, String path) {
+    @Test
+    @DisplayName("platform-operator namespace는 platformoperator audience 패키지만 선언할 수 있다")
+    void platformOperatorNamespaceIsOwnedByPlatformOperatorAudiencePackage() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.publicapi",
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/audits")));
 
-        boolean isConsumer() {
-            return packageName.startsWith("com.miriyum.domain.consumer.controller.")
-                    || packageName.contains(".controller.consumer");
-        }
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("platform-operator namespace owner");
+    }
 
-        boolean isStoreOperator() {
-            return packageName.startsWith("com.miriyum.domain.storeoperator.controller.")
-                    || packageName.contains(".controller.storeoperator");
-        }
+    @Test
+    void consumerLookalikePackageCannotOwnConsumerNamespace() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.consumerproxy",
+                new ApiRoute(RequestMethod.GET, "/api/v1/consumers/me/widgets")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("consumer namespace owner");
+    }
+
+    @Test
+    void storeOperatorLookalikePackageCannotOwnStoreOperatorNamespace() {
+        Set<ControllerRoute> routes = Set.of(new ControllerRoute(
+                "com.miriyum.domain.search.controller.storeoperatorlegacy",
+                new ApiRoute(RequestMethod.GET, "/api/v1/store-operators/stores")));
+
+        assertThatThrownBy(() -> assertAudienceNamespaces(routes))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("store-operator namespace owner");
+    }
+
+    private static void assertAudienceNamespaces(Set<ControllerRoute> routes) {
+        assertThat(routes).isNotEmpty();
+        assertThat(routes).noneMatch(route -> LEGACY_ROOTS.stream()
+                .anyMatch(legacy -> route.route().path().equals(legacy)
+                        || route.route().path().startsWith(legacy + "/")));
+        assertThat(routes.stream().filter(HttpApiNamespaceContractTest::isConsumer))
+                .as("consumer audience canonical root")
+                .allMatch(route -> usesNamespace(route, CONSUMER_ROOT));
+        assertThat(routes.stream().filter(HttpApiNamespaceContractTest::isStoreOperator))
+                .as("store-operator audience canonical root")
+                .allMatch(route -> usesNamespace(route, STORE_OPERATOR_ROOT));
+        assertThat(routes.stream().filter(HttpApiNamespaceContractTest::isPlatformOperator))
+                .as("platform-operator audience canonical root")
+                .allMatch(route -> usesNamespace(route, PLATFORM_OPERATOR_ROOT));
+        assertThat(routes.stream().filter(route -> usesNamespace(route, CONSUMER_ROOT)))
+                .as("consumer namespace owner")
+                .allMatch(HttpApiNamespaceContractTest::isConsumer);
+        assertThat(routes.stream().filter(route -> usesNamespace(route, STORE_OPERATOR_ROOT)))
+                .as("store-operator namespace owner")
+                .allMatch(HttpApiNamespaceContractTest::isStoreOperator);
+        assertThat(routes.stream().filter(route -> usesNamespace(route, PLATFORM_OPERATOR_ROOT)))
+                .as("platform-operator namespace owner")
+                .allMatch(HttpApiNamespaceContractTest::isPlatformOperator);
+    }
+
+    private static boolean usesNamespace(ControllerRoute route, String root) {
+        String path = route.route().path();
+        return path.equals(root) || path.startsWith(root + "/");
+    }
+
+    private static boolean isConsumer(ControllerRoute route) {
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.consumer.controller")
+                || containsPackageOrChild(route.packageName(), ".controller.consumer");
+    }
+
+    private static boolean isStoreOperator(ControllerRoute route) {
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.storeoperator.controller")
+                || containsPackageOrChild(route.packageName(), ".controller.storeoperator");
+    }
+
+    private static boolean isPlatformOperator(ControllerRoute route) {
+        return isPackageOrChild(route.packageName(), "com.miriyum.domain.platformoperator.controller");
+    }
+
+    private static boolean isPackageOrChild(String packageName, String packageRoot) {
+        return packageName.equals(packageRoot) || packageName.startsWith(packageRoot + ".");
+    }
+
+    private static boolean containsPackageOrChild(String packageName, String packageSuffix) {
+        return packageName.endsWith(packageSuffix) || packageName.contains(packageSuffix + ".");
     }
 }

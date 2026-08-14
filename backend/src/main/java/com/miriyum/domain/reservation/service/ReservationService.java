@@ -36,6 +36,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
@@ -130,6 +131,7 @@ public class ReservationService {
     private ReservationCancellationAuditRepository cancellationAuditRepository;
     private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
     private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
+    private ReservationNotificationPublisher notificationPublisher;
 
     ReservationService(
             StoreScheduleService storeScheduleService,
@@ -162,8 +164,7 @@ public class ReservationService {
     }
 
     /** Spring constructor including the public contracts used by creation and cancellation. */
-    @Autowired
-    public ReservationService(
+    ReservationService(
             StoreScheduleService storeScheduleService,
             StoreServiceIntervalValidationService storeServiceIntervalValidationService,
             ReservationTimePolicyVersionRepository timePolicyRepository,
@@ -205,6 +206,53 @@ public class ReservationService {
         this.cancellationAuditRepository = cancellationAuditRepository;
         this.cancellationPolicyEvaluator = cancellationPolicyEvaluator;
         this.fulfillmentAuditRepository = fulfillmentAuditRepository;
+    }
+
+    @Autowired
+    public ReservationService(
+            StoreScheduleService storeScheduleService,
+            StoreServiceIntervalValidationService storeServiceIntervalValidationService,
+            ReservationTimePolicyVersionRepository timePolicyRepository,
+            StoreService storeService,
+            IdempotencyExecutor idempotencyExecutor,
+            ReservationTimePolicyAuditRepository timePolicyAuditRepository,
+            ObjectMapper objectMapper,
+            Clock clock,
+            ReservationCapacityBucketRepository capacityBucketRepository,
+            ReservationRepository reservationRepository,
+            ConsumerAccountService consumerAccountService,
+            ReservationMenuHoldPort menuHoldPort,
+            ReservationTimeResolutionService timeResolutionService,
+            StoreTransactionEligibilityService storeTransactionEligibilityService,
+            ReservationCapacityAllocationRepository capacityAllocationRepository,
+            ReservationCancellationPolicySelector cancellationPolicySelector,
+            ReservationCancellationAuditRepository cancellationAuditRepository,
+            ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator,
+            ReservationFulfillmentAuditRepository fulfillmentAuditRepository,
+            ReservationNotificationPublisher notificationPublisher
+    ) {
+        this(
+                storeScheduleService,
+                storeServiceIntervalValidationService,
+                timePolicyRepository,
+                storeService,
+                idempotencyExecutor,
+                timePolicyAuditRepository,
+                objectMapper,
+                clock,
+                capacityBucketRepository,
+                reservationRepository,
+                consumerAccountService,
+                menuHoldPort,
+                timeResolutionService,
+                storeTransactionEligibilityService,
+                capacityAllocationRepository,
+                cancellationPolicySelector,
+                cancellationAuditRepository,
+                cancellationPolicyEvaluator,
+                fulfillmentAuditRepository
+        );
+        this.notificationPublisher = notificationPublisher;
     }
 
     /**
@@ -385,6 +433,7 @@ public class ReservationService {
                         ? List.of()
                         : menuHoldPort.findSnapshots(saved.getId())
         );
+        notificationPublisher.recordConfirmed(saved, saved.getCreatedAt(), key.value());
         return new BusinessResult<>(
                 HttpStatus.CREATED.value(),
                 SUCCESS_RESPONSE_CODE,
@@ -398,7 +447,8 @@ public class ReservationService {
         if (storeTransactionEligibilityService == null
                 || capacityAllocationRepository == null
                 || cancellationPolicySelector == null
-                || menuHoldPort == null) {
+                || menuHoldPort == null
+                || notificationPublisher == null) {
             throw new IllegalStateException("reservation creation dependencies are required");
         }
         return storeTransactionEligibilityService;
@@ -619,6 +669,7 @@ public class ReservationService {
             Instant requestedAt,
             String correlationId
     ) {
+        requireCancellationDependencies();
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
@@ -752,6 +803,9 @@ public class ReservationService {
                 audit.getActorType(),
                 audit.getCancellationReason()
         );
+        notificationPublisher.recordCancelled(
+                managedReservation, occurredAt, correlationId
+        );
         return new BusinessResult<>(
                 HttpStatus.OK.value(),
                 SUCCESS_RESPONSE_CODE,
@@ -759,6 +813,16 @@ public class ReservationService {
                 String.valueOf(managedReservation.getId()),
                 response
         );
+    }
+
+    private void requireCancellationDependencies() {
+        if (capacityAllocationRepository == null
+                || cancellationPolicyEvaluator == null
+                || cancellationAuditRepository == null
+                || menuHoldPort == null
+                || notificationPublisher == null) {
+            throw new IllegalStateException("reservation cancellation dependencies are required");
+        }
     }
 
     private static TreeSet<Long> validateOriginalAllocations(
@@ -1112,7 +1176,7 @@ public class ReservationService {
 
     private static String fingerprintForCreation(NormalizedCreationRequest request) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/consumers/reservations|");
+                "POST|/api/v1/consumers/me/reservations|");
         append(canonical, "storeId", Long.toString(request.storeId()));
         append(canonical, "serviceDate", request.serviceDate().toString());
         append(canonical, "startTime", request.startTime().toString());
@@ -1806,7 +1870,7 @@ public class ReservationService {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
-                        + "/reservation-time-policies/{version}/publication|"
+                        + "/reservation-time-policies/{version}/publications|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
@@ -1830,7 +1894,7 @@ public class ReservationService {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies/{version}"
-                        + "/publication-cancellation|"
+                        + "/publication-cancellations|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));

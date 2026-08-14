@@ -170,6 +170,9 @@ class ReservationCancellationIT {
         dropTrigger(MENU_HOLD_FAILURE_TRIGGER);
         dropTrigger(AUDIT_FAILURE_TRIGGER);
         dropTrigger(IDEMPOTENCY_FAILURE_TRIGGER);
+        jdbcTemplate.execute("DELETE FROM notification_task_transition_audits");
+        jdbcTemplate.execute("DELETE FROM notification_channel_attempts");
+        jdbcTemplate.execute("DELETE FROM notification_tasks");
         jdbcTemplate.execute("DELETE FROM reservation_cancellation_audits");
         jdbcTemplate.execute("DELETE FROM menu_hold_items");
         jdbcTemplate.execute("DELETE FROM menu_holds");
@@ -1457,7 +1460,7 @@ class ReservationCancellationIT {
         appendCanonical(
                 canonical,
                 "route",
-                "/api/v1/consumers/reservations/{reservationId}/cancellations");
+                "/api/v1/consumers/me/reservations/{reservationId}/cancellations");
         appendCanonical(canonical, "reservationId", String.valueOf(reservationId));
         appendCanonical(canonical, "reason", reason);
         return RequestFingerprint.of(canonical.toString());

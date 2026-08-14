@@ -10,6 +10,9 @@ import static org.mockito.Mockito.never;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.pickup.dto.request.PickupStoreSearchRequest;
 import com.miriyum.domain.pickup.dto.request.StorePickupCancellationRequest;
 import com.miriyum.domain.pickup.dto.response.PickupReservationPageResponse;
@@ -17,6 +20,8 @@ import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.entity.PickupStatus;
+import com.miriyum.domain.pickup.notification.PickupNotificationEventFactory;
+import com.miriyum.domain.pickup.notification.PickupNotificationPublisher;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -32,6 +37,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -59,12 +65,23 @@ class PickupStoreManagementServiceTest {
     @Mock IdempotencyExecutor idempotencyExecutor;
 
     private PickupStoreManagementService service;
+    private List<NotificationSourceEventV1> notificationEvents;
 
     @BeforeEach
     void setUp() {
+        notificationEvents = new ArrayList<>();
+        PickupNotificationPublisher notificationPublisher = new PickupNotificationPublisher(
+                new PickupNotificationEventFactory(),
+                event -> {
+                    notificationEvents.add(event);
+                    return new NotificationTaskReceipt(
+                            Long.toString(700L + notificationEvents.size()), false
+                    );
+                }
+        );
         service = new PickupStoreManagementService(
                 storeService, inventoryService, repository, idempotencyExecutor,
-                new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+                new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC), notificationPublisher);
         org.mockito.Mockito.lenient()
                 .when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation -> {
                     Supplier<BusinessResult<?>> work = invocation.getArgument(1);
@@ -136,6 +153,13 @@ class PickupStoreManagementServiceTest {
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
                 "POST|/api/v1/store-operators/stores/22/pickup-reservations/77/cancellations|"
                         + "재료 소진"));
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose())
+                    .isEqualTo(NotificationPurpose.PICKUP_RESERVATION_CANCELLED);
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+            assertThat(event.correlationId()).isEqualTo(KEY.value());
+            assertThat(event.occurredAt().toInstant()).isEqualTo(NOW);
+        });
     }
 
     @Test
@@ -149,6 +173,7 @@ class PickupStoreManagementServiceTest {
 
         assertThat(result.data().status()).isEqualTo(PickupStatus.PICKED_UP);
         assertThat(pickup.getPickedUpAt()).isEqualTo(NOW);
+        assertThat(notificationEvents).isEmpty();
         then(inventoryService).shouldHaveNoInteractions();
         ArgumentCaptor<IdempotencyCommand> command =
                 ArgumentCaptor.forClass(IdempotencyCommand.class);

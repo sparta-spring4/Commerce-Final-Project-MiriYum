@@ -8,6 +8,7 @@ ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
 VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-60}"
+RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}"
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
 
 publish_deployment_health() {
@@ -16,6 +17,16 @@ publish_deployment_health() {
     --namespace "${CLOUDWATCH_NAMESPACE}" \
     --metric-data "MetricName=DeploymentHealth,Value=${value},Unit=Count" \
     >/dev/null || echo "Warning: CloudWatch deployment health metric was not published." >&2
+}
+
+validate_runtime_environment() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+
+  # Compose owns required-variable declarations, so this stays in sync with new runtime keys.
+  if ! "${compose[@]}" config --quiet; then
+    echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
+    return 1
+  fi
 }
 
 wait_for_valkey_health() {
@@ -69,6 +80,50 @@ verify_valkey() {
   fi
 }
 
+# 구버전 롤백 중 생성된 marker까지 다음 전달 대상에서 누락되지 않게 매 배포 이관한다.
+backfill_pending_risk_event_index() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local marker_pattern="auth:risk:pending:*"
+  local pending_index="auth:risk:pending-index"
+
+  case "${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES}" in
+    ''|0|*[!0-9]*)
+      echo "RISK_EVENT_BACKFILL_MAX_SCAN_PAGES must be a positive integer." >&2
+      return 1
+      ;;
+  esac
+
+  "${compose[@]}" exec -T valkey sh -ec '
+    marker_pattern="$1"
+    pending_index="$2"
+    max_scan_pages="$3"
+    cursor=0
+    scan_pages=0
+
+    while :; do
+      scan_result="$(REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw SCAN "$cursor" MATCH "$marker_pattern" COUNT 100)"
+      cursor="$(printf "%s\\n" "$scan_result" | sed -n "1p")"
+      case "$cursor" in
+        ""|*[!0-9]*)
+          echo "Invalid SCAN cursor: $cursor" >&2
+          exit 1
+          ;;
+      esac
+      scan_pages=$((scan_pages + 1))
+      if [ "$scan_pages" -gt "$max_scan_pages" ]; then
+        echo "Risk event index backfill exceeded $max_scan_pages SCAN pages." >&2
+        exit 1
+      fi
+      printf "%s\\n" "$scan_result" | tail -n +2 | while IFS= read -r marker_key; do
+        [ -n "$marker_key" ] || continue
+        REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli SADD "$pending_index" "$marker_key" >/dev/null
+      done
+
+      [ "$cursor" = "0" ] && break
+    done
+  ' sh "${marker_pattern}" "${pending_index}" "${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES}"
+}
+
 # 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 main() {
   local account_id registry deadline
@@ -80,6 +135,8 @@ main() {
     echo "Missing runtime environment file: ${ENV_FILE}" >&2
     return 1
   fi
+
+  validate_runtime_environment
 
   for command in aws curl docker; do
     command -v "${command}" >/dev/null
@@ -95,22 +152,34 @@ main() {
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
+  # 새 backend가 pending Set만 읽기 시작하기 전에 Valkey와 기존 marker 인덱스를 준비한다.
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
 
   if ! verify_valkey; then
     publish_deployment_health 0
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
     return 1
   fi
+
+  if ! backfill_pending_risk_event_index; then
+    # Set-only 전달 worker는 backfill이 완료된 marker 인덱스에서만 시작한다.
+    echo "Pending risk event index backfill failed; aborting deployment before Set-only delivery starts." >&2
+    publish_deployment_health 0
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true
+    return 1
+  fi
+
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --remove-orphans
 
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   until curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; do
     if (( SECONDS >= deadline )); then
       echo "Backend health check timed out after ${HEALTH_TIMEOUT_SECONDS}s" >&2
       publish_deployment_health 0
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
-      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 backend || true
       return 1
     fi
     sleep 3

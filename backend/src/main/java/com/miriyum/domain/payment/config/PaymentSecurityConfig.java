@@ -22,7 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class PaymentSecurityConfig {
 
-    private static final String CONSUMER_PAYMENT_ROOT = "/api/v1/consumers/payments";
+    private static final String CONSUMER_PAYMENT_ROOT = "/api/v1/consumers/me/payments";
     private static final String CONSUMER_PAYMENT_FAMILY = CONSUMER_PAYMENT_ROOT + "/**";
     private static final String PORTONE_WEBHOOK = "/api/v1/payments/webhooks/portone";
 
