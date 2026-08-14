@@ -140,7 +140,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         )
         self.assertIn("RefreshTokenRiskEventPendingCount", self.resource_script)
         self.assertIn(
-            "[marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]",
+            "[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]",
             self.resource_script,
         )
         self.assertIn("metricValue=$pending_count", self.resource_script)
@@ -208,10 +208,12 @@ esac
             )
 
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            captured_arguments = arguments_path.read_text(encoding="utf-8")
             self.assertIn(
-                "metricValue=$pending_count",
-                arguments_path.read_text(encoding="utf-8"),
+                "[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]",
+                captured_arguments,
             )
+            self.assertIn("metricValue=$pending_count", captured_arguments)
 
     def test_staging_can_disable_reservation_hold_expiration_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
