@@ -42,6 +42,8 @@ public class S3FileStorageAdapter implements FileStoragePort {
     public FileStorageSaveResult save(FileStorageRequest request) {
         validateSizeLimit(request.sizeBytes());
         PreparedUpload preparedUpload = prepareUpload(request);
+        RuntimeException failure = null;
+        boolean uploaded = false;
         try {
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucket)
@@ -52,6 +54,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     .checksumSHA256(preparedUpload.checksumBase64())
                     .build();
             s3Client.putObject(putObjectRequest, RequestBody.fromFile(preparedUpload.file()));
+            uploaded = true;
 
             HeadObjectResponse storedObject = s3Client.headObject(HeadObjectRequest.builder()
                     .bucket(bucket)
@@ -66,8 +69,14 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     storedObject.contentLength(),
                     preparedUpload.checksumHex()
             );
+        } catch (RuntimeException exception) {
+            failure = exception;
+            if (uploaded) {
+                deleteUploadedObject(request.objectKey(), exception);
+            }
+            throw exception;
         } finally {
-            deleteTemporaryFile(preparedUpload.file());
+            deleteTemporaryFile(preparedUpload.file(), failure);
         }
     }
 
@@ -78,15 +87,25 @@ public class S3FileStorageAdapter implements FileStoragePort {
                 .key(objectKey)
                 .build());
         validateSizeLimit(metadata.contentLength());
+        String eTag = metadata.eTag();
+        if (eTag == null || eTag.isBlank()) {
+            throw new IllegalStateException("stored object ETag is missing");
+        }
         GetObjectRequest request = GetObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
+                .ifMatch(eTag)
                 .build();
         ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(request);
+        validateSizeLimit(response.response().contentLength());
+        byte[] bytes = response.asByteArray();
+        if (response.response().contentLength() == null || response.response().contentLength() != bytes.length) {
+            throw new IllegalStateException("stored file size does not match content");
+        }
         return new FileStorageObject(
                 objectKey,
                 response.response().contentType(),
-                response.asByteArray()
+                bytes
         );
     }
 
@@ -135,10 +154,11 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     Base64.getEncoder().encodeToString(checksum)
             );
         } catch (IOException exception) {
-            deleteTemporaryFile(temporaryFile);
-            throw new IllegalStateException("failed to prepare file content", exception);
+            IllegalStateException failure = new IllegalStateException("failed to prepare file content", exception);
+            deleteTemporaryFile(temporaryFile, failure);
+            throw failure;
         } catch (RuntimeException exception) {
-            deleteTemporaryFile(temporaryFile);
+            deleteTemporaryFile(temporaryFile, exception);
             throw exception;
         }
     }
@@ -173,11 +193,24 @@ public class S3FileStorageAdapter implements FileStoragePort {
         }
     }
 
-    private void deleteTemporaryFile(Path temporaryFile) {
+    private void deleteUploadedObject(String objectKey, RuntimeException failure) {
+        try {
+            delete(objectKey);
+        } catch (RuntimeException cleanupException) {
+            failure.addSuppressed(cleanupException);
+        }
+    }
+
+    private void deleteTemporaryFile(Path temporaryFile, RuntimeException failure) {
         try {
             Files.deleteIfExists(temporaryFile);
         } catch (IOException exception) {
-            throw new IllegalStateException("failed to delete temporary file", exception);
+            IllegalStateException cleanupException = new IllegalStateException("failed to delete temporary file", exception);
+            if (failure != null) {
+                failure.addSuppressed(cleanupException);
+                return;
+            }
+            throw cleanupException;
         }
     }
 

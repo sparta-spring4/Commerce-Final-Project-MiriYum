@@ -112,11 +112,12 @@ class S3FileStorageAdapterTest {
         S3Client s3Client = mock(S3Client.class);
         GetObjectResponse response = GetObjectResponse.builder()
                 .contentType("image/png")
+                .contentLength(5L)
                 .build();
         when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
                 .thenReturn(ResponseBytes.fromByteArray(response, "image".getBytes(StandardCharsets.UTF_8)));
         when(s3Client.headObject(any(HeadObjectRequest.class)))
-                .thenReturn(HeadObjectResponse.builder().contentLength(5L).build());
+                .thenReturn(HeadObjectResponse.builder().contentLength(5L).eTag("etag-before-read").build());
         S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
 
         FileStorageObject result = adapter.read("public/store/10/store-image/sample.png");
@@ -124,6 +125,71 @@ class S3FileStorageAdapterTest {
         assertThat(result.objectKey()).isEqualTo("public/store/10/store-image/sample.png");
         assertThat(result.contentType()).isEqualTo("image/png");
         assertThat(result.bytes()).isEqualTo("image".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 HEAD에서 확인한 ETag로 GET 객체 교체를 거절한다")
+    void readsObjectWithHeadEtagPrecondition() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder().contentLength(5L).eTag("etag-before-read").build());
+        when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
+                .thenReturn(ResponseBytes.fromByteArray(
+                        GetObjectResponse.builder().contentLength(5L).contentType("image/png").build(),
+                        "image".getBytes(StandardCharsets.UTF_8)));
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10L);
+
+        adapter.read("public/store/10/store-image/sample.png");
+
+        ArgumentCaptor<GetObjectRequest> requestCaptor = ArgumentCaptor.forClass(GetObjectRequest.class);
+        verify(s3Client).getObjectAsBytes(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().ifMatch()).isEqualTo("etag-before-read");
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 HEAD 뒤 더 큰 GET 응답을 최대 크기 초과로 거절한다")
+    void rejectsOversizedObjectChangedAfterHead() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder().contentLength(5L).eTag("etag-before-read").build());
+        when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
+                .thenReturn(ResponseBytes.fromByteArray(
+                        GetObjectResponse.builder().contentLength(11L).contentType("image/png").build(),
+                        "larger-image".getBytes(StandardCharsets.UTF_8)));
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10L);
+
+        assertThatThrownBy(() -> adapter.read("public/store/10/store-image/sample.png"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("configured limit");
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 저장 결과 검증이 실패하면 업로드한 객체를 보상 삭제한다")
+    void deletesUploadedObjectWhenStoredMetadataVerificationFails() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().build());
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength(6L)
+                        .contentType("image/jpeg")
+                        .checksumSHA256("LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+        FileStorageRequest request = new FileStorageRequest(
+                "public/store/10/menu-image/sample.jpg",
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> adapter.save(request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stored file size");
+
+        ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(s3Client).deleteObject(deleteCaptor.capture());
+        assertThat(deleteCaptor.getValue().bucket()).isEqualTo("miriyum-test-bucket");
+        assertThat(deleteCaptor.getValue().key()).isEqualTo("public/store/10/menu-image/sample.jpg");
     }
 
     @Test
