@@ -1870,7 +1870,7 @@ public class ReservationService {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
-                        + "/reservation-time-policies/{version}/publication|"
+                        + "/reservation-time-policies/{version}/publications|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));

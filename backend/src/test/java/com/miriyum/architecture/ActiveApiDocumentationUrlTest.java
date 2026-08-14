@@ -25,6 +25,7 @@ class ActiveApiDocumentationUrlTest {
                     + "call|arrive|check-in|cancel)(?![a-z0-9-])"
                     + "|/waiting-close-jobs(?![a-z0-9-])"
                     + "|/waiting-settings/disable-impact(?![a-z0-9-])"
+                    + "|/disable-impact(?![a-z0-9-])"
                     + "|/alternatives/search(?![a-z0-9-])"
     );
 

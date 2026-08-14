@@ -140,7 +140,7 @@ HAVING COUNT(*) > 1;
 
 ## 비활성화와 활성 팀
 
-Frontend는 비활성화 전에 `GET .../disable-impact`로 현재 버전과 활성 팀 수를 확인할 수
+Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전과 활성 팀 수를 확인할 수
 있다. 실제 명령 시점에 활성 팀이 있으면 `disableAction`이 반드시 필요하다. 영향 조회와
 명령 사이의 경합은 PUT이 다시 판정한다.
 
