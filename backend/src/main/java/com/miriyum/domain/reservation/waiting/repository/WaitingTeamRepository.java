@@ -14,7 +14,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-/** 웨이팅 팀 잠금, FIFO 선두와 활성 수 조회를 소유한다. */
+/** 웨이팅 팀 잠금, FIFO 선두와 활성 수·종결 대상 조회를 소유한다. */
 public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> {
 
     /** 매장·선택 상태·복합 cursor에 한정된 안정적인 FIFO 페이지를 조회한다. */
@@ -103,6 +103,12 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             Collection<WaitingTeamStatus> activeStatuses
     );
 
-    @Query("select team from WaitingTeam team where team.storeId = :storeId and team.status in ('WAITING','CALLED','ARRIVED') order by team.id")
+    @Query("""
+            select team
+            from WaitingTeam team
+            where team.storeId = :storeId
+              and team.status in ('WAITING', 'CALLED', 'ARRIVED', 'RESERVATION_CONVERTING')
+            order by team.id
+            """)
     List<WaitingTeam> findActiveClosureTargets(@Param("storeId") long storeId);
 }

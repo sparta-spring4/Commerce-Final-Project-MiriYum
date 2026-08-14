@@ -118,23 +118,57 @@ class WaitingLedgerConcurrencyIT {
     }
 
     @Test
-    void duplicateActiveMembershipRaceLeavesOnlyWinningAggregateSideEffects() throws Exception {
+    void crossStoreDuplicateActiveMembershipRacePreservesWinnerThenAllowsCreationAfterCancellation() throws Exception {
         Fixture fixture = fixture(1);
         long consumerId = fixture.consumerIds().getFirst();
+        long otherStoreId = createStore(fixture.operatorId());
         List<Attempt<WaitingCommandResult>> attempts = runTogether(2, index -> creationService.create(
-                fixture.storeId(), consumerId, BUSINESS_DATE, 2, WaitingSource.REMOTE, key(200 + index)));
+                index == 0 ? fixture.storeId() : otherStoreId,
+                consumerId, BUSINESS_DATE, 2, WaitingSource.REMOTE, key(200 + index)));
 
         assertThat(attempts.stream().filter(Attempt::succeeded)).hasSize(1);
         assertThat(attempts.stream().filter(attempt -> !attempt.succeeded()).map(Attempt::failure))
                 .singleElement()
                 .isInstanceOfSatisfying(ServiceException.class, failure ->
                         assertThat(failure.getErrorCode())
-                                .isEqualTo(ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT));
+                                .isEqualTo(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS));
+        WaitingTeam winner = teams.findById(Long.parseLong(attempts.stream()
+                .filter(Attempt::succeeded)
+                .findFirst()
+                .orElseThrow()
+                .result()
+                .data()
+                .waitingTeamId())).orElseThrow();
+        long winnerStoreId = winner.getStoreId();
+        long losingStoreId = winnerStoreId == fixture.storeId() ? otherStoreId : fixture.storeId();
+        assertThat(winner.getStatus()).isEqualTo(WaitingTeamStatus.WAITING);
+        assertThat(winner.getVersion()).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT store_id FROM waiting_active_memberships WHERE consumer_account_id=?", Long.class, consumerId))
+                .isEqualTo(winnerStoreId);
         assertThat(count("waiting_teams")).isOne();
         assertThat(count("waiting_active_memberships")).isOne();
         assertThat(count("waiting_transition_audits")).isOne();
         assertThat(count("waiting_status_events")).isOne();
         assertThat(count("idempotency_commands")).isOne();
+
+        commandFacade.cancel(fixture.operatorId(), winnerStoreId, winner.getId(), key(202),
+                new WaitingTeamTransitionRequest(winner.getVersion()));
+
+        assertThat(teams.findById(winner.getId()).orElseThrow().getStatus()).isEqualTo(WaitingTeamStatus.CANCELLED);
+        assertThat(count("waiting_active_memberships")).isZero();
+
+        WaitingCommandResult retry = creationService.create(losingStoreId, consumerId, BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(203));
+
+        assertThat(retry.data().storeId()).isEqualTo(Long.toString(losingStoreId));
+        assertThat(teams.findById(Long.parseLong(retry.data().waitingTeamId())).orElseThrow().getStatus())
+                .isEqualTo(WaitingTeamStatus.WAITING);
+        assertThat(count("waiting_teams")).isEqualTo(2);
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(count("waiting_transition_audits")).isEqualTo(3);
+        assertThat(count("waiting_status_events")).isEqualTo(3);
+        assertThat(count("idempotency_commands")).isEqualTo(3);
     }
 
     @Test
@@ -214,6 +248,39 @@ class WaitingLedgerConcurrencyIT {
     }
 
     @Test
+    void convertingTeamCancelAndClosureRaceProducesOneTerminalEffectAndRemovesMembership() throws Exception {
+        Fixture fixture = fixture(1);
+        WaitingCommandResult created = creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(450));
+        long teamId = Long.parseLong(created.data().waitingTeamId());
+        jdbc.update("UPDATE waiting_teams SET status='RESERVATION_CONVERTING' WHERE waiting_team_id=?", teamId);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(451), 7L));
+        WaitingClosureClaim claim = closureService.claimPendingItems(
+                "converting-race", 1, Duration.ofSeconds(30), 0L).getFirst();
+
+        List<Attempt<Object>> attempts = runTogether(2, index -> index == 0
+                ? commandFacade.cancel(fixture.operatorId(), fixture.storeId(), teamId, key(452),
+                        new WaitingTeamTransitionRequest(0L))
+                : closureService.processClaimedItem(claim));
+
+        assertThat(attempts.get(1).succeeded()).isTrue();
+        assertThat(attempts.get(1).result()).isEqualTo(Boolean.TRUE);
+        if (!attempts.getFirst().succeeded()) {
+            assertThat(attempts.getFirst().failure()).isInstanceOfSatisfying(ServiceException.class,
+                    failure -> assertThat(failure.getErrorCode())
+                            .isEqualTo(ReservationErrorCode.WAITING_VERSION_CONFLICT));
+        }
+        WaitingTeam stored = teams.findById(teamId).orElseThrow();
+        assertThat(stored.getStatus()).isIn(WaitingTeamStatus.CANCELLED, WaitingTeamStatus.CLOSED_BY_STORE);
+        assertThat(stored.getVersion()).isOne();
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(count("waiting_transition_audits")).isEqualTo(2);
+        assertThat(count("waiting_status_events")).isEqualTo(2);
+    }
+
+    @Test
     void committedPartialBatchRetryResumesWithoutDuplicateEffects() {
         Fixture fixture = fixture(2);
         createTeams(fixture, 500);
@@ -262,10 +329,7 @@ class WaitingLedgerConcurrencyIT {
         long operatorId = operators.saveAndFlush(
                 StoreOperatorAccount.create("concurrency-" + UUID.randomUUID() + "@example.com", "hashed", "owner"))
                 .getId();
-        long storeId = stores.saveAndFlush(Store.create(operatorId, registrationNumber(), BusinessType.CAFE,
-                "Concurrency Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
-                true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
-                "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
+        long storeId = createStore(operatorId);
         List<Long> consumerIds = new ArrayList<>();
         for (int index = 0; index < consumerCount; index++) {
             String email = "waiting-concurrency-" + UUID.randomUUID() + "@example.com";
@@ -275,6 +339,13 @@ class WaitingLedgerConcurrencyIT {
                     "SELECT consumer_account_id FROM consumer_accounts WHERE email=?", Long.class, email));
         }
         return new Fixture(operatorId, storeId, consumerIds);
+    }
+
+    private long createStore(long operatorId) {
+        return stores.saveAndFlush(Store.create(operatorId, registrationNumber(), BusinessType.CAFE,
+                "Concurrency Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
+                true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
+                "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
     }
 
     private <T> List<Attempt<T>> runTogether(int participants, ConcurrentWork<T> work) throws Exception {

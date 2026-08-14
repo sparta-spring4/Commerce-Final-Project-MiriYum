@@ -3,7 +3,6 @@ package com.miriyum.domain.reservation.waiting.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.MiriyumApplication;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -18,12 +17,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -32,14 +29,6 @@ import org.testcontainers.utility.DockerImageName;
 @Tag("integration")
 @Tag("integration-shard-b")
 @Testcontainers
-@SpringBootTest(
-        classes = MiriyumApplication.class,
-        properties = {
-            "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.store.schedule.activation-enabled=false",
-            "miriyum.reservation.time-policy.activation-enabled=false"
-        })
 class WaitingMigrationTest {
 
     private static final DockerImageName MYSQL_IMAGE =
@@ -58,13 +47,6 @@ class WaitingMigrationTest {
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE)
             .withCommand("--log-bin-trust-function-creators=1");
-
-    @DynamicPropertySource
-    static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-    }
 
     @Test
     @DisplayName("Flyway V36이 웨이팅 원장 마이그레이션을 적용한다")
@@ -119,13 +101,13 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("활성 중복 순번 감사 명령과 종결 작업 항목의 중앙 유일 키를 만든다")
+    @DisplayName("계정 전체 활성 중복 순번 감사 명령과 종결 작업 항목의 중앙 유일 키를 만든다")
     void createsRequiredUniqueKeys() throws SQLException {
         migrate();
 
         assertThat(uniqueIndexColumns()).contains(
-                "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
-                        + "store_id,consumer_account_id",
+                "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                        + "consumer_account_id",
                 "waiting_active_memberships.uk_waiting_active_memberships_team=waiting_team_id",
                 "waiting_closure_job_items.uk_waiting_closure_job_items_job_team="
                         + "waiting_closure_job_id,waiting_team_id",
@@ -137,6 +119,81 @@ class WaitingMigrationTest {
                         + "waiting_team_id,event_sequence",
                 "waiting_transition_audits.uk_waiting_transition_audits_command=command_id"
         );
+        assertThat(uniqueIndexColumns()).doesNotContain(
+                "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                        + "store_id,consumer_account_id");
+    }
+
+    @Test
+    @DisplayName("V36 기준선 뒤 V40이 계정 전체 활성 membership 유일 키로 교체한다")
+    void replacesStoreScopedMembershipKeyAfterV36Baseline() throws SQLException {
+        try {
+            Flyway v36 = flywayForTarget("36");
+            v36.clean();
+            v36.migrate();
+            assertThat(v36.info().applied()).anyMatch(migration ->
+                    "36".equals(String.valueOf(migration.getVersion())));
+            try (Connection connection = connection()) {
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+            }
+
+            Flyway v40 = flywayForTarget(null);
+            v40.migrate();
+
+            assertThat(v40.info().applied()).anyMatch(migration ->
+                    "40".equals(String.valueOf(migration.getVersion()))
+                            && "V40__enforce_account_wide_active_waiting.sql"
+                            .equals(migration.getScript()));
+            try (Connection connection = connection()) {
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                                + "consumer_account_id");
+                assertThat(uniqueIndexColumns(connection)).doesNotContain(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+            }
+        } finally {
+            cleanDatabase();
+        }
+    }
+
+    @Test
+    @DisplayName("V40은 계정 중복 데이터가 있으면 원본 데이터와 V36 유일 키를 보존한 채 실패한다")
+    void preservesV36DataAndConstraintWhenAccountWideMigrationFindsDuplicates() throws SQLException {
+        try {
+            Flyway v36 = flywayForTarget("36");
+            v36.clean();
+            v36.migrate();
+            try (Connection connection = connection()) {
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+                connection.createStatement().executeUpdate("""
+                        INSERT INTO waiting_active_memberships (
+                            store_id, consumer_account_id, waiting_team_id, created_at
+                        ) VALUES
+                            (101, 200, 1001, UTC_TIMESTAMP(6)),
+                            (102, 200, 1002, UTC_TIMESTAMP(6))
+                        """);
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 1");
+            }
+
+            assertThatThrownBy(() -> flywayForTarget(null).migrate())
+                    .isInstanceOf(FlywayException.class)
+                    .hasMessageContaining("V40__enforce_account_wide_active_waiting.sql");
+
+            try (Connection connection = connection()) {
+                assertThat(membershipCount(connection)).isEqualTo(2);
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+                assertThat(uniqueIndexColumns(connection)).doesNotContain(
+                        "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                                + "consumer_account_id");
+            }
+        } finally {
+            cleanDatabase();
+        }
     }
 
     @Test
@@ -278,6 +335,7 @@ class WaitingMigrationTest {
         migrate();
 
         assertThat(nonUniqueIndexColumns()).contains(
+                "waiting_active_memberships.idx_waiting_active_memberships_store=store_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_claim="
                         + "waiting_closure_job_id,status,waiting_closure_job_item_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_global_claim="
@@ -345,7 +403,13 @@ class WaitingMigrationTest {
     }
 
     private List<String> uniqueIndexColumns() throws SQLException {
-        return queryStrings("""
+        try (Connection connection = connection()) {
+            return uniqueIndexColumns(connection);
+        }
+    }
+
+    private List<String> uniqueIndexColumns(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT CONCAT(
                     table_name, '.', index_name, '=',
                     GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',')
@@ -358,6 +422,36 @@ class WaitingMigrationTest {
                 GROUP BY table_name, index_name
                 ORDER BY table_name, index_name
                 """);
+             ResultSet rows = statement.executeQuery()) {
+            List<String> values = new ArrayList<>();
+            while (rows.next()) {
+                values.add(rows.getString(1));
+            }
+            return values;
+        }
+    }
+
+    private Flyway flywayForTarget(String target) {
+        var configuration = Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .cleanDisabled(false);
+        if (target != null) {
+            configuration.target(target);
+        }
+        return configuration.load();
+    }
+
+    private void cleanDatabase() {
+        flywayForTarget(null).clean();
+    }
+
+    private long membershipCount(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) FROM waiting_active_memberships");
+             ResultSet rows = statement.executeQuery()) {
+            assertThat(rows.next()).isTrue();
+            return rows.getLong(1);
+        }
     }
 
     private List<String> nonUniqueIndexColumns() throws SQLException {

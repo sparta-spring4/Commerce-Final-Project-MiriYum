@@ -158,12 +158,13 @@ public class WaitingTeam {
         version++;
     }
 
-    /** 대기·호출·도착 상태의 사용자 취소를 종결 기록한다. */
+    /** 대기·호출·도착·예약 전환 중 상태의 사용자 취소를 종결 기록한다. */
     public void cancel(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);
         if (status != WaitingTeamStatus.WAITING
                 && status != WaitingTeamStatus.CALLED
-                && status != WaitingTeamStatus.ARRIVED) {
+                && status != WaitingTeamStatus.ARRIVED
+                && status != WaitingTeamStatus.RESERVATION_CONVERTING) {
             throw invalidTransition();
         }
         cancelledAt = requireNotBefore(occurredAt, latestStateTimestamp());
@@ -184,12 +185,13 @@ public class WaitingTeam {
         version++;
     }
 
-    /** 대기·호출·도착 상태의 팀을 사용자 취소와 구분해 매장 종료한다. */
+    /** 대기·호출·도착·예약 전환 중 상태의 팀을 사용자 취소와 구분해 매장 종료한다. */
     public void closeByStore(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);
         if (status != WaitingTeamStatus.WAITING
                 && status != WaitingTeamStatus.CALLED
-                && status != WaitingTeamStatus.ARRIVED) {
+                && status != WaitingTeamStatus.ARRIVED
+                && status != WaitingTeamStatus.RESERVATION_CONVERTING) {
             throw invalidTransition();
         }
         closedByStoreAt = requireNotBefore(occurredAt, latestStateTimestamp());

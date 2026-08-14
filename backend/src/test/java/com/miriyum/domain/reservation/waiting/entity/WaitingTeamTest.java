@@ -354,6 +354,27 @@ class WaitingTeamTest {
         );
     }
 
+    @Test
+    @DisplayName("예약 전환 중인 팀은 call arrive check-in 공개 명령을 모두 거절한다")
+    void rejectsCallArriveAndCheckInFromReservationConverting() {
+        WaitingTeam team = reservationConvertingTeam();
+
+        assertThatThrownBy(() -> team.call(0L, CALLED_AT))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+        assertThatThrownBy(() -> team.arrive(0L, CALLED_AT))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+        assertThatThrownBy(() -> team.checkIn(0L, CALLED_AT))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(ReservationErrorCode.WAITING_INVALID_TRANSITION);
+        assertThat(team.getStatus()).isEqualTo(WaitingTeamStatus.RESERVATION_CONVERTING);
+        assertThat(team.getVersion()).isZero();
+    }
+
     private static WaitingTeam newTeam() {
         return WaitingTeam.create(
                 10L,
@@ -376,6 +397,18 @@ class WaitingTeamTest {
         WaitingTeam team = calledTeam();
         team.arrive(1L, Instant.parse("2026-08-12T03:02:00Z"));
         return team;
+    }
+
+    private static WaitingTeam reservationConvertingTeam() {
+        WaitingTeam team = newTeam();
+        try {
+            var status = WaitingTeam.class.getDeclaredField("status");
+            status.setAccessible(true);
+            status.set(team, WaitingTeamStatus.RESERVATION_CONVERTING);
+            return team;
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private static void assertTerminalRejectsEveryTransition(WaitingTeam team, long expectedVersion) {
