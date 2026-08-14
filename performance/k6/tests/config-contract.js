@@ -45,9 +45,9 @@ export default function () {
     'unreviewed external host cannot be selected as staging': () =>
       throws(() => assertSafeTarget('staging', 'https://staging.example.test', ['staging.example.test'])),
     'zero load input is rejected': () =>
-      throws(() => parsePositiveInt('MAX_VUS', '0', 100)),
+      throws(() => parsePositiveInt('MAX_VUS', '0', 50)),
     'load above its hard ceiling is rejected': () =>
-      throws(() => parsePositiveInt('MAX_VUS', '101', 100)),
+      throws(() => parsePositiveInt('MAX_VUS', '51', 50)),
     'local smoke has fixed minimal limits': () => {
       const smoke = loadConfig(LOCAL_SMOKE_ENV)
       return smoke.profile === 'smoke'
@@ -138,6 +138,17 @@ export default function () {
         DURATION_SECONDS: '10',
         ARRIVAL_RATE: '1',
         LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
+      })),
+    'baseline VU ceiling stays below the default CSRF preparation budget': () =>
+      throws(() => loadConfig({
+        ...LOCAL_SMOKE_ENV,
+        PROFILE: 'local-baseline',
+        SCENARIOS: 'authRefresh',
+        MAX_VUS: '51',
+        DURATION_SECONDS: '10',
+        ARRIVAL_RATE: '1',
+        LOCAL_SMOKE_RUN_ID: 'local-smoke-approved',
+        SMOKE_PROOF_PATH: '/results/local-smoke-approved.json',
       })),
     'baseline longer than the bearer validity safety window is rejected': () =>
       throws(() => loadConfig({

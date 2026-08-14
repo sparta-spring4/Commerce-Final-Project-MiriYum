@@ -9,7 +9,7 @@ export const SCENARIO_NAMES = Object.freeze([
 ])
 const VALID_SCENARIOS = new Set(SCENARIO_NAMES)
 const HARD_LIMITS = Object.freeze({
-  maxVus: 100,
+  maxVus: 50,
   durationSeconds: 600,
   arrivalRate: 1000,
 })

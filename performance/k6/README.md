@@ -7,7 +7,7 @@ Issue #285의 인증·공개 검색·예약 생성·알림 이력 기준선을 �
 - `TARGET_ENV`는 `local` 또는 `staging`만 허용한다. production hostname과 allowlist 밖 host는 HTTP 요청 전에 거부하며, local은 전용 HTTPS proxy 또는 loopback host만 허용한다.
 - staging은 `STAGING_APPROVED=true`가 필요하다. local·staging baseline은 성공한 smoke의 run ID와 JSON artifact를 함께 요구하고, artifact의 profile·target·commit·fixture·threshold를 현재 실행과 대조한다.
 - staging host는 저장소의 신뢰 allowlist가 비어 있는 동안 fail-closed다. 실제 host는 별도 리뷰 변경으로 먼저 고정해야 한다.
-- `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
+- `MAX_VUS`와 `ARRIVAL_RATE`는 선택한 시나리오 전체에 배분되는 상한이다. `MAX_VUS`는 backend 기본 CSRF 준비 제한 60회/60초와의 경계 실패를 피하도록 50 이하로 제한하며, duration은 setup bearer의 유효성을 보존하기 위해 최대 600초다.
 - 실제 계정 비밀번호는 저장소 밖 환경 파일에서만 읽는다. Access/Refresh Token, cookie, cursor, 알림 제목, 응답 body와 자원 ID는 summary에 쓰지 않는다.
 - `test-data.example.json`은 schema 예시이며 실행 가능한 데이터가 아니다. 실제 local fixture는 ignored `fixtures/test-data.local.json`, staging fixture는 저장소 밖 승인 경로를 사용한다.
 - 기존 공개 API만으로 합성 계정·예약 슬롯·계정별 2페이지 이상의 전달 완료 알림을 준비할 수 없으면 실행을 중단하고 Issue #285를 `BLOCKED`로 보고한다. Repository 직접 seed나 production test endpoint를 추가하지 않는다.
@@ -125,6 +125,8 @@ docker compose --env-file deploy/local/.env `
 ```
 
 `SCENARIOS`는 `authRefresh`, `storeSearch`, `reservationCreate`, `notificationHistory`의 쉼표 목록이며 생략하면 네 시나리오를 조합 실행한다. 조합 실행에서는 전체 `MAX_VUS`와 `ARRIVAL_RATE`를 시나리오 수에 정수 배분한다. `ARRIVAL_RATE`는 HTTP 요청 수가 아니라 iteration/s이다. 인증 iteration은 login·refresh 두 측정 요청 뒤 logout 정리 요청을 보내며 client cookie jar에 CSRF 토큰이 없을 때만 준비 요청을 한 번 추가한다. 알림 iteration은 두 페이지를 측정한다. `dropped_iterations`가 하나라도 생기면 해당 실행은 실패한다. 같은 입력으로 최소 두 번 실행하고 `results/{RUN_ID}.json`과 `.md`의 편차만 기록한다.
+
+현재 backend 기본 IP rate limit은 login 성공 표본을 단일 k6 컨테이너 기준 5회/600초로 제한한다. 따라서 rate limit 완화가 결정되기 전의 `authRefresh` 결과는 보호 동작과 오류 분류 확인용일 뿐 처리량 기준선이 아니며, p50/p95/p99를 #286 최적화 근거로 사용하지 않는다. local loadtest 전용 제한값과 결과 해석 정책은 [#331](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/331)에서 Auth·배포 소유자 승인 후 결정한다.
 
 `SMOKE_PROOF_PATH`는 바로 앞 smoke가 생성한 `/results/{SMOKE_RUN_ID}.json`을 가리켜야 한다. baseline init context는 artifact의 `schemaVersion`, `profile=smoke`, run ID, target environment와 fingerprint, full commit SHA, fixture SHA-256, 실행 시나리오 포함 관계, 고정 smoke 상한, 전체 threshold 성공을 검증한다. 문자열 run ID만 전달하거나 다른 target·commit·fixture의 artifact를 재사용하면 HTTP 요청 전에 실패한다.
 
