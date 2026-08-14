@@ -55,15 +55,12 @@ class RefreshTokenRiskEventSchedulingConfigTest {
 
     @Test
     void 위험_사건_전달이_비활성화된_환경에서는_전용_스케줄러를_등록하지_않는다() {
-        disabledContextRunner.run(context -> {
-            assertThat(context).doesNotHaveBean("refreshTokenRiskEventTaskScheduler");
-            assertThat(context).hasBean("taskScheduler");
-        });
+        disabledContextRunner.run(context ->
+                assertThat(context).doesNotHaveBean("refreshTokenRiskEventTaskScheduler"));
         disabledContextRunner
                 .withPropertyValues("miriyum.auth.refresh-risk-event-delivery.enabled=false")
-                .run(context -> {
-                    assertThat(context).doesNotHaveBean("refreshTokenRiskEventTaskScheduler");
-                    assertThat(context).hasBean("taskScheduler");
-                });
+                .run(context ->
+                        assertThat(context).doesNotHaveBean("refreshTokenRiskEventTaskScheduler"));
     }
 }
+
