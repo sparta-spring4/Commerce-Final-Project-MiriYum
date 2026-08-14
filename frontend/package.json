@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "generate:api": "openapi-typescript ../docs/specs/mvp1-common/openapi.yaml -o src/shared/api/generated/common.ts && openapi-typescript ../docs/specs/auth-account/openapi.yaml -o src/shared/api/generated/auth-account.ts && openapi-typescript ../docs/specs/store-search/openapi.yaml -o src/shared/api/generated/store-search.ts && openapi-typescript ../docs/specs/reservation/openapi.yaml -o src/shared/api/generated/reservation.ts && openapi-typescript ../docs/specs/menu-hold-pickup/openapi.yaml -o src/shared/api/generated/menu-hold-pickup.ts",
+    "generate:api": "openapi-typescript ../docs/specs/mvp1-common/openapi.yaml -o src/shared/api/generated/common.ts && openapi-typescript ../docs/specs/auth-account/openapi.yaml -o src/shared/api/generated/auth-account.ts && openapi-typescript ../docs/specs/store-search/openapi.yaml -o src/shared/api/generated/store-search.ts && openapi-typescript ../docs/specs/reservation/openapi.yaml -o src/shared/api/generated/reservation.ts && openapi-typescript ../docs/specs/menu-hold-pickup/openapi.yaml -o src/shared/api/generated/menu-hold-pickup.ts && openapi-typescript ../docs/specs/notification/openapi.yaml -o src/shared/api/generated/notification.ts",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "build": "tsc -b && vite build"
