@@ -3,13 +3,21 @@ package com.miriyum.domain.auth.riskevent;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 class RefreshTokenRiskEventSchedulingConfigTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(TaskSchedulingAutoConfiguration.class))
+            .withUserConfiguration(RefreshTokenRiskEventSchedulingConfig.class)
+            .withPropertyValues("miriyum.auth.refresh-risk-event-delivery.enabled=true");
 
     @Test
     void 위험_사건_전달은_활성화된_환경에서만_전용_스케줄러를_사용한다() throws NoSuchMethodException {
@@ -31,5 +39,13 @@ class RefreshTokenRiskEventSchedulingConfigTest {
                 .getMethod("deliverPendingEventsOnSchedule")
                 .getAnnotation(Scheduled.class);
         assertThat(scheduled.scheduler()).isEqualTo("refreshTokenRiskEventTaskScheduler");
+    }
+
+    @Test
+    void 위험_사건_전달이_활성화돼도_기본_스케줄러를_유지한다() {
+        contextRunner.run(context -> {
+            assertThat(context).hasBean("refreshTokenRiskEventTaskScheduler");
+            assertThat(context).hasBean("taskScheduler");
+        });
     }
 }
