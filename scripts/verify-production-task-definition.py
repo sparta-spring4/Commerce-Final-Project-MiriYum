@@ -68,9 +68,15 @@ def validate(contract_path, task_definition_path, application_config_path=None):
             if not environment.get(name, ""):
                 errors.append(f"Missing environment value: {name}")
 
+    secret_prefixes = set()
     for name, value_from in secrets.items():
         if not value_from.endswith(f":{name}::"):
             errors.append(f"Secret reference must select its matching JSON key: {name}")
+            continue
+        secret_prefixes.add(value_from[: -len(f":{name}::")])
+
+    if len(secret_prefixes) > 1:
+        errors.append("Secret references must use one shared Secret ARN")
 
     return errors
 

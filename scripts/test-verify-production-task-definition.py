@@ -220,6 +220,45 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     validate(contract, task_definition, application_config),
             )
 
+    def test_rejects_secret_references_with_different_secret_prefixes(self):
+        validate = load_validator()
+
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.write_json(
+                    directory,
+                    "contract.json",
+                    {"requiredSecrets": ["MIRIYUM_DB_URL", "MIRIYUM_DB_PASSWORD"]},
+            )
+            task_definition = self.write_json(
+                    directory,
+                    "task-definition.json",
+                    {
+                        "requiresCompatibilities": ["FARGATE"],
+                        "networkMode": "awsvpc",
+                        "runtimePlatform": {"cpuArchitecture": "ARM64"},
+                        "containerDefinitions": [
+                            {
+                                "name": "backend",
+                                "secrets": [
+                                    {
+                                        "name": "MIRIYUM_DB_URL",
+                                        "valueFrom": "FIRST_SECRET:MIRIYUM_DB_URL::",
+                                    },
+                                    {
+                                        "name": "MIRIYUM_DB_PASSWORD",
+                                        "valueFrom": "SECOND_SECRET:MIRIYUM_DB_PASSWORD::",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+            )
+
+            self.assertEqual(
+                    ["Secret references must use one shared Secret ARN"],
+                    validate(contract, task_definition),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
