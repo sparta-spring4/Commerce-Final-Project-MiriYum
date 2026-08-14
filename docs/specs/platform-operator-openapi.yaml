@@ -17,3 +17,5 @@ paths:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1sessions~1current"
   /api/v1/platform-operators/auth/initial-password:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
+  /api/v1/platform-operators/reauthentication-approvals:
+    $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
