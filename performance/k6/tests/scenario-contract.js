@@ -406,6 +406,18 @@ export default function () {
         },
         { items: [notificationItem('9')], hasNext: false, nextCursor: null },
       ]),
+    'notification history rejects a non-calendar deliveredAt': () =>
+      notificationContractThrows([
+        {
+          items: [
+            { ...notificationItem('11'), deliveredAt: '2026-02-30T10:00:00+09:00' },
+            notificationItem('10'),
+          ],
+          hasNext: true,
+          nextCursor: 'opaque_cursor_1',
+        },
+        { items: [notificationItem('9')], hasNext: false, nextCursor: null },
+      ]),
     'notification history rejects a cursor outside the OpenAPI pattern': () =>
       notificationContractThrows([
         {

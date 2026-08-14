@@ -1,4 +1,9 @@
-import { classifyStatus, parseEnvelope, recordClassification } from '../lib/contracts.js'
+import {
+  classifyStatus,
+  parseEnvelope,
+  recordClassification,
+  requireOffsetDateTime,
+} from '../lib/contracts.js'
 import { bearerHeaders } from '../lib/session.js'
 
 const ITEM_FIELDS = [
@@ -54,13 +59,6 @@ function requireExactObject(value, fields, name) {
 function requirePublicId(value, name) {
   if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) {
     throw new Error(`${name} must be a public ID`)
-  }
-}
-
-function requireOffsetDateTime(value, name) {
-  const pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/
-  if (typeof value !== 'string' || !pattern.test(value) || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`${name} must be an offset date-time`)
   }
 }
 

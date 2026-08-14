@@ -24,6 +24,37 @@ function requireInteger(name, value, minimum, maximum) {
   return value
 }
 
+export function isCalendarDate(value) {
+  if (typeof value !== 'string') return false
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (match === null) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12) return false
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day >= 1 && day <= days[month - 1]
+}
+
+export function requireOffsetDateTime(value, name) {
+  if (typeof value !== 'string') {
+    throw new Error(`${name} must be an offset date-time`)
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
+  if (match === null || !isCalendarDate(match[1])) {
+    throw new Error(`${name} must be an offset date-time`)
+  }
+  const hour = Number(match[2])
+  const minute = Number(match[3])
+  const second = Number(match[4])
+  const offsetHour = match[6] === undefined ? 0 : Number(match[6])
+  const offsetMinute = match[7] === undefined ? 0 : Number(match[7])
+  if (hour > 23 || minute > 59 || second > 60 || offsetHour > 23 || offsetMinute > 59) {
+    throw new Error(`${name} must be an offset date-time`)
+  }
+}
+
 function validateAccount(account) {
   requireKeys(
     account,

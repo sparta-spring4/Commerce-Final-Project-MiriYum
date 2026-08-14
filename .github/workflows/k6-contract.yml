@@ -32,16 +32,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tests=(
-            config-contract.js
-            contracts-contract.js
-            scenario-contract.js
-            smoke-proof-contract.js
-            summary-contract.js
-          )
+          shopt -s nullglob
+          tests=(performance/k6/tests/*.js)
+          if (( ${#tests[@]} == 0 )); then
+            echo "No k6 contract tests found" >&2
+            exit 1
+          fi
           for test in "${tests[@]}"; do
+            echo "Running $test"
             docker run --rm --network none \
               -v "$PWD/performance/k6:/scripts:ro" \
               grafana/k6:2.1.0 \
-              run "/scripts/tests/$test"
+              run "/scripts/tests/$(basename "$test")"
           done
