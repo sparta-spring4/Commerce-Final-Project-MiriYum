@@ -15,6 +15,19 @@ COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
+RISK_EVENT_DELIVERY_PATH = (
+    ROOT
+    / "backend"
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "miriyum"
+    / "domain"
+    / "auth"
+    / "riskevent"
+    / "RefreshTokenRiskEventDelivery.java"
+)
 GIT_BASH_EXECUTABLE = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH_EXECUTABLE = str(GIT_BASH_EXECUTABLE) if GIT_BASH_EXECUTABLE.exists() else shutil.which("bash")
 TEST_NOTIFICATION_HISTORY_CURSOR_SECRET = (
@@ -31,6 +44,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
         cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
+        cls.risk_event_delivery = RISK_EVENT_DELIVERY_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
     @staticmethod
@@ -120,6 +134,87 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
 
         self.assertEqual("true", backend_environment["MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED"])
 
+    def test_pending_risk_event_count_is_observable_without_identifier_dimensions(self):
+        self.assertIn(
+            "miriyum-staging-refresh-risk-event-pending-count", self.resource_script
+        )
+        self.assertIn("RefreshTokenRiskEventPendingCount", self.resource_script)
+        self.assertIn(
+            "[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]",
+            self.resource_script,
+        )
+        self.assertIn("metricValue=$pending_count", self.resource_script)
+        self.assertIn(
+            '"refresh_token_risk_event_pending_count pending_count {}"',
+            self.risk_event_delivery,
+        )
+        self.assertIn("MiriYum pending refresh risk event index members", self.resource_script)
+
+    def test_refresh_risk_marker_integrity_failures_become_cloudwatch_metrics(self):
+        expected_events = (
+            "refresh_token_risk_event_marker_malformed",
+            "refresh_token_risk_event_marker_quarantine_failed",
+            "refresh_token_risk_event_stale_index_cleanup_failed",
+        )
+        expected_metrics = (
+            "RefreshTokenRiskEventMarkerMalformed",
+            "RefreshTokenRiskEventMarkerQuarantineFailed",
+            "RefreshTokenRiskEventStaleIndexCleanupFailed",
+        )
+
+        for event in expected_events:
+            self.assertIn(event, self.resource_script)
+        for metric in expected_metrics:
+            self.assertIn(metric, self.resource_script)
+        self.assertIn("MiriYum refresh risk marker integrity failures", self.resource_script)
+
+    def test_resource_script_preserves_pending_count_field_reference_for_cloudwatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            arguments_path = temporary_path / "aws-arguments"
+            aws_path = bin_path / "aws"
+            aws_path.write_text(
+                """#!/usr/bin/env bash
+printf '%s\\n' \"$@\" >> \"$AWS_TEST_ARGUMENTS\"
+case \"$1 $2\" in
+  \"logs describe-log-groups\"|\"sns list-subscriptions-by-topic\") echo 0 ;;
+  \"sns create-topic\") echo arn:aws:sns:ap-northeast-2:123456789012:miriyum-staging-alerts ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            aws_path.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{bin_path}{os.pathsep}{environment['PATH']}",
+                    "AWS_REGION": "ap-northeast-2",
+                    "EC2_INSTANCE_ID": "i-1234567890abcdef0",
+                    "ALARM_EMAIL": "test@example.com",
+                    "AWS_TEST_ARGUMENTS": str(arguments_path),
+                }
+            )
+
+            result = subprocess.run(
+                [BASH_EXECUTABLE, str(RESOURCE_SCRIPT_PATH)],
+                cwd=ROOT,
+                capture_output=True,
+                env=environment,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            captured_arguments = arguments_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]",
+                captured_arguments,
+            )
+            self.assertIn("metricValue=$pending_count", captured_arguments)
+
     def test_staging_can_disable_reservation_hold_expiration_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
             "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED=true",
@@ -143,7 +238,6 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
                 "MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED"
             ),
         )
-
     def test_staging_can_enable_waiting_closure_worker_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
             "MIRIYUM_WAITING_CLOSURE_ENABLED=false",
@@ -321,7 +415,7 @@ main
         self.assertIn("SADD", backfill_function)
         self.assertNotIn("backfill-v1", backfill_function)
 
-    def test_main_continues_when_risk_event_backfill_fails_before_scan_delivery_is_replaced(self):
+    def test_deployment_fails_when_risk_event_backfill_fails_before_set_only_delivery_starts(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             metric_path = temporary_path / "metric-arguments"
@@ -376,10 +470,19 @@ main
                 },
             )
 
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-            self.assertIn("Pending risk event index backfill failed; continuing", result.stderr)
-            self.assertIn("Value=1", metric_path.read_text(encoding="utf-8"))
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Pending risk event index backfill failed; aborting deployment", result.stderr)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
             self.assertIn("logs --tail 100 valkey", log_path.read_text(encoding="utf-8"))
+
+    def test_deployment_backfills_pending_index_before_starting_the_new_backend(self):
+        main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
+        valkey_start = main_body.index('up -d mysql valkey')
+        backfill = main_body.index('backfill_pending_risk_event_index')
+        backend_start = main_body.index('up -d --remove-orphans')
+
+        self.assertLess(valkey_start, backfill)
+        self.assertLess(backfill, backend_start)
 
     def test_deployment_backfill_propagates_valkey_scan_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -431,6 +534,111 @@ exit 1
 
             self.assertNotEqual(0, result.returncode)
             self.assertIn("simulated SCAN failure", result.stderr)
+
+    def test_deployment_backfill_rejects_an_invalid_scan_cursor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" == "SCAN" ]]; then
+  printf 'invalid-cursor\\nauth:risk:pending:marker\\n'
+  exit 0
+fi
+
+exit 1
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+
+if backfill_pending_risk_event_index; then
+  exit 0
+fi
+exit 1
+""",
+                {"TEST_VALKEY_BIN": self.to_bash_path(bin_path)},
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Invalid SCAN cursor", result.stderr)
+
+    def test_deployment_backfill_stops_after_the_configured_scan_page_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" == "SCAN" ]]; then
+  printf '1\\n'
+  exit 0
+fi
+
+exit 1
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+            result = self.run_deploy_script(
+                """
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {
+  local arguments=("$@")
+  local index
+
+  for ((index = 0; index < ${#arguments[@]} - 2; index++)); do
+    if [[ "${arguments[index]}" == "sh" && "${arguments[index + 1]}" == "-ec" ]]; then
+      bash -ec "${arguments[index + 2]}" "${arguments[@]:index + 3}"
+      return
+    fi
+  done
+  return 1
+}
+
+if backfill_pending_risk_event_index; then
+  exit 0
+fi
+exit 1
+""",
+                {
+                    "RISK_EVENT_BACKFILL_MAX_SCAN_PAGES": "2",
+                    "TEST_VALKEY_BIN": self.to_bash_path(bin_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Risk event index backfill exceeded 2 SCAN pages", result.stderr)
 
     def test_deployment_repeats_backfill_after_legacy_rollback(self):
         with tempfile.TemporaryDirectory() as directory:

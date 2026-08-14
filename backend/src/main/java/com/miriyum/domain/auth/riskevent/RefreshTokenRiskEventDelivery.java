@@ -52,6 +52,7 @@ public class RefreshTokenRiskEventDelivery {
             recordFailure("valkey_read");
             return 0;
         }
+        logPendingEventCount();
 
         int delivered = 0;
         String failureStage = null;
@@ -76,6 +77,17 @@ public class RefreshTokenRiskEventDelivery {
             consecutiveFailures.set(0);
         }
         return delivered;
+    }
+
+    private void logPendingEventCount() {
+        try {
+            log.info(
+                    "refresh_token_risk_event_pending_count pending_count {}",
+                    markerStore.pendingEventCount());
+        } catch (DataAccessException | ServiceException exception) {
+            // 전달 성공 여부와 분리된 관측 실패는 marker 전달을 중단시키지 않는다.
+            log.warn("event=refresh_token_risk_event_pending_count_observation_failed");
+        }
     }
 
     private String firstFailureStage(String currentStage, String newStage) {

@@ -11,7 +11,7 @@ Prometheus·Grafana 컨테이너, X-Ray·OpenTelemetry, production ECS·RDS·Ela
 - AWS 기본 지표: `CPUUtilization`, `StatusCheckFailed`
 - CloudWatch Agent 지표: 루트 디스크 사용률, 메모리 사용률
 - CloudWatch Logs: Docker `awslogs` 드라이버로 서비스별 표준 출력 로그
-- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
+- 사용자 지정 지표: 배포 후 health 결과 `DeploymentHealth`, 위험 사건 전달 정체 `RefreshTokenRiskEventDeliveryStalled`, pending 인덱스 멤버 수 `RefreshTokenRiskEventPendingCount`, marker 무결성 실패 `RefreshTokenRiskEventMarkerMalformed`·`RefreshTokenRiskEventMarkerQuarantineFailed`·`RefreshTokenRiskEventStaleIndexCleanupFailed`, ReservationHold 대사 장기 체류 `ReservationHoldReconciliationStalled`
 - 로그 보존: 7일
 
 CloudWatch Agent 설정은 [`cloudwatch-agent-config.json`](../../deploy/monitoring/cloudwatch-agent-config.json)에 있다. Agent는 메모리·디스크 지표를 수집하고, Docker 로그는 Compose의 `awslogs` 드라이버가 `/miriyum/staging/docker` 로그 그룹의 `mysql`, `backend`, `nginx`, `valkey` 스트림으로 직접 전송한다. CD가 배포 파일을 SSM으로 전송할 때 Agent 설정도 `/opt/miriyum/monitoring/cloudwatch-agent.json`에 복사한다.
@@ -72,16 +72,31 @@ SNS 이메일은 명령 실행 후 확인 메일의 `Confirm subscription` 링�
 
 `deploy.sh`는 `http://127.0.0.1:8080/actuator/health`와 Valkey의 `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개를 모두 확인한다. 어느 하나라도 실패하면 `DeploymentHealth=0`을 기록하고 배포를 실패 처리한다.
 
-위 확인 뒤 실행하는 pending marker Set 인덱스 backfill은 #304 전까지는 경고·Valkey 상태·로그만 남기고 배포를 계속한다. 현재 위험 사건 전달이 기존 marker `SCAN`을 사용하므로 backfill 실패가 전달을 막지 않기 때문이다. #304에서 전달이 Set-only 읽기로 바뀌면 backfill 실패를 `DeploymentHealth=0`과 배포 실패로 승격한다.
+위 확인 뒤 pending marker Set 인덱스를 backfill한다. 현재 위험 사건 전달은 Set만 조회하므로, backfill에 실패하면 새 backend를 시작하지 않고 `DeploymentHealth=0`을 기록해 배포를 실패 처리한다. 이 순서는 새 전달 worker가 인덱스에 없는 기존 marker를 놓치지 않도록 보장한다.
 
 - health 성공: `DeploymentHealth=1`
 - health timeout: `DeploymentHealth=0`
+- pending marker Set 인덱스 backfill 실패: `DeploymentHealth=0`
 
 CloudWatch 전송 실패가 배포 자체를 실패시키지는 않는다. 배포 성공·실패의 최종 기준은 기존 SSM 결과와 loopback health check이며, CloudWatch는 이를 보조하는 관측 수단이다.
 
 ## 위험 사건 전달 정체 지표
 
-Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
+pending marker 전달 작업은 `SSCAN` 커서를 이어서 읽고, 한 주기에 최대 100개만 조회한다. 한 페이지가 100개를 넘으면 남은 marker는 메모리 buffer에 보관해 다음 주기에 먼저 처리하므로 특정 marker만 반복 조회하지 않는다. `RefreshTokenRiskEventPendingCount`는 Spring Boot console 접두어 뒤의 `refresh_token_risk_event_pending_count pending_count <숫자>` 형식에서 현재 pending 인덱스 멤버 수를 추출한다. CloudWatch 패턴의 `...`은 timestamp·level·thread·logger 접두어를 건너뛴다. 0을 포함하며, 아직 정리되지 않은 stale member도 포함할 수 있다. 계정·family·토큰 식별자는 포함하지 않는다. 지표 조회가 실패해도 위험 사건 전달은 중단하지 않고 관측 실패 로그만 남긴다. 이 값이 지속적으로 증가하면 전달 작업이 처리 속도를 따라가지 못하는지 점검한다.
+
+다음 명령으로 전체 console 로그 한 줄에서 `$pending_count`가 숫자로 추출되는지 검증한다.
+
+```bash
+aws logs test-metric-filter \
+  --region ap-northeast-2 \
+  --filter-pattern '[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]' \
+  --log-event-messages '2026-08-14T13:15:00.000+09:00  INFO 1 --- [scheduler-1] c.m.d.a.r.RefreshTokenRiskEventDelivery : refresh_token_risk_event_pending_count pending_count 42' \
+  --output json --no-cli-pager
+```
+
+정상 결과에는 `"$pending_count": "42"`가 포함된다.
+
+Refresh Token 재사용 위험 사건은 Valkey pending marker에서 MySQL 중앙 위험 사건으로 전달된다. Valkey 조회 또는 MySQL 저장이 한두 번 실패하면 marker를 보존하고 다음 주기에 재시도한다. 반대로 필수 필드가 없는 손상 marker는 전달 대상에서 제거하고 식별자 없는 제한 로그만 남겨, 한 건의 저장 상태 이상이 정상 위험 사건 전달 전체를 막지 않게 한다. 30초 주기 전달이 기본 10회 연속 실패한 경우에만 backend가 다음 제한 로그를 남긴다.
 
 ```text
 event=refresh_token_risk_event_delivery_stalled consecutive_failures=10 failure_stage=mysql_write
