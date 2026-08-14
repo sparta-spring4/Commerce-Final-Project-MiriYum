@@ -182,6 +182,49 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("짧은 family를 회전해도 계정 family 인덱스 TTL을 줄이지 않고 전체 폐기한다")
+    void preservesAccountFamilyIndexUntilTheLongestFamilyExpires() {
+        Instant now = Instant.now();
+        Instant oldFamilyCreatedAt = now.minusSeconds(2_592_000 - 120);
+        RefreshTokenState oldFamily = new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-old",
+                "token-old",
+                RefreshTokenHash.sha256("refresh-token-old"),
+                oldFamilyCreatedAt,
+                oldFamilyCreatedAt.plusSeconds(2_592_000),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+        RefreshTokenState recentFamily = state("family-recent", "token-recent", now);
+        create(oldFamily);
+        create(recentFamily);
+
+        assertThat(store.rotate(
+                        oldFamily.namespace(),
+                        oldFamily.familyId(),
+                        oldFamily.accountId(),
+                        oldFamily.currentTokenId(),
+                        oldFamily.currentTokenHash(),
+                        "token-old-next",
+                        RefreshTokenHash.sha256("refresh-token-old-next"),
+                        now.plusSeconds(1),
+                        oldFamilyCreatedAt.plusSeconds(2_592_000))
+                .status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(TokenNamespace.CONSUMER, 7L);
+        assertThat(redisTemplate.getExpire(accountFamiliesKey, TimeUnit.SECONDS)).isGreaterThan(1_000_000L);
+
+        store.revokeAll(TokenNamespace.CONSUMER, 7L, now.plusSeconds(2), now.plusSeconds(1_209_600));
+
+        assertThat(rotate(oldFamily, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+        assertThat(rotate(recentFamily, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+    }
+
+    @Test
     @DisplayName("배포 전 legacy family는 회전해도 기존 TTL을 연장하지 않는다")
     void doesNotExtendLegacyFamilyTtlOnRotation() {
         Instant now = Instant.now();

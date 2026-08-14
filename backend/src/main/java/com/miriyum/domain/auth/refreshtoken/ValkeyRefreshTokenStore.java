@@ -41,7 +41,10 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'familyCreatedAt', ARGV[9])
             redis.call('EXPIREAT', KEYS[1], ARGV[7])
             redis.call('SADD', KEYS[2], KEYS[1])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+            if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            end
             return 1
             """, Long.class);
 
@@ -91,7 +94,10 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'lastRotatedAt', ARGV[6])
             if familyCreatedAt ~= false and familyCreatedAt ~= nil then
                 redis.call('EXPIREAT', KEYS[1], ARGV[7])
-                redis.call('EXPIREAT', KEYS[2], ARGV[7])
+                local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+                if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                    redis.call('EXPIREAT', KEYS[2], ARGV[7])
+                end
             end
             return 1
             """, Long.class);
