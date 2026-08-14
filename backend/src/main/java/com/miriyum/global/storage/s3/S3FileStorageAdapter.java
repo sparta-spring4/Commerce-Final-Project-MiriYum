@@ -23,6 +23,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 public class S3FileStorageAdapter implements FileStoragePort {
 
@@ -44,6 +45,7 @@ public class S3FileStorageAdapter implements FileStoragePort {
         PreparedUpload preparedUpload = prepareUpload(request);
         RuntimeException failure = null;
         boolean uploaded = false;
+        String uploadedVersionId = null;
         try {
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucket)
@@ -53,8 +55,12 @@ public class S3FileStorageAdapter implements FileStoragePort {
                     .checksumAlgorithm(ChecksumAlgorithm.SHA256)
                     .checksumSHA256(preparedUpload.checksumBase64())
                     .build();
-            s3Client.putObject(putObjectRequest, RequestBody.fromFile(preparedUpload.file()));
+            PutObjectResponse putObjectResponse = s3Client.putObject(
+                    putObjectRequest,
+                    RequestBody.fromFile(preparedUpload.file())
+            );
             uploaded = true;
+            uploadedVersionId = putObjectResponse.versionId();
 
             HeadObjectResponse storedObject = s3Client.headObject(HeadObjectRequest.builder()
                     .bucket(bucket)
@@ -71,8 +77,8 @@ public class S3FileStorageAdapter implements FileStoragePort {
             );
         } catch (RuntimeException exception) {
             failure = exception;
-            if (uploaded) {
-                deleteUploadedObject(request.objectKey(), exception);
+            if (uploaded && uploadedVersionId != null && !uploadedVersionId.isBlank()) {
+                deleteUploadedObject(request.objectKey(), uploadedVersionId, exception);
             }
             throw exception;
         } finally {
@@ -193,9 +199,13 @@ public class S3FileStorageAdapter implements FileStoragePort {
         }
     }
 
-    private void deleteUploadedObject(String objectKey, RuntimeException failure) {
+    private void deleteUploadedObject(String objectKey, String versionId, RuntimeException failure) {
         try {
-            delete(objectKey);
+            s3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(objectKey)
+                    .versionId(versionId)
+                    .build());
         } catch (RuntimeException cleanupException) {
             failure.addSuppressed(cleanupException);
         }

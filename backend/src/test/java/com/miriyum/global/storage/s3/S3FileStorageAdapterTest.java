@@ -168,7 +168,7 @@ class S3FileStorageAdapterTest {
     void deletesUploadedObjectWhenStoredMetadataVerificationFails() {
         S3Client s3Client = mock(S3Client.class);
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
-                .thenReturn(PutObjectResponse.builder().build());
+                .thenReturn(PutObjectResponse.builder().versionId("uploaded-version").build());
         when(s3Client.headObject(any(HeadObjectRequest.class)))
                 .thenReturn(HeadObjectResponse.builder()
                         .contentLength(6L)
@@ -190,6 +190,33 @@ class S3FileStorageAdapterTest {
         verify(s3Client).deleteObject(deleteCaptor.capture());
         assertThat(deleteCaptor.getValue().bucket()).isEqualTo("miriyum-test-bucket");
         assertThat(deleteCaptor.getValue().key()).isEqualTo("public/store/10/menu-image/sample.jpg");
+        assertThat(deleteCaptor.getValue().versionId()).isEqualTo("uploaded-version");
+    }
+
+    @Test
+    @DisplayName("S3 어댑터는 업로드 버전을 식별할 수 없으면 다른 요청의 객체를 지우지 않는다")
+    void doesNotDeleteByKeyWhenUploadVersionIsUnavailable() {
+        S3Client s3Client = mock(S3Client.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().build());
+        when(s3Client.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength(6L)
+                        .contentType("image/jpeg")
+                        .checksumSHA256("LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+                        .build());
+        S3FileStorageAdapter adapter = new S3FileStorageAdapter(s3Client, "miriyum-test-bucket", 10_485_760L);
+        FileStorageRequest request = new FileStorageRequest(
+                "public/store/10/menu-image/sample.jpg",
+                "image/jpeg",
+                5L,
+                new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> adapter.save(request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stored file size");
+
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test
