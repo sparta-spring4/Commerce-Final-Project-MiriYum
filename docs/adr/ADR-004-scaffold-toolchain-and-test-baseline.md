@@ -154,6 +154,8 @@ stdout과 stderr는 child 시작 직후 서로 독립적인 비동기 pump로 ch
 
 각 child timeout은 35분이다. Windows native launcher는 `CreateProcessW(..., CREATE_SUSPENDED, ...)`로 child를 생성하고 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`가 설정된 Job Object에 `AssignProcessToJobObject`가 성공한 뒤에만 main thread를 `ResumeThread`한다. **Job 귀속 전 resume은 금지한다.** `CreateProcessW` 전에 pipe 또는 launcher 준비가 실패하면 생성한 handle만 회수한다. `CreateProcessW` 성공 뒤 `AssignProcessToJobObject`가 실패하거나 Job 귀속 전에 다른 오류가 발생하면 suspended process를 절대 resume하지 않고 `TerminateProcess`를 호출한다. 이어서 process handle로 종료를 기다리고 실제 종료를 확인한 뒤 thread·process·pipe handle을 닫는다. handle close만으로 suspended process 종료를 대신해서는 안 된다. Job 귀속 뒤 `ResumeThread` 또는 이후 시작 단계가 실패하면 `TerminateJobObject`를 호출하고 `QueryInformationJobObject`의 `ActiveProcesses == 0`을 확인한다. 일반 timeout·Ctrl-C·예외도 Job handle을 유지한 상태에서 `TerminateJobObject`를 호출하고 `ActiveProcesses == 0`이 될 때까지 제한 시간 안에서 확인한 뒤 handle을 닫는다. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`는 handle 누수나 비정상 종료에 대비한 fail-safe이며 정상 cleanup 또는 OS process orphan 0건 증거를 대신하지 않는다. Ubuntu child는 `setsid`로 새 process group/session에서 시작하고, timeout·Ctrl-C·예외 시 group 전체에 TERM을 보낸 뒤 유예 시간을 거쳐 KILL을 적용한다. PID와 process 시작 시각을 함께 기록하고 종료 뒤 job/group의 생존 process가 0건인지 확인한다. `Process.Kill(entireProcessTree)`는 정상 containment가 아니라 fallback으로만 사용한다. descendant process가 남거나 정리 결과를 확인할 수 없으면 runner 전체를 실패로 기록하며, 이미 생성된 로그와 report는 삭제하지 않는다.
 
+runner 전체에 별도 global deadline은 두지 않는다. 한 child의 실패나 timeout 뒤에도 아직 시작하지 않은 shard까지 실행해 전체 진단을 모으는 `fail-fast=false` 계약과 충돌하기 때문이다. `ParallelShards=1`에서는 integration A~D의 child timeout budget이 네 순차 wave로 최대 140분이며 unit child는 첫 wave와 병행한다. 이 값은 process 시작·cleanup overhead를 제외한 최악 상한이고 25분 성능 목표와 같은 의미가 아니다. runner는 시작 시와 child 상태가 바뀔 때마다 완료·실행 중·대기 queue, 전체 elapsed와 현재 병렬도에서 남은 queue가 소비할 수 있는 보수적 child-timeout budget을 출력한다. 과거 duration 근거가 없는 예상 완료 시각은 출력하지 않으며 사용자는 Ctrl-C로 중단할 수 있다.
+
 이 문서의 `orphan 0건`은 runner가 Job Object 또는 process group으로 containment하는 **OS process descendant** 기준이다. Testcontainers MySQL은 Gradle process의 OS 자손이 아니라 Docker daemon이 소유한 container이므로 `ActiveProcesses == 0`이나 process group 생존 process 0건을 container 회수 증거로 사용하지 않는다. 정상 종료와 강제 종료 뒤 container 회수는 Testcontainers의 Ryuk 자원 정리 수명 주기에 위임하며, runner는 process cleanup 성공을 container 0건 보장으로 보고하지 않는다. run-id label을 이용한 container 직접 추적·강제 정리는 이번 runner 계약에서 제외한다.
 
 ### 결과 판정과 보고서
@@ -166,6 +168,8 @@ unit 및 각 shard는 다음 조건을 모두 만족해야 성공이다.
 4. `failures`, `errors`, `skipped` 합이 모두 0이다.
 
 exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 child는 실패다. malformed XML, 필수 attribute 누락과 빈 report도 실패다. runner는 모든 child가 끝난 뒤 선택값과 근거, child별 task·PID·시작/종료·elapsed·exit code·test 합계·log/report 경로를 출력하며 하나라도 실패하면 non-zero로 종료한다.
+
+`skipped == 0`은 Gradle의 기본 성공 조건보다 의도적으로 엄격하다. 이 명령은 선택된 전체 테스트가 실제로 실행됐다는 coverage completeness까지 확인하는 로컬 full-verification runner이므로 `@Disabled`, assumption 또는 조건부 실행으로 미실행된 테스트를 성공으로 숨기지 않는다. 조건부 skip을 정상 상태로 도입하려면 허용 기준과 CI 의미를 별도 계약 변경으로 먼저 정렬한다.
 
 ### 플랫폼과 CI 경계
 
@@ -181,6 +185,8 @@ Windows contract job을 모든 backend Pull Request의 `backend-ci` 필수 의�
 - stdout·stderr 독립 비동기 drain, process와 두 stream 완료 뒤 실제 exit code 수집과 최종 non-zero 전파
 - XML 누락·malformed·tests=0·failure/error/skipped 거부
 - 한 child 실패와 timeout 뒤에도 남은 queue 실행
+- global deadline 없이 child별 35분 timeout을 적용하고, 완료·실행 중·대기 queue와 남은 보수적 child-timeout budget을 출력하는 진행 계약
+- `skipped == 0`을 전체 테스트 실제 실행 여부에 대한 의도적 strict contract로 사용하는 경계
 - Windows `CreateProcessW`의 `CREATE_SUSPENDED` 생성, Job 귀속 전 resume 금지, 귀속 후 resume 순서와 Ubuntu process group 시작
 - Windows fixture가 `AssignProcessToJobObject` 실패를 주입해 resume 0회, `TerminateProcess` 호출, process 종료 확인 뒤 handle 회수와 OS process orphan 0건을 검증하는 계약
 - Windows `TerminateJobObject` 뒤 `ActiveProcesses == 0` 확인, Ubuntu group cleanup을 통한 Ctrl-C·timeout descendant process 종료와 OS process orphan 0건
@@ -201,7 +207,9 @@ Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 �
 
 2026-08-14의 외부 실험에서는 Test JVM 1GB, fork 1, Gradle daemon 1GB로 unit+assemble과 A~D 다섯 child를 실행해 23분 0.828초 wall clock, unit 2,093개와 integration 544개, failure/error/skipped 0을 관찰했다. Java peak working set은 약 7.1GB였고 Docker peak는 측정하지 못했다. 이 결과는 25분 목표와 초기 Auto 기준을 정하기 위한 잠정 sizing input일 뿐 인수 또는 완료 증거가 아니다. 실험 wrapper가 `Start-Process.ExitCode`를 안정적으로 수집하지 못했고 이후 테스트 소스도 변경됐다.
 
-구현 후 최신 `dev`를 반영한 동일 commit을 현재 34GB Windows 기준 머신에서 정식 runner로 한 번 실행해 child별 ExitCode, unit+assemble+A~D XML 무결성과 25분 이하 wall clock을 확인한다. 이 실행만 25분 목표의 완료 증거로 인정하며, 해당 머신과 실행의 관찰 결과일 뿐 모든 PC에 대한 보장이 아니다. 같은 코드·설정으로 기존 43~46분 전체 build를 설계 단계에서 반복하지 않는다. 로컬 runner 성공은 해당 commit의 Backend CI 성공을 대신하지 않는다.
+구현 후 최신 `dev`를 반영한 동일 commit을 현재 34GB Windows 기준 머신에서 정식 runner로 한 번 실행해 child별 ExitCode, unit+assemble+A~D XML 무결성과 25분 이하 wall clock을 확인한다. 이 실행만 25분 목표의 완료 증거로 인정하며, 해당 머신과 실행의 관찰 결과일 뿐 모든 PC에 대한 보장이 아니다. 같은 실행에서 외부 측정으로 Java process aggregate peak와 Docker/Testcontainers workload aggregate peak를 함께 기록하고 측정 대상·방법·sampling interval을 PR 증거에 남긴다. 이 peak 측정은 runner runtime 기능이나 container 직접 cleanup 범위를 늘리지 않는다.
+
+34GB·Auto=4 한 번의 성공은 20GB·12GB 경계의 안전성을 직접 증명하지 않는다. 구현 PR은 함께 기록한 Java·Docker peak, 고정 여유와 worker당 예산 계산을 다시 대조해 초기 Auto 임계값을 유지하거나 수정한 근거를 남겨야 한다. 그 재검토가 끝나기 전까지 20GB·12GB 값은 잠정 sizing input이고, 계산 근거가 기록된 뒤에도 모든 Docker/WSL2 상한 환경에 대한 안전성 보장이 아니라 초기 선택 heuristic이다. 같은 코드·설정으로 기존 43~46분 전체 build를 설계 단계에서 반복하지 않는다. 로컬 runner 성공은 해당 commit의 Backend CI 성공을 대신하지 않는다.
 
 ### shard 재배치 경계
 
