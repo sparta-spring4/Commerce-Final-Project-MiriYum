@@ -3,6 +3,8 @@ package com.miriyum.domain.auth.qrepoch;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Clock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -11,6 +13,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ConsumerQrLogoutCoordinator {
+
+    private static final Logger log = LoggerFactory.getLogger(ConsumerQrLogoutCoordinator.class);
 
     private final ConsumerQrEpochStore store;
     private final Clock clock;
@@ -25,6 +29,12 @@ public class ConsumerQrLogoutCoordinator {
             ParsedToken refreshToken,
             String rawRefreshToken
     ) {
-        store.advanceForLogout(namespace, refreshToken, rawRefreshToken, clock.instant());
+        ConsumerQrEpochAdvanceResult result = store.advanceForLogout(
+                namespace, refreshToken, rawRefreshToken, clock.instant());
+        switch (result.status()) {
+            case APPLIED -> log.info("event=qr_epoch_logout_result outcome=applied");
+            case ALREADY_APPLIED -> log.info("event=qr_epoch_logout_result outcome=already_applied");
+            case NOT_AUTHORIZED -> log.info("event=qr_epoch_logout_result outcome=not_authorized");
+        }
     }
 }

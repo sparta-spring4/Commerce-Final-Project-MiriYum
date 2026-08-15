@@ -198,6 +198,7 @@
 | `AUTH_009` | 403 | CSRF 토큰 검증 실패 |
 | `AUTH_010` | 403 | Origin·Referer 검증 실패 |
 | `AUTH_011` | 403 | 현재 계정 상태가 이용을 허용하지 않음 |
+| `AUTH_016` | 미발행(회수) | 과거 Consumer 로그아웃의 Access/Refresh subject 불일치에 사용했으며, 현재는 발행하지 않고 영구 재사용하지 않음 |
 | `AUTH_017` | 409 | QR account 또는 epoch가 현재 Auth 원본과 불일치 |
 | `ACCOUNT_001` | 409 | 같은 계정 유형의 이메일 중복 |
 | `ACCOUNT_002` | 409 | 같은 계정 유형의 휴대전화 중복 |

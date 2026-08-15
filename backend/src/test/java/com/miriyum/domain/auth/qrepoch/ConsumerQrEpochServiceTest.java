@@ -4,8 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
@@ -13,12 +18,14 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 @ExtendWith(MockitoExtension.class)
 class ConsumerQrEpochServiceTest {
@@ -79,20 +86,65 @@ class ConsumerQrEpochServiceTest {
     class LogoutCoordination {
 
         @Test
-        void advancesForLogoutAtInjectedClockInstant() {
+        void logsAppliedOutcomeAfterAdvancingAtInjectedClockInstant() {
+            assertLogoutOutcome(
+                    ConsumerQrEpochAdvanceResult.Status.APPLIED,
+                    "event=qr_epoch_logout_result outcome=applied");
+        }
+
+        @Test
+        void logsAlreadyAppliedOutcomeForIdempotentRetry() {
+            assertLogoutOutcome(
+                    ConsumerQrEpochAdvanceResult.Status.ALREADY_APPLIED,
+                    "event=qr_epoch_logout_result outcome=already_applied");
+        }
+
+        @Test
+        void logsNotAuthorizedOutcomeForCleanupOnlyRequest() {
+            assertLogoutOutcome(
+                    ConsumerQrEpochAdvanceResult.Status.NOT_AUTHORIZED,
+                    "event=qr_epoch_logout_result outcome=not_authorized");
+        }
+
+        private void assertLogoutOutcome(
+                ConsumerQrEpochAdvanceResult.Status status,
+                String expectedMessage
+        ) {
             ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-id", "token-id");
-            ConsumerQrEpochAdvanceResult applied = new ConsumerQrEpochAdvanceResult(
-                    ConsumerQrEpochAdvanceResult.Status.APPLIED);
             given(store.advanceForLogout(
                     TokenNamespace.CONSUMER,
                     refresh,
                     "raw-refresh-token",
                     Instant.parse("2026-08-14T00:00:00Z")))
-                    .willReturn(applied);
+                    .willReturn(new ConsumerQrEpochAdvanceResult(status));
 
-            assertThatCode(() -> logoutCoordinator.advanceForLogout(
-                    TokenNamespace.CONSUMER, refresh, "raw-refresh-token"))
-                    .doesNotThrowAnyException();
+            List<ILoggingEvent> logs = captureLogoutCoordinatorLogs(() ->
+                    logoutCoordinator.advanceForLogout(
+                            TokenNamespace.CONSUMER, refresh, "raw-refresh-token"));
+
+            assertThat(logs).singleElement().satisfies(log -> {
+                assertThat(log.getLevel()).isEqualTo(Level.INFO);
+                assertThat(log.getFormattedMessage()).isEqualTo(expectedMessage);
+            });
+            verify(store).advanceForLogout(
+                    TokenNamespace.CONSUMER,
+                    refresh,
+                    "raw-refresh-token",
+                    Instant.parse("2026-08-14T00:00:00Z"));
+        }
+
+        private List<ILoggingEvent> captureLogoutCoordinatorLogs(Runnable action) {
+            Logger logger = (Logger) LoggerFactory.getLogger(ConsumerQrLogoutCoordinator.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                action.run();
+                return List.copyOf(appender.list);
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
         }
     }
 

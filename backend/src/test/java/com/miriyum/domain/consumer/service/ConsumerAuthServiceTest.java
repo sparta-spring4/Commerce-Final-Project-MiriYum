@@ -41,8 +41,9 @@ import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.util.Optional;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 import org.junit.jupiter.api.DisplayName;
@@ -460,12 +461,12 @@ class ConsumerAuthServiceTest {
         given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
         given(jwtTokenProvider.parseAccessToken("access-token")).willReturn(access);
 
-        String auditLog = captureConsumerAuthLog(
+        List<ILoggingEvent> auditLogs = captureConsumerAuthLogs(
                 () -> consumerAuthService.logout("refresh-token", "Bearer access-token"));
 
-        assertThat(auditLog)
-                .contains("event=consumer_logout_access_refresh_subject_mismatch")
-                .doesNotContain("1", "2", "family-id", "token-id", "refresh-token", "access-token");
+        assertThat(auditLogs).singleElement().satisfies(log ->
+                assertThat(log.getFormattedMessage())
+                        .isEqualTo("event=consumer_logout_access_refresh_subject_mismatch"));
         verify(consumerQrLogoutCoordinator).advanceForLogout(
                 TokenNamespace.CONSUMER, refresh, "refresh-token");
     }
@@ -542,16 +543,14 @@ class ConsumerAuthServiceTest {
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
     }
 
-    private String captureConsumerAuthLog(Runnable action) {
+    private List<ILoggingEvent> captureConsumerAuthLogs(Runnable action) {
         Logger logger = (Logger) LoggerFactory.getLogger(ConsumerAuthService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
             action.run();
-            return appender.list.stream()
-                    .map(ILoggingEvent::getFormattedMessage)
-                    .reduce("", (left, right) -> left + "\n" + right);
+            return List.copyOf(appender.list);
         } finally {
             logger.detachAppender(appender);
             appender.stop();
