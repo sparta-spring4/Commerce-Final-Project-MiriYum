@@ -48,6 +48,12 @@ public class MemberSupportCase extends BaseEntity {
     @Column(name = "source_sanction_id")
     private Long sourceSanctionId;
 
+    @Column(name = "password_reset_verification_id")
+    private Long passwordResetVerificationId;
+
+    @Column(name = "password_reset_completed_at")
+    private LocalDateTime passwordResetCompletedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 40)
     private MemberSupportCaseStatus status;
@@ -103,12 +109,19 @@ public class MemberSupportCase extends BaseEntity {
     public static MemberSupportCase appeal(MemberAccountType accountType, long accountId,
                                            long sourceSanctionId, long targetSupportVersion,
                                            LocalDateTime now) {
+        return appeal(accountType, accountId, sourceSanctionId, null, targetSupportVersion, now);
+    }
+
+    public static MemberSupportCase appeal(MemberAccountType accountType, long accountId,
+                                           long sourceSanctionId, Long identityVerificationId,
+                                           long targetSupportVersion, LocalDateTime now) {
         MemberSupportCase supportCase = new MemberSupportCase();
         supportCase.publicId = UUID.randomUUID().toString();
         supportCase.caseType = MemberSupportCaseType.ACCOUNT_APPEAL;
         supportCase.accountType = accountType;
         supportCase.accountId = accountId;
         supportCase.sourceSanctionId = sourceSanctionId;
+        supportCase.identityVerificationId = identityVerificationId;
         supportCase.status = MemberSupportCaseStatus.SUBMITTED;
         supportCase.targetSupportVersion = targetSupportVersion;
         supportCase.reasonCode = "MEMBER_APPEAL";
@@ -143,6 +156,27 @@ public class MemberSupportCase extends BaseEntity {
     public void pendingAdditionalApproval() {
         requireStatus(MemberSupportCaseStatus.ASSIGNED);
         status = MemberSupportCaseStatus.PENDING_ADDITIONAL_APPROVAL;
+        rowVersion++;
+    }
+
+    public void issuePasswordResetVerification(long verificationId) {
+        if (caseType != MemberSupportCaseType.ACCOUNT_RECOVERY
+                || status != MemberSupportCaseStatus.APPROVED
+                || passwordResetVerificationId != null
+                || passwordResetCompletedAt != null || verificationId < 1) {
+            throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT);
+        }
+        passwordResetVerificationId = verificationId;
+        rowVersion++;
+    }
+
+    public void completePasswordReset(LocalDateTime now) {
+        if (caseType != MemberSupportCaseType.ACCOUNT_RECOVERY
+                || status != MemberSupportCaseStatus.APPROVED
+                || passwordResetVerificationId == null || passwordResetCompletedAt != null) {
+            throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT);
+        }
+        passwordResetCompletedAt = now;
         rowVersion++;
     }
 

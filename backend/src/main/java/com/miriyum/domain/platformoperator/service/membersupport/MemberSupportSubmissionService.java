@@ -2,6 +2,7 @@ package com.miriyum.domain.platformoperator.service.membersupport;
 
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportRegistry;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
@@ -38,15 +39,17 @@ public class MemberSupportSubmissionService {
 
     @Transactional
     public void submitAppeal(MemberAccountType accountType, String sanctionPublicId,
-                             String ignoredContact, String ignoredStatement) {
+                             MemberVerificationChannel channel, String contact, String ignoredStatement) {
         if (sanctionPublicId == null || sanctionPublicId.isBlank()) return;
         sanctions.findByPublicId(sanctionPublicId)
                 .filter(sanction -> sanction.getAccountType() == accountType)
                 .filter(sanction -> sanction.getStatus() == MemberSanctionStatus.APPLIED)
-                .flatMap(sanction -> accounts.require(accountType).findMinimal(sanction.getAccountId())
-                        .map(account -> MemberSupportCase.appeal(
-                                accountType, account.accountId(), sanction.getId(),
-                                account.supportVersion(), LocalDateTime.now(clock))))
+                .flatMap(sanction -> verifications.verifyAppeal(accountType, sanction.getAccountId(),
+                                sanction.getId(), channel, contact)
+                        .flatMap(verificationId -> accounts.require(accountType).findMinimal(sanction.getAccountId())
+                                .map(account -> MemberSupportCase.appeal(
+                                        accountType, account.accountId(), sanction.getId(), verificationId,
+                                        account.supportVersion(), LocalDateTime.now(clock)))))
                 .ifPresent(cases::save);
     }
 

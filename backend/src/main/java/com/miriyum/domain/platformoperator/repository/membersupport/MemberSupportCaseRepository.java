@@ -16,6 +16,18 @@ public interface MemberSupportCaseRepository extends JpaRepository<MemberSupport
             Long identityVerificationId, MemberSupportCaseStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select supportCase from MemberSupportCase supportCase "
+            + "where supportCase.identityVerificationId = :verificationId")
+    Optional<MemberSupportCase> findByIdentityVerificationIdForUpdate(
+            @Param("verificationId") Long verificationId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select supportCase from MemberSupportCase supportCase "
+            + "where supportCase.passwordResetVerificationId = :verificationId")
+    Optional<MemberSupportCase> findByPasswordResetVerificationIdForUpdate(
+            @Param("verificationId") Long verificationId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select supportCase from MemberSupportCase supportCase where supportCase.publicId = :publicId")
     Optional<MemberSupportCase> findByPublicIdForUpdate(@Param("publicId") String publicId);
 }

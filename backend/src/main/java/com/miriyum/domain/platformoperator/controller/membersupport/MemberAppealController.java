@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.controller.membersupport;
 
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.platformoperator.dto.membersupport.PublicMemberSupportRequests.AppealSubmissionRequest;
 import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportSubmissionService;
 import com.miriyum.global.response.ApiResponse;
@@ -25,14 +26,16 @@ public class MemberAppealController {
     @PostMapping("/api/v1/consumers/account-sanction-appeals")
     public ResponseEntity<ApiResponse<Void>> submitConsumer(@Valid @RequestBody AppealSubmissionRequest request) {
         submissions.submitAppeal(MemberAccountType.CONSUMER,
-                request.sanctionId(), request.contact(), request.statement());
+                request.sanctionId(), MemberVerificationChannel.valueOf(request.verificationChannel().name()),
+                request.contact(), request.statement());
         return ResponseEntity.accepted().body(ACCEPTED);
     }
 
     @PostMapping("/api/v1/store-operators/account-sanction-appeals")
     public ResponseEntity<ApiResponse<Void>> submitStoreOperator(@Valid @RequestBody AppealSubmissionRequest request) {
         submissions.submitAppeal(MemberAccountType.STORE_OPERATOR,
-                request.sanctionId(), request.contact(), request.statement());
+                request.sanctionId(), MemberVerificationChannel.valueOf(request.verificationChannel().name()),
+                request.contact(), request.statement());
         return ResponseEntity.accepted().body(ACCEPTED);
     }
 }

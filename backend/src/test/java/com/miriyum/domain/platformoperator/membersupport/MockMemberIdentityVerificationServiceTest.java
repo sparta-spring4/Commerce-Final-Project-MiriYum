@@ -11,6 +11,8 @@ import com.miriyum.domain.auth.membersupport.MemberAccountSnapshot;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportRegistry;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
+import com.miriyum.domain.auth.membersupport.StoreRecoveryEvidencePort;
 import com.miriyum.domain.platformoperator.dto.membersupport.PublicMemberSupportRequests.RecoveryVerificationCommand;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberIdentityVerification;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
@@ -60,7 +62,7 @@ class MockMemberIdentityVerificationServiceTest {
         MemberSupportProperties properties = properties(true);
         MockMemberIdentityVerificationService service = new MockMemberIdentityVerificationService(
                 new MemberAccountSupportRegistry(List.of(port)), repository,
-                new MemberSupportCrypto(properties.proofDigestSecret(), properties.piiEncryptionKey()),
+                new MemberSupportCrypto(properties),
                 properties, CLOCK);
 
         var valid = service.issueRecovery(MemberAccountType.CONSUMER,
@@ -84,7 +86,7 @@ class MockMemberIdentityVerificationServiceTest {
         MemberSupportProperties properties = properties(false);
         MockMemberIdentityVerificationService service = new MockMemberIdentityVerificationService(
                 mock(MemberAccountSupportRegistry.class), repository,
-                new MemberSupportCrypto(properties.proofDigestSecret(), properties.piiEncryptionKey()),
+                new MemberSupportCrypto(properties),
                 properties, CLOCK);
 
         var proof = service.issueRecovery(MemberAccountType.CONSUMER,
@@ -98,8 +100,7 @@ class MockMemberIdentityVerificationServiceTest {
     void proofIsBoundToTypeAndPurposeAndCanBeConsumedOnce() {
         MemberIdentityVerificationRepository repository = mock(MemberIdentityVerificationRepository.class);
         MemberSupportProperties properties = properties(true);
-        MemberSupportCrypto crypto = new MemberSupportCrypto(
-                properties.proofDigestSecret(), properties.piiEncryptionKey());
+        MemberSupportCrypto crypto = new MemberSupportCrypto(properties);
         MemberIdentityVerification verification = MemberIdentityVerification.recovery(
                 crypto.digest("proof"), MemberAccountType.CONSUMER, 41,
                 crypto.encrypt("new@example.com"), crypto.digest("new@example.com"),
@@ -118,6 +119,66 @@ class MockMemberIdentityVerificationServiceTest {
                 .get().extracting(result -> result.accountId()).isEqualTo(41L);
         assertThat(service.consumeForSubmission(
                 "proof", MemberAccountType.CONSUMER, MemberVerificationPurpose.MEMBER_RECOVERY)).isEmpty();
+    }
+
+    @Test
+    void storeRecoveryRequiresRepresentativeAndBusinessNumberForOneOwnedStore() {
+        MemberIdentityVerificationRepository repository = mock(MemberIdentityVerificationRepository.class);
+        MemberAccountSupportPort port = mock(MemberAccountSupportPort.class);
+        when(port.accountType()).thenReturn(MemberAccountType.STORE_OPERATOR);
+        var account = new MemberAccountSnapshot(MemberAccountType.STORE_OPERATOR, 71, false, false,
+                Instant.parse("2026-08-01T00:00:00Z"), 0);
+        when(port.findRecoveryTarget("store@example.com", "+821012345678", "대표자"))
+                .thenReturn(Optional.of(account));
+        StoreRecoveryEvidencePort evidence = mock(StoreRecoveryEvidencePort.class);
+        when(evidence.matchesOwnedStore(71, "1234567890")).thenReturn(true);
+        MemberSupportProperties properties = properties(true);
+        MockMemberIdentityVerificationService service = new MockMemberIdentityVerificationService(
+                new MemberAccountSupportRegistry(List.of(port)), repository,
+                new MemberSupportCrypto(properties),
+                properties, CLOCK, evidence);
+
+        service.issueRecovery(MemberAccountType.STORE_OPERATOR,
+                new RecoveryVerificationCommand("store@example.com", "+821012345678", "new@example.com",
+                        "0000000000", "대표자"));
+        verify(repository, never()).save(any());
+
+        service.issueRecovery(MemberAccountType.STORE_OPERATOR,
+                new RecoveryVerificationCommand("store@example.com", "+821012345678", "new@example.com",
+                        "1234567890", "대표자"));
+        verify(repository).save(any(MemberIdentityVerification.class));
+    }
+
+    @Test
+    void appealEvidenceIsBoundToAccountAndSanctionAndConsumedImmediately() {
+        MemberIdentityVerificationRepository repository = mock(MemberIdentityVerificationRepository.class);
+        when(repository.save(any(MemberIdentityVerification.class))).thenAnswer(invocation -> {
+            MemberIdentityVerification saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 17L);
+            return saved;
+        });
+        MemberAccountSupportPort port = mock(MemberAccountSupportPort.class);
+        when(port.accountType()).thenReturn(MemberAccountType.CONSUMER);
+        when(port.matchesRegisteredContact(41, MemberVerificationChannel.REGISTERED_EMAIL, "registered@example.com"))
+                .thenReturn(true);
+        MemberSupportProperties properties = properties(true);
+        MockMemberIdentityVerificationService service = new MockMemberIdentityVerificationService(
+                new MemberAccountSupportRegistry(List.of(port)), repository,
+                new MemberSupportCrypto(properties),
+                properties, CLOCK, mock(StoreRecoveryEvidencePort.class));
+
+        assertThat(service.verifyAppeal(MemberAccountType.CONSUMER, 41, 9,
+                MemberVerificationChannel.REGISTERED_EMAIL, "wrong@example.com")).isEmpty();
+        assertThat(service.verifyAppeal(MemberAccountType.CONSUMER, 41, 9,
+                MemberVerificationChannel.REGISTERED_EMAIL, "registered@example.com")).contains(17L);
+
+        ArgumentCaptor<MemberIdentityVerification> saved = ArgumentCaptor.forClass(MemberIdentityVerification.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().getAccountId()).isEqualTo(41);
+        assertThat(saved.getValue().getSourceSanctionId()).isEqualTo(9);
+        assertThat(saved.getValue().getConsumedAt()).isEqualTo(LocalDateTime.now(CLOCK));
+        assertThat(saved.getValue().consume(MemberAccountType.CONSUMER,
+                MemberVerificationPurpose.ACCOUNT_APPEAL, LocalDateTime.now(CLOCK))).isFalse();
     }
 
     private MemberSupportProperties properties(boolean stubEnabled) {

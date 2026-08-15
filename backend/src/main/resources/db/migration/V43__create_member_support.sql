@@ -30,6 +30,7 @@ CREATE TABLE member_identity_verifications (
     purpose VARCHAR(30) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     encrypted_new_email VARBINARY(1024) NULL,
     new_email_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    source_sanction_id BIGINT NULL,
     evidence_verified BOOLEAN NOT NULL,
     issued_at DATETIME(6) NOT NULL,
     expires_at DATETIME(6) NOT NULL,
@@ -42,11 +43,14 @@ CREATE TABLE member_identity_verifications (
     CONSTRAINT ck_member_identity_verifications_account_type
         CHECK (account_type IN ('CONSUMER', 'STORE_OPERATOR')),
     CONSTRAINT ck_member_identity_verifications_purpose
-        CHECK (purpose IN ('MEMBER_RECOVERY', 'ACCOUNT_APPEAL')),
+        CHECK (purpose IN ('MEMBER_RECOVERY', 'ACCOUNT_APPEAL', 'PASSWORD_RESET')),
     CONSTRAINT ck_member_identity_verifications_expiry CHECK (expires_at > issued_at),
     CONSTRAINT ck_member_identity_verifications_recovery_email CHECK (
         purpose <> 'MEMBER_RECOVERY'
         OR (encrypted_new_email IS NOT NULL AND new_email_digest IS NOT NULL)
+    ),
+    CONSTRAINT ck_member_identity_verifications_appeal_source CHECK (
+        purpose <> 'ACCOUNT_APPEAL' OR source_sanction_id IS NOT NULL
     ),
     INDEX ix_member_identity_verifications_consume
         (proof_digest, purpose, account_type, expires_at, consumed_at)
@@ -60,6 +64,8 @@ CREATE TABLE member_support_cases (
     account_id BIGINT NOT NULL,
     identity_verification_id BIGINT NULL,
     source_sanction_id BIGINT NULL,
+    password_reset_verification_id BIGINT NULL,
+    password_reset_completed_at DATETIME(6) NULL,
     status VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     target_support_version BIGINT NOT NULL,
     reason_code VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NULL,
@@ -79,6 +85,9 @@ CREATE TABLE member_support_cases (
         UNIQUE (case_type, account_type, account_id, active_case_marker),
     CONSTRAINT fk_member_support_cases_identity_verification
         FOREIGN KEY (identity_verification_id)
+        REFERENCES member_identity_verifications (member_identity_verification_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_member_support_cases_password_reset_verification
+        FOREIGN KEY (password_reset_verification_id)
         REFERENCES member_identity_verifications (member_identity_verification_id) ON DELETE RESTRICT,
     CONSTRAINT ck_member_support_cases_type
         CHECK (case_type IN ('ACCOUNT_RECOVERY', 'ACCOUNT_SANCTION', 'ACCOUNT_APPEAL')),
@@ -146,6 +155,11 @@ CREATE TABLE member_sanctions (
 
 ALTER TABLE member_support_cases
     ADD CONSTRAINT fk_member_support_cases_source_sanction
+        FOREIGN KEY (source_sanction_id)
+        REFERENCES member_sanctions (member_sanction_id) ON DELETE RESTRICT;
+
+ALTER TABLE member_identity_verifications
+    ADD CONSTRAINT fk_member_identity_verifications_source_sanction
         FOREIGN KEY (source_sanction_id)
         REFERENCES member_sanctions (member_sanction_id) ON DELETE RESTRICT;
 

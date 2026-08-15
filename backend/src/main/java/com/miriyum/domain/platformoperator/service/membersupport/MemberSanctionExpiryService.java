@@ -29,13 +29,16 @@ public class MemberSanctionExpiryService {
         var due = sanctions.findExpiredForUpdate(now);
         for (var sanction : due) {
             sanction.expire(now);
-            if (sanction.getLevel() == MemberSanctionLevel.TEMPORARY_SUSPENSION
-                    && !sanctions.existsOtherActiveSuspension(
-                    sanction.getAccountType(), sanction.getAccountId(), sanction.getId(), now)) {
-                var port = accounts.require(sanction.getAccountType());
-                port.findMinimal(sanction.getAccountId()).ifPresent(snapshot ->
-                        port.clearSuspension(sanction.getAccountId(), snapshot.supportVersion()));
-            }
+            var port = accounts.require(sanction.getAccountType());
+            port.findMinimal(sanction.getAccountId()).ifPresent(snapshot -> {
+                if (sanction.getLevel() == MemberSanctionLevel.TEMPORARY_SUSPENSION
+                        && !sanctions.existsOtherActiveSuspension(
+                        sanction.getAccountType(), sanction.getAccountId(), sanction.getId(), now)) {
+                    port.clearSuspension(sanction.getAccountId(), snapshot.supportVersion());
+                } else {
+                    port.advanceSupportVersion(sanction.getAccountId(), snapshot.supportVersion());
+                }
+            });
         }
         return due.size();
     }

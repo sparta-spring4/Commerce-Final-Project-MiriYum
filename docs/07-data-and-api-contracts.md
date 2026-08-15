@@ -12,7 +12,7 @@ V40의 역할·직접 권한 grant, 사건 배정과 재인증 승인 원장이 
 
 ## 회원지원 데이터·API 계약
 
-V42의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
+V43의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
 
 ## OpenAPI 소유권과 진입점
 

@@ -30,7 +30,7 @@ class MemberSupportMigrationIT {
             flyway.migrate();
 
             assertThat(flyway.info().applied()).extracting(MigrationInfo::getScript)
-                    .contains("V42__create_member_support.sql");
+                    .contains("V43__create_member_support.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(columns(connection, "consumer_accounts"))
                         .contains("password_reset_required", "support_version");
@@ -46,6 +46,10 @@ class MemberSupportMigrationIT {
                         .contains("retention_until")
                         .doesNotContain("email", "phone", "password", "approval");
                 assertThat(columns(connection, "member_sanctions")).contains("sanction_public_id");
+                assertThat(columns(connection, "member_identity_verifications"))
+                        .contains("source_sanction_id", "consumed_at", "expires_at");
+                assertThat(columns(connection, "member_support_cases"))
+                        .contains("password_reset_verification_id", "password_reset_completed_at");
 
                 long operatorId = insertOperator(connection);
                 try (var statement = connection.prepareStatement("""

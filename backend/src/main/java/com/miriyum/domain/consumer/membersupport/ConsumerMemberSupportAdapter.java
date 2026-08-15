@@ -8,6 +8,7 @@ import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
 import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
@@ -57,6 +58,21 @@ public class ConsumerMemberSupportAdapter implements MemberAccountSupportPort {
         return repository.findByEmailAndPhone(oldEmail, registeredPhone).map(this::snapshot);
     }
 
+    @Override public Optional<MemberAccountSnapshot> findRecoveryTarget(
+            String oldEmail, String registeredPhone, String representativeName) {
+        if (representativeName != null) return Optional.empty();
+        return findRecoveryTarget(oldEmail, registeredPhone);
+    }
+
+    @Override @Transactional(readOnly = true)
+    public boolean matchesRegisteredContact(long accountId, MemberVerificationChannel channel, String contact) {
+        if (channel == null || contact == null) return false;
+        return repository.findById(accountId).map(account -> switch (channel) {
+            case REGISTERED_EMAIL -> account.getEmail().equalsIgnoreCase(contact.trim());
+            case REGISTERED_PHONE -> account.getPhone().equals(contact.trim());
+        }).orElse(false);
+    }
+
     @Override
     @Transactional(readOnly = true)
     public MemberAccountPage search(MemberSearchCriteria criteria, MemberStatus status, int offset, int limit) {
@@ -93,6 +109,14 @@ public class ConsumerMemberSupportAdapter implements MemberAccountSupportPort {
         ConsumerAccount account = requireLocked(accountId);
         account.assertSupportVersion(expectedVersion);
         account.clearSupportSuspension();
+        return account.getSupportVersion();
+    }
+
+    @Override @Transactional
+    public long advanceSupportVersion(long accountId, long expectedVersion) {
+        ConsumerAccount account = requireLocked(accountId);
+        account.assertSupportVersion(expectedVersion);
+        account.advanceSupportVersion();
         return account.getSupportVersion();
     }
 

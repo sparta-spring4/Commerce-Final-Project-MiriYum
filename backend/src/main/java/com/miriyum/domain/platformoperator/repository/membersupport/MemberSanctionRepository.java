@@ -18,6 +18,13 @@ public interface MemberSanctionRepository extends JpaRepository<MemberSanction, 
 
     Optional<MemberSanction> findByPublicId(String publicId);
 
+    @Query("select sanction from MemberSanction sanction where sanction.accountType = :accountType "
+            + "and sanction.accountId = :accountId and sanction.status = 'APPLIED' "
+            + "and sanction.appliedAt <= :now and (sanction.endsAt is null or sanction.endsAt > :now)")
+    List<MemberSanction> findActive(@Param("accountType") com.miriyum.domain.auth.membersupport.MemberAccountType accountType,
+                                    @Param("accountId") long accountId,
+                                    @Param("now") LocalDateTime now);
+
     @Query(value = """
             select count(*) > 0 from member_sanctions
              where account_type = :#{#accountType.name()}

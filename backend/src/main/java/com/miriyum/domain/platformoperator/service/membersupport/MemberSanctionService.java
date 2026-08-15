@@ -81,6 +81,9 @@ public class MemberSanctionService {
             if (level == MemberSanctionLevel.TEMPORARY_SUSPENSION) {
                 accounts.require(supportCase.getAccountType()).applySuspension(
                         supportCase.getAccountId(), expectedSupportVersion);
+            } else {
+                accounts.require(supportCase.getAccountType()).advanceSupportVersion(
+                        supportCase.getAccountId(), expectedSupportVersion);
             }
             supportCase.decide(MemberSupportCaseStatus.APPROVED, level.name(), now);
         }

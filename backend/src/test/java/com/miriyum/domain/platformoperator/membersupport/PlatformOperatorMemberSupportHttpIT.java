@@ -16,6 +16,16 @@ import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
+import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
+import com.miriyum.domain.auth.membersupport.RestrictedFeature;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Set;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -46,7 +56,8 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.member-support.enabled=true",
         "miriyum.member-support.dev-stub-enabled=true",
         "miriyum.member-support.proof-digest-secret=test-only-member-proof-secret",
-        "miriyum.member-support.pii-encryption-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "miriyum.member-support.pii-encryption-active-key-version=1",
+        "miriyum.member-support.pii-encryption-active-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "miriyum.store.schedule.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
         "miriyum.menu.schedule.enabled=false"
@@ -71,9 +82,13 @@ class PlatformOperatorMemberSupportHttpIT {
     @Autowired PlatformOperatorRoleGrantRepository roleGrants;
     @Autowired ConsumerAccountRepository consumers;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired MemberSanctionRepository sanctions;
+    @Autowired MemberSupportCaseRepository supportCases;
 
     @BeforeEach
     void clean() {
+        sanctions.deleteAll();
+        supportCases.deleteAll();
         authEvents.deleteAll();
         roleGrants.deleteAll();
         operators.deleteAll();
@@ -133,6 +148,33 @@ class PlatformOperatorMemberSupportHttpIT {
                 .andExpect(jsonPath("$.data.content.length()").value(1))
                 .andExpect(jsonPath("$.data.content[0].accountId").value(suspended.getId()))
                 .andExpect(jsonPath("$.data.content[0].status").value("TEMPORARILY_SUSPENDED"));
+    }
+
+    @Test
+    void activeFeatureSanctionIsProjectedAndFilteredFromMysqlLedger() throws Exception {
+        ConsumerAccount consumer = consumers.saveAndFlush(ConsumerAccount.createWithContact(
+                "feature@example.com", "password-hash", "feature", "+821033333333", "feature-ref"));
+        PlatformOperatorAccount operator = createOperator();
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.MEMBER_SUPPORT_OPERATOR, Instant.now()));
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        MemberSupportCase supportCase = supportCases.saveAndFlush(MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, consumer.getId(), 0, "ABUSE", now));
+        sanctions.saveAndFlush(MemberSanction.propose(supportCase, MemberSanctionLevel.FEATURE_RESTRICTION,
+                Set.of(RestrictedFeature.RESERVATION), "ABUSE", "v1", operator.getId(), now));
+        String accessToken = activateAndLogin(operator.getEmail());
+
+        mvc.perform(get("/api/v1/platform-operators/members")
+                        .param("accountType", "CONSUMER")
+                        .param("status", "FEATURE_RESTRICTED")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].status").value("FEATURE_RESTRICTED"))
+                .andExpect(jsonPath("$.data.content[0].activeSanctions[0].level")
+                        .value("FEATURE_RESTRICTION"))
+                .andExpect(jsonPath("$.data.content[0].activeSanctions[0].restrictedFeatures[0]")
+                        .value("RESERVATION"));
     }
 
     private PlatformOperatorAccount createOperator() {

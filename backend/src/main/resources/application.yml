@@ -67,8 +67,13 @@ miriyum:
   member-support:
     enabled: ${MIRIYUM_MEMBER_SUPPORT_ENABLED:false}
     proof-digest-secret: ${MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET:}
-    pii-encryption-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_KEY:}
+    pii-encryption-active-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY_VERSION:0}
+    pii-encryption-active-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY:}
+    pii-encryption-previous-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY_VERSION:0}
+    pii-encryption-previous-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY:}
     verification-ttl: ${MIRIYUM_MEMBER_SUPPORT_VERIFICATION_TTL:PT15M}
+    recovery-completion-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_COMPLETION_TTL:P30D}
+    recovery-tracking-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_TRACKING_TTL:P365D}
     assignment-ttl: ${MIRIYUM_MEMBER_SUPPORT_ASSIGNMENT_TTL:PT30M}
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   auth:

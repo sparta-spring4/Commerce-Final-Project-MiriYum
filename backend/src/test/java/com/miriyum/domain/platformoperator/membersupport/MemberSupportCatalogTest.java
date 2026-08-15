@@ -8,6 +8,7 @@ import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.auth.membersupport.RestrictedFeature;
 import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
 import org.junit.jupiter.api.Test;
 
 class MemberSupportCatalogTest {
@@ -40,5 +41,7 @@ class MemberSupportCatalogTest {
         assertThat(RestrictedFeature.values()).containsExactly(
                 RestrictedFeature.RESERVATION, RestrictedFeature.WAITING, RestrictedFeature.PICKUP,
                 RestrictedFeature.STORE_OPERATION, RestrictedFeature.MENU_OPERATION);
+        assertThat(MemberVerificationPurpose.values()).extracting(Enum::name).containsExactly(
+                "MEMBER_RECOVERY", "ACCOUNT_APPEAL", "PASSWORD_RESET");
     }
 }

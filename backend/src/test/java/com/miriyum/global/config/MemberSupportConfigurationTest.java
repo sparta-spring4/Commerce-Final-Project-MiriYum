@@ -23,4 +23,24 @@ class MemberSupportConfigurationTest {
         new MemberSupportProperties(true, "proof", key,
                 Duration.ofMinutes(15), Duration.ofMinutes(30), true);
     }
+
+    @Test
+    void previousEncryptionKeyRequiresACompleteDistinctVersionedPair() {
+        String activeKey = Base64.getEncoder().encodeToString(new byte[32]);
+        byte[] previousBytes = new byte[32];
+        java.util.Arrays.fill(previousBytes, (byte) 1);
+        String previousKey = Base64.getEncoder().encodeToString(previousBytes);
+
+        MemberSupportProperties properties = new MemberSupportProperties(
+                true, "proof", activeKey, Duration.ofMinutes(15), Duration.ofMinutes(30), true);
+        properties.setPiiEncryptionActiveKeyVersion(2);
+        properties.setPiiEncryptionPreviousKeyVersion(1);
+        properties.setPiiEncryptionPreviousKey(previousKey);
+        properties.validate();
+
+        properties.setPiiEncryptionPreviousKeyVersion(0);
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("previous encryption key");
+    }
 }

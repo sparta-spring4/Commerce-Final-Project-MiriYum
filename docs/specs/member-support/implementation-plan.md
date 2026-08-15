@@ -11,10 +11,10 @@
 ## Global Constraints
 
 - Work only in `feature/278-admin-member-support` and its isolated worktree; never modify the user's original tree or push directly to `dev`.
-- The only schema file is `backend/src/main/resources/db/migration/V42__create_member_support.sql`; never edit an existing migration.
+- The only member-support schema file is `backend/src/main/resources/db/migration/V43__create_member_support.sql`; latest `dev` owns V42 and existing migrations are never edited.
 - Controllers and services exist only when both `miriyum.platform-operator.enabled=true` and `miriyum.member-support.enabled=true`; the external paths are real MVC 404 when disabled.
 - The dev mock verifier is usable only when `miriyum.identity-verification.dev-stub-enabled=true`; otherwise verification fails closed.
-- Member-support configuration keys are `miriyum.member-support.enabled`, `proof-digest-secret`, `pii-encryption-key`, `verification-ttl=PT15M`, and `assignment-ttl=PT30M`; the two secrets are distinct and the encryption key is base64-encoded 32 bytes.
+- Member-support configuration uses a distinct `proof-digest-secret` plus versioned AES-256-GCM `pii-encryption-active-key-version`/`pii-encryption-active-key` and optional matching previous pair. Ciphertext is `version || nonce || ciphertext`, new writes use only active, and reads accept active/previous during rotation.
 - Permission checks happen before account lookup. Missing IDs and IDs in the other account type both become `AUTH_016`; anonymous recovery/appeal submissions always return the same 202 body.
 - Never return or log password, JWT, cookie, OTP, raw reauthentication approval, mock proof, email, phone, business number, or representative name. Store the pending new email only as AES-256-GCM ciphertext and its equality digest.
 - Warning has no expiry, feature restriction lasts exactly 7 days, temporary suspension lasts exactly 30 days, and permanent suspension needs a different SUPER_ADMIN with `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
@@ -23,7 +23,7 @@
 
 ---
 
-### Task 1: Contract enums, account guard columns, and V42 schema
+### Task 1: Contract enums, account guard columns, and V43 schema
 
 **Files:**
 - Modify: `backend/src/main/java/com/miriyum/domain/auth/exception/AuthErrorCode.java`
@@ -37,7 +37,7 @@
 - Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/consumer/entity/ConsumerAccount.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/entity/StoreOperatorAccount.java`
-- Create: `backend/src/main/resources/db/migration/V42__create_member_support.sql`
+- Create: `backend/src/main/resources/db/migration/V43__create_member_support.sql`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportMigrationIT.java`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportCatalogTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/auth/membersupport/MemberAccountGuardTest.java`
@@ -48,7 +48,7 @@
 - Produces account fields `boolean passwordResetRequired` and `long supportVersion` plus methods `approveRecovery(String email)`, `replaceRecoveredPassword(String hash)`, `applySuspension()`, `clearSuspension()`, and `assertSupportVersion(long expected)`.
 - Produces error codes `AUTH_016 MEMBER_SUPPORT_NOT_FOUND`, `AUTH_017 MEMBER_SUPPORT_STATE_CONFLICT`, and `AUTH_018 PERMANENT_SANCTION_APPROVAL_CONFLICT`.
 
-- [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V42, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V42 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
+- [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V43, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V43 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
 
 ```java
 assertThat(appliedVersions(dataSource)).contains("42");
@@ -64,9 +64,9 @@ Run: `backend\gradlew.bat test --tests "*PlatformOperatorRoleTest" --tests "*Pla
 
 Run: `backend\gradlew.bat integrationTest --tests "*MemberSupportMigrationIT"`
 
-Expected: compile/assertion failures for missing enum values, error codes, V42, and account columns.
+Expected: compile/assertion failures for missing enum values, error codes, V43, and account columns.
 
-- [x] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V42 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
+- [x] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V43 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
 
 ```java
 public void assertSupportVersion(long expected) {
@@ -415,4 +415,138 @@ Expected: every path is in the active spec allowlist and no whitespace errors.
 
 - [ ] **Step 5: Use `superpowers:requesting-code-review`, fix every confirmed issue test-first, then use `superpowers:verification-before-completion` and `superpowers:finishing-a-development-branch`.**
 
-- [ ] **Step 6: Commit remaining verified changes, push only `feature/278-admin-member-support`, and create a Draft PR targeting `dev`.** Include test evidence, known pre-existing store aggregate lint debt, migration V42, security invariants, and no direct dev push.
+- [ ] **Step 6: Commit remaining verified changes, push only `feature/278-admin-member-support`, and create a Draft PR targeting `dev`.** Include test evidence, known pre-existing store aggregate lint debt, migration V43, security invariants, and no direct dev push.
+
+### Task 11: Separate approval-gated password reset credential
+
+**Files:**
+- Modify: `backend/src/main/resources/db/migration/V43__create_member_support.sql`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/MemberIdentityVerification.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/MemberSupportCase.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/repository/membersupport/MemberIdentityVerificationRepository.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/repository/membersupport/MemberSupportCaseRepository.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberPasswordResetCredentialService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/controller/membersupport/MemberRecoveryController.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportCookieFactory.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportProperties.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberRecoveryPasswordResetTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/PublicMemberSupportHttpIT.java`
+
+**Interfaces:**
+- Recovery submission renews only an opaque case-tracking cookie for the configured recovery-completion window.
+- After approval, `exchange(MemberAccountType, trackingProof)` rotates a distinct `PASSWORD_RESET` verification and returns a short-lived opaque reset proof.
+- Password reset locks the reset verification and approved case, validates purpose/type/expiry/current pointer, consumes it once, and marks the case reset-complete in the same transaction.
+
+- [ ] **Step 1: Add failing tests for approval after the original 15-minute verification TTL, expired reset proof, double use, and an older rotated proof.**
+
+```java
+assertThat(credentials.exchange(CONSUMER, trackingProof)).isPresent();
+credentials.reset(CONSUMER, resetProof, "Changed2@");
+assertThatThrownBy(() -> credentials.reset(CONSUMER, resetProof, "Changed3#"))
+        .isInstanceOf(ServiceException.class);
+```
+
+- [ ] **Step 2: Run RED.**
+
+Run: `backend\gradlew.bat test --tests "*MemberRecoveryPasswordResetTest"`
+
+- [ ] **Step 3: Implement the separate credential, V43 columns/checks, cookie paths and approval-gated exchange HTTP path.** Never persist or log the raw tracking/reset proof.
+
+- [ ] **Step 4: Run GREEN and the focused public HTTP/MySQL tests.**
+
+### Task 12: Store recovery ownership evidence and appeal contact evidence
+
+**Files:**
+- Modify: `backend/src/main/java/com/miriyum/domain/auth/membersupport/MemberAccountSupportPort.java`
+- Create: `backend/src/main/java/com/miriyum/domain/auth/membersupport/StoreRecoveryEvidencePort.java`
+- Create: `backend/src/main/java/com/miriyum/domain/store/membersupport/StoreRecoveryEvidenceAdapter.java`
+- Create: `backend/src/main/java/com/miriyum/domain/store/membersupport/StoreRecoveryEvidenceRepository.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/consumer/membersupport/ConsumerMemberSupportAdapter.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/StoreOperatorMemberSupportAdapter.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/dto/membersupport/PublicMemberSupportRequests.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MockMemberIdentityVerificationService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportSubmissionService.java`
+- Test: `backend/src/test/java/com/miriyum/domain/store/membersupport/StoreRecoveryEvidenceAdapterTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MockMemberIdentityVerificationServiceTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportSubmissionServiceTest.java`
+
+**Interfaces:**
+- Store recovery succeeds only when account email, phone, representative display name, and one owned store business number all match.
+- Appeal verification is purpose/account/sanction-bound, checks the selected registered contact channel, is consumed once, and persists no raw contact or statement.
+
+- [ ] **Step 1: Add failing mismatch tests for business number, representative name, wrong contact, another account contact and replay.**
+- [ ] **Step 2: Run RED with the three focused test classes.**
+- [ ] **Step 3: Implement the dedicated store-owned adapter and appeal verification lifecycle.**
+- [ ] **Step 4: Run GREEN and privacy assertions.**
+
+### Task 13: Apply account CAS to every enforcement and appeal decision
+
+**Files:**
+- Modify: `backend/src/main/java/com/miriyum/domain/auth/membersupport/MemberAccountSupportPort.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/consumer/entity/ConsumerAccount.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/entity/StoreOperatorAccount.java`
+- Modify: both account member-support adapters
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSanctionService.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberAppealService.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSanctionServiceTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberAppealServiceTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportConcurrencyIT.java`
+
+**Interfaces:**
+- `advanceSupportVersion(accountId, expectedVersion)` locks the owned account, checks the expected version and increments exactly once without changing suspension/password state.
+- WARNING, FEATURE_RESTRICTION, UPHOLD, and any reduction/cancellation that does not call suspension transition use this CAS operation.
+
+- [ ] **Step 1: Add failing unit tests and a MySQL recovery-versus-feature-restriction race.** Assert one success, one `AUTH_017`, and rollback of losing case/reauthentication/audit state.
+- [ ] **Step 2: Run RED.**
+- [ ] **Step 3: Add the owned account CAS operation and call it exactly once per final command.**
+- [ ] **Step 4: Run GREEN for unit and real MySQL concurrency tests.**
+
+### Task 14: Compute five member states from active sanction projection
+
+**Files:**
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/MemberSanction.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/repository/membersupport/MemberSanctionRepository.java`
+- Create: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/ActiveMemberSanctionReader.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/dto/membersupport/MemberSupportResponses.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportQueryService.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportQueryServiceTest.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/PlatformOperatorMemberSupportHttpIT.java`
+
+**Interfaces:**
+- The reader returns only APPLIED sanctions whose `appliedAt <= now` and whose optional `endsAt` is still in the future, grouped by account type and ID.
+- Status precedence is PERMANENTLY_SUSPENDED, TEMPORARILY_SUSPENDED, PASSWORD_RESET_REQUIRED, FEATURE_RESTRICTED, ACTIVE.
+- Filtering, total count, global joined-at/public-ID ordering and pagination run on the computed projection; every member response contains `activeSanctions` with level, feature set and nullable end time.
+
+- [ ] **Step 1: Add failing projection tests for feature restriction, permanent suspension, summaries, total and second-page ordering.**
+- [ ] **Step 2: Run RED.**
+- [ ] **Step 3: Implement active sanction reading and computed projection.**
+- [ ] **Step 4: Run GREEN including real MySQL/HTTP contract tests.**
+
+### Task 15: Review remediation contract and publication
+
+**Files:**
+- Modify: `docs/specs/member-support/spec.md`
+- Modify: `docs/specs/member-support/openapi.yaml`
+- Modify audience OpenAPI refs only when route inventory requires them.
+
+- [ ] **Step 1: Add contract tests for the reset-credential exchange path and required `activeSanctions`.**
+- [ ] **Step 2: Update the active spec/OpenAPI and V43 only; do not add a later member-support migration.**
+- [ ] **Step 3: Run changed OpenAPI lint, architecture tests, full unit suite and integration shards A-D.**
+- [ ] **Step 4: Verify the exact allowlist and `git diff --check`, commit, push only the feature branch, reply in all six review threads with test evidence, and resolve only addressed threads.**
+
+### Task 16: Versioned PII encryption key rotation
+
+**Files:**
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportCrypto.java`
+- Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/MemberSupportProperties.java`
+- Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportCryptoTest.java`
+- Test: `backend/src/test/java/com/miriyum/global/config/MemberSupportConfigurationTest.java`
+- Modify: `backend/src/main/resources/application.yml`
+- Modify: `deploy/.env.example`
+- Modify: `deploy/ecs/production-secret-contract.json`
+- Modify: `docs/deployment/ecs-production-secret-contract.md`
+
+- [x] **Step 1: Add failing tests for the version prefix, previous-key reads, active-key writes, unknown versions and incomplete previous pairs.**
+- [x] **Step 2: Implement authenticated `version || nonce || ciphertext` payloads and active/previous key selection.**
+- [x] **Step 3: Document production secret names, rotation order, backup responsibility and irreversible key-loss behavior without committing secret values.**
+- [ ] **Step 4: Re-run full unit, deployment-contract, MySQL/HTTP integration, OpenAPI and allowlist verification before publication.**

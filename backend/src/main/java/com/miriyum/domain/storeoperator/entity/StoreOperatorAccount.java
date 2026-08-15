@@ -119,4 +119,6 @@ public class StoreOperatorAccount extends BaseEntity {
         this.status = StoreOperatorAccountStatus.ACTIVE;
         this.supportVersion++;
     }
+
+    public void advanceSupportVersion() { this.supportVersion++; }
 }

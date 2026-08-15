@@ -55,10 +55,11 @@
 
 1. 소비자 또는 식당 운영자는 자기 계정 유형 namespace에서 mock 확인을 요청한다. 소비자는 기존 등록 이메일, 등록 휴대전화, 새 이메일을 제출한다. 식당 운영자는 이에 더해 관리 중인 매장 한 곳의 사업자등록번호와 대표자명을 제출한다.
 2. mock verifier는 원문을 응답·로그·감사에 남기지 않고 모든 요청에 같은 형태의 목적 결속 증거 쿠키를 발급한다. 조건이 맞을 때에만 서버가 digest와 암호화된 새 이메일을 저장한다.
-3. 사용자가 사건 접수를 요청하면 유효한 증거를 한 번 소비하고 `SUBMITTED` 사건을 만든다. 겉으로는 항상 같은 202를 반환한다.
+3. 사용자가 사건 접수를 요청하면 유효한 증거를 한 번 소비하고 `SUBMITTED` 사건을 만든다. 겉으로는 항상 같은 202를 반환하며, 최초 15분 증거와 별개로 장기 승인 지연을 견디는 365일 추적 쿠키를 같은 형태로 갱신한다. 추적 쿠키만으로는 비밀번호를 바꿀 수 없다.
 4. `MEMBER_RECOVERY` 운영자가 사건을 자기에게 배정하고 승인 또는 거절한다.
 5. 승인은 한 MySQL transaction에서 새 이메일 교체, 모든 refresh state 폐기, `password_reset_required=true`, `support_version` 증가, 사건 종결, 고위험 감사 기록을 확정한다. 이후 카카오를 포함한 모든 로그인은 새 비밀번호 설정 전까지 차단한다.
-6. 사용자는 복구 쿠키로 새 비밀번호를 설정한다. 성공 시 다시 모든 세션을 폐기하고 `password_reset_required=false`로 바꾸되 현재 제재는 제거하지 않는다. 자동 로그인하지 않는다.
+6. 승인 후 사용자는 추적 쿠키를 한 번 교환해 별도 목적에 결속된 15분·1회용 비밀번호 재설정 쿠키를 받는다. 교환 성공 여부도 같은 202와 같은 쿠키 형태로 감춘다. 교환은 승인 시점부터 30일까지만 가능하며 사용한 추적 쿠키와 발급된 재설정 자격은 재사용할 수 없다.
+7. 사용자는 비밀번호 재설정 쿠키로 새 비밀번호를 설정한다. 성공 시 자격과 사건 완료 상태를 한 번 소비하고 모든 세션을 폐기한 뒤 `password_reset_required=false`로 바꾸되 현재 제재는 제거하지 않는다. 자동 로그인하지 않는다.
 
 복구 상태는 `SUBMITTED -> ASSIGNED -> APPROVED | REJECTED`만 허용한다. 종결 사건의 재결정과 stale version은 `409 AUTH_017`이다.
 
@@ -81,7 +82,7 @@
 
 ## 이의 접수·배정·결정
 
-사용자는 등록 휴대전화 또는 등록 이메일 중 하나에 대한 mock 확인 증거로 활성 제재 하나에 이의를 접수한다. 동일 사건에는 동시 이의 하나만 허용하고 접수 여부는 항상 같은 202로 감춘다. 이의 처리 중 기존 제재는 유지한다.
+사용자는 등록 휴대전화 또는 등록 이메일 중 하나에 대한 mock 확인 증거로 활성 제재 하나에 이의를 접수한다. 목 증거는 선택 채널·제재 대상 계정·제재 ID에 결속되어 즉시 한 번 소비되며, 다른 계정의 연락처·틀린 연락처·재사용 증거로는 사건을 만들지 않는다. 동일 사건에는 동시 이의 하나만 허용하고 접수 여부는 항상 같은 202로 감춘다. 이의 처리 중 기존 제재는 유지한다.
 
 `ACCOUNT_APPEAL_REVIEW` 운영자가 사건을 자기에게 배정한 뒤 `UPHOLD`, `REDUCE`, `CANCEL` 중 하나를 결정한다. 감경은 허용된 더 낮은 단계와 그 단계의 고정 기간·기능 묶음만 선택한다. 취소·감경은 새 불변 제재 revision을 추가하고 현재 projection을 갱신한다. 영구 정지 결과를 유지하거나 변경하는 최종 결정은 `SUPER_ADMIN`만 할 수 있다.
 
@@ -104,6 +105,8 @@
 
 이메일·전화번호·사업자번호·대표자명·비밀번호·OTP·JWT·cookie·재인증 원문·mock 증거 원문은 애플리케이션 로그와 감사에 저장하지 않는다. 복구 감사는 사건 종결 후 3년 보존 대상으로 표시한다.
 
+복구 PII 암호문은 인증된 1-byte key version, nonce, AES-256-GCM ciphertext 순서로 저장한다. 설정은 active version/key와 선택적인 previous version/key를 함께 받아 새 암호문은 active로만 쓰고 회전 기간에는 두 버전을 읽는다. 키 분실 시 해당 버전 암호문은 복구할 수 없으므로 운영 비밀 저장소에서 버전별로 백업하고, 원문 키는 응답·로그·감사에 남기지 않는다.
+
 ## HTTP와 오류 계약
 
 정확한 path·request·response는 `openapi.yaml`이 소유한다. 모든 운영자 고위험 POST는 `X-Admin-Reauthentication`, `If-Match` 사건 또는 계정 version, `Idempotency-Key`를 요구한다.
@@ -119,7 +122,7 @@
 
 ## migration
 
-신규 migration은 반드시 `backend/src/main/resources/db/migration/V42__create_member_support.sql` 하나다. 기존 migration을 수정하지 않는다. 복구·제재·이의·추가 승인·감사·mock 확인 session·대상 guard 원장을 만들고 `consumer_accounts`, `store_operator_accounts`에 `password_reset_required`, `support_version`을 추가한다. 연락처·인증 비밀 원문은 신규 테이블에 저장하지 않는다.
+신규 migration은 반드시 `backend/src/main/resources/db/migration/V43__create_member_support.sql` 하나다. 최신 `dev`의 파일 메타데이터 migration이 V42를 선점했으므로 다음 빈 버전 V43을 사용하며 기존 migration을 수정하지 않는다. 복구·제재·이의·추가 승인·감사·mock 확인 session·대상 guard 원장을 만들고 `consumer_accounts`, `store_operator_accounts`에 `password_reset_required`, `support_version`을 추가한다. 연락처·인증 비밀 원문은 신규 테이블에 저장하지 않는다.
 
 ## 변경 파일 allowlist
 
@@ -137,6 +140,7 @@
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorAuthService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/service/StoreOperatorKakaoAuthService.java`
 - `backend/src/main/java/com/miriyum/domain/storeoperator/membersupport/**`
+- `backend/src/main/java/com/miriyum/domain/store/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/config/membersupport/**`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/dto/membersupport/**`
@@ -149,10 +153,11 @@
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/**`
 - `backend/src/main/java/com/miriyum/global/security/SecurityConfig.java`
 - `backend/src/main/resources/application.yml`
-- `backend/src/main/resources/db/migration/V42__create_member_support.sql`
+- `backend/src/main/resources/db/migration/V43__create_member_support.sql`
 - `backend/src/test/java/com/miriyum/domain/auth/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/consumer/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/storeoperator/membersupport/**`
+- `backend/src/test/java/com/miriyum/domain/store/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/config/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorRoleTest.java`
@@ -184,12 +189,15 @@
 - `docs/specs/member-support/openapi.yaml`
 - `docs/specs/member-support/implementation-plan.md`
 - `redocly.yaml`
+- `deploy/.env.example`
+- `deploy/ecs/production-secret-contract.json`
+- `docs/deployment/ecs-production-secret-contract.md`
 
-`docs/superpowers/**`, 기존 migration, 다른 도메인의 Entity·Repository 직접 참조, frontend, 배포 파일, dev 직접 push는 allowlist 밖이다. 구현 중 새 파일 필요가 발견되면 먼저 이 명세의 allowlist와 계획을 갱신하고 별도 검토를 받는다.
+`docs/superpowers/**`, 기존 migration, 다른 도메인의 Entity·Repository 직접 참조, frontend, 위에 명시하지 않은 배포 파일, dev 직접 push는 allowlist 밖이다. 구현 중 새 파일 필요가 발견되면 먼저 이 명세의 allowlist와 계획을 갱신하고 별도 검토를 받는다.
 
 ## 구현 계획
 
-1. 계약·정책 테스트에서 OpenAPI path, 오류, 권한 catalog와 migration V42를 먼저 실패시킨다.
+1. 계약·정책 테스트에서 OpenAPI path, 오류, 권한 catalog와 migration V43을 먼저 실패시킨다.
 2. mock 확인 증거와 계정 유형별 public 최소 조회·복구·제재 port를 테스트 주도로 만든다.
 3. MySQL migration과 복구·제재·이의 사건 원장, version CAS, 감사 writer를 구현한다.
 4. 운영자 최소 조회·사건 배정·결정·영구 정지 추가 승인 HTTP를 순서대로 red-green-refactor 한다.

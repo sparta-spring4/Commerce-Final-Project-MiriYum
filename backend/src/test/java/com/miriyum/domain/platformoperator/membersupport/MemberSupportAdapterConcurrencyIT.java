@@ -37,7 +37,8 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.member-support.enabled=true",
         "miriyum.member-support.dev-stub-enabled=true",
         "miriyum.member-support.proof-digest-secret=test-only-member-proof-secret",
-        "miriyum.member-support.pii-encryption-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "miriyum.member-support.pii-encryption-active-key-version=1",
+        "miriyum.member-support.pii-encryption-active-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "miriyum.store.schedule.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
         "miriyum.menu.schedule.enabled=false"
@@ -64,7 +65,7 @@ class MemberSupportAdapterConcurrencyIT {
     }
 
     @Test
-    void recoveryAndSuspensionHaveOneValidTransitionAndOneStateConflict() throws Exception {
+    void recoveryAndFeatureRestrictionHaveOneValidTransitionAndOneStateConflict() throws Exception {
         ConsumerAccount account = accounts.saveAndFlush(ConsumerAccount.createWithContact(
                 "race@example.com", "hash", "race", "+821012345678", "contact-ref"));
         CountDownLatch ready = new CountDownLatch(2);
@@ -73,12 +74,12 @@ class MemberSupportAdapterConcurrencyIT {
         try (var executor = Executors.newFixedThreadPool(2)) {
             var recovery = executor.submit(() -> race(ready, start,
                     () -> adapter.approveRecovery(account.getId(), 0, "recovered@example.com")));
-            var suspension = executor.submit(() -> race(ready, start,
-                    () -> adapter.applySuspension(account.getId(), 0)));
+            var restriction = executor.submit(() -> race(ready, start,
+                    () -> adapter.advanceSupportVersion(account.getId(), 0)));
             ready.await();
             start.countDown();
 
-            assertThat(List.of(recovery.get(), suspension.get()))
+            assertThat(List.of(recovery.get(), restriction.get()))
                     .containsExactlyInAnyOrder("SUCCESS", AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT.getCode());
         }
 
@@ -87,10 +88,10 @@ class MemberSupportAdapterConcurrencyIT {
         boolean recovered = committed.isPasswordResetRequired()
                 && committed.getEmail().equals("recovered@example.com")
                 && committed.getStatus() == ConsumerAccountStatus.ACTIVE;
-        boolean suspended = !committed.isPasswordResetRequired()
+        boolean restricted = !committed.isPasswordResetRequired()
                 && committed.getEmail().equals("race@example.com")
-                && committed.getStatus() == ConsumerAccountStatus.SUSPENDED;
-        assertThat(recovered || suspended).isTrue();
+                && committed.getStatus() == ConsumerAccountStatus.ACTIVE;
+        assertThat(recovered || restricted).isTrue();
     }
 
     private String race(CountDownLatch ready, CountDownLatch start, Transition transition) throws Exception {

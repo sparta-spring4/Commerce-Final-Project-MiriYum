@@ -10,6 +10,7 @@ import com.miriyum.domain.auth.membersupport.MemberAccountSnapshot;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportRegistry;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.platformoperator.dto.membersupport.PublicMemberSupportRequests.ConsumedVerification;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
@@ -85,14 +86,19 @@ class MemberSupportSubmissionServiceTest {
         when(port.accountType()).thenReturn(MemberAccountType.CONSUMER);
         when(port.findMinimal(41)).thenReturn(Optional.of(new MemberAccountSnapshot(
                 MemberAccountType.CONSUMER, 41, false, true, Instant.now(), 4)));
+        MockMemberIdentityVerificationService verifier = mock(MockMemberIdentityVerificationService.class);
+        when(verifier.verifyAppeal(MemberAccountType.CONSUMER, 41, 5,
+                MemberVerificationChannel.REGISTERED_EMAIL, "private contact")).thenReturn(Optional.of(17L));
         MemberSupportSubmissionService service = new MemberSupportSubmissionService(
-                mock(MockMemberIdentityVerificationService.class),
+                verifier,
                 new MemberAccountSupportRegistry(List.of(port)), cases, sanctions, CLOCK);
 
-        service.submitAppeal(MemberAccountType.CONSUMER, "sanction-id", "private contact", "private statement");
+        service.submitAppeal(MemberAccountType.CONSUMER, "sanction-id",
+                MemberVerificationChannel.REGISTERED_EMAIL, "private contact", "private statement");
 
         ArgumentCaptor<MemberSupportCase> saved = ArgumentCaptor.forClass(MemberSupportCase.class);
         verify(cases).save(saved.capture());
         assertThat(saved.getValue().toString()).doesNotContain("private contact", "private statement");
+        assertThat(saved.getValue().getIdentityVerificationId()).isEqualTo(17L);
     }
 }

@@ -7,6 +7,9 @@ import java.util.List;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseStatus;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseType;
 import java.time.LocalDateTime;
+import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
+import com.miriyum.domain.auth.membersupport.RestrictedFeature;
+import java.util.Set;
 
 public final class MemberSupportResponses {
     private MemberSupportResponses() {
@@ -17,8 +20,16 @@ public final class MemberSupportResponses {
             long accountId,
             MemberStatus status,
             Instant joinedAt,
-            long supportVersion
+            long supportVersion,
+            List<ActiveSanctionResponse> activeSanctions
     ) {
+        public MemberResponse { activeSanctions = List.copyOf(activeSanctions); }
+    }
+
+    public record ActiveSanctionResponse(MemberSanctionLevel level,
+                                         Set<RestrictedFeature> restrictedFeatures,
+                                         LocalDateTime endsAt) {
+        public ActiveSanctionResponse { restrictedFeatures = Set.copyOf(restrictedFeatures); }
     }
 
     public record MemberPageResponse(List<MemberResponse> content, long totalElements, int page, int size) {

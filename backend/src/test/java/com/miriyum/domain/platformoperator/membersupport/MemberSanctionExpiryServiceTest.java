@@ -52,4 +52,28 @@ class MemberSanctionExpiryServiceTest {
         assertThat(sanction.getStatus()).isEqualTo(MemberSanctionStatus.EXPIRED);
         verify(port).clearSuspension(41, 4);
     }
+
+    @Test
+    void featureRestrictionExpiryAlsoAdvancesAccountCasVersion() {
+        Clock proposedClock = Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC);
+        MemberSupportCase supportCase = MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, 41, 3, "ABUSE", LocalDateTime.now(proposedClock));
+        MemberSanction sanction = MemberSanction.propose(
+                supportCase, MemberSanctionLevel.FEATURE_RESTRICTION,
+                Set.of(com.miriyum.domain.auth.membersupport.RestrictedFeature.RESERVATION),
+                "ABUSE", "v1", 9, LocalDateTime.now(proposedClock));
+        Clock expiryClock = Clock.fixed(Instant.parse("2026-08-09T00:00:00Z"), ZoneOffset.UTC);
+        MemberSanctionRepository sanctions = mock(MemberSanctionRepository.class);
+        when(sanctions.findExpiredForUpdate(LocalDateTime.now(expiryClock))).thenReturn(List.of(sanction));
+        MemberAccountSupportPort port = mock(MemberAccountSupportPort.class);
+        when(port.accountType()).thenReturn(MemberAccountType.CONSUMER);
+        when(port.findMinimal(41)).thenReturn(Optional.of(new MemberAccountSnapshot(
+                MemberAccountType.CONSUMER, 41, false, false, Instant.now(), 4)));
+        MemberSanctionExpiryService service = new MemberSanctionExpiryService(
+                sanctions, new MemberAccountSupportRegistry(List.of(port)), expiryClock);
+
+        service.expireDueSanctions();
+
+        verify(port).advanceSupportVersion(41, 4);
+    }
 }

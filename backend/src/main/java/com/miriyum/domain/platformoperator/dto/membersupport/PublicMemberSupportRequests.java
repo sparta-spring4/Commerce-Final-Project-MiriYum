@@ -2,6 +2,7 @@ package com.miriyum.domain.platformoperator.dto.membersupport;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -9,7 +10,11 @@ public final class PublicMemberSupportRequests {
     private PublicMemberSupportRequests() {
     }
 
-    public record RecoveryVerificationCommand(String oldEmail, String registeredPhone, String newEmail) {
+    public record RecoveryVerificationCommand(String oldEmail, String registeredPhone, String newEmail,
+                                              String businessRegistrationNumber, String representativeName) {
+        public RecoveryVerificationCommand(String oldEmail, String registeredPhone, String newEmail) {
+            this(oldEmail, registeredPhone, newEmail, null, null);
+        }
         @Override
         public String toString() {
             return "RecoveryVerificationCommand[REDACTED]";
@@ -22,7 +27,7 @@ public final class PublicMemberSupportRequests {
             @NotBlank @Email @Size(max = 254) String newEmail
     ) {
         public RecoveryVerificationCommand toCommand() {
-            return new RecoveryVerificationCommand(oldEmail, registeredPhone, newEmail);
+            return new RecoveryVerificationCommand(oldEmail, registeredPhone, newEmail, null, null);
         }
 
         @Override public String toString() { return "ConsumerRecoveryVerificationRequest[REDACTED]"; }
@@ -36,7 +41,8 @@ public final class PublicMemberSupportRequests {
             @NotBlank @Size(max = 100) String representativeName
     ) {
         public RecoveryVerificationCommand toCommand() {
-            return new RecoveryVerificationCommand(oldEmail, registeredPhone, newEmail);
+            return new RecoveryVerificationCommand(oldEmail, registeredPhone, newEmail,
+                    businessRegistrationNumber, representativeName);
         }
 
         @Override public String toString() { return "StoreOperatorRecoveryVerificationRequest[REDACTED]"; }
@@ -56,7 +62,7 @@ public final class PublicMemberSupportRequests {
 
     public record AppealSubmissionRequest(
             @NotBlank @Size(max = 100) String sanctionId,
-            VerificationChannel verificationChannel,
+            @NotNull VerificationChannel verificationChannel,
             @NotBlank @Size(max = 254) String contact,
             @NotBlank @Size(max = 2000) String statement
     ) {

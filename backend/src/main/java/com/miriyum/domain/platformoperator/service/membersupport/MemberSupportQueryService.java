@@ -8,12 +8,16 @@ import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberResponse;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.ActiveSanctionResponse;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,23 +25,28 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @ConditionalOnProperty(prefix = "miriyum.member-support", name = "enabled", havingValue = "true")
 public class MemberSupportQueryService {
-    private static final Comparator<MemberAccountSnapshot> ORDER = Comparator
-            .comparing(MemberAccountSnapshot::joinedAt).reversed()
-            .thenComparing(MemberAccountSnapshot::accountId, Comparator.reverseOrder());
     private final MemberSupportAuthorizationService authorization;
     private final MemberAccountSupportRegistry accounts;
+    private final MemberSanctionRepository sanctions;
+    private final Clock clock;
+    private final MemberProjectionReader projections;
 
     public MemberSupportQueryService(MemberSupportAuthorizationService authorization,
-                                     MemberAccountSupportRegistry accounts) {
+                                     MemberAccountSupportRegistry accounts,
+                                     MemberSanctionRepository sanctions, Clock clock,
+                                     MemberProjectionReader projections) {
         this.authorization = authorization;
         this.accounts = accounts;
+        this.sanctions = sanctions;
+        this.clock = clock;
+        this.projections = projections;
     }
 
     @Transactional(readOnly = true)
     public MemberResponse get(PlatformOperatorPrincipal principal, MemberAccountType type, long accountId) {
         authorization.requirePermission(principal, PlatformOperatorPermission.MEMBER_READ_MINIMAL);
         return accounts.require(type).findMinimal(accountId)
-                .map(this::response)
+                .map(this::enrich)
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
     }
 
@@ -47,33 +56,41 @@ public class MemberSupportQueryService {
         authorization.requirePermission(principal, PlatformOperatorPermission.MEMBER_READ_MINIMAL);
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("invalid page");
         int offset = Math.multiplyExact(page, size);
-        int fetch = Math.addExact(offset, size);
-        List<MemberAccountSnapshot> merged = new ArrayList<>();
-        long total;
-        if (type != null) {
-            var result = accounts.require(type).search(criteria, status, 0, fetch);
-            merged.addAll(result.content());
-            total = result.totalElements();
-        } else {
-            var consumer = accounts.require(MemberAccountType.CONSUMER).search(criteria, status, 0, fetch);
-            var store = accounts.require(MemberAccountType.STORE_OPERATOR).search(criteria, status, 0, fetch);
-            merged.addAll(consumer.content());
-            merged.addAll(store.content());
-            total = consumer.totalElements() + store.totalElements();
-        }
-        List<MemberResponse> content = merged.stream().sorted(ORDER)
-                .skip(offset).limit(size).map(this::response).toList();
-        return new MemberPageResponse(content, total, page, size);
+        LocalDateTime now = LocalDateTime.now(clock);
+        var result = projections.read(type, status, criteria, offset, size, now);
+        List<MemberResponse> content = result.content().stream()
+                .map(row -> response(row.accountType(), row.accountId(), row.status(),
+                        row.joinedAt(), row.supportVersion(),
+                        sanctions.findActive(row.accountType(), row.accountId(), now)))
+                .toList();
+        return new MemberPageResponse(content, result.totalElements(), page, size);
     }
 
-    private MemberResponse response(MemberAccountSnapshot snapshot) {
-        return new MemberResponse(snapshot.accountType(), snapshot.accountId(), status(snapshot),
-                snapshot.joinedAt(), snapshot.supportVersion());
+    private MemberResponse enrich(MemberAccountSnapshot snapshot) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<MemberSanction> active = sanctions.findActive(snapshot.accountType(), snapshot.accountId(), now);
+        return response(snapshot.accountType(), snapshot.accountId(), status(snapshot, active),
+                snapshot.joinedAt(), snapshot.supportVersion(), active);
     }
 
-    private MemberStatus status(MemberAccountSnapshot snapshot) {
-        if (snapshot.suspended()) return MemberStatus.TEMPORARILY_SUSPENDED;
+    private MemberResponse response(MemberAccountType accountType, long accountId, MemberStatus status,
+                                    java.time.Instant joinedAt, long supportVersion,
+                                    List<MemberSanction> active) {
+        List<ActiveSanctionResponse> summaries = active.stream()
+                .map(sanction -> new ActiveSanctionResponse(
+                        sanction.getLevel(), sanction.restrictedFeatures(), sanction.getEndsAt()))
+                .toList();
+        return new MemberResponse(accountType, accountId, status, joinedAt, supportVersion, summaries);
+    }
+
+    private MemberStatus status(MemberAccountSnapshot snapshot, List<MemberSanction> active) {
+        if (active.stream().anyMatch(s -> s.getLevel() == MemberSanctionLevel.PERMANENT_SUSPENSION))
+            return MemberStatus.PERMANENTLY_SUSPENDED;
+        if (active.stream().anyMatch(s -> s.getLevel() == MemberSanctionLevel.TEMPORARY_SUSPENSION)
+                || snapshot.suspended()) return MemberStatus.TEMPORARILY_SUSPENDED;
         if (snapshot.passwordResetRequired()) return MemberStatus.PASSWORD_RESET_REQUIRED;
+        if (active.stream().anyMatch(s -> s.getLevel() == MemberSanctionLevel.FEATURE_RESTRICTION))
+            return MemberStatus.FEATURE_RESTRICTED;
         return MemberStatus.ACTIVE;
     }
 }

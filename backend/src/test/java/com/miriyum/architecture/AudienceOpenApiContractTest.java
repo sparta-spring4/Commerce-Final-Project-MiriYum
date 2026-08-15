@@ -65,10 +65,12 @@ class AudienceOpenApiContractTest {
                             "/api/v1/store-operators/me/kakao-links",
                             "/api/v1/consumers/account-recovery-verifications",
                             "/api/v1/consumers/account-recovery-cases",
+                            "/api/v1/consumers/account-recovery-password-reset-credentials",
                             "/api/v1/consumers/account-recovery-password-resets",
                             "/api/v1/consumers/account-sanction-appeals",
                             "/api/v1/store-operators/account-recovery-verifications",
                             "/api/v1/store-operators/account-recovery-cases",
+                            "/api/v1/store-operators/account-recovery-password-reset-credentials",
                             "/api/v1/store-operators/account-recovery-password-resets",
                             "/api/v1/store-operators/account-sanction-appeals"),
                     Stream.concat(

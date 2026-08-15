@@ -64,6 +64,18 @@ class MemberSanctionServiceTest {
     }
 
     @Test
+    void featureRestrictionAdvancesTheSameAccountSupportVersionCas() {
+        Fixture fixture = fixture(MemberSanctionLevel.FEATURE_RESTRICTION);
+
+        fixture.service.apply(PROPOSER, fixture.supportCase.getPublicId(), 2, 3,
+                MemberSanctionLevel.FEATURE_RESTRICTION, Set.of(RestrictedFeature.RESERVATION),
+                "ABUSE", "v1", "approval", "correlation");
+
+        verify(fixture.port).advanceSupportVersion(41, 3);
+        verify(fixture.port, never()).applySuspension(41, 3);
+    }
+
+    @Test
     void permanentSuspensionNeedsRecordedApprovalFromDifferentSuperAdmin() {
         Fixture fixture = fixture(MemberSanctionLevel.PERMANENT_SUSPENSION);
         MemberSanction pending = fixture.service.apply(

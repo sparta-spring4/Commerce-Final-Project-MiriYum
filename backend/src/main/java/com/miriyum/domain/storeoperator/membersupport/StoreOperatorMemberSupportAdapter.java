@@ -8,6 +8,7 @@ import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
 import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
+import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -52,7 +53,23 @@ public class StoreOperatorMemberSupportAdapter implements MemberAccountSupportPo
 
     @Override @Transactional(readOnly = true)
     public Optional<MemberAccountSnapshot> findRecoveryTarget(String oldEmail, String registeredPhone) {
-        return repository.findByEmailAndPhone(oldEmail, registeredPhone).map(this::snapshot);
+        return Optional.empty();
+    }
+
+    @Override public Optional<MemberAccountSnapshot> findRecoveryTarget(
+            String oldEmail, String registeredPhone, String representativeName) {
+        if (representativeName == null) return Optional.empty();
+        return repository.findByEmailAndPhoneAndDisplayName(
+                oldEmail, registeredPhone, representativeName.trim()).map(this::snapshot);
+    }
+
+    @Override @Transactional(readOnly = true)
+    public boolean matchesRegisteredContact(long accountId, MemberVerificationChannel channel, String contact) {
+        if (channel == null || contact == null) return false;
+        return repository.findById(accountId).map(account -> switch (channel) {
+            case REGISTERED_EMAIL -> account.getEmail().equalsIgnoreCase(contact.trim());
+            case REGISTERED_PHONE -> account.getPhone().equals(contact.trim());
+        }).orElse(false);
     }
 
     @Override @Transactional(readOnly = true)
@@ -87,6 +104,14 @@ public class StoreOperatorMemberSupportAdapter implements MemberAccountSupportPo
         StoreOperatorAccount account = requireLocked(accountId);
         account.assertSupportVersion(expectedVersion);
         account.clearSupportSuspension();
+        return account.getSupportVersion();
+    }
+
+    @Override @Transactional
+    public long advanceSupportVersion(long accountId, long expectedVersion) {
+        StoreOperatorAccount account = requireLocked(accountId);
+        account.assertSupportVersion(expectedVersion);
+        account.advanceSupportVersion();
         return account.getSupportVersion();
     }
 

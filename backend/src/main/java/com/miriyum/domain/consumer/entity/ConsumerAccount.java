@@ -130,4 +130,6 @@ public class ConsumerAccount extends BaseEntity {
         this.status = ConsumerAccountStatus.ACTIVE;
         this.supportVersion++;
     }
+
+    public void advanceSupportVersion() { this.supportVersion++; }
 }

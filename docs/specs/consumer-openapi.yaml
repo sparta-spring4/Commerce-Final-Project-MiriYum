@@ -14,6 +14,8 @@ paths:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-verifications"
   /api/v1/consumers/account-recovery-cases:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-cases"
+  /api/v1/consumers/account-recovery-password-reset-credentials:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-password-reset-credentials"
   /api/v1/consumers/account-recovery-password-resets:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1consumers~1account-recovery-password-resets"
   /api/v1/consumers/account-sanction-appeals:

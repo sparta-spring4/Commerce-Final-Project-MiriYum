@@ -46,6 +46,9 @@ public class MemberIdentityVerification extends BaseEntity {
     @Column(name = "new_email_digest", length = 64)
     private String newEmailDigest;
 
+    @Column(name = "source_sanction_id")
+    private Long sourceSanctionId;
+
     @Column(name = "evidence_verified", nullable = false)
     private boolean evidenceVerified;
 
@@ -74,6 +77,36 @@ public class MemberIdentityVerification extends BaseEntity {
         verification.purpose = MemberVerificationPurpose.MEMBER_RECOVERY;
         verification.encryptedNewEmail = encryptedNewEmail.clone();
         verification.newEmailDigest = newEmailDigest;
+        verification.evidenceVerified = true;
+        verification.issuedAt = issuedAt;
+        verification.expiresAt = expiresAt;
+        return verification;
+    }
+
+    public static MemberIdentityVerification passwordReset(
+            String proofDigest, MemberAccountType accountType, long accountId,
+            LocalDateTime issuedAt, LocalDateTime expiresAt
+    ) {
+        MemberIdentityVerification verification = new MemberIdentityVerification();
+        verification.proofDigest = proofDigest;
+        verification.accountType = accountType;
+        verification.accountId = accountId;
+        verification.purpose = MemberVerificationPurpose.PASSWORD_RESET;
+        verification.evidenceVerified = true;
+        verification.issuedAt = issuedAt;
+        verification.expiresAt = expiresAt;
+        return verification;
+    }
+
+    public static MemberIdentityVerification appeal(
+            String proofDigest, MemberAccountType accountType, long accountId, long sanctionId,
+            LocalDateTime issuedAt, LocalDateTime expiresAt) {
+        MemberIdentityVerification verification = new MemberIdentityVerification();
+        verification.proofDigest = proofDigest;
+        verification.accountType = accountType;
+        verification.accountId = accountId;
+        verification.purpose = MemberVerificationPurpose.ACCOUNT_APPEAL;
+        verification.sourceSanctionId = sanctionId;
         verification.evidenceVerified = true;
         verification.issuedAt = issuedAt;
         verification.expiresAt = expiresAt;

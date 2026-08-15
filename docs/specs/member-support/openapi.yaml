@@ -82,6 +82,32 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/consumers/account-recovery-password-reset-credentials:
+    post:
+      tags: [Member Recovery]
+      summary: 승인된 소비자 복구의 단기 비밀번호 재설정 자격 교환
+      description: 승인 지연을 위한 장기 추적 쿠키를 승인 상태와 대조해 승인 후 30일 안에 별도의 15분·1회용 재설정 쿠키로 교환한다. 성공 여부는 공개하지 않는다.
+      operationId: exchangeConsumerPasswordResetCredential
+      responses:
+        "202":
+          $ref: "#/components/responses/PrivateAccepted"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+  /api/v1/store-operators/account-recovery-password-reset-credentials:
+    post:
+      tags: [Member Recovery]
+      summary: 승인된 식당 운영자 복구의 단기 비밀번호 재설정 자격 교환
+      description: 승인 지연을 위한 장기 추적 쿠키를 승인 상태와 대조해 승인 후 30일 안에 별도의 15분·1회용 재설정 쿠키로 교환한다. 성공 여부는 공개하지 않는다.
+      operationId: exchangeStoreOperatorPasswordResetCredential
+      responses:
+        "202":
+          $ref: "#/components/responses/PrivateAccepted"
+        "400":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+        "503":
+          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/consumers/account-recovery-password-resets:
     post:
       tags: [Member Recovery]

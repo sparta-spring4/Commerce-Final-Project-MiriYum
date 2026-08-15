@@ -38,7 +38,8 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.member-support.enabled=true",
         "miriyum.member-support.dev-stub-enabled=true",
         "miriyum.member-support.proof-digest-secret=test-only-member-proof-secret",
-        "miriyum.member-support.pii-encryption-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "miriyum.member-support.pii-encryption-active-key-version=1",
+        "miriyum.member-support.pii-encryption-active-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "miriyum.store.schedule.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
         "miriyum.menu.schedule.enabled=false"

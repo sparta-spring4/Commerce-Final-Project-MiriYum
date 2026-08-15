@@ -79,7 +79,11 @@ public class MemberAppealService {
         }
         LocalDateTime now = LocalDateTime.now(clock);
         switch (outcome) {
-            case UPHOLD -> appeal.decide(MemberSupportCaseStatus.UPHELD, reasonCode, now);
+            case UPHOLD -> {
+                accounts.require(appeal.getAccountType()).advanceSupportVersion(
+                        appeal.getAccountId(), expectedSupportVersion);
+                appeal.decide(MemberSupportCaseStatus.UPHELD, reasonCode, now);
+            }
             case REDUCE -> reduce(principal, appeal, original, expectedSupportVersion,
                     reducedLevel, features, reasonCode, now);
             case CANCEL -> cancel(principal, appeal, original, expectedSupportVersion, reasonCode, now);
@@ -101,6 +105,9 @@ public class MemberAppealService {
                 appeal, original, reducedLevel, features, reasonCode, principal.accountId(), now));
         if (isSuspension(original.getLevel()) && !isSuspension(reducedLevel)) {
             accounts.require(appeal.getAccountType()).clearSuspension(appeal.getAccountId(), expectedSupportVersion);
+        } else {
+            accounts.require(appeal.getAccountType()).advanceSupportVersion(
+                    appeal.getAccountId(), expectedSupportVersion);
         }
         appeal.decide(MemberSupportCaseStatus.REDUCED, reasonCode, now);
     }
@@ -113,6 +120,9 @@ public class MemberAppealService {
         sanctions.save(MemberSanction.cancelledRevision(appeal, original, reasonCode, principal.accountId(), now));
         if (isSuspension(original.getLevel())) {
             accounts.require(appeal.getAccountType()).clearSuspension(appeal.getAccountId(), expectedSupportVersion);
+        } else {
+            accounts.require(appeal.getAccountType()).advanceSupportVersion(
+                    appeal.getAccountId(), expectedSupportVersion);
         }
         appeal.decide(MemberSupportCaseStatus.CANCELLED, reasonCode, now);
     }

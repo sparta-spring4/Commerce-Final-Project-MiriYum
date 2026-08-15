@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface StoreOperatorMemberSupportRepository extends JpaRepository<StoreOperatorAccount, Long> {
     Optional<StoreOperatorAccount> findByEmailAndPhone(String email, String phone);
+    Optional<StoreOperatorAccount> findByEmailAndPhoneAndDisplayName(String email, String phone, String displayName);
 
     @Query(value = "SELECT * FROM store_operator_accounts WHERE store_operator_account_id = :accountId FOR UPDATE",
             nativeQuery = true)

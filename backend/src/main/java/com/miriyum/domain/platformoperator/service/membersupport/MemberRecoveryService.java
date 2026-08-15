@@ -7,6 +7,7 @@ import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignment
 import com.miriyum.domain.platformoperator.dto.authorization.HighRiskCommandRequest;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseStatus;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseType;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
 import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
 import com.miriyum.domain.platformoperator.enums.AdminTargetType;
@@ -88,14 +89,18 @@ public class MemberRecoveryService {
         if (rawProof == null || rawProof.isBlank()) {
             throw new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND);
         }
-        var verification = verifications.findByProofDigest(crypto.digest(rawProof))
+        LocalDateTime now = LocalDateTime.now(clock);
+        var verification = verifications.findByProofDigestForUpdate(crypto.digest(rawProof))
                 .filter(candidate -> candidate.getAccountType() == accountType)
+                .filter(candidate -> candidate.consume(
+                        accountType, MemberVerificationPurpose.PASSWORD_RESET, now))
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
-        var supportCase = cases.findByIdentityVerificationIdAndStatus(
-                        verification.getId(), MemberSupportCaseStatus.APPROVED)
+        var supportCase = cases.findByPasswordResetVerificationIdForUpdate(verification.getId())
+                .filter(candidate -> candidate.getStatus() == MemberSupportCaseStatus.APPROVED)
                 .filter(candidate -> candidate.getAccountType() == accountType)
                 .filter(candidate -> candidate.getAccountId() == verification.getAccountId())
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
         accounts.require(accountType).replaceRecoveredPassword(supportCase.getAccountId(), newPassword);
+        supportCase.completePasswordReset(now);
     }
 }

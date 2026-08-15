@@ -17,6 +17,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.AccessLevel;
@@ -144,6 +145,15 @@ public class MemberSanction extends BaseEntity {
         if (status != MemberSanctionStatus.APPLIED) conflict();
         status = MemberSanctionStatus.CANCELLED;
         rowVersion++;
+    }
+
+    public Set<RestrictedFeature> restrictedFeatures() {
+        if (restrictedFeaturesJson == null || restrictedFeaturesJson.equals("[]")) return Set.of();
+        return Arrays.stream(restrictedFeaturesJson.substring(1, restrictedFeaturesJson.length() - 1).split(","))
+                .map(value -> value.replace("\"", "").trim())
+                .filter(value -> !value.isBlank())
+                .map(RestrictedFeature::valueOf)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private static void conflict() {
