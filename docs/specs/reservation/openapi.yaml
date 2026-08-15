@@ -552,6 +552,81 @@ paths:
         "409":
           $ref: "#/components/responses/ReservationTimePolicyConflict"
 components:
+  pathItems:
+    Mvp1ConsumerReservations:
+      post:
+        tags: [Reservation]
+        summary: 일반 예약과 선택 메뉴 홀드 생성
+        operationId: createReservationMvp1
+        security:
+          - bearerAuth: []
+        parameters:
+          - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationCreateRequest"
+        responses:
+          "201":
+            description: 즉시 확정된 예약
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ReservationSuccessResponse"
+          "400":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+          "401":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+          "403":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/Forbidden"
+          "404":
+            $ref: "#/components/responses/ReservationCreationNotFound"
+          "409":
+            $ref: "#/components/responses/Mvp1ReservationCreationConflict"
+          "503":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
+      get:
+        tags: [My Page]
+        summary: 내 예약 이력 조회
+        operationId: getCurrentConsumerReservationsMvp1
+        security:
+          - bearerAuth: []
+        parameters:
+          - name: status
+            in: query
+            required: false
+            schema:
+              $ref: "#/components/schemas/ReservationHistoryStatus"
+          - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Page"
+          - $ref: "../mvp1-common/openapi.yaml#/components/parameters/Size"
+          - name: sort
+            in: query
+            description: 예약 이력 정렬. 아래 허용값 이외에는 400을 반환한다.
+            schema:
+              type: string
+              enum:
+                - "createdAt,desc"
+                - "createdAt,asc"
+                - "serviceDate,desc"
+                - "serviceDate,asc"
+                - "startAt,desc"
+                - "startAt,asc"
+              default: "createdAt,desc"
+        responses:
+          "200":
+            description: 본인 예약 이력 페이지
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ReservationHistoryPageSuccessResponse"
+          "400":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
+          "401":
+            $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
+          "403":
+            $ref: "#/components/responses/AccountRestricted"
   securitySchemes:
     bearerAuth:
       $ref: "../mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
@@ -924,6 +999,7 @@ components:
         - status
         - expiresAt
         - paymentPreparation
+        - abandonmentRequested
         - reservation
       properties:
         reservationRequestId:
@@ -934,6 +1010,11 @@ components:
           $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
         paymentPreparation:
           $ref: "#/components/schemas/ReservationPaymentPreparation"
+        abandonmentRequested:
+          type: boolean
+          description: |
+            단순 요청 수신 여부가 아니라 COMPLETED 전 process 잠금 아래 포기 의도가 성공적으로 영속화됐는지를 나타낸다.
+            영속 후에는 payment-driven 조정 상태와 독립적으로 true를 유지하며, 거절된 완료 후 command나 포기와 무관한 보상·복구는 값을 변경하지 않는다.
         reservation:
           oneOf:
             - $ref: "#/components/schemas/ReservationDetail"
@@ -1303,6 +1384,33 @@ components:
               value:
                 code: RESERVATION_001
                 message: 예약을 찾을 수 없습니다.
+    Mvp1ReservationCreationConflict:
+      description: 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            capacityConflict:
+              value:
+                code: RESERVATION_003
+                message: 요청한 시간의 예약 수용량이 부족합니다.
+            contactMissing:
+              value:
+                code: ACCOUNT_006
+                message: 예약 알림에 사용할 연락처를 먼저 등록해야 합니다.
+            ineligibleMenu:
+              value:
+                code: MENU_HOLD_001
+                message: 현재 메뉴 상태 또는 자격에서 홀드할 수 없습니다.
+            insufficientMenuQuantity:
+              value:
+                code: MENU_HOLD_002
+                message: 요청한 구간의 온라인 메뉴 수량이 부족합니다.
+            notificationSourceEventConflict:
+              value:
+                code: NOTIFICATION_002
+                message: 동일한 알림 원 사건 식별자를 다른 내용으로 사용할 수 없습니다.
     ReservationCreationConflict:
       description: 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록
       content:

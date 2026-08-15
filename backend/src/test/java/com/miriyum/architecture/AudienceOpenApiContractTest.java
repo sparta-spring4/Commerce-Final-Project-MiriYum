@@ -167,21 +167,37 @@ class AudienceOpenApiContractTest {
             Map<String, Object> pathItem
     ) throws IOException {
         String reference = (String) pathItem.get("$ref");
-        String pathFragmentPrefix = "#/paths/";
-        int fragmentStart = reference.indexOf(pathFragmentPrefix);
+        int fragmentStart = reference.indexOf('#');
         assertThat(fragmentStart).isPositive();
 
         String targetFile = reference.substring(0, fragmentStart);
-        String escapedTargetPath = reference.substring(
-                fragmentStart + pathFragmentPrefix.length());
-        String targetPath = escapedTargetPath.replace("~1", "/").replace("~0", "~");
-        assertThat(targetPath).isEqualTo(exposedPath);
-
         Path targetContract = SPECS.resolve(entrypointFile)
                 .resolveSibling(targetFile)
                 .normalize();
         assertThat(targetContract).startsWith(SPECS.normalize());
-        assertThat(paths(targetContract)).containsKey(targetPath);
+
+        String fragment = reference.substring(fragmentStart + 1);
+        String pathsPrefix = "/paths/";
+        String pathItemsPrefix = "/components/pathItems/";
+        if (fragment.startsWith(pathsPrefix)) {
+            String targetPath = decodeJsonPointer(fragment.substring(pathsPrefix.length()));
+            assertThat(targetPath).isEqualTo(exposedPath);
+            assertThat(paths(targetContract)).containsKey(targetPath);
+            return;
+        }
+
+        assertThat(entrypointFile).isEqualTo("mvp1-openapi.yaml");
+        assertThat(exposedPath).isEqualTo("/api/v1/consumers/me/reservations");
+        assertThat(fragment).startsWith(pathItemsPrefix);
+        String pathItemName = decodeJsonPointer(fragment.substring(pathItemsPrefix.length()));
+        assertThat(pathItemName).isEqualTo("Mvp1ConsumerReservations");
+        Map<String, Object> targetDocument = document(targetContract);
+        assertThat(map(map(targetDocument.get("components")).get("pathItems")))
+                .containsKey(pathItemName);
+    }
+
+    private static String decodeJsonPointer(String value) {
+        return value.replace("~1", "/").replace("~0", "~");
     }
 
     @Test
@@ -257,15 +273,17 @@ class AudienceOpenApiContractTest {
     }
 
     private static Map<String, Object> paths(Path file) throws IOException {
-        try (InputStream input = Files.newInputStream(file)) {
-            return map(map(new Yaml().load(input)).get("paths"));
-        }
+        return map(document(file).get("paths"));
     }
 
     private static Map<String, Object> schemas(String file) throws IOException {
-        try (InputStream input = Files.newInputStream(SPECS.resolve(file))) {
-            Map<String, Object> document = map(new Yaml().load(input));
-            return map(map(document.get("components")).get("schemas"));
+        Map<String, Object> document = document(SPECS.resolve(file));
+        return map(map(document.get("components")).get("schemas"));
+    }
+
+    private static Map<String, Object> document(Path file) throws IOException {
+        try (InputStream input = Files.newInputStream(file)) {
+            return map(new Yaml().load(input));
         }
     }
 

@@ -214,6 +214,11 @@ export interface components {
       status: components["schemas"]["ReservationDepositProcessStatus"];
       expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
       paymentPreparation: components["schemas"]["ReservationPaymentPreparation"];
+      /**
+       * @description 단순 요청 수신 여부가 아니라 COMPLETED 전 process 잠금 아래 포기 의도가 성공적으로 영속화됐는지를 나타낸다.
+       * 영속 후에는 payment-driven 조정 상태와 독립적으로 true를 유지하며, 거절된 완료 후 command나 포기와 무관한 보상·복구는 값을 변경하지 않는다.
+       */
+      abandonmentRequested: boolean;
       /** @description COMPLETED이면 확정 Reservation, 그 전과 보상·복구 상태에서는 null */
       reservation: components["schemas"]["ReservationDetail"] | null;
     };
@@ -352,6 +357,12 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
+    /** @description 시간·수용량·중복·정책·메뉴 수량 충돌 또는 예약 연락처 미등록 */
+    Mvp1ReservationCreationConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 시간·수용량·중복·정책·메뉴 수량·결제 준비·멱등 충돌 또는 예약 연락처 미등록 */
     ReservationCreationConflict: {
       content: {
@@ -416,7 +427,14 @@ export interface components {
   };
   requestBodies: never;
   headers: never;
-  pathItems: never;
+  pathItems: {
+    Mvp1ConsumerReservations: {
+      /** 내 예약 이력 조회 */
+      get: operations["getCurrentConsumerReservationsMvp1"];
+      /** 일반 예약과 선택 메뉴 홀드 생성 */
+      post: operations["createReservationMvp1"];
+    };
+  };
 }
 
 export type $defs = Record<string, never>;
@@ -1192,6 +1210,56 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["StoreNotFound"];
       409: components["responses"]["ReservationTimePolicyConflict"];
+    };
+  };
+  /** 내 예약 이력 조회 */
+  getCurrentConsumerReservationsMvp1: {
+    parameters: {
+      query?: {
+        status?: components["schemas"]["ReservationHistoryStatus"];
+        page?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Page"];
+        size?: external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["Size"];
+        /** @description 예약 이력 정렬. 아래 허용값 이외에는 400을 반환한다. */
+        sort?: "createdAt,desc" | "createdAt,asc" | "serviceDate,desc" | "serviceDate,asc" | "startAt,desc" | "startAt,asc";
+      };
+    };
+    responses: {
+      /** @description 본인 예약 이력 페이지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReservationHistoryPageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["AccountRestricted"];
+    };
+  };
+  /** 일반 예약과 선택 메뉴 홀드 생성 */
+  createReservationMvp1: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReservationCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description 즉시 확정된 예약 */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ReservationSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
+      404: components["responses"]["ReservationCreationNotFound"];
+      409: components["responses"]["Mvp1ReservationCreationConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 본인 결제·환불 이력 조회 */

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -129,16 +130,104 @@ class ReservationOpenApiContractTest {
                         ));
             }
 
+            String expectedAggregateReference = contract.path().equals(
+                    "/api/v1/consumers/me/reservations"
+            )
+                    ? "./reservation/openapi.yaml#/components/pathItems/Mvp1ConsumerReservations"
+                    : (contract.path().startsWith("/api/v1/consumers/")
+                            ? "./consumer-openapi.yaml#/paths/"
+                            : "./store-operator-openapi.yaml#/paths/")
+                            + escapeJsonPointer(contract.path());
             assertThat(map(aggregatePaths.get(contract.path())))
                     .containsOnlyKeys("$ref")
-                    .containsEntry(
-                            "$ref",
-                            (contract.path().startsWith("/api/v1/consumers/")
-                                    ? "./consumer-openapi.yaml#/paths/"
-                                    : "./store-operator-openapi.yaml#/paths/")
-                                    + escapeJsonPointer(contract.path())
-                    );
+                    .containsEntry("$ref", expectedAggregateReference);
         });
+    }
+
+    @Test
+    void mvp1ReservationCreationProjectionKeepsImplementedResponsesOnly() throws IOException {
+        String reservationsPath = "/api/v1/consumers/me/reservations";
+        Map<String, Object> reservation = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> canonicalPath = map(map(reservation.get("paths")).get(reservationsPath));
+        Map<String, Object> canonicalPost = map(canonicalPath.get("post"));
+        assertThat(map(canonicalPost.get("responses")))
+                .containsKeys("201", "202")
+                .extractingByKey("409")
+                .satisfies(conflict -> assertThat(map(conflict))
+                        .containsEntry("$ref", "#/components/responses/ReservationCreationConflict"));
+
+        Map<String, Object> mvp1 = load(Path.of("..", "docs", "specs", "mvp1-openapi.yaml"));
+        assertThat(map(map(mvp1.get("paths")).get(reservationsPath)))
+                .containsOnlyKeys("$ref")
+                .containsEntry(
+                        "$ref",
+                        "./reservation/openapi.yaml#/components/pathItems/Mvp1ConsumerReservations"
+                );
+
+        Map<String, Object> components = map(reservation.get("components"));
+        assertThat(components).containsKey("pathItems");
+        Map<String, Object> projection = map(
+                map(components.get("pathItems")).get("Mvp1ConsumerReservations")
+        );
+        Map<String, Object> canonicalGet = map(canonicalPath.get("get"));
+        Map<String, Object> projectedGet = map(projection.get("get"));
+        assertThat(projectedGet).containsEntry(
+                "operationId",
+                "getCurrentConsumerReservationsMvp1"
+        );
+        Map<String, Object> canonicalGetCommon = new LinkedHashMap<>(canonicalGet);
+        canonicalGetCommon.remove("operationId");
+        Map<String, Object> projectedGetCommon = new LinkedHashMap<>(projectedGet);
+        projectedGetCommon.remove("operationId");
+        assertThat(projectedGetCommon).isEqualTo(canonicalGetCommon);
+
+        Map<String, Object> projectedPost = map(projection.get("post"));
+        assertThat(projectedPost).containsEntry("operationId", "createReservationMvp1");
+        Map<String, Object> canonicalCommon = new LinkedHashMap<>(canonicalPost);
+        canonicalCommon.remove("description");
+        canonicalCommon.remove("operationId");
+        canonicalCommon.remove("responses");
+        Map<String, Object> projectedCommon = new LinkedHashMap<>(projectedPost);
+        projectedCommon.remove("operationId");
+        projectedCommon.remove("responses");
+        assertThat(projectedCommon).isEqualTo(canonicalCommon);
+
+        Map<String, Object> projectedResponses = map(projectedPost.get("responses"));
+        assertThat(projectedResponses.keySet())
+                .containsExactlyInAnyOrder("201", "400", "401", "403", "404", "409", "503");
+        assertThat(map(projectedResponses.get("409")))
+                .containsEntry("$ref", "#/components/responses/Mvp1ReservationCreationConflict");
+
+        Map<String, Object> mvp1Conflict = map(
+                map(components.get("responses")).get("Mvp1ReservationCreationConflict")
+        );
+        Map<String, Object> conflictExamples = map(
+                map(map(mvp1Conflict.get("content")).get("application/json")).get("examples")
+        );
+        assertThat(conflictExamples.values())
+                .extracting(example -> map(map(example).get("value")).get("code"))
+                .containsExactlyInAnyOrder(
+                        "RESERVATION_003",
+                        "ACCOUNT_006",
+                        "MENU_HOLD_001",
+                        "MENU_HOLD_002",
+                        "NOTIFICATION_002"
+                );
+    }
+
+    @Test
+    void reservationRequestExposesDurablyRecordedAbandonmentIntent() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> request = map(schemas.get("ReservationRequest"));
+
+        assertThat(list(request.get("required"))).contains("abandonmentRequested");
+        assertThat(map(map(request.get("properties")).get("abandonmentRequested")))
+                .containsEntry("type", "boolean");
     }
 
     @Test
@@ -233,6 +322,7 @@ class ReservationOpenApiContractTest {
                         "status",
                         "expiresAt",
                         "paymentPreparation",
+                        "abandonmentRequested",
                         "reservation"
                 );
         assertThat(list(map(map(request.get("properties")).get("reservation")).get("oneOf")))
