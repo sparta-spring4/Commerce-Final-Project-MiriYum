@@ -70,7 +70,8 @@ public class RefreshTokenRiskEventDelivery {
                 continue;
             }
             try {
-                if (markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())) {
+                if (markerStore.deleteIfUnchanged(
+                        event.eventKey(), event.occurrenceCount(), event.generation())) {
                     delivered++;
                 }
             } catch (DataAccessException | ServiceException exception) {
