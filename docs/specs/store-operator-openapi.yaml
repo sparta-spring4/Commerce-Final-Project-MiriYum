@@ -35,6 +35,10 @@ paths:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores"
   /api/v1/store-operators/stores/{storeId}:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}"
+  /api/v1/store-operators/stores/{storeId}/images:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1images"
+  /api/v1/store-operators/stores/{storeId}/images/{imageId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1images~1{imageId}"
   /api/v1/store-operators/stores/{storeId}/operating-hours:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1operating-hours"
   /api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publications:

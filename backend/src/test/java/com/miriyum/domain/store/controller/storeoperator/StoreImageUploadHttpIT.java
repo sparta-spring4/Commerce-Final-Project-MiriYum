@@ -29,7 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         properties = {
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "spring.servlet.multipart.max-file-size=1KB",
-            "spring.servlet.multipart.max-request-size=1KB",
+            "spring.servlet.multipart.max-request-size=2KB",
             "miriyum.store.schedule.activation-enabled=false",
             "miriyum.menu.schedule.enabled=false"
         })
@@ -56,16 +56,23 @@ class StoreImageUploadHttpIT {
     }
 
     @Test
-    void oversizedMultipartUploadReturnsStoreImageSizeErrorBeforeControllerExecution()
+    void maximumFileSizeMultipartUploadReachesImageValidation()
             throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://127.0.0.1:" + port
-                        + "/api/v1/store-operators/stores/7/images"))
-                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
-                .header("Authorization", "Bearer "
-                        + jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 11L))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody(1025)))
-                .build();
+        HttpRequest request = multipartRequest(1024);
+
+        HttpResponse<String> response;
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+
+        assertThat(response.statusCode()).isEqualTo(415);
+        assertThat(response.body()).contains("\"code\":\"COMMON_009\"");
+    }
+
+    @Test
+    void fileBeyondBusinessSizeLimitReturnsStoreImageSizeError()
+            throws Exception {
+        HttpRequest request = multipartRequest(1025);
 
         HttpResponse<String> response;
         try (HttpClient client = HttpClient.newHttpClient()) {
@@ -74,6 +81,19 @@ class StoreImageUploadHttpIT {
 
         assertThat(response.statusCode()).isEqualTo(413);
         assertThat(response.body()).contains("\"code\":\"STORE_013\"");
+    }
+
+    private HttpRequest multipartRequest(int fileSizeBytes) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port
+                        + "/api/v1/store-operators/stores/7/images"))
+                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
+                .header("Idempotency-Key", "84e7a2dd-0b4f-4ee4-9cc8-e851b91e6213")
+                .header("Authorization", "Bearer "
+                        + jwtTokenProvider.generateAccessToken(TokenNamespace.STORE_OPERATOR, 11L))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody(fileSizeBytes)))
+                .build();
+        return request;
     }
 
     private byte[] multipartBody(int fileSizeBytes) throws Exception {
