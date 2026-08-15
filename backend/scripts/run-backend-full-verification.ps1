@@ -38,6 +38,7 @@ namespace Miriyum.Verification
         public TimeSpan TerminationGrace { get; set; } = TimeSpan.FromSeconds(5);
         public bool InjectJobAssignmentFailure { get; set; }
         public bool InjectPostAssignmentFailure { get; set; }
+        public bool InjectUnixPostStartFailure { get; set; }
     }
 
     public sealed class ProcessResult
@@ -520,60 +521,129 @@ namespace Miriyum.Verification
 
             using (var process = new Process { StartInfo = startInfo })
             {
-                events.Add("StartProcessGroup");
-                if (!process.Start())
+                bool processStarted = false;
+                int processId = 0;
+                Task stdoutPump = null;
+                Task stderrPump = null;
+                try
                 {
-                    throw new InvalidOperationException("setsid process did not start.");
-                }
-                DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-                int processId = process.Id;
-                Task stdoutPump = PumpReaderAsync(process.StandardOutput, request.StdoutPath);
-                Task stderrPump = PumpReaderAsync(process.StandardError, request.StderrPath);
-                process.StandardInput.Write(request.StdinText ?? String.Empty);
-                process.StandardInput.Close();
-
-                bool timedOut = false;
-                bool cancelled = false;
-                var stopwatch = Stopwatch.StartNew();
-                while (!process.WaitForExit(50))
-                {
-                    if (cancellationToken.IsCancellationRequested)
+                    events.Add("StartProcessGroup");
+                    if (!process.Start())
                     {
-                        cancelled = true;
-                        break;
+                        throw new InvalidOperationException("setsid process did not start.");
                     }
-                    if (stopwatch.Elapsed >= request.Timeout)
+                    processStarted = true;
+                    DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+                    processId = process.Id;
+                    stdoutPump = PumpReaderAsync(process.StandardOutput, request.StdoutPath);
+                    stderrPump = PumpReaderAsync(process.StandardError, request.StderrPath);
+                    process.StandardInput.Write(request.StdinText ?? String.Empty);
+                    process.StandardInput.Close();
+
+                    bool timedOut = false;
+                    bool cancelled = false;
+                    var stopwatch = Stopwatch.StartNew();
+                    while (!process.WaitForExit(50))
                     {
-                        timedOut = true;
-                        break;
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            cancelled = true;
+                            break;
+                        }
+                        if (stopwatch.Elapsed >= request.Timeout)
+                        {
+                            timedOut = true;
+                            break;
+                        }
                     }
-                }
 
-                if (timedOut || cancelled)
-                {
-                    events.Add("TerminateProcessGroup");
-                    TerminateUnixProcessGroup(processId, request.TerminationGrace);
-                    process.WaitForExit(ToMilliseconds(request.TerminationGrace));
-                }
+                    if (timedOut || cancelled)
+                    {
+                        events.Add("TerminateProcessGroup");
+                        TerminateUnixProcessGroup(processId, request.TerminationGrace);
+                        process.WaitForExit(ToMilliseconds(request.TerminationGrace));
+                    }
 
-                process.WaitForExit();
-                Task.WaitAll(stdoutPump, stderrPump);
-                uint activeProcesses = UnixProcessGroupExists(processId) ? 1u : 0u;
-                events.Add("ActiveProcessesZero");
-                return new ProcessResult
+                    process.WaitForExit();
+                    if (request.InjectUnixPostStartFailure)
+                    {
+                        events.Add("InjectUnixPostStartFailure");
+                        throw new InvalidOperationException("Injected Unix post-start failure.");
+                    }
+                    Task.WaitAll(stdoutPump, stderrPump);
+                    uint activeProcesses = UnixProcessGroupExists(processId) ? 1u : 0u;
+                    events.Add("ActiveProcessesZero");
+                    return new ProcessResult
+                    {
+                        ProcessId = processId,
+                        StartedAt = startedAt,
+                        ExitedAt = DateTimeOffset.UtcNow,
+                        ExitCode = process.ExitCode,
+                        TimedOut = timedOut,
+                        Cancelled = cancelled,
+                        ContainmentSucceeded = activeProcesses == 0,
+                        ActiveProcessesAfterCleanup = activeProcesses,
+                        LifecycleEvents = events.ToArray(),
+                        StdoutPath = Path.GetFullPath(request.StdoutPath),
+                        StderrPath = Path.GetFullPath(request.StderrPath)
+                    };
+                }
+                catch (Exception originalException)
                 {
-                    ProcessId = processId,
-                    StartedAt = startedAt,
-                    ExitedAt = DateTimeOffset.UtcNow,
-                    ExitCode = process.ExitCode,
-                    TimedOut = timedOut,
-                    Cancelled = cancelled,
-                    ContainmentSucceeded = activeProcesses == 0,
-                    ActiveProcessesAfterCleanup = activeProcesses,
-                    LifecycleEvents = events.ToArray(),
-                    StdoutPath = Path.GetFullPath(request.StdoutPath),
-                    StderrPath = Path.GetFullPath(request.StderrPath)
-                };
+                    if (!processStarted)
+                    {
+                        throw;
+                    }
+
+                    try
+                    {
+                        events.Add("TerminateProcessGroupAfterException");
+                        TerminateUnixProcessGroup(processId, request.TerminationGrace);
+                        bool processExited = process.WaitForExit(
+                            ToMilliseconds(request.TerminationGrace));
+                        bool pumpsCompleted = WaitForPumpsAfterUnixCleanup(
+                            stdoutPump,
+                            stderrPump,
+                            request.TerminationGrace);
+                        if (!processExited ||
+                            !pumpsCompleted ||
+                            UnixProcessGroupExists(processId))
+                        {
+                            throw new InvalidOperationException(
+                                "Unix process group cleanup did not reach zero active processes and completed streams.");
+                        }
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        throw new AggregateException(
+                            "Unix post-start failure cleanup did not complete.",
+                            originalException,
+                            cleanupException);
+                    }
+                    throw;
+                }
+            }
+        }
+
+        private static bool WaitForPumpsAfterUnixCleanup(
+            Task stdoutPump,
+            Task stderrPump,
+            TimeSpan grace)
+        {
+            if (stdoutPump == null || stderrPump == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                return Task.WaitAll(
+                    new[] { stdoutPump, stderrPump },
+                    ToMilliseconds(grace));
+            }
+            catch (AggregateException)
+            {
+                return stdoutPump.IsCompleted && stderrPump.IsCompleted;
             }
         }
 

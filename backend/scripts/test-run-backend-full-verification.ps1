@@ -528,8 +528,8 @@ exit 23
 
     Invoke-ContractCase 'Process bridge timeout and cancellation leave no contained OS descendants' {
         foreach ($case in @(
-            @{ Name = 'timeout'; Timeout = [TimeSpan]::FromSeconds(2); CancelAfterMilliseconds = $null },
-            @{ Name = 'cancellation'; Timeout = [TimeSpan]::FromSeconds(20); CancelAfterMilliseconds = 700 }
+            @{ Name = 'timeout'; Timeout = [TimeSpan]::FromSeconds(2); CancelWhenReady = $false },
+            @{ Name = 'cancellation'; Timeout = [TimeSpan]::FromSeconds(20); CancelWhenReady = $true }
         )) {
             $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "miriyum-cleanup-$($case.Name)-$([guid]::NewGuid().ToString('N'))"
             $cancellationSource = $null
@@ -579,16 +579,49 @@ Start-Sleep -Seconds 120
                 $request.TerminationGrace = [TimeSpan]::FromSeconds(3)
 
                 $token = [System.Threading.CancellationToken]::None
-                if ($null -ne $case.CancelAfterMilliseconds) {
+                if ($case.CancelWhenReady) {
                     $cancellationSource = [System.Threading.CancellationTokenSource]::new()
-                    $cancellationSource.CancelAfter($case.CancelAfterMilliseconds)
                     $token = $cancellationSource.Token
                 }
 
-                $result = [Miriyum.Verification.ProcessBridge]::RunAsync(
+                $runTask = [Miriyum.Verification.ProcessBridge]::RunAsync(
                     $request,
                     $token
-                ).GetAwaiter().GetResult()
+                )
+
+                $identity = $null
+                if ($case.CancelWhenReady) {
+                    $readinessDeadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+                    while ([DateTimeOffset]::UtcNow -lt $readinessDeadline) {
+                        if ($runTask.IsCompleted) {
+                            $earlyResult = $runTask.GetAwaiter().GetResult()
+                            throw "Cancellation fixture completed before descendant identity was ready (exit=$($earlyResult.ExitCode))."
+                        }
+
+                        if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+                            try {
+                                $candidate = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+                                if ([int] $candidate.Pid -gt 0 -and [long] $candidate.StartTimeUtcTicks -gt 0) {
+                                    $identity = $candidate
+                                    break
+                                }
+                            }
+                            catch {
+                                # Set-Content can make the file visible before the JSON write is complete.
+                            }
+                        }
+                        Start-Sleep -Milliseconds 50
+                    }
+
+                    if ($null -eq $identity) {
+                        $cancellationSource.Cancel()
+                        $null = $runTask.GetAwaiter().GetResult()
+                        throw 'Cancellation fixture descendant identity was not ready within 10 seconds.'
+                    }
+                    $cancellationSource.Cancel()
+                }
+
+                $result = $runTask.GetAwaiter().GetResult()
 
                 Assert-Equal -Expected ($case.Name -eq 'timeout') -Actual $result.TimedOut `
                     -Because "$($case.Name) timeout classification"
@@ -600,7 +633,9 @@ Start-Sleep -Seconds 120
                     -Because "$($case.Name) active contained processes after cleanup"
                 Assert-True -Condition (Test-Path -LiteralPath $identityPath -PathType Leaf) `
                     -Because "$($case.Name) fixture must prove a descendant was created"
-                $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+                if ($null -eq $identity) {
+                    $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+                }
                 $sameProcessSurvives = $false
                 try {
                     $survivor = [System.Diagnostics.Process]::GetProcessById([int] $identity.Pid)
@@ -626,6 +661,93 @@ Start-Sleep -Seconds 120
                 if (Test-Path -LiteralPath $fixtureRoot) {
                     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
                 }
+            }
+        }
+    }
+
+    Invoke-ContractCase 'Unix post-start exceptions terminate the process group and its descendants' {
+        $injectionProperty = [Miriyum.Verification.ProcessRequest].GetProperty(
+            'InjectUnixPostStartFailure'
+        )
+        Assert-True -Condition ($null -ne $injectionProperty) `
+            -Because 'the Unix bridge must expose the contract-only post-start failure injection'
+
+        if ($IsWindows) {
+            return
+        }
+
+        $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "miriyum-unix-exception-$([guid]::NewGuid().ToString('N'))"
+        try {
+            $null = New-Item -ItemType Directory -Path $fixtureRoot
+            $descendantFixture = Join-Path $fixtureRoot 'descendant.ps1'
+            'Start-Sleep -Seconds 120' |
+                Set-Content -LiteralPath $descendantFixture -Encoding utf8NoBOM
+            $identityPath = Join-Path $fixtureRoot 'descendant.json'
+            $parentFixture = Join-Path $fixtureRoot 'parent.ps1'
+            @'
+param(
+    [Parameter(Mandatory)]
+    [string] $DescendantFixture,
+    [Parameter(Mandatory)]
+    [string] $IdentityPath
+)
+
+$executable = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$descendant = Start-Process -FilePath $executable `
+    -ArgumentList @('-NoProfile', '-File', $DescendantFixture) `
+    -PassThru
+[pscustomobject]@{
+    Pid = $descendant.Id
+    StartTimeUtcTicks = $descendant.StartTime.ToUniversalTime().Ticks
+} | ConvertTo-Json -Compress | Set-Content -LiteralPath $IdentityPath -Encoding utf8NoBOM
+'@ | Set-Content -LiteralPath $parentFixture -Encoding utf8NoBOM
+
+            $request = New-Object 'Miriyum.Verification.ProcessRequest'
+            $request.FileName = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $request.Arguments = @(
+                '-NoProfile',
+                '-File',
+                $parentFixture,
+                '-DescendantFixture',
+                $descendantFixture,
+                '-IdentityPath',
+                $identityPath
+            )
+            $request.WorkingDirectory = $fixtureRoot
+            $request.StdoutPath = Join-Path $fixtureRoot 'stdout.log'
+            $request.StderrPath = Join-Path $fixtureRoot 'stderr.log'
+            $request.Timeout = [TimeSpan]::FromSeconds(20)
+            $request.TerminationGrace = [TimeSpan]::FromSeconds(3)
+            $request.InjectUnixPostStartFailure = $true
+
+            Assert-Throws -Body {
+                $null = [Miriyum.Verification.ProcessBridge]::RunAsync(
+                    $request,
+                    [System.Threading.CancellationToken]::None
+                ).GetAwaiter().GetResult()
+            } -MessagePattern 'Injected Unix post-start failure' `
+                -Because 'the fixture must exercise the exceptional post-start cleanup path'
+
+            Assert-True -Condition (Test-Path -LiteralPath $identityPath -PathType Leaf) `
+                -Because 'the injected failure must happen after a descendant was created'
+            $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+            $sameProcessSurvives = $false
+            try {
+                $survivor = [System.Diagnostics.Process]::GetProcessById([int] $identity.Pid)
+                $sameProcessSurvives = (
+                    $survivor.StartTime.ToUniversalTime().Ticks -eq
+                    [long] $identity.StartTimeUtcTicks
+                )
+            }
+            catch {
+                $sameProcessSurvives = $false
+            }
+            Assert-True -Condition (-not $sameProcessSurvives) `
+                -Because 'the exceptional cleanup must leave no recorded descendant alive'
+        }
+        finally {
+            if (Test-Path -LiteralPath $fixtureRoot) {
+                Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
             }
         }
     }
