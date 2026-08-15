@@ -136,7 +136,7 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
             end
 
             if namespace ~= ARGV[1] or accountId ~= ARGV[2] or familyId ~= ARGV[3] then
-                return 0
+                return -1
             end
 
             local markerNamespace = redis.call('HGET', KEYS[1], 'qrLogoutNamespace')

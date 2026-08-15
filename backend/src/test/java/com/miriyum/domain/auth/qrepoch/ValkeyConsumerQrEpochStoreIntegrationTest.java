@@ -285,6 +285,16 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
         assertThat(store.captureCurrent(7L)).isEqualTo(beforeEpoch);
     }
 
+    @ParameterizedTest
+    @MethodSource("validButMismatchedFamilyTupleFields")
+    void validButMismatchedFamilyTupleFailsClosedWithoutMutation(String field, String mismatchedValue) {
+        RefreshFixture refresh = createActiveRefresh(
+                "family-tuple-mismatch", "token-current", "raw-refresh-token");
+        redisTemplate.opsForHash().put(refresh.familyKey(), field, mismatchedValue);
+
+        assertLogoutFailureDoesNotMutate(refresh);
+    }
+
     @Test
     void duplicateMarkerRequiresFamilyTupleToRemainConsistent() {
         RefreshFixture refresh = createActiveRefresh("family-marker", "token-current", "raw-refresh-token");
@@ -494,6 +504,13 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
                 Arguments.of("currentTokenHash", "not-a-sha256"),
                 Arguments.of("status", "BROKEN"),
                 Arguments.of("lastRotatedAt", "not-a-number"));
+    }
+
+    private static java.util.stream.Stream<Arguments> validButMismatchedFamilyTupleFields() {
+        return java.util.stream.Stream.of(
+                Arguments.of("namespace", "store-operator"),
+                Arguments.of("accountId", "8"),
+                Arguments.of("familyId", "family-other"));
     }
 
     private RefreshFixture createActiveRefresh(String familyId, String tokenId, String rawToken) {
