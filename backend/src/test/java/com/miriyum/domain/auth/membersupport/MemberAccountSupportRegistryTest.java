@@ -31,7 +31,8 @@ class MemberAccountSupportRegistryTest {
         @Override public Optional<MemberAccountSnapshot> findRecoveryTarget(String email, String phone) {
             return Optional.empty();
         }
-        @Override public MemberAccountPage search(MemberSearchCriteria criteria, int offset, int limit) {
+        @Override public MemberAccountPage search(MemberSearchCriteria criteria, MemberStatus status,
+                                                  int offset, int limit) {
             return new MemberAccountPage(List.of(), 0);
         }
         @Override public long approveRecovery(long accountId, long expectedVersion, String newEmail) { return 0; }

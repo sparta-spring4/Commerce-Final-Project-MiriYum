@@ -111,6 +111,30 @@ class PlatformOperatorMemberSupportHttpIT {
                 .andExpect(jsonPath("$.data.content[0].password").doesNotExist());
     }
 
+    @Test
+    void statusFilterUsesMysqlPaginationAndReturnsAnAccurateTotal() throws Exception {
+        consumers.saveAndFlush(ConsumerAccount.createWithContact(
+                "active@example.com", "password-hash", "active", "+821011111111", "active-ref"));
+        ConsumerAccount suspended = ConsumerAccount.createWithContact(
+                "suspended@example.com", "password-hash", "suspended", "+821022222222", "suspended-ref");
+        suspended.applySupportSuspension();
+        suspended = consumers.saveAndFlush(suspended);
+        PlatformOperatorAccount operator = createOperator();
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.MEMBER_SUPPORT_OPERATOR, Instant.now()));
+        String accessToken = activateAndLogin(operator.getEmail());
+
+        mvc.perform(get("/api/v1/platform-operators/members")
+                        .param("accountType", "CONSUMER")
+                        .param("status", "TEMPORARILY_SUSPENDED")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].accountId").value(suspended.getId()))
+                .andExpect(jsonPath("$.data.content[0].status").value("TEMPORARILY_SUSPENDED"));
+    }
+
     private PlatformOperatorAccount createOperator() {
         return operators.saveAndFlush(PlatformOperatorAccount.createTemporary(
                 "operator@example.com", passwordEncoder.encode("Password1!"),

@@ -7,6 +7,7 @@ import com.miriyum.domain.auth.membersupport.MemberAccountSnapshot;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
 import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
+import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
@@ -55,10 +56,11 @@ public class StoreOperatorMemberSupportAdapter implements MemberAccountSupportPo
     }
 
     @Override @Transactional(readOnly = true)
-    public MemberAccountPage search(MemberSearchCriteria criteria, int offset, int limit) {
+    public MemberAccountPage search(MemberSearchCriteria criteria, MemberStatus status, int offset, int limit) {
         if (offset < 0 || limit < 1 || offset % limit != 0) throw new IllegalArgumentException("invalid page window");
         var page = repository.search(
-                local(criteria.joinedFrom()), local(criteria.joinedTo()), PageRequest.of(offset / limit, limit));
+                local(criteria.joinedFrom()), local(criteria.joinedTo()), accountStatus(status),
+                passwordResetRequired(status), PageRequest.of(offset / limit, limit));
         return new MemberAccountPage(page.map(this::snapshot).getContent(), page.getTotalElements());
     }
 
@@ -110,5 +112,16 @@ public class StoreOperatorMemberSupportAdapter implements MemberAccountSupportPo
 
     private static LocalDateTime local(Instant instant) {
         return instant == null ? null : LocalDateTime.ofInstant(instant, BUSINESS_ZONE);
+    }
+
+    private static StoreOperatorAccountStatus accountStatus(MemberStatus status) {
+        if (status == null) return null;
+        return status == MemberStatus.TEMPORARILY_SUSPENDED
+                ? StoreOperatorAccountStatus.SUSPENDED : StoreOperatorAccountStatus.ACTIVE;
+    }
+
+    private static Boolean passwordResetRequired(MemberStatus status) {
+        if (status == null || status == MemberStatus.TEMPORARILY_SUSPENDED) return null;
+        return status == MemberStatus.PASSWORD_RESET_REQUIRED;
     }
 }

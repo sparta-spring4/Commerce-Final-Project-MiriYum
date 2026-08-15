@@ -9,7 +9,7 @@ public interface MemberAccountSupportPort {
 
     Optional<MemberAccountSnapshot> findRecoveryTarget(String oldEmail, String registeredPhone);
 
-    MemberAccountPage search(MemberSearchCriteria criteria, int offset, int limit);
+    MemberAccountPage search(MemberSearchCriteria criteria, MemberStatus status, int offset, int limit);
 
     long approveRecovery(long accountId, long expectedVersion, String newEmail);
 

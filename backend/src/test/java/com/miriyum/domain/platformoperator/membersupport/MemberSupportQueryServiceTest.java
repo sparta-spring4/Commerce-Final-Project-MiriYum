@@ -1,5 +1,6 @@
 package com.miriyum.domain.platformoperator.membersupport;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -8,9 +9,12 @@ import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.membersupport.MemberAccountSnapshot;
+import com.miriyum.domain.auth.membersupport.MemberAccountPage;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportPort;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportRegistry;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
+import com.miriyum.domain.auth.membersupport.MemberStatus;
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
@@ -66,5 +70,36 @@ class MemberSupportQueryServiceTest {
                         exception -> org.assertj.core.api.Assertions.assertThat(exception.getErrorCode())
                                 .isEqualTo(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND));
         verify(store, never()).findMinimal(71);
+    }
+
+    @Test
+    void statusFilteringKeepsAccurateTotalAndNewestFirstAcrossAccountTypes() {
+        OperatorAuthorityReader authorities = mock(OperatorAuthorityReader.class);
+        when(authorities.requireCurrentAuthority(9, 2)).thenReturn(new OperatorAuthority(
+                9, 2, Set.of(), Set.of(PlatformOperatorPermission.MEMBER_READ_MINIMAL)));
+        MemberAccountSupportPort consumer = mock(MemberAccountSupportPort.class);
+        MemberAccountSupportPort store = mock(MemberAccountSupportPort.class);
+        when(consumer.accountType()).thenReturn(MemberAccountType.CONSUMER);
+        when(store.accountType()).thenReturn(MemberAccountType.STORE_OPERATOR);
+        MemberSearchCriteria criteria = new MemberSearchCriteria(null, null);
+        when(consumer.search(criteria, MemberStatus.TEMPORARILY_SUSPENDED, 0, 20))
+                .thenReturn(new MemberAccountPage(List.of(
+                snapshot(MemberAccountType.CONSUMER, 2, true, "2026-01-02T00:00:00Z")), 1));
+        when(store.search(criteria, MemberStatus.TEMPORARILY_SUSPENDED, 0, 20))
+                .thenReturn(new MemberAccountPage(List.of(
+                snapshot(MemberAccountType.STORE_OPERATOR, 3, true, "2026-01-04T00:00:00Z")), 1));
+        MemberSupportQueryService service = new MemberSupportQueryService(
+                new MemberSupportAuthorizationService(authorities),
+                new MemberAccountSupportRegistry(List.of(consumer, store)));
+
+        var result = service.list(PRINCIPAL, null, MemberStatus.TEMPORARILY_SUSPENDED,
+                criteria, 0, 20);
+
+        assertThat(result.totalElements()).isEqualTo(2);
+        assertThat(result.content()).extracting(response -> response.accountId()).containsExactly(3L, 2L);
+    }
+
+    private MemberAccountSnapshot snapshot(MemberAccountType type, long id, boolean suspended, String joinedAt) {
+        return new MemberAccountSnapshot(type, id, false, suspended, Instant.parse(joinedAt), 0);
     }
 }

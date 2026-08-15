@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class MemberSupportQueryService {
     private static final Comparator<MemberAccountSnapshot> ORDER = Comparator
             .comparing(MemberAccountSnapshot::joinedAt).reversed()
-            .thenComparing(MemberAccountSnapshot::accountId).reversed();
+            .thenComparing(MemberAccountSnapshot::accountId, Comparator.reverseOrder());
     private final MemberSupportAuthorizationService authorization;
     private final MemberAccountSupportRegistry accounts;
 
@@ -51,18 +51,17 @@ public class MemberSupportQueryService {
         List<MemberAccountSnapshot> merged = new ArrayList<>();
         long total;
         if (type != null) {
-            var result = accounts.require(type).search(criteria, 0, fetch);
+            var result = accounts.require(type).search(criteria, status, 0, fetch);
             merged.addAll(result.content());
             total = result.totalElements();
         } else {
-            var consumer = accounts.require(MemberAccountType.CONSUMER).search(criteria, 0, fetch);
-            var store = accounts.require(MemberAccountType.STORE_OPERATOR).search(criteria, 0, fetch);
+            var consumer = accounts.require(MemberAccountType.CONSUMER).search(criteria, status, 0, fetch);
+            var store = accounts.require(MemberAccountType.STORE_OPERATOR).search(criteria, status, 0, fetch);
             merged.addAll(consumer.content());
             merged.addAll(store.content());
             total = consumer.totalElements() + store.totalElements();
         }
         List<MemberResponse> content = merged.stream().sorted(ORDER)
-                .filter(snapshot -> status == null || status(snapshot) == status)
                 .skip(offset).limit(size).map(this::response).toList();
         return new MemberPageResponse(content, total, page, size);
     }

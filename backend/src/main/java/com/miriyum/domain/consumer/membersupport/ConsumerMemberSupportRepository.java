@@ -1,6 +1,7 @@
 package com.miriyum.domain.consumer.membersupport;
 
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
+import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -21,10 +22,15 @@ public interface ConsumerMemberSupportRepository extends JpaRepository<ConsumerA
             SELECT account FROM ConsumerAccount account
              WHERE (:joinedFrom IS NULL OR account.createdAt >= :joinedFrom)
                AND (:joinedTo IS NULL OR account.createdAt <= :joinedTo)
-             ORDER BY account.createdAt ASC, account.id ASC
+               AND (:accountStatus IS NULL OR account.status = :accountStatus)
+               AND (:passwordResetRequired IS NULL
+                    OR account.passwordResetRequired = :passwordResetRequired)
+             ORDER BY account.createdAt DESC, account.id DESC
             """)
     Page<ConsumerAccount> search(
             @Param("joinedFrom") LocalDateTime joinedFrom,
             @Param("joinedTo") LocalDateTime joinedTo,
+            @Param("accountStatus") ConsumerAccountStatus accountStatus,
+            @Param("passwordResetRequired") Boolean passwordResetRequired,
             Pageable pageable);
 }
