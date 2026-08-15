@@ -29,7 +29,7 @@ class DomainPackageArchitectureTest {
     private static final Set<String> LEGACY_STORE_SUBDOMAINS = Set.of(
             "core", "schedule", "closure", "menu", "search", "recommendation");
     private static final Set<String> HTTP_BOUNDARIES = Set.of(
-            "publicapi", "consumer", "storeoperator", "auth", "account");
+            "publicapi", "consumer", "storeoperator", "auth", "account", "management", "audit");
     private static final Map<String, Set<String>> APPROVED_CROSS_DOMAIN_QUERY_READERS = Map.of(
             "recommendation/repository/RecommendationSignalRepository.java",
             Set.of("menu", "store"),
