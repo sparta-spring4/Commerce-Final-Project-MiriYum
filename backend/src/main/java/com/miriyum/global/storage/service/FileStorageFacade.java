@@ -52,9 +52,8 @@ public class FileStorageFacade {
             fileStoragePort.delete(deleted.objectKey());
         } catch (RuntimeException exception) {
             log.warn(
-                    "event=file_storage_object_delete_failed file_id={} object_key={}",
+                    "event=file_storage_object_delete_failed file_id={}",
                     deleted.fileId(),
-                    deleted.objectKey(),
                     exception);
             throw exception;
         }

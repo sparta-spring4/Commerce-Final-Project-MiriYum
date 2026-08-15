@@ -3,6 +3,9 @@ package com.miriyum.global.storage.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.global.storage.FileStorageObject;
 import com.miriyum.global.storage.FileStorageMetadata;
 import com.miriyum.global.storage.FileStorageOwner;
@@ -21,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class FileStorageFacadeTest {
 
@@ -189,6 +193,33 @@ class FileStorageFacadeTest {
                 "storage-delete:public/store/11/store-image/deleted-object",
                 "metadata-delete:" + confirmed.fileId(),
                 "storage-delete:public/store/11/store-image/deleted-object");
+    }
+
+    @Test
+    @DisplayName("저장소 삭제 실패 로그에는 파일 식별자만 남기고 객체 키를 남기지 않는다")
+    void doesNotLogObjectKeyWhenStorageDeletionFails() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FileStorageFacade facade = new FileStorageFacade(
+                new FailingOnceDeleteFileStoragePort(new ArrayList<>(), deletionFailure),
+                new RecordingTransactionExecutor(null, null));
+        Logger logger = (Logger) LoggerFactory.getLogger(FileStorageFacade.class);
+        ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+
+        try {
+            assertThatThrownBy(() -> facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                    .isSameAs(deletionFailure);
+
+            assertThat(logAppender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .contains("event=file_storage_object_delete_failed file_id=" + confirmed.fileId())
+                    .noneMatch(message -> message.contains(confirmed.objectKey()));
+        } finally {
+            logger.detachAppender(logAppender);
+            logAppender.stop();
+        }
     }
 
     private void assertStorageResultMismatch(FileStorageSaveResult saveResult) {
