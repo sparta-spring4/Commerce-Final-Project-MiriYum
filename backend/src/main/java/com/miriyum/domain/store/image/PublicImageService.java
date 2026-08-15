@@ -33,6 +33,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -44,6 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 매장 운영자가 공개 매장 이미지를 저장하고 교체·삭제하는 업무 서비스다. */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class PublicImageService {
 
@@ -116,10 +118,13 @@ public class PublicImageService {
                     imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE);
             FileStorageMetadata stored = store(image, new FileStorageOwner("STORE", storeId),
                     FileStoragePurpose.STORE_IMAGE, storeObjectKey(storeId, image));
-            deleteAfterReplacement(previous);
+            tryDeleteAfterReplacement(previous.fileId());
             PublicImageResponse response = PublicImageResponse.from(stored);
             return success(HttpStatus.OK, "STORE_IMAGE", stored.fileId().toString(), response);
         });
+        if (outcome.replayed()) {
+            retryDeletedReplacementObjectCleanup(operatorAccountId, storeId, imageId);
+        }
         return result(outcome);
     }
 
@@ -240,6 +245,29 @@ public class PublicImageService {
                         && metadata.getVisibility() == FileStorageVisibility.PUBLIC
                         && metadata.getStorageStatus() == FileStorageStatus.CONFIRMED)
                 .map(FileMetadata::toPublicMetadata);
+    }
+
+    /**
+     * 교체의 논리적 성공은 새 이미지가 CONFIRMED된 시점에 확정한다.
+     * 이전 객체 정리는 실패해도 DELETED 정본을 남겨 같은 멱등 재요청에서 다시 시도한다.
+     */
+    private void tryDeleteAfterReplacement(UUID imageId) {
+        try {
+            deleteAfterReplacement(imageId);
+        } catch (ServiceException exception) {
+            log.warn("event=store_public_image_replacement_cleanup_failed image_id={}", imageId);
+        }
+    }
+
+    private void retryDeletedReplacementObjectCleanup(
+            long operatorAccountId,
+            long storeId,
+            UUID imageId
+    ) {
+        requireLockedStoreOwnership(operatorAccountId, storeId);
+        findDeletableImage(imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE)
+                .filter(metadata -> metadata.status() == FileStorageStatus.DELETED)
+                .ifPresent(metadata -> tryDeleteAfterReplacement(metadata.fileId()));
     }
 
     private java.util.Optional<FileStorageMetadata> findDeletableImage(

@@ -16,6 +16,11 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      # Store 공개 이미지 업무 상한과 웹 계층 파싱 상한을 함께 10MB로 맞춘다.
+      max-file-size: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
+      max-request-size: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
 server:
   forward-headers-strategy: native
   tomcat:
