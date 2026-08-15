@@ -185,10 +185,7 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
                     or currentTokenId ~= ARGV[4] or currentTokenHash ~= ARGV[5]) then
                 return 0
             end
-            if markerCount == 0 and ARGV[9] == '1' then
-                return 3
-            end
-            if ARGV[10] ~= '1' then
+            if ARGV[9] ~= '1' then
                 return -1
             end
 
@@ -300,7 +297,6 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
             TokenNamespace namespace,
             ParsedToken refreshToken,
             String rawRefreshToken,
-            boolean corroboratingSubjectMismatch,
             Instant now
     ) {
         String configuredGeneration = properties.getStorageGeneration();
@@ -324,7 +320,6 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
                     Long.toString(now.getEpochSecond()),
                     generation,
                     newSalt(),
-                    corroboratingSubjectMismatch ? "1" : "0",
                     generationValid ? "1" : "0");
         } catch (DataAccessException exception) {
             log.error("event=qr_epoch_store_unavailable operation=advanceForLogout namespace={}", namespace.value());
@@ -343,9 +338,6 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
         if (result.equals(0L)) {
             return new ConsumerQrEpochAdvanceResult(ConsumerQrEpochAdvanceResult.Status.NOT_AUTHORIZED);
         }
-        if (result.equals(3L)) {
-            return new ConsumerQrEpochAdvanceResult(ConsumerQrEpochAdvanceResult.Status.SUBJECT_MISMATCH);
-        }
         if (result.equals(ACTIVE_INDEX_MEMBER_MISSING)) {
             log.error("event=qr_epoch_refresh_index_mismatch operation=advanceForLogout namespace={} expected=present",
                     namespace.value());
@@ -359,15 +351,6 @@ class ValkeyConsumerQrEpochStore implements ConsumerQrEpochStore {
         log.error("event=qr_epoch_script_unexpected_result operation=advanceForLogout namespace={} result={}",
                 namespace.value(), result);
         throw unavailable();
-    }
-
-    ConsumerQrEpochAdvanceResult advanceForLogout(
-            TokenNamespace namespace,
-            ParsedToken refreshToken,
-            String rawRefreshToken,
-            Instant now
-    ) {
-        return advanceForLogout(namespace, refreshToken, rawRefreshToken, false, now);
     }
 
     private String execute(RedisScript<String> script, String operation, String key, String... args) {

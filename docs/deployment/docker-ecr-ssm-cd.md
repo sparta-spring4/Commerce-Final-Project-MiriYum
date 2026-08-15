@@ -52,6 +52,8 @@ Before logging in to ECR or restarting containers, `deploy.sh` runs `docker comp
 
 The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Validation includes staging `healthy`, unauthenticated `NOAUTH`, authenticated `PONG`, and no host port exposure. Valkey joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
 
+Auth Valkey must use `maxmemory-policy noeviction`; eviction can remove TTL-free QR epoch hashes or Refresh security state and invalidate the atomic logout contract. The staging/production and standard local Compose commands set this explicitly. Any externally managed Valkey must return `noeviction` from `CONFIG GET maxmemory-policy` before rollout. The opt-in local load-test override is non-production and currently relies on Valkey's default `noeviction`, so verify its runtime value on every run instead of treating the file as an explicit guarantee.
+
 After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication use Valkey through Spring Data Redis/Lettuce. Compose waits for MySQL health before starting the backend, but does not wait for Valkey health. If Valkey is unavailable, the backend still starts and deployment health remains available; only Refresh Token operations fail closed with `503`. Existing Access JWT requests and public endpoints continue without Valkey. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
 
 `MIRIYUM_QR_STORAGE_GENERATION` fences account QR epochs from restored Valkey data. Keep the same value for ordinary backend or Valkey restarts. Before restoring any older Valkey snapshot, stop the backend, choose a value that has never been used in that environment, update every backend instance, restore the snapshot, and only then resume the backend. Never reopen an earlier generation value. A missing or invalid value leaves non-QR Access JWT traffic available but makes QR capture/check and a Refresh-authorized Consumer logout mutation fail closed with `COMMON_012`; it must not be treated as a successful server logout or QR revocation.
@@ -65,10 +67,11 @@ cd /opt/miriyum
 sudo docker compose --env-file .env -f docker-compose.prod.yml ps valkey
 sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey valkey-cli ping
 sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping'
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli CONFIG GET maxmemory-policy'
 sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
 ```
 
-The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
+The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, authenticated `PONG`, and a `maxmemory-policy` value of `noeviction`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
 ## Release and rollback
 

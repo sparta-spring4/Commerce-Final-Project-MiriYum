@@ -23,6 +23,8 @@ import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ConsumerAuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(ConsumerAuthService.class);
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final ConsumerAccountRepository consumerAccountRepository;
@@ -192,11 +195,13 @@ public class ConsumerAuthService {
         }
 
         ParsedToken access = parseOptionalAccessToken(authorizationHeader);
-        boolean subjectMismatch = access != null && (access.namespace() != parsed.namespace()
+        boolean accessSubjectDiffers = access != null && (access.namespace() != parsed.namespace()
                 || !access.accountId().equals(parsed.accountId()));
+        if (accessSubjectDiffers) {
+            log.info("event=consumer_logout_access_refresh_subject_mismatch");
+        }
 
-        consumerQrLogoutCoordinator.advanceForLogout(
-                TokenNamespace.CONSUMER, parsed, refreshToken, subjectMismatch);
+        consumerQrLogoutCoordinator.advanceForLogout(TokenNamespace.CONSUMER, parsed, refreshToken);
     }
 
     private ParsedToken parseOptionalAccessToken(String authorizationHeader) {
@@ -209,12 +214,8 @@ public class ConsumerAuthService {
         }
         try {
             return jwtTokenProvider.parseAccessToken(rawAccessToken);
-        } catch (ServiceException exception) {
-            if (exception.getErrorCode() == AuthErrorCode.ACCESS_TOKEN_INVALID
-                    || exception.getErrorCode() == AuthErrorCode.ACCESS_TOKEN_EXPIRED) {
-                return null;
-            }
-            throw exception;
+        } catch (ServiceException ignored) {
+            return null;
         }
     }
 

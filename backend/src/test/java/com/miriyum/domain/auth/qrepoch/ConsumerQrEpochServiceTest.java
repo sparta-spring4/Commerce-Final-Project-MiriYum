@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -37,75 +38,62 @@ class ConsumerQrEpochServiceTest {
                 store, Clock.fixed(Instant.parse("2026-08-14T00:00:00Z"), ZoneOffset.UTC));
     }
 
-    @Test
-    void capturesCurrentSnapshotFromAuthStore() {
-        ConsumerQrEpochSnapshot stored = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
-        given(store.captureCurrent(7L)).willReturn(stored);
+    @Nested
+    class EpochValidation {
 
-        assertThat(service.captureCurrent(7L)).isEqualTo(stored);
+        @Test
+        void capturesCurrentSnapshotFromAuthStore() {
+            ConsumerQrEpochSnapshot stored = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
+            given(store.captureCurrent(7L)).willReturn(stored);
+
+            assertThat(service.captureCurrent(7L)).isEqualTo(stored);
+        }
+
+        @Test
+        void rejectsSnapshotAccountMismatchBeforeStoreLookup() {
+            ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(8L, OPAQUE_VERSION);
+
+            assertStale(() -> service.requireCurrent(7L, snapshot));
+
+            verifyNoInteractions(store);
+        }
+
+        @Test
+        void rejectsStaleOpaqueVersionWithoutExposingCurrentValue() {
+            ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
+            given(store.isCurrent(7L, OPAQUE_VERSION)).willReturn(false);
+
+            assertStale(() -> service.requireCurrent(7L, snapshot));
+        }
+
+        @Test
+        void acceptsCurrentOpaqueVersion() {
+            ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
+            given(store.isCurrent(7L, OPAQUE_VERSION)).willReturn(true);
+
+            assertThatCode(() -> service.requireCurrent(7L, snapshot)).doesNotThrowAnyException();
+        }
     }
 
-    @Test
-    void rejectsSnapshotAccountMismatchBeforeStoreLookup() {
-        ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(8L, OPAQUE_VERSION);
+    @Nested
+    class LogoutCoordination {
 
-        assertStale(() -> service.requireCurrent(7L, snapshot));
+        @Test
+        void advancesForLogoutAtInjectedClockInstant() {
+            ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-id", "token-id");
+            ConsumerQrEpochAdvanceResult applied = new ConsumerQrEpochAdvanceResult(
+                    ConsumerQrEpochAdvanceResult.Status.APPLIED);
+            given(store.advanceForLogout(
+                    TokenNamespace.CONSUMER,
+                    refresh,
+                    "raw-refresh-token",
+                    Instant.parse("2026-08-14T00:00:00Z")))
+                    .willReturn(applied);
 
-        verifyNoInteractions(store);
-    }
-
-    @Test
-    void rejectsStaleOpaqueVersionWithoutExposingCurrentValue() {
-        ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
-        given(store.isCurrent(7L, OPAQUE_VERSION)).willReturn(false);
-
-        assertStale(() -> service.requireCurrent(7L, snapshot));
-    }
-
-    @Test
-    void acceptsCurrentOpaqueVersion() {
-        ConsumerQrEpochSnapshot snapshot = new ConsumerQrEpochSnapshot(7L, OPAQUE_VERSION);
-        given(store.isCurrent(7L, OPAQUE_VERSION)).willReturn(true);
-
-        assertThatCode(() -> service.requireCurrent(7L, snapshot)).doesNotThrowAnyException();
-    }
-
-    @Test
-    void advancesForLogoutAtInjectedClockInstant() {
-        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-id", "token-id");
-        ConsumerQrEpochAdvanceResult applied = new ConsumerQrEpochAdvanceResult(
-                ConsumerQrEpochAdvanceResult.Status.APPLIED);
-        given(store.advanceForLogout(
-                TokenNamespace.CONSUMER,
-                refresh,
-                "raw-refresh-token",
-                false,
-                Instant.parse("2026-08-14T00:00:00Z")))
-                .willReturn(applied);
-
-        assertThatCode(() -> logoutCoordinator.advanceForLogout(
-                TokenNamespace.CONSUMER, refresh, "raw-refresh-token", false))
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void mapsActiveCredentialSubjectMismatchToAuthError() {
-        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, 7L, "family-id", "token-id");
-        ConsumerQrEpochAdvanceResult mismatch = new ConsumerQrEpochAdvanceResult(
-                ConsumerQrEpochAdvanceResult.Status.SUBJECT_MISMATCH);
-        given(store.advanceForLogout(
-                TokenNamespace.CONSUMER,
-                refresh,
-                "raw-refresh-token",
-                true,
-                Instant.parse("2026-08-14T00:00:00Z")))
-                .willReturn(mismatch);
-
-        assertThatThrownBy(() -> logoutCoordinator.advanceForLogout(
-                TokenNamespace.CONSUMER, refresh, "raw-refresh-token", true))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH);
+            assertThatCode(() -> logoutCoordinator.advanceForLogout(
+                    TokenNamespace.CONSUMER, refresh, "raw-refresh-token"))
+                    .doesNotThrowAnyException();
+        }
     }
 
     private void assertStale(Runnable action) {

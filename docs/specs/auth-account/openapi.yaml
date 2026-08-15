@@ -136,7 +136,7 @@ paths:
       tags: [Consumer Auth]
       summary: 일반 사용자 현재 shell 로그아웃
       operationId: deleteConsumerCurrentSession
-      description: 공개 auth chain에서 인증되지 않는 원문 Access bearer를 Auth service가 직접 선택 파싱해 교차 확인한다. 없거나 형식 오류·손상·만료여도 현재 ACTIVE Refresh의 단독 판정을 방해하지 않는다.
+      description: 현재 ACTIVE Refresh가 로그아웃 mutation의 권한이다. 공개 auth chain에서 인증되지 않는 원문 Access bearer는 Auth service가 감사 목적으로만 선택 파싱하며, 파싱 ServiceException 또는 유효 subject 불일치가 Refresh 판정을 방해하지 않는다.
       security:
         - {}
         - bearerAuth: []
@@ -156,8 +156,6 @@ paths:
                 $ref: "#/components/schemas/NoDataSuccessResponse"
         "403":
           $ref: "#/components/responses/CsrfRejected"
-        "401":
-          $ref: "#/components/responses/AccessRefreshSubjectMismatch"
         "503":
           $ref: "#/components/responses/ConsumerLogoutServiceUnavailable"
   /api/v1/consumers/auth/kakao/authorizations:
@@ -1188,20 +1186,6 @@ components:
         data:
           $ref: "#/components/schemas/StoreOperatorAccount"
   responses:
-    AccessRefreshSubjectMismatch:
-      description: 각각 유효한 Access JWT와 Refresh JWT의 계정 주체가 다름. Valkey mutation 전에 거부한다.
-      headers:
-        Set-Cookie:
-          description: CSRF 검증 뒤이므로 Max-Age=0인 MIRIYUM_CONSUMER_REFRESH 쿠키를 유지한다.
-          schema:
-            type: string
-      content:
-        application/json:
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: AUTH_016
-            message: Access Token과 Refresh Token의 계정이 일치하지 않습니다.
     ConsumerLogoutServiceUnavailable:
       description: storage generation 또는 Valkey QR 세대·Refresh 원자 연산을 확정할 수 없음
       headers:

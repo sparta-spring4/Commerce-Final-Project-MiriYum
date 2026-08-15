@@ -78,6 +78,7 @@ services:
       - |
         exec valkey-server \
           --appendonly yes \
+          --maxmemory-policy noeviction \
           --requirepass "$$MIRIYUM_VALKEY_PASSWORD"
     volumes:
       - valkey-data:/data

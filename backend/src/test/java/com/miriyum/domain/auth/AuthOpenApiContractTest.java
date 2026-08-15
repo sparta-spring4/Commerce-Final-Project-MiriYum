@@ -27,19 +27,19 @@ class AuthOpenApiContractTest {
     }
 
     @Test
-    @DisplayName("일반 사용자 로그아웃은 선택적 Access 교차 확인과 서버 실패 응답을 공개한다")
+    @DisplayName("일반 사용자 로그아웃은 Refresh 권한과 선택적 Access 감사, 서버 실패 응답을 공개한다")
     void consumerLogoutPublishesQrRevocationCredentialOutcomes() throws IOException {
         String openApi = Files.readString(AUTH_OPEN_API).replace("\r\n", "\n");
         String logout = operation(openApi, "/api/v1/consumers/auth/sessions/current:");
 
         assertThat(logout)
                 .contains("security:\n        - {}\n        - bearerAuth: []")
-                .contains("\"401\":\n          $ref: \"#/components/responses/AccessRefreshSubjectMismatch\"")
+                .doesNotContain("\"401\":")
                 .contains("\"503\":\n          $ref: \"#/components/responses/ConsumerLogoutServiceUnavailable\"");
         assertThat(openApi)
                 .doesNotContain("OptionalAuthorization:")
-                .contains("AccessRefreshSubjectMismatch:")
-                .contains("code: AUTH_016");
+                .doesNotContain("AccessRefreshSubjectMismatch:")
+                .doesNotContain("code: AUTH_016");
     }
 
     @Test

@@ -1,9 +1,7 @@
 package com.miriyum.domain.auth.qrepoch;
 
-import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
-import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import org.springframework.stereotype.Service;
 
@@ -25,13 +23,8 @@ public class ConsumerQrLogoutCoordinator {
     public void advanceForLogout(
             TokenNamespace namespace,
             ParsedToken refreshToken,
-            String rawRefreshToken,
-            boolean corroboratingSubjectMismatch
+            String rawRefreshToken
     ) {
-        ConsumerQrEpochAdvanceResult result = store.advanceForLogout(
-                namespace, refreshToken, rawRefreshToken, corroboratingSubjectMismatch, clock.instant());
-        if (result.status() == ConsumerQrEpochAdvanceResult.Status.SUBJECT_MISMATCH) {
-            throw new ServiceException(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH);
-        }
+        store.advanceForLogout(namespace, refreshToken, rawRefreshToken, clock.instant());
     }
 }

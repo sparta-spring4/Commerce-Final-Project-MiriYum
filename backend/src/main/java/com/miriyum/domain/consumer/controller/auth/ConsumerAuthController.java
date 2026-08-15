@@ -149,7 +149,7 @@ public class ConsumerAuthController {
         }
 
         // CSRF 검증을 통과한 로그아웃 요청은 서버 폐기 성공 여부와 무관하게 브라우저 쿠키를 만료시킨다.
-        // AUTH_016·COMMON_012 응답도 로컬 자격 제거를 우선하지만 서버 폐기 성공을 주장하지 않는다.
+        // COMMON_012 응답에서도 로컬 자격 제거를 우선하지만 서버 폐기 성공을 주장하지 않는다.
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieFactory.expiredRefreshCookie(NAMESPACE).toString());
         consumerAuthService.logout(refreshToken, request.getHeader(HttpHeaders.AUTHORIZATION));
         return ApiResponse.success("로그아웃 요청을 처리했습니다.", null);

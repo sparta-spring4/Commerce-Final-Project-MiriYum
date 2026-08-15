@@ -23,6 +23,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -197,7 +198,7 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
     }
 
     @Test
-    void invalidCurrentRefreshDoesNotInspectCorruptQrState() {
+    void rotatedRefreshR1DoesNotRevokeActiveR2OrInspectQrState() {
         RefreshFixture refresh = createActiveRefresh("family-rotated", "token-current", "raw-refresh-token");
         redisTemplate.opsForHash().put(refresh.familyKey(), "currentTokenId", "token-next");
         redisTemplate.opsForHash().put(
@@ -206,38 +207,53 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
         redisTemplate.opsForValue().set(epochKey, "not-a-hash");
 
         ConsumerQrEpochAdvanceResult result = store.advanceForLogout(
-                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), true, Instant.now());
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now());
 
         assertThat(result.status()).isEqualTo(ConsumerQrEpochAdvanceResult.Status.NOT_AUTHORIZED);
         assertThat(redisTemplate.opsForValue().get(epochKey)).isEqualTo("not-a-hash");
         assertThat(redisTemplate.<String, String>opsForHash().get(refresh.familyKey(), "status"))
                 .isEqualTo("ACTIVE");
+        assertThat(redisTemplate.<String, String>opsForHash().get(refresh.familyKey(), "currentTokenId"))
+                .isEqualTo("token-next");
+        assertThat(redisTemplate.opsForSet().members(refresh.accountFamiliesKey()))
+                .contains(refresh.familyKey());
     }
 
     @Test
-    void activeRefreshDetectsAccessSubjectMismatchBeforeMutation() {
+    void activeRefreshCompletesLogoutBasedOnRefreshAlone() {
         RefreshFixture refresh = createActiveRefresh("family-mismatch", "token-current", "raw-refresh-token");
         ConsumerQrEpochSnapshot before = store.captureCurrent(7L);
 
         ConsumerQrEpochAdvanceResult result = store.advanceForLogout(
-                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), true, Instant.now());
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now());
 
-        assertThat(result.status().name()).isEqualTo("SUBJECT_MISMATCH");
-        assertThat(store.captureCurrent(7L)).isEqualTo(before);
-        assertRefreshStillActive(refresh);
+        assertThat(result.status()).isEqualTo(ConsumerQrEpochAdvanceResult.Status.APPLIED);
+        assertThat(store.captureCurrent(7L)).isNotEqualTo(before);
+        assertThat(redisTemplate.<String, String>opsForHash().get(refresh.familyKey(), "status"))
+                .isEqualTo("REVOKED");
+        assertThat(redisTemplate.opsForSet().members(refresh.accountFamiliesKey()))
+                .doesNotContain(refresh.familyKey());
     }
 
     @Test
-    void missingFamilyCleanupDoesNotRequireStorageGeneration() {
+    void missingFamilyIsCleanupOnlyWithoutInspectingGenerationOrAccountIndex() {
         ValkeyConsumerQrEpochStore invalidGenerationStore = new ValkeyConsumerQrEpochStore(
                 redisTemplate, properties(null));
         ParsedToken missing = new ParsedToken(
                 TokenNamespace.CONSUMER, 7L, "family-missing", "token-missing");
+        String familyKey = RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, missing.familyId());
+        String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(TokenNamespace.CONSUMER, 7L);
+        redisTemplate.opsForSet().add(accountFamiliesKey, familyKey);
+        redisTemplate.expire(accountFamiliesKey, Duration.ofHours(1));
+        Long ttlBeforeMillis = redisTemplate.getExpire(accountFamiliesKey, TimeUnit.MILLISECONDS);
 
         ConsumerQrEpochAdvanceResult result = invalidGenerationStore.advanceForLogout(
-                TokenNamespace.CONSUMER, missing, "raw-refresh-token", false, Instant.now());
+                TokenNamespace.CONSUMER, missing, "raw-refresh-token", Instant.now());
 
         assertThat(result.status()).isEqualTo(ConsumerQrEpochAdvanceResult.Status.NOT_AUTHORIZED);
+        assertThat(redisTemplate.opsForSet().members(accountFamiliesKey)).containsExactly(familyKey);
+        assertThat(redisTemplate.getExpire(accountFamiliesKey, TimeUnit.MILLISECONDS))
+                .isBetween(ttlBeforeMillis - 5_000L, ttlBeforeMillis);
     }
 
     @Test
@@ -247,7 +263,7 @@ class ValkeyConsumerQrEpochStoreIntegrationTest {
                 redisTemplate, properties(null));
 
         assertUnavailable(() -> invalidGenerationStore.advanceForLogout(
-                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), false, Instant.now()));
+                TokenNamespace.CONSUMER, refresh.parsed(), refresh.rawToken(), Instant.now()));
 
         assertRefreshStillActive(refresh);
     }

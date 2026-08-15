@@ -14,7 +14,6 @@ interface ConsumerQrEpochStore {
             TokenNamespace namespace,
             ParsedToken refreshToken,
             String rawRefreshToken,
-            boolean corroboratingSubjectMismatch,
             Instant now
     );
 }

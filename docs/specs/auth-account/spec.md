@@ -114,7 +114,8 @@
 ### 고도화 Consumer QR epoch 로그아웃
 
 - `DELETE /api/v1/consumers/auth/sessions/current`는 CSRF 통과 뒤 Refresh 쿠키를 항상 만료한다. 현재 ACTIVE Consumer Refresh가 namespace·account·family·current token ID·원문 hash까지 일치할 때만 서버 family 폐기와 계정 QR epoch 증가를 한 Valkey Lua에서 확정한다.
-- 선택적 Bearer Access JWT는 account 교차 확인 전용이다. `/auth/**` 공개 SecurityFilterChain은 Authorization을 자동 파싱하지 않으므로 controller가 원문 헤더를 Auth service에 전달하고 service가 정확한 Bearer 형식을 `JwtTokenProvider`로 직접 선택 파싱한다. 유효 Access·Refresh subject가 다르면 mutation 전 `AUTH_016`; Access-only나 Refresh 부재·무효·만료·회전·폐기·저장소 없음은 브라우저 cleanup-only `200`이다. missing/invalid/expired Access는 `null` 교차 확인값으로 처리해 현재 Refresh 단독 판정을 막지 않는다.
+- 현재 ACTIVE Refresh가 로그아웃 mutation의 유일한 권한이다. 선택적 Bearer Access JWT는 감사 보조값일 뿐이다. `/auth/**` 공개 SecurityFilterChain은 Authorization을 자동 파싱하지 않으므로 controller가 원문 헤더를 Auth service에 전달하고 service가 정확한 Bearer 형식만 `JwtTokenProvider`로 직접 선택 파싱한다. Access 파싱 중 발생한 모든 `ServiceException`은 Access 부재로 취급하되 예상하지 못한 `RuntimeException`은 숨기지 않는다. 각각 유효한 Access·Refresh subject가 달라도 민감 식별자 없는 감사 event만 남기고 현재 Refresh의 mutation을 계속한다. Access-only나 Refresh 부재·무효·만료·회전·폐기·저장소 없음은 브라우저 cleanup-only `200`이다.
+- 응답 유실 뒤 회전 전 Refresh R1으로 로그아웃해도 ACTIVE R2 family를 찾아 폐기하지 않는다. family가 이미 사라졌다면 account index를 조회·정리하지 않으므로 stale member는 index의 기존 TTL까지 남을 수 있다. 두 경우 모두 이번 계약에서는 cleanup-only이며 QR epoch도 증가시키지 않는다.
 - Auth 공개 Java 계약은 `ConsumerQrEpochSnapshot(Long accountId, String opaqueVersion)`, `captureCurrent(Long accountId)`, `requireCurrent(Long expectedAccountId, ConsumerQrEpochSnapshot snapshot)`이다. expected accountId는 Reservation 원장 값이며 account/epoch 불일치는 `AUTH_017`로 통합하고 현재 값을 노출하지 않는다.
 - QR epoch는 generation namespace별 TTL 없는 salt·counter hash다. backend가 Java `SecureRandom`으로 128-bit 후보 salt를 만들고 Lua는 최초 후보만 원자적으로 선점한다. 외부 opaqueVersion은 비공개 salt를 포함한 generation·accountId·salt·counter 직렬화의 `v1.` + SHA-256 base64url digest이며 equality-only다. 원문 연결값의 단순 Base64 인코딩은 사용하지 않는다. 최초 capture와 missing-epoch logout 초기화는 Lua로 원자화한다.
 - `MIRIYUM_QR_STORAGE_GENERATION`은 `^[A-Za-z0-9._-]{1,64}$`이고 모든 backend instance에서 같아야 한다. 정상 재시작에는 유지하고 과거 Valkey snapshot 복원 전에는 미사용 새 값으로 바꾸며 이전 값을 다시 사용하지 않는다.
@@ -197,7 +198,6 @@
 | `AUTH_009` | 403 | CSRF 토큰 검증 실패 |
 | `AUTH_010` | 403 | Origin·Referer 검증 실패 |
 | `AUTH_011` | 403 | 현재 계정 상태가 이용을 허용하지 않음 |
-| `AUTH_016` | 401 | 각각 유효한 Access·Refresh subject 불일치 |
 | `AUTH_017` | 409 | QR account 또는 epoch가 현재 Auth 원본과 불일치 |
 | `ACCOUNT_001` | 409 | 같은 계정 유형의 이메일 중복 |
 | `ACCOUNT_002` | 409 | 같은 계정 유형의 휴대전화 중복 |

@@ -24,7 +24,7 @@ export interface paths {
   "/api/v1/consumers/auth/sessions/current": {
     /**
      * 일반 사용자 현재 shell 로그아웃
-     * @description 공개 auth chain에서 인증되지 않는 원문 Access bearer를 Auth service가 직접 선택 파싱해 교차 확인한다. 없거나 형식 오류·손상·만료여도 현재 ACTIVE Refresh의 단독 판정을 방해하지 않는다.
+     * @description 현재 ACTIVE Refresh가 로그아웃 mutation의 권한이다. 공개 auth chain에서 인증되지 않는 원문 Access bearer는 Auth service가 감사 목적으로만 선택 파싱하며, 파싱 ServiceException 또는 유효 subject 불일치가 Refresh 판정을 방해하지 않는다.
      */
     delete: operations["deleteConsumerCurrentSession"];
   };
@@ -340,16 +340,6 @@ export interface components {
     };
   };
   responses: {
-    /** @description 각각 유효한 Access JWT와 Refresh JWT의 계정 주체가 다름. Valkey mutation 전에 거부한다. */
-    AccessRefreshSubjectMismatch: {
-      headers: {
-        /** @description CSRF 검증 뒤이므로 Max-Age=0인 MIRIYUM_CONSUMER_REFRESH 쿠키를 유지한다. */
-        "Set-Cookie"?: string;
-      };
-      content: {
-        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
-      };
-    };
     /** @description storage generation 또는 Valkey QR 세대·Refresh 원자 연산을 확정할 수 없음 */
     ConsumerLogoutServiceUnavailable: {
       headers: {
@@ -650,7 +640,7 @@ export interface operations {
   };
   /**
    * 일반 사용자 현재 shell 로그아웃
-   * @description 공개 auth chain에서 인증되지 않는 원문 Access bearer를 Auth service가 직접 선택 파싱해 교차 확인한다. 없거나 형식 오류·손상·만료여도 현재 ACTIVE Refresh의 단독 판정을 방해하지 않는다.
+   * @description 현재 ACTIVE Refresh가 로그아웃 mutation의 권한이다. 공개 auth chain에서 인증되지 않는 원문 Access bearer는 Auth service가 감사 목적으로만 선택 파싱하며, 파싱 ServiceException 또는 유효 subject 불일치가 Refresh 판정을 방해하지 않는다.
    */
   deleteConsumerCurrentSession: {
     parameters: {
@@ -669,7 +659,6 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["AccessRefreshSubjectMismatch"];
       403: components["responses"]["CsrfRejected"];
       503: components["responses"]["ConsumerLogoutServiceUnavailable"];
     };

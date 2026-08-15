@@ -91,25 +91,6 @@ class ConsumerAuthControllerLogoutTest {
     }
 
     @Test
-    @DisplayName("Access·Refresh subject 불일치로 401이어도 Refresh 쿠키 만료 헤더를 유지한다")
-    void logoutExpiresRefreshCookieEvenWhenSubjectsMismatch() {
-        request.setCookies(
-                new Cookie(NAMESPACE.refreshCookieName(), "refresh-token"),
-                new Cookie(NAMESPACE.csrfCookieName(), CSRF_TOKEN));
-        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer other-account-access-token");
-        willThrow(new ServiceException(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH))
-                .given(consumerAuthService)
-                .logout("refresh-token", "Bearer other-account-access-token");
-
-        assertThatThrownBy(() -> controller.logout(request, response, CSRF_TOKEN))
-                .isInstanceOf(ServiceException.class)
-                .extracting(exception -> ((ServiceException) exception).getErrorCode())
-                .isEqualTo(AuthErrorCode.ACCESS_REFRESH_SUBJECT_MISMATCH);
-
-        assertThat(expiredRefreshCookieHeader()).isTrue();
-    }
-
-    @Test
     @DisplayName("정상 로그아웃도 Refresh 쿠키 만료 헤더를 내려보낸다")
     void logoutExpiresRefreshCookieOnSuccess() {
         // given
