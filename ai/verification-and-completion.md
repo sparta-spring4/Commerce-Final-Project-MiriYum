@@ -40,7 +40,7 @@ QA는 사용자가 관찰할 수 있는 인수 동작과 의미 있는 실패 �
 
 CI는 실제 실행의 결과와 로그를 소유한다. workflow는 존재하고 깨끗한 checkout에서 필수 gate를 재현한 후에만 활성 상태다. 저장소 설정도 검증된 후에만 검사가 필수 상태다. 구성 텍스트, 로컬 실행 또는 계획된 workflow는 활성/필수 CI를 주장하기에 충분하지 않다.
 
-`Backend CI` workflow와 `dev` 브랜치의 `backend-ci` required check는 `CONFIGURED`다. `backend-ci`는 단위 테스트, Testcontainers 통합 테스트, CD workflow 계약 검증이 모두 성공할 때만 성공한다. 로컬 엔드포인트 검증과 루트 명령 조합만으로 개별 PR의 CI `PASS`를 주장할 수는 없으며, Pull Request는 로그를 영구 작업 로그에 복사하는 대신 해당 commit의 CI 증거로 링크한다.
+`Backend CI` workflow와 `dev` 브랜치의 `backend-ci` required check는 `CONFIGURED`다. `backend-ci`는 단위 테스트, Testcontainers 통합 테스트, CD workflow 계약 검증과 Gradle/Testcontainers를 실행하지 않는 Windows native runner contract가 모두 성공할 때만 성공한다. 새 Windows 의존성을 추가하는 변경은 해당 Pull Request의 실제 Ubuntu·Windows 실행 전까지 `NOT RUN`이며 workflow YAML만으로 `PASS`를 주장하지 않는다. 로컬 엔드포인트 검증과 루트 명령 조합만으로 개별 PR의 CI `PASS`를 주장할 수는 없으며, Pull Request는 로그를 영구 작업 로그에 복사하는 대신 해당 commit의 CI 증거로 링크한다.
 
 존재하지 않는 GitHub Actions check를 required check로 설명하거나 문서 체크리스트만으로 현재 PR의 CI 통과를 주장하지 않는다.
 
@@ -86,6 +86,7 @@ Issue는 인수 조건이 해결되고, 담당자와 위임된 출력이 대조�
 | 기계 판독 가능한 프로젝트 상태, 기계 레지스트리 및 JSON schema | `NOT CONFIGURED` | 실제 엔드포인트 명령과 출력 형식이 안정적이고 검증됨. schema는 실제 fixture를 검증해야 함 |
 | command runner | `NOT CONFIGURED` | 반복 명령, 실패 fixture, 종료 동작 및 증거 형식이 검증됨 |
 | verification runner | `NOT CONFIGURED` | 여러 gate에 안정적인 입력, 순서, 실패 동작 및 재현 가능한 출력이 있음 |
+| 선택적 Backend 로컬 full-verification runner | `NOT CONFIGURED` | Windows·Ubuntu contract, Windows 전체 기능 실행, 25분 성능 목표, Java·Docker 전체-run peak와 해당 commit의 Backend CI가 모두 검증됨. backend 전용 활성화는 범용 verification runner 상태를 바꾸지 않음 |
 | API smoke verifier | `NOT CONFIGURED` | 실제 API scaffold, 환경 계약, 안전한 데이터, 성공 사례 및 실패 사례가 검증됨 |
 | failure triage artifact | `NOT CONFIGURED` | 반복된 실패가 안정적인 분류와 실행 가능한 다음 소유자 인계(handoff) 형식을 보여 줌 |
 | 별도 QA, CI, reviewer, Issue 완료 및 완료 주장 문서 | `NOT CONFIGURED` | 독립 작업 흐름(workflow) 또는 소유자가 입증되어 이 섹션만으로 충분하지 않음 |
@@ -109,7 +110,7 @@ Issue는 인수 조건이 해결되고, 담당자와 위임된 출력이 대조�
 
 ## 엔드포인트 scaffold 및 이후 경계
 
-backend와 frontend scaffold, 로컬 AI 계약, wrapper/package script 및 엔드포인트 실행 증거는 이제 존재한다. 해당 `CONFIGURED` command ID는 `ai/command-registry.md`를 통해 조합할 수 있다. 루트 조합은 위임과 증거 집계일 뿐 runner, CI, API smoke 또는 cross-end 통합 runtime을 활성화하지 않는다.
+backend와 frontend scaffold, 로컬 AI 계약, wrapper/package script 및 엔드포인트 실행 증거는 이제 존재한다. 해당 `CONFIGURED` command ID는 `ai/command-registry.md`를 통해 조합할 수 있다. 선택적 backend full-verification runner 구현이 존재하더라도 명령 레지스트리의 활성화 조건을 모두 충족하기 전에는 `NOT CONFIGURED`다. 루트 조합은 위임과 증거 집계일 뿐 범용 runner, CI, API smoke 또는 cross-end 통합 runtime을 활성화하지 않는다.
 
 runner, schema, CI, skill, `lazycodex-runbook.md`, cache 또는 adapter 작업은 해당 반복 workflow나 실패 증거가 matrix를 충족한 후에만 별도 계획으로 옮긴다. 엔드포인트 scaffold 작업은 이러한 artifact를 만들지 않는다.
 

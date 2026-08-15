@@ -177,7 +177,7 @@ exit code 또는 XML 중 하나라도 조건을 만족하지 않으면 해당 ch
 
 Windows contract job을 모든 backend Pull Request의 `backend-ci` 필수 의존성으로 두면 backend 코드와 직접 관련 없는 변경도 Windows runner 가용성이나 이 계약의 실패로 차단될 수 있고, Linux·macOS 개발자는 실패를 로컬에서 그대로 재현하기 어렵다. 이 비용은 지원 대상으로 선언한 저장소 소유 Windows 검증 표면이 조용히 깨지는 것을 막기 위해 수용한다. job은 Gradle과 Testcontainers를 실행하지 않는 contract-only 검증으로 비용을 제한하고, GitHub Actions의 로그·artifact·rerun을 공통 진단 경로로 사용한다. path filter나 파일 존재 여부 skip은 집계 job의 `needs` 의미를 불명확하게 하거나 검증하지 않은 상태를 성공처럼 보이게 할 수 있으므로 적용하지 않는다.
 
-설계 문서만 수정하는 현재 변경에서는 아직 존재하지 않는 runner·native launcher·contract test보다 workflow gate를 먼저 활성화하지 않는다. 구현 전 `.github/workflows/backend-ci.yml`은 변경하지 않으며, 파일 존재 여부 조건이나 `continue-on-error`로 Windows contract job을 skip·완화하는 임시 우회도 금지한다. 다음 계약은 구현과 CI 활성화를 같은 commit 또는 Pull Request 범위에서 원자적으로 적용할 때 검증한다.
+Issue #330 구현에서는 runner·native launcher·contract test와 `.github/workflows/backend-ci.yml`의 Windows contract job을 같은 Pull Request 범위에서 함께 추가한다. Windows job은 path filter, 파일 존재 여부 skip과 `continue-on-error` 없이 `backend-ci`의 필수 `needs`로 연결하고, 실제 지원 활성화는 해당 commit의 Ubuntu·Windows CI 성공 뒤에만 판정한다.
 
 - Auto 경계, 8GB 미만·탐지 실패의 최소 fallback 경고, Docker Engine·WSL2 VM 메모리 상한 비관측 경고와 명시적 override
 - integration 동시 실행 상한 1·2·4와 별도 unit child
@@ -210,6 +210,16 @@ Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 �
 구현 후 최신 `dev`를 반영한 동일 commit을 현재 34GB Windows 기준 머신에서 정식 runner로 한 번 실행해 child별 ExitCode, unit+assemble+A~D XML 무결성과 25분 이하 wall clock을 확인한다. 이 실행만 25분 목표의 완료 증거로 인정하며, 해당 머신과 실행의 관찰 결과일 뿐 모든 PC에 대한 보장이 아니다. 같은 실행에서 외부 측정으로 Java process aggregate peak와 Docker/Testcontainers workload aggregate peak를 함께 기록하고 측정 대상·방법·sampling interval을 PR 증거에 남긴다. 이 peak 측정은 runner runtime 기능이나 container 직접 cleanup 범위를 늘리지 않는다.
 
 34GB·Auto=4 한 번의 성공은 20GB·12GB 경계의 안전성을 직접 증명하지 않는다. 구현 PR은 함께 기록한 Java·Docker peak, 고정 여유와 worker당 예산 계산을 다시 대조해 초기 Auto 임계값을 유지하거나 수정한 근거를 남겨야 한다. 그 재검토가 끝나기 전까지 20GB·12GB 값은 잠정 sizing input이고, 계산 근거가 기록된 뒤에도 모든 Docker/WSL2 상한 환경에 대한 안전성 보장이 아니라 초기 선택 heuristic이다. 같은 코드·설정으로 기존 43~46분 전체 build를 설계 단계에서 반복하지 않는다. 로컬 runner 성공은 해당 commit의 Backend CI 성공을 대신하지 않는다.
+
+#### 2026-08-15 구현 증거와 미충족 gate
+
+commit `065318c9`의 Windows에서 Common+WindowsNative contract 17건, Common+Gradle contract 13건이 성공했다. 같은 commit의 정식 Auto 실행은 시작 시 host 가용 메모리 약 10.7GB와 16 logical CPU를 관찰해 Auto=1을 선택했다. 당시 다른 worktree의 2GB Gradle integration build가 동시에 실행 중이었으므로 이 선택과 host 가용 메모리·Docker 전체 합계는 동시 부하의 영향을 받았다.
+
+unit+assemble은 1분 57초, shard A는 24분, B는 18분 34초, C는 14분 36초에 성공했다. shard D 실행 중 Codex가 종료되면서 runner와 외부 sampler도 중단됐고 Windows Job handle close 뒤 해당 run token의 OS process 0건과 Ryuk 회수 뒤 임시 container 0건을 확인했다. 보존 XML을 재검증한 뒤 같은 run root와 `--rerun-tasks`로 D만 복구했으며 15분 03초, exit `0`, timeout/cancel 없음, containment 성공, `ActiveProcessesAfterCleanup=0`이었다. 최종 XML 합계는 unit 2,314, A 123, B 223, C 174, D 91로 총 2,925 tests이며 failures/errors/skipped는 모두 0이다.
+
+중단과 복구를 포함한 논리적 wall time은 79분 15초이므로 25분 성능 목표는 `FAIL`이다. 원래 sampler가 sample을 메모리에만 보유해 종료 전에 전체-run CSV/JSON을 쓰지 못했으므로 전체 Java·Docker peak는 증거 유실로 판정한다. 복구된 D에서 2초 간격으로 즉시 저장한 하한은 runner descendant Java working set 약 1.97GB, 동시에 실행 중인 전체 Docker container memory 약 820.5MB, 최소 host 가용 메모리 약 11.1GB다. Docker 수치는 장기 실행 `miriyum-local-mysql-1`을 포함하며 runner 전용 label을 사용하지 않았다.
+
+이 D-only 하한과 동시 부하가 섞인 Auto=1 결과만으로 20GB·12GB threshold를 낮추거나 안전하다고 주장할 수 없다. 초기 threshold는 잠정 heuristic으로 유지하며, 전체-run peak와 Auto=4 성능 목표를 충족하는 비교 가능한 후속 증거가 생기기 전에는 선택적 backend full-verification runner를 `CONFIGURED`로 승격하지 않는다. Ubuntu CI도 이 문서 개정 시점에는 `NOT RUN`이다.
 
 ### shard 재배치 경계
 

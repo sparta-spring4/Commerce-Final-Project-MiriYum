@@ -56,9 +56,17 @@
 - 순수 JUnit·Mockito 및 `@WebMvcTest` slice 테스트는 태그 없이 빠른 `test` task에서 실행한다.
 - `@SpringBootTest`, `@Testcontainers` 또는 `MySQLContainer`를 사용하는 테스트 클래스에는 class-level `@Tag("integration")`을 선언한다.
 - `integrationTest` task는 `@Tag("integration")` 테스트를 모두 실행하며, CI 전용 `integrationTestShardA`~`integrationTestShardD` task는 각각 `integration-shard-a`~`integration-shard-d` 태그를 실행한다. `test` task는 integration 태그를 제외하고, `build`는 전체 통합 테스트를 포함한다.
-- `Backend CI`는 unit job과 네 integration shard job을 병렬 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
+- `Backend CI`는 unit job, 네 integration shard job과 Gradle/Testcontainers를 실행하지 않는 Windows native contract job을 실행하고, 모두 성공한 뒤에만 required check 이름인 `backend-ci`를 성공 처리한다. 새 통합 테스트가 기본 태그 또는 정확히 하나의 shard 태그를 빠뜨리면 Gradle 검증 task가 실패한다.
 - 새 통합 테스트의 shard는 최근 CI 실행 시간과 테스트 구성 정보를 함께 보고 균형 있게 고른다. `@SpringBootTest` 속성·`@AutoConfigureMockMvc`·`@Testcontainers` 조합은 배치 힌트일 뿐, 실제 Spring ApplicationContext 캐시 키는 `@DynamicPropertySource`, `@MockitoBean` 등 context customizer까지 포함하므로 정적 어노테이션만으로 컨텍스트 공유를 단정하지 않는다. 컨텍스트 재사용을 근거로 배치하려면 cache debug log 또는 동등한 실행 증거를 남긴다. Gradle 검증 task는 태그 개수만 확인하고 shard별 균형은 검사하지 않으므로 새 테스트 추가 뒤 한 shard의 실측 시간이 치우치면 재배치한다(#288).
 - 위 marker를 직접 사용하지 않아도 외부 DB, Docker 또는 느린 Spring runtime에 의존하는 테스트는 통합 테스트로 분류하고 그 근거를 PR에 기록한다.
+
+### 선택적 backend 로컬 전체 검증 runner
+
+PowerShell 7 runner는 unit+assemble child와 integration A~D queue를 분리하고 integration 동시 실행 수를 `Auto|1|2|4`로 제한한다. Auto는 실행 시점 host 가용 메모리와 논리 CPU로 1·2·4를 고르며 Auto=1은 최소 병렬 fallback일 뿐 저메모리 안전 보장이 아니다. Docker Desktop/WSL2 VM cap은 탐지하지 못하므로 경고와 명시적 override를 제공한다.
+
+각 child는 전용 build directory, Gradle project cache, stdout, stderr와 report를 사용하고 Gradle daemon/Test heap은 1GB, `maxParallelForks=1`이다. Windows는 suspended process를 Job Object에 귀속한 뒤에만 resume하고, Ubuntu는 별도 process group을 사용한다. child별 35분 timeout 뒤에도 남은 queue를 실행하는 `fail-fast=false`이며, process와 양쪽 stream 완료, exit `0`, XML 존재, `tests > 0`, `failures/errors/skipped == 0`을 모두 만족해야 성공이다. OS process containment와 Testcontainers/Ryuk container 수명 주기는 별도 증거로 다룬다.
+
+정확한 명령과 현재 활성화 상태는 [backend 명령 레지스트리](../backend/ai/command-registry.md)가 소유한다. 파일 존재나 로컬 일부 성공만으로 이 runner를 `CONFIGURED` 또는 CI 대체 수단으로 부르지 않는다.
 
 ## `1차 MVP` 검증 gate
 

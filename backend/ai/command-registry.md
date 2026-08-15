@@ -17,6 +17,14 @@
 
 위 여덟 명령은 파일이 존재하고 각 명령의 성공적인 종료 코드 `0`이 관찰된 후에만 활성화되었다.
 
+## 활성화 대기 로컬 전체 검증 명령
+
+| 명령 ID | 상태 | 정확한 명령 | 필수 입력 | 예상 출력 | 현재 증거와 활성화 조건 | 실패 의미 |
+|---|---|---|---|---|---|---|
+| `backend.full-verification` | `NOT CONFIGURED` | `.\scripts\run-backend-full-verification.ps1 -ParallelShards Auto` | PowerShell 7, Java 21, Docker/Testcontainers, 해결된 의존성, Windows에서는 Job Object를 사용할 수 있는 host | unit+assemble과 integration A~D가 모두 exit `0`, 각 XML의 `tests > 0`, `failures/errors/skipped == 0`, child별 격리 로그·report와 최종 종료 코드 | commit `065318c9`에서 Windows contract 17건과 Gradle contract 13건이 성공했다. 2026-08-15 Auto=1 실행은 Codex 종료 뒤 D만 같은 run root에서 복구해 2,925 tests의 기능 결과를 성공시켰지만 논리적 wall time 79분 15초로 25분 목표에 실패했고 전체-run peak는 유실됐다. Ubuntu CI도 아직 `NOT RUN`이다. 성능 목표, 완전한 peak 측정과 Ubuntu CI가 모두 확인되기 전에는 `CONFIGURED`로 승격하지 않는다 | child timeout·cancel·containment 실패, non-zero exit, XML 누락·malformed·0 tests·failure/error/skipped, 또는 활성화 전제 미충족은 각각 `FAIL` 또는 `NOT CONFIGURED`다 |
+
+`-ParallelShards`는 기본 `Auto`이고 명시적 override는 `1`, `2`, `4`만 허용한다. Auto=1은 저메모리 안전 보장이 아니라 최소 병렬 fallback이며 Docker Desktop/WSL2 VM memory cap은 host 가용 메모리 탐지에 포함되지 않는다. 이 명령은 선택적 backend 전용 runner이고 범용 command/verification runner의 상태를 바꾸지 않는다.
+
 ## 러너 플랫폼별 호출
 
 위 "정확한 명령"은 Windows 로컬 기준 `.\gradlew.bat` 표기다. Linux CI 러너(`ubuntu-24.04`, `.github/workflows/backend-ci.yml`, Issue #92)에서는 같은 명령 ID를 `./gradlew`로 호출한다. 예: `backend.wrapper.version`은 `./gradlew --version`, `backend.test`는 `./gradlew test`, shard 명령은 `./gradlew integrationTestShardA`부터 `./gradlew integrationTestShardD`까지, `backend.build`는 `./gradlew build`다. 래퍼·버전·검증 대상은 동일하며 호출 표기만 플랫폼에 따라 다르다. GitHub Windows 러너는 Linux 컨테이너를 지원하지 않아 Testcontainers MySQL을 실행할 수 없으므로 CI 러너는 Linux(`./gradlew`)를 사용한다.
