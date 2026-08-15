@@ -6,6 +6,7 @@ import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAccountStatus;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
+import com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorPermissionGrantRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
@@ -21,6 +22,19 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @ConditionalOnProperty(prefix = "miriyum.platform-operator", name = "enabled", havingValue = "true")
 public class OperatorAuthorityService implements OperatorAuthorityReader {
+    private static final Set<PlatformOperatorPermission> ASSIGNABLE_DIRECT_PERMISSIONS = Set.of(
+            PlatformOperatorPermission.ONBOARDING_REVIEW,
+            PlatformOperatorPermission.ONBOARDING_EVIDENCE_READ,
+            PlatformOperatorPermission.MEMBER_READ_MINIMAL,
+            PlatformOperatorPermission.MEMBER_RECOVERY,
+            PlatformOperatorPermission.ACCOUNT_SANCTION,
+            PlatformOperatorPermission.ACCOUNT_APPEAL_REVIEW,
+            PlatformOperatorPermission.STORE_READ_MINIMAL,
+            PlatformOperatorPermission.STORE_SANCTION,
+            PlatformOperatorPermission.OPERATIONS_MONITOR_READ,
+            PlatformOperatorPermission.PAYMENT_RECOVERY_EXECUTE,
+            PlatformOperatorPermission.AUDIT_READ,
+            PlatformOperatorPermission.INCIDENT_RESPOND);
     private final PlatformOperatorAccountRepository accounts;
     private final PlatformOperatorRoleGrantRepository roles;
     private final PlatformOperatorPermissionGrantRepository permissions;
@@ -109,6 +123,91 @@ public class OperatorAuthorityService implements OperatorAuthorityReader {
         PlatformOperatorAccount account = lock(operatorId);
         if (permissions.deleteByPlatformOperatorAccountIdAndPermission(operatorId, permission) == 1L) {
             account.advanceAuthorityVersion();
+        }
+    }
+
+    /** 하위 운영자의 역할·직접 권한을 요청한 최종 상태로 원자적으로 교체한다. */
+    @Transactional
+    public AuthorityReplacement replaceAuthority(
+            long operatorId,
+            long expectedAuthorityVersion,
+            Set<PlatformOperatorRole> desiredRoles,
+            Set<PlatformOperatorPermission> desiredPermissions
+    ) {
+        Set<PlatformOperatorRole> afterRoles = immutableRoles(desiredRoles);
+        Set<PlatformOperatorPermission> afterPermissions = immutablePermissions(desiredPermissions);
+        validateAssignable(afterRoles, afterPermissions);
+
+        PlatformOperatorAccount account = lock(operatorId);
+        if (account.getAuthorityVersion() != expectedAuthorityVersion) {
+            throw new ServiceException(com.miriyum.global.exception.CommonErrorCode.CONCURRENT_MODIFICATION);
+        }
+        lastSuperAdminPolicy.assertRemovable(operatorId);
+
+        Set<PlatformOperatorRole> beforeRoles = EnumSet.noneOf(PlatformOperatorRole.class);
+        roles.findAllByPlatformOperatorAccountId(operatorId)
+                .forEach(grant -> beforeRoles.add(grant.getRole()));
+        Set<PlatformOperatorPermission> beforePermissions = EnumSet.noneOf(PlatformOperatorPermission.class);
+        permissions.findAllByPlatformOperatorAccountId(operatorId)
+                .forEach(grant -> beforePermissions.add(grant.getPermission()));
+
+        if (beforeRoles.equals(afterRoles) && beforePermissions.equals(afterPermissions)) {
+            return new AuthorityReplacement(false, beforeRoles, afterRoles, beforePermissions, afterPermissions);
+        }
+
+        beforeRoles.stream().filter(role -> !afterRoles.contains(role))
+                .forEach(role -> roles.deleteByPlatformOperatorAccountIdAndRole(operatorId, role));
+        afterRoles.stream().filter(role -> !beforeRoles.contains(role))
+                .forEach(role -> roles.save(com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant.create(
+                        operatorId, role, clock.instant())));
+        beforePermissions.stream().filter(permission -> !afterPermissions.contains(permission))
+                .forEach(permission -> permissions.deleteByPlatformOperatorAccountIdAndPermission(
+                        operatorId, permission));
+        afterPermissions.stream().filter(permission -> !beforePermissions.contains(permission))
+                .forEach(permission -> permissions.save(
+                        com.miriyum.domain.platformoperator.entity.PlatformOperatorPermissionGrant.create(
+                                operatorId, permission, clock.instant())));
+        account.advanceAuthorityVersion();
+        return new AuthorityReplacement(true, beforeRoles, afterRoles, beforePermissions, afterPermissions);
+    }
+
+    private static Set<PlatformOperatorRole> immutableRoles(Set<PlatformOperatorRole> roles) {
+        if (roles == null || roles.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new ServiceException(AdminAuthorizationErrorCode.FORBIDDEN_AUTHORITY);
+        }
+        return Set.copyOf(roles);
+    }
+
+    private static Set<PlatformOperatorPermission> immutablePermissions(
+            Set<PlatformOperatorPermission> permissions) {
+        if (permissions == null || permissions.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new ServiceException(AdminAuthorizationErrorCode.FORBIDDEN_AUTHORITY);
+        }
+        return Set.copyOf(permissions);
+    }
+
+    static void validateAssignable(
+            Set<PlatformOperatorRole> roles,
+            Set<PlatformOperatorPermission> permissions
+    ) {
+        if (roles.contains(PlatformOperatorRole.SUPER_ADMIN)
+                || !ASSIGNABLE_DIRECT_PERMISSIONS.containsAll(permissions)) {
+            throw new ServiceException(AdminAuthorizationErrorCode.FORBIDDEN_AUTHORITY);
+        }
+    }
+
+    public record AuthorityReplacement(
+            boolean changed,
+            Set<PlatformOperatorRole> beforeRoles,
+            Set<PlatformOperatorRole> afterRoles,
+            Set<PlatformOperatorPermission> beforePermissions,
+            Set<PlatformOperatorPermission> afterPermissions
+    ) {
+        public AuthorityReplacement {
+            beforeRoles = Set.copyOf(beforeRoles);
+            afterRoles = Set.copyOf(afterRoles);
+            beforePermissions = Set.copyOf(beforePermissions);
+            afterPermissions = Set.copyOf(afterPermissions);
         }
     }
 

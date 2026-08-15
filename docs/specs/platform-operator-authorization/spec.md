@@ -15,7 +15,7 @@
 
 #275의 독립 `platform-operator` principal과 중앙 세션 위에서 역할·세부 권한, 사건 배정과 현재 비밀번호 재인증을 고위험 명령의 공통 서버 계약으로 제공한다. #277~#282는 이 계약을 소비하고 인증 namespace, 권한 판정이나 승인 소비를 중복 구현하지 않는다.
 
-포함 범위는 고정 역할·권한 catalog, 계정별 grant와 `authority_version`, 중앙 사건 배정 검증, 목적·대상·세션·만료에 결속된 일회 승인, 고위험 명령 guard, 감사 context와 마지막 슈퍼관리자 보호 판정이다. WebAuthn, 실제 업무 명령, 운영자 관리 HTTP API, 통합 감사 조회 API와 frontend는 제외한다.
+포함 범위는 고정 역할·권한 catalog, 계정별 grant와 `authority_version`, 중앙 사건 배정 검증, 목적·대상·세션·만료에 결속된 일회 승인, 고위험 명령 guard, 감사 context와 마지막 슈퍼관리자 보호 판정이다. WebAuthn, 실제 업무 명령, 운영자 관리 HTTP API, 통합 감사 조회 API와 frontend는 제외한다. #282는 단일 슈퍼관리자 모델에 따라 `OPERATOR_CREATION`·`AUDIT_CORRECTION` 목적과 `AUDIT_EVENT` 대상을 이 공통 승인 계약에 추가한다.
 
 ## 역할과 세부 권한 catalog
 
@@ -33,6 +33,8 @@
 | `INCIDENT_RESPONDER` | `INCIDENT_RESPOND` |
 
 `SUPER_ADMIN`도 업무상 필요가 없는 회원·입점 증빙·감사 원문 조회 권한을 자동으로 얻지 않는다. 개인정보 대량 조회·내보내기, 결제수단·비밀과 광범위 민감정보 권한은 catalog에 없다.
+
+#282부터 `SUPER_ADMIN`은 교체되지 않는 단일 bootstrap 계정으로 운용한다. 후속 운영 API는 이를 생성·추가·중지·강등하거나 핵심 권한을 변경하지 않으며 하위 운영자에게 `SUPER_ADMIN` 역할이나 위 핵심 권한을 직접 grant하지 않는다.
 
 ## 중앙 권한과 권한 회수
 

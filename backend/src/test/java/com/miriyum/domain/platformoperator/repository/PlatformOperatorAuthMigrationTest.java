@@ -24,7 +24,8 @@ class PlatformOperatorAuthMigrationTest {
 
     @Test
     void createsConstrainedAccountAndSecretFreeEventLedgers() throws Exception {
-        try (MySQLContainer mysql = new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))) {
+        try (MySQLContainer mysql = new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))
+                .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
             Flyway flyway = Flyway.configure()
                     .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())

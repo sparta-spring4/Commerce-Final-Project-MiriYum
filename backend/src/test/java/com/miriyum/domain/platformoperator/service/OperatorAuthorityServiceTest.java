@@ -3,11 +3,16 @@ package com.miriyum.domain.platformoperator.service;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.AUDIT_READ;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ONBOARDING_REVIEW;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ONBOARDING_EVIDENCE_READ;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.MEMBER_READ_MINIMAL;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.OPERATOR_CREATE;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorRole.MEMBER_SUPPORT_OPERATOR;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorRole.ONBOARDING_REVIEWER;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorRole.SUPER_ADMIN;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
@@ -25,6 +30,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,5 +103,62 @@ class OperatorAuthorityServiceTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AuthErrorCode.PLATFORM_OPERATOR_SESSION_INVALID));
+    }
+
+    @Test
+    @DisplayName("운영자 권한 교체는 요청한 역할·직접 권한을 정확한 최종 상태로 만든다")
+    void replacesAuthorityAsDesiredState() {
+        PlatformOperatorAccount account = mock(PlatformOperatorAccount.class);
+        when(account.getAuthorityVersion()).thenReturn(3L);
+        when(accounts.findByIdForUpdate(7L)).thenReturn(Optional.of(account));
+        when(roles.findAllByPlatformOperatorAccountId(7L)).thenReturn(List.of(
+                PlatformOperatorRoleGrant.create(7L, ONBOARDING_REVIEWER, Instant.EPOCH)));
+        when(permissions.findAllByPlatformOperatorAccountId(7L)).thenReturn(List.of(
+                PlatformOperatorPermissionGrant.create(7L, AUDIT_READ, Instant.EPOCH)));
+        when(roles.deleteByPlatformOperatorAccountIdAndRole(7L, ONBOARDING_REVIEWER)).thenReturn(1L);
+        when(permissions.deleteByPlatformOperatorAccountIdAndPermission(7L, AUDIT_READ)).thenReturn(1L);
+
+        OperatorAuthorityService.AuthorityReplacement result = service.replaceAuthority(
+                7L, 3L, Set.of(MEMBER_SUPPORT_OPERATOR), Set.of(MEMBER_READ_MINIMAL));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.beforeRoles()).containsExactly(ONBOARDING_REVIEWER);
+        assertThat(result.afterRoles()).containsExactly(MEMBER_SUPPORT_OPERATOR);
+        assertThat(result.beforePermissions()).containsExactly(AUDIT_READ);
+        assertThat(result.afterPermissions()).containsExactly(MEMBER_READ_MINIMAL);
+        verify(account).advanceAuthorityVersion();
+    }
+
+    @Test
+    @DisplayName("동일한 desired state 재요청은 권한 version을 올리지 않는다")
+    void identicalAuthorityReplacementIsNoOp() {
+        PlatformOperatorAccount account = mock(PlatformOperatorAccount.class);
+        when(account.getAuthorityVersion()).thenReturn(3L);
+        when(accounts.findByIdForUpdate(7L)).thenReturn(Optional.of(account));
+        when(roles.findAllByPlatformOperatorAccountId(7L)).thenReturn(List.of(
+                PlatformOperatorRoleGrant.create(7L, ONBOARDING_REVIEWER, Instant.EPOCH)));
+        when(permissions.findAllByPlatformOperatorAccountId(7L)).thenReturn(List.of(
+                PlatformOperatorPermissionGrant.create(7L, AUDIT_READ, Instant.EPOCH)));
+
+        OperatorAuthorityService.AuthorityReplacement result = service.replaceAuthority(
+                7L, 3L, Set.of(ONBOARDING_REVIEWER), Set.of(AUDIT_READ));
+
+        assertThat(result.changed()).isFalse();
+        verify(account, never()).advanceAuthorityVersion();
+    }
+
+    @Test
+    @DisplayName("SUPER_ADMIN 역할과 핵심 운영자 관리 권한은 하위 운영자에게 부여할 수 없다")
+    void rejectsSuperAdminAndCorePermissionAssignment() {
+        assertThatThrownBy(() -> service.replaceAuthority(7L, 3L, Set.of(SUPER_ADMIN), Set.of()))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode
+                                .FORBIDDEN_AUTHORITY));
+        assertThatThrownBy(() -> service.replaceAuthority(7L, 3L, Set.of(), Set.of(OPERATOR_CREATE)))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode
+                                .FORBIDDEN_AUTHORITY));
     }
 }

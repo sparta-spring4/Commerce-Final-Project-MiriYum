@@ -67,8 +67,10 @@ components:
         - ACCOUNT_SANCTION
         - STORE_SANCTION
         - PAYMENT_RECOVERY
+        - OPERATOR_CREATION
         - OPERATOR_AUTHORITY_CHANGE
         - OPERATOR_SUSPENSION
+        - AUDIT_CORRECTION
         - INCIDENT_RESPONSE
     AdminTargetType:
       type: string
@@ -79,6 +81,7 @@ components:
         - STORE
         - PAYMENT_RECOVERY_CASE
         - PLATFORM_OPERATOR_ACCOUNT
+        - AUDIT_EVENT
         - INCIDENT
     PublicId:
       type: string

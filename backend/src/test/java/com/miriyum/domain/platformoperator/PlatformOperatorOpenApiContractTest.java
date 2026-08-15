@@ -26,8 +26,16 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/auth/initial-password");
     private static final String REAUTHENTICATION_PATH =
             "/api/v1/platform-operators/reauthentication-approvals";
+    private static final Set<String> MANAGEMENT_AUDIT_PATHS = Set.of(
+            "/api/v1/platform-operators/accounts",
+            "/api/v1/platform-operators/accounts/{operatorId}/authority",
+            "/api/v1/platform-operators/accounts/{operatorId}/suspension",
+            "/api/v1/platform-operators/audit-events",
+            "/api/v1/platform-operators/audit-events/{eventKey}",
+            "/api/v1/platform-operators/audit-events/{eventKey}/corrections");
     private static final Set<String> EXPECTED_AUDIENCE_PATHS = java.util.stream.Stream
-            .concat(AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH))
+            .concat(AUTH_PATHS.stream(), java.util.stream.Stream.concat(
+                    java.util.stream.Stream.of(REAUTHENTICATION_PATH), MANAGEMENT_AUDIT_PATHS.stream()))
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     @Test
@@ -56,9 +64,14 @@ class PlatformOperatorOpenApiContractTest {
                 .doesNotContainAnyElementsOf(EXPECTED_AUDIENCE_PATHS);
         for (var entry : audiencePaths.entrySet()) {
             String ref = (String) map(entry.getValue()).get("$ref");
-            String feature = entry.getKey().equals(REAUTHENTICATION_PATH)
-                    ? "platform-operator-authorization"
-                    : "platform-operator-auth";
+            String feature;
+            if (entry.getKey().equals(REAUTHENTICATION_PATH)) {
+                feature = "platform-operator-authorization";
+            } else if (MANAGEMENT_AUDIT_PATHS.contains(entry.getKey())) {
+                feature = "platform-operator-management-audit";
+            } else {
+                feature = "platform-operator-auth";
+            }
             assertThat(ref).startsWith("./" + feature + "/openapi.yaml#/paths/");
             assertThat(map(document(feature + "/openapi.yaml").get("paths"))).containsKey(entry.getKey());
         }
