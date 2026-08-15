@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     private static final Logger log = LoggerFactory.getLogger(ValkeyRefreshTokenStore.class);
+    private static final long RISK_EVENT_MARKER_RETENTION_SECONDS = 604_800L;
 
     private static final RedisScript<Long> CREATE_SCRIPT = new DefaultRedisScript<>("""
             local currentSessionEpoch = redis.call('GET', KEYS[3])
@@ -37,10 +38,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
                 'status', 'ACTIVE',
-                'lastRotatedAt', ARGV[6])
+                'lastRotatedAt', ARGV[6],
+                'familyCreatedAt', ARGV[9])
             redis.call('EXPIREAT', KEYS[1], ARGV[7])
             redis.call('SADD', KEYS[2], KEYS[1])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+            if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            end
             return 1
             """, Long.class);
 
@@ -58,6 +63,7 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'occurredAt', ARGV[6],
                         'occurrenceCount', '1',
                         'lastOccurredAt', ARGV[6])
+                    redis.call('EXPIREAT', KEYS[3], ARGV[10])
                 else
                     redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
                     redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
@@ -82,13 +88,19 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 recordRiskEvent('REUSED_REVOKED_TOKEN', 'REVOCATION')
                 return 3
             end
+            local familyCreatedAt = redis.call('HGET', KEYS[1], 'familyCreatedAt')
             redis.call('SADD', KEYS[2], KEYS[1])
             redis.call('HSET', KEYS[1],
                 'currentTokenId', ARGV[4],
                 'currentTokenHash', ARGV[5],
                 'lastRotatedAt', ARGV[6])
-            redis.call('EXPIREAT', KEYS[1], ARGV[7])
-            redis.call('EXPIREAT', KEYS[2], ARGV[7])
+            if familyCreatedAt ~= false and familyCreatedAt ~= nil then
+                redis.call('EXPIREAT', KEYS[1], ARGV[7])
+                local accountFamiliesExpiresAt = redis.call('EXPIRETIME', KEYS[2])
+                if accountFamiliesExpiresAt < tonumber(ARGV[7]) then
+                    redis.call('EXPIREAT', KEYS[2], ARGV[7])
+                end
+            end
             return 1
             """, Long.class);
 
@@ -144,7 +156,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 state.currentTokenHash(),
                 epochSeconds(state.lastRotatedAt()),
                 epochSeconds(state.familyExpiresAt()),
-                Long.toString(expectedSessionEpoch));
+                Long.toString(expectedSessionEpoch),
+                epochSeconds(state.familyCreatedAt()));
         // CREATE_SCRIPT는 0(familyId 충돌)·1(생성)·2(session epoch 변경)만 반환한다.
         int createResult = requireScriptResult(result, "create", state.namespace());
         return switch (createResult) {
@@ -197,7 +210,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(now),
                 epochSeconds(nextFamilyExpiresAt),
                 namespace.value(),
-                familyId);
+                familyId,
+                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)));
         // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 0만 정상 업무 결과이고,
         // null과 그 밖의 값은 Valkey 실행 이상이므로 인증 오류로 감추지 않고 COMMON_012로 실패시킨다.
         int rotateResult = requireScriptResult(result, "rotate", namespace);

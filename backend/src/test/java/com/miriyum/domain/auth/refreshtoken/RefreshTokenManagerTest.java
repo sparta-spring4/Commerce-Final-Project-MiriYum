@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.auth.exception.AuthErrorCode;
@@ -14,6 +15,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +69,7 @@ class RefreshTokenManagerTest {
         assertThat(captor.getValue().familyId()).isEqualTo("family-1");
         assertThat(captor.getValue().currentTokenId()).isEqualTo("token-1");
         assertThat(captor.getValue().currentTokenHash()).isEqualTo(RefreshTokenHash.sha256("refresh-token"));
+        assertThat(captor.getValue().familyCreatedAt()).isEqualTo(Instant.parse("2026-08-08T00:00:00Z"));
         assertThat(pair.refreshToken()).isEqualTo("refresh-token");
     }
 
@@ -136,6 +139,53 @@ class RefreshTokenManagerTest {
         assertThat(instantCaptor.getAllValues()).containsExactly(
                 Instant.parse("2026-08-08T00:00:00Z"),
                 Instant.parse("2026-08-22T00:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("절대 세션 상한이 가까우면 새 Refresh Token 만료를 상한 시각으로 제한한다")
+    void capsRotatedRefreshTokenAtAbsoluteFamilyLifetime() {
+        Instant familyCreatedAt = Instant.parse("2026-07-09T01:00:00Z");
+        ParsedToken parsed = new ParsedToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1", null, familyCreatedAt);
+        RefreshTokenIdentity nextIdentity = new RefreshTokenIdentity("ignored-family", "token-2");
+        given(identityGenerator.generate()).willReturn(nextIdentity);
+        given(jwtTokenProvider.getRefreshTokenValiditySeconds()).willReturn(1_209_600L);
+        given(jwtTokenProvider.generateAccessToken(TokenNamespace.CONSUMER, 7L)).willReturn("next-access-token");
+        given(jwtTokenProvider.generateRefreshToken(
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-1",
+                "token-2",
+                familyCreatedAt,
+                Duration.ofHours(1))).willReturn("next-refresh-token");
+        given(refreshTokenStore.rotate(
+                eq(TokenNamespace.CONSUMER), eq("family-1"), eq(7L), eq("token-1"), any(),
+                eq("token-2"), any(), any(), any()))
+                .willReturn(new RefreshTokenRotationResult(RefreshTokenRotationResult.Status.ROTATED));
+
+        TokenPair pair = manager.rotate(TokenNamespace.CONSUMER, parsed, "current-refresh-token");
+
+        assertThat(pair.refreshToken()).isEqualTo("next-refresh-token");
+        verify(jwtTokenProvider).generateRefreshToken(
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-1",
+                "token-2",
+                familyCreatedAt,
+                Duration.ofHours(1));
+    }
+
+    @Test
+    @DisplayName("절대 세션 상한에 도달한 Refresh Token은 새 토큰 발급이나 위험 사건 없이 만료 처리한다")
+    void doesNotRotateRefreshTokenAfterAbsoluteFamilyLifetime() {
+        Instant familyCreatedAt = Instant.parse("2026-07-09T00:00:00Z");
+        ParsedToken parsed = new ParsedToken(
+                TokenNamespace.CONSUMER, 7L, "family-1", "token-1", null, familyCreatedAt);
+
+        assertThatThrownBy(() -> manager.rotate(TokenNamespace.CONSUMER, parsed, "current-refresh-token"))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID));
+        verifyNoInteractions(identityGenerator, refreshTokenStore);
     }
 
     @Test
