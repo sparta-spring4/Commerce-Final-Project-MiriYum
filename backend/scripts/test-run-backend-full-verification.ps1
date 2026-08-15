@@ -381,6 +381,42 @@ if ($Suite -contains 'Common') {
         }
     }
 
+    Invoke-ContractCase 'Child completion summary is fully formatted before it is written' {
+        $startedAt = [DateTimeOffset]::Parse('2026-08-15T00:00:00Z')
+        $result = [pscustomobject]@{
+            Id = 'unit'
+            Definition = [pscustomobject]@{
+                Tasks = @('test', 'assemble')
+                StdoutPath = 'stdout.log'
+                StderrPath = 'stderr.log'
+                ResultDirectory = 'test-results/test'
+            }
+            Succeeded = $true
+            ProcessResult = [pscustomobject]@{
+                ProcessId = 42
+                StartedAt = $startedAt
+                ExitedAt = $startedAt.AddSeconds(3)
+                ExitCode = 0
+            }
+            TestSummary = [pscustomobject]@{
+                Tests = 7
+                Failures = 0
+                Errors = 0
+                Skipped = 0
+            }
+            Failure = $null
+        }
+
+        $line = Format-VerificationChildSummary -Result $result
+
+        Assert-True -Condition ($line -notmatch '\{\d+\}| -f ') `
+            -Because 'format placeholders and the format operator must not leak into runner output'
+        Assert-True -Condition ($line -match 'id=unit tasks=\[test,assemble\] succeeded=True') `
+            -Because 'summary identifies the completed child and task list'
+        Assert-True -Condition ($line -match 'exit=0 tests=7 failures=0 errors=0 skipped=0') `
+            -Because 'summary reports the verified process and XML counts'
+    }
+
     Invoke-ContractCase 'Process bridge preserves Unicode argv stdin stdout stderr and exit code' {
         $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "miriyum-process-$([guid]::NewGuid().ToString('N'))"
         try {

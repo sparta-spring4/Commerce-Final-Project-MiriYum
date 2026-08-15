@@ -1705,6 +1705,52 @@ function Get-AvailablePhysicalMemoryBytes {
     }
 }
 
+function Format-VerificationChildSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Result
+    )
+
+    $process = $Result.ProcessResult
+    $summary = $Result.TestSummary
+    $elapsed = if ($null -eq $process) {
+        'unknown'
+    }
+    else {
+        ($process.ExitedAt - $process.StartedAt).ToString('c')
+    }
+
+    return (
+        (
+            "Child id={0} tasks=[{1}] succeeded={2} pid={3} started={4} ended={5} " +
+            "elapsed={6} exit={7} tests={8} failures={9} errors={10} skipped={11} " +
+            "stdout={12} stderr={13} report={14} failure={15}"
+        ) -f (
+            $Result.Id
+        ), (
+            $Result.Definition.Tasks -join ','
+        ), $Result.Succeeded, $(
+            if ($null -eq $process) { 'unknown' } else { $process.ProcessId }
+        ), $(
+            if ($null -eq $process) { 'unknown' } else { $process.StartedAt }
+        ), $(
+            if ($null -eq $process) { 'unknown' } else { $process.ExitedAt }
+        ), $elapsed, $(
+            if ($null -eq $process) { 'unknown' } else { $process.ExitCode }
+        ), $(
+            if ($null -eq $summary) { 'unknown' } else { $summary.Tests }
+        ), $(
+            if ($null -eq $summary) { 'unknown' } else { $summary.Failures }
+        ), $(
+            if ($null -eq $summary) { 'unknown' } else { $summary.Errors }
+        ), $(
+            if ($null -eq $summary) { 'unknown' } else { $summary.Skipped }
+        ), $Result.Definition.StdoutPath, $Result.Definition.StderrPath,
+            $Result.Definition.ResultDirectory, $Result.Failure
+    )
+}
+
 function Invoke-BackendFullVerification {
     [CmdletBinding()]
     param(
@@ -1761,40 +1807,7 @@ function Invoke-BackendFullVerification {
         -ChildTimeout $childTimeout
 
     foreach ($result in $schedule.Results) {
-        $process = $result.ProcessResult
-        $summary = $result.TestSummary
-        $elapsed = if ($null -eq $process) {
-            'unknown'
-        }
-        else {
-            ($process.ExitedAt - $process.StartedAt).ToString('c')
-        }
-        Write-Host (
-            "Child id={0} tasks=[{1}] succeeded={2} pid={3} started={4} ended={5} " +
-            "elapsed={6} exit={7} tests={8} failures={9} errors={10} skipped={11} " +
-            "stdout={12} stderr={13} report={14} failure={15}"
-        ) -f (
-            $result.Id
-        ), (
-            $result.Definition.Tasks -join ','
-        ), $result.Succeeded, (
-            if ($null -eq $process) { 'unknown' } else { $process.ProcessId }
-        ), (
-            if ($null -eq $process) { 'unknown' } else { $process.StartedAt }
-        ), (
-            if ($null -eq $process) { 'unknown' } else { $process.ExitedAt }
-        ), $elapsed, (
-            if ($null -eq $process) { 'unknown' } else { $process.ExitCode }
-        ), (
-            if ($null -eq $summary) { 'unknown' } else { $summary.Tests }
-        ), (
-            if ($null -eq $summary) { 'unknown' } else { $summary.Failures }
-        ), (
-            if ($null -eq $summary) { 'unknown' } else { $summary.Errors }
-        ), (
-            if ($null -eq $summary) { 'unknown' } else { $summary.Skipped }
-        ), $result.Definition.StdoutPath, $result.Definition.StderrPath,
-            $result.Definition.ResultDirectory, $result.Failure
+        Write-Host (Format-VerificationChildSummary -Result $result)
     }
     Write-Host (
         "Verification complete succeeded={0} elapsed={1:c} parallel-shards={2}" -f
