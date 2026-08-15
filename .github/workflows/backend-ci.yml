@@ -84,7 +84,11 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # #288 2단계에서 샤드를 4개로 늘린 뒤 실측 소요가 4분 42초~6분 3초로 줄었다.
+    # 1단계의 임시 상향 35분을 실측 기준으로 되돌린다. 최댓값의 3배가 넘는 여유이므로
+    # 러너 편차나 Testcontainers 이미지 pull 지연은 흡수하면서, 실제로 멈춘 job은
+    # 20분 안에 중단된다. 통합 테스트가 다시 늘어 이 상한에 닿으면 샤드 수를 조정한다.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +99,12 @@ jobs:
           - shard: b
             task: integrationTestShardB
             report_directory: integrationTestShardB
+          - shard: c
+            task: integrationTestShardC
+            report_directory: integrationTestShardC
+          - shard: d
+            task: integrationTestShardD
+            report_directory: integrationTestShardD
     defaults:
       run:
         working-directory: backend
@@ -176,6 +186,14 @@ jobs:
 
       - name: Verify backend CD path filter
         run: python3 scripts/test-should-deploy-backend.py
+
+      - name: Verify production task definition secret contract
+        run: |
+          python3 scripts/test-verify-production-task-definition.py
+          python3 scripts/verify-production-task-definition.py \
+            deploy/ecs/production-secret-contract.json \
+            deploy/ecs/production-task-definition.json \
+            --application-config backend/src/main/resources/application.yml
 
       - name: Verify backend CD workflow contract
         shell: pwsh

@@ -1,6 +1,7 @@
 package com.miriyum.domain.storeoperator.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -9,6 +10,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
@@ -17,31 +21,48 @@ import com.miriyum.domain.auth.dto.response.AccountType;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.JwtTokenProvider;
+import com.miriyum.domain.auth.jwt.ParsedToken;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
+import com.miriyum.domain.storeoperator.enums.StoreOperatorAccountStatus;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.util.Optional;
+import java.lang.reflect.Method;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(MockitoExtension.class)
 class StoreOperatorAuthServiceTest {
 
     private static final Long ACCOUNT_ID = 1L;
+
+    @Test
+    @DisplayName("리프레시 호출은 Valkey 지연 동안 DB 트랜잭션을 점유하지 않는다")
+    void 리프레시_호출에는_서비스_트랜잭션을_적용하지_않는다() throws NoSuchMethodException {
+        Method refresh = StoreOperatorAuthService.class.getMethod("refresh", String.class);
+
+        assertThat(StoreOperatorAuthService.class.getAnnotation(Transactional.class)).isNull();
+        assertThat(refresh.getAnnotation(Transactional.class)).isNull();
+    }
 
     @Mock
     private StoreOperatorAccountRepository storeOperatorAccountRepository;
@@ -55,6 +76,9 @@ class StoreOperatorAuthServiceTest {
     @Mock
     private LoginDelayGuard loginDelayGuard;
 
+    @Mock
+    private RefreshTokenManager refreshTokenManager;
+
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
     private StoreOperatorAuthService storeOperatorAuthService;
@@ -63,7 +87,7 @@ class StoreOperatorAuthServiceTest {
     void setUp() {
         storeOperatorAuthService = new StoreOperatorAuthService(
                 storeOperatorAccountRepository, passwordEncoder, jwtTokenProvider, passwordPolicy,
-                loginDelayGuard, new PhoneNumberPolicy());
+                loginDelayGuard, new PhoneNumberPolicy(), refreshTokenManager);
     }
 
     @Test
@@ -219,6 +243,25 @@ class StoreOperatorAuthServiceTest {
     }
 
     @Test
+    @DisplayName("로그인 시작 시점의 세션 세대를 토큰 발급까지 유지한다")
+    void loginIssuesTokenPairWithCapturedSessionEpoch() {
+        StoreOperatorAccount account = persistedAccount();
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
+        delegatePasswordCheckToEncoder();
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(4L);
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 4L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
+
+        storeOperatorAuthService.login(request);
+
+        InOrder order = inOrder(refreshTokenManager, passwordEncoder);
+        order.verify(passwordEncoder).matches("password123", "hashed");
+        order.verify(refreshTokenManager).captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+        order.verify(refreshTokenManager).issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 4L);
+    }
+    @Test
     @DisplayName("이메일과 비밀번호가 맞으면 로그인에 성공해 Access/Refresh 토큰을 발급한다")
     void loginIssuesTokenPairOnSuccess() {
         // given
@@ -227,10 +270,9 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 0L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = storeOperatorAuthService.login(request);
@@ -252,10 +294,9 @@ class StoreOperatorAuthServiceTest {
         given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(account));
         delegatePasswordCheckToEncoder();
         given(passwordEncoder.matches(nfcPassword, "hashed")).willReturn(true);
-        given(jwtTokenProvider.generateAccessToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("access-token-value");
-        given(jwtTokenProvider.generateRefreshToken(eq(TokenNamespace.STORE_OPERATOR), any()))
-                .willReturn("refresh-token-value");
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(0L);
+        given(refreshTokenManager.issue(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, 0L))
+                .willReturn(new TokenPair("access-token-value", "refresh-token-value"));
 
         // when
         TokenPair tokenPair = storeOperatorAuthService.login(request);
@@ -274,11 +315,111 @@ class StoreOperatorAuthServiceTest {
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REQUIRED);
     }
 
+    @Test
+    @DisplayName("정지된 매장 운영자 계정의 재발급 요청은 모든 Refresh Token family를 폐기한다")
+    void revokesAllRefreshTokenFamiliesWhenSuspendedAccountRefreshes() {
+        StoreOperatorAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(
+                        RefreshTokenRotationResult.Status.ROTATED,
+                        new TokenPair("access-token", "refresh-token-next")));
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh("refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED);
+
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("정지 매장 운영자도 재사용 Refresh Token은 먼저 탐지한다")
+    void detectsRefreshTokenReuseBeforeRejectingSuspendedAccount() {
+        StoreOperatorAccount account = persistedAccount();
+        ReflectionTestUtils.setField(account, "status", StoreOperatorAccountStatus.SUSPENDED);
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        InOrder order = inOrder(refreshTokenManager);
+        order.verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
+        order.verify(refreshTokenManager).revokeAll(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID);
+    }
+
+    @Test
+    @DisplayName("활성 매장 운영자의 재사용 Refresh Token은 해당 family만 폐기한다")
+    void doesNotRevokeAllFamiliesWhenActiveAccountReusesRefreshToken() {
+        StoreOperatorAccount account = persistedAccount();
+        ParsedToken parsedToken = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshToken("reused-refresh-token")).willReturn(parsedToken);
+        given(refreshTokenManager.attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token"))
+                .willReturn(new RefreshTokenRotationAttempt(RefreshTokenRotationResult.Status.REUSED, null));
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> storeOperatorAuthService.refresh("reused-refresh-token"))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_INVALID);
+
+        verify(refreshTokenManager).attemptRotate(TokenNamespace.STORE_OPERATOR, parsedToken, "reused-refresh-token");
+        verifyNoMoreInteractions(refreshTokenManager);
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token으로 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithExpiredRefreshTokenIsIdempotent() {
+        given(jwtTokenProvider.parseRefreshTokenForLogout("expired-refresh-token")).willReturn(null);
+
+        assertThatCode(() -> storeOperatorAuthService.logout("expired-refresh-token"))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(refreshTokenManager);
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키가 없어도 로그아웃하면 같은 성공 결과로 수렴한다")
+    void logoutWithoutRefreshTokenIsIdempotent() {
+        assertThatCode(() -> storeOperatorAuthService.logout(null))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> storeOperatorAuthService.logout(" "))
+                .doesNotThrowAnyException();
+
+        verifyNoInteractions(jwtTokenProvider, refreshTokenManager);
+    }
+
     /**
      * 실제 {@code LoginDelayGuard}는 계정 행을 잠근 뒤 지연 여부를 판정한다. 이 단위 테스트는
      * 지연이 아닌 비밀번호 비교 규칙을 확인하므로, 대역이 항상 시도를 허용하게 해 지연이 걸리지
      * 않은 상태를 재현한다.
      */
+    @Test
+    @DisplayName("로그인 중 StoreOperatorAccount 계정이 정지되면 Refresh Token을 발급하지 않는다")
+    void rejectsLoginWhenAccountIsSuspendedAfterInitialLookup() {
+        StoreOperatorAccount initialAccount = persistedAccount();
+        StoreOperatorAccount currentAccount = persistedAccount();
+        ReflectionTestUtils.setField(currentAccount, "status", StoreOperatorAccountStatus.SUSPENDED);
+        LoginRequest request = new LoginRequest("owner@example.com", "password123");
+        given(storeOperatorAccountRepository.findByEmail("owner@example.com")).willReturn(Optional.of(initialAccount));
+        delegatePasswordCheckToEncoder();
+        given(passwordEncoder.matches("password123", "hashed")).willReturn(true);
+        given(refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID)).willReturn(1L);
+
+        assertThatThrownBy(() -> storeOperatorAuthService.login(request))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
+    }
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
@@ -292,6 +433,7 @@ class StoreOperatorAuthServiceTest {
     private StoreOperatorAccount persistedAccount() {
         StoreOperatorAccount account = StoreOperatorAccount.create("owner@example.com", "hashed", "미리윰식당");
         ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
+        lenient().when(storeOperatorAccountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
         return account;
     }
 }

@@ -148,7 +148,10 @@ class DomainPackageArchitectureTest {
                         "consumer",
                         "menu",
                         "menuhold",
+                        "notification",
+                        "payment",
                         "pickup",
+                        "platformoperator",
                         "recommendation",
                         "reservation",
                         "schedule",
@@ -241,6 +244,15 @@ class DomainPackageArchitectureTest {
                 && APPROVED_CROSS_DOMAIN_QUERY_READERS
                         .getOrDefault(source.relativePath(), Set.of())
                         .contains(topLevelDomain(imported));
+    }
+
+    private static SourceFile sourceInDomain(String domain) {
+        return new SourceFile(
+                domain + "/Example.java",
+                DOMAIN_PREFIX + domain,
+                List.of(),
+                ""
+        );
     }
 
     private static Map<String, Set<String>> domainDependencies(List<SourceFile> sources) {

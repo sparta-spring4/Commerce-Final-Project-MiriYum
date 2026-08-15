@@ -3,9 +3,11 @@ package com.miriyum.domain.auth.logindelay;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -15,6 +17,8 @@ import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.jwt.TokenPair;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenCreationResult;
+import com.miriyum.domain.auth.refreshtoken.RefreshTokenStore;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.consumer.service.ConsumerAuthService;
@@ -38,6 +42,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -53,7 +58,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * credential failures.</p>
  */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-c")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -83,6 +88,10 @@ class LoginDelayIntegrationTest {
     @Autowired
     private ConsumerAuthService consumerAuthService;
 
+    // 로그인 지연 테스트는 MySQL 상태 전이만 검증하므로 Valkey 저장소는 격리한다.
+    @MockitoBean
+    private RefreshTokenStore refreshTokenStore;
+
     @Autowired
     private LoginDelayGuard loginDelayGuard;
 
@@ -109,6 +118,9 @@ class LoginDelayIntegrationTest {
         ConsumerAccount account = ConsumerAccount.create(
                 EMAIL, passwordEncoder.encode(RAW_PASSWORD), "지연테스트");
         accountId = consumerAccountRepository.saveAndFlush(account).getId();
+        given(refreshTokenStore.currentSessionEpoch(any(), anyLong())).willReturn(0L);
+        given(refreshTokenStore.create(any(), anyLong()))
+                .willReturn(new RefreshTokenCreationResult(RefreshTokenCreationResult.Status.CREATED));
         // 준비 과정의 encode() 호출이 뒤의 matches() 검증에 섞이지 않게 비운다.
         clearInvocations(passwordEncoder);
     }

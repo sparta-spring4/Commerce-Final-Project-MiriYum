@@ -18,6 +18,9 @@ import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreCommand;
 import com.miriyum.domain.menuhold.dto.MenuInventoryRestoreResult;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
 import com.miriyum.domain.menuhold.service.MenuInventoryTransactionService;
+import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
+import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.pickup.dto.request.PickupMenuSelectionRequest;
 import com.miriyum.domain.pickup.dto.request.PickupReservationCreateRequest;
 import com.miriyum.domain.pickup.dto.request.PickupCancellationRequest;
@@ -25,6 +28,8 @@ import com.miriyum.domain.pickup.entity.PickupItemSnapshot;
 import com.miriyum.domain.pickup.dto.response.PickupReservationResponse;
 import com.miriyum.domain.pickup.entity.PickupReservation;
 import com.miriyum.domain.pickup.exception.PickupErrorCode;
+import com.miriyum.domain.pickup.notification.PickupNotificationEventFactory;
+import com.miriyum.domain.pickup.notification.PickupNotificationPublisher;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import com.miriyum.domain.store.dto.contract.StorePickupTransactionEligibility;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
@@ -44,6 +49,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -74,6 +80,8 @@ class PickupReservationServiceTest {
     @Mock IdempotencyExecutor idempotencyExecutor;
     @Mock ConsumerAccountService consumerAccountService;
     private PickupIntervalTimePolicy intervalTimePolicy;
+    private List<NotificationSourceEventV1> notificationEvents;
+    private PickupNotificationPublisher notificationPublisher;
 
     private PickupReservationService service;
 
@@ -81,11 +89,21 @@ class PickupReservationServiceTest {
     void setUp() {
         intervalTimePolicy = org.mockito.Mockito.spy(new PickupIntervalTimePolicy(
                 Clock.fixed(NOW, ZoneOffset.UTC)));
+        notificationEvents = new ArrayList<>();
+        notificationPublisher = new PickupNotificationPublisher(
+                new PickupNotificationEventFactory(),
+                event -> {
+                    notificationEvents.add(event);
+                    return new NotificationTaskReceipt(
+                            Long.toString(600L + notificationEvents.size()), false
+                    );
+                }
+        );
         service = new PickupReservationService(
                 storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), notificationPublisher);
         org.mockito.Mockito.lenient().doReturn(true).when(intervalTimePolicy)
                 .isOpen(any(), any(), any());
         org.mockito.Mockito.lenient()
@@ -208,6 +226,7 @@ class PickupReservationServiceTest {
     @Test
     void createsConfirmedPickupFromLockedStoreAndActualAcquiredBucket() {
         PickupReservationCreateRequest request = request(2);
+        Instant persistedCreatedAt = NOW.minusSeconds(1);
         given(storeTransactionEligibilityService.requirePickupTransactionEligibility(22L))
                 .willReturn(new StorePickupTransactionEligibility(22L, "미리윰 강남점", "Asia/Seoul"));
         given(menuTransactionFacade.requireTransactionEligibility(22L, 33L))
@@ -220,6 +239,7 @@ class PickupReservationServiceTest {
         given(repository.saveAndFlush(any())).willAnswer(invocation -> {
             PickupReservation saved = invocation.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", 77L);
+            ReflectionTestUtils.setField(saved, "createdAt", persistedCreatedAt);
             return saved;
         });
 
@@ -261,8 +281,16 @@ class PickupReservationServiceTest {
                 ArgumentCaptor.forClass(IdempotencyCommand.class);
         then(idempotencyExecutor).should().execute(command.capture(), any());
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                "POST|/api/v1/consumers/pickup-reservations|"
+                "POST|/api/v1/consumers/me/pickup-reservations|"
                         + "22|2026-08-10|12:00|33:2"));
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose())
+                    .isEqualTo(NotificationPurpose.PICKUP_RESERVATION_CONFIRMED);
+            assertThat(event.resourceId()).isEqualTo("77");
+            assertThat(event.resourceVersion()).isEqualTo(1L);
+            assertThat(event.correlationId()).isEqualTo(KEY.value());
+            assertThat(event.occurredAt().toInstant()).isEqualTo(persistedCreatedAt);
+        });
     }
 
     @Test
@@ -508,10 +536,17 @@ class PickupReservationServiceTest {
                 ArgumentCaptor.forClass(IdempotencyCommand.class);
         then(idempotencyExecutor).should().execute(command.capture(), any());
         assertThat(command.getValue().requestFingerprint()).isEqualTo(RequestFingerprint.of(
-                "POST|/api/v1/consumers/pickup-reservations/77/cancellations|"
+                "POST|/api/v1/consumers/me/pickup-reservations/77/cancellations|"
                         + "일정 변경"));
         assertThat(restore.getValue().operationId())
                 .isEqualTo("pickup-cancel-11-" + KEY.value());
+        assertThat(notificationEvents).singleElement().satisfies(event -> {
+            assertThat(event.purpose())
+                    .isEqualTo(NotificationPurpose.PICKUP_RESERVATION_CANCELLED);
+            assertThat(event.resourceVersion()).isEqualTo(2L);
+            assertThat(event.correlationId()).isEqualTo(KEY.value());
+            assertThat(event.occurredAt().toInstant()).isEqualTo(NOW);
+        });
     }
 
     @Test
@@ -521,7 +556,8 @@ class PickupReservationServiceTest {
                 storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
-                Clock.fixed(Instant.parse("2026-08-10T03:00:01Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-10T03:00:01Z"), ZoneOffset.UTC),
+                notificationPublisher);
         PickupReservation pickup = confirmedPickup();
         given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                 .willReturn(Optional.of(pickup));
@@ -543,7 +579,8 @@ class PickupReservationServiceTest {
                 storeTransactionEligibilityService, menuTransactionFacade, inventoryService,
                 repository, idempotencyExecutor, consumerAccountService,
                 intervalTimePolicy, new ObjectMapper(),
-                Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-10T03:00:00Z"), ZoneOffset.UTC),
+                notificationPublisher);
         given(repository.findByIdAndConsumerAccountIdForUpdate(77L, 11L))
                 .willReturn(Optional.of(confirmedPickup()));
 
@@ -553,6 +590,7 @@ class PickupReservationServiceTest {
                         Instant.parse("2026-08-10T03:00:00Z")));
 
         assertThat(exception.getErrorCode()).isEqualTo(PickupErrorCode.CANCELLATION_NOT_ALLOWED);
+        assertThat(notificationEvents).isEmpty();
         then(inventoryService).should(never()).restore(any());
     }
 

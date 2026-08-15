@@ -47,7 +47,7 @@ export function usePickupReservation(pickupReservationId: string) {
     queryKey: pickupKeys.detail(pickupReservationId),
     queryFn: async ({ signal }): Promise<PickupReservation> => {
       const response = await apiClient(
-        '/api/v1/consumers/pickup-reservations/{pickupReservationId}',
+        '/api/v1/consumers/me/pickup-reservations/{pickupReservationId}',
         { method: 'get', pathParams: { pickupReservationId }, signal },
       )
       return response.data
@@ -64,11 +64,14 @@ export function useCreatePickupReservation() {
       body: PickupReservationCreateRequest
       idempotencyKey: string
     }): Promise<PickupReservation> => {
-      const response = await apiClient('/api/v1/consumers/pickup-reservations', {
-        method: 'post',
-        body: variables.body,
-        idempotencyKey: variables.idempotencyKey,
-      })
+      const response = await apiClient(
+        '/api/v1/consumers/me/pickup-reservations',
+        {
+          method: 'post',
+          body: variables.body,
+          idempotencyKey: variables.idempotencyKey,
+        },
+      )
       return response.data
     },
     onSuccess: (reservation) =>
@@ -86,7 +89,7 @@ export function useCancelPickupReservation(pickupReservationId: string) {
       idempotencyKey: string
     }): Promise<PickupReservation> => {
       const response = await apiClient(
-        '/api/v1/consumers/pickup-reservations/{pickupReservationId}/cancellations',
+        '/api/v1/consumers/me/pickup-reservations/{pickupReservationId}/cancellations',
         {
           method: 'post',
           pathParams: { pickupReservationId },

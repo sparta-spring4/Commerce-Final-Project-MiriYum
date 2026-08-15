@@ -5,10 +5,15 @@ spring:
     url: ${MIRIYUM_DB_URL}
     username: ${MIRIYUM_DB_USERNAME}
     password: ${MIRIYUM_DB_PASSWORD}
+  data:
+    redis:
+      host: ${MIRIYUM_VALKEY_HOST:localhost}
+      port: ${MIRIYUM_VALKEY_PORT:6379}
+      password: ${MIRIYUM_VALKEY_PASSWORD:}
+      timeout: ${MIRIYUM_VALKEY_TIMEOUT:2s}
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-
 server:
   forward-headers-strategy: native
   tomcat:
@@ -19,6 +24,10 @@ server:
 
 # Docker 배포 확인은 백엔드 127.0.0.1(EC2 내부 전용) 포트의 이 엔드포인트만 사용한다.
 management:
+  health:
+    # Valkey 장애는 Refresh Token 기능만 503으로 닫고, 배포용 앱 health 전체를 DOWN으로 만들지 않는다.
+    redis:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -29,13 +38,67 @@ management:
       show-details: never
 
 miriyum:
+  platform-operator:
+    enabled: ${MIRIYUM_PLATFORM_OPERATOR_ENABLED:false}
+    reauthentication-fingerprint-secret: ${MIRIYUM_PLATFORM_OPERATOR_REAUTH_FINGERPRINT_SECRET:}
+    temporary-password:
+      validity: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_VALIDITY:}
+      max-failures: ${MIRIYUM_PLATFORM_OPERATOR_TEMPORARY_PASSWORD_MAX_FAILURES:0}
   jwt:
     secret: ${MIRIYUM_JWT_SECRET}
     issuer: ${MIRIYUM_JWT_ISSUER:miriyum}
+  kakao:
+    enabled: ${MIRIYUM_KAKAO_ENABLED:false}
+    rest-api-key: ${MIRIYUM_KAKAO_REST_API_KEY:}
+    client-secret: ${MIRIYUM_KAKAO_CLIENT_SECRET:}
+    redirect-uris: ${MIRIYUM_KAKAO_REDIRECT_URIS:}
+    state-secret: ${MIRIYUM_KAKAO_STATE_SECRET:${miriyum.jwt.secret}}
+    sign-up-ticket-secret: ${MIRIYUM_KAKAO_SIGN_UP_TICKET_SECRET:${miriyum.jwt.secret}}
+    identity-fingerprint-active-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_KEY_VERSION:}
+    identity-fingerprint-active-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_ACTIVE_SECRET:}
+    identity-fingerprint-previous-key-version: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_KEY_VERSION:}
+    identity-fingerprint-previous-secret: ${MIRIYUM_KAKAO_IDENTITY_FINGERPRINT_PREVIOUS_SECRET:}
   security:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  auth:
+    # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
+    refresh-risk-event-delivery:
+      enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}
+    # 30초 주기 전달이 10회 연속 실패하면 CloudWatch 로그 기반 운영 알람을 발생시킨다.
+    refresh-risk-event-delivery-alert-threshold: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ALERT_THRESHOLD:10}
+  reservation:
+    hold-expiration:
+      enabled: ${MIRIYUM_RESERVATION_HOLD_EXPIRATION_ENABLED:true}
+  payment:
+    enabled: ${MIRIYUM_PAYMENT_ENABLED:false}
+    cursor-secret: ${MIRIYUM_PAYMENT_CURSOR_SECRET:}
+    portone:
+      api-secret: ${MIRIYUM_PORTONE_API_SECRET:}
+      webhook-secret: ${MIRIYUM_PORTONE_WEBHOOK_SECRET:}
+      store-id: ${MIRIYUM_PORTONE_STORE_ID:}
+      base-url: ${MIRIYUM_PORTONE_BASE_URL:https://api.portone.io}
+      timeout-policy-version: ${MIRIYUM_PORTONE_TIMEOUT_POLICY_VERSION:portone-v2-v1}
+      connect-timeout: ${MIRIYUM_PORTONE_CONNECT_TIMEOUT:1s}
+      read-timeout: ${MIRIYUM_PORTONE_READ_TIMEOUT:3s}
+  notification:
+    history:
+      cursor-secret: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:}
+    worker:
+      enabled: ${MIRIYUM_NOTIFICATION_WORKER_ENABLED:false}
+      policy-version: ${MIRIYUM_NOTIFICATION_WORKER_POLICY_VERSION:}
+      worker-id: ${MIRIYUM_NOTIFICATION_WORKER_ID:}
+      batch-size: ${MIRIYUM_NOTIFICATION_WORKER_BATCH_SIZE:0}
+      lease-duration-ms: ${MIRIYUM_NOTIFICATION_WORKER_LEASE_DURATION_MS:0}
+      max-attempts: ${MIRIYUM_NOTIFICATION_WORKER_MAX_ATTEMPTS:0}
+      initial-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_RETRY_DELAY_MS:0}
+      max-retry-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_MAX_RETRY_DELAY_MS:0}
+      poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
+      initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
+  waiting:
+    closure:
+      enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
@@ -47,6 +110,12 @@ miriyum:
       response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:
     available-candidate-limit: ${MIRIYUM_STORE_SEARCH_AVAILABLE_CANDIDATE_LIMIT:5000}
+  storage:
+    s3:
+      enabled: ${MIRIYUM_STORAGE_S3_ENABLED:false}
+      bucket: ${MIRIYUM_STORAGE_S3_BUCKET:}
+      region: ${MIRIYUM_STORAGE_S3_REGION:ap-northeast-2}
+      max-size-bytes: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
   rate-limit:
     sign-up:
       max-requests: ${MIRIYUM_RATE_LIMIT_SIGN_UP_MAX_REQUESTS:5}

@@ -1,0 +1,59 @@
+{
+  "properties": [
+    {
+      "name": "miriyum.kakao.state-secret",
+      "type": "java.lang.String",
+      "description": "카카오 OAuth state 서명에 사용하는 서버 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.sign-up-ticket-secret",
+      "type": "java.lang.String",
+      "description": "카카오 최초 가입 ticket 서명에 사용하는 서버 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-active-key-version",
+      "type": "java.lang.String",
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-active-secret",
+      "type": "java.lang.String",
+      "description": "카카오 식별자 fingerprint에 사용하는 현재 키의 비밀값입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-key-version",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 버전입니다."
+    },
+    {
+      "name": "miriyum.kakao.identity-fingerprint-previous-secret",
+      "type": "java.lang.String",
+      "description": "키 교체 기간에만 사용하는 이전 fingerprint 키의 비밀값입니다."
+    },
+    {
+      "name": "miriyum.identity-verification.dev-stub-enabled",
+      "type": "java.lang.Boolean",
+      "description": "개발 환경의 본인 확인 Stub 사용 여부입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.enabled",
+      "type": "java.lang.Boolean",
+      "description": "S3 파일 저장 어댑터 활성화 여부입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.bucket",
+      "type": "java.lang.String",
+      "description": "S3 파일 저장에 사용할 버킷 이름입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.region",
+      "type": "java.lang.String",
+      "description": "S3 파일 저장에 사용할 AWS 리전입니다."
+    },
+    {
+      "name": "miriyum.storage.s3.max-size-bytes",
+      "type": "java.lang.Long",
+      "description": "Maximum file size accepted by the S3 storage adapter in bytes."
+    }
+  ]
+}

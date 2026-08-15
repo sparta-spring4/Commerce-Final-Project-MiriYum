@@ -1,0 +1,243 @@
+package com.miriyum.domain.auth.riskevent;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willDoNothing;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.miriyum.domain.auth.jwt.TokenNamespace;
+import com.miriyum.domain.auth.refreshtoken.PendingRefreshTokenRiskEvent;
+import com.miriyum.domain.auth.refreshtoken.ValkeyRefreshTokenRiskEventMarkerStore;
+import java.time.Instant;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
+
+@ExtendWith(MockitoExtension.class)
+class RefreshTokenRiskEventDeliveryTest {
+
+    @Mock
+    private ValkeyRefreshTokenRiskEventMarkerStore markerStore;
+
+    @Mock
+    private AuthRiskEventStore authRiskEventStore;
+
+    private RefreshTokenRiskEventDelivery delivery;
+    private Logger logger;
+    private ListAppender<ILoggingEvent> logAppender;
+
+    @BeforeEach
+    void setUp() {
+        delivery = new RefreshTokenRiskEventDelivery(markerStore, authRiskEventStore, 3);
+        logger = (Logger) LoggerFactory.getLogger(RefreshTokenRiskEventDelivery.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void tearDown() {
+        logger.detachAppender(logAppender);
+        logAppender.stop();
+    }
+
+    @Test
+    @DisplayName("MySQL 위험 사건 저장이 실패하면 pending marker를 남겨 다음 전달에서 재시도한다")
+    void retriesPendingMarkerAfterDurableStorageFailure() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .willDoNothing()
+                .given(authRiskEventStore).record(event);
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
+
+        int firstDelivered = delivery.deliverPendingEvents();
+        int secondDelivered = delivery.deliverPendingEvents();
+
+        assertThat(firstDelivered).isZero();
+        assertThat(secondDelivered).isEqualTo(1);
+        verify(authRiskEventStore, times(2)).record(event);
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+    }
+
+    @Test
+    @DisplayName("pending marker가 없어도 0건을 운영 로그에 남긴다")
+    void logsZeroPendingMarkerCountWithoutSensitiveIdentifiers() {
+        given(markerStore.findPendingEvents()).willReturn(List.of());
+        given(markerStore.pendingEventCount()).willReturn(0L);
+
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("refresh_token_risk_event_pending_count pending_count 0");
+    }
+
+    @Test
+    @DisplayName("1시간 이상 전달되지 않은 marker는 민감값 없이 장기 정체 건수만 로그에 남긴다")
+    void logsLongStayMarkerCountWithoutSensitiveIdentifiers() {
+        PendingRefreshTokenRiskEvent longStayedEvent = event(Instant.now().minusSeconds(3_601));
+        given(markerStore.findPendingEvents()).willReturn(List.of(longStayedEvent));
+        given(markerStore.pendingEventCount()).willReturn(1L);
+        given(markerStore.deleteIfUnchanged(
+                longStayedEvent.eventKey(), longStayedEvent.occurrenceCount())).willReturn(true);
+
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .contains("event=refresh_token_risk_event_marker_long_stay long_stay_count=1")
+                .noneMatch(message -> message.contains(longStayedEvent.familyId()))
+                .noneMatch(message -> message.contains(longStayedEvent.tokenHash()))
+                .noneMatch(message -> message.contains(longStayedEvent.accountId().toString()));
+    }
+
+    @Test
+    @DisplayName("pending marker 수 관측이 실패해도 이미 조회한 위험 사건은 전달한다")
+    void deliversEventsWhenPendingMarkerCountObservationFails() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        given(markerStore.pendingEventCount()).willThrow(new com.miriyum.global.exception.ServiceException(
+                com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE));
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
+
+        int delivered = delivery.deliverPendingEvents();
+
+        assertThat(delivered).isEqualTo(1);
+        verify(authRiskEventStore).record(event);
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("event=refresh_token_risk_event_pending_count_observation_failed");
+    }
+
+    @Test
+    @DisplayName("전달 중 재사용 횟수가 증가한 marker는 삭제하지 않고 다음 전달에 남긴다")
+    void keepsMarkerWhenOccurrenceCountChangedDuringDelivery() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(false);
+
+        int delivered = delivery.deliverPendingEvents();
+
+        assertThat(delivered).isZero();
+        verify(authRiskEventStore).record(event);
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+    }
+
+    @Test
+    @DisplayName("MySQL 전달이 연속 임계치만큼 실패하면 민감값 없는 운영 경보 로그를 남긴다")
+    void logsRestrictedOperationalSignalAfterRepeatedMysqlFailures() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .given(authRiskEventStore).record(event);
+
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+
+        List<String> messages = logAppender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
+                .toList();
+        assertThat(messages).containsExactly(
+                "event=refresh_token_risk_event_delivery_stalled "
+                        + "consecutive_failures=3 failure_stage=mysql_write");
+        assertThat(messages.getFirst())
+                .doesNotContain(event.eventKey(), event.familyId(), event.tokenHash());
+    }
+
+    @Test
+    @DisplayName("Valkey pending 조회가 연속 임계치만큼 실패해도 동일한 운영 경보 로그를 남긴다")
+    void logsOperationalSignalAfterRepeatedValkeyFailures() {
+        given(markerStore.findPendingEvents())
+                .willThrow(new com.miriyum.global.exception.ServiceException(
+                        com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .filteredOn(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
+                .containsExactly(
+                        "event=refresh_token_risk_event_delivery_stalled "
+                                + "consecutive_failures=3 failure_stage=valkey_read");
+    }
+
+    @Test
+    @DisplayName("MySQL 저장 후 Valkey marker 삭제가 반복 실패하면 삭제 단계 경보를 남긴다")
+    void logsOperationalSignalAfterRepeatedValkeyDeleteFailures() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        willDoNothing().given(authRiskEventStore).record(event);
+        willThrow(new com.miriyum.global.exception.ServiceException(
+                com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE))
+                .given(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .filteredOn(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"))
+                .containsExactly(
+                        "event=refresh_token_risk_event_delivery_stalled "
+                                + "consecutive_failures=3 failure_stage=valkey_delete");
+    }
+
+    @Test
+    @DisplayName("정상 전달이 한 번 성공하면 연속 실패 횟수를 초기화한다")
+    void resetsConsecutiveFailuresAfterSuccessfulDelivery() {
+        PendingRefreshTokenRiskEvent event = event();
+        given(markerStore.findPendingEvents()).willReturn(List.of(event));
+        willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .willDoNothing()
+                .willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .willThrow(new DataAccessResourceFailureException("mysql unavailable"))
+                .given(authRiskEventStore).record(event);
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            delivery.deliverPendingEvents();
+        }
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .noneMatch(message -> message.startsWith("event=refresh_token_risk_event_delivery_stalled"));
+    }
+
+    private PendingRefreshTokenRiskEvent event() {
+        return event(Instant.now());
+    }
+
+    private PendingRefreshTokenRiskEvent event(Instant occurredAt) {
+        return new PendingRefreshTokenRiskEvent(
+                "auth:risk:pending:consumer:family-1:"
+                        + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                TokenNamespace.CONSUMER,
+                7L,
+                "family-1",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "REUSED_ROTATED_TOKEN",
+                "ROTATION",
+                "AUTH-012-v1",
+                occurredAt,
+                1L,
+                occurredAt);
+    }
+}

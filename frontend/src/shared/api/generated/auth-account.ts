@@ -219,6 +219,17 @@ export interface components {
     KakaoLoginData: {
       /** @enum {string} */
       status: "AUTHENTICATED" | "SIGN_UP_REQUIRED";
+      /** @description AUTHENTICATED일 때만 Access JWT를 반환한다. */
+      accessToken?: string;
+      /** @constant */
+      tokenType?: "Bearer";
+      /**
+       * @description Access JWT 수명(초)
+       * @constant
+       */
+      expiresIn?: 900;
+      /** @description SIGN_UP_REQUIRED일 때만 반환하는 5분 가입 티켓 */
+      signUpTicket?: string;
     };
     /**
      * @description CREATED는 새 연결, ALREADY_LINKED는 같은 계정에 이미 존재한 멱등 결과다.
@@ -255,7 +266,7 @@ export interface components {
        * @description Access JWT 수명(초)
        * @constant
        */
-      expiresIn: 3600;
+      expiresIn: 900;
     };
     CsrfTokenData: {
       token: string;
@@ -570,6 +581,7 @@ export interface operations {
       401: components["responses"]["InvalidCredentials"];
       403: components["responses"]["AccountRestricted"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 Access Token 재발급 */
@@ -594,6 +606,7 @@ export interface operations {
       401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["OriginRejected"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 shell CSRF 토큰 준비 */
@@ -630,7 +643,6 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
     };
   };
@@ -708,6 +720,7 @@ export interface operations {
       400: components["responses"]["InvalidKakaoOAuth"];
       409: components["responses"]["AccountConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 가입 */
@@ -751,6 +764,7 @@ export interface operations {
       401: components["responses"]["InvalidCredentials"];
       403: components["responses"]["AccountRestricted"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 Access Token 재발급 */
@@ -775,6 +789,7 @@ export interface operations {
       401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["OriginRejected"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 매장 운영자 shell CSRF 토큰 준비 */
@@ -811,7 +826,6 @@ export interface operations {
           "application/json": components["schemas"]["NoDataSuccessResponse"];
         };
       };
-      401: components["responses"]["InvalidRefreshToken"];
       403: components["responses"]["CsrfRejected"];
     };
   };
@@ -889,6 +903,7 @@ export interface operations {
       400: components["responses"]["InvalidKakaoOAuth"];
       409: components["responses"]["AccountConflict"];
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 일반 사용자 본인 정보 조회 */

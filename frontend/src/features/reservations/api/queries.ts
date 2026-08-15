@@ -68,7 +68,7 @@ export function useReservation(reservationId: string) {
     queryKey: reservationKeys.detail(reservationId),
     queryFn: async ({ signal }): Promise<ReservationDetail> => {
       const response = await apiClient(
-        '/api/v1/consumers/reservations/{reservationId}',
+        '/api/v1/consumers/me/reservations/{reservationId}',
         { method: 'get', pathParams: { reservationId }, signal },
       )
       return response.data
@@ -91,7 +91,7 @@ export function useCreateReservation() {
       body: ReservationCreateRequest
       idempotencyKey: string
     }): Promise<ReservationDetail> => {
-      const response = await apiClient('/api/v1/consumers/reservations', {
+      const response = await apiClient('/api/v1/consumers/me/reservations', {
         method: 'post',
         body: variables.body,
         idempotencyKey: variables.idempotencyKey,
@@ -114,7 +114,7 @@ export function useCancelReservation(reservationId: string) {
       idempotencyKey: string
     }): Promise<ReservationDetail> => {
       const response = await apiClient(
-        '/api/v1/consumers/reservations/{reservationId}/cancellations',
+        '/api/v1/consumers/me/reservations/{reservationId}/cancellations',
         {
           method: 'post',
           pathParams: { reservationId },

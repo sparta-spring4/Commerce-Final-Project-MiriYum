@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Validated
 @RestController
-@RequestMapping("/api/v1/stores/{storeId}/menus/{menuId}/alternatives")
+@RequestMapping("/api/v1/stores/{storeId}/menus/{menuId}")
 public class MenuAlternativeSearchController {
     private final MenuAlternativeSearchService service;
 
@@ -23,7 +23,7 @@ public class MenuAlternativeSearchController {
         this.service = service;
     }
 
-    @PostMapping("/search")
+    @PostMapping("/alternative-searches")
     public ApiResponse<MenuAlternativeSearchResponse> search(
             @PathVariable @Positive long storeId, @PathVariable @Positive long menuId,
             @Valid @RequestBody MenuAlternativeSearchRequest request) {

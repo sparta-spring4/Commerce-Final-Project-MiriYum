@@ -19,9 +19,16 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - 로그아웃과 개별 기기 종료, 전체 로그인 종료, 계정 정지와 권한 회수는 대상 로그인 단위 또는 토큰 계열의 리프레시 상태를 중앙에서 폐기한다.
 - MySQL은 계정과 권한을 포함한 업무 원장을 맡고, Valkey는 만료와 회전이 잦은 리프레시 토큰 상태를 맡는다.
 
+### Staging Valkey 시험 운영 경계
+
+- #141의 첫 staging 배포에는 단일 `valkey/valkey:8.1-alpine` 컨테이너를 **시험 후보값**으로 사용한다. `8.1-alpine`, 단일 컨테이너, `maxmemory 128mb`는 운영 확정값이 아니며, ARM64 EC2 기동·health·용량·AOF 복구 검증 전에는 변경할 수 있다. 관리형 ElastiCache와 replica는 현재 트래픽·가용성 요구에 비해 비용과 운영 범위가 커서 이번 시험 범위에 도입하지 않는다.
+- Valkey는 호스트 포트를 공개하지 않고, backend와만 공유하는 Docker `backend-valkey` internal network에 둔다. MySQL과 Nginx는 이 네트워크에 연결하지 않는다.
+- 시험 구성에서는 AOF, `appendfsync everysec`, `maxmemory 128mb`, `noeviction`을 적용한다. 인증 상태가 메모리 부족으로 조용히 축출되는 대신 새 쓰기가 명시적으로 실패하는지, 실제 사용량이 128MB 후보값에 적합한지는 측정으로 확인한다.
+- #141은 컨테이너 실행, 비밀번호 인증 healthcheck, staging `healthy`, 무인증 `NOAUTH`, 인증 `PONG`, host port 미공개 확인까지 담당한다. 배포 SHA·ARM64 환경·검증 결과·실패 시 기능 비활성화 또는 이전 Compose로 되돌리는 조건을 기록한 뒤에만 시험 후보값을 유지하거나 변경한다. Spring Data Redis/Lettuce 연결과 Valkey 장애 시 인증 요청 fail-closed 검증은 #140에서 수행한다.
+
 ### 이번 결정에서 확정하지 않는 항목
 
-토큰 유효기간은 2026-07-28 후속 팀 결정으로 Access JWT 1시간·Refresh JWT 14일로 확정했다. 이 수치 결정은 이 ADR의 단계별 저장·회전·폐기 구조를 변경하지 않는다.
+토큰 유효기간은 [AUTH-007](../service-policies/01-member-auth.md#auth-007-세션토큰기기-관리)을 정본으로 한다. 2026-08-13 결정으로 Access JWT는 15분, Refresh JWT는 14일이며, 이 결정은 2026-07-28의 Access JWT 1시간 결정을 대체한다. Refresh Token 회전이 성공하면 새 발급 시각을 기준으로 다시 14일을 부여하는 sliding 만료를 적용하고, Valkey family TTL도 같은 만료 시각으로 갱신한다. 이 수치 결정은 이 ADR의 단계별 저장·회전·폐기 구조를 변경하지 않는다.
 
 `1차 MVP`에는 계정별 동시 로그인 상한·활성 로그인 목록·기기별 종료를 제공하지 않으며, 과거 중앙 세션 정책의 역할별 상한을 stateless JWT에 변환하지 않는다. 정확한 상한과 초과 시 종료 순서는 Valkey 로그인 상태를 활성화하는 고도화 전에 별도 결정한다.
 
@@ -82,10 +89,34 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 - **1차 MVP와 2차 MVP:** Access Token과 Refresh Token 모두 서버 저장소 없는 JWT다. 서명, 만료, 발급자, audience, 계정 유형별 토큰 namespace를 검증하며 정상 토큰 저장소·폐기 목록·Valkey 의존성을 두지 않는다.
 - **고도화:** Valkey에 Refresh Token family의 회전, 폐기, 재사용 탐지와 로그인 단위 종료 상태를 둔다. Access Token은 짧은 수명의 stateless JWT를 유지하며 권한·계정 상태는 요청 경계에서 검증한다.
 - 일반 사용자, 매장 운영자, 플랫폼 운영자는 계정 테이블·PK·principal·토큰 namespace가 다르다. 다른 계정 유형의 Refresh Token을 교환하거나 같은 subject 문자열로 결합하지 않는다.
+- 전체 로그인 종료는 계정별 세션 세대를 증가시키고 Refresh Token 최대 만료 시각까지 보관한다. 로그인 시작 시 읽은 세대와 생성 시점 세대가 다르면 늦게 끝난 로그인은 Refresh Token을 발급받지 못한다.
 - 단계가 바뀌어도 브라우저는 Access Token을 shell별 메모리, Refresh Token을 namespace별 `HttpOnly` 쿠키로 다룬다. 고도화 전환은 브라우저 저장 위치를 바꾸지 않고 Refresh Token의 서버 검증에 Valkey 회전·폐기·재사용 탐지를 추가한다.
 
 ### 전환과 검증
 
-- 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 정해진 짧은 호환 기간 뒤 자연 만료시키며 Valkey 상태가 없는 과거 토큰을 무기한 승인하지 않는다.
+- 고도화 전환 시점부터 새 Refresh Token에 family 식별자와 회전 상태를 부여한다. 기존 stateless Refresh Token은 family·token 식별자가 없으므로 재발급에 사용하지 않으며, 기존 Access Token은 원래 만료 시각까지 유지하고 사용자는 한 번 다시 로그인한다.
 - 1차 MVP는 서명 변조, 만료, audience·계정 유형 불일치, Access/Refresh 용도 교차, 동시 재발급의 계약을 검증한다. 고도화는 회전 경쟁, 이전 토큰 재사용, 전체 family 폐기, Valkey 지연·중단과 복구를 추가 검증한다.
 - 초기 단계에는 즉시 세션 폐기와 재사용 탐지가 제한된다는 단점이 있고, 고도화에는 Valkey 가용성·상태 마이그레이션·실패 폐쇄 운영 비용이 추가된다. 이 절은 그 비용을 기능·운영 요구가 생기는 단계로 미룬다.
+
+## 2026-08-13 날짜별 개정
+
+### 절대 세션 수명 적용
+
+- **상태: 확정·적용.** 기존 sliding 만료 결정에 30일 절대 상한을 추가한다.
+- Access JWT 15분과 Refresh JWT 최대 14일은 유지한다. Refresh Token 회전 시에는 sliding 만료를 적용하되, 새 Refresh JWT와 Valkey family TTL을 `min(회전 시각 + 14일, 최초 로그인 시각 + 30일)`까지만 연장한다.
+- 절대 상한은 최초 로그인부터 30일 뒤의 **새 Access·Refresh 발급 권한**의 상한이다. 상한 직전 회전에서 이미 발급된 stateless Access JWT는 중앙에서 즉시 폐기하지 않으므로 최대 15분 동안 더 통과할 수 있다. 상한 이후에는 새 Access·Refresh를 발급하지 않고 기존 `AUTH_008`로 재로그인을 요구한다.
+- 절대 상한 뒤에 별도 tombstone 또는 전용 종료 상태를 보관하지 않는다. Refresh JWT와 Valkey family TTL의 만료 시각은 정확히 일치할 필요가 없다. Refresh JWT가 먼저 만료되면 JWT 검증이, family TTL이 먼저 만료되면 family 부재 결과가 각각 기존 `AUTH_008`로 종료하므로, 어느 순서에서도 정상적인 상한 만료·후속 재시도는 재사용 위험 사건을 만들지 않는다.
+- 새 만료 시각이 최초 로그인 + 30일에 의해 잘리는 회전은 민감 식별자 없는 `상한 적용 회전 수` 구조화 로그와 지표로 관측한다. 이 값은 30일 만료에 실제로 도달했거나 재로그인한 세션 수가 아니라, 절대 상한 계산이 적용된 회전 수다. 정책 적용 경로만 확인하며, 만료된 JWT를 다시 파싱하거나 상태를 되살려 종료 원인을 별도 집계하지 않는다.
+- 배포 전에 생성되어 `familyCreatedAt`이 없는 legacy family는 backfill하지 않는다. 첫 회전에도 기존 family의 남은 만료 시각을 유지하고 만료를 다시 연장하지 않아, legacy family의 sliding 만료는 배포 직후부터 중지된다. 사용자는 갱신해도 기존 만료 시각에 재로그인해야 하며, 배포 시점의 잔여 수명에 따라 즉시 또는 최대 14일 안에 자연 종료된다. 이후 새 로그인으로 생성된 family에만 30일 절대 상한이 적용된다.
+- 구현 통합 테스트에는 `familyCreatedAt`이 없는 legacy family의 회전이 기존 만료 시각을 넘기지 않는 경계값, 새 Refresh 만료가 30일 상한으로 잘리는 경계값, 상한 적용 관측, 만료 Refresh JWT의 `AUTH_008`과 위험 사건 미생성을 포함한다.
+
+완전 sliding 만료는 사용자가 14일 안에 한 번만 갱신해도 세션이 끝나지 않는 장점이 있지만, 탈취되거나 잊힌 로그인 상태가 무기한 남을 수 있다. 반대로 고정 14일 만료는 구현이 단순하지만 정상 사용자가 갱신해도 정확히 14일 뒤 재로그인해야 한다. 이번에는 두 방식의 장단점을 함께 고려해 sliding 14일과 절대 30일 상한을 결합한다.
+
+### 위험 사건 marker 인덱스와 Valkey Cluster 경계
+
+- Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
+- Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
+- pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 매 전진 배포마다 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 멱등하게 이관한다. 구버전 롤백 중 생성된 marker도 다음 전진 배포에서 다시 등록되며, `SADD`는 이미 등록된 marker를 중복 생성하지 않는다. 후속 전달 경로는 Set만 조회해 평상시 전 keyspace `SCAN`을 사용하지 않는다.
+- 전달 작업은 `SSCAN` 커서를 이어서 읽고 한 주기에 marker 100개까지만 처리한다. 한 페이지의 남은 marker는 다음 주기에 먼저 처리해 특정 marker만 반복 조회하지 않는다. marker가 비어 보이면 Lua에서 marker 부재 확인과 `SREM`을 함께 수행하므로, 같은 키의 marker가 전달 중 다시 생성되어도 새 인덱스 연결을 삭제하지 않는다.
+- pending Set의 현재 크기는 민감 식별자 없이 `RefreshTokenRiskEventPendingCount` 지표로 관측한다. 이 값은 전달 가능한 이벤트 수가 아니라 stale member를 포함한 인덱스 멤버 수이며, 지속적으로 증가하면 전달 정체 알람과 함께 원인을 점검한다. marker는 최초 생성 시점부터 7일 절대 TTL을 적용하며, 같은 사건 재사용으로 발생 횟수를 누적해도 TTL을 연장하지 않는다. 1시간 이상 남아 있는 marker가 현재 전달 배치에 하나라도 있으면 `RefreshTokenRiskEventMarkerLongStay=1` 존재 신호를 기록하고 5분 합계 알람으로 관측한다. 이 지표는 전체 장기 정체 건수가 아니다.
+- 필수 필드가 없거나 숫자 형식이 손상된 pending marker는 인덱스와 함께 제거하고 제한 로그만 남긴다. 손상 marker 하나가 정상 marker 전달을 반복적으로 막지 않게 하며, 계정·family·토큰 식별자는 로그에 넣지 않는다.

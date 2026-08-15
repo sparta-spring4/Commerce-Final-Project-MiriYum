@@ -1,12 +1,12 @@
 # 기능 명세: 일반 예약
 
-> 문서 상태: 4단계 승인
-> 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통)
+> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약 승인, runtime 비활성)
+> 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
-> 관련 정책 ID: RES-001~RES-015의 1차 범위, S-001~S-003, E-003, E-005, C-001~C-013
+> 관련 정책 ID: RES-001~RES-015의 1차 범위, HOLD-004, HOLD-007, PAY-001~PAY-010, S-001~S-003, E-003, E-005, C-001~C-013
 > OpenAPI: `docs/specs/reservation/openapi.yaml`
-> 최종 승인일: 2026-08-04
+> 최종 승인일: 2026-08-14
 
 ## 범위
 
@@ -19,12 +19,13 @@
 - 날짜·시간 구간별 예약 가능 인원·팀 수 설정
 - 매장별 예약 시간 정책 버전과 실제 서비스·점유 종료 계산
 - 중복 예약 방지와 동시 수용량 처리
+- 고도화의 예약금 선점·결제 준비·최종 확정·사용자 포기·전액 환불 보상 계약
 
 ### 제외
 
 - 예약 변경·시간 이동·인원 변경
 - 매장 승인·거절 대기
-- 결제·예약금·환불·결제 상태와 금전 취소 시간 구간·cutoff
+- frontend 결제 SDK·화면과 확정 Reservation의 금전 취소·노쇼 환불 정책
 - 체크인·노쇼
 - 대리 예약·예약 양도·단체 별도 승인
 - 웨이팅 전환·자동 승계
@@ -33,16 +34,19 @@
 
 | 사용자 목적 | 공개 API | 선택 이유 |
 | --- | --- | --- |
-| 예약 생성 | `POST /api/v1/consumers/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
-| 본인 상세 | `GET /api/v1/consumers/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
+| 예약 생성 | `POST /api/v1/consumers/me/reservations` | 메뉴 선택을 포함해 하나의 조정 유스케이스로 처리 |
+| 예약금 요청 최신 상태 | `GET /api/v1/consumers/me/reservation-requests/{reservationRequestId}` | 생성 replay와 최신 비동기 상태 조회를 분리하고 본인 소유 범위로 제한 |
+| 예약금 요청 최종 확정 | `POST .../{reservationRequestId}/finalizations` | Payment 공개 결과만 사용한 명시적 멱등 수렴 명령 제공 |
+| 예약금 요청 포기 | `POST .../{reservationRequestId}/abandonments` | 결제 전 사용자 포기와 늦은 결제 보상을 범용 상태 변경 없이 처리 |
+| 본인 상세 | `GET /api/v1/consumers/me/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
 | 운영자 목록·상세 | `/api/v1/store-operators/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
 | 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
 | 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
-| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publication` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
-| 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellation` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
+| 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publications` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
+| 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellations` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
 `PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이, 결제·노쇼 상태 선도입과 담당자별 중복 구현을 유발하므로 사용하지 않는다.
 
@@ -112,6 +116,120 @@
 1차 MVP의 `REQUESTED`와 `CAPACITY_HELD`는 같은 생성 트랜잭션 안의 전이 단계다. 사용자에게 별도 확정 API나 10분 카운트다운을 제공하지 않으며 성공 응답은 `CONFIRMED`만 반환한다.
 
 메뉴 수량 하나라도 부족하면 예약만 성공시키거나 가능한 메뉴만 남기지 않는다. 메뉴를 원하지 않는 사용자는 처음부터 `menuSelections`를 생략해 예약만 생성한다.
+
+## 고도화 임시 선점 영속 계약
+
+> 활성화 단계: Issue #264 — 계약·영속 모델만 활성, runtime과 HTTP 비활성
+
+- 고도화의 10분 임시 선점은 기존 `Reservation`에 중간 상태를 추가하지 않고 별도 `ReservationHold` aggregate로 저장한다. 따라서 1차 MVP의 즉시 확정 `ReservationStatus`와 예약 조회·취소 응답은 바뀌지 않는다.
+- 영속 상태 계약은 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED`, `RELEASED`, `EXPIRED`다. Issue #264에는 상태 변경 service를 두지 않고 후속 #265가 승인된 명령 전이를 구현한다.
+- 루트는 선점 소유 계정, 매장·시간·인원·연락 대상 스냅샷, 시간·수용량·취소 정책 버전, 생성 명령 ID, 상태 버전, 중앙 `createdAt`과 `expiresAt`을 보존한다. 클라이언트 멱등 키인 생성 명령 ID의 유일성과 replay 조회는 반드시 `(consumerAccountId, creationCommandId)` 소비자 범위로 제한한다.
+- `contactAvailableAtConfirmation`은 향후 `false`를 허용하기 위한 상태가 아니라 선점 생성 시점의 연락 가능 근거 스냅샷이다. 연락할 수 없으면 hold를 만들지 않으므로 영속 행에서는 항상 `true`이고, 컬럼과 CHECK는 이 불변식의 감사 근거를 보존한다.
+- `expiresAt`은 서버 중앙 `createdAt`에서 정확히 10분 뒤로만 계산하며 사용자 입력·setter·연장 필드를 제공하지 않는다.
+- `reservation_hold_capacity_allocations`는 관련 서비스 구간별 버킷 ID, 점유 인원, 팀 1건과 수용량 정책 버전을 보존한다. 실제 원자 점유는 후속 #265가 담당한다.
+- `reservation_hold_transition_audits`는 전이 전후 상태, 행위자, 요청·발생 시각, 시간·수용량 정책 버전과 명령 ID를 append-only로 보존하며 repository에는 삭제 API를 노출하지 않는다. 감사 명령 ID는 서버가 생성하는 전역 고유 내부 식별자이고 클라이언트 입력을 그대로 저장하지 않는다.
+- `reservation_hold_warning_tasks`는 선점별 최대 한 건으로 `expiresAt - 2분` 경고 의무만 기록한다. `(reservationHoldId, createdAt)` 복합 FK로 실제 선점의 10분 시각창에 결합하며, Notification 계약이 준비되기 전에는 채널·본문·provider·발송 재시도 상태를 소유하지 않는다.
+- V31은 네 영속 테이블의 FK, 허용 상태, 정책·수량 양수, 명령 멱등성, 정확한 10분/8분 시각식을 MySQL 제약으로 검증한다.
+- MenuHold와 같은 만료 시각으로 묶는 원자 선점은 #266, 중복 worker·명령 시점 만료·대사 runtime은 #267, Payment 준비와 최종 예약 확정은 #238에서 순서대로 활성화한다.
+
+### 수용량 선점·종결 명령 계약
+
+> 활성화 단계: Issue #265 — 수용량 선점·명시적 종결만 활성, HTTP·MenuHold·명령 시점 자동 만료 비활성
+
+- 명령 진입점은 기술적 MySQL deadlock·lock timeout만 트랜잭션 바깥에서 제한 재시도하는 얇은 facade와, 각 시도마다 새 트랜잭션을 소유하는 service로 분리한다. 업무 충돌·입력 오류·일반 무결성 오류는 재시도하지 않는다.
+- 생성 명령은 버킷 ID·정책 버전·만료 시각을 입력받지 않는다. 서버가 사용자 입력인 매장·업무 날짜·시작 시각·offset·인원을 정규화하고, 인증된 소비자 계약에서 연락 대상 참조와 시간·취소 정책을 해석한 뒤 최신 수용량 정책에서 `[startAt, occupancyEndAt)` 전체를 연속해서 덮는 버킷을 결정한다. 서버가 해석한 연락 대상은 생성 요청 지문에 넣지 않고 거래 스냅샷으로만 보존한다.
+- 생성 replay는 신규 거래 자격보다 먼저 판정한다. replay가 아닌 새 Hold 생성과 수용량 정책 재게시는 기존 Store 공개 계약으로 같은 Store 행을 먼저 잠가 직렬화한다. 종결은 매장의 CLOSED·예약 기능 비활성 여부와 무관하게 Hold 행을 먼저 잠그고 계속한다. 정책 재게시는 확정 Reservation과 보호 상태 Hold를 각각 PK 오름차순으로 잠근 뒤 관련 수용량 버킷으로 진행하며, 모든 경로는 aggregate-before-bucket과 버킷 PK 오름차순을 지킨다.
+- 생성은 모든 관련 버킷에서 양의 전체 인원과 팀 1건을 확보한 뒤 `ReservationHold`, 구간별 allocation, `null → ACTIVE` 생성 감사, `expiresAt - 2분` 경고 의무를 한 트랜잭션에 기록한다. 구간 누락·수용량 부족·저장 실패가 하나라도 있으면 점유를 포함해 전부 롤백한다.
+- `(consumerAccountId, creationCommandId)`가 이미 존재하면 최초 요청에서 사용자가 통제한 정규 입력 의미를 영속 스냅샷과 비교한다. 같은 의미면 정책 재게시 여부와 관계없이 현재 Hold 결과를 replay하고, 다른 의미면 `COMMON_007`로 거절한다. 생략한 offset과 서버가 해석한 값과 같은 명시 offset은 같은 의미이며, 파생된 현재 정책 버전·현재 버킷 구성은 비교 지문에 넣지 않는다.
+- 생성 replay 판정 뒤 같은 소비자·매장·겹치는 서비스 구간의 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED` Hold와 확정 Reservation을 잠금 조회한다. 기존 유효 거래가 있으면 새 선점을 만들지 않고 `RESERVATION_004`로 거절하며 `RELEASED`, `EXPIRED` Hold는 중복 후보에서 제외한다.
+- 생성은 `uk_reservation_holds_creation_command`, 종결은 `uk_reservation_hold_transition_audits_command` 충돌만 식별해 실패한 트랜잭션이 끝난 뒤 새 트랜잭션에서 기존 결과를 조회한다. 같은 명령 의미면 replay하고 다른 의미면 `COMMON_007`로 거절하며, 그 밖의 unique·FK·CHECK 위반은 replay로 숨기지 않는다.
+- 일반 종결은 `ACTIVE → CONFIRMED|RELEASED|EXPIRED|RECONCILIATION_REQUIRED`만 허용한다. 대사 복구는 `RECONCILIATION_REQUIRED → CONFIRMED|RELEASED`만 허용하며 그 밖의 전이는 `RESERVATION_005`로 거절한다.
+- #265는 검증된 목표 상태를 적용하는 수용량 전이 명령, 정확히 한 번의 점유 유지·반환, append-only 전이 감사와 replay 판정만 소유한다. 결과 불명확 여부나 금전 결과를 스스로 판단하지 않는다. #267은 #265·#266 명령을 worker·명령 시점 만료·그룹 경합에서 호출하는 runtime을 소유하고, #238은 Payment/PG 원본을 검증해 적용할 목표 상태를 결정한다.
+- `CONFIRMED`와 `RECONCILIATION_REQUIRED`는 수용량 점유를 유지한다. `RELEASED`와 `EXPIRED`만 allocation의 인원·팀을 정확히 한 번 반환하며, 상태 전이·수용량 변경·감사 기록은 함께 커밋한다.
+- #265의 만료 판정은 명시적 EXPIRED 명령에만 적용한다. 중앙 `Clock`에서 `now < expiresAt`이면 거절하고 `now >= expiresAt`이면 단일 만료를 허용한다. 확정·해제·대사 명령 진입 시 만료를 우선하는 지연 만료와 scheduler/worker 자동 만료는 #267이 소유한다.
+- 종결 명령은 상위 서버 조정자가 발급하고 재전송에서도 재사용하는 전역 고유 operation ID를 사용한다. 감사에는 raw 클라이언트 키가 아니라 이 내부 ID를 저장하며, 같은 ID·같은 Hold·같은 목표 상태 replay는 추가 전이·감사·수용량 반환 없이 현재 최신 Hold 결과를 반환한다. 같은 ID를 다른 Hold나 다른 목표 상태에 재사용하면 `COMMON_007`로 거절한다.
+- 수용량 정책 재게시는 잠근 aggregate의 최신 상태를 기준으로 기존 확정 Reservation 점유와 아직 최종 Reservation으로 전환되지 않은 `ACTIVE`, `RECONCILIATION_REQUIRED`, `CONFIRMED` Hold 점유를 각각 한 번만 새 정책 버킷에 합산한다. 예약 취소·Hold 종결과 경합해도 잠금 뒤 확정된 상태만 이월한다. `RELEASED`, `EXPIRED` Hold는 이월하지 않으며, 분할·병합된 새 버킷에서도 각 Hold의 전체 겹침 구간에 인원과 팀 1건을 반영한다. #238의 최종 전환은 점유 소유권을 원자적으로 이전해 같은 거래의 Hold와 Reservation을 동시에 계산하지 않는다.
+- 정책 재게시 뒤 Hold를 해제하거나 명시적으로 만료할 때는 최초 allocation 버킷과 현재 최신 정책의 겹치는 버킷을 합친 PK 정렬 집합을 잠그고 각 버킷에서 한 번만 복구한다. 같은 ID는 중복 제거하고 과거 중간 정책 버킷은 감사용 이력으로 남겨 수정하지 않는다.
+- Hold 부재는 `RESERVATION_001`, 수용량 부족은 `RESERVATION_003`, 중복 유효 거래는 `RESERVATION_004`, 허용되지 않은 전이는 `RESERVATION_005`, allocation·최신 버킷 불일치는 `RESERVATION_008`, 인원 정책 위반은 `RESERVATION_009`, 멱등 재사용은 `COMMON_007`, 기술적 잠금 재시도 소진은 `COMMON_008`을 사용하며 #265에서 새 공개 오류 코드를 추가하지 않는다.
+
+### 임시 선점 그룹의 메뉴 수량 원자 결합
+
+> 활성화 단계: Issue #266 — 수용량과 선택 메뉴 수량의 단일 그룹 primitive만 활성, HTTP·worker·Payment·최종 Reservation 생성 비활성
+
+- 생성 명령의 선택 메뉴는 `menuId`별로 중복 수량을 합산하고 메뉴 ID 오름차순으로 정규화한다. 메뉴별 합산 overflow와 허용 수량 범위 위반은 저장·잠금 전에 거절한다. 빈 목록은 MenuHold 행 부재라는 하나의 정규 의미를 가진다.
+- 생성 replay는 기존 수용량 입력 의미와 함께 임시 MenuHold에 저장된 메뉴 ID·합산 수량을 비교한다. 메뉴 있음/없음 변경, 메뉴 ID 변경 또는 합산 수량 변경은 `COMMON_007`이며 Hold·수용량·메뉴 재고·감사를 변경하지 않는다. 최초 replay와 Store 잠금 뒤 concurrent replay가 같은 비교를 사용한다.
+- fresh 생성은 Store와 겹치는 Reservation·Hold, 수용량 버킷을 기존 순서로 잠그고 수용량을 점유한 뒤 `ReservationHold`를 영속한다. 선택 메뉴가 있으면 예약 소유 `ReservationTemporaryMenuHoldPort`를 호출해 메뉴 재고 버킷을 PK 오름차순으로 잠그고 수량 원장과 임시 MenuHold를 같은 트랜잭션에 기록한다. 일부 메뉴 부족, 계약 불일치 또는 저장 실패에는 ReservationHold·allocation·수용량·메뉴 재고·감사·경고 의무를 전부 롤백한다.
+- 메뉴 재고 확보 operation ID는 소비자 범위 생성 command ID를 재사용하지 않는다. 영속된 Hold ID로 `reservation-temp-menu-acquire:{reservationHoldId}` 형식의 100자 이하 결정적 전역 ID를 만들고 MenuHold의 case-sensitive unique 계약을 따른다.
+- 종결은 ReservationHold를 잠근 직후 포트의 `lockForTransition(reservationHoldId)`로 임시 MenuHold 루트만 잠근다. 이후 수용량 유지 또는 복구를 처리하고, 포트의 `applyTransition`이 MenuHold 상태 변경과 필요한 메뉴 재고 복구를 수행한다. 두 계약은 호출자 트랜잭션에 필수 참여하며 최종 잠금 순서는 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK`다.
+- 생성과 종결의 MenuHold 위치는 의도적으로 다르다. fresh 생성은 기존 MenuHold 행을 잠그지 않고 `capacity → 새 MenuHold insert → inventory`로 진행하며, 종결만 기존 MenuHold 루트를 `capacity`보다 먼저 잠근다. 두 경로의 공통 불변식은 `capacity`가 항상 `inventory`보다 앞서고 각 버킷을 PK 오름차순으로 잠근다는 것이다.
+- `ACTIVE → RECONCILIATION_REQUIRED`는 수용량과 메뉴 수량을 모두 유지한다. `ACTIVE|RECONCILIATION_REQUIRED → RELEASED`와 `ACTIVE → EXPIRED`는 수용량과 메뉴 수량을 같은 트랜잭션에서 한 번만 반환한다. `CONFIRMED`는 재고를 유지하며 임시 MenuHold에 기존 최종 Reservation ID를 연결한다.
+- 메뉴가 있는 `CONFIRMED` 명령만 양의 `finalReservationId`를 요구한다. 메뉴 없는 그룹과 다른 목표 상태에는 이 값이 없어야 한다. 최초 audit replay와 Hold 잠금 후 concurrent replay도 임시 MenuHold의 영속 `reservationId`를 비교하며, 같은 operation ID를 다른 최종 Reservation에 재사용하면 `COMMON_007`이다.
+- #266은 호출자가 검증한 목표 상태와 이미 존재하는 최종 Reservation ID를 그룹에 적용하는 primitive만 소유한다. 자동 만료·명령 시점 만료 우선·중복 worker·대사 orchestration은 #267, Payment/PG 검증·목표 상태 결정·최종 Reservation 생성은 #238이 소유한다.
+
+### 임시 선점 만료·대사 runtime
+
+> 활성화 단계: Issue #267 — 중앙 만료 worker, 명령 시점 만료 우선, 대사 수렴과 장기 체류 관측 활성
+
+- 자동 만료 후보는 조회 시각 이하로 `expiresAt`이 지난 `ACTIVE` Hold ID다. 조회는 무잠금 힌트로만 사용하고 한 poll 안에서 `reservationHoldId` keyset pagination으로 전진한다. 각 후보의 최종 상태와 만료 경계는 Hold 행을 잠근 뒤 중앙 `Clock`으로 다시 판정하며, 한 후보의 실패가 다음 후보를 막지 않는다. 종료 interrupt를 관찰하면 남은 batch 처리를 중단한다.
+- job과 후보 조회·조정 service는 트랜잭션을 열지 않는다. 각 후보는 기존 `Propagation.NEVER` command facade를 거쳐 `ReservationHoldService.transition`의 새 트랜잭션 하나에서 처리한다. worker 또는 조정 service에 outer transaction을 두거나 같은 객체의 self-invocation으로 이 경계를 우회하지 않는다.
+- 자동 만료는 `SYSTEM` actor와 null actor ID, `reservation-hold-expire:{reservationHoldId}` operation ID, Hold의 영속 `expiresAt`을 `requestedAt`으로 사용한다. 이 값은 worker 재시작·중복 실행·명령 시점 만료에서 모두 같아야 하며 `reservation-hold-expire:` namespace는 `EXPIRED` 내부 명령 전용이다. 실제 잠금 뒤 판정·감사 발생 시각은 한 번 읽은 중앙 `Clock`의 값을 `occurredAt`으로 사용한다.
+- 모든 확정·해제·대사 명령은 기존 operation replay 판정을 먼저 수행하고 Hold와 임시 MenuHold를 기존 순서로 잠근다. replay가 아니고 `ACTIVE && now >= expiresAt`이면 원 요청의 operation ID를 소비하거나 EXPIRED 감사에 기록하지 않고, 위 결정적 만료 명령으로 치환해 기존 수용량·메뉴 수량 복구와 상태 전이·감사를 한 번 수행한 뒤 현재 `EXPIRED` 결과를 반환한다. 만료 때문에 실행되지 않은 원 operation ID의 재사용뿐 아니라 이미 `EXPIRED`인 Hold에 도착한 새 명령도 operation ID를 소비하거나 별도 감사를 추가하지 않는 no-op으로 현재 `EXPIRED` 결과를 반환한다. 호출자는 command의 목표 상태가 적용됐다고 추정하지 않고 반환된 Hold 상태를 최종 판단 근거로 사용한다.
+- `now < expiresAt`인 `ACTIVE`만 원래 확정·해제·대사 목표를 적용할 수 있다. `RECONCILIATION_REQUIRED`에는 자동 만료 치환을 적용하지 않고, 검증된 `CONFIRMED|RELEASED` 대사 명령만 기존 primitive로 실행한다. Payment/PG 원본 조회, 금전 결과 판정과 최종 Reservation 생성은 #238이 소유한다. #238 조정자는 만료에 밀린 원 operation의 감사 존재를 전제로 삼지 않고, 영속 process·Payment 결과와 Hold의 현재 상태 및 결정적 `SYSTEM` 만료 감사를 대조해 확정 또는 전액 환불로 수렴해야 한다.
+- 잠금 순서는 `ReservationHold → temporary MenuHold → capacity bucket PK → inventory bucket PK`를 유지한다. 후보 조회와 장기 체류 관측은 잠금 순서나 다른 Schedule·Payment·Waiting·Notification 도메인의 entity, repository 또는 API 계약을 추가하지 않는다.
+- `RECONCILIATION_REQUIRED` 장기 체류 기준 시각은 해당 상태로 전이한 append-only 감사의 `occurredAt`이며 경계는 정확히 10분이다. `now < occurredAt + 10분`은 대상이 아니고 `now >= occurredAt + 10분`부터 현재도 `RECONCILIATION_REQUIRED`인 그룹을 관측한다. 이 관측은 count만 포함한 `event=reservation_hold_reconciliation_stalled` 로그를 남기고 Hold·계정·매장·명령 식별자나 연락처를 기록하지 않는다.
+- CloudWatch Logs metric filter는 위 이벤트를 `ReservationHoldReconciliationStalled` 지표로 바꾸고 5분 합계가 0보다 크면 기존 staging SNS 주제의 알람을 활성화한다. 관측은 현재 위험 상태가 지속되는 동안 반복되는 level-triggered 신호이며 별도 발송 receipt를 영속하지 않는다. 중복 poll은 상태·수용량·메뉴 수량·감사를 변경하지 않고, 장기 체류가 사라져 이벤트가 없으면 `notBreaching`으로 복귀한다.
+- 만료와 장기 체류 관측은 이름이 지정된 전용 single-thread scheduler를 명시적으로 사용하고 scheduler bean은 다른 `@Scheduled` 작업의 기본 후보가 아니다. enabled, poll delay와 batch size는 양수 검증 가능한 운영 설정이며 기본 활성화하되 `enabled=false`로 중지할 수 있다. 구체 기본값은 구현 선택이지 제품 만료 정책이 아니다.
+- 선점별 `expiresAt - 2분` 경고 의무는 기존 unique 영속 계약을 유지한다. 실제 Notification 발송·채널·provider·재시도 부재 또는 실패는 만료 worker와 장기 체류 관측을 막지 않는다.
+
+## 예약금 결제 후 최종 확정
+
+> 활성화 단계: Issue #238 — contract-only 승인, runtime exact allowlist 확정 전 구현 비활성
+
+### 소유권과 선행 계약
+
+- Reservation이 예약금 거래의 조정자다. 자원 상태의 원본은 ReservationHold·MenuHold이고 금전 상태와 환불 원장의 원본은 Payment다. `ReservationDepositProcess`는 두 상태를 복제하지 않고 조정 단계와 후속 작업 의무만 소유한다.
+- Reservation은 Payment의 공개 `PaymentService`·`PaymentContracts`만 사용하고 Payment Entity·Repository 또는 PortOne 모델을 참조하지 않는다. Payment도 Reservation·ReservationHold·MenuHold를 역조회하거나 변경하지 않는다.
+- 예약금 필요 여부와 Store 소유 입력·안정적인 정책 버전은 #313의 Store 공개 Service·DTO로 읽는다. 대표 메뉴 설정 버전, 각 메뉴 ID·게시 버전·기본 가격은 기존 `RepresentativeMenuQueryService.getCurrent(storeId)` 공개 결과를 재사용하며 Menu DTO를 영속 모델로 사용하지 않는다.
+- #267은 만료 대상 탐색·임대·기술적 실행만 소유한다. 결제 process가 연결된 Hold를 직접 만료시키지 않고 #238 조정자를 호출한다. #238이 Payment 공개 DTO로 목표 상태를 결정하고 #265·#266 공개 명령이 Hold·MenuHold 전이를 적용한다.
+- Migration은 목적과 충돌 없는 다음 번호 선택 규칙만 먼저 고정한다. 실제 Flyway 파일명은 migration 파일 생성 직전에 최신 `dev`와 열린 PR을 다시 확인해 Issue #238 exact allowlist에 추가하고, PR 진행 중 선행 migration이 먼저 병합되면 번호와 Issue·테스트·PR 본문을 함께 갱신한다.
+
+### 생성과 공개 API
+
+- 기존 `POST /api/v1/consumers/me/reservations`를 유지한다. 예약금 불필요 판정은 기존 `201 ReservationSuccessResponse`와 즉시 확정 의미를 보존한다.
+- 예약금 필요 판정은 `202 ReservationRequestResponse`를 반환한다. 성공한 `202`에는 `reservationRequestId`, 조정 상태, Hold `expiresAt`과 `PaymentPreparation`이 반드시 있으며 nullable 준비 결과나 별도 브라우저용 Payment 준비 API를 만들지 않는다.
+- 공개 `paymentPreparation`은 Payment가 요청 생성 시 반환한 값을 저장한 불변 snapshot이다. 생성 `202`부터 `COMPLETED`·`ABANDONED`·`EXPIRED`·보상·복구 상태의 최신 `GET`까지 required·non-nullable로 같은 값을 보존하며, snapshot의 `status=READY`와 `sourceExpiresAt`은 현재 Payment 상태나 현재 결제 가능 여부를 뜻하지 않는다.
+- 같은 생성 URL을 참조하는 `mvp1-openapi.yaml`은 `components.pathItems.Mvp1ConsumerReservations` stage projection으로 기존 `201`·오류와 조회 계약만 노출하고, full consumer entrypoint만 예약금 `202`·전용 409를 함께 노출한다. 두 projection은 생성 타입에서 서로 덮어쓰지 않도록 서로 다른 `operationId`를 사용한다.
+- 생성은 #266 정본의 `멱등 기록 → Store·중복 거래 직렬화 → 수용량 버킷 PK 오름차순 → ReservationHold·allocation·감사·경고 의무 → 새 임시 MenuHold root → 메뉴 재고 풀 PK 오름차순 → MenuHold 항목·수량 원장` 뒤 `ReservationDepositProcess·Payment 준비 원장·최초 202 결과`를 같은 MySQL 트랜잭션에 기록한다. Payment 준비는 PG 호출이 없는 내부 원장 생성이며 호출자 트랜잭션에 참여한다. 준비 유일 키 경합은 전체 rollback 뒤 facade가 새 트랜잭션으로 제한 재시도한다.
+- Store·중복 거래 직렬화로 Store 행 잠금을 획득한 직후이자 첫 자원 쓰기 전에, 같은 caller transaction에서 `StoreReservationDepositPolicyQueryService.getCurrent(storeId)`를 먼저 호출하고 `RepresentativeMenuQueryService.getCurrent(storeId)`를 다음으로 호출한다. 두 조회는 독립 transaction을 열지 않으며 Store 정책 상태·비율·revision, 대표 메뉴 설정 version, 메뉴별 ID·게시 version·기본 가격과 예약 인원수를 정해진 관찰 순서 그대로 하나의 immutable 계산 snapshot에 저장한다. runtime 통합 테스트는 Store 조회의 `MANDATORY` 참여, Store→Menu 호출 순서, 독립 transaction 0건과 snapshot 영속을 함께 검증한다.
+- 같은 생성 멱등 키와 같은 요청 지문은 상태가 바뀌어도 저장된 최초 HTTP 상태와 최초 payload를 replay한다. 최신 상태는 `GET /api/v1/consumers/me/reservation-requests/{reservationRequestId}`에서 `reservationRequestId + authenticatedConsumerAccountId`로 한 번에 조회하고 실제 부재와 타인 소유를 `RESERVATION_001`로 숨긴다.
+- `POST .../{reservationRequestId}/finalizations`는 `Idempotency-Key`를 요구하며 브라우저 성공 주장 대신 저장된 `paymentId + consumerAccountId`로 `PaymentService.getOwnedPayment(...)`만 호출한다. 완료하면 확정 Reservation을 반환하고 미종결이면 `202`를 반환한다. 사용자가 호출하지 않아도 worker가 같은 내부 조정 명령을 실행한다.
+- `POST .../{reservationRequestId}/abandonments`는 인증된 본인의 포기 의사와 `Idempotency-Key`만 받는다. 명령이 `COMPLETED` 전에 process를 잠그면 Payment가 이미 `PAID`이거나 이후 `PAID`로 확인돼도 Reservation을 만들지 않고 전액 환불 obligation으로 수렴한다. `READY`·명시적 비성공이면 Hold·MenuHold를 기존 명령으로 `RELEASED`하고 `ABANDONED`로 종결하며, `CONFIRMING`·`RECONCILIATION_REQUIRED`이면 포기 의사를 영속화하고 결과를 추측하지 않은 채 자원을 보호한다. 이미 `COMPLETED`인 거래만 `RESERVATION_005`로 거절하고 확정 Reservation 취소 정책으로 분리한다.
+- 공개 `ReservationRequest.abandonmentRequested`는 단순 HTTP 요청 수신 여부가 아니라 포기 command가 `COMPLETED` 전에 process 잠금을 획득하고 포기 의도를 성공적으로 영속화했는지를 나타낸다. 영속 전에는 `false`, 영속 후에는 payment-driven 조정 상태와 독립적으로 `true`를 유지하며 `ABANDONED`·보상·복구 상태에서도 다시 `false`가 되지 않는다. 이미 `COMPLETED`라 거절된 command와 포기 의도 없이 시작된 보상·복구는 이 값을 변경하지 않는다.
+- 미종결 생성·finalization·abandonment 명령만 `202`를 사용한다. 최신 상태 `GET`은 `200`, 생성 replay는 최초 응답, 명시적 실패는 계약된 오류를 유지한다.
+
+### 조정 상태와 판정
+
+- 조정 상태는 `AWAITING_PAYMENT`, `FINALIZING_RESOURCES`, `COMPLETED`, `ABANDONED`, `EXPIRED`, `COMPENSATION_REQUIRED`, `COMPENSATING`, `COMPENSATED`, `RECOVERY_REQUIRED`다.
+- Payment의 `READY + lastAttemptStatus=FAILED|CANCELLED`은 원래 만료 시각까지 재결제 가능한 결과이므로 포기 의사가 없으면 `AWAITING_PAYMENT`를 유지한다. 일반 `ACTIVE` 선점은 중앙 `now >= expiresAt`이면 만료·반환하고 뒤늦은 `PAID`는 전액 환불한다.
+- 만료 전에 Payment가 `CONFIRMING`·`RECONCILIATION_REQUIRED`로 관측된 거래만 Hold·MenuHold를 `RECONCILIATION_REQUIRED`로 전이해 점유를 보호한다. 이 보호 예외는 일반 `ACTIVE` 선점의 만료를 연장하지 않으며 Payment 결과를 성공·실패로 추측하거나 자원을 재판매하지 않는다.
+- 보호 예외에서는 Payment가 서버에서 검증하고 원장에 기록한 `paidAt < expiresAt`이고 포기 의사가 없으며 자원이 계속 보호 중이면 벽시계 만료 후 대사돼도 최종 확정한다. `paidAt >= expiresAt`, 이미 반환된 자원 또는 영속 포기 의사가 있으면 Reservation을 만들거나 되살리지 않고 전액 환불로 수렴한다.
+- 최종 확정은 `멱등 기록 → ReservationDepositProcess → ReservationHold·MenuHold aggregate → 수용량 버킷 PK 오름차순 → 필요한 메뉴 재고 풀 PK 오름차순`의 상대 순서를 지킨다. 최종 Reservation 생성, 선택 MenuHold 확정, Hold 점유의 Reservation 점유 이전과 process 완료를 같은 트랜잭션에 기록하여 같은 거래의 Hold와 Reservation을 동시에 산입하지 않는다.
+- #267은 process 연결 여부를 읽기 전용으로 식별하고 ReservationHold·MenuHold·bucket 잠금을 보유하지 않은 채 #238 조정자에게 위임한다. #238은 `ReservationDepositProcess → ReservationHold·MenuHold aggregate → 수용량 bucket → 메뉴 재고 pool` 순서를 지키며 Hold를 먼저 잠근 뒤 process를 잠그는 역순 호출을 금지한다.
+- 포기·결제 확인·만료·worker가 경합하면 process와 Hold의 상태 버전·멱등 operation ID·worker fencing으로 하나의 다음 결과만 유효하다. 포기 의사가 기록된 process는 이미 확인됐거나 뒤늦게 확인된 `PAID`로 최종 확정 경로에 복귀하지 않는다.
+
+### 영속 스냅샷과 환불 의무
+
+- `ReservationDepositProcess`는 ReservationHold와 1:1, 최종 Reservation과 0..1로 연결한다. Payment 공개 `paymentId`는 0..1 불변·유일 참조로 저장하되 Payment 테이블 물리 FK를 만들지 않는다. 공개 ID 조회 실패에는 연결을 삭제하지 않고 `RECOVERY_REQUIRED`를 유지한다.
+- process는 조정 상태·상태 버전, worker 임대·fencing·다음 실행 시각, 확정·포기·환불의 안정적인 내부 operation ID, 생성·갱신·종결·포기 요청 시각을 보존하며 종결 뒤 삭제하지 않는다.
+- 예약금 계산 근거는 Store 설정 revision·비율·통화·예약 인원·계산 정책 버전·계산된 최종 예약금·대표 메뉴 설정 version·대표 메뉴 가격 합계·대표 메뉴 수와 계산에 사용한 각 대표 메뉴 ID·게시 version·기본 가격을 불변 snapshot으로 보존한다. 공개 DTO의 값만 복사하고 이후 Store 설정이나 Menu 원본 변경으로 갱신하지 않는다.
+- 결제 성공 뒤 자원 확정 불가 또는 포기·반환 뒤 늦은 `PAID`는 process와 같은 트랜잭션에 정확히 한 건의 `ReservationDepositRefundObligation`을 기록한다. obligation은 process·불변 원인 사건, `paymentId`, 전액·통화·환불 정책 버전, 안정적인 Payment 환불 멱등 키와 작업 임대·재시도 정보만 소유한다. process와 원인 사건 조합뿐 아니라 `process + paymentId + FULL_DEPOSIT_COMPENSATION` 조합에 최대 한 obligation만 허용하며 포기·만료·자원 확정 실패·late PAID의 여러 원인 사건은 같은 obligation의 append-only 감사 근거로 연결한다.
+- 커밋 뒤 `PaymentService.requestRefund(...)`를 호출한다. Payment 환불 원장이 실제 금전 결과의 유일한 원본이고 obligation은 요청 의무만 나타낸다. 결과 불명확에는 새 환불을 만들지 않고 같은 의무로 조회·대사하며 자동 해소할 수 없으면 `RECOVERY_REQUIRED`를 유지한다.
+
+### 오류와 검증 경계
+
+- 예약금 요청 부재·타인 소유는 `RESERVATION_001`, 허용되지 않은 조정 전이는 `RESERVATION_005`, 멱등 키의 다른 요청 지문은 `COMMON_007`, 기술적 잠금 재시도 소진은 `COMMON_008`을 사용한다.
+- Store·Menu·Payment 오류는 각 Reservation route가 실제 호출하는 공개 Service에서 발생 가능한 소유 오류만 OpenAPI에 열거한다. 이미 영속된 `paymentId`를 `getOwnedPayment`에서 찾지 못한 `PAYMENT_001`은 소비자 404로 전파하지 않고 process를 `RECOVERY_REQUIRED`로 전이해 현재 ReservationRequest 상태로 반환한다. Payment 이력 cursor·Webhook 전용 오류를 Reservation API에 노출하지 않으며 비동기 환불·대사 실패를 즉시 소비자 오류로 위장하지 않는다.
+- 기존 거래와 Payment는 backfill하지 않는다. runtime 구현은 snapshot·본인 소유·멱등 API 계약, 실제 MySQL 단일 commit/rollback, 결제·Webhook·worker 중복, 확정/만료/포기 경합, 결과 불명확 보호, 환불 obligation, 다중 worker 임대·fencing과 실제 migration 제약을 검증한다.
 
 ## 수용량
 
@@ -225,6 +343,7 @@
 
 | 날짜 | 결정 | 선택 이유 |
 | --- | --- | --- |
+| 2026-08-12 | 10분 임시 선점은 기존 예약과 분리된 `ReservationHold` aggregate와 V31 영속 계약으로 단계 도입 | 1차 MVP 즉시 확정 조회·취소 의미를 보존하고 #265~#267의 수용량·MenuHold·worker 검토를 작은 PR로 분리 |
 | 2026-08-04 | Store 전체 서비스 구간 검증은 Issue #104 / PR #106 선행 계약을 소비 | Store 일정 원본·충돌 판정을 Reservation에 복제하지 않고 `[startAt, serviceEndAt)`과 turnover 책임 경계를 유지 |
 | 2026-08-03 | 서비스 종료와 실제 점유 종료를 `serviceEndAt`·`occupancyEndAt`으로 분리 | 고객 표시 의미와 수용량 점유 의미를 섞지 않고 매장별 duration 적용 |
 | 2026-08-03 | 실제 시각은 Instant와 IANA 시간대·offset 스냅샷으로 보존 | 자정 넘김과 DST 중복·누락 시각을 LocalTime 비교로 손실하지 않음 |

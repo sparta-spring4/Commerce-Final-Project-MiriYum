@@ -17,11 +17,11 @@ const MENU_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1MA'
 const PICKUP_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1P1'
 
 const AVAILABILITY_PATH = '/api/v1/stores/:storeId/pickup-availability'
-const CREATE_PATH = '/api/v1/consumers/pickup-reservations'
+const CREATE_PATH = '/api/v1/consumers/me/pickup-reservations'
 const DETAIL_PATH =
-  '/api/v1/consumers/pickup-reservations/:pickupReservationId'
+  '/api/v1/consumers/me/pickup-reservations/:pickupReservationId'
 const CANCEL_PATH =
-  '/api/v1/consumers/pickup-reservations/:pickupReservationId/cancellations'
+  '/api/v1/consumers/me/pickup-reservations/:pickupReservationId/cancellations'
 
 function availability(availableQuantity = 5) {
   return {

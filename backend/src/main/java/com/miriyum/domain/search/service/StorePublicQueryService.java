@@ -4,6 +4,8 @@ import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityConditi
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.schedule.dto.contract.PublicOperatingDay;
 import com.miriyum.domain.schedule.dto.contract.PublicReservationDay;
@@ -22,7 +24,12 @@ import com.miriyum.domain.search.repository.PublicStoreSnapshot;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.global.exception.ServiceException;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class StorePublicQueryService {
@@ -30,15 +37,18 @@ public class StorePublicQueryService {
     private final StorePublicReadRepository publicReadRepository;
     private final StoreScheduleQueryService scheduleQueryService;
     private final ReservationService reservationService;
+    private final RepresentativeMenuQueryService representativeMenuQueryService;
 
     public StorePublicQueryService(
             StorePublicReadRepository publicReadRepository,
             StoreScheduleQueryService scheduleQueryService,
-            ReservationService reservationService
+            ReservationService reservationService,
+            RepresentativeMenuQueryService representativeMenuQueryService
     ) {
         this.publicReadRepository = publicReadRepository;
         this.scheduleQueryService = scheduleQueryService;
         this.reservationService = reservationService;
+        this.representativeMenuQueryService = representativeMenuQueryService;
     }
 
     public List<PublicMenu> getMenus(long storeId) {
@@ -47,6 +57,7 @@ public class StorePublicQueryService {
         return menus;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PublicStoreDetail getDetail(
             long storeId,
             ReservationSearchCondition condition,
@@ -55,6 +66,8 @@ public class StorePublicQueryService {
         ReservationAvailability availability = availabilityOf(
                 storeId, condition, includesInfants);
         List<PublicMenu> menus = publicReadRepository.findPublicMenus(storeId);
+        RepresentativeMenuSnapshot representativeMenus =
+                representativeMenuQueryService.getCurrent(storeId);
         PublicStoreSchedules schedules = scheduleQueryService.getPublicSchedules(storeId);
         PublicStoreSnapshot store = requirePublicStore(storeId);
         ReservationAvailability finalAvailability = reconcileLatestStoreState(
@@ -68,7 +81,29 @@ public class StorePublicQueryService {
                         store.pickupEnabled()),
                 operatingHours(schedules.operatingHours()),
                 reservationTimeSlots(schedules.reservationTimeSlots()),
-                menus.stream().filter(PublicMenu::representative).toList(), finalAvailability);
+                orderedRepresentativeMenus(menus, representativeMenus), finalAvailability);
+    }
+
+    private static List<PublicMenu> orderedRepresentativeMenus(
+            List<PublicMenu> menus,
+            RepresentativeMenuSnapshot snapshot
+    ) {
+        Map<String, PublicMenu> menusById = menus.stream().collect(Collectors.toMap(
+                PublicMenu::menuId,
+                Function.identity()));
+        return snapshot.items().stream()
+                .map(item -> menusById.get(item.menuId()))
+                .filter(java.util.Objects::nonNull)
+                .map(StorePublicQueryService::asRepresentative)
+                .toList();
+    }
+
+    private static PublicMenu asRepresentative(PublicMenu menu) {
+        return new PublicMenu(
+                menu.menuId(), menu.name(), menu.description(), menu.price(), true,
+                menu.primaryCategoryCode(), menu.secondaryCategoryCodes(),
+                menu.localTags(), menu.holdEnabled(),
+                menu.pickupEnabled(), menu.saleStatus());
     }
 
     private static List<PublicDailySchedule> operatingHours(

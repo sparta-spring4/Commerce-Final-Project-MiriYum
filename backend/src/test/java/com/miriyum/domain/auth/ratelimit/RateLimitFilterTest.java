@@ -24,6 +24,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -35,7 +36,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * ({@code docs/service-policies/18-scale-reliability.md} SCALE-014).
  */
 @Tag("integration")
-@Tag("integration-shard-b")
+@Tag("integration-shard-d")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
@@ -66,6 +67,17 @@ class RateLimitFilterTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Test
+    @DisplayName("플랫폼 운영자 공개 인증 중 로그인·재발급·CSRF 준비만 요청 제한한다")
+    void limitsOnlyApprovedPlatformOperatorPublicAuthRoutes() {
+        RateLimitFilter filter = new RateLimitFilter(null, null);
+
+        assertThatFilterApplies(filter, "POST", "/api/v1/platform-operators/auth/sessions");
+        assertThatFilterApplies(filter, "POST", "/api/v1/platform-operators/auth/token-refreshes");
+        assertThatFilterApplies(filter, "GET", "/api/v1/platform-operators/auth/csrf-tokens/current");
+        assertThatFilterDoesNotApply(filter, "POST", "/api/v1/platform-operators/auth/accounts");
+    }
 
     @Test
     @DisplayName("한도를 초과한 요청은 429와 Retry-After를 반환한다")
@@ -120,7 +132,7 @@ class RateLimitFilterTest {
 
     @ParameterizedTest(name = "{2} {1}은 {0} 등급 한도({3})에서 정확히 허용/거부를 나눈다")
     @MethodSource("limitedRoutes")
-    @DisplayName("8개 제한 대상 경로 각각이 기대한 등급의 한도로 정확히 매핑된다")
+    @DisplayName("14개 제한 대상 경로 각각이 기대한 등급의 한도로 정확히 매핑된다")
     void eachLimitedRouteEnforcesItsOwnCategoryLimit(
             String categoryName, String path, String method, int maxRequests, String uniqueSuffix
     ) throws Exception {
@@ -148,12 +160,18 @@ class RateLimitFilterTest {
         return Stream.of(
                 Arguments.of("SIGN_UP", "/api/v1/consumers/auth/accounts", "POST", 5, "1"),
                 Arguments.of("LOGIN", "/api/v1/consumers/auth/sessions", "POST", 5, "2"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "3"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "4"),
-                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/accounts", "POST", 5, "5"),
-                Arguments.of("LOGIN", "/api/v1/store-operators/auth/sessions", "POST", 5, "6"),
-                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "7"),
-                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "8")
+                Arguments.of("LOGIN", "/api/v1/consumers/auth/kakao/authorizations", "POST", 5, "3"),
+                Arguments.of("LOGIN", "/api/v1/consumers/auth/kakao/sessions", "POST", 5, "4"),
+                Arguments.of("SIGN_UP", "/api/v1/consumers/auth/kakao/accounts", "POST", 5, "5"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/consumers/auth/token-refreshes", "POST", 30, "6"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/consumers/auth/csrf-tokens/current", "GET", 2, "7"),
+                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/accounts", "POST", 5, "8"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/sessions", "POST", 5, "9"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/kakao/authorizations", "POST", 5, "10"),
+                Arguments.of("LOGIN", "/api/v1/store-operators/auth/kakao/sessions", "POST", 5, "11"),
+                Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/kakao/accounts", "POST", 5, "12"),
+                Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "13"),
+                Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "14")
         );
     }
 
@@ -189,5 +207,15 @@ class RateLimitFilterTest {
             request.setRemoteAddr(remoteAddr);
             return request;
         };
+    }
+
+    private static void assertThatFilterApplies(RateLimitFilter filter, String method, String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+        org.assertj.core.api.Assertions.assertThat(filter.shouldNotFilter(request)).isFalse();
+    }
+
+    private static void assertThatFilterDoesNotApply(RateLimitFilter filter, String method, String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+        org.assertj.core.api.Assertions.assertThat(filter.shouldNotFilter(request)).isTrue();
     }
 }

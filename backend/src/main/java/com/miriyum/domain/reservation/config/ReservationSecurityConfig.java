@@ -22,7 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnableWebSecurity
 public class ReservationSecurityConfig {
 
-    private static final String RESERVATION_ROOT = "/api/v1/consumers/reservations";
+    private static final String RESERVATION_ROOT = "/api/v1/consumers/me/reservations";
     private static final String RESERVATION_FAMILY = RESERVATION_ROOT + "/**";
     private static final String RESERVATION_DETAIL = RESERVATION_ROOT + "/*";
     private static final String RESERVATION_CANCELLATION =
@@ -37,6 +37,18 @@ public class ReservationSecurityConfig {
             STORE_RESERVATION_ROOT + "/*/cancellations";
     private static final String STORE_RESERVATION_FULFILLMENT =
             STORE_RESERVATION_ROOT + "/*/fulfillments";
+    private static final String WAITING_TEAM_ROOT =
+            "/api/v1/store-operators/stores/*/waiting-teams";
+    private static final String WAITING_TEAM_FAMILY = WAITING_TEAM_ROOT + "/**";
+    private static final String WAITING_TEAM_DETAIL = WAITING_TEAM_ROOT + "/*";
+    private static final String WAITING_TEAM_CALL = WAITING_TEAM_ROOT + "/*/calls";
+    private static final String WAITING_TEAM_ARRIVE = WAITING_TEAM_ROOT + "/*/arrivals";
+    private static final String WAITING_TEAM_CHECK_IN = WAITING_TEAM_ROOT + "/*/check-ins";
+    private static final String WAITING_TEAM_CANCEL = WAITING_TEAM_ROOT + "/*/cancellations";
+    private static final String WAITING_CLOSE_JOB_ROOT =
+            "/api/v1/store-operators/stores/*/waiting-closure-jobs";
+    private static final String WAITING_CLOSE_JOB_FAMILY = WAITING_CLOSE_JOB_ROOT + "/**";
+    private static final String WAITING_CLOSE_JOB_DETAIL = WAITING_CLOSE_JOB_ROOT + "/*";
 
     @Bean
     @Order(-1)
@@ -46,7 +58,13 @@ public class ReservationSecurityConfig {
             ObjectMapper objectMapper
     ) throws Exception {
         http
-                .securityMatcher(STORE_RESERVATION_ROOT, STORE_RESERVATION_FAMILY)
+                .securityMatcher(
+                        STORE_RESERVATION_ROOT,
+                        STORE_RESERVATION_FAMILY,
+                        WAITING_TEAM_ROOT,
+                        WAITING_TEAM_FAMILY,
+                        WAITING_CLOSE_JOB_ROOT,
+                        WAITING_CLOSE_JOB_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -55,6 +73,13 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.GET, STORE_RESERVATION_DETAIL).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_CANCELLATION).authenticated()
                         .requestMatchers(HttpMethod.POST, STORE_RESERVATION_FULFILLMENT).authenticated()
+                        .requestMatchers(HttpMethod.GET, WAITING_TEAM_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, WAITING_TEAM_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.POST, WAITING_TEAM_CALL).authenticated()
+                        .requestMatchers(HttpMethod.POST, WAITING_TEAM_ARRIVE).authenticated()
+                        .requestMatchers(HttpMethod.POST, WAITING_TEAM_CHECK_IN).authenticated()
+                        .requestMatchers(HttpMethod.POST, WAITING_TEAM_CANCEL).authenticated()
+                        .requestMatchers(HttpMethod.GET, WAITING_CLOSE_JOB_DETAIL).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))

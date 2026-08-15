@@ -14,7 +14,8 @@ import { PickupCompletePage } from './PickupCompletePage'
 const STORE_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1XA'
 const MENU_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1MA'
 const PICKUP_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1P1'
-const DETAIL_PATH = '/api/v1/consumers/pickup-reservations/:pickupReservationId'
+const DETAIL_PATH =
+  '/api/v1/consumers/me/pickup-reservations/:pickupReservationId'
 
 function pickupReservation(
   overrides: Partial<PickupReservation> = {},

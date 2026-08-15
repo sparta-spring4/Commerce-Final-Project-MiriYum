@@ -36,6 +36,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.notification.ReservationNotificationPublisher;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldCreateCommand;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
@@ -53,11 +54,6 @@ import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibil
 import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
-import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
-import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowStatus;
-import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalRequest;
-import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalResult;
-import com.miriyum.domain.schedule.dto.contract.StoreServiceIntervalStatus;
 import com.miriyum.domain.schedule.service.StoreScheduleService;
 import com.miriyum.domain.schedule.service.StoreServiceIntervalValidationService;
 import com.miriyum.global.exception.CommonErrorCode;
@@ -70,10 +66,8 @@ import com.miriyum.global.idempotency.IdempotentOutcome;
 import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.DateTimeException;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -129,12 +123,15 @@ public class ReservationService {
     private final ConsumerAccountService consumerAccountService;
     private final ReservationMenuHoldPort menuHoldPort;
     private final ReservationTimeResolutionService timeResolutionService;
+    private final ReservationCreationCapacityValidator creationCapacityValidator =
+            new ReservationCreationCapacityValidator();
     private StoreTransactionEligibilityService storeTransactionEligibilityService;
     private ReservationCapacityAllocationRepository capacityAllocationRepository;
     private ReservationCancellationPolicySelector cancellationPolicySelector;
     private ReservationCancellationAuditRepository cancellationAuditRepository;
     private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
     private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
+    private ReservationNotificationPublisher notificationPublisher;
 
     ReservationService(
             StoreScheduleService storeScheduleService,
@@ -167,8 +164,7 @@ public class ReservationService {
     }
 
     /** Spring constructor including the public contracts used by creation and cancellation. */
-    @Autowired
-    public ReservationService(
+    ReservationService(
             StoreScheduleService storeScheduleService,
             StoreServiceIntervalValidationService storeServiceIntervalValidationService,
             ReservationTimePolicyVersionRepository timePolicyRepository,
@@ -210,6 +206,53 @@ public class ReservationService {
         this.cancellationAuditRepository = cancellationAuditRepository;
         this.cancellationPolicyEvaluator = cancellationPolicyEvaluator;
         this.fulfillmentAuditRepository = fulfillmentAuditRepository;
+    }
+
+    @Autowired
+    public ReservationService(
+            StoreScheduleService storeScheduleService,
+            StoreServiceIntervalValidationService storeServiceIntervalValidationService,
+            ReservationTimePolicyVersionRepository timePolicyRepository,
+            StoreService storeService,
+            IdempotencyExecutor idempotencyExecutor,
+            ReservationTimePolicyAuditRepository timePolicyAuditRepository,
+            ObjectMapper objectMapper,
+            Clock clock,
+            ReservationCapacityBucketRepository capacityBucketRepository,
+            ReservationRepository reservationRepository,
+            ConsumerAccountService consumerAccountService,
+            ReservationMenuHoldPort menuHoldPort,
+            ReservationTimeResolutionService timeResolutionService,
+            StoreTransactionEligibilityService storeTransactionEligibilityService,
+            ReservationCapacityAllocationRepository capacityAllocationRepository,
+            ReservationCancellationPolicySelector cancellationPolicySelector,
+            ReservationCancellationAuditRepository cancellationAuditRepository,
+            ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator,
+            ReservationFulfillmentAuditRepository fulfillmentAuditRepository,
+            ReservationNotificationPublisher notificationPublisher
+    ) {
+        this(
+                storeScheduleService,
+                storeServiceIntervalValidationService,
+                timePolicyRepository,
+                storeService,
+                idempotencyExecutor,
+                timePolicyAuditRepository,
+                objectMapper,
+                clock,
+                capacityBucketRepository,
+                reservationRepository,
+                consumerAccountService,
+                menuHoldPort,
+                timeResolutionService,
+                storeTransactionEligibilityService,
+                capacityAllocationRepository,
+                cancellationPolicySelector,
+                cancellationAuditRepository,
+                cancellationPolicyEvaluator,
+                fulfillmentAuditRepository
+        );
+        this.notificationPublisher = notificationPublisher;
     }
 
     /**
@@ -288,7 +331,12 @@ public class ReservationService {
         StoreReservationTransactionEligibility store =
                 requireCreationDependencies().requireReservationTransactionEligibility(
                         request.storeId());
-        ReservationTimeSnapshot timeSnapshot = resolveCreationTime(request);
+        ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
+                request.storeId(),
+                new ReservationTimeRequest(
+                        request.serviceDate(),
+                        request.startTime(),
+                        request.startOffset()));
 
         if (!reservationRepository.findConfirmedOverlappingForUpdate(
                 consumerAccountId,
@@ -309,10 +357,14 @@ public class ReservationService {
                         request.startTime(),
                         occupancyEndTime
                 );
-        long capacityPolicyVersion = validateCreationCapacity(
+        long capacityPolicyVersion = creationCapacityValidator.validate(
                 buckets,
-                request,
-                occupancyEndTime
+                request.storeId(),
+                request.serviceDate(),
+                request.startTime(),
+                occupancyEndTime,
+                request.partySize(),
+                request.infantCount() > 0
         );
         for (ReservationCapacityBucket bucket : buckets) {
             bucket.occupy(request.partySize());
@@ -381,6 +433,7 @@ public class ReservationService {
                         ? List.of()
                         : menuHoldPort.findSnapshots(saved.getId())
         );
+        notificationPublisher.recordConfirmed(saved, saved.getCreatedAt(), key.value());
         return new BusinessResult<>(
                 HttpStatus.CREATED.value(),
                 SUCCESS_RESPONSE_CODE,
@@ -394,7 +447,8 @@ public class ReservationService {
         if (storeTransactionEligibilityService == null
                 || capacityAllocationRepository == null
                 || cancellationPolicySelector == null
-                || menuHoldPort == null) {
+                || menuHoldPort == null
+                || notificationPublisher == null) {
             throw new IllegalStateException("reservation creation dependencies are required");
         }
         return storeTransactionEligibilityService;
@@ -615,6 +669,7 @@ public class ReservationService {
             Instant requestedAt,
             String correlationId
     ) {
+        requireCancellationDependencies();
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
         }
@@ -748,6 +803,9 @@ public class ReservationService {
                 audit.getActorType(),
                 audit.getCancellationReason()
         );
+        notificationPublisher.recordCancelled(
+                managedReservation, occurredAt, correlationId
+        );
         return new BusinessResult<>(
                 HttpStatus.OK.value(),
                 SUCCESS_RESPONSE_CODE,
@@ -755,6 +813,16 @@ public class ReservationService {
                 String.valueOf(managedReservation.getId()),
                 response
         );
+    }
+
+    private void requireCancellationDependencies() {
+        if (capacityAllocationRepository == null
+                || cancellationPolicyEvaluator == null
+                || cancellationAuditRepository == null
+                || menuHoldPort == null
+                || notificationPublisher == null) {
+            throw new IllegalStateException("reservation cancellation dependencies are required");
+        }
     }
 
     private static TreeSet<Long> validateOriginalAllocations(
@@ -1047,127 +1115,6 @@ public class ReservationService {
     ) {
     }
 
-    private ReservationTimeSnapshot resolveCreationTime(NormalizedCreationRequest request) {
-        List<StoreReservationWindowResult> windows =
-                storeScheduleService.resolveReservationWindows(
-                        List.of(request.storeId()),
-                        request.serviceDate(),
-                        request.startTime());
-        if (windows == null || windows.size() != 1) {
-            throw outsideReservationWindow();
-        }
-        StoreReservationWindowResult window = windows.getFirst();
-        if (window == null
-                || window.storeId() != request.storeId()
-                || window.status() != StoreReservationWindowStatus.ACCEPTING) {
-            throw outsideReservationWindow();
-        }
-
-        Instant evaluatedAt = clock.instant();
-        List<ReservationTimePolicyVersion> policies =
-                timePolicyRepository.findResolutionCandidatesByStoreIds(
-                        Set.of(request.storeId()),
-                        ReservationTimePolicyStatus.ACTIVE,
-                        ReservationTimePolicyStatus.SCHEDULED,
-                        evaluatedAt);
-        ReservationTimePolicyVersion policy = singleEffectivePolicy(
-                policies,
-                request.storeId(),
-                evaluatedAt);
-        LocalDateTime requestedAt = LocalDateTime.of(
-                request.serviceDate(), request.startTime());
-        if (policy == null || !isSlotAligned(window.windowStartAt(), requestedAt, policy)) {
-            throw outsideReservationWindow();
-        }
-
-        ReservationTimeSnapshot snapshot;
-        try {
-            snapshot = ReservationTimeSnapshot.calculate(
-                    policy,
-                    requestedAt,
-                    ZoneId.of(window.timeZoneId()),
-                    request.startOffset());
-        } catch (DateTimeException | IllegalArgumentException exception) {
-            throw outsideReservationWindow();
-        }
-        if (!staysWithinCreationLocalBoundary(snapshot)) {
-            throw outsideReservationWindow();
-        }
-        if (snapshot.getStartAt().isBefore(evaluatedAt)) {
-            throw outsideReservationWindow();
-        }
-
-        StoreServiceIntervalRequest intervalRequest = new StoreServiceIntervalRequest(
-                request.storeId(), snapshot.getStartAt(), snapshot.getServiceEndAt());
-        List<StoreServiceIntervalResult> intervalResults =
-                storeServiceIntervalValidationService.validateServiceIntervals(
-                        List.of(intervalRequest));
-        if (intervalResults == null || intervalResults.size() != 1) {
-            throw outsideReservationWindow();
-        }
-        StoreServiceIntervalResult interval = intervalResults.getFirst();
-        if (interval == null
-                || interval.storeId() != intervalRequest.storeId()
-                || !interval.startAt().equals(intervalRequest.startAt())
-                || !interval.serviceEndAt().equals(intervalRequest.serviceEndAt())
-                || interval.status() != StoreServiceIntervalStatus.ACCEPTING) {
-            throw outsideReservationWindow();
-        }
-        return snapshot;
-    }
-
-    private static boolean staysWithinCreationLocalBoundary(ReservationTimeSnapshot snapshot) {
-        ZoneId zone = ZoneId.of(snapshot.getTimeZoneId());
-        ZonedDateTime start = snapshot.getStartAt().atZone(zone);
-        ZonedDateTime serviceEnd = snapshot.getServiceEndAt().atZone(zone);
-        ZonedDateTime occupancyEnd = snapshot.getOccupancyEndAt().atZone(zone);
-        ZoneOffset requiredOffset = start.getOffset();
-        return start.toLocalDate().equals(snapshot.getServiceDate())
-                && serviceEnd.toLocalDate().equals(snapshot.getServiceDate())
-                && occupancyEnd.toLocalDate().equals(snapshot.getServiceDate())
-                && serviceEnd.getOffset().equals(requiredOffset)
-                && occupancyEnd.getOffset().equals(requiredOffset);
-    }
-
-    private static long validateCreationCapacity(
-            List<ReservationCapacityBucket> buckets,
-            NormalizedCreationRequest request,
-            LocalTime occupancyEndTime
-    ) {
-        if (buckets == null || buckets.isEmpty()) {
-            throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
-        }
-        long version = buckets.getFirst().getPolicyVersion();
-        for (ReservationCapacityBucket bucket : buckets) {
-            if (bucket.getStoreId() != request.storeId()
-                    || !bucket.getServiceDate().equals(request.serviceDate())
-                    || bucket.getPolicyVersion() != version) {
-                throw new ServiceException(ReservationErrorCode.CAPACITY_POLICY_CHANGED);
-            }
-            if (request.partySize() < bucket.getMinPartySize()
-                    || request.partySize() > bucket.getMaxPartySize()
-                    || (request.infantCount() > 0 && !bucket.isInfantsAllowed())) {
-                throw new ServiceException(ReservationErrorCode.PARTY_SIZE_OUT_OF_RANGE);
-            }
-        }
-        List<ReservationCapacityBucket> byInterval = buckets.stream()
-                .sorted(BUCKET_ORDER)
-                .toList();
-        LocalTime coveredUntil = request.startTime();
-        for (ReservationCapacityBucket bucket : byInterval) {
-            LocalTime coveredStart = laterOf(bucket.getStartTime(), request.startTime());
-            LocalTime coveredEnd = earlierOf(bucket.getEndTime(), occupancyEndTime);
-            if (!coveredStart.equals(coveredUntil) || !coveredEnd.isAfter(coveredStart)) {
-                throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
-            }
-            coveredUntil = coveredEnd;
-        }
-        if (coveredUntil.equals(occupancyEndTime)) {
-            return version;
-        }
-        throw new ServiceException(ReservationErrorCode.INSUFFICIENT_CAPACITY);
-    }
-
     private static NormalizedCreationRequest normalizeCreationRequest(
             long consumerAccountId,
             IdempotencyKey key,
@@ -1229,7 +1176,7 @@ public class ReservationService {
 
     private static String fingerprintForCreation(NormalizedCreationRequest request) {
         StringBuilder canonical = new StringBuilder(
-                "POST|/api/v1/consumers/reservations|");
+                "POST|/api/v1/consumers/me/reservations|");
         append(canonical, "storeId", Long.toString(request.storeId()));
         append(canonical, "serviceDate", request.serviceDate().toString());
         append(canonical, "startTime", request.startTime().toString());
@@ -1243,10 +1190,6 @@ public class ReservationService {
             append(canonical, "quantity", Integer.toString(selection.quantity()));
         }
         return RequestFingerprint.of(canonical.toString());
-    }
-
-    private static ServiceException outsideReservationWindow() {
-        return new ServiceException(ReservationErrorCode.OUTSIDE_RESERVATION_WINDOW);
     }
 
     private record NormalizedCreationRequest(
@@ -1927,7 +1870,7 @@ public class ReservationService {
     ) {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
-                        + "/reservation-time-policies/{version}/publication|"
+                        + "/reservation-time-policies/{version}/publications|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
@@ -1951,7 +1894,7 @@ public class ReservationService {
         StringBuilder canonical = new StringBuilder(
                 "POST|/api/v1/store-operators/stores/{storeId}"
                         + "/reservation-time-policies/{version}"
-                        + "/publication-cancellation|"
+                        + "/publication-cancellations|"
         );
         append(canonical, "storeId", Long.toString(storeId));
         append(canonical, "version", Long.toString(version));
@@ -2139,38 +2082,6 @@ public class ReservationService {
         if (storeId <= 0) {
             throw new IllegalArgumentException("storeId must be positive");
         }
-    }
-
-    private static ReservationTimePolicyVersion singleEffectivePolicy(
-            List<ReservationTimePolicyVersion> policies,
-            long storeId,
-            Instant evaluatedAt
-    ) {
-        if (policies == null || policies.size() != 1) {
-            return null;
-        }
-        ReservationTimePolicyVersion policy = policies.getFirst();
-        if (policy.getStoreId() != storeId
-                || policy.getStatus() != ReservationTimePolicyStatus.ACTIVE
-                || policy.getEffectiveAt() == null
-                || policy.getEffectiveAt().isAfter(evaluatedAt)) {
-            return null;
-        }
-        return policy;
-    }
-
-    private static boolean isSlotAligned(
-            LocalDateTime windowStartAt,
-            LocalDateTime requestedAt,
-            ReservationTimePolicyVersion policy
-    ) {
-        if (windowStartAt == null || requestedAt.isBefore(windowStartAt)) {
-            return false;
-        }
-        Duration elapsed = Duration.between(windowStartAt, requestedAt);
-        long elapsedMinutes = elapsed.toMinutes();
-        return elapsed.equals(Duration.ofMinutes(elapsedMinutes))
-                && elapsedMinutes % policy.getSlotIntervalMinutes() == 0;
     }
 
     private record CapacityWindow(

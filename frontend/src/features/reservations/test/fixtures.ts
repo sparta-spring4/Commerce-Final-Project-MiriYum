@@ -5,11 +5,11 @@ export const STORE_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1XA'
 export const MENU_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1MA'
 export const RESERVATION_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1R1'
 
-export const RESERVATIONS_PATH = '/api/v1/consumers/reservations'
+export const RESERVATIONS_PATH = '/api/v1/consumers/me/reservations'
 export const RESERVATION_DETAIL_PATH =
-  '/api/v1/consumers/reservations/:reservationId'
+  '/api/v1/consumers/me/reservations/:reservationId'
 export const RESERVATION_CANCEL_PATH =
-  '/api/v1/consumers/reservations/:reservationId/cancellations'
+  '/api/v1/consumers/me/reservations/:reservationId/cancellations'
 export const MENU_HOLD_AVAILABILITY_PATH =
   '/api/v1/stores/:storeId/menu-hold-availability'
 
