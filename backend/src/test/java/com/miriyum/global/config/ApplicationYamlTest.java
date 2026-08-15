@@ -24,6 +24,8 @@ class ApplicationYamlTest {
         assertThat(properties.getProperty("spring.datasource.url")).isEqualTo("${MIRIYUM_DB_URL}");
         assertThat(properties.getProperty("spring.datasource.username")).isEqualTo("${MIRIYUM_DB_USERNAME}");
         assertThat(properties.getProperty("spring.datasource.password")).isEqualTo("${MIRIYUM_DB_PASSWORD}");
+        assertThat(properties.getProperty("spring.data.redis.ssl.enabled"))
+                .isEqualTo("${MIRIYUM_VALKEY_SSL_ENABLED:false}");
         assertThat(properties.getProperty("spring.jackson.deserialization.fail-on-unknown-properties"))
                 .isEqualTo(true);
         assertThat(properties.getProperty("server.forward-headers-strategy"))

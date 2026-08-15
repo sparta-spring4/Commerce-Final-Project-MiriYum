@@ -48,6 +48,8 @@ Before registering the task definition, replace these placeholders through the a
 - HTTPS origin, Valkey endpoint, and CloudWatch log group
 - application Secret ARN
 
+`MIRIYUM_VALKEY_SSL_ENABLED=true` is a reviewed non-secret task environment value, not a JSON secret key. It is required because the production ElastiCache Valkey connection uses TLS; the local and staging default remains `false` for the Docker Compose Valkey container.
+
 The execution role needs `secretsmanager:GetSecretValue` only for the application secret ARN. The task role receives only the runtime permissions the application needs; it must not receive broad Secrets Manager access.
 
 ## Local verification
