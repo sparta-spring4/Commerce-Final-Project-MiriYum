@@ -6,6 +6,7 @@ import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.entity.FileMetadata;
+import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 
 /** 파일 저장 결과와 메타데이터 상태 전이를 순서대로 조정한다. */
@@ -29,6 +30,22 @@ public class FileStorageFacade {
             throw exception;
         }
         return transactionExecutor.confirm(persistedMetadata.getFileId()).toPublicMetadata();
+    }
+
+    /**
+     * 공개 조회를 먼저 차단한 뒤 저장소 원본을 삭제한다.
+     *
+     * <p>원본 삭제가 일시적으로 실패해도 메타데이터는 이미 {@code DELETED}이므로 애플리케이션 URL을 통한
+     * 재노출은 막는다. 저장소의 잔여 객체 정리는 호출자가 관측·재시도한다.</p>
+     */
+    public FileStorageMetadata delete(FileStorageMetadata metadata, Instant deletedAt) {
+        if (metadata.status() != FileStorageStatus.CONFIRMED || metadata.deletedAt() != null) {
+            throw new IllegalArgumentException("저장 완료된 파일만 삭제할 수 있습니다.");
+        }
+        FileStorageMetadata deleted = transactionExecutor.delete(metadata.fileId().toString(), deletedAt)
+                .toPublicMetadata();
+        fileStoragePort.delete(metadata.objectKey());
+        return deleted;
     }
 
     private void validatePendingMetadata(FileStorageMetadata metadata) {

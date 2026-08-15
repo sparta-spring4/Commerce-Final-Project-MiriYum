@@ -3,6 +3,7 @@ package com.miriyum.global.storage.service;
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -47,6 +48,14 @@ public class FileMetadataTransactionExecutor {
     public FileMetadata fail(String fileId) {
         FileMetadata metadata = findMetadata(fileId);
         metadata.fail();
+        return saveTerminalState(metadata);
+    }
+
+    /** 파일을 외부에서 더 이상 조회하지 않도록 삭제 상태를 먼저 확정한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public FileMetadata delete(String fileId, Instant deletedAt) {
+        FileMetadata metadata = findMetadata(fileId);
+        metadata.delete(deletedAt);
         return saveTerminalState(metadata);
     }
 

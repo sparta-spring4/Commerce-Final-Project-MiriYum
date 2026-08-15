@@ -16,5 +16,9 @@ public enum FileStoragePurpose {
         if (this == BUSINESS_LICENSE && visibility != FileStorageVisibility.PRIVATE) {
             throw new IllegalArgumentException("사업자등록증은 비공개 파일로만 저장할 수 있습니다.");
         }
+        if ((this == STORE_IMAGE || this == MENU_IMAGE)
+                && visibility != FileStorageVisibility.PUBLIC) {
+            throw new IllegalArgumentException("매장·메뉴 이미지는 공개 파일로만 저장할 수 있습니다.");
+        }
     }
 }

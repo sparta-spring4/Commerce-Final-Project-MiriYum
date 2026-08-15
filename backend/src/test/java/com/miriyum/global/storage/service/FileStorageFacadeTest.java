@@ -154,6 +154,22 @@ class FileStorageFacadeTest {
                 pendingMetadata().objectKey(), "image/jpeg", 4L, "a".repeat(64)));
     }
 
+    @Test
+    @DisplayName("저장 완료된 파일은 메타데이터를 먼저 삭제 처리한 뒤 저장소 객체를 삭제한다")
+    void deletesMetadataBeforeStorageObject() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort(events);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        facade.delete(confirmed, Instant.parse("2026-08-15T00:00:00Z"));
+
+        assertThat(events).containsExactly(
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:" + confirmed.objectKey());
+    }
+
     private void assertStorageResultMismatch(FileStorageSaveResult saveResult) {
         FileStorageMetadata metadata = pendingMetadata();
         RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
@@ -181,6 +197,14 @@ class FileStorageFacadeTest {
                 null);
     }
 
+    private FileStorageMetadata confirmedMetadata() {
+        FileStorageMetadata pending = pendingMetadata();
+        return new FileStorageMetadata(
+                pending.fileId(), pending.owner(), pending.purpose(), pending.objectKey(), pending.contentType(),
+                pending.sizeBytes(), pending.checksum(), pending.visibility(), FileStorageStatus.CONFIRMED,
+                pending.retentionPolicy(), pending.createdAt(), null);
+    }
+
     private FileStorageRequest request(String objectKey) {
         return new FileStorageRequest(
                 objectKey,
@@ -195,12 +219,22 @@ class FileStorageFacadeTest {
         private final RuntimeException failedStatusFailure;
         private final List<String> pendingFileIds = new ArrayList<>();
         private final List<String> failedFileIds = new ArrayList<>();
+        private final List<String> events;
 
         private RecordingTransactionExecutor(
                 RuntimeException confirmationFailure, RuntimeException failedStatusFailure) {
+            this(confirmationFailure, failedStatusFailure, new ArrayList<>());
+        }
+
+        private RecordingTransactionExecutor(
+                RuntimeException confirmationFailure,
+                RuntimeException failedStatusFailure,
+                List<String> events
+        ) {
             super(null);
             this.confirmationFailure = confirmationFailure;
             this.failedStatusFailure = failedStatusFailure;
+            this.events = events;
         }
 
         @Override
@@ -226,6 +260,26 @@ class FileStorageFacadeTest {
             throw new UnsupportedOperationException();
         }
 
+        @Override
+        public FileMetadata delete(String fileId, Instant deletedAt) {
+            events.add("metadata-delete:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.confirm();
+            metadata.delete(deletedAt);
+            return metadata;
+        }
+
         private List<String> failedFileIds() {
             return failedFileIds;
         }
@@ -238,6 +292,15 @@ class FileStorageFacadeTest {
     private static class RecordingFileStoragePort implements FileStoragePort {
 
         private final List<String> savedObjectKeys = new ArrayList<>();
+        private final List<String> events;
+
+        private RecordingFileStoragePort() {
+            this(new ArrayList<>());
+        }
+
+        private RecordingFileStoragePort(List<String> events) {
+            this.events = events;
+        }
 
         @Override
         public FileStorageSaveResult save(FileStorageRequest request) {
@@ -253,6 +316,7 @@ class FileStorageFacadeTest {
 
         @Override
         public void delete(String objectKey) {
+            events.add("storage-delete:" + objectKey);
         }
 
         private List<String> savedObjectKeys() {
