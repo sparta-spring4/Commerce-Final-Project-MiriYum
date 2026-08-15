@@ -3,7 +3,11 @@ package com.miriyum.domain.auth.refreshtoken;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -23,6 +27,8 @@ import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @Testcontainers
 @Tag("integration")
@@ -337,6 +343,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                     assertThat(event.policyVersion()).isEqualTo("AUTH-012-v1");
                     assertThat(event.occurrenceCount()).isEqualTo(2L);
                     assertThat(event.lastOccurredAt()).isEqualTo(now.plusSeconds(3).truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
+                    assertThat(event.generation()).isNotBlank();
                 });
     }
 
@@ -435,7 +442,11 @@ class ValkeyRefreshTokenStoreIntegrationTest {
 
         assertThat(markerStore.findPendingEvents())
                 .singleElement()
-                .satisfies(event -> assertThat(event.eventKey()).isEqualTo(validMarkerKey));
+                .satisfies(event -> {
+                    assertThat(event.eventKey()).isEqualTo(validMarkerKey);
+                    assertThat(event.generation()).isNotBlank();
+                });
+        assertThat(redisTemplate.<String, String>opsForHash().get(validMarkerKey, "generation")).isNotBlank();
         assertThat(redisTemplate.opsForSet().isMember(
                 RefreshTokenRiskEventKey.pendingIndex(), malformedMarkerKey)).isFalse();
         assertThat(redisTemplate.hasKey(malformedMarkerKey)).isFalse();
@@ -477,17 +488,177 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
         assertThat(rotate(state, now.plusSeconds(2)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(
+                state.namespace(), state.familyId(), state.currentTokenHash());
+        PendingRefreshTokenRiskEvent firstSnapshot = markerStore.findPendingEvents().getFirst();
+
         assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, firstSnapshot.occurrenceCount(), firstSnapshot.generation())).isFalse();
+        PendingRefreshTokenRiskEvent updatedSnapshot = markerStore.findPendingEvents().getFirst();
+        assertThat(updatedSnapshot.occurrenceCount()).isEqualTo(2L);
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, updatedSnapshot.occurrenceCount(), updatedSnapshot.generation())).isTrue();
+        assertThat(markerStore.findPendingEvents()).isEmpty();
+        assertThat(redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이전 worker는 같은 재사용 횟수로 다시 생성된 위험 marker를 삭제하지 않는다")
+    void preservesRecreatedRiskMarkerWhenStaleWorkerDeletesSameOccurrenceCount() {
+        String markerKey = "auth:risk:pending:aba";
+        writePendingRiskMarker(markerKey, "generation-first");
+        PendingRefreshTokenRiskEvent staleSnapshot = markerStore.findPendingEvents().getFirst();
+
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, staleSnapshot.occurrenceCount(), staleSnapshot.generation())).isTrue();
+
+        writePendingRiskMarker(markerKey, "generation-second");
+
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, staleSnapshot.occurrenceCount(), staleSnapshot.generation())).isFalse();
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .satisfies(event -> assertThat(event.eventKey()).isEqualTo(markerKey));
+    }
+
+    @Test
+    @DisplayName("전달 후 삭제된 위험 marker가 다시 생성돼도 재사용 횟수는 token family 동안 누적된다")
+    void keepsOccurrenceCountAfterDeliveredMarkerIsRecreated() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-occurrence", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
 
         String markerKey = RefreshTokenRiskEventKey.forReuse(
                 state.namespace(), state.familyId(), state.currentTokenHash());
-        assertThat(markerStore.deleteIfUnchanged(markerKey, 1L)).isFalse();
-        assertThat(markerStore.findPendingEvents()).singleElement()
-                .satisfies(event -> assertThat(event.occurrenceCount()).isEqualTo(2L));
-        assertThat(markerStore.deleteIfUnchanged(markerKey, 2L)).isTrue();
-        assertThat(markerStore.findPendingEvents()).isEmpty();
-        assertThat(redisTemplate.opsForSet().members(RefreshTokenRiskEventKey.pendingIndex())).isEmpty();
+        PendingRefreshTokenRiskEvent first = markerStore.findPendingEvents().getFirst();
+        assertThat(first.occurrenceCount()).isEqualTo(1L);
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, first.occurrenceCount(), first.generation())).isTrue();
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        PendingRefreshTokenRiskEvent recreated = markerStore.findPendingEvents().getFirst();
+        assertThat(recreated.occurrenceCount()).isEqualTo(2L);
+        assertThat(recreated.generation()).isNotEqualTo(first.generation());
+        assertThat(redisTemplate.opsForValue().get(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), state.familyId(), state.currentTokenHash()))).isEqualTo("2");
+    }
+
+    @Test
+    @DisplayName("기존 marker의 재사용 횟수는 counter가 없어도 다음 재사용에서 감소하지 않는다")
+    void preservesLegacyMarkerOccurrenceCountWhenCounterIsMissing() {
+        Instant now = Instant.now();
+        String familyId = "family-aba";
+        String tokenId = "token-legacy-counter";
+        String tokenHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        RefreshTokenState state = new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                tokenId,
+                tokenHash,
+                now.plusSeconds(1_209_600),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+        create(state);
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                tokenId + "-next",
+                RefreshTokenHash.sha256(tokenId + "-next"),
+                now.plusSeconds(1),
+                state.familyExpiresAt()).status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(state.namespace(), familyId, tokenHash);
+        writePendingRiskMarker(markerKey, "legacy-generation");
+        redisTemplate.<String, String>opsForHash().put(markerKey, "occurrenceCount", "2");
+        redisTemplate.delete(RefreshTokenRiskEventKey.occurrenceCounter(state.namespace(), familyId, tokenHash));
+
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                tokenId,
+                tokenHash,
+                tokenId + "-ignored",
+                RefreshTokenHash.sha256(tokenId + "-ignored"),
+                now.plusSeconds(2),
+                now.plusSeconds(60)).status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .extracting(PendingRefreshTokenRiskEvent::occurrenceCount)
+                .isEqualTo(3L);
+        assertThat(redisTemplate.opsForValue().get(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), familyId, tokenHash))).isEqualTo("3");
+    }
+
+    @Test
+    @DisplayName("위험 사건 counter TTL은 호출 만료값이 아니라 실제 Refresh family TTL과 일치한다")
+    void alignsOccurrenceCounterTtlWithActualFamilyExpiry() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-counter-ttl", "token-first", now);
+        create(state);
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                "token-ignored",
+                RefreshTokenHash.sha256("token-ignored"),
+                now.plusSeconds(2),
+                now.plusSeconds(60)).status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        long familyTtl = redisTemplate.getExpire(RefreshTokenKey.forFamily(state.namespace(), state.familyId()));
+        long counterTtl = redisTemplate.getExpire(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), state.familyId(), state.currentTokenHash()));
+        assertThat(counterTtl).isBetween(familyTtl - 1, familyTtl + 1);
+    }
+
+    @Test
+    @DisplayName("구버전 marker의 이전 snapshot은 재생성된 marker 세대를 빌려오지 않는다")
+    void doesNotCombineLegacySnapshotWithRecreatedMarkerGeneration() {
+        String markerKey = "auth:risk:pending:legacy-aba";
+        writeLegacyPendingRiskMarker(markerKey);
+        Map<String, String> staleValues = redisTemplate.<String, String>opsForHash().entries(markerKey);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> firstSnapshot = ReflectionTestUtils.invokeMethod(
+                markerStore, "withMarkerGeneration", markerKey, staleValues);
+        assertThat(firstSnapshot).isNotNull();
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey,
+                Long.parseLong(firstSnapshot.get("occurrenceCount")),
+                firstSnapshot.get("generation"))).isTrue();
+
+        writePendingRiskMarker(markerKey, "generation-recreated", "1775952001");
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> staleSnapshotAfterRecreation = ReflectionTestUtils.invokeMethod(
+                markerStore, "withMarkerGeneration", markerKey, staleValues);
+
+        assertThat(staleSnapshotAfterRecreation).isNull();
+        assertThat(redisTemplate.<String, String>opsForHash().get(markerKey, "generation"))
+                .isEqualTo("generation-recreated");
+        assertThat(redisTemplate.<String, String>opsForHash().get(markerKey, "lastOccurredAt"))
+                .isEqualTo("1775952001");
     }
 
     @Test
@@ -596,6 +767,75 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                     assertThat(event.originEvent()).isEqualTo("ROTATION");
                 });
     }
+
+    @Test
+    @DisplayName("배포 backfill은 DB, counter, pending marker 중 가장 큰 재사용 횟수를 유지한다")
+    void keepsGreatestOccurrenceCountDuringDeploymentBackfill() throws IOException {
+        String eventKey = RefreshTokenRiskEventKey.forReuse(
+                TokenNamespace.CONSUMER,
+                "family-deployment-backfill",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        String counterKey = RefreshTokenRiskEventKey.occurrenceCounter(
+                TokenNamespace.CONSUMER,
+                "family-deployment-backfill",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        String familyKey = RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, "family-deployment-backfill");
+        redisTemplate.opsForHash().put(familyKey, "status", "REVOKED");
+        redisTemplate.expire(familyKey, 1, TimeUnit.HOURS);
+        redisTemplate.opsForValue().set(counterKey, "4");
+        redisTemplate.opsForHash().put(eventKey, "occurrenceCount", "5");
+
+        Long result = redisTemplate.execute(
+                new DefaultRedisScript<>(deploymentOccurrenceCounterBackfillScript(), Long.class),
+                List.of(counterKey, familyKey, eventKey),
+                "3");
+
+        assertThat(result).isEqualTo(1L);
+        assertThat(redisTemplate.opsForValue().get(counterKey)).isEqualTo("5");
+        long familyTtl = redisTemplate.getExpire(familyKey, TimeUnit.SECONDS);
+        long counterTtl = redisTemplate.getExpire(counterKey, TimeUnit.SECONDS);
+        assertThat(counterTtl).isBetween(familyTtl - 1, familyTtl + 1);
+    }
+
+    private void writePendingRiskMarker(String markerKey, String generation) {
+        writePendingRiskMarker(markerKey, generation, "1775952000");
+    }
+
+    private String deploymentOccurrenceCounterBackfillScript() throws IOException {
+        String deployScript = Files.readString(Path.of("..", "deploy", "deploy.sh"));
+        String startDelimiter = "REDISCLI_AUTH=\"$MIRIYUM_VALKEY_PASSWORD\" valkey-cli --raw EVAL \"";
+        int scriptStart = deployScript.indexOf(startDelimiter);
+        int scriptEnd = deployScript.indexOf("\" 3 \"$counter_key\"", scriptStart);
+        return deployScript.substring(scriptStart + startDelimiter.length(), scriptEnd)
+                .replace("\\\"", "\"");
+    }
+
+    private void writeLegacyPendingRiskMarker(String markerKey) {
+        redisTemplate.<String, String>opsForHash().putAll(markerKey, pendingRiskMarkerValues("1775952000"));
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+    }
+
+    private void writePendingRiskMarker(String markerKey, String generation, String lastOccurredAt) {
+        Map<String, String> values = new HashMap<>(pendingRiskMarkerValues(lastOccurredAt));
+        values.put("generation", generation);
+        redisTemplate.<String, String>opsForHash().putAll(markerKey, values);
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+    }
+
+    private Map<String, String> pendingRiskMarkerValues(String lastOccurredAt) {
+        return Map.ofEntries(
+                Map.entry("namespace", TokenNamespace.CONSUMER.value()),
+                Map.entry("accountId", "7"),
+                Map.entry("familyId", "family-aba"),
+                Map.entry("tokenHash", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+                Map.entry("sourceEvent", "REUSED_ROTATED_TOKEN"),
+                Map.entry("originEvent", "ROTATION"),
+                Map.entry("policyVersion", "AUTH-012-v1"),
+                Map.entry("occurredAt", "1775952000"),
+                Map.entry("occurrenceCount", "1"),
+                Map.entry("lastOccurredAt", lastOccurredAt));
+    }
+
     private RefreshTokenState state(String familyId, String tokenId, Instant now) {
         return new RefreshTokenState(
                 TokenNamespace.CONSUMER,

@@ -2,6 +2,7 @@ package com.miriyum.global.storage.service;
 
 import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.repository.FileMetadataRepository;
+import com.miriyum.global.storage.FileStorageStatus;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
@@ -51,10 +52,16 @@ public class FileMetadataTransactionExecutor {
         return saveTerminalState(metadata);
     }
 
-    /** 파일을 외부에서 더 이상 조회하지 않도록 삭제 상태를 먼저 확정한다. */
+    /**
+     * 파일을 외부 조회 대상에서 제외하고, 이미 삭제된 파일이면 같은 정본을 반환해 외부 객체 삭제를 재시도한다.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public FileMetadata delete(String fileId, Instant deletedAt) {
-        FileMetadata metadata = findMetadata(fileId);
+    public FileMetadata deleteOrGetDeleted(String fileId, Instant deletedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (metadata.getStorageStatus() == FileStorageStatus.DELETED) {
+            return metadata;
+        }
         metadata.delete(deletedAt);
         return saveTerminalState(metadata);
     }

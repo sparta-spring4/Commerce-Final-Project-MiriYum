@@ -12,4 +12,3 @@ performance/k6/fixtures/test-data.local.json
 performance/k6/results/
 # IntelliJ 로컬 프로젝트 설정은 개발자마다 달라 저장소에 포함하지 않는다.
 .idea/
-backend/.idea/

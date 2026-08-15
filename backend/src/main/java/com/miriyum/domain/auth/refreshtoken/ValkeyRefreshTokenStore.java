@@ -5,6 +5,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -51,6 +52,20 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     private static final RedisScript<Long> ROTATE_SCRIPT = new DefaultRedisScript<>("""
             local function recordRiskEvent(sourceEvent, originEvent)
+                local familyExpiresAt = redis.call('EXPIRETIME', KEYS[1])
+                local currentOccurrenceCount = redis.call('GET', KEYS[5])
+                if currentOccurrenceCount == false then
+                    local legacyOccurrenceCount = redis.call('HGET', KEYS[3], 'occurrenceCount')
+                    if legacyOccurrenceCount ~= false then
+                        redis.call('SET', KEYS[5], legacyOccurrenceCount)
+                    end
+                end
+                local totalOccurrenceCount = redis.call('INCR', KEYS[5])
+                if familyExpiresAt > 0 then
+                    redis.call('EXPIREAT', KEYS[5], familyExpiresAt)
+                else
+                    redis.call('DEL', KEYS[5])
+                end
                 if redis.call('EXISTS', KEYS[3]) == 0 then
                     redis.call('HSET', KEYS[3],
                         'namespace', ARGV[8],
@@ -61,12 +76,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'originEvent', originEvent,
                         'policyVersion', 'AUTH-012-v1',
                         'occurredAt', ARGV[6],
-                        'occurrenceCount', '1',
-                        'lastOccurredAt', ARGV[6])
+                        'occurrenceCount', totalOccurrenceCount,
+                        'lastOccurredAt', ARGV[6],
+                        'generation', ARGV[11])
                     redis.call('EXPIREAT', KEYS[3], ARGV[10])
                 else
-                    redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
-                    redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
+                    redis.call('HSET', KEYS[3],
+                        'occurrenceCount', totalOccurrenceCount,
+                        'lastOccurredAt', ARGV[6])
                 end
                 redis.call('SADD', KEYS[4], KEYS[3])
             end
@@ -200,8 +217,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
         String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
         String riskEventKey = RefreshTokenRiskEventKey.forReuse(namespace, familyId, expectedTokenHash);
         String pendingRiskEventIndexKey = RefreshTokenRiskEventKey.pendingIndex();
+        String riskEventOccurrenceCounterKey = RefreshTokenRiskEventKey.occurrenceCounter(
+                namespace, familyId, expectedTokenHash);
         Long result = execute(ROTATE_SCRIPT, List.of(
-                        familyKey, accountFamiliesKey, riskEventKey, pendingRiskEventIndexKey),
+                        familyKey,
+                        accountFamiliesKey,
+                        riskEventKey,
+                        pendingRiskEventIndexKey,
+                        riskEventOccurrenceCounterKey),
                 accountId.toString(),
                 expectedTokenId,
                 expectedTokenHash,
@@ -211,7 +234,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(nextFamilyExpiresAt),
                 namespace.value(),
                 familyId,
-                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)));
+                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)),
+                UUID.randomUUID().toString());
         // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 0만 정상 업무 결과이고,
         // null과 그 밖의 값은 Valkey 실행 이상이므로 인증 오류로 감추지 않고 COMMON_012로 실패시킨다.
         int rotateResult = requireScriptResult(result, "rotate", namespace);
