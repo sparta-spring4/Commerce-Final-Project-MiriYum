@@ -103,4 +103,44 @@ class FileStorageMetadataSchemaIntegrationTest {
                 .isInstanceOf(UncategorizedSQLException.class)
                 .hasMessageContaining("ck_file_metadata_purpose_visibility");
     }
+
+    @Test
+    @DisplayName("DB에서도 매장·메뉴 이미지의 비공개 저장을 거절한다")
+    void rejectsPrivatePublicImageAtDatabaseBoundary() {
+        assertThatThrownBy(() -> insertMetadata("STORE_IMAGE", "PRIVATE"))
+                .isInstanceOf(UncategorizedSQLException.class)
+                .hasMessageContaining("ck_file_metadata_purpose_visibility");
+        assertThatThrownBy(() -> insertMetadata("MENU_IMAGE", "PRIVATE"))
+                .isInstanceOf(UncategorizedSQLException.class)
+                .hasMessageContaining("ck_file_metadata_purpose_visibility");
+    }
+
+    @Test
+    @DisplayName("DB는 비공개 사업자등록증과 공개 메뉴 이미지를 저장한다")
+    void allowsConfiguredPurposeVisibilityCombinations() {
+        insertMetadata("BUSINESS_LICENSE", "PRIVATE");
+        insertMetadata("MENU_IMAGE", "PUBLIC");
+    }
+
+    private void insertMetadata(String purpose, String visibility) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO file_metadata (
+                    file_id, owner_type, owner_id, purpose, object_key, content_type,
+                    size_bytes, checksum, visibility, storage_status, retention_policy, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                UUID.randomUUID().toString(),
+                "STORE_OPERATOR",
+                11L,
+                purpose,
+                "private/store-operator/11/" + purpose.toLowerCase() + "/" + UUID.randomUUID(),
+                "image/jpeg",
+                512L,
+                "a".repeat(64),
+                visibility,
+                "PENDING",
+                purpose + "_DEFAULT",
+                Instant.parse("2026-08-10T03:30:00Z"));
+    }
 }

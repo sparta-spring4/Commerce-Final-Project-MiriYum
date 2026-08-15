@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import com.miriyum.global.storage.entity.FileMetadata;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -105,6 +106,41 @@ class FileMetadataTest {
 
         // when & then
         assertThatIllegalStateException().isThrownBy(metadata::confirm);
+    }
+
+    @Test
+    @DisplayName("저장 완료된 파일 메타데이터를 삭제 시각과 함께 삭제 상태로 전환한다")
+    void deletesConfirmedMetadata() {
+        // given
+        FileMetadata metadata = pendingMetadata();
+        metadata.confirm();
+        Instant deletedAt = Instant.parse("2026-08-15T00:00:00Z");
+
+        // when
+        metadata.delete(deletedAt);
+
+        // then
+        assertThat(metadata.getStorageStatus()).isEqualTo(FileStorageStatus.DELETED);
+        assertThat(metadata.getDeletedAt()).isEqualTo(deletedAt);
+    }
+
+    @Test
+    void rejectsPrivateStoreImageMetadata() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
+                UUID.randomUUID(),
+                new FileStorageOwner("STORE", 7L),
+                FileStoragePurpose.STORE_IMAGE,
+                "private/stores/7/image.png",
+                "image/png",
+                10L,
+                "0".repeat(64),
+                FileStorageVisibility.PRIVATE,
+                FileStorageStatus.PENDING,
+                "STORE_IMAGE_PUBLIC",
+                Instant.parse("2026-08-15T00:00:00Z"),
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .withMessage("매장·메뉴 이미지는 공개 파일로만 저장할 수 있습니다.");
     }
 
     private FileMetadata pendingMetadata() {
