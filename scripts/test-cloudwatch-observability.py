@@ -548,6 +548,65 @@ backfill_risk_event_occurrence_counters
             self.assertIn("EXPIREAT", valkey_arguments)
             self.assertIn("HGET", valkey_arguments)
 
+    def test_deployment_preserves_lua_integer_pattern_through_container_shell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            bin_path = temporary_path / "bin"
+            bin_path.mkdir()
+            valkey_cli = bin_path / "valkey-cli"
+            event_key = (
+                "auth:risk:pending:consumer:family-123:"
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            )
+            valkey_cli.write_text(
+                """#!/usr/bin/env bash
+if [[ "$1" == "--raw" ]]; then
+  shift
+fi
+
+if [[ "$1" != "EVAL" ]]; then
+  exit 1
+fi
+
+if [[ "$2" != *'string.match(value, "^[1-9][0-9]*$")'* ]]; then
+  echo "Lua integer pattern was not preserved" >&2
+  exit 1
+fi
+""",
+                encoding="utf-8",
+            )
+            valkey_cli.chmod(0o755)
+
+            result = self.run_deploy_script(
+                f"""
+PATH="$TEST_VALKEY_BIN:$PATH"
+export PATH
+
+docker() {{
+  local arguments=("$@")
+  local index
+
+  if [[ "$*" == *" mysql "* ]]; then
+    printf '%s\\t2\\n' '{event_key}'
+    return 0
+  fi
+
+  for ((index = 0; index < ${{#arguments[@]}} - 2; index++)); do
+    if [[ "${{arguments[index]}}" == "sh" && "${{arguments[index + 1]}}" == "-ec" ]]; then
+      bash -ec "${{arguments[index + 2]}}" "${{arguments[@]:index + 3}}"
+      return
+    fi
+  done
+  return 1
+}}
+
+backfill_risk_event_occurrence_counters
+""",
+                {"TEST_VALKEY_BIN": self.to_bash_path(bin_path)},
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def test_deployment_backfill_propagates_valkey_scan_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)

@@ -162,7 +162,7 @@ backfill_risk_event_occurrence_counters() {
       occurrence_count="$4"
       REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw EVAL "
         local function isPositiveInteger(value)
-          return value ~= false and string.match(value, '^[1-9][0-9]*$') ~= nil
+          return value ~= false and string.match(value, \"^[1-9][0-9]*$\") ~= nil
         end
 
         local function isGreater(left, right)
