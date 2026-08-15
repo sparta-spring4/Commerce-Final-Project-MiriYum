@@ -2,10 +2,13 @@
 
 ## #285 카카오 지오코딩 환경 연결 후 local 재측정
 
-- 검증 commit: `c19c73fff960d247896a33abc8a3e97a0076703e`
+- 검증 commit: 카카오 환경 연결 `c19c73fff960d247896a33abc8a3e97a0076703e`, 예약·알림 runtime `89e38fe0c26622785ad3bb465347687e3d825656`
 - 기록일: 2026-08-15
 - 실행 환경: local HTTPS proxy, ignored local fixture, 저장소 밖 합성 계정 자격증명과 카카오 Local REST API 키
 - 공개 매장은 저장소의 공개 매장 등록 API로 생성했고 지오코딩 `VERIFIED`와 주소 버전 `1`을 확인했다. 키, 좌표, 매장 ID와 응답 본문은 증거에 기록하지 않았다.
+
+### 인증·매장 검색
+
 - smoke `local-auth-search-smoke-20260815-sync01`: `authRefresh` 1회와 실제 결과가 존재하는 `storeSearch` 1회가 통과했고 unexpected 4xx·5xx·dropped iteration은 모두 0이었다.
 - baseline 입력: `authRefresh,storeSearch`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`. 시나리오별로 1 VU와 1 iteration/s를 배분했다.
 
@@ -16,7 +19,31 @@
 | `local-auth-search-baseline-20260815-sync02` | authRefresh | 62 | 36.472 | 64.931 | 68.746 | 0 | 0 | 0 |
 | `local-auth-search-baseline-20260815-sync02` | storeSearch | 31 | 13.767 | 15.397 | 17.281 | 0 | 0 | 0 |
 
-두 baseline은 동일 smoke 증거와 fixture fingerprint를 사용해 threshold를 통과했다. 예약은 충돌 없는 운영시간·slot fixture, 알림은 계정별 2페이지 이상의 공개 `IN_APP` 전달 완료 데이터가 아직 없어 실행하지 않았으므로 전체 local baseline 완료로 해석하지 않는다. 이 결과만으로 #286의 SQL 병목이나 실서비스 SLO를 주장하지 않는다.
+### 예약 생성
+
+- 공개 운영시간·예약 slot·시간 정책·빈 정기휴무 버전과 날짜별 capacity를 공개 API로 준비했다. smoke `local-reservation-smoke-20260815-sync03`은 1 request, p50·p95·p99 21.438 ms로 통과했다.
+- baseline 입력: `reservationCreate`, `MAX_VUS=1`, `ARRIVAL_RATE=1`, `DURATION_SECONDS=30`. 서로 다른 날짜의 template 30개와 executor 경계용 guard template 1개를 사용했다.
+
+| run ID | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `local-reservation-baseline-20260815-sync02` | 31 | 21.640 | 26.115 | 56.316 | 0 | 0 | 0 |
+| `local-reservation-baseline-20260815-sync03` | 30 | 20.883 | 24.926 | 27.601 | 0 | 0 | 0 |
+
+첫 실행 `local-reservation-baseline-20260815-sync01`은 설정 검증이 요구한 30개 template보다 executor가 경계 iteration을 하나 더 예약해 31번째 template 부재로 threshold가 실패했으므로 기준선에서 제외했다. 현재 validation의 `ARRIVAL_RATE × DURATION_SECONDS` 계산과 실제 constant-arrival-rate 예약 수가 경계에서 다를 수 있어 guard template을 사용했으며, `performance/k6/main.js` 수정은 #285 허용 범위 밖이므로 후속 소유 Issue가 필요하다.
+
+### 알림 이력
+
+- 합성 소비자 두 계정에 공개 예약 API로 확정 이벤트를 각각 3건 만들었다. smoke `local-notification-smoke-20260815-sync02`는 계정별 두 페이지, 총 4 requests를 검증했고 p50 4.637 ms, p95 9.879 ms, p99 10.554 ms로 통과했다.
+- baseline 입력: `notificationHistory`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`. 한 iteration이 두 페이지를 읽으므로 measured requests는 iteration 수의 두 배다.
+
+| run ID | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `local-notification-baseline-20260815-sync01` | 120 | 4.596 | 6.006 | 6.168 | 0 | 0 | 0 |
+| `local-notification-baseline-20260815-sync02` | 122 | 4.757 | 6.138 | 7.647 | 0 | 0 | 0 |
+
+기본 local Compose는 알림 history cursor만 구성하고 worker는 비활성화한다. 또한 기본 JDBC 세션의 `NOW()`보다 예약 알림 `scheduled_at`이 약 9시간 뒤로 기록되어 작업이 `PENDING`에 머무는 것을 관찰했다. 저장소를 변경하지 않고 일회성 worker의 JDBC session timezone만 `Asia/Seoul`로 강제했을 때 해당 6건이 `DELIVERED`로 수렴하고 smoke·baseline이 통과했다. 따라서 수치는 알림 조회 API 기준선으로만 사용하며, 기본 worker 구성과 예약 이벤트 시각 변환은 별도 소유 Issue에서 해결해야 한다.
+
+네 시나리오의 두 baseline은 각자 동일 smoke 증거와 fixture fingerprint를 사용해 threshold를 통과했고 expected/unexpected 4xx·5xx·dropped iteration은 모두 0이었다. 모든 예약 fixture는 실행 후 공개 취소 API로 정리했다. 이 local 결과만으로 #286의 SQL 병목이나 실서비스 SLO를 주장하지 않는다.
 
 ## #338 authRefresh 반복 cleanup 회귀 검증
 
