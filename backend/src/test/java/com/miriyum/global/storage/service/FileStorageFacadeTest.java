@@ -155,19 +155,40 @@ class FileStorageFacadeTest {
     }
 
     @Test
-    @DisplayName("저장 완료된 파일은 메타데이터를 먼저 삭제 처리한 뒤 저장소 객체를 삭제한다")
-    void deletesMetadataBeforeStorageObject() {
+    @DisplayName("저장 완료된 파일은 DB 정본 객체 키로 메타데이터를 먼저 삭제 처리한 뒤 저장소 객체를 삭제한다")
+    void deletesMetadataBeforeStorageObjectUsingAuthoritativeObjectKey() {
         FileStorageMetadata confirmed = confirmedMetadata();
         List<String> events = new ArrayList<>();
         RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
         RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort(events);
         FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
 
-        facade.delete(confirmed, Instant.parse("2026-08-15T00:00:00Z"));
+        facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z"));
 
         assertThat(events).containsExactly(
                 "metadata-delete:" + confirmed.fileId(),
-                "storage-delete:" + confirmed.objectKey());
+                "storage-delete:public/store/11/store-image/deleted-object");
+    }
+
+    @Test
+    @DisplayName("저장소 객체 삭제가 실패한 뒤 같은 파일 식별자로 다시 호출하면 삭제를 재시도한다")
+    void retriesStorageDeletionForAlreadyDeletedMetadata() {
+        FileStorageMetadata confirmed = confirmedMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FailingOnceDeleteFileStoragePort fileStoragePort = new FailingOnceDeleteFileStoragePort(events, deletionFailure);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        assertThatThrownBy(() -> facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                .isSameAs(deletionFailure);
+        assertThat(facade.delete(confirmed.fileId(), Instant.parse("2026-08-15T00:01:00Z")).status())
+                .isEqualTo(FileStorageStatus.DELETED);
+        assertThat(events).containsExactly(
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-delete:" + confirmed.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object");
     }
 
     private void assertStorageResultMismatch(FileStorageSaveResult saveResult) {
@@ -261,7 +282,7 @@ class FileStorageFacadeTest {
         }
 
         @Override
-        public FileMetadata delete(String fileId, Instant deletedAt) {
+        public FileMetadata deleteOrGetDeleted(String fileId, Instant deletedAt) {
             events.add("metadata-delete:" + fileId);
             FileMetadata metadata = FileMetadata.createPending(
                     fileId,
@@ -325,6 +346,37 @@ class FileStorageFacadeTest {
     }
 
     private static final class SuccessfulFileStoragePort extends RecordingFileStoragePort {
+    }
+
+    private static final class FailingOnceDeleteFileStoragePort implements FileStoragePort {
+
+        private final List<String> events;
+        private final RuntimeException failure;
+        private boolean failed;
+
+        private FailingOnceDeleteFileStoragePort(List<String> events, RuntimeException failure) {
+            this.events = events;
+            this.failure = failure;
+        }
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+            events.add("storage-delete:" + objectKey);
+            if (!failed) {
+                failed = true;
+                throw failure;
+            }
+        }
     }
 
     private record FixedResultFileStoragePort(FileStorageSaveResult result) implements FileStoragePort {
