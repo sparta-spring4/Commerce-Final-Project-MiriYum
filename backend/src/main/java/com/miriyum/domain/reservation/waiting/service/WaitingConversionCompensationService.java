@@ -174,18 +174,18 @@ public class WaitingConversionCompensationService {
     }
 
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
-    public List<Long> findMissingTerminalCompensationCandidateIds(
-            long afterWaitingTeamId,
+    public List<Long> findTerminalCompensationScanIds(
+            long beforeExclusiveWaitingTeamId,
             long upperBoundWaitingTeamId,
             int limit
     ) {
-        return List.copyOf(teams.findMissingTerminalCompensationCandidateIds(
-                afterWaitingTeamId, upperBoundWaitingTeamId, limit));
+        return List.copyOf(teams.findTerminalCompensationScanIds(
+                beforeExclusiveWaitingTeamId, upperBoundWaitingTeamId, limit));
     }
 
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
-    public long findMissingTerminalCompensationUpperBoundId() {
-        return teams.findMissingTerminalCompensationUpperBoundId();
+    public long findTerminalCompensationScanUpperBoundId() {
+        return teams.findTerminalCompensationScanUpperBoundId();
     }
 
     public boolean reconcileMissingTerminalCompensation(long waitingTeamId) {

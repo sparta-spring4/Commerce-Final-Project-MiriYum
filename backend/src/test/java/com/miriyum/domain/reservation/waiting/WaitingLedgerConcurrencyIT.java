@@ -508,9 +508,9 @@ class WaitingLedgerConcurrencyIT {
         CompletionCommand callback = new CompletionCommand(
                 paid.teamId(), paid.preparation().paymentId(), 9_010L);
         long recoveryUpperBound =
-                compensationService.findMissingTerminalCompensationUpperBoundId();
-        assertThat(compensationService.findMissingTerminalCompensationCandidateIds(
-                0L, recoveryUpperBound, 100)).containsExactly(paid.teamId());
+                compensationService.findTerminalCompensationScanUpperBoundId();
+        assertThat(compensationService.findTerminalCompensationScanIds(
+                Long.MAX_VALUE, recoveryUpperBound, 100)).contains(paid.teamId());
 
         List<Attempt<Object>> attempts = runTogether(2, index -> index == 0
                 ? conversionService.completeVerified(callback)

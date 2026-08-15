@@ -29,7 +29,7 @@ public class WaitingConversionCompensationRunner {
     private final WaitingConversionCompensationService service;
     private final String owner;
     private final Duration leaseDuration;
-    private long terminalCandidateAfterId;
+    private long terminalScanBeforeId = Long.MAX_VALUE;
     private long terminalCandidateUpperBoundId;
 
     @Autowired
@@ -110,24 +110,24 @@ public class WaitingConversionCompensationRunner {
     public int recoverMissingTerminalCompensations() {
         if (terminalCandidateUpperBoundId == 0L) {
             terminalCandidateUpperBoundId =
-                    service.findMissingTerminalCompensationUpperBoundId();
+                    service.findTerminalCompensationScanUpperBoundId();
             if (terminalCandidateUpperBoundId == 0L) {
                 return 0;
             }
         }
-        var candidates = service.findMissingTerminalCompensationCandidateIds(
-                terminalCandidateAfterId,
+        var candidates = service.findTerminalCompensationScanIds(
+                terminalScanBeforeId,
                 terminalCandidateUpperBoundId,
                 MAX_ITEMS_PER_POLL);
         if (candidates.isEmpty()) {
-            terminalCandidateAfterId = 0L;
+            terminalScanBeforeId = Long.MAX_VALUE;
             terminalCandidateUpperBoundId = 0L;
             return 0;
         }
 
         int recovered = 0;
         for (long waitingTeamId : candidates) {
-            terminalCandidateAfterId = waitingTeamId;
+            terminalScanBeforeId = waitingTeamId;
             try {
                 if (service.reconcileMissingTerminalCompensation(waitingTeamId)) {
                     recovered++;

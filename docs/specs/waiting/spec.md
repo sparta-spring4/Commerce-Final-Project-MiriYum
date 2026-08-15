@@ -365,11 +365,13 @@ cannot complete, requeue, or reconcile the reclaimed item. Failed results use a 
 policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRED`.
 
 The callback is a fast path, not the sole durable trigger. On the reconciliation schedule, the
-compensation runner scans at most 100 `CANCELLED` or `CLOSED_BY_STORE` teams with a preserved
-`waiting_payment_id` and no matching compensation. Each traversal fixes the current maximum
-Waiting-team ID as an upper watermark and scans beneath it with a keyset cursor; after reaching an
-empty page it starts a new traversal from zero. Thus continuously arriving higher IDs cannot starve
-an older candidate that becomes eligible after its cursor position was passed.
+compensation runner scans at most 100 Waiting ledger IDs per poll in descending primary-key order.
+Each traversal fixes the current maximum Waiting-team ID as an upper watermark and reads only
+`id <= watermark AND id < cursor ORDER BY id DESC LIMIT 100`; terminal status, preserved payment,
+and compensation absence are evaluated after that bounded ledger page is read. An empty page starts
+a new traversal from the newest ID. Thus a sparse candidate cannot make one poll examine an
+unbounded historic range, continuously arriving higher IDs cannot displace the current traversal,
+and an older row that becomes eligible after its cursor was passed is retried on the next traversal.
 For each candidate it verifies the Payment-owned source identity and historical-paid snapshot through
 `PaymentService`, re-locks the terminal Waiting team, and records the same deterministic compensation
 payload as the callback. A not-yet-paid source remains eligible for a later scan without creating a

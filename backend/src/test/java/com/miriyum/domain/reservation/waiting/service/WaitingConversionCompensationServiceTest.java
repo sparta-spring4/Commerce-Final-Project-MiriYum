@@ -395,10 +395,10 @@ class WaitingConversionCompensationServiceTest {
     ) {
         WaitingConversionCompensationService workerService =
                 mock(WaitingConversionCompensationService.class);
-        given(workerService.findMissingTerminalCompensationUpperBoundId())
+        given(workerService.findTerminalCompensationScanUpperBoundId())
                 .willReturn(200L);
-        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 200L, 100))
-                .willReturn(List.of(11L, 19L));
+        given(workerService.findTerminalCompensationScanIds(Long.MAX_VALUE, 200L, 100))
+                .willReturn(List.of(19L, 11L));
         given(workerService.reconcileMissingTerminalCompensation(11L)).willReturn(true);
         given(workerService.reconcileMissingTerminalCompensation(19L)).willReturn(true);
         WaitingConversionCompensationRunner runner =
@@ -419,14 +419,14 @@ class WaitingConversionCompensationServiceTest {
     void runnerCompletesFixedTraversalBeforeIncludingContinuousHigherIdIngress() {
         WaitingConversionCompensationService workerService =
                 mock(WaitingConversionCompensationService.class);
-        given(workerService.findMissingTerminalCompensationUpperBoundId())
+        given(workerService.findTerminalCompensationScanUpperBoundId())
                 .willReturn(200L, 500L);
-        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 200L, 100))
+        given(workerService.findTerminalCompensationScanIds(Long.MAX_VALUE, 200L, 100))
                 .willReturn(List.of(100L));
-        given(workerService.findMissingTerminalCompensationCandidateIds(100L, 200L, 100))
+        given(workerService.findTerminalCompensationScanIds(100L, 200L, 100))
                 .willReturn(List.of());
-        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 500L, 100))
-                .willReturn(List.of(50L, 400L));
+        given(workerService.findTerminalCompensationScanIds(Long.MAX_VALUE, 500L, 100))
+                .willReturn(List.of(400L, 50L));
         WaitingConversionCompensationRunner runner =
                 new WaitingConversionCompensationRunner(
                         workerService, "worker-a", Duration.ofSeconds(30));
@@ -435,12 +435,12 @@ class WaitingConversionCompensationServiceTest {
         runner.recoverMissingTerminalCompensations();
         runner.recoverMissingTerminalCompensations();
 
-        then(workerService).should().findMissingTerminalCompensationCandidateIds(
-                0L, 200L, 100);
-        then(workerService).should().findMissingTerminalCompensationCandidateIds(
+        then(workerService).should().findTerminalCompensationScanIds(
+                Long.MAX_VALUE, 200L, 100);
+        then(workerService).should().findTerminalCompensationScanIds(
                 100L, 200L, 100);
-        then(workerService).should().findMissingTerminalCompensationCandidateIds(
-                0L, 500L, 100);
+        then(workerService).should().findTerminalCompensationScanIds(
+                Long.MAX_VALUE, 500L, 100);
         then(workerService).should().reconcileMissingTerminalCompensation(50L);
     }
 
@@ -448,8 +448,8 @@ class WaitingConversionCompensationServiceTest {
     void runnerDoesNotReportUnpaidTerminalCandidateAsMissingHandoff(CapturedOutput output) {
         WaitingConversionCompensationService workerService =
                 mock(WaitingConversionCompensationService.class);
-        given(workerService.findMissingTerminalCompensationUpperBoundId()).willReturn(11L);
-        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 11L, 100))
+        given(workerService.findTerminalCompensationScanUpperBoundId()).willReturn(11L);
+        given(workerService.findTerminalCompensationScanIds(Long.MAX_VALUE, 11L, 100))
                 .willReturn(List.of(11L));
         given(workerService.reconcileMissingTerminalCompensation(11L)).willReturn(false);
         WaitingConversionCompensationRunner runner =

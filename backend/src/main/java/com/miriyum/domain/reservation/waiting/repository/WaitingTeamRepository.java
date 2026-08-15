@@ -112,63 +112,40 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             """)
     List<WaitingTeam> findActiveClosureTargets(@Param("storeId") long storeId);
 
-    default List<Long> findMissingTerminalCompensationCandidateIds(
-            long afterWaitingTeamId,
+    default List<Long> findTerminalCompensationScanIds(
+            long beforeExclusiveWaitingTeamId,
             long upperBoundWaitingTeamId,
             int limit
     ) {
-        if (afterWaitingTeamId < 0
-                || upperBoundWaitingTeamId < afterWaitingTeamId
+        if (beforeExclusiveWaitingTeamId < 1
+                || upperBoundWaitingTeamId < 0
                 || limit < 1) {
             throw new IllegalArgumentException("cursor and limit must be valid");
         }
-        return findMissingTerminalCompensationCandidateIds(
-                afterWaitingTeamId,
+        return findTerminalCompensationScanIds(
+                beforeExclusiveWaitingTeamId,
                 upperBoundWaitingTeamId,
-                List.of(WaitingTeamStatus.CANCELLED, WaitingTeamStatus.CLOSED_BY_STORE),
                 PageRequest.of(0, Math.min(limit, 100)));
     }
 
     @Query("""
             select team.id
             from WaitingTeam team
-            where team.id > :afterWaitingTeamId
+            where team.id < :beforeExclusiveWaitingTeamId
               and team.id <= :upperBoundWaitingTeamId
-              and team.status in :terminalStatuses
-              and team.waitingPaymentId is not null
-              and not exists (
-                  select compensation.id
-                  from WaitingConversionCompensation compensation
-                  where compensation.waitingTeamId = team.id
-                    and compensation.paymentId = team.waitingPaymentId
-              )
-            order by team.id
+            order by team.id desc
             """)
-    List<Long> findMissingTerminalCompensationCandidateIds(
-            @Param("afterWaitingTeamId") long afterWaitingTeamId,
+    List<Long> findTerminalCompensationScanIds(
+            @Param("beforeExclusiveWaitingTeamId") long beforeExclusiveWaitingTeamId,
             @Param("upperBoundWaitingTeamId") long upperBoundWaitingTeamId,
-            @Param("terminalStatuses") Collection<WaitingTeamStatus> terminalStatuses,
             Pageable pageable
     );
 
-    @Query("""
-            select max(team.id)
-            from WaitingTeam team
-            where team.status in :terminalStatuses
-              and team.waitingPaymentId is not null
-              and not exists (
-                  select compensation.id
-                  from WaitingConversionCompensation compensation
-                  where compensation.waitingTeamId = team.id
-                    and compensation.paymentId = team.waitingPaymentId
-              )
-            """)
-    Long findMaxMissingTerminalCompensationCandidateId(
-            @Param("terminalStatuses") Collection<WaitingTeamStatus> terminalStatuses);
+    @Query("select max(team.id) from WaitingTeam team")
+    Long findMaxWaitingTeamId();
 
-    default long findMissingTerminalCompensationUpperBoundId() {
-        Long upperBound = findMaxMissingTerminalCompensationCandidateId(
-                List.of(WaitingTeamStatus.CANCELLED, WaitingTeamStatus.CLOSED_BY_STORE));
+    default long findTerminalCompensationScanUpperBoundId() {
+        Long upperBound = findMaxWaitingTeamId();
         return upperBound == null ? 0L : upperBound;
     }
 }
