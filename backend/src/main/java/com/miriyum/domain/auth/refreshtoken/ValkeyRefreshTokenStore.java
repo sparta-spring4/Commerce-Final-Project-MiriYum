@@ -52,10 +52,19 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     private static final RedisScript<Long> ROTATE_SCRIPT = new DefaultRedisScript<>("""
             local function recordRiskEvent(sourceEvent, originEvent)
+                local familyExpiresAt = redis.call('EXPIRETIME', KEYS[1])
+                local currentOccurrenceCount = redis.call('GET', KEYS[5])
+                if currentOccurrenceCount == false then
+                    local legacyOccurrenceCount = redis.call('HGET', KEYS[3], 'occurrenceCount')
+                    if legacyOccurrenceCount ~= false then
+                        redis.call('SET', KEYS[5], legacyOccurrenceCount)
+                    end
+                end
                 local totalOccurrenceCount = redis.call('INCR', KEYS[5])
-                local counterExpiresAt = redis.call('EXPIRETIME', KEYS[5])
-                if counterExpiresAt < tonumber(ARGV[7]) then
-                    redis.call('EXPIREAT', KEYS[5], ARGV[7])
+                if familyExpiresAt > 0 then
+                    redis.call('EXPIREAT', KEYS[5], familyExpiresAt)
+                else
+                    redis.call('DEL', KEYS[5])
                 end
                 if redis.call('EXISTS', KEYS[3]) == 0 then
                     redis.call('HSET', KEYS[3],

@@ -124,6 +124,62 @@ backfill_pending_risk_event_index() {
   ' sh "${marker_pattern}" "${pending_index}" "${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES}"
 }
 
+# 배포 전 DB에 기록된 재사용 횟수를 Valkey counter에 이관해 marker 재생성 시 횟수가 줄지 않게 한다.
+backfill_risk_event_occurrence_counters() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local rows event_key occurrence_count namespace family_id token_hash counter_key family_key
+
+  if ! rows="$("${compose[@]}" exec -T mysql sh -ec '
+    MYSQL_PWD="$MYSQL_PASSWORD" mysql --batch --skip-column-names --raw \
+      -u "$MYSQL_USER" "$MYSQL_DATABASE" \
+      -e "SELECT event_key, occurrence_count FROM auth_risk_events"
+  ')"; then
+    echo "Risk event occurrence counter backfill could not read MySQL." >&2
+    return 1
+  fi
+
+  while IFS=$'\t' read -r event_key occurrence_count; do
+    [[ -n "${event_key}" ]] || continue
+    if [[ "${event_key}" =~ ^auth:risk:pending:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+):([0-9a-f]{64})$ ]]; then
+      namespace="${BASH_REMATCH[1]}"
+      family_id="${BASH_REMATCH[2]}"
+      token_hash="${BASH_REMATCH[3]}"
+    else
+      echo "Risk event occurrence counter backfill found an invalid row." >&2
+      return 1
+    fi
+    if [[ ! "${occurrence_count}" =~ ^[1-9][0-9]*$ ]]; then
+      echo "Risk event occurrence counter backfill found an invalid row." >&2
+      return 1
+    fi
+    counter_key="auth:risk:occurrence:${namespace}:${family_id}:${token_hash}"
+    family_key="auth:refresh:${namespace}:${family_id}"
+
+    if ! "${compose[@]}" exec -T valkey sh -ec '
+      counter_key="$1"
+      family_key="$2"
+      occurrence_count="$3"
+      REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw EVAL "
+        local familyExpiresAt = redis.call(\"EXPIRETIME\", KEYS[2])
+        if familyExpiresAt <= 0 then
+          redis.call(\"DEL\", KEYS[1])
+          return 0
+        end
+        local currentOccurrenceCount = redis.call(\"GET\", KEYS[1])
+        if currentOccurrenceCount == false
+            or tonumber(currentOccurrenceCount) < tonumber(ARGV[1]) then
+          redis.call(\"SET\", KEYS[1], ARGV[1])
+        end
+        redis.call(\"EXPIREAT\", KEYS[1], familyExpiresAt)
+        return 1
+      " 2 "$counter_key" "$family_key" "$occurrence_count" >/dev/null
+    ' sh "${counter_key}" "${family_key}" "${occurrence_count}"; then
+      echo "Risk event occurrence counter backfill could not update Valkey." >&2
+      return 1
+    fi
+  done <<<"${rows}"
+}
+
 # 인스턴스 역할이 배포 시 ECR 토큰을 받아오므로 레지스트리 비밀번호를 저장하지 않는다.
 main() {
   local account_id registry deadline
@@ -162,9 +218,9 @@ main() {
     return 1
   fi
 
-  if ! backfill_pending_risk_event_index; then
-    # Set-only 전달 worker는 backfill이 완료된 marker 인덱스에서만 시작한다.
-    echo "Pending risk event index backfill failed; aborting deployment before Set-only delivery starts." >&2
+  if ! backfill_pending_risk_event_index || ! backfill_risk_event_occurrence_counters; then
+    # Set-only 전달 worker는 marker index와 재사용 횟수 이관이 완료된 상태에서만 시작한다.
+    echo "Risk event state backfill failed; aborting deployment before Set-only delivery starts." >&2
     publish_deployment_health 0
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 valkey || true

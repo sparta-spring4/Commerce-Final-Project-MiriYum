@@ -551,6 +551,84 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("기존 marker의 재사용 횟수는 counter가 없어도 다음 재사용에서 감소하지 않는다")
+    void preservesLegacyMarkerOccurrenceCountWhenCounterIsMissing() {
+        Instant now = Instant.now();
+        String familyId = "family-aba";
+        String tokenId = "token-legacy-counter";
+        String tokenHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        RefreshTokenState state = new RefreshTokenState(
+                TokenNamespace.CONSUMER,
+                7L,
+                familyId,
+                tokenId,
+                tokenHash,
+                now.plusSeconds(1_209_600),
+                now,
+                RefreshTokenState.Status.ACTIVE);
+        create(state);
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                tokenId + "-next",
+                RefreshTokenHash.sha256(tokenId + "-next"),
+                now.plusSeconds(1),
+                state.familyExpiresAt()).status()).isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(state.namespace(), familyId, tokenHash);
+        writePendingRiskMarker(markerKey, "legacy-generation");
+        redisTemplate.<String, String>opsForHash().put(markerKey, "occurrenceCount", "2");
+        redisTemplate.delete(RefreshTokenRiskEventKey.occurrenceCounter(state.namespace(), familyId, tokenHash));
+
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                tokenId,
+                tokenHash,
+                tokenId + "-ignored",
+                RefreshTokenHash.sha256(tokenId + "-ignored"),
+                now.plusSeconds(2),
+                now.plusSeconds(60)).status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        assertThat(markerStore.findPendingEvents())
+                .singleElement()
+                .extracting(PendingRefreshTokenRiskEvent::occurrenceCount)
+                .isEqualTo(3L);
+        assertThat(redisTemplate.opsForValue().get(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), familyId, tokenHash))).isEqualTo("3");
+    }
+
+    @Test
+    @DisplayName("위험 사건 counter TTL은 호출 만료값이 아니라 실제 Refresh family TTL과 일치한다")
+    void alignsOccurrenceCounterTtlWithActualFamilyExpiry() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-counter-ttl", "token-first", now);
+        create(state);
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+
+        assertThat(store.rotate(
+                state.namespace(),
+                state.familyId(),
+                state.accountId(),
+                state.currentTokenId(),
+                state.currentTokenHash(),
+                "token-ignored",
+                RefreshTokenHash.sha256("token-ignored"),
+                now.plusSeconds(2),
+                now.plusSeconds(60)).status()).isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        long familyTtl = redisTemplate.getExpire(RefreshTokenKey.forFamily(state.namespace(), state.familyId()));
+        long counterTtl = redisTemplate.getExpire(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), state.familyId(), state.currentTokenHash()));
+        assertThat(counterTtl).isBetween(familyTtl - 1, familyTtl + 1);
+    }
+
+    @Test
     @DisplayName("구버전 marker의 이전 snapshot은 재생성된 marker 세대를 빌려오지 않는다")
     void doesNotCombineLegacySnapshotWithRecreatedMarkerGeneration() {
         String markerKey = "auth:risk:pending:legacy-aba";

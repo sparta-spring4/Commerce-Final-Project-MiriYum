@@ -489,18 +489,60 @@ main
             )
 
             self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-            self.assertIn("Pending risk event index backfill failed; aborting deployment", result.stderr)
+            self.assertIn("Risk event state backfill failed; aborting deployment", result.stderr)
             self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
             self.assertIn("logs --tail 100 valkey", log_path.read_text(encoding="utf-8"))
 
     def test_deployment_backfills_pending_index_before_starting_the_new_backend(self):
         main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
         valkey_start = main_body.index('up -d mysql valkey')
-        backfill = main_body.index('backfill_pending_risk_event_index')
+        pending_index_backfill = main_body.index('backfill_pending_risk_event_index')
+        occurrence_counter_backfill = main_body.index(
+            'backfill_risk_event_occurrence_counters'
+        )
         backend_start = main_body.index('up -d --remove-orphans')
 
-        self.assertLess(valkey_start, backfill)
-        self.assertLess(backfill, backend_start)
+        self.assertLess(valkey_start, pending_index_backfill)
+        self.assertLess(pending_index_backfill, occurrence_counter_backfill)
+        self.assertLess(occurrence_counter_backfill, backend_start)
+
+    def test_deployment_backfills_db_occurrence_count_to_family_bound_counter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            valkey_arguments_path = self.to_bash_path(
+                temporary_path / "valkey-arguments"
+            )
+            event_key = (
+                "auth:risk:pending:consumer:family-123:"
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            )
+            result = self.run_deploy_script(
+                f"""
+docker() {{
+  if [[ "$*" == *" mysql "* ]]; then
+    printf '%s\\t2\\n' '{event_key}'
+    return 0
+  fi
+  if [[ "$*" == *" valkey "* ]]; then
+    printf '%s\\n' "$*" >> "$RISK_OCCURRENCE_VALKEY_ARGUMENTS"
+    return 0
+  fi
+  return 1
+}}
+backfill_risk_event_occurrence_counters
+""",
+                {"RISK_OCCURRENCE_VALKEY_ARGUMENTS": valkey_arguments_path},
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            valkey_arguments = Path(directory, "valkey-arguments").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("auth:risk:occurrence:consumer:family-123:", valkey_arguments)
+            self.assertIn("auth:refresh:consumer:family-123", valkey_arguments)
+            self.assertIn(" 2", valkey_arguments)
+            self.assertIn("EXPIRETIME", valkey_arguments)
+            self.assertIn("EXPIREAT", valkey_arguments)
 
     def test_deployment_backfill_propagates_valkey_scan_failure(self):
         with tempfile.TemporaryDirectory() as directory:
