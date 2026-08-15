@@ -116,6 +116,11 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
 
+    def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
+        mysql_command = self.compose_config["services"]["mysql"]["command"]
+
+        self.assertIn("--log-bin-trust-function-creators=1", mysql_command)
+
     def test_observability_document_lists_all_docker_log_streams(self):
         self.assertIn("`mysql`, `backend`, `nginx`, `valkey`", self.observability_document)
 
