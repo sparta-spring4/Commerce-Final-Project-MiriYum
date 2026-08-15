@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -21,15 +22,21 @@ import com.miriyum.global.exception.GlobalExceptionHandler;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import jakarta.validation.Validation;
+import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.SpringValidatorAdapter;
 import org.springframework.web.context.request.NativeWebRequest;
@@ -41,13 +48,14 @@ class PlatformOperatorManagementAuditControllerTest {
 
     private MockMvc mvc;
     private PlatformOperatorManagementService managementService;
+    private PlatformOperatorAuditService auditService;
     private PlatformOperatorPrincipal principal;
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         managementService = mock(PlatformOperatorManagementService.class);
-        PlatformOperatorAuditService auditService = mock(PlatformOperatorAuditService.class);
+        auditService = mock(PlatformOperatorAuditService.class);
         principal = new PlatformOperatorPrincipal(
                 1L, "super@example.com", "session-1", 3L, 3L, false);
         objectMapper = new ObjectMapper();
@@ -121,6 +129,42 @@ class PlatformOperatorManagementAuditControllerTest {
                         .header("X-Admin-Case-Id", "audit-review-1")
                         .header("X-Admin-Case-Version", "1"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidAuditSearchQueries")
+    @DisplayName("감사 검색 조건이 OpenAPI 계약을 위반하면 COMMON_001을 반환한다")
+    void auditSearchRejectsInvalidContractValues(String caseName, Map<String, String> query)
+            throws Exception {
+        MockHttpServletRequestBuilder request = get("/api/v1/platform-operators/audit-events")
+                .header("X-Admin-Case-Id", "audit-review-1")
+                .header("X-Admin-Case-Version", "1")
+                .header("X-Admin-Reason-Code", "AUDIT_VERIFICATION");
+        query.forEach((name, value) -> request.queryParam(name, value));
+
+        mvc.perform(request)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+        verifyNoInteractions(auditService);
+    }
+
+    private static Stream<Arguments> invalidAuditSearchQueries() {
+        return Stream.of(
+                Arguments.of("음수 페이지", Map.of("page", "-1")),
+                Arguments.of("0인 페이지 크기", Map.of("size", "0")),
+                Arguments.of("최대치를 넘는 페이지 크기", Map.of("size", "101")),
+                Arguments.of("역전된 발생 일시 범위", Map.of(
+                        "occurredFrom", "2026-08-15T02:00:00Z",
+                        "occurredTo", "2026-08-15T01:00:00Z")),
+                Arguments.of("알 수 없는 원천", Map.of("source", "OTHER")),
+                Arguments.of("형식이 잘못된 행위자 ID", Map.of("actorOperatorId", "operator id")),
+                Arguments.of("최대 길이를 넘는 행위자 ID", Map.of(
+                        "actorOperatorId", "a".repeat(101))),
+                Arguments.of("형식이 잘못된 대상 ID", Map.of("targetId", "target/id")),
+                Arguments.of("최대 길이를 넘는 대상 ID", Map.of("targetId", "t".repeat(101))),
+                Arguments.of("형식이 잘못된 원 사건 키", Map.of("originalEventKey", "AUTH:0")),
+                Arguments.of("최대 길이를 넘는 원 사건 키", Map.of(
+                        "originalEventKey", "ADMIN:12345678901234567890")));
     }
 
     private org.springframework.test.web.servlet.ResultActions performCreate(String temporaryPassword)
