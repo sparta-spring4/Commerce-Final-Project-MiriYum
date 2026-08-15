@@ -1,5 +1,6 @@
 package com.miriyum.domain.reservation.waiting.service;
 
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -47,6 +48,7 @@ public class WaitingConversionCompensationRunner {
     }
 
     @Scheduled(
+            scheduler = "waitingConversionCompensationTaskScheduler",
             fixedDelayString = "${miriyum.waiting.compensation.fixed-delay-ms:5000}",
             initialDelayString = "${miriyum.waiting.compensation.initial-delay-ms:5000}")
     public void processBatch() {
@@ -66,16 +68,35 @@ public class WaitingConversionCompensationRunner {
         try {
             service.processClaim(claim);
         } catch (RuntimeException failure) {
+            boolean retryable = isRetryable(failure);
+            boolean recorded = false;
             try {
-                service.recordFailure(claim, isRetryable(failure));
+                recorded = service.recordFailure(claim, retryable);
             } catch (RuntimeException recordingFailure) {
                 failure.addSuppressed(recordingFailure);
             }
-            if (!(failure instanceof ServiceException)) {
-                log.warn("Waiting conversion compensation failed. compensationId={}",
-                        claim.compensationId(), failure);
-            }
+            log.warn(
+                    "event=waiting_conversion_compensation_failed "
+                            + "compensation_id={} retryable={} recorded={} error_code={}",
+                    claim.compensationId(), retryable, recorded, errorCode(failure), failure);
         }
+    }
+
+    @Scheduled(
+            scheduler = "waitingConversionCompensationTaskScheduler",
+            fixedDelayString =
+                    "${miriyum.waiting.compensation.reconciliation-delay-ms:60000}",
+            initialDelayString =
+                    "${miriyum.waiting.compensation.reconciliation-delay-ms:60000}")
+    public long reportReconciliationBacklog() {
+        long pendingCount = service.countReconciliationRequired();
+        if (pendingCount > 0) {
+            log.warn(
+                    "event=waiting_conversion_compensation_reconciliation_required "
+                            + "pending_count={}",
+                    pendingCount);
+        }
+        return pendingCount;
     }
 
     private static boolean isRetryable(Throwable failure) {
@@ -83,8 +104,12 @@ public class WaitingConversionCompensationRunner {
         for (Throwable current = failure;
                 current != null && visited.add(current);
                 current = current.getCause()) {
-            if (current instanceof ServiceException
-                    || current instanceof IllegalArgumentException
+            if (current instanceof ServiceException serviceException) {
+                return serviceException.getErrorCode() == CommonErrorCode.SERVICE_UNAVAILABLE
+                        || serviceException.getErrorCode()
+                        == CommonErrorCode.CONCURRENT_MODIFICATION;
+            }
+            if (current instanceof IllegalArgumentException
                     || current instanceof DataIntegrityViolationException) {
                 return false;
             }
@@ -99,5 +124,17 @@ public class WaitingConversionCompensationRunner {
             }
         }
         return false;
+    }
+
+    private static String errorCode(Throwable failure) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable current = failure;
+                current != null && visited.add(current);
+                current = current.getCause()) {
+            if (current instanceof ServiceException serviceException) {
+                return serviceException.getErrorCode().getCode();
+            }
+        }
+        return failure.getClass().getSimpleName();
     }
 }

@@ -156,6 +156,12 @@ public class WaitingConversionCompensationService {
         });
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public long countReconciliationRequired() {
+        return repository.countByStatus(
+                WaitingConversionCompensationStatus.RECONCILIATION_REQUIRED);
+    }
+
     private boolean isCurrent(WaitingCompensationClaim claim) {
         WaitingConversionCompensation compensation = repository
                 .findByIdForUpdate(claim.compensationId())

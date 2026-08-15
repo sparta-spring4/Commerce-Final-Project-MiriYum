@@ -367,9 +367,17 @@ policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRE
 The provider call is made outside the Waiting database transaction and only through
 `PaymentService.requestRefund(RequestRefundCommand)`. Only `RefundStatus.COMPLETED` completes the
 compensation. Payment reconciliation or an unknown provider outcome maps to compensation
-reconciliation. The compensation runner is enabled when its property is absent and can be disabled
-with `miriyum.waiting.compensation.enabled=false`; its scheduling annotations default both initial
-delay and fixed delay to 5000 ms, so normal operation requires no additional configuration path.
+reconciliation. `SERVICE_UNAVAILABLE` and `CONCURRENT_MODIFICATION` failures consume the bounded
+retry budget; other service errors reconcile immediately. Every processing failure emits the
+structured `waiting_conversion_compensation_failed` event, and a positive reconciliation backlog
+emits the identifier-free `waiting_conversion_compensation_reconciliation_required` aggregate
+event every 60000 ms.
+
+The compensation runner is enabled when its property is absent and can be disabled with
+`MIRIYUM_WAITING_COMPENSATION_ENABLED=false`. `application.yml`, the production environment
+example, and production Compose expose the enable switch, the 5000 ms initial/fixed delays, and the
+60000 ms reconciliation observation delay. Both jobs run on a dedicated single-thread scheduler
+that is not a default candidate and interrupts work on application shutdown.
 
 ### Internal reservation conversion orchestration
 

@@ -12,6 +12,10 @@ import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensationStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingConversionCompensationRepository;
+import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,19 +23,29 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class WaitingConversionCompensationServiceTest {
     private static final Instant BASE_TIME = Instant.parse("2026-08-14T00:00:00Z");
 
@@ -58,6 +72,122 @@ class WaitingConversionCompensationServiceTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(WaitingConversionCompensationRunner.class);
                 });
+    }
+
+    @Test
+    void compensationWorkerUsesDedicatedSingleThreadScheduler() throws NoSuchMethodException {
+        Scheduled scheduled = WaitingConversionCompensationRunner.class
+                .getMethod("processBatch")
+                .getAnnotation(Scheduled.class);
+        Scheduled reconciliationScheduled = WaitingConversionCompensationRunner.class
+                .getMethod("reportReconciliationBacklog")
+                .getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.scheduler())
+                .isEqualTo("waitingConversionCompensationTaskScheduler");
+        assertThat(reconciliationScheduled.scheduler())
+                .isEqualTo("waitingConversionCompensationTaskScheduler");
+
+        new ApplicationContextRunner()
+                .withBean(
+                        WaitingConversionCompensationService.class,
+                        () -> mock(WaitingConversionCompensationService.class))
+                .withUserConfiguration(
+                        WaitingConversionCompensationSchedulingConfig.class,
+                        WaitingConversionCompensationRunner.class)
+                .withPropertyValues(
+                        "miriyum.waiting.compensation.initial-delay-ms=60000")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context)
+                            .hasBean("waitingConversionCompensationTaskScheduler");
+                    ThreadPoolTaskScheduler scheduler = context.getBean(
+                            "waitingConversionCompensationTaskScheduler",
+                            ThreadPoolTaskScheduler.class);
+                    assertThat(scheduler.getPoolSize()).isEqualTo(1);
+                    assertThat(scheduler.getThreadNamePrefix())
+                            .isEqualTo("waiting-conversion-compensation-");
+                    AbstractBeanDefinition schedulerDefinition =
+                            (AbstractBeanDefinition) context.getBeanFactory()
+                                    .getBeanDefinition(
+                                            "waitingConversionCompensationTaskScheduler");
+                    assertThat(schedulerDefinition.isDefaultCandidate()).isFalse();
+                });
+    }
+
+    @Test
+    void compensationSchedulerInterruptsRunningWorkOnShutdown() {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(WaitingConversionCompensationSchedulingConfig.class)
+                .run(context -> {
+                    ThreadPoolTaskScheduler scheduler = context.getBean(
+                            "waitingConversionCompensationTaskScheduler",
+                            ThreadPoolTaskScheduler.class);
+                    scheduler.execute(() -> {
+                        started.countDown();
+                        try {
+                            release.await();
+                        } catch (InterruptedException exception) {
+                            interrupted.countDown();
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+
+                    assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+                    try {
+                        context.close();
+                        assertThat(interrupted.await(1, TimeUnit.SECONDS)).isTrue();
+                    } finally {
+                        release.countDown();
+                    }
+                });
+    }
+
+    @Test
+    void compensationWorkerOffSwitchDisablesRunnerAndScheduler() {
+        new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withBean(
+                        WaitingConversionCompensationService.class,
+                        () -> mock(WaitingConversionCompensationService.class))
+                .withUserConfiguration(
+                        WaitingConversionCompensationSchedulingConfig.class,
+                        WaitingConversionCompensationRunner.class)
+                .withPropertyValues("MIRIYUM_WAITING_COMPENSATION_ENABLED=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context)
+                            .doesNotHaveBean("waitingConversionCompensationTaskScheduler");
+                    assertThat(context)
+                            .doesNotHaveBean("waitingConversionCompensationRunner");
+                });
+    }
+
+    @Test
+    void compensationWorkerPropertiesReachProductionDeployment() throws Exception {
+        String application = Files.readString(Path.of("src", "main", "resources", "application.yml"));
+        String environment = Files.readString(Path.of("..", "deploy", ".env.example"));
+        String compose = Files.readString(Path.of("..", "deploy", "docker-compose.prod.yml"));
+
+        assertThat(application)
+                .contains("enabled: ${MIRIYUM_WAITING_COMPENSATION_ENABLED:true}")
+                .contains("fixed-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS:5000}")
+                .contains("initial-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:5000}")
+                .contains("reconciliation-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:60000}");
+        assertThat(environment)
+                .contains("MIRIYUM_WAITING_COMPENSATION_ENABLED=true")
+                .contains("MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS=5000")
+                .contains("MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS=5000")
+                .contains("MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS=60000");
+        assertThat(compose)
+                .contains("MIRIYUM_WAITING_COMPENSATION_ENABLED: ${MIRIYUM_WAITING_COMPENSATION_ENABLED:-true}")
+                .contains("MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS: ${MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS:-5000}")
+                .contains("MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:-5000}")
+                .contains("MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:-60000}");
     }
 
     @Test
@@ -176,6 +306,67 @@ class WaitingConversionCompensationServiceTest {
         runner.processSafely(claim);
 
         then(workerService).should().recordFailure(claim, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = CommonErrorCode.class,
+            names = {"SERVICE_UNAVAILABLE", "CONCURRENT_MODIFICATION"})
+    void runnerRetriesTransientServiceErrors(CommonErrorCode errorCode) {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        WaitingCompensationClaim claim = WaitingCompensationClaim.from(
+                claimed("worker-a"), "worker-a");
+        given(workerService.processClaim(claim))
+                .willThrow(new ServiceException(errorCode));
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        runner.processSafely(claim);
+
+        then(workerService).should().recordFailure(claim, true);
+    }
+
+    @Test
+    void runnerLogsServiceFailureClassification(CapturedOutput output) {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        WaitingCompensationClaim claim = WaitingCompensationClaim.from(
+                claimed("worker-a"), "worker-a");
+        given(workerService.processClaim(claim))
+                .willThrow(new ServiceException(CommonErrorCode.VALIDATION_FAILED));
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        runner.processSafely(claim);
+
+        then(workerService).should().recordFailure(claim, false);
+        assertThat(output)
+                .contains("event=waiting_conversion_compensation_failed")
+                .contains("compensation_id=71")
+                .contains("retryable=false")
+                .contains("error_code=COMMON_001");
+    }
+
+    @Test
+    void runnerReportsOnlyPositiveReconciliationAggregate(CapturedOutput output) {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        given(workerService.countReconciliationRequired())
+                .willReturn(0L, 3L);
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        assertThat(runner.reportReconciliationBacklog()).isZero();
+        assertThat(runner.reportReconciliationBacklog()).isEqualTo(3L);
+
+        assertThat(output)
+                .contains("event=waiting_conversion_compensation_reconciliation_required")
+                .contains("pending_count=3")
+                .doesNotContain("compensation_id=");
     }
 
     private long recordRequired(long amountMinor) {

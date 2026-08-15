@@ -161,6 +161,7 @@ class WaitingConversionCompensationIT {
         assertThat(jdbc.queryForObject(
                 "SELECT status FROM waiting_conversion_compensations", String.class))
                 .isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(service.countReconciliationRequired()).isOne();
     }
 
     private Long recordConcurrently(

@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.waiting.repository;
 
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensation;
+import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensationStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
@@ -96,4 +97,6 @@ public interface WaitingConversionCompensationRepository
             @Param("now") Instant now,
             @Param("afterId") long afterId,
             @Param("limit") int limit);
+
+    long countByStatus(WaitingConversionCompensationStatus status);
 }
