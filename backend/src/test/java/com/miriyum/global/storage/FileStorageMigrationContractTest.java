@@ -13,6 +13,7 @@ class FileStorageMigrationContractTest {
         Path migrationDirectory = Path.of("src/main/resources/db/migration");
 
         assertThat(Files.exists(migrationDirectory.resolve("V32__create_file_metadata.sql"))).isTrue();
+        assertThat(Files.exists(migrationDirectory.resolve("V42__enforce_file_metadata_purpose_visibility.sql"))).isTrue();
         assertThat(Files.exists(migrationDirectory.resolve("V31__create_file_metadata.sql"))).isFalse();
     }
 }
