@@ -1,5 +1,23 @@
 # 핵심 API k6 기준선
 
+## #285 카카오 지오코딩 환경 연결 후 local 재측정
+
+- 검증 commit: `c19c73fff960d247896a33abc8a3e97a0076703e`
+- 기록일: 2026-08-15
+- 실행 환경: local HTTPS proxy, ignored local fixture, 저장소 밖 합성 계정 자격증명과 카카오 Local REST API 키
+- 공개 매장은 저장소의 공개 매장 등록 API로 생성했고 지오코딩 `VERIFIED`와 주소 버전 `1`을 확인했다. 키, 좌표, 매장 ID와 응답 본문은 증거에 기록하지 않았다.
+- smoke `local-auth-search-smoke-20260815-sync01`: `authRefresh` 1회와 실제 결과가 존재하는 `storeSearch` 1회가 통과했고 unexpected 4xx·5xx·dropped iteration은 모두 0이었다.
+- baseline 입력: `authRefresh,storeSearch`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`. 시나리오별로 1 VU와 1 iteration/s를 배분했다.
+
+| run ID | scenario | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `local-auth-search-baseline-20260815-sync01` | authRefresh | 60 | 41.956 | 73.329 | 85.784 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync01` | storeSearch | 31 | 17.473 | 24.665 | 32.316 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | authRefresh | 62 | 36.472 | 64.931 | 68.746 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | storeSearch | 31 | 13.767 | 15.397 | 17.281 | 0 | 0 | 0 |
+
+두 baseline은 동일 smoke 증거와 fixture fingerprint를 사용해 threshold를 통과했다. 예약은 충돌 없는 운영시간·slot fixture, 알림은 계정별 2페이지 이상의 공개 `IN_APP` 전달 완료 데이터가 아직 없어 실행하지 않았으므로 전체 local baseline 완료로 해석하지 않는다. 이 결과만으로 #286의 SQL 병목이나 실서비스 SLO를 주장하지 않는다.
+
 ## #338 authRefresh 반복 cleanup 회귀 검증
 
 - 검증 commit: `9302bb6c468514ad35b2ef9fc11bf047cd41e759`
