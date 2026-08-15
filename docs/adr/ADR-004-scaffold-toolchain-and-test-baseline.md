@@ -213,13 +213,13 @@ Windows와 Ubuntu contract test의 실제 성공 증거가 생기기 전에는 �
 
 #### 2026-08-15 구현 증거와 미충족 gate
 
-commit `065318c9`의 Windows에서 Common+WindowsNative contract 17건, Common+Gradle contract 13건이 성공했다. 같은 commit의 정식 Auto 실행은 시작 시 host 가용 메모리 약 10.7GB와 16 logical CPU를 관찰해 Auto=1을 선택했다. 당시 다른 worktree의 2GB Gradle integration build가 동시에 실행 중이었으므로 이 선택과 host 가용 메모리·Docker 전체 합계는 동시 부하의 영향을 받았다.
+commit `9303cbb8`의 Windows에서 Common contract 14건, Gradle contract 1건, WindowsNative contract 4건이 성공했다. PR #351의 같은 commit에서 Windows contract job, Ubuntu Common+Gradle contract를 포함한 unit job, integration A~D와 최종 `backend-ci`가 모두 성공했다.
 
-unit+assemble은 1분 57초, shard A는 24분, B는 18분 34초, C는 14분 36초에 성공했다. shard D 실행 중 Codex가 종료되면서 runner와 외부 sampler도 중단됐고 Windows Job handle close 뒤 해당 run token의 OS process 0건과 Ryuk 회수 뒤 임시 container 0건을 확인했다. 보존 XML을 재검증한 뒤 같은 run root와 `--rerun-tasks`로 D만 복구했으며 15분 03초, exit `0`, timeout/cancel 없음, containment 성공, `ActiveProcessesAfterCleanup=0`이었다. 최종 XML 합계는 unit 2,314, A 123, B 223, C 174, D 91로 총 2,925 tests이며 failures/errors/skipped는 모두 0이다.
+경쟁 Gradle/Testcontainers workload와 그 Ryuk session이 자연 종료하고 임시 container가 0건인 것을 확인한 뒤, total RAM 34,050,875,392 bytes·16 logical CPU Windows에서 정식 runner를 다시 실행했다. 선택 시 host 가용 메모리 14,210,465,792 bytes를 관찰해 Auto=2를 선택했고, baseline container는 장기 실행 `miriyum-local-mysql-1` 하나뿐이었다. unit+assemble 2분 03.78초, shard A 25분 35.70초, B 22분 16.54초, C 15분 57.46초, D 17분 03.85초로 모두 exit `0`이었다. XML 합계는 unit 2,314, A 123, B 223, C 174, D 91로 총 2,925 tests이며 failures/errors/skipped는 모두 0이다. runner 종료 뒤 해당 run token의 OS process 0건과 Ryuk 회수 뒤 임시 container 0건을 별도로 확인했다.
 
-중단과 복구를 포함한 논리적 wall time은 79분 15초이므로 25분 성능 목표는 `FAIL`이다. 원래 sampler가 sample을 메모리에만 보유해 종료 전에 전체-run CSV/JSON을 쓰지 못했으므로 전체 Java·Docker peak는 증거 유실로 판정한다. 복구된 D에서 2초 간격으로 즉시 저장한 하한은 runner descendant Java working set 약 1.97GB, 동시에 실행 중인 전체 Docker container memory 약 820.5MB, 최소 host 가용 메모리 약 11.1GB다. Docker 수치는 장기 실행 `miriyum-local-mysql-1`을 포함하며 runner 전용 label을 사용하지 않았다.
+외부 sampler는 2초마다 CSV와 checkpoint JSON을 즉시 저장했고 600 samples에서 sampling error 0건이었다. runner PowerShell descendant인 `java.exe`/`javaw.exe`의 aggregate `WorkingSet64` peak는 4,584,701,952 bytes(약 4.27GiB), 동시에 실행 중인 전체 Docker container의 `docker stats` aggregate peak는 2,167,081,533 bytes(약 2.02GiB), 최소 host 가용 메모리는 5,537,357,824 bytes(약 5.16GiB)였다. Docker 합계에는 baseline의 장기 실행 `miriyum-local-mysql-1` 약 391MiB가 포함되며 runner 전용 label이나 강제 cleanup은 사용하지 않았다.
 
-이 D-only 하한과 동시 부하가 섞인 Auto=1 결과만으로 20GB·12GB threshold를 낮추거나 안전하다고 주장할 수 없다. 초기 threshold는 잠정 heuristic으로 유지하며, 전체-run peak와 Auto=4 성능 목표를 충족하는 비교 가능한 후속 증거가 생기기 전에는 선택적 backend full-verification runner를 `CONFIGURED`로 승격하지 않는다. Ubuntu CI도 이 문서 개정 시점에는 `NOT RUN`이다.
+측정 wrapper wall time은 42분 42.61초이고 runner schedule elapsed는 42분 39.68초이므로 25분 성능 목표는 `FAIL`이다. 이 실행은 시작 가용 메모리가 12GB 경계보다 약 1.23GiB 높은 Auto=2 한 사례이며 기능적으로 성공했지만, 20GB 경계의 Auto=4 안전성이나 모든 Docker/WSL2 cap 환경을 증명하지 않는다. 관찰된 최소 가용 메모리와 전체 peak는 초기 threshold를 낮출 근거가 아니므로 20GB·12GB 값을 잠정 heuristic으로 유지한다. 전체 기능·containment·peak와 Windows·Ubuntu CI 증거는 충족했지만 성능 목표가 남아 있어 선택적 backend full-verification runner를 `CONFIGURED`로 승격하지 않는다.
 
 ### shard 재배치 경계
 

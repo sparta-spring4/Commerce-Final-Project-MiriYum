@@ -128,4 +128,4 @@ Controller class와 public endpoint, Service class와 public method, cross-domai
 
 ## 연기된 기능
 
-Docker Compose, staging CD, `Backend CI`와 Gradle 의존성 cache는 구성되어 있으며, 각각의 runtime 결과는 배포 runbook과 CI 실행 링크로 확인한다. 선택적 backend 로컬 full-verification runner의 구현과 Windows contract는 존재하지만 성능 목표와 완전한 peak 측정, Ubuntu CI 증거가 남아 있어 `NOT CONFIGURED`다. 정확한 호출과 활성화 조건은 [명령 레지스트리](command-registry.md)가 소유한다. 범용 command/verification runner, API 스모크, 기계 판독 schema, skill과 선택적 local hook도 아직 구성되지 않았으며 정본 활성화 경로와 별도로 승인된 허용 목록을 통해서만 추가한다.
+Docker Compose, staging CD, `Backend CI`와 Gradle 의존성 cache는 구성되어 있으며, 각각의 runtime 결과는 배포 runbook과 CI 실행 링크로 확인한다. 선택적 backend 로컬 full-verification runner의 구현, Windows·Ubuntu contract, Windows 전체 기능·peak와 Backend CI 증거는 존재하지만 25분 성능 목표를 충족하지 못해 `NOT CONFIGURED`다. 정확한 호출과 활성화 조건은 [명령 레지스트리](command-registry.md)가 소유한다. 범용 command/verification runner, API 스모크, 기계 판독 schema, skill과 선택적 local hook도 아직 구성되지 않았으며 정본 활성화 경로와 별도로 승인된 허용 목록을 통해서만 추가한다.
