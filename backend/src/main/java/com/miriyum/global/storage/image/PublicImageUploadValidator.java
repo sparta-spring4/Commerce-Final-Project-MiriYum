@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.image;
+package com.miriyum.global.storage.image;
 
 import java.util.Map;
 
@@ -8,7 +8,7 @@ public final class PublicImageUploadValidator {
     private static final Map<String, ImageFormat> FORMATS = Map.of(
             "image/jpeg", new ImageFormat("jpg", new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}),
             "image/png", new ImageFormat("png", new byte[] {
-                    (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}),
+                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}),
             "image/webp", new ImageFormat("webp", new byte[] {0x52, 0x49, 0x46, 0x46})
     );
 
