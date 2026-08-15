@@ -8,9 +8,14 @@ import static org.mockito.Mockito.mock;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensationStatus;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
+import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingConversionCompensationRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -50,6 +55,7 @@ class WaitingConversionCompensationServiceTest {
     private static final Instant BASE_TIME = Instant.parse("2026-08-14T00:00:00Z");
 
     @Mock WaitingConversionCompensationRepository repository;
+    @Mock WaitingTeamRepository teams;
     @Mock PaymentService paymentService;
     private MutableClock clock;
     private WaitingConversionCompensationService service;
@@ -58,7 +64,7 @@ class WaitingConversionCompensationServiceTest {
     void setUp() {
         clock = new MutableClock(BASE_TIME);
         service = new WaitingConversionCompensationService(
-                repository, paymentService, clock, new TestTransactionManager());
+                repository, teams, paymentService, clock, new TestTransactionManager());
     }
 
     @Test
@@ -82,10 +88,15 @@ class WaitingConversionCompensationServiceTest {
         Scheduled reconciliationScheduled = WaitingConversionCompensationRunner.class
                 .getMethod("reportReconciliationBacklog")
                 .getAnnotation(Scheduled.class);
+        Scheduled handoffScheduled = WaitingConversionCompensationRunner.class
+                .getMethod("recoverMissingTerminalCompensations")
+                .getAnnotation(Scheduled.class);
 
         assertThat(scheduled.scheduler())
                 .isEqualTo("waitingConversionCompensationTaskScheduler");
         assertThat(reconciliationScheduled.scheduler())
+                .isEqualTo("waitingConversionCompensationTaskScheduler");
+        assertThat(handoffScheduled.scheduler())
                 .isEqualTo("waitingConversionCompensationTaskScheduler");
 
         new ApplicationContextRunner()
@@ -308,6 +319,150 @@ class WaitingConversionCompensationServiceTest {
         then(workerService).should().recordFailure(claim, true);
     }
 
+    @Test
+    void missingTerminalCallbackRecordsDeterministicCompensationFromHistoricalPaidPayment() {
+        WaitingTeam cancelled = cancelledPaidConversion();
+        WaitingConversionCompensation stored = WaitingConversionCompensation.pending(
+                11L,
+                "101",
+                12_000L,
+                "KRW",
+                3L,
+                "waiting-conversion-terminal:11:CANCELLED:101",
+                "01e2a14e-a438-3b09-84cb-cee7341776e3",
+                "WAITING_CANCELLED",
+                BASE_TIME);
+        ReflectionTestUtils.setField(stored, "id", 72L);
+        given(teams.findById(11L)).willReturn(Optional.of(cancelled));
+        given(teams.findByIdForUpdate(11L)).willReturn(Optional.of(cancelled));
+        given(paymentService.getVerifiedWaitingReservationDeposit("101", 11L, 41L))
+                .willReturn(new VerifiedWaitingReservationDeposit(
+                        "101", 12_000L, "KRW", 3L,
+                        PaymentStatus.PAID, BASE_TIME.minusSeconds(5)));
+        given(repository.findByWaitingTeamIdAndPaymentIdForUpdate(11L, "101"))
+                .willReturn(Optional.empty(), Optional.of(stored));
+
+        assertThat(service.reconcileMissingTerminalCompensation(11L)).isTrue();
+
+        then(repository).should().insertRequired(
+                11L,
+                "101",
+                12_000L,
+                "KRW",
+                3L,
+                "waiting-conversion-terminal:11:CANCELLED:101",
+                "01e2a14e-a438-3b09-84cb-cee7341776e3",
+                "WAITING_CANCELLED",
+                BASE_TIME);
+    }
+
+    @Test
+    void callbackThatAlreadyRecordedTerminalHandoffIsNotReportedAsRecovery() {
+        WaitingTeam cancelled = cancelledPaidConversion();
+        WaitingConversionCompensation existing = pending();
+        given(teams.findById(11L)).willReturn(Optional.of(cancelled));
+        given(teams.findByIdForUpdate(11L)).willReturn(Optional.of(cancelled));
+        given(paymentService.getVerifiedWaitingReservationDeposit("101", 11L, 41L))
+                .willReturn(new VerifiedWaitingReservationDeposit(
+                        "101", 12_000L, "KRW", 3L,
+                        PaymentStatus.PAID, BASE_TIME.minusSeconds(5)));
+        given(repository.findByWaitingTeamIdAndPaymentIdForUpdate(11L, "101"))
+                .willReturn(Optional.of(existing));
+
+        assertThat(service.reconcileMissingTerminalCompensation(11L)).isFalse();
+
+        then(repository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void terminalPaymentThatIsNotHistoricallyPaidRemainsEligibleWithoutFalseCompensation() {
+        WaitingTeam cancelled = cancelledPaidConversion();
+        given(teams.findById(11L)).willReturn(Optional.of(cancelled));
+        given(paymentService.getVerifiedWaitingReservationDeposit("101", 11L, 41L))
+                .willThrow(new ServiceException(
+                        com.miriyum.domain.payment.exception.PaymentErrorCode.PAYMENT_NOT_FOUND));
+
+        assertThat(service.reconcileMissingTerminalCompensation(11L)).isFalse();
+
+        then(teams).should().findById(11L);
+        then(teams).shouldHaveNoMoreInteractions();
+        then(repository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void runnerScansMissingTerminalHandoffsWithinFixedTraversalWatermark(
+            CapturedOutput output
+    ) {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        given(workerService.findMissingTerminalCompensationUpperBoundId())
+                .willReturn(200L);
+        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 200L, 100))
+                .willReturn(List.of(11L, 19L));
+        given(workerService.reconcileMissingTerminalCompensation(11L)).willReturn(true);
+        given(workerService.reconcileMissingTerminalCompensation(19L)).willReturn(true);
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        assertThat(runner.recoverMissingTerminalCompensations()).isEqualTo(2);
+
+        then(workerService).should().reconcileMissingTerminalCompensation(11L);
+        then(workerService).should().reconcileMissingTerminalCompensation(19L);
+        assertThat(output)
+                .contains("event=waiting_conversion_compensation_handoff_recovered")
+                .contains("recovered_count=2")
+                .doesNotContain("waiting_conversion_compensation_handoff_missing");
+    }
+
+    @Test
+    void runnerCompletesFixedTraversalBeforeIncludingContinuousHigherIdIngress() {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        given(workerService.findMissingTerminalCompensationUpperBoundId())
+                .willReturn(200L, 500L);
+        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 200L, 100))
+                .willReturn(List.of(100L));
+        given(workerService.findMissingTerminalCompensationCandidateIds(100L, 200L, 100))
+                .willReturn(List.of());
+        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 500L, 100))
+                .willReturn(List.of(50L, 400L));
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        runner.recoverMissingTerminalCompensations();
+        runner.recoverMissingTerminalCompensations();
+        runner.recoverMissingTerminalCompensations();
+
+        then(workerService).should().findMissingTerminalCompensationCandidateIds(
+                0L, 200L, 100);
+        then(workerService).should().findMissingTerminalCompensationCandidateIds(
+                100L, 200L, 100);
+        then(workerService).should().findMissingTerminalCompensationCandidateIds(
+                0L, 500L, 100);
+        then(workerService).should().reconcileMissingTerminalCompensation(50L);
+    }
+
+    @Test
+    void runnerDoesNotReportUnpaidTerminalCandidateAsMissingHandoff(CapturedOutput output) {
+        WaitingConversionCompensationService workerService =
+                mock(WaitingConversionCompensationService.class);
+        given(workerService.findMissingTerminalCompensationUpperBoundId()).willReturn(11L);
+        given(workerService.findMissingTerminalCompensationCandidateIds(0L, 11L, 100))
+                .willReturn(List.of(11L));
+        given(workerService.reconcileMissingTerminalCompensation(11L)).willReturn(false);
+        WaitingConversionCompensationRunner runner =
+                new WaitingConversionCompensationRunner(
+                        workerService, "worker-a", Duration.ofSeconds(30));
+
+        assertThat(runner.recoverMissingTerminalCompensations()).isZero();
+
+        assertThat(output)
+                .doesNotContain("waiting_conversion_compensation_handoff_recovered")
+                .doesNotContain("waiting_conversion_compensation_handoff_missing");
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = CommonErrorCode.class,
@@ -366,6 +521,7 @@ class WaitingConversionCompensationServiceTest {
         assertThat(output)
                 .contains("event=waiting_conversion_compensation_reconciliation_required")
                 .contains("pending_count=3")
+                .doesNotContain("waiting_conversion_compensation_handoff_missing")
                 .doesNotContain("compensation_id=");
     }
 
@@ -381,6 +537,21 @@ class WaitingConversionCompensationServiceTest {
         WaitingConversionCompensation work = pending();
         work.claim(owner, clock.instant(), clock.instant().plusSeconds(30));
         return work;
+    }
+
+    private static WaitingTeam cancelledPaidConversion() {
+        WaitingTeam team = WaitingTeam.create(
+                7L,
+                41L,
+                java.time.LocalDate.of(2026, 8, 14),
+                2,
+                WaitingSource.REMOTE,
+                1L,
+                BASE_TIME.minusSeconds(30));
+        ReflectionTestUtils.setField(team, "id", 11L);
+        team.beginReservationConversion(0L, "101", BASE_TIME.minusSeconds(10));
+        team.cancel(1L, BASE_TIME);
+        return team;
     }
 
     private static WaitingConversionCompensation pending() {

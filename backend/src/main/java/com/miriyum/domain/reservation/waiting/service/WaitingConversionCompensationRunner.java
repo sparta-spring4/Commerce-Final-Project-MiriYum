@@ -29,6 +29,8 @@ public class WaitingConversionCompensationRunner {
     private final WaitingConversionCompensationService service;
     private final String owner;
     private final Duration leaseDuration;
+    private long terminalCandidateAfterId;
+    private long terminalCandidateUpperBoundId;
 
     @Autowired
     public WaitingConversionCompensationRunner(
@@ -97,6 +99,53 @@ public class WaitingConversionCompensationRunner {
                     pendingCount);
         }
         return pendingCount;
+    }
+
+    @Scheduled(
+            scheduler = "waitingConversionCompensationTaskScheduler",
+            fixedDelayString =
+                    "${miriyum.waiting.compensation.reconciliation-delay-ms:60000}",
+            initialDelayString =
+                    "${miriyum.waiting.compensation.reconciliation-delay-ms:60000}")
+    public int recoverMissingTerminalCompensations() {
+        if (terminalCandidateUpperBoundId == 0L) {
+            terminalCandidateUpperBoundId =
+                    service.findMissingTerminalCompensationUpperBoundId();
+            if (terminalCandidateUpperBoundId == 0L) {
+                return 0;
+            }
+        }
+        var candidates = service.findMissingTerminalCompensationCandidateIds(
+                terminalCandidateAfterId,
+                terminalCandidateUpperBoundId,
+                MAX_ITEMS_PER_POLL);
+        if (candidates.isEmpty()) {
+            terminalCandidateAfterId = 0L;
+            terminalCandidateUpperBoundId = 0L;
+            return 0;
+        }
+
+        int recovered = 0;
+        for (long waitingTeamId : candidates) {
+            terminalCandidateAfterId = waitingTeamId;
+            try {
+                if (service.reconcileMissingTerminalCompensation(waitingTeamId)) {
+                    recovered++;
+                }
+            } catch (RuntimeException failure) {
+                log.warn(
+                        "event=waiting_conversion_compensation_handoff_failed "
+                                + "waiting_team_id={} error_code={}",
+                        waitingTeamId, errorCode(failure), failure);
+            }
+        }
+        if (recovered > 0) {
+            log.warn(
+                    "event=waiting_conversion_compensation_handoff_recovered "
+                            + "recovered_count={}",
+                    recovered);
+        }
+        return recovered;
     }
 
     private static boolean isRetryable(Throwable failure) {

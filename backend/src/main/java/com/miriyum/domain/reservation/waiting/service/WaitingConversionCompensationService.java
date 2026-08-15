@@ -2,15 +2,23 @@ package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensation;
 import com.miriyum.domain.reservation.waiting.entity.WaitingConversionCompensationStatus;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
+import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.repository.WaitingConversionCompensationRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
+import com.miriyum.global.exception.ServiceException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Isolation;
@@ -24,17 +32,20 @@ public class WaitingConversionCompensationService {
     private static final Duration RETRY_DELAY = Duration.ofSeconds(5);
 
     private final WaitingConversionCompensationRepository repository;
+    private final WaitingTeamRepository teams;
     private final PaymentService paymentService;
     private final Clock clock;
     private final TransactionTemplate resultTransaction;
 
     public WaitingConversionCompensationService(
             WaitingConversionCompensationRepository repository,
+            WaitingTeamRepository teams,
             PaymentService paymentService,
             Clock clock,
             PlatformTransactionManager transactionManager
     ) {
         this.repository = repository;
+        this.teams = teams;
         this.paymentService = paymentService;
         this.clock = clock;
         this.resultTransaction = new TransactionTemplate(transactionManager);
@@ -160,6 +171,84 @@ public class WaitingConversionCompensationService {
     public long countReconciliationRequired() {
         return repository.countByStatus(
                 WaitingConversionCompensationStatus.RECONCILIATION_REQUIRED);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public List<Long> findMissingTerminalCompensationCandidateIds(
+            long afterWaitingTeamId,
+            long upperBoundWaitingTeamId,
+            int limit
+    ) {
+        return List.copyOf(teams.findMissingTerminalCompensationCandidateIds(
+                afterWaitingTeamId, upperBoundWaitingTeamId, limit));
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public long findMissingTerminalCompensationUpperBoundId() {
+        return teams.findMissingTerminalCompensationUpperBoundId();
+    }
+
+    public boolean reconcileMissingTerminalCompensation(long waitingTeamId) {
+        WaitingTeam snapshot = teams.findById(waitingTeamId).orElse(null);
+        if (!isTerminalConversion(snapshot)) {
+            return false;
+        }
+
+        VerifiedWaitingReservationDeposit verified;
+        try {
+            verified = paymentService.getVerifiedWaitingReservationDeposit(
+                    snapshot.getWaitingPaymentId(),
+                    snapshot.getId(),
+                    snapshot.getConsumerAccountId());
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode() == PaymentErrorCode.PAYMENT_NOT_FOUND) {
+                return false;
+            }
+            throw exception;
+        }
+
+        Boolean recorded = resultTransaction.execute(status -> {
+            WaitingTeam locked = teams.findByIdForUpdate(waitingTeamId).orElse(null);
+            if (!isTerminalConversion(locked)
+                    || !snapshot.getWaitingPaymentId().equals(locked.getWaitingPaymentId())
+                    || !snapshot.getConsumerAccountId().equals(locked.getConsumerAccountId())) {
+                return false;
+            }
+            if (repository.findByWaitingTeamIdAndPaymentIdForUpdate(
+                    locked.getId(), locked.getWaitingPaymentId()).isPresent()) {
+                return false;
+            }
+            recordTerminalRequired(locked, verified);
+            return true;
+        });
+        return Boolean.TRUE.equals(recorded);
+    }
+
+    private long recordTerminalRequired(
+            WaitingTeam team,
+            VerifiedWaitingReservationDeposit verified
+    ) {
+        String sourceEventId = "waiting-conversion-terminal:"
+                + team.getId() + ':' + team.getStatus() + ':' + verified.paymentId();
+        String reasonCode = team.getStatus() == WaitingTeamStatus.CANCELLED
+                ? "WAITING_CANCELLED"
+                : "WAITING_CLOSED_BY_STORE";
+        return recordRequired(
+                team.getId(),
+                verified.paymentId(),
+                verified.amountMinor(),
+                verified.currency(),
+                verified.sourcePolicyVersion(),
+                sourceEventId,
+                UUID.nameUUIDFromBytes(sourceEventId.getBytes(StandardCharsets.UTF_8)).toString(),
+                reasonCode);
+    }
+
+    private static boolean isTerminalConversion(WaitingTeam team) {
+        return team != null
+                && team.getWaitingPaymentId() != null
+                && (team.getStatus() == WaitingTeamStatus.CANCELLED
+                    || team.getStatus() == WaitingTeamStatus.CLOSED_BY_STORE);
     }
 
     private boolean isCurrent(WaitingCompensationClaim claim) {

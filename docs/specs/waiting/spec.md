@@ -364,6 +364,22 @@ monotonically increasing fencing token. An expired lease may be reclaimed, and a
 cannot complete, requeue, or reconcile the reclaimed item. Failed results use a bounded three-attempt
 policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRED`.
 
+The callback is a fast path, not the sole durable trigger. On the reconciliation schedule, the
+compensation runner scans at most 100 `CANCELLED` or `CLOSED_BY_STORE` teams with a preserved
+`waiting_payment_id` and no matching compensation. Each traversal fixes the current maximum
+Waiting-team ID as an upper watermark and scans beneath it with a keyset cursor; after reaching an
+empty page it starts a new traversal from zero. Thus continuously arriving higher IDs cannot starve
+an older candidate that becomes eligible after its cursor position was passed.
+For each candidate it verifies the Payment-owned source identity and historical-paid snapshot through
+`PaymentService`, re-locks the terminal Waiting team, and records the same deterministic compensation
+payload as the callback. A not-yet-paid source remains eligible for a later scan without creating a
+false compensation. Callback/reconciliation races converge on the existing unique keys, so process
+restart or callback loss cannot strand a paid terminal conversion without a durable refund handoff.
+The runner emits the identifier-free
+`waiting_conversion_compensation_handoff_recovered` aggregate only after Payment verification and
+successful durable handoff creation. Raw terminal candidates are not reported as missing because an
+unpaid or invalid source is a normal negative candidate rather than a compensation incident.
+
 The provider call is made outside the Waiting database transaction and only through
 `PaymentService.requestRefund(RequestRefundCommand)`. Only `RefundStatus.COMPLETED` completes the
 compensation. Payment reconciliation or an unknown provider outcome maps to compensation

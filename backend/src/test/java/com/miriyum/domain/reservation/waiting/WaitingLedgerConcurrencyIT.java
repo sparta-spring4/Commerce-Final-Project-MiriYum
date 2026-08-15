@@ -452,6 +452,82 @@ class WaitingLedgerConcurrencyIT {
     }
 
     @Test
+    void paidTerminalWithoutCallbackIsRecoveredAndRefundedByDurableReconciliation() {
+        Fixture fixture = fixture(1);
+        PaidConversion paid = paidConversion(fixture, 540);
+        commandFacade.cancel(
+                fixture.operatorId(), fixture.storeId(), paid.teamId(), key(543),
+                new WaitingTeamTransitionRequest(1L));
+        WaitingConversionCompensationRunner recoveryRunner =
+                new WaitingConversionCompensationRunner(
+                        compensationService, "missing-callback-it", Duration.ofSeconds(30));
+
+        assertThat(count("waiting_conversion_compensations")).isZero();
+        assertThat(recoveryRunner.recoverMissingTerminalCompensations()).isEqualTo(1);
+        assertThat(jdbc.queryForMap("""
+                SELECT payment_id, refund_amount_minor, currency,
+                       refund_policy_version, reason_code, status
+                  FROM waiting_conversion_compensations
+                 WHERE waiting_team_id = ?
+                """, paid.teamId()))
+                .containsEntry("payment_id", paid.preparation().paymentId())
+                .containsEntry("refund_amount_minor", 12_000L)
+                .containsEntry("currency", "KRW")
+                .containsEntry("refund_policy_version", 3L)
+                .containsEntry("reason_code", "WAITING_CANCELLED")
+                .containsEntry("status", "PENDING");
+
+        when(providerClient.cancelPayment(
+                eq(paid.preparation().portOnePaymentId()), anyString(), eq(12_000L),
+                eq("KRW"), eq("WAITING_CANCELLED")))
+                .thenReturn(new ProviderCancellation(
+                        "waiting-recovered-cancellation-" + paid.teamId(),
+                        ProviderStatus.CANCELLED, 12_000L, "KRW"));
+        WaitingCompensationClaim claim = compensationService.claimPending(
+                "missing-callback-it", 1, Duration.ofSeconds(30), 0L).getFirst();
+
+        assertThat(compensationService.processClaim(claim)).isTrue();
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_conversion_compensations WHERE waiting_team_id=?",
+                String.class, paid.teamId())).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM payments WHERE payment_id=?",
+                String.class, paid.preparation().paymentId())).isEqualTo("REFUNDED");
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment_refunds WHERE status='COMPLETED'",
+                Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void terminalCallbackAndDurableReconciliationConvergeOnOneCompensation() throws Exception {
+        Fixture fixture = fixture(1);
+        PaidConversion paid = paidConversion(fixture, 550);
+        commandFacade.cancel(
+                fixture.operatorId(), fixture.storeId(), paid.teamId(), key(553),
+                new WaitingTeamTransitionRequest(1L));
+        CompletionCommand callback = new CompletionCommand(
+                paid.teamId(), paid.preparation().paymentId(), 9_010L);
+        long recoveryUpperBound =
+                compensationService.findMissingTerminalCompensationUpperBoundId();
+        assertThat(compensationService.findMissingTerminalCompensationCandidateIds(
+                0L, recoveryUpperBound, 100)).containsExactly(paid.teamId());
+
+        List<Attempt<Object>> attempts = runTogether(2, index -> index == 0
+                ? conversionService.completeVerified(callback)
+                : compensationService.reconcileMissingTerminalCompensation(paid.teamId()));
+
+        assertThat(attempts).allMatch(Attempt::succeeded);
+        assertThat(conversionService.completeVerified(callback)).isFalse();
+        assertThat(count("waiting_conversion_compensations")).isOne();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*)
+                  FROM waiting_conversion_compensations
+                 WHERE waiting_team_id = ? AND payment_id = ?
+                   AND reason_code = 'WAITING_CANCELLED'
+                """, Long.class, paid.teamId(), paid.preparation().paymentId())).isOne();
+    }
+
+    @Test
     void paidConversionAndClaimedClosureRaceCommitExactlyOneTerminalTransition() throws Exception {
         Fixture fixture = fixture(1);
         PaidConversion paid = paidConversion(fixture, 480);
