@@ -66,8 +66,8 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("Flyway V43이 웨이팅 예약 전환 runtime 스키마를 적용한다")
-    void appliesWaitingReservationConversionRuntimeAsFlywayV43() {
+    @DisplayName("Flyway V45가 웨이팅 예약 전환 runtime 스키마를 적용한다")
+    void appliesWaitingReservationConversionRuntimeAsFlywayV45() {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load();
@@ -76,13 +76,13 @@ class WaitingMigrationTest {
 
         assertThat(flyway.info().applied())
                 .anyMatch(migration ->
-                        "43".equals(String.valueOf(migration.getVersion()))
-                                && "V43__add_waiting_reservation_conversion_runtime.sql"
+                        "45".equals(String.valueOf(migration.getVersion()))
+                                && "V45__add_waiting_reservation_conversion_runtime.sql"
                                 .equals(migration.getScript()));
     }
 
     @Test
-    @DisplayName("V43까지 적용하면 Waiting 소유 테이블 여덟 개만 존재한다")
+    @DisplayName("V45까지 적용하면 Waiting 소유 테이블 여덟 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
@@ -120,7 +120,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V43은 Waiting 소유 예약 전환 scalar 열만 추가하고 Reservation FK를 만들지 않는다")
+    @DisplayName("V45는 Waiting 소유 예약 전환 scalar 열만 추가하고 Reservation FK를 만들지 않는다")
     void addsWaitingOwnedReservationConversionScalarColumns() throws SQLException {
         migrate();
 
@@ -170,7 +170,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V36 기준선 뒤 V42가 계정 전체 활성 membership 유일 키로 교체한다")
+    @DisplayName("V36 기준선 뒤 V44가 계정 전체 활성 membership 유일 키로 교체한다")
     void replacesStoreScopedMembershipKeyAfterV36Baseline() throws SQLException {
         try {
             Flyway v36 = flywayForTarget("36");
@@ -184,12 +184,12 @@ class WaitingMigrationTest {
                                 + "store_id,consumer_account_id");
             }
 
-            Flyway v42 = flywayForTarget(null);
-            v42.migrate();
+            Flyway v44 = flywayForTarget(null);
+            v44.migrate();
 
-            assertThat(v42.info().applied()).anyMatch(migration ->
-                    "42".equals(String.valueOf(migration.getVersion()))
-                            && "V42__enforce_account_wide_active_waiting.sql"
+            assertThat(v44.info().applied()).anyMatch(migration ->
+                    "44".equals(String.valueOf(migration.getVersion()))
+                            && "V44__enforce_account_wide_active_waiting.sql"
                             .equals(migration.getScript()));
             try (Connection connection = connection()) {
                 assertThat(uniqueIndexColumns(connection)).contains(
@@ -205,7 +205,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V42는 계정 중복 데이터가 있으면 원본 데이터와 V36 유일 키를 보존한 채 실패한다")
+    @DisplayName("V44는 계정 중복 데이터가 있으면 원본 데이터와 V36 유일 키를 보존한 채 실패한다")
     void preservesV36DataAndConstraintWhenAccountWideMigrationFindsDuplicates() throws SQLException {
         try {
             Flyway v36 = flywayForTarget("36");
@@ -225,7 +225,7 @@ class WaitingMigrationTest {
 
             assertThatThrownBy(() -> flywayForTarget(null).migrate())
                     .isInstanceOf(FlywayException.class)
-                    .hasMessageContaining("V42__enforce_account_wide_active_waiting.sql");
+                    .hasMessageContaining("V44__enforce_account_wide_active_waiting.sql");
 
             try (Connection connection = connection()) {
                 assertThat(membershipCount(connection)).isEqualTo(2);
@@ -242,20 +242,20 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V43은 V42 예약 전환 중 행을 재작성 취소 삭제 없이 그대로 보존한다")
-    void preservesLegacyReservationConvertingRowWhenApplyingV43() throws SQLException {
+    @DisplayName("V45는 V44 예약 전환 중 행을 재작성 취소 삭제 없이 그대로 보존한다")
+    void preservesLegacyReservationConvertingRowWhenApplyingV45() throws SQLException {
         try {
-            Flyway v42 = flywayForTarget("42");
-            v42.clean();
-            v42.migrate();
+            Flyway v44 = flywayForTarget("44");
+            v44.clean();
+            v44.migrate();
             try (Connection connection = connection()) {
                 connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
                 insertLegacyReservationConvertingTeam(connection);
                 connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 1");
             }
 
-            Flyway v43 = flywayForTarget(null);
-            v43.migrate();
+            Flyway v45 = flywayForTarget(null);
+            v45.migrate();
 
             assertThat(queryStrings("""
                     SELECT CONCAT(
@@ -304,7 +304,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V43은 예약 전환 상태별 scalar 필드 조합과 시간 순서를 강제한다")
+    @DisplayName("V45는 예약 전환 상태별 scalar 필드 조합과 시간 순서를 강제한다")
     void enforcesReservationConversionFieldInvariants() throws SQLException {
         migrate();
         Instant createdAt = Instant.parse("2026-08-12T03:00:00Z");

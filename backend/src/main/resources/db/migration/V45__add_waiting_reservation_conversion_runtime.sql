@@ -1,4 +1,4 @@
--- Issue #272 V43: Waiting-owned payment-backed reservation conversion lifecycle.
+-- Issue #272 V45: Waiting-owned payment-backed reservation conversion lifecycle.
 ALTER TABLE waiting_teams
     ADD COLUMN reservation_converting_at DATETIME(6) NULL AFTER closed_by_store_at,
     ADD COLUMN waiting_payment_id VARCHAR(19) NULL AFTER reservation_converting_at,
