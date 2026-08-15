@@ -4,7 +4,9 @@
 
 - 검증 commit: 카카오 환경 연결 `c19c73fff960d247896a33abc8a3e97a0076703e`, 예약·알림 runtime `89e38fe0c26622785ad3bb465347687e3d825656`
 - 기록일: 2026-08-15
-- 실행 환경: local HTTPS proxy, ignored local fixture, 저장소 밖 합성 계정 자격증명과 카카오 Local REST API 키
+- 실행 환경: Windows 11 Pro 64-bit `10.0.26200`, Intel Core Ultra 9 275HX 24 physical/logical processors, RAM 31.43 GiB, local HTTPS proxy, ignored local fixture, 저장소 밖 합성 계정 자격증명과 카카오 Local REST API 키
+- container 자원 경계: local Compose에 CPU·memory limit을 별도로 두지 않아 Docker Desktop이 사용할 수 있는 host 자원을 공유했다. 이 결과를 다른 개발 PC나 staging 사양으로 환산하지 않는다.
+- 데이터 규모: 합성 계정 5개(auth 2, reservation 1, notification 2), 지오코딩 `VERIFIED` 공개 매장 1개, 서로 다른 예약 template 31개, 합성 알림 `DELIVERED` 6건(계정당 3건, page size 2)
 - 공개 매장은 저장소의 공개 매장 등록 API로 생성했고 지오코딩 `VERIFIED`와 주소 버전 `1`을 확인했다. 키, 좌표, 매장 ID와 응답 본문은 증거에 기록하지 않았다.
 
 ### 인증·매장 검색
@@ -12,36 +14,36 @@
 - smoke `local-auth-search-smoke-20260815-sync01`: `authRefresh` 1회와 실제 결과가 존재하는 `storeSearch` 1회가 통과했고 unexpected 4xx·5xx·dropped iteration은 모두 0이었다.
 - baseline 입력: `authRefresh,storeSearch`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`. 시나리오별로 1 VU와 1 iteration/s를 배분했다.
 
-| run ID | scenario | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| `local-auth-search-baseline-20260815-sync01` | authRefresh | 60 | 41.956 | 73.329 | 85.784 | 0 | 0 | 0 |
-| `local-auth-search-baseline-20260815-sync01` | storeSearch | 31 | 17.473 | 24.665 | 32.316 | 0 | 0 | 0 |
-| `local-auth-search-baseline-20260815-sync02` | authRefresh | 62 | 36.472 | 64.931 | 68.746 | 0 | 0 | 0 |
-| `local-auth-search-baseline-20260815-sync02` | storeSearch | 31 | 13.767 | 15.397 | 17.281 | 0 | 0 | 0 |
+| run ID | scenario | measured requests | actual RPS | p50 ms | p95 ms | p99 ms | expected 4xx | unexpected 4xx | 5xx | dropped iterations |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `local-auth-search-baseline-20260815-sync01` | authRefresh | 60 | 1.999055 | 41.956 | 73.329 | 85.784 | 0 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync01` | storeSearch | 31 | 1.032845 | 17.473 | 24.665 | 32.316 | 0 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | authRefresh | 62 | 2.061352 | 36.472 | 64.931 | 68.746 | 0 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | storeSearch | 31 | 1.030676 | 13.767 | 15.397 | 17.281 | 0 | 0 | 0 | 0 |
 
 ### 예약 생성
 
 - 공개 운영시간·예약 slot·시간 정책·빈 정기휴무 버전과 날짜별 capacity를 공개 API로 준비했다. smoke `local-reservation-smoke-20260815-sync03`은 1 request, p50·p95·p99 21.438 ms로 통과했다.
 - baseline 입력: `reservationCreate`, `MAX_VUS=1`, `ARRIVAL_RATE=1`, `DURATION_SECONDS=30`. 서로 다른 날짜의 template 30개와 executor 경계용 guard template 1개를 사용했다.
 
-| run ID | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `local-reservation-baseline-20260815-sync02` | 31 | 21.640 | 26.115 | 56.316 | 0 | 0 | 0 |
-| `local-reservation-baseline-20260815-sync03` | 30 | 20.883 | 24.926 | 27.601 | 0 | 0 | 0 |
+| run ID | measured requests | actual RPS | p50 ms | p95 ms | p99 ms | expected 4xx | unexpected 4xx | 5xx | dropped iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `local-reservation-baseline-20260815-sync02` | 31 | 1.029766 | 21.640 | 26.115 | 56.316 | 0 | 0 | 0 | 0 |
+| `local-reservation-baseline-20260815-sync03` | 30 | 0.997591 | 20.883 | 24.926 | 27.601 | 0 | 0 | 0 | 0 |
 
-첫 실행 `local-reservation-baseline-20260815-sync01`은 설정 검증이 요구한 30개 template보다 executor가 경계 iteration을 하나 더 예약해 31번째 template 부재로 threshold가 실패했으므로 기준선에서 제외했다. 현재 validation의 `ARRIVAL_RATE × DURATION_SECONDS` 계산과 실제 constant-arrival-rate 예약 수가 경계에서 다를 수 있어 guard template을 사용했으며, `performance/k6/main.js` 수정은 #285 허용 범위 밖이므로 후속 소유 Issue가 필요하다.
+첫 실행 `local-reservation-baseline-20260815-sync01`은 설정 검증이 요구한 30개 template보다 executor가 경계 iteration을 하나 더 예약해 31번째 template 부재로 threshold가 실패했으므로 기준선에서 제외했다. 현재 validation의 `ARRIVAL_RATE × DURATION_SECONDS` 계산과 실제 constant-arrival-rate 예약 수가 경계에서 다를 수 있어 guard template을 사용했으며, harness 계약 보강은 [#358](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/358)로 분리했다.
 
 ### 알림 이력
 
 - 합성 소비자 두 계정에 공개 예약 API로 확정 이벤트를 각각 3건 만들었다. smoke `local-notification-smoke-20260815-sync02`는 계정별 두 페이지, 총 4 requests를 검증했고 p50 4.637 ms, p95 9.879 ms, p99 10.554 ms로 통과했다.
 - baseline 입력: `notificationHistory`, `MAX_VUS=2`, `ARRIVAL_RATE=2`, `DURATION_SECONDS=30`. 한 iteration이 두 페이지를 읽으므로 measured requests는 iteration 수의 두 배다.
 
-| run ID | measured requests | p50 ms | p95 ms | p99 ms | unexpected 4xx | 5xx | dropped iterations |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `local-notification-baseline-20260815-sync01` | 120 | 4.596 | 6.006 | 6.168 | 0 | 0 | 0 |
-| `local-notification-baseline-20260815-sync02` | 122 | 4.757 | 6.138 | 7.647 | 0 | 0 | 0 |
+| run ID | measured requests | actual RPS | p50 ms | p95 ms | p99 ms | expected 4xx | unexpected 4xx | 5xx | dropped iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `local-notification-baseline-20260815-sync01` | 120 | 3.982300 | 4.596 | 6.006 | 6.168 | 0 | 0 | 0 | 0 |
+| `local-notification-baseline-20260815-sync02` | 122 | 4.047441 | 4.757 | 6.138 | 7.647 | 0 | 0 | 0 | 0 |
 
-기본 local Compose는 알림 history cursor만 구성하고 worker는 비활성화한다. 또한 기본 JDBC 세션의 `NOW()`보다 예약 알림 `scheduled_at`이 약 9시간 뒤로 기록되어 작업이 `PENDING`에 머무는 것을 관찰했다. 저장소를 변경하지 않고 일회성 worker의 JDBC session timezone만 `Asia/Seoul`로 강제했을 때 해당 6건이 `DELIVERED`로 수렴하고 smoke·baseline이 통과했다. 따라서 수치는 알림 조회 API 기준선으로만 사용하며, 기본 worker 구성과 예약 이벤트 시각 변환은 별도 소유 Issue에서 해결해야 한다.
+기본 local Compose는 알림 history cursor만 구성하고 worker는 비활성화한다. 또한 기본 JDBC 세션의 `NOW()`보다 예약 알림 `scheduled_at`이 약 9시간 뒤로 기록되어 작업이 `PENDING`에 머무는 것을 관찰했다. 저장소를 변경하지 않고 일회성 worker의 JDBC session timezone만 `Asia/Seoul`로 강제했을 때 해당 6건이 `DELIVERED`로 수렴하고 smoke·baseline이 통과했다. 따라서 수치는 알림 조회 API 기준선으로만 사용하며, 기본 worker 구성과 예약 이벤트 시각 변환은 [#359](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/359)에서 해결한다.
 
 네 시나리오의 두 baseline은 각자 동일 smoke 증거와 fixture fingerprint를 사용해 threshold를 통과했고 expected/unexpected 4xx·5xx·dropped iteration은 모두 0이었다. 모든 예약 fixture는 실행 후 공개 취소 API로 정리했다. 이 local 결과만으로 #286의 SQL 병목이나 실서비스 SLO를 주장하지 않는다.
 
@@ -66,21 +68,21 @@
 
 | 구간 | 상태 | 관찰 결과 |
 |---|---|---|
-| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 21, 공통 계약 27, scenario 27, smoke proof 8, summary 6 checks가 모두 성공했다. |
+| k6 계약 테스트 | PASS | 고정 k6 이미지에서 config 23, 공통 계약 27, runtime options 2, scenario 34, smoke proof 8, summary 6 — 총 100 checks가 성공했다. |
 | k6 계약 CI workflow | PASS | `rhysd/actionlint:1.7.7`이 path-filtered workflow를 오류 없이 검증했으며 workflow는 `--network none`으로 외부·local API 접근을 차단한 고정 k6 이미지에서 계약 테스트만 실행한다. |
 | k6 smoke profile inspect | PASS | 인증 1 iteration, 검색 1, 예약 1, 알림은 명시한 2개 합성 계정에 대해 2 iterations로 해석됐다. |
 | k6 local-baseline profile inspect | PASS | 동일 target·commit·fixture의 smoke artifact를 전달했을 때 `storeSearch`, 1 VU·1 arrival/s·10초가 하나의 constant-arrival-rate executor로 해석됐다. commit이 다른 artifact는 init context에서 요청 전에 거부됐다. |
 | k6 Secure cookie TLS probe | PASS | 고정 k6 이미지의 실제 VU cookie jar가 Caddy 내부 TLS를 거쳐 mock login의 `Secure` refresh cookie를 다음 refresh 요청에 재전송했다. |
-| k6 mock runtime summary | NOT RUN | 응답 검증과 summary schema가 변경된 현재 script commit에서는 네트워크 mock을 반복하지 않았다. summary 입력·비식별 출력은 고정 k6 계약 테스트로 검증했고 실제 backend smoke는 계속 `NOT CONFIGURED`다. |
+| k6 mock runtime summary | NOT RUN | 응답 검증과 summary schema가 변경된 현재 script commit에서는 네트워크 mock을 반복하지 않았다. summary 입력·비식별 출력은 고정 k6 계약 테스트로 검증했고 실제 backend smoke·baseline은 아래 별도 실행에서 검증했다. |
 | Local Compose 합성 | PASS | load-test override 사용 시 `mysql`, `valkey`, `backend`, `loadtest-proxy`, `loadtest`; 기본 Compose 단독 사용 시 기존 `mysql`, `backend`만 존재했다. |
 | Backend 단위 테스트 | PASS | 최종 브랜치 상태에서 backend 작업 디렉터리의 `.\gradlew.bat test`가 exit 0이었다. |
 | Backend assemble | PASS | `.\gradlew.bat assemble`이 compile·bootJar·jar를 포함해 exit 0이었다. |
 | Backend 통합 테스트 | FAIL | 전체 task와 shard A가 Testcontainers JDBC readiness/context 전환 중 각각 15분·10분 안에 종료되지 않았다. |
 | Backend build | NOT RUN | `build`가 실패한 통합 gate에 의존하므로 동일 장시간 실행을 반복하지 않았다. PR의 공식 A~D CI shard 성공이 필요하다. |
-| Local smoke·baseline | NOT CONFIGURED | ignored `performance/k6/fixtures/test-data.local.json`과 `deploy/local/.env`가 없어 요청을 보내지 않았다. |
-| Staging smoke·baseline | NOT CONFIGURED | 승인된 시간·부하 상한·합성 fixture·배포 SHA·smoke run ID와 저장소에서 리뷰한 staging hostname allowlist가 없어 요청을 보내지 않았다. |
+| Local smoke·baseline | PASS | ignored fixture와 저장소 밖 자격증명을 사용해 네 시나리오 smoke와 baseline 2회를 실행했고 모든 threshold가 통과했다. actual RPS·지연·오류는 환경별 결과 표에 기록했다. |
+| Staging smoke·baseline | NOT CONFIGURED | 승인된 시간·부하 상한·합성 fixture·배포 SHA·smoke run ID와 저장소에서 리뷰한 staging hostname allowlist가 없어 요청을 보내지 않았다. 후속 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)이 소유한다. |
 
-`NOT CONFIGURED`는 성공이 아니다. 시나리오별로 격리한 실제 합성 계정, 서로 충돌하지 않는 예약 template, 계정별 2페이지 이상의 공개 `IN_APP` 전달 완료 알림이 준비되기 전에는 local 또는 staging 지연시간·처리량을 추정하지 않는다.
+staging의 `NOT CONFIGURED`는 성공이 아니다. local 결과는 위 비식별 fixture 규모와 실행 artifact에서 관찰한 값이며 staging 지연시간·처리량으로 추정하지 않는다.
 
 ## 실행 환경
 
@@ -92,7 +94,8 @@
 | k6 image digest | `sha256:65c920dc067d5e2e00befbf982af6ad6ad0117034e8b1c65817c7975c52d4669` |
 | Caddy image | `caddy:2.10.2-alpine` |
 | Caddy image digest | `sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d` |
-| Local DB·Valkey·backend runtime | 실행하지 않음 |
+| Host | Windows 11 Pro 64-bit `10.0.26200`, Intel Core Ultra 9 275HX, 24 physical/logical processors, RAM 31.43 GiB |
+| Local DB·Valkey·backend runtime | `mysql`, `valkey`, `backend`, `loadtest-proxy` container 실행; Compose CPU·memory limit 미설정 |
 | Staging runtime·인스턴스 사양 | 확인되지 않음 |
 
 ## 실제 명령과 결과
@@ -180,6 +183,44 @@ docker compose --env-file deploy/local/.env.example `
 
 첫 명령은 `mysql`, `valkey`, `backend`, `loadtest-proxy`, `loadtest`, 두 번째 명령은 `mysql`, `backend`를 출력했다. Valkey command도 Compose 렌더 뒤 `$${MIRIYUM_VALKEY_PASSWORD}` 참조를 유지해 예시 password 값을 command 문자열에 펼치지 않았다. `loadtest-proxy`는 내부 CA로 발급한 로컬 HTTPS 인증서를 사용해 backend의 `Secure` refresh cookie를 그대로 왕복시키며, backend health와 proxy TLS listener가 준비된 뒤에만 k6가 시작된다.
 
+### Local smoke·baseline
+
+실제 실행은 아래 Compose 명령에 표의 비식별 입력을 대입했다. `$credentialFile`의 저장소 밖 실제 경로, 계정 원문과 카카오 키는 기록하지 않는다.
+
+```powershell
+docker compose --env-file deploy/local/.env `
+  -f deploy/local/docker-compose.dev.yml `
+  -f deploy/local/docker-compose.loadtest.yml `
+  --profile loadtest run --rm --env-from-file $credentialFile loadtest run `
+  -e TARGET_ENV=local `
+  -e BASE_URL=https://loadtest-proxy:8443 `
+  -e ALLOWED_HOSTS=loadtest-proxy `
+  -e PROFILE=$profile `
+  -e LOCAL_SMOKE_RUN_ID=$smokeRunId `
+  -e SMOKE_PROOF_PATH=/results/$smokeRunId.json `
+  -e SCENARIOS=$scenarios `
+  -e MAX_VUS=$maxVus `
+  -e DURATION_SECONDS=$durationSeconds `
+  -e ARRIVAL_RATE=$arrivalRate `
+  -e FIXTURE_PATH=/scripts/fixtures/test-data.local.json `
+  -e RUN_ID=$runId `
+  -e COMMIT_SHA=$commitSha `
+  /scripts/main.js
+```
+
+smoke에서는 `PROFILE=smoke`를 사용하고 `LOCAL_SMOKE_RUN_ID`와 `SMOKE_PROOF_PATH`를 전달하지 않았다. baseline에 사용한 실제 입력과 결과 artifact는 다음과 같다.
+
+| baseline run ID | prerequisite smoke run ID | commit SHA | scenarios | max VUs | arrival rate(iteration/s) | duration seconds | artifact |
+|---|---|---|---|---:|---:|---:|---|
+| `local-auth-search-baseline-20260815-sync01` | `local-auth-search-smoke-20260815-sync01` | `c19c73fff960d247896a33abc8a3e97a0076703e` | `authRefresh,storeSearch` | 2 | 2 | 30 | ignored JSON·Markdown summary |
+| `local-auth-search-baseline-20260815-sync02` | `local-auth-search-smoke-20260815-sync01` | `c19c73fff960d247896a33abc8a3e97a0076703e` | `authRefresh,storeSearch` | 2 | 2 | 30 | ignored JSON·Markdown summary |
+| `local-reservation-baseline-20260815-sync02` | `local-reservation-smoke-20260815-sync03` | `89e38fe0c26622785ad3bb465347687e3d825656` | `reservationCreate` | 1 | 1 | 30 | ignored JSON·Markdown summary |
+| `local-reservation-baseline-20260815-sync03` | `local-reservation-smoke-20260815-sync03` | `89e38fe0c26622785ad3bb465347687e3d825656` | `reservationCreate` | 1 | 1 | 30 | ignored JSON·Markdown summary |
+| `local-notification-baseline-20260815-sync01` | `local-notification-smoke-20260815-sync02` | `89e38fe0c26622785ad3bb465347687e3d825656` | `notificationHistory` | 2 | 2 | 30 | ignored JSON·Markdown summary |
+| `local-notification-baseline-20260815-sync02` | `local-notification-smoke-20260815-sync02` | `89e38fe0c26622785ad3bb465347687e3d825656` | `notificationHistory` | 2 | 2 | 30 | ignored JSON·Markdown summary |
+
+각 baseline JSON의 `schemaVersion`, target·commit·fixture fingerprint, threshold 성공과 scenario별 `httpRequests.rate`를 대조했다. 위 actual RPS는 측정 request rate이며 iteration/s 입력과 구분한다. `authRefresh`는 iteration마다 login·refresh 두 요청, `notificationHistory`는 두 페이지 요청을 측정하므로 actual RPS가 iteration arrival rate보다 크다.
+
 ### Backend 회귀
 
 ```powershell
@@ -197,29 +238,34 @@ Pop-Location
 
 ### Local
 
-| scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| authRefresh | NOT CONFIGURED | — | — | — | — | — | — | — |
-| storeSearch | NOT CONFIGURED | — | — | — | — | — | — | — |
-| reservationCreate | NOT CONFIGURED | — | — | — | — | — | — | — |
-| notificationHistory | NOT CONFIGURED | — | — | — | — | — | — | — |
+| run ID | scenario | 입력 | p50 ms | p95 ms | p99 ms | actual RPS | expected 4xx | unexpected 4xx | 5xx |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `local-auth-search-baseline-20260815-sync01` | authRefresh | 1 VU·1 iter/s·30s 배분 | 41.956 | 73.329 | 85.784 | 1.999055 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | authRefresh | 1 VU·1 iter/s·30s 배분 | 36.472 | 64.931 | 68.746 | 2.061352 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync01` | storeSearch | 1 VU·1 iter/s·30s 배분 | 17.473 | 24.665 | 32.316 | 1.032845 | 0 | 0 | 0 |
+| `local-auth-search-baseline-20260815-sync02` | storeSearch | 1 VU·1 iter/s·30s 배분 | 13.767 | 15.397 | 17.281 | 1.030676 | 0 | 0 | 0 |
+| `local-reservation-baseline-20260815-sync02` | reservationCreate | 1 VU·1 iter/s·30s | 21.640 | 26.115 | 56.316 | 1.029766 | 0 | 0 | 0 |
+| `local-reservation-baseline-20260815-sync03` | reservationCreate | 1 VU·1 iter/s·30s | 20.883 | 24.926 | 27.601 | 0.997591 | 0 | 0 | 0 |
+| `local-notification-baseline-20260815-sync01` | notificationHistory | 2 VU·2 iter/s·30s | 4.596 | 6.006 | 6.168 | 3.982300 | 0 | 0 | 0 |
+| `local-notification-baseline-20260815-sync02` | notificationHistory | 2 VU·2 iter/s·30s | 4.757 | 6.138 | 7.647 | 4.047441 | 0 | 0 | 0 |
 
 ### Staging
 
 | scenario | 입력 | p50 | p95 | p99 | RPS | expected 4xx | unexpected 4xx | 5xx |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| authRefresh | NOT CONFIGURED | — | — | — | — | — | — | — |
-| storeSearch | NOT CONFIGURED | — | — | — | — | — | — | — |
-| reservationCreate | NOT CONFIGURED | — | — | — | — | — | — | — |
-| notificationHistory | NOT CONFIGURED | — | — | — | — | — | — | — |
+| authRefresh | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
+| storeSearch | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
+| reservationCreate | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
+| notificationHistory | NOT CONFIGURED — #357 | — | — | — | — | — | — | — |
 
 ## 위험과 다음 실행 gate
 
-- local fixture가 없으므로 실제 API 계약, DB 상태와 Valkey·cursor 연결은 아직 검증되지 않았다.
+- local fixture와 실제 키는 계속 Git에서 제외하며, 이번 실행의 비식별 규모·fingerprint·요약만 문서화했다. fixture 원문이나 실행 자격증명을 commit하지 않는다.
 - 로컬 backend integration task가 Testcontainers readiness/context 종료에서 시간 초과됐다. 현재 변경과 독립적인 환경·suite 종료 문제지만 CI A~D shard가 성공하기 전에는 회귀 검증이 완료되지 않는다.
+- staging EC2 Compose에는 현재 지오코딩 키 전달이 없지만 production ECS secret contract에는 기존 `MIRIYUM_KAKAO_LOCAL_REST_API_KEY`가 이미 연결되어 있다. 운영 전체 미배선으로 일반화하지 않고 범용 이름 전환과 staging 배선은 [#356](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/356)이 소유한다.
 - 공유 staging의 동시 트래픽과 데이터 상태는 측정 noise가 될 수 있다. 승인 시간과 실행 전후 CloudWatch 구간을 함께 기록해야 한다.
 - staging host는 호출자가 함께 넘기는 allowlist만 신뢰하지 않는다. 저장소의 신뢰 allowlist에 승인 hostname이 리뷰되어 들어오기 전까지 모든 staging 실행을 차단한다.
-- 예약 baseline은 배분된 `ARRIVAL_RATE × DURATION_SECONDS` 수만큼 충돌하지 않는 template을 소모한다. 반복 사용으로 예상 409 비율을 왜곡하지 않는다.
+- 예약 baseline은 배분된 `ARRIVAL_RATE × DURATION_SECONDS`와 executor 경계 guard를 포함한 충돌하지 않는 template을 소모한다. 반복 사용으로 예상 409 비율을 왜곡하지 않으며 공식 보강은 #358이 소유한다.
 - 인증은 IP rate limit을 의도된 429로 분리한다. 알림·예약 setup은 fixture에서 실제로 쓰는 계정만 로그인한다.
 - 로컬 k6 요청은 전용 HTTPS proxy를 통해서만 보내고, 내부 CA 인증서 검증 완화는 `TARGET_ENV=local`에만 적용한다. backend의 refresh cookie 보안 속성은 낮추지 않는다.
 - 혼합 프로필의 인증 refresh 계정, 예약 계정, 알림 이력 계정은 서로 격리하며 알림 조회는 fixture가 약속한 두 번째 페이지가 실제로 없으면 계약 실패로 처리한다.
@@ -233,8 +279,13 @@ Pop-Location
 - setup bearer의 15분 수명보다 짧게 끝내기 위해 duration을 최대 600초로 제한했다. 더 긴 시험은 token 회전 계약을 별도 설계한 뒤 수행한다.
 - raw HTTP output, Token, cookie, cursor, 알림 제목과 자원 ID는 증거로 보관하지 않는다.
 
-다음 실행은 `performance/k6/README.md`의 local smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 local baseline 구성이 거부된다. staging은 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, 저장소에서 리뷰한 trusted hostname, `STAGING_APPROVED=true`, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 실행한다.
+다음 local 실행은 `performance/k6/README.md`의 smoke 순서를 따르며, 성공한 `LOCAL_SMOKE_RUN_ID`와 그 run이 생성한 검증 가능한 JSON artifact 없이는 baseline 구성이 거부된다. staging 실행은 [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357)에서 배포 full SHA, 합성 fixture, 공지 시간, 부하 상한, 저장소에서 리뷰한 trusted hostname, `STAGING_APPROVED=true`, 성공한 `STAGING_SMOKE_RUN_ID`와 동일 실행 artifact가 모두 있을 때만 수행한다.
 
 ## 후속 이슈 연결
+
+- [#356](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/356): 지오코딩 키의 범용 환경변수 전환과 staging backend 배선
+- [#357](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/357): 승인된 staging 핵심 API k6 smoke·기준선
+- [#358](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/358): 예약 `constant-arrival-rate` template 경계 계약
+- [#359](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/359): Notification worker 시간대·기본 활성화 계약
 
 현재 SQL 실행 시간, rows examined 또는 실행 계획 증거가 없으므로 [#286](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/286)에 병목을 주장하거나 인덱스 변경을 제안하지 않는다. 실제 local/staging 결과에서 쿼리 병목이 관찰된 경우에만 환경·commit·scenario·부하 입력과 함께 #286으로 연결하고, 다른 병목은 소유 도메인 Issue로 분리한다.
