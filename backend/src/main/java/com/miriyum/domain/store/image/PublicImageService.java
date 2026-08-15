@@ -133,7 +133,7 @@ public class PublicImageService {
         idempotencyExecutor.execute(command(operatorAccountId, "STORE_IMAGE_DELETE", idempotencyKey,
                 "storeId=" + storeId + "|imageId=" + imageId), () -> {
             requireLockedStoreOwnership(operatorAccountId, storeId);
-            findConfirmedImage(imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE)
+            findDeletableImage(imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE)
                     .ifPresent(this::deleteAfterReplacement);
             return success(HttpStatus.NO_CONTENT, null, null, null);
         });
@@ -202,12 +202,16 @@ public class PublicImageService {
     }
 
     private void deleteAfterReplacement(FileStorageMetadata metadata) {
+        deleteAfterReplacement(metadata.fileId());
+    }
+
+    private void deleteAfterReplacement(UUID imageId) {
         FileStorageFacade facade = fileStorageFacadeProvider.getIfAvailable();
         if (facade == null) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
         try {
-            facade.delete(metadata, clock.instant());
+            facade.delete(imageId, clock.instant());
         } catch (RuntimeException exception) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
@@ -235,6 +239,19 @@ public class PublicImageService {
                         && metadata.getPurpose() == purpose
                         && metadata.getVisibility() == FileStorageVisibility.PUBLIC
                         && metadata.getStorageStatus() == FileStorageStatus.CONFIRMED)
+                .map(FileMetadata::toPublicMetadata);
+    }
+
+    private java.util.Optional<FileStorageMetadata> findDeletableImage(
+            UUID imageId, String ownerType, long ownerId, FileStoragePurpose purpose
+    ) {
+        return fileMetadataRepository.findById(imageId.toString())
+                .filter(metadata -> metadata.getOwnerType().equals(ownerType)
+                        && metadata.getOwnerId() == ownerId
+                        && metadata.getPurpose() == purpose
+                        && metadata.getVisibility() == FileStorageVisibility.PUBLIC
+                        && (metadata.getStorageStatus() == FileStorageStatus.CONFIRMED
+                        || metadata.getStorageStatus() == FileStorageStatus.DELETED))
                 .map(FileMetadata::toPublicMetadata);
     }
 
