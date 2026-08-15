@@ -41,6 +41,14 @@ aws logs put-metric-filter \
 aws logs put-metric-filter \
   --region "$AWS_REGION" \
   --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-risk-event-marker-long-stay \
+  --filter-pattern '"event=refresh_token_risk_event_marker_long_stay"' \
+  --metric-transformations \
+    "metricName=RefreshTokenRiskEventMarkerLongStay,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
   --filter-name miriyum-staging-refresh-risk-event-pending-count \
   --filter-pattern '[..., marker = refresh_token_risk_event_pending_count, label = pending_count, pending_count]' \
   --metric-transformations \
@@ -53,6 +61,14 @@ aws logs put-metric-filter \
   --filter-pattern '"event=refresh_token_risk_event_marker_malformed"' \
   --metric-transformations \
     "metricName=RefreshTokenRiskEventMarkerMalformed,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
+
+aws logs put-metric-filter \
+  --region "$AWS_REGION" \
+  --log-group-name "$LOG_GROUP_NAME" \
+  --filter-name miriyum-staging-refresh-token-absolute-lifetime-cap-applied \
+  --filter-pattern '"event=refresh_token_absolute_lifetime_cap_applied"' \
+  --metric-transformations \
+    "metricName=RefreshTokenAbsoluteLifetimeCapApplied,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0"
 
 aws logs put-metric-filter \
   --region "$AWS_REGION" \
@@ -169,6 +185,15 @@ put_alarm "miriyum-staging-refresh-risk-event-delivery-stalled" \
   --threshold 0 \
   --comparison-operator GreaterThanThreshold
 
+put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay" \
+  --namespace "$NAMESPACE" \
+  --metric-name RefreshTokenRiskEventMarkerLongStay \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
 put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
   --namespace "$NAMESPACE" \
   --metric-name ReservationHoldReconciliationStalled \
@@ -268,6 +293,23 @@ dashboard_body=$(cat <<EOF
           ["MiriYum/Staging", "RefreshTokenRiskEventMarkerMalformed"],
           [".", "RefreshTokenRiskEventMarkerQuarantineFailed"],
           [".", "RefreshTokenRiskEventStaleIndexCleanupFailed"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum refresh risk marker long-stay signal",
+        "period": 300,
+        "stat": "Sum",
+        "metrics": [
+          ["MiriYum/Staging", "RefreshTokenRiskEventMarkerLongStay"]
         ]
       }
     }

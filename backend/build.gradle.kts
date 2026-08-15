@@ -26,6 +26,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
+    implementation("software.amazon.awssdk:s3:2.33.4")
     implementation("com.ibm.icu:icu4j:78.3")
     runtimeOnly("org.flywaydb:flyway-mysql")
     runtimeOnly("com.mysql:mysql-connector-j")

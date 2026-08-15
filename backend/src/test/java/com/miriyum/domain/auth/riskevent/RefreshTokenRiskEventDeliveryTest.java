@@ -86,6 +86,25 @@ class RefreshTokenRiskEventDeliveryTest {
     }
 
     @Test
+    @DisplayName("1시간 이상 전달되지 않은 marker는 민감값 없이 장기 정체 건수만 로그에 남긴다")
+    void logsLongStayMarkerCountWithoutSensitiveIdentifiers() {
+        PendingRefreshTokenRiskEvent longStayedEvent = event(Instant.now().minusSeconds(3_601));
+        given(markerStore.findPendingEvents()).willReturn(List.of(longStayedEvent));
+        given(markerStore.pendingEventCount()).willReturn(1L);
+        given(markerStore.deleteIfUnchanged(
+                longStayedEvent.eventKey(), longStayedEvent.occurrenceCount())).willReturn(true);
+
+        delivery.deliverPendingEvents();
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .contains("event=refresh_token_risk_event_marker_long_stay long_stay_count=1")
+                .noneMatch(message -> message.contains(longStayedEvent.familyId()))
+                .noneMatch(message -> message.contains(longStayedEvent.tokenHash()))
+                .noneMatch(message -> message.contains(longStayedEvent.accountId().toString()));
+    }
+
+    @Test
     @DisplayName("pending marker 수 관측이 실패해도 이미 조회한 위험 사건은 전달한다")
     void deliversEventsWhenPendingMarkerCountObservationFails() {
         PendingRefreshTokenRiskEvent event = event();
@@ -203,6 +222,10 @@ class RefreshTokenRiskEventDeliveryTest {
     }
 
     private PendingRefreshTokenRiskEvent event() {
+        return event(Instant.now());
+    }
+
+    private PendingRefreshTokenRiskEvent event(Instant occurredAt) {
         return new PendingRefreshTokenRiskEvent(
                 "auth:risk:pending:consumer:family-1:"
                         + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -213,8 +236,8 @@ class RefreshTokenRiskEventDeliveryTest {
                 "REUSED_ROTATED_TOKEN",
                 "ROTATION",
                 "AUTH-012-v1",
-                Instant.parse("2026-08-10T00:00:00Z"),
+                occurredAt,
                 1L,
-                Instant.parse("2026-08-10T00:00:00Z"));
+                occurredAt);
     }
 }

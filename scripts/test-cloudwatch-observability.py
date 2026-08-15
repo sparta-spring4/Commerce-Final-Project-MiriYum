@@ -168,7 +168,15 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             self.assertIn(metric, self.resource_script)
         self.assertIn("MiriYum refresh risk marker integrity failures", self.resource_script)
 
-    def test_resource_script_preserves_pending_count_field_reference_for_cloudwatch(self):
+    def test_refresh_token_absolute_lifetime_cap_is_observable(self):
+        self.assertIn(
+            "miriyum-staging-refresh-token-absolute-lifetime-cap-applied",
+            self.resource_script,
+        )
+        self.assertIn("RefreshTokenAbsoluteLifetimeCapApplied", self.resource_script)
+        self.assertIn("refresh_token_absolute_lifetime_cap_applied", self.resource_script)
+
+    def test_resource_script_emits_pending_count_and_long_stay_metric_filters(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory)
             bin_path = temporary_path / "bin"
@@ -214,6 +222,16 @@ esac
                 captured_arguments,
             )
             self.assertIn("metricValue=$pending_count", captured_arguments)
+            self.assertIn(
+                "miriyum-staging-refresh-risk-event-marker-long-stay\n"
+                "--filter-pattern\n"
+                '"event=refresh_token_risk_event_marker_long_stay"\n'
+                "--metric-transformations\n"
+                "metricName=RefreshTokenRiskEventMarkerLongStay,"
+                "metricNamespace=MiriYum/Staging,metricValue=1,defaultValue=0",
+                captured_arguments,
+            )
+            self.assertNotIn("metricValue=$long_stay_count", captured_arguments)
 
     def test_staging_can_disable_reservation_hold_expiration_through_env_file(self):
         staging_environment = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").replace(
@@ -862,6 +880,24 @@ main
         )
         alarm = self.resource_script[start:]
         self.assertIn("--metric-name RefreshTokenRiskEventDeliveryStalled", alarm)
+        self.assertIn("--statistic Sum", alarm)
+        self.assertIn("--threshold 0", alarm)
+        self.assertIn("--comparison-operator GreaterThanThreshold", alarm)
+
+    def test_refresh_risk_marker_long_stay_log_becomes_a_cloudwatch_metric_and_alarm(self):
+        self.assertIn(
+            'refresh_token_risk_event_marker_long_stay',
+            self.resource_script,
+        )
+        self.assertIn(
+            'metricName=RefreshTokenRiskEventMarkerLongStay',
+            self.resource_script,
+        )
+        start = self.resource_script.index(
+            'put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay"'
+        )
+        alarm = self.resource_script[start:]
+        self.assertIn("--metric-name RefreshTokenRiskEventMarkerLongStay", alarm)
         self.assertIn("--statistic Sum", alarm)
         self.assertIn("--threshold 0", alarm)
         self.assertIn("--comparison-operator GreaterThanThreshold", alarm)

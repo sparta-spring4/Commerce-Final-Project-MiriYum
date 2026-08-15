@@ -6,7 +6,7 @@
 > 협업 검토: 3번 팀원 — 예약 가용성, 4번 팀원 — 메뉴 수량 가용성
 > 관련 정책 ID: STORE-002~STORE-007, STORE-014, OPER-002~OPER-010, S-005, S-007, E-002, C-001~C-013
 > OpenAPI: `docs/specs/store-search/openapi.yaml`
-> 최종 승인일: 2026-07-31
+> 최종 승인일: 2026-08-14
 
 ## 범위
 
@@ -236,6 +236,12 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 - `HIDDEN`, `PAUSED`, `RETIRED`, 현재 게시 버전 없음은 대표 목록에서 자동 해제한다. 안전한 숨김·중지·종료 명령은 최소 개수 때문에 거부하지 않으며 3개 미만이면 설정을 `REQUIRES_ATTENTION`으로 표시한다.
 - 공개 상세의 기존 `representativeMenus`는 설정 순서로 현재 공개 가능한 항목만 반환한다. 별도 `popularMenus` 필드를 만들지 않는다.
 - Payment·Reservation이 예약금 계산에 사용할 때는 Store/Menu 소유 공개 Service·DTO로 setting version과 순서·게시 version·기본 가격을 읽고 Entity·Repository를 직접 참조하지 않는다.
+
+## 예약금 현재 설정
+
+- Store는 매장별 1:1 현재 예약금 설정의 영속 원본을 소유한다. 행 없음은 비율과 revision도 없는 `UNCONFIGURED`, 행 존재와 `enabled=false`는 `DISABLED`, 행 존재와 `enabled=true`는 `ENABLED`다. 두 행 존재 상태는 모두 10~30 정수 비율과 양수 `policyVersion`을 가진다.
+- 최초 설정은 `policyVersion=1`, 기술적 낙관적 잠금 토큰 `lockVersion=0`으로 시작한다. 실제 `enabled` 또는 비율 변경만 `policyVersion`을 증가시키고, 동일 값 저장은 완전한 no-op이며 비활성화해도 마지막 비율을 보존한다. `lockVersion`은 공개 계약에 노출하지 않는다.
+- Store의 `enabled`는 설정 의도다. Store는 Menu를 조회하지 않으며, #238이 Store 공개 조회와 대표 메뉴 snapshot을 결합해 예약 시점 적용 가능 여부와 금액을 계산한다. 유효 대표 메뉴가 0개면 계산 불가로 명시하고 결제 불필요로 대체하지 않는다.
 
 ## 권한
 

@@ -3,6 +3,7 @@ package com.miriyum.domain.auth.riskevent;
 import com.miriyum.domain.auth.refreshtoken.PendingRefreshTokenRiskEvent;
 import com.miriyum.domain.auth.refreshtoken.ValkeyRefreshTokenRiskEventMarkerStore;
 import com.miriyum.global.exception.ServiceException;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
 public class RefreshTokenRiskEventDelivery {
 
     private static final Logger log = LoggerFactory.getLogger(RefreshTokenRiskEventDelivery.class);
+    private static final long MARKER_LONG_STAY_THRESHOLD_SECONDS = 3_600L;
 
     private final ValkeyRefreshTokenRiskEventMarkerStore markerStore;
     private final AuthRiskEventStore authRiskEventStore;
@@ -39,7 +41,10 @@ public class RefreshTokenRiskEventDelivery {
         this.alertThreshold = Math.max(1, alertThreshold);
     }
 
-    @Scheduled(fixedDelayString = "${miriyum.auth.refresh-risk-event-delivery-delay-ms:30000}")
+    @Scheduled(
+            fixedDelayString = "${miriyum.auth.refresh-risk-event-delivery-delay-ms:30000}",
+            scheduler = "refreshTokenRiskEventTaskScheduler"
+    )
     public void deliverPendingEventsOnSchedule() {
         deliverPendingEvents();
     }
@@ -53,6 +58,7 @@ public class RefreshTokenRiskEventDelivery {
             return 0;
         }
         logPendingEventCount();
+        logLongStayMarkerCount(events);
 
         int delivered = 0;
         String failureStage = null;
@@ -87,6 +93,16 @@ public class RefreshTokenRiskEventDelivery {
         } catch (DataAccessException | ServiceException exception) {
             // 전달 성공 여부와 분리된 관측 실패는 marker 전달을 중단시키지 않는다.
             log.warn("event=refresh_token_risk_event_pending_count_observation_failed");
+        }
+    }
+
+    private void logLongStayMarkerCount(List<PendingRefreshTokenRiskEvent> events) {
+        Instant threshold = Instant.now().minusSeconds(MARKER_LONG_STAY_THRESHOLD_SECONDS);
+        long longStayCount = events.stream()
+                .filter(event -> !event.occurredAt().isAfter(threshold))
+                .count();
+        if (longStayCount > 0) {
+            log.warn("event=refresh_token_risk_event_marker_long_stay long_stay_count={}", longStayCount);
         }
     }
 
