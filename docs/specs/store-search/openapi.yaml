@@ -273,7 +273,7 @@ paths:
       tags: [Store Public Image]
       summary: 공개 이미지 원본 조회
       description: >-
-        CONFIRMED 상태의 PUBLIC 매장·메뉴 이미지만 반환한다. S3 객체 키·버킷 URL·체크섬·원본 파일명은 응답에 포함하지 않는다.
+        CONFIRMED 상태의 PUBLIC 이미지만 반환한다. S3 객체 키·버킷 URL·체크섬·원본 파일명은 응답에 포함하지 않는다.
       operationId: getPublicImageFile
       parameters:
         - $ref: "#/components/parameters/ImageId"
@@ -951,94 +951,6 @@ paths:
           $ref: "#/components/responses/MenuNotFound"
         "409":
           $ref: "#/components/responses/MenuStateConflict"
-  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/image:
-    get:
-      tags: [Store Public Image]
-      summary: 메뉴 대표 이미지 조회
-      operationId: getManagedMenuImage
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/StoreId"
-        - $ref: "#/components/parameters/MenuId"
-      responses:
-        "200":
-          description: 메뉴 대표 이미지
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PublicImageSuccessResponse"
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/StoreAccessDenied"
-        "404":
-          $ref: "#/components/responses/MenuOrPublicImageNotFound"
-    put:
-      tags: [Store Public Image]
-      summary: 메뉴 대표 이미지 등록 또는 교체
-      description: 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
-      operationId: upsertMenuImage
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/StoreId"
-        - $ref: "#/components/parameters/MenuId"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        "200":
-          description: 등록 또는 교체된 메뉴 대표 이미지
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PublicImageSuccessResponse"
-        "400":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/BadRequest"
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/StoreAccessDenied"
-        "404":
-          $ref: "#/components/responses/MenuNotFound"
-        "413":
-          $ref: "#/components/responses/ImageSizeExceeded"
-        "415":
-          $ref: "#/components/responses/UnsupportedImageMediaType"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
-    delete:
-      tags: [Store Public Image]
-      summary: 메뉴 대표 이미지 삭제
-      operationId: deleteMenuImage
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/StoreId"
-        - $ref: "#/components/parameters/MenuId"
-        - $ref: "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
-      responses:
-        "204":
-          description: 삭제 완료 또는 이미지 미등록 상태
-        "401":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/StoreAccessDenied"
-        "404":
-          $ref: "#/components/responses/MenuNotFound"
-        "503":
-          $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications:
     post:
       tags: [Store Management]
@@ -2789,21 +2701,6 @@ components:
           example:
             code: STORE_011
             message: 이미지를 찾을 수 없습니다.
-    MenuOrPublicImageNotFound:
-      description: 메뉴 또는 메뉴 대표 이미지를 찾을 수 없음
-      content:
-        application/json:
-          schema:
-            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          examples:
-            menuNotFound:
-              value:
-                code: STORE_009
-                message: 메뉴를 찾을 수 없습니다.
-            imageNotFound:
-              value:
-                code: STORE_011
-                message: 이미지를 찾을 수 없습니다.
     StorePublicImageConflict:
       description: 매장 이미지 최대 개수 초과 또는 동시 교체 충돌
       content:

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 공개로 확정된 매장·메뉴 이미지만 내부 저장소에서 읽어 반환한다. */
+/** 공개로 확정된 이미지만 내부 저장소에서 읽어 반환한다. */
 @RestController
 @RequestMapping("/api/v1/public-files")
 @RequiredArgsConstructor

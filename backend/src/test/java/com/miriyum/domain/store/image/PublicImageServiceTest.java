@@ -3,7 +3,6 @@ package com.miriyum.domain.store.image;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 
-import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.store.repository.StoreRepository;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -37,9 +36,6 @@ class PublicImageServiceTest {
     private StoreRepository storeRepository;
 
     @Mock
-    private MenuRepository menuRepository;
-
-    @Mock
     private FileMetadataRepository fileMetadataRepository;
 
     @Mock
@@ -57,7 +53,7 @@ class PublicImageServiceTest {
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
         service = new PublicImageService(
-                storeService, storeRepository, menuRepository, fileMetadataRepository,
+                storeService, storeRepository, fileMetadataRepository,
                 fileStorageFacadeProvider, fileStoragePortProvider, idempotencyExecutor,
                 objectMapper, Clock.fixed(Instant.parse("2026-08-15T00:00:00Z"), ZoneOffset.UTC));
     }

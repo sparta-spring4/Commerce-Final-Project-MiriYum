@@ -231,10 +231,10 @@ catalog code는 불투명한 문자열이며 클라이언트가 영문 이름을
 
 ## 고도화 공개 이미지 계약
 
-- 매장 운영자는 본인이 관리하는 매장에 공개 이미지 최대 10장을 추가·교체·삭제할 수 있다. 메뉴는 대표 이미지 1장만 등록·교체·삭제할 수 있다.
-- 업로드 경로는 `POST /api/v1/store-operators/stores/{storeId}/images`, `PUT`·`DELETE /api/v1/store-operators/stores/{storeId}/images/{imageId}`, `PUT`·`DELETE /api/v1/store-operators/stores/{storeId}/menus/{menuId}/image`이다. 모든 변경 요청은 `Idempotency-Key`를 사용한다.
+- 매장 운영자는 본인이 관리하는 매장에 공개 이미지 최대 10장을 추가·교체·삭제할 수 있다.
+- 업로드 경로는 `POST /api/v1/store-operators/stores/{storeId}/images`, `PUT`·`DELETE /api/v1/store-operators/stores/{storeId}/images/{imageId}`이다. 모든 변경 요청은 `Idempotency-Key`를 사용한다.
 - JPEG·PNG·WebP만 허용한다. 서버는 요청의 MIME 타입뿐 아니라 파일 시그니처와 크기를 검증한 뒤 공통 저장소를 호출한다.
-- 공통 저장소 메타데이터는 매장 이미지에 `ownerType=STORE`, `purpose=STORE_IMAGE`, 메뉴 이미지에 `ownerType=MENU`, `purpose=MENU_IMAGE`, 두 경우 모두 `visibility=PUBLIC`을 사용한다.
+- 공통 저장소 메타데이터는 `ownerType=STORE`, `purpose=STORE_IMAGE`, `visibility=PUBLIC`을 사용한다.
 - 공개 응답은 `imageId`와 애플리케이션의 `/api/v1/public-files/{imageId}` 경로만 반환한다. S3 버킷·객체 키·체크섬·원본 파일명은 반환하거나 로그에 기록하지 않는다.
 - 교체 중 새 파일 저장 또는 검증이 실패하면 새 파일은 공개하지 않고 기존 공개 이미지를 유지한다. 삭제는 이미 삭제된 이미지에도 같은 종료 상태로 수렴해야 한다.
 - 사업자등록증은 이 계약에 포함하지 않는다. PRIVATE 접근 제어와 보존·파기 기준을 확정하는 #344에서 별도 처리한다.

@@ -1,6 +1,5 @@
 package com.miriyum.domain.store.image;
 
-import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.store.dto.image.PublicImageResponse;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -43,7 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
-/** 매장 운영자가 공개 매장·메뉴 이미지를 저장하고 교체·삭제하는 업무 서비스다. */
+/** 매장 운영자가 공개 매장 이미지를 저장하고 교체·삭제하는 업무 서비스다. */
 @Service
 @RequiredArgsConstructor
 public class PublicImageService {
@@ -54,7 +53,6 @@ public class PublicImageService {
 
     private final StoreService storeService;
     private final StoreRepository storeRepository;
-    private final MenuRepository menuRepository;
     private final FileMetadataRepository fileMetadataRepository;
     private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
     private final ObjectProvider<FileStoragePort> fileStoragePortProvider;
@@ -142,67 +140,6 @@ public class PublicImageService {
     }
 
     @Transactional(readOnly = true)
-    public PublicImageResponse getMenuImage(long operatorAccountId, long storeId, long menuId) {
-        storeService.requireManagementOwnership(operatorAccountId, storeId);
-        requireMenuBelongsToStore(storeId, menuId);
-        return confirmedImages("MENU", menuId, FileStoragePurpose.MENU_IMAGE).stream()
-                .findFirst()
-                .map(FileMetadata::toPublicMetadata)
-                .map(PublicImageResponse::from)
-                .orElseThrow(() -> new ServiceException(StoreErrorCode.PUBLIC_IMAGE_NOT_FOUND));
-    }
-
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 15)
-    public PublicImageCommandResult upsertMenuImage(
-            long operatorAccountId,
-            long storeId,
-            long menuId,
-            IdempotencyKey idempotencyKey,
-            MultipartFile file
-    ) {
-        ValidatedPublicImage image = validate(file);
-        IdempotentOutcome outcome = idempotencyExecutor.execute(command(
-                operatorAccountId,
-                "MENU_IMAGE_UPSERT",
-                idempotencyKey,
-                "storeId=" + storeId + "|menuId=" + menuId + "|checksum=" + checksum(image.bytes())), () -> {
-            requireLockedStoreOwnership(operatorAccountId, storeId);
-            requireMenuBelongsToStore(storeId, menuId);
-            FileStorageMetadata previous = confirmedImages("MENU", menuId, FileStoragePurpose.MENU_IMAGE).stream()
-                    .findFirst()
-                    .map(FileMetadata::toPublicMetadata)
-                    .orElse(null);
-            FileStorageMetadata stored = store(image, new FileStorageOwner("MENU", menuId),
-                    FileStoragePurpose.MENU_IMAGE, menuObjectKey(storeId, menuId, image));
-            if (previous != null) {
-                deleteAfterReplacement(previous);
-            }
-            PublicImageResponse response = PublicImageResponse.from(stored);
-            return success(HttpStatus.OK, "MENU_IMAGE", stored.fileId().toString(), response);
-        });
-        return result(outcome);
-    }
-
-    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 15)
-    public void deleteMenuImage(
-            long operatorAccountId,
-            long storeId,
-            long menuId,
-            IdempotencyKey idempotencyKey
-    ) {
-        idempotencyExecutor.execute(command(operatorAccountId, "MENU_IMAGE_DELETE", idempotencyKey,
-                "storeId=" + storeId + "|menuId=" + menuId), () -> {
-            requireLockedStoreOwnership(operatorAccountId, storeId);
-            requireMenuBelongsToStore(storeId, menuId);
-            confirmedImages("MENU", menuId, FileStoragePurpose.MENU_IMAGE).stream()
-                    .findFirst()
-                    .map(FileMetadata::toPublicMetadata)
-                    .ifPresent(this::deleteAfterReplacement);
-            return success(HttpStatus.NO_CONTENT, null, null, null);
-        });
-    }
-
-    @Transactional(readOnly = true)
     public com.miriyum.global.storage.FileStorageObject readPublicImage(UUID imageId) {
         FileStorageMetadata metadata = fileMetadataRepository.findByFileIdAndVisibilityAndStorageStatus(
                         imageId.toString(), FileStorageVisibility.PUBLIC, FileStorageStatus.CONFIRMED)
@@ -283,14 +220,6 @@ public class PublicImageService {
         store.requireManagedBy(operatorAccountId);
     }
 
-    private void requireMenuBelongsToStore(long storeId, long menuId) {
-        long actualStoreId = menuRepository.findStoreIdById(menuId)
-                .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
-        if (actualStoreId != storeId) {
-            throw new ServiceException(StoreErrorCode.MENU_NOT_FOUND);
-        }
-    }
-
     private List<FileMetadata> confirmedImages(String ownerType, long ownerId, FileStoragePurpose purpose) {
         return fileMetadataRepository
                 .findAllByOwnerTypeAndOwnerIdAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
@@ -342,11 +271,6 @@ public class PublicImageService {
 
     private static String storeObjectKey(long storeId, ValidatedPublicImage image) {
         return "public/stores/" + storeId + "/images/" + UUID.randomUUID() + "." + image.extension();
-    }
-
-    private static String menuObjectKey(long storeId, long menuId, ValidatedPublicImage image) {
-        return "public/stores/" + storeId + "/menus/" + menuId + "/" + UUID.randomUUID()
-                + "." + image.extension();
     }
 
     private static String checksum(byte[] bytes) {
