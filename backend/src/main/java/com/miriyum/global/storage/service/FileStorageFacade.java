@@ -6,9 +6,13 @@ import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageSaveResult;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.entity.FileMetadata;
+import java.time.Instant;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /** 파일 저장 결과와 메타데이터 상태 전이를 순서대로 조정한다. */
+@Slf4j
 @RequiredArgsConstructor
 public class FileStorageFacade {
 
@@ -29,6 +33,31 @@ public class FileStorageFacade {
             throw exception;
         }
         return transactionExecutor.confirm(persistedMetadata.getFileId()).toPublicMetadata();
+    }
+
+    /**
+     * 공개 조회를 먼저 차단한 뒤 저장소 원본을 삭제한다.
+     *
+     * <p>후속 조회 경로가 {@code CONFIRMED} 상태만 서빙한다는 불변식 아래, 원본 삭제가 일시적으로 실패해도
+     * {@code DELETED} 메타데이터는 앱 공개 URL에서 제외된다. 이미 {@code DELETED}인 파일도 DB 정본의
+     * 객체 키로 외부 삭제를 멱등 재시도한다.</p>
+     */
+    public FileStorageMetadata delete(UUID fileId, Instant deletedAt) {
+        if (fileId == null || deletedAt == null) {
+            throw new IllegalArgumentException("파일 식별자와 삭제 시각은 필수입니다.");
+        }
+        FileStorageMetadata deleted = transactionExecutor.deleteOrGetDeleted(fileId.toString(), deletedAt)
+                .toPublicMetadata();
+        try {
+            fileStoragePort.delete(deleted.objectKey());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "event=file_storage_object_delete_failed file_id={}",
+                    deleted.fileId(),
+                    exception);
+            throw exception;
+        }
+        return deleted;
     }
 
     private void validatePendingMetadata(FileStorageMetadata metadata) {

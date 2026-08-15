@@ -117,6 +117,46 @@ class FileStorageFacadeIntegrationTest {
                 .isEqualTo(FileStorageStatus.FAILED);
     }
 
+    @Test
+    @DisplayName("저장소 삭제 실패 뒤 같은 파일 식별자로 재호출하면 DELETED 정본 객체를 멱등 재시도한다")
+    void retriesStorageDeletionAfterMetadataIsDeleted() {
+        String fileId = UUID.randomUUID().toString();
+        String objectKey = "public/store/11/store-image/object-delete-retry";
+        transactionExecutor.savePending(FileMetadata.createPending(
+                fileId,
+                "STORE",
+                11L,
+                FileStoragePurpose.STORE_IMAGE,
+                objectKey,
+                "image/jpeg",
+                4L,
+                FILE_CHECKSUM,
+                FileStorageVisibility.PUBLIC,
+                "STORE_IMAGE_DEFAULT",
+                Instant.parse("2026-08-10T07:00:00Z")));
+        transactionExecutor.confirm(fileId);
+
+        IllegalStateException storageFailure = new IllegalStateException("저장소 삭제 실패");
+        FailingOnceDeleteFileStoragePort fileStoragePort = new FailingOnceDeleteFileStoragePort(storageFailure);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        assertThatThrownBy(() -> facade.delete(UUID.fromString(fileId), Instant.parse("2026-08-15T00:00:00Z")))
+                .isSameAs(storageFailure);
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getStorageStatus)
+                .isEqualTo(FileStorageStatus.DELETED);
+        assertThat(fileMetadataRepository.findByFileIdAndStorageStatus(fileId, FileStorageStatus.CONFIRMED))
+                .isEmpty();
+
+        FileStorageMetadata deleted = facade.delete(
+                UUID.fromString(fileId), Instant.parse("2026-08-15T00:01:00Z"));
+
+        assertThat(deleted.status()).isEqualTo(FileStorageStatus.DELETED);
+        assertThat(fileStoragePort.deletedObjectKeys()).containsExactly(objectKey, objectKey);
+    }
+
     private FileStorageMetadata pendingMetadata(String fileId, String objectKey, String checksum, Instant createdAt) {
         return new FileStorageMetadata(
                 UUID.fromString(fileId),
@@ -172,6 +212,40 @@ class FileStorageFacadeIntegrationTest {
 
         @Override
         public void delete(String objectKey) {
+        }
+    }
+
+    private static final class FailingOnceDeleteFileStoragePort implements FileStoragePort {
+
+        private final RuntimeException failure;
+        private final List<String> deletedObjectKeys = new ArrayList<>();
+        private boolean failed;
+
+        private FailingOnceDeleteFileStoragePort(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public FileStorageSaveResult save(FileStorageRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FileStorageObject read(String objectKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(String objectKey) {
+            deletedObjectKeys.add(objectKey);
+            if (!failed) {
+                failed = true;
+                throw failure;
+            }
+        }
+
+        private List<String> deletedObjectKeys() {
+            return deletedObjectKeys;
         }
     }
 }

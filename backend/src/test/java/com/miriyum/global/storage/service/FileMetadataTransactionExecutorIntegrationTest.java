@@ -197,6 +197,40 @@ class FileMetadataTransactionExecutorIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("동시에 파일 삭제를 요청해도 DB 정본의 삭제 상태와 객체 키로 수렴한다")
+    void returnsDeletedMetadataForConcurrentDeleteRequests() throws Exception {
+        String fileId = UUID.randomUUID().toString();
+        transactionExecutor.savePending(createMetadata(fileId, 11L, "object-delete-race"));
+        transactionExecutor.confirm(fileId);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            List<Future<FileMetadata>> futures = List.of(
+                    executorService.submit(() -> deleteAfterStart(
+                            fileId, Instant.parse("2026-08-15T00:00:00Z"), start)),
+                    executorService.submit(() -> deleteAfterStart(
+                            fileId, Instant.parse("2026-08-15T00:01:00Z"), start)));
+
+            start.countDown();
+
+            for (Future<FileMetadata> future : futures) {
+                assertThat(future.get(10, TimeUnit.SECONDS).getStorageStatus())
+                        .isEqualTo(FileStorageStatus.DELETED);
+            }
+            assertThat(fileMetadataRepository.findById(fileId))
+                    .isPresent()
+                    .get()
+                    .satisfies(metadata -> {
+                        assertThat(metadata.getStorageStatus()).isEqualTo(FileStorageStatus.DELETED);
+                        assertThat(metadata.getObjectKey()).endsWith("object-delete-race");
+                    });
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
     private FileStorageStatus transitionInTransaction(
             String fileId,
             FileStorageStatus nextStatus,
@@ -214,6 +248,11 @@ class FileMetadataTransactionExecutorIntegrationTest {
             }
             return fileMetadataRepository.saveAndFlush(metadata).getStorageStatus();
         });
+    }
+
+    private FileMetadata deleteAfterStart(String fileId, Instant deletedAt, CountDownLatch start) {
+        await(start);
+        return transactionExecutor.deleteOrGetDeleted(fileId, deletedAt);
     }
 
     private void await(CountDownLatch latch) {
