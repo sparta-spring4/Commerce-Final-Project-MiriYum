@@ -115,16 +115,16 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 ### 위험 사건 marker 인덱스와 Valkey Cluster 경계
 
 - Refresh Token Lua 스크립트는 family, 계정 index, session epoch, 위험 marker와 pending index를 한 원자적 연산으로 함께 변경한다. 현재 키 구조는 **단일 Valkey 노드만 지원**하며 Valkey Cluster는 지원하지 않는다.
-- Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token과 위험 marker 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
+- Valkey Cluster로 전환해야 할 때는 모든 Lua `KEYS`가 같은 hash slot에 놓이도록 Refresh Token, 위험 marker와 occurrence counter 키 전체를 hash tag 기반으로 재설계한다. 기존 family는 재로그인으로 전환한다.
 - pending Set 인덱스를 조회 방식으로 전환하기 전, 배포 스크립트가 매 전진 배포마다 기존 `auth:risk:pending:*` marker를 `auth:risk:pending-index`에 멱등하게 이관한다. 구버전 롤백 중 생성된 marker도 다음 전진 배포에서 다시 등록되며, `SADD`는 이미 등록된 marker를 중복 생성하지 않는다. 후속 전달 경로는 Set만 조회해 평상시 전 keyspace `SCAN`을 사용하지 않는다.
 - 전달 작업은 `SSCAN` 커서를 이어서 읽고 한 주기에 marker 100개까지만 처리한다. 한 페이지의 남은 marker는 다음 주기에 먼저 처리해 특정 marker만 반복 조회하지 않는다. marker가 비어 보이면 Lua에서 marker 부재 확인과 `SREM`을 함께 수행하므로, 같은 키의 marker가 전달 중 다시 생성되어도 새 인덱스 연결을 삭제하지 않는다.
-- pending Set의 현재 크기는 민감 식별자 없이 `RefreshTokenRiskEventPendingCount` 지표로 관측한다. 이 값은 전달 가능한 이벤트 수가 아니라 stale member를 포함한 인덱스 멤버 수이며, 지속적으로 증가하면 전달 정체 알람과 함께 원인을 점검한다. marker는 최초 생성 시점부터 7일 절대 TTL을 적용하며, 같은 사건 재사용으로 발생 횟수를 누적해도 TTL을 연장하지 않는다. 1시간 이상 남아 있는 marker가 현재 전달 배치에 하나라도 있으면 `RefreshTokenRiskEventMarkerLongStay=1` 존재 신호를 기록하고 5분 합계 알람으로 관측한다. 이 지표는 전체 장기 정체 건수가 아니다.
+- pending Set의 현재 크기는 민감 식별자 없이 `RefreshTokenRiskEventPendingCount` 지표로 관측한다. 이 값은 전달 가능한 이벤트 수가 아니라 stale member를 포함한 인덱스 멤버 수이며, 지속적으로 증가하면 전달 정체 알람과 함께 원인을 점검한다. marker는 최초 생성 시점부터 7일 절대 TTL을 적용하며, 같은 사건 재사용으로 발생 횟수를 누적해도 TTL을 연장하지 않는다. marker가 전달 뒤 삭제돼도 별도 occurrence counter는 Refresh Token family 만료까지 남아 다음 marker를 이전 횟수보다 큰 값으로 생성한다. 1시간 이상 남아 있는 marker가 현재 전달 배치에 하나라도 있으면 `RefreshTokenRiskEventMarkerLongStay=1` 존재 신호를 기록하고 5분 합계 알람으로 관측한다. 이 지표는 전체 장기 정체 건수가 아니다.
 - 필수 필드가 없거나 숫자 형식이 손상된 pending marker는 인덱스와 함께 제거하고 제한 로그만 남긴다. 손상 marker 하나가 정상 marker 전달을 반복적으로 막지 않게 하며, 계정·family·토큰 식별자는 로그에 넣지 않는다.
 
 ### 다중 인스턴스 위험 사건 전달 방침
 
 - 여러 애플리케이션 인스턴스가 실행되면 각 인스턴스의 scheduler가 같은 pending marker를 읽을 수 있다. 이 전달은 정확히 한 번이 아니라 **at-least-once(최소 한 번)** 방식으로 동작하며, 일시적인 MySQL 중복 쓰기는 허용한다.
-- 동일 marker를 여러 인스턴스가 전달해도 `auth_risk_events.event_key` 고유키와 upsert가 발생 횟수·마지막 발생 시각을 큰 값으로 수렴시킨다. 따라서 중복 실행이 별도 위험 사건 행을 만들지 않는다.
+- 동일 marker를 여러 인스턴스가 전달해도 `auth_risk_events.event_key` 고유키와 upsert가 발생 횟수·마지막 발생 시각을 큰 값으로 수렴시킨다. marker 재생성 뒤에도 occurrence counter가 단조 증가하므로, 중복 실행이 별도 위험 사건 행을 만들거나 이후 재사용 횟수를 되돌리지 않는다.
 - marker를 새로 만들 때는 수명 주기를 구분하는 임의 `generation` 값을 한 번 저장한다. 구버전 marker는 읽은 필드 snapshot이 그대로일 때만 generation을 한 번 채워 기존 위험 사건을 보존한다.
 - marker는 MySQL 저장이 성공한 뒤에도 읽은 `occurrenceCount`와 `generation`이 모두 같을 때만 Lua로 삭제한다. 전달 중 같은 사건이 누적되거나, 삭제 뒤 같은 키의 marker가 새로 생성되면 이전 worker는 삭제하지 않아 새 위험 사건을 다음 주기에 전달한다.
 - 롤링 배포 중 구버전 인스턴스가 남아 있으면 구버전의 count-only 삭제 경로는 generation을 비교하지 못한다. 전진 배포가 완료되어 신버전만 실행된 뒤 generation 기반 ABA 삭제 방어가 완전히 성립하므로, 구·신버전 혼재 시간은 배포 관측과 재배포로 짧게 유지한다.

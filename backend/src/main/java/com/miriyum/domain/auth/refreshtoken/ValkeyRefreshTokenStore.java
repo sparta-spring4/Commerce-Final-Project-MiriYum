@@ -52,6 +52,11 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
 
     private static final RedisScript<Long> ROTATE_SCRIPT = new DefaultRedisScript<>("""
             local function recordRiskEvent(sourceEvent, originEvent)
+                local totalOccurrenceCount = redis.call('INCR', KEYS[5])
+                local counterExpiresAt = redis.call('EXPIRETIME', KEYS[5])
+                if counterExpiresAt < tonumber(ARGV[7]) then
+                    redis.call('EXPIREAT', KEYS[5], ARGV[7])
+                end
                 if redis.call('EXISTS', KEYS[3]) == 0 then
                     redis.call('HSET', KEYS[3],
                         'namespace', ARGV[8],
@@ -62,13 +67,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'originEvent', originEvent,
                         'policyVersion', 'AUTH-012-v1',
                         'occurredAt', ARGV[6],
-                        'occurrenceCount', '1',
+                        'occurrenceCount', totalOccurrenceCount,
                         'lastOccurredAt', ARGV[6],
                         'generation', ARGV[11])
                     redis.call('EXPIREAT', KEYS[3], ARGV[10])
                 else
-                    redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
-                    redis.call('HSET', KEYS[3], 'lastOccurredAt', ARGV[6])
+                    redis.call('HSET', KEYS[3],
+                        'occurrenceCount', totalOccurrenceCount,
+                        'lastOccurredAt', ARGV[6])
                 end
                 redis.call('SADD', KEYS[4], KEYS[3])
             end
@@ -202,8 +208,14 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
         String accountFamiliesKey = RefreshTokenKey.forAccountFamilies(namespace, accountId);
         String riskEventKey = RefreshTokenRiskEventKey.forReuse(namespace, familyId, expectedTokenHash);
         String pendingRiskEventIndexKey = RefreshTokenRiskEventKey.pendingIndex();
+        String riskEventOccurrenceCounterKey = RefreshTokenRiskEventKey.occurrenceCounter(
+                namespace, familyId, expectedTokenHash);
         Long result = execute(ROTATE_SCRIPT, List.of(
-                        familyKey, accountFamiliesKey, riskEventKey, pendingRiskEventIndexKey),
+                        familyKey,
+                        accountFamiliesKey,
+                        riskEventKey,
+                        pendingRiskEventIndexKey,
+                        riskEventOccurrenceCounterKey),
                 accountId.toString(),
                 expectedTokenId,
                 expectedTokenHash,

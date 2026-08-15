@@ -522,6 +522,35 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("전달 후 삭제된 위험 marker가 다시 생성돼도 재사용 횟수는 token family 동안 누적된다")
+    void keepsOccurrenceCountAfterDeliveredMarkerIsRecreated() {
+        Instant now = Instant.now();
+        RefreshTokenState state = state("family-risk-occurrence", "token-first", now);
+        create(state);
+
+        assertThat(rotate(state, now.plusSeconds(1)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
+        assertThat(rotate(state, now.plusSeconds(2)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        String markerKey = RefreshTokenRiskEventKey.forReuse(
+                state.namespace(), state.familyId(), state.currentTokenHash());
+        PendingRefreshTokenRiskEvent first = markerStore.findPendingEvents().getFirst();
+        assertThat(first.occurrenceCount()).isEqualTo(1L);
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey, first.occurrenceCount(), first.generation())).isTrue();
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
+        PendingRefreshTokenRiskEvent recreated = markerStore.findPendingEvents().getFirst();
+        assertThat(recreated.occurrenceCount()).isEqualTo(2L);
+        assertThat(recreated.generation()).isNotEqualTo(first.generation());
+        assertThat(redisTemplate.opsForValue().get(RefreshTokenRiskEventKey.occurrenceCounter(
+                state.namespace(), state.familyId(), state.currentTokenHash()))).isEqualTo("2");
+    }
+
+    @Test
     @DisplayName("구버전 marker의 이전 snapshot은 재생성된 marker 세대를 빌려오지 않는다")
     void doesNotCombineLegacySnapshotWithRecreatedMarkerGeneration() {
         String markerKey = "auth:risk:pending:legacy-aba";
