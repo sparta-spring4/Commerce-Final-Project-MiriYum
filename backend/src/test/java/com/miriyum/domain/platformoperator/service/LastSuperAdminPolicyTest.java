@@ -36,10 +36,13 @@ class LastSuperAdminPolicyTest {
     }
 
     @Test
-    void allowsOneOfTwoActiveSuperAdministrators() {
+    void rejectsMutatingAnyActiveSuperAdministratorEvenIfLegacyDataContainsTwo() {
         when(roles.countActiveSuperAdministratorById(7L)).thenReturn(1L);
         when(roles.countActiveSuperAdministrators()).thenReturn(2L);
-        inTransaction(() -> assertThatCode(() -> policy.assertRemovable(7L)).doesNotThrowAnyException());
+        inTransaction(() -> assertThatThrownBy(() -> policy.assertRemovable(7L))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED)));
     }
 
     @Test
@@ -50,6 +53,43 @@ class LastSuperAdminPolicyTest {
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED)));
+    }
+
+    @Test
+    void acceptsOnlyTheSingletonActiveSuperAdministratorAsManagementActor() {
+        when(roles.countActiveSuperAdministratorById(7L)).thenReturn(1L);
+        when(roles.countActiveSuperAdministrators()).thenReturn(1L);
+
+        inTransaction(() -> assertThatCode(() -> policy.requireSingletonActor(7L))
+                .doesNotThrowAnyException());
+    }
+
+    @Test
+    void rejectsOrdinaryOperatorAsManagementActor() {
+        when(roles.countActiveSuperAdministratorById(7L)).thenReturn(0L);
+        when(roles.countActiveSuperAdministrators()).thenReturn(1L);
+
+        inTransaction(() -> assertThatThrownBy(() -> policy.requireSingletonActor(7L))
+                .isInstanceOf(ServiceException.class)
+                .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                        .isEqualTo(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED)));
+    }
+
+    @Test
+    void failsClosedWhenActiveSuperAdministratorCardinalityIsInvalid() {
+        when(roles.countActiveSuperAdministratorById(7L)).thenReturn(1L);
+        when(roles.countActiveSuperAdministrators()).thenReturn(0L, 2L);
+
+        inTransaction(() -> {
+            assertThatThrownBy(() -> policy.requireSingletonActor(7L))
+                    .isInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                            .isEqualTo(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED));
+            assertThatThrownBy(() -> policy.requireSingletonActor(7L))
+                    .isInstanceOf(ServiceException.class)
+                    .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
+                            .isEqualTo(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED));
+        });
     }
 
     private void inTransaction(Runnable assertion) {

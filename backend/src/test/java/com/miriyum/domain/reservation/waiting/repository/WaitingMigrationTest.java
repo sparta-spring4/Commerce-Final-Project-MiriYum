@@ -56,7 +56,8 @@ class WaitingMigrationTest {
     );
 
     @Container
-    static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE);
+    static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE)
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {

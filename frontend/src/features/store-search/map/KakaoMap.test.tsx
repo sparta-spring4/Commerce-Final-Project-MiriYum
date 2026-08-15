@@ -307,7 +307,7 @@ describe('KakaoMap', () => {
     )
 
     await waitFor(() => expect(Map).toHaveBeenCalledTimes(2))
-    expect(mocks.markerConstruct).toHaveBeenCalledTimes(4)
+    await waitFor(() => expect(mocks.markerConstruct).toHaveBeenCalledTimes(4))
     const secondMap = Map.mock.results[1]?.value
     expect(mocks.markerConstruct.mock.calls[2]?.[1]).toBe(secondMap)
     expect(mocks.markerConstruct.mock.calls[3]?.[1]).toBe(secondMap)

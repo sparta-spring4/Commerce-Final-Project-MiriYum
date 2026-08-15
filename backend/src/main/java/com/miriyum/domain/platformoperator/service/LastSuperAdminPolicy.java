@@ -26,15 +26,28 @@ public class LastSuperAdminPolicy {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void assertRemovable(long targetOperatorId) {
-        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
-            throw new IllegalStateException("last-super-admin decision requires an active mutation transaction");
-        }
-        guard.lockSingleton().orElseThrow(() -> new IllegalStateException("authority guard row is missing"));
-        if (roles.countActiveSuperAdministratorById(targetOperatorId) == 0) {
-            return;
-        }
-        if (roles.countActiveSuperAdministrators() <= 1) {
+        lockAuthorityGuard();
+        if (roles.countActiveSuperAdministratorById(targetOperatorId) == 1) {
             throw new ServiceException(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED);
         }
+    }
+
+    /** 운영자 관리 명령의 행위자가 유일한 활성 슈퍼관리자인지 잠금 아래 확인한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireSingletonActor(long actorOperatorId) {
+        lockAuthorityGuard();
+        if (roles.countActiveSuperAdministrators() != 1) {
+            throw new ServiceException(AdminAuthorizationErrorCode.LAST_SUPER_ADMIN_REQUIRED);
+        }
+        if (roles.countActiveSuperAdministratorById(actorOperatorId) != 1) {
+            throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
+        }
+    }
+
+    private void lockAuthorityGuard() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("super-admin decision requires an active mutation transaction");
+        }
+        guard.lockSingleton().orElseThrow(() -> new IllegalStateException("authority guard row is missing"));
     }
 }

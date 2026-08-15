@@ -23,7 +23,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class StoreGeocodingMigrationTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40");
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0.40")
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @Test
     @DisplayName("V29는 레거시 매장을 주소 버전 1의 좌표 없는 미검증 상태로 이관한다")

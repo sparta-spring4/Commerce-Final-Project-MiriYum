@@ -54,7 +54,8 @@ import org.testcontainers.mysql.MySQLContainer;
 @AutoConfigureMockMvc
 @Import(PlatformOperatorAuthHttpIT.BusinessController.class)
 class PlatformOperatorAuthHttpIT {
-    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40")
+            .withCommand("--log-bin-trust-function-creators=1");
     @Container static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:8.1-alpine")
             .withExposedPorts(6379);
 
