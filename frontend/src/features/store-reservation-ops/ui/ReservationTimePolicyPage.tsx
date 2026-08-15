@@ -204,7 +204,7 @@ export function ReservationTimePolicyPage() {
         </div>
 
         <div className="op-stack">
-          <SectionCard title="게시" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
+          <SectionCard title="게시" icon="calendar" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
             {saved !== null && (
               <SummaryList
                 items={[
@@ -266,7 +266,7 @@ export function ReservationTimePolicyPage() {
             />
           </SectionCard>
 
-          <SectionCard title="적용 범위">
+          <SectionCard title="적용 범위" icon="users">
             <p className="op-section__hint">
               정책을 게시해도 이미 접수된 예약의 시각은 바뀌지 않습니다. 게시 후
               새로 들어오는 예약에 적용됩니다.

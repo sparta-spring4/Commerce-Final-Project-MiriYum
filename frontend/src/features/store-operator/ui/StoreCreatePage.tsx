@@ -21,6 +21,7 @@ import {
   validateStoreName,
   validateTagCodes,
 } from '../model/storeValidation'
+import { OperatorIcon } from './OperatorIcon'
 import {
   BUSINESS_TYPE_LABEL,
   REGION_LABEL,
@@ -57,6 +58,15 @@ const REGIONS: readonly Region[] = [
 ]
 
 const BUSINESS_TYPES: readonly BusinessType[] = ['CAFE', 'BAKERY', 'OTHER']
+
+/** 좌측 단계 표시에 쓰는 구역 이름. 카드 제목의 번호와 순서가 같다. */
+const FORM_SECTIONS: readonly string[] = [
+  '사업자 정보',
+  '매장 기본 정보',
+  '카테고리와 태그',
+  '운영 방식',
+  '확인 사항',
+]
 
 export function StoreCreatePage() {
   const navigate = useNavigate()
@@ -180,11 +190,34 @@ export function StoreCreatePage() {
       />
 
       <form onSubmit={handleSubmit} aria-label="매장 등록" noValidate>
-        <div className="op-stack">
-          {formError !== null && <Alert tone="error" title={formError} />}
+        <div className="op-grid op-grid--intro">
+          {/*
+            시안 왼쪽의 단계 표시. 실제 다단계 마법사가 아니라 이 폼이 가진
+            구역의 목록이다. 진행 중 단계를 꾸며 내지 않고 순서만 알린다.
+          */}
+          <aside className="op-steps" aria-label="입력 구역">
+            <ol className="op-steps__list">
+              {FORM_SECTIONS.map((section, index) => (
+                <li className="op-step" key={section}>
+                  <span className="op-step__index" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  {section}
+                </li>
+              ))}
+            </ol>
+            <p className="op-section__hint">
+              1차 서비스는 플랫폼 심사 없이 입력한 사업자 정보 확인만으로 바로
+              등록됩니다.
+            </p>
+          </aside>
+
+          <div className="op-stack">
+            {formError !== null && <Alert tone="error" title={formError} />}
 
           <SectionCard
-            title="사업자 정보"
+            title="1. 사업자 정보"
+            icon="lock"
             hint="등록 후에는 사업자등록번호와 업종을 이 화면에서 바꿀 수 없습니다."
           >
             <div className="op-form-grid op-form-grid--two">
@@ -217,7 +250,7 @@ export function StoreCreatePage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="매장 기본 정보">
+          <SectionCard title="2. 매장 기본 정보" icon="store">
             <div className="op-form-grid">
               <TextField
                 label="매장명"
@@ -271,7 +304,7 @@ export function StoreCreatePage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="카테고리와 태그">
+          <SectionCard title="3. 카테고리와 태그" icon="menu-book">
             <div className="op-form-grid">
               <CatalogSelectField
                 label="주 카테고리"
@@ -294,11 +327,11 @@ export function StoreCreatePage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="운영 방식">
+          <SectionCard title="4. 운영 방식" icon="list">
             <ModesFieldset value={modes} onChange={setModes} />
           </SectionCard>
 
-          <SectionCard title="확인 사항">
+          <SectionCard title="5. 확인 사항" icon="check">
             <label className="op-check">
               <input
                 type="checkbox"
@@ -335,12 +368,15 @@ export function StoreCreatePage() {
               <Button
                 type="submit"
                 variant="primary"
+                block
                 loading={createStore.isPending}
               >
+                <OperatorIcon name="plus" />
                 매장 등록
               </Button>
             </div>
           </SectionCard>
+          </div>
         </div>
       </form>
     </>

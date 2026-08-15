@@ -193,7 +193,7 @@ export function RegularClosureSection({
       </div>
 
       <div className="op-stack">
-        <SectionCard title="정기 휴무 게시">
+        <SectionCard title="정기 휴무 게시" icon="calendar">
           {saved !== null && (
             <SummaryList
               items={[

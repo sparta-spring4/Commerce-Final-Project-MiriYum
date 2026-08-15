@@ -6,11 +6,11 @@ import {
   type NavigationItem,
 } from '../../../app/routes'
 import { Badge } from '../../../shared/ui/Badge'
-import { Button } from '../../../shared/ui/Button'
 import { useCurrentStore } from '../CurrentStoreProvider'
 import { useStoreOperatorAuth } from '../StoreOperatorAuthProvider'
 import { useManagedStore } from '../api/queries'
 import { OPERATION_STATUS_LABEL } from '../model/types'
+import { OPERATOR_NAV_ICONS, OperatorIcon } from './OperatorIcon'
 
 /**
  * 매장 운영자 보호 화면의 공통 셸.
@@ -24,6 +24,14 @@ import { OPERATION_STATUS_LABEL } from '../model/types'
  */
 export function StoreOperatorLayout() {
   const { storeId: currentStoreId } = useCurrentStore()
+
+  /*
+   * 좁은 화면에서만 쓰는 내비 열림 상태.
+   *
+   * 데스크톱은 CSS가 항상 펼치므로 이 값이 화면을 막지 않는다. 초기값을 닫힘으로
+   * 두면 모바일에서 본문이 항목 여덟 개 아래로 밀리는 일이 없다.
+   */
+  const [navOpen, setNavOpen] = useState(false)
 
   /**
    * 경로에서 매장 ID를 읽는다.
@@ -53,41 +61,99 @@ export function StoreOperatorLayout() {
 
       <div className="op-shell__frame">
         <div className="op-sidebar">
-          <Link className="op-sidebar__brand" to={ROUTES.storeOperatorHome}>
-            MiriYum Partner
-          </Link>
+          <div className="op-sidebar__head">
+            <Link className="op-sidebar__brand" to={ROUTES.storeOperatorHome}>
+              <span className="op-sidebar__mark" aria-hidden="true">
+                MY
+              </span>
+              MiriYum Partner
+            </Link>
 
-          {items.length > 0 && (
-            <nav aria-label="매장 관리 메뉴">
-              <ul className="op-sidebar__nav">
-                {items.map((item) => (
-                  <li key={item.path}>
-                    <NavLink
-                      to={item.path}
-                      end
-                      className={({ isActive }) =>
-                        isActive
-                          ? 'op-sidebar__link op-sidebar__link--active'
-                          : 'op-sidebar__link'
-                      }
-                    >
-                      {item.label}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          )}
+            {/*
+              좁은 화면 전용 토글. `aria-expanded`와 `aria-controls`로 상태를
+              보조기술에 알린다. 데스크톱에서는 CSS가 이 버튼을 숨긴다.
+            */}
+            <button
+              type="button"
+              className="op-nav-toggle"
+              aria-expanded={navOpen}
+              aria-controls="op-nav"
+              onClick={() => setNavOpen((open) => !open)}
+            >
+              <OperatorIcon name={navOpen ? 'close' : 'bars'} />
+              메뉴
+            </button>
+          </div>
+
+          <nav aria-label="매장 관리 메뉴">
+            {/*
+              닫힌 상태는 클래스로만 감춘다. `hidden` 속성을 쓰면 CSS로 다시
+              펼치는 데스크톱에서도 DOM에 감춤 표시가 남고, 보조기술이 그 표시를
+              먼저 믿는다. `display: none`은 접근성 트리에서도 함께 사라진다.
+            */}
+            <ul
+              className={
+                navOpen
+                  ? 'op-sidebar__nav op-sidebar__nav--open'
+                  : 'op-sidebar__nav'
+              }
+              id="op-nav"
+            >
+              <li>
+                <NavLink
+                  to={ROUTES.storeOperatorHome}
+                  end
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'op-sidebar__link op-sidebar__link--active'
+                      : 'op-sidebar__link'
+                  }
+                  onClick={() => setNavOpen(false)}
+                >
+                  <OperatorIcon name="home" />
+                  운영 홈
+                </NavLink>
+              </li>
+              {items.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    end
+                    className={({ isActive }) =>
+                      isActive
+                        ? 'op-sidebar__link op-sidebar__link--active'
+                        : 'op-sidebar__link'
+                    }
+                    onClick={() => setNavOpen(false)}
+                  >
+                    <OperatorIcon name={OPERATOR_NAV_ICONS[item.label] ?? 'list'} />
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
           <div className="op-sidebar__footer">
-            <StoreOperatorAccountMenu />
+            <p className="op-account">
+              <span className="op-account__avatar" aria-hidden="true">
+                <OperatorIcon name="user" />
+              </span>
+              <span>
+                <span className="op-account__name">매장 운영자</span>
+                <span className="op-account__role">Partner</span>
+              </span>
+            </p>
           </div>
         </div>
 
-        <div>
+        <div className="op-shell__main">
           <div className="op-topbar">
             <CurrentStoreSummary storeId={storeId ?? null} />
             <span className="op-topbar__spacer" />
+            <div className="op-topbar__actions">
+              <StoreOperatorAccountMenu />
+            </div>
           </div>
 
           <main className="op-content" id="main" tabIndex={-1}>
@@ -110,11 +176,17 @@ function CurrentStoreSummary({ storeId }: { storeId: string | null }) {
   const store = storeId === null ? undefined : query.data
 
   if (storeId === null) {
-    return <p className="op-topbar__store">관리 중인 매장을 선택하지 않았습니다</p>
+    return (
+      <p className="op-topbar__store">
+        <OperatorIcon name="pin" className="op-topbar__store-icon" />
+        관리 중인 매장을 선택하지 않았습니다
+      </p>
+    )
   }
 
   return (
     <p className="op-topbar__store">
+      <OperatorIcon name="pin" className="op-topbar__store-icon" />
       <span>{store?.name ?? `매장 #${storeId}`}</span>
       {store !== undefined && (
         <Badge tone={store.operationStatus === 'OPEN' ? 'positive' : 'neutral'}>
@@ -165,13 +237,19 @@ export function StoreOperatorAccountMenu() {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      loading={signingOut}
+    <button
+      type="button"
+      className="op-topbar__signout"
+      disabled={signingOut}
+      aria-busy={signingOut || undefined}
       onClick={() => void handleSignOut()}
     >
+      {signingOut ? (
+        <span className="mi-spinner" aria-hidden="true" />
+      ) : (
+        <OperatorIcon name="logout" />
+      )}
       로그아웃
-    </Button>
+    </button>
   )
 }

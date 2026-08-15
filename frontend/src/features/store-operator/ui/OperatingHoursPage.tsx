@@ -27,7 +27,7 @@ import {
 import { PageHeader, SectionCard, SummaryList } from './PageHeader'
 import { PublicationControls } from './PublicationControls'
 import { RangeListEditor } from './RangeListEditor'
-import { DayToggleRow } from './DayToggleRow'
+import { DayToggleRow, dayCardClass } from './DayToggleRow'
 
 /**
  * 영업시간 초안 저장·게시.
@@ -152,7 +152,7 @@ function OperatingHoursEditor({
 
           {week.map((day, index) => (
             <div
-              className={day.open ? 'op-day op-day--open' : 'op-day'}
+              className={dayCardClass(day.dayOfWeek, day.open, errors)}
               key={day.dayOfWeek}
             >
               <DayToggleRow
@@ -195,7 +195,7 @@ function OperatingHoursEditor({
         </div>
 
         <div className="op-stack">
-          <SectionCard title="게시" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
+          <SectionCard title="게시" icon="calendar" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
             {saved !== null && (
               <>
                 <SummaryList
@@ -270,7 +270,7 @@ function OperatingHoursEditor({
             />
           </SectionCard>
 
-          <SectionCard title="적용 범위">
+          <SectionCard title="적용 범위" icon="users">
             <p className="op-section__hint">
               영업시간을 바꿔도 이미 접수된 예약을 자동으로 옮기거나 취소하지
               않습니다. 필요한 조치는 예약 목록에서 직접 처리해 주세요.

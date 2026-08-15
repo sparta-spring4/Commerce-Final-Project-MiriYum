@@ -108,7 +108,7 @@ export function ReservationCapacityPage() {
 
           {formError !== null && <Alert tone="error" title={formError} />}
 
-          <SectionCard title="적용 날짜">
+          <SectionCard title="적용 날짜" icon="calendar">
             <TextField
               label="서비스 날짜"
               type="date"
@@ -157,7 +157,7 @@ export function ReservationCapacityPage() {
         </div>
 
         <div className="op-stack">
-          <SectionCard title="저장 결과">
+          <SectionCard title="저장 결과" icon="check">
             {saved === null ? (
               <p className="op-section__hint">
                 저장하면 서버가 계산한 점유·잔여가 여기 표시됩니다.

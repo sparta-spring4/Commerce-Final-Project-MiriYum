@@ -25,7 +25,7 @@ import {
   validateTimeSlotsDraft,
   type DayTimeSlotsDraft,
 } from '../model/weeklySchedule'
-import { DayToggleRow } from './DayToggleRow'
+import { DayToggleRow, dayCardClass } from './DayToggleRow'
 import { PageHeader, SectionCard, SummaryList } from './PageHeader'
 import { PublicationControls } from './PublicationControls'
 import { RangeListEditor } from './RangeListEditor'
@@ -182,7 +182,7 @@ function TimeSlotsEditor({
 
           {week.map((day, index) => (
             <div
-              className={day.open ? 'op-day op-day--open' : 'op-day'}
+              className={dayCardClass(day.dayOfWeek, day.open, errors)}
               key={day.dayOfWeek}
             >
               <DayToggleRow
@@ -213,7 +213,7 @@ function TimeSlotsEditor({
         </div>
 
         <div className="op-stack">
-          <SectionCard title="게시" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
+          <SectionCard title="게시" icon="calendar" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
             {saved !== null && (
               <SummaryList
                 items={[
@@ -281,7 +281,7 @@ function TimeSlotsEditor({
             />
           </SectionCard>
 
-          <SectionCard title="수용량은 별도입니다">
+          <SectionCard title="수용량은 별도입니다" icon="users">
             <p className="op-section__hint">
               접수 시간대는 "언제 받는지"만 정합니다. 인원·팀 수 제한은 예약
               수용량 화면에서 날짜 단위로 설정합니다.

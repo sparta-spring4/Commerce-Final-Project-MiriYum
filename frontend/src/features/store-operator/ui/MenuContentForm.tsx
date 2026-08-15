@@ -49,7 +49,7 @@ export function MenuContentForm({
 
   return (
     <div className="op-stack">
-      <SectionCard title="메뉴 기본 정보">
+      <SectionCard title="메뉴 기본 정보" icon="menu-book">
         <div className="op-form-grid">
           <TextField
             label="메뉴명"
@@ -94,7 +94,7 @@ export function MenuContentForm({
         </div>
       </SectionCard>
 
-      <SectionCard title="분류">
+      <SectionCard title="분류" icon="list">
         <div className="op-form-grid">
           <CatalogSelectField
             label="주 카테고리"

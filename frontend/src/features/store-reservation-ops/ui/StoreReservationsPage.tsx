@@ -68,46 +68,61 @@ export function StoreReservationsPage() {
 
       <section className="mi-card">
         <div className="mi-card__body">
-          <div className="op-form-grid op-form-grid--two">
-            <TextField
-              label="이용 날짜"
-              type="date"
-              value={serviceDate}
-              help="비우면 전체 날짜를 조회합니다."
-              onChange={(event) => {
-                setServiceDate(event.target.value)
-                setPage(0)
-              }}
-            />
-            <SelectField
-              label="예약 상태"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as ReservationStatus | '')
-                setPage(0)
-              }}
-            >
-              <option value="">전체</option>
-              {RESERVATION_STATUSES.map((value) => (
-                <option key={value} value={value}>
-                  {RESERVATION_STATUS_LABEL[value]}
-                </option>
-              ))}
-            </SelectField>
-            <SelectField
-              label="정렬"
-              value={sort}
-              onChange={(event) => {
-                setSort(event.target.value as ReservationSort)
-                setPage(0)
-              }}
-            >
-              {SORTS.map((value) => (
-                <option key={value} value={value}>
-                  {RESERVATION_SORT_LABEL[value]}
-                </option>
-              ))}
-            </SelectField>
+          {/*
+            시안의 도구 막대. 날짜·상태·정렬을 한 줄에 두고 좁아지면 접힌다.
+
+            시안은 상태를 건수가 붙은 알약 버튼으로 고르지만, 목록 응답에 상태별
+            집계가 없어 건수를 지어내야 한다. 그래서 상태는 선택 상자 하나로
+            둔다. 같은 상태를 고르는 컨트롤을 둘로 늘리지도 않는다.
+          */}
+          <div className="op-toolbar">
+            <div className="op-toolbar__search">
+              <TextField
+                label="이용 날짜"
+                type="date"
+                value={serviceDate}
+                help="비우면 전체 날짜를 조회합니다."
+                onChange={(event) => {
+                  setServiceDate(event.target.value)
+                  setPage(0)
+                }}
+              />
+            </div>
+            <div className="op-toolbar__filters">
+              <div className="op-toolbar__field">
+                <SelectField
+                  label="예약 상태"
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value as ReservationStatus | '')
+                    setPage(0)
+                  }}
+                >
+                  <option value="">전체</option>
+                  {RESERVATION_STATUSES.map((value) => (
+                    <option key={value} value={value}>
+                      {RESERVATION_STATUS_LABEL[value]}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+              <div className="op-toolbar__field">
+                <SelectField
+                  label="정렬"
+                  value={sort}
+                  onChange={(event) => {
+                    setSort(event.target.value as ReservationSort)
+                    setPage(0)
+                  }}
+                >
+                  {SORTS.map((value) => (
+                    <option key={value} value={value}>
+                      {RESERVATION_SORT_LABEL[value]}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+            </div>
           </div>
 
           {reservations.isPending && (

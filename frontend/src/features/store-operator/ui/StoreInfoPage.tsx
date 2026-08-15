@@ -23,13 +23,32 @@ import {
   type StoreModes,
   type StoreUpdateRequest,
 } from '../model/types'
-import { PageHeader, SectionCard, SummaryList } from './PageHeader'
+import { OperatorIcon } from './OperatorIcon'
+import { PageHeader, SectionCard } from './PageHeader'
 import {
   CatalogSelectField,
   CatalogTagPicker,
   ModesFieldset,
   toggleCode,
 } from './StoreFormFields'
+
+/**
+ * 읽기 전용 값 한 줄.
+ *
+ * 시안은 서버가 정한 값에 자물쇠를 붙여 회색 상자로 보여 준다. 입력처럼 보이는
+ * 비활성 `input`을 두지 않는다. 편집할 수 없는 값은 폼 컨트롤이 아니다.
+ */
+function ReadonlyRow({ term, value }: { term: string; value: string }) {
+  return (
+    <div>
+      <p className="mi-field__label">{term}</p>
+      <p className="op-readonly">
+        <span>{value}</span>
+        <OperatorIcon name="lock" className="op-icon--sm" />
+      </p>
+    </div>
+  )
+}
 
 const REGIONS: readonly Region[] = [
   'SEOUL',
@@ -228,7 +247,7 @@ function StoreInfoForm({
               </Alert>
             )}
 
-            <SectionCard title="매장 기본 정보">
+            <SectionCard title="매장 기본 정보" icon="store">
               <div className="op-form-grid">
                 <TextField
                   label="매장명"
@@ -283,7 +302,7 @@ function StoreInfoForm({
               </div>
             </SectionCard>
 
-            <SectionCard title="카테고리와 태그">
+            <SectionCard title="카테고리와 태그" icon="menu-book">
               <div className="op-form-grid">
                 <CatalogSelectField
                   label="주 카테고리"
@@ -308,30 +327,46 @@ function StoreInfoForm({
           </div>
 
           <div className="op-stack">
-            <SectionCard title="운영 모드">
+            <SectionCard
+              title="운영 모드"
+              icon="store"
+              hint="활성화한 방식만 고객 화면에 노출됩니다."
+            >
               <ModesFieldset
                 value={form.modes}
                 onChange={(next) => update('modes', next)}
               />
+            </SectionCard>
+
+            {/*
+              시안은 저장·취소를 곁 열 맨 아래 별도 패널에 모아 스크롤을 따라
+              오게 한다. sticky 처리는 `.op-grid--aside`가 맡는다.
+            */}
+            <SectionCard title="변경 사항" icon="save">
               <div className="op-actions">
                 <Button
                   type="submit"
                   variant="primary"
+                  block
                   loading={updateStore.isPending}
                 >
+                  <OperatorIcon name="save" />
                   변경 사항 저장
                 </Button>
               </div>
+              <p className="op-section__hint">
+                저장하면 공개 매장 정보에 반영되고, 이미 접수된 예약은 바뀌지
+                않습니다.
+              </p>
             </SectionCard>
 
-            <SectionCard title="등록 정보">
-              <SummaryList
-                items={[
-                  { term: '매장 ID', value: store.storeId },
-                  { term: '시간대', value: store.timeZoneId },
-                  { term: '입점 상태', value: store.verificationStatus },
-                ]}
-              />
+            {/* 서버가 정하고 이 화면에서 바꿀 수 없는 값. 시안의 잠금 필드 자리다. */}
+            <SectionCard title="등록 정보" icon="lock">
+              <div className="op-form-grid">
+                <ReadonlyRow term="매장 ID" value={store.storeId} />
+                <ReadonlyRow term="시간대" value={store.timeZoneId} />
+                <ReadonlyRow term="입점 상태" value={store.verificationStatus} />
+              </div>
               <p className="op-section__hint">
                 사업자등록번호와 업종은 조회 계약에 없어 표시하지 않습니다.
               </p>

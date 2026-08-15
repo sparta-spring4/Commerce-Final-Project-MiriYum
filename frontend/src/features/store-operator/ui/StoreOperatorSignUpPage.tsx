@@ -18,6 +18,7 @@ import {
 import { signUpStoreOperator } from '../api/storeOperatorAuthApi'
 import { fieldErrorsFromApiError } from '../model/storeErrors'
 import { validateDisplayName } from '../model/storeValidation'
+import { OperatorIcon } from './OperatorIcon'
 
 /**
  * 식당 대표자 회원가입.
@@ -81,98 +82,132 @@ export function StoreOperatorSignUpPage() {
   return (
     <div className="op-shell">
       <div className="op-auth">
-        <aside className="op-auth__hero">
-          <div>
-            <p className="op-auth__hero-title">매장 관리를 시작하세요.</p>
-            <p className="op-auth__hero-text">
-              대표자 계정을 만든 뒤 매장을 등록합니다. 1차 서비스는 플랫폼 심사
-              없이 사업자등록번호 확인만으로 바로 등록됩니다.
-            </p>
-          </div>
-        </aside>
-
-        <div className="op-auth__panel">
-          <form
-            className="op-auth__form"
-            onSubmit={handleSubmit}
-            aria-label="식당 대표자 회원가입"
-            noValidate
-          >
+        <div className="op-auth__card">
+          <aside className="op-auth__hero">
             <div>
-              <h1 className="op-auth__title">식당 대표자 회원가입</h1>
-              <p className="op-auth__subtitle">
-                매장 관리를 시작하려면 계정을 만들어 주세요.
+              <p className="op-auth__hero-title">매장 관리를 시작하세요.</p>
+              <p className="op-auth__hero-text">
+                대표자 계정을 만든 뒤 매장을 등록합니다. 1차 서비스는 플랫폼 심사
+                없이 사업자등록번호 확인만으로 바로 등록됩니다.
               </p>
             </div>
 
-            {formError !== null && <Alert tone="error" title={formError} />}
+            <div className="op-auth__hero-points">
+              <div>
+                <p className="op-auth__hero-point-title">계정 먼저, 매장 다음</p>
+                <p className="op-auth__hero-point-text">
+                  가입과 매장 등록을 한 요청으로 합치지 않아 한쪽이 실패해도
+                  다른 쪽이 남습니다.
+                </p>
+              </div>
+              <div>
+                <p className="op-auth__hero-point-title">바로 등록</p>
+                <p className="op-auth__hero-point-text">
+                  1차 서비스는 별도 심사 대기 없이 등록 즉시 관리 화면을
+                  엽니다.
+                </p>
+              </div>
+            </div>
+          </aside>
 
-            <TextField
-              label="이메일"
-              type="email"
-              name="email"
-              autoComplete="email"
-              required
-              value={email}
-              error={fieldErrors.email ?? null}
-              onChange={(event) => setEmail(event.target.value)}
-            />
+          <div className="op-auth__panel">
+            <form
+              className="op-auth__form"
+              onSubmit={handleSubmit}
+              aria-label="식당 대표자 회원가입"
+              noValidate
+            >
+              <p className="op-auth__brand">
+                <span className="op-sidebar__mark" aria-hidden="true">
+                  MY
+                </span>
+                MiriYum Partner
+              </p>
 
-            <TextField
-              label="대표자명"
-              name="displayName"
-              autoComplete="name"
-              required
-              value={displayName}
-              help="2~50자로 입력해 주세요."
-              error={fieldErrors.displayName ?? null}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
+              <div>
+                <h1 className="op-auth__title">식당 대표자 회원가입</h1>
+                <p className="op-auth__subtitle">
+                  매장 관리를 시작하려면 계정을 만들어 주세요.
+                </p>
+              </div>
 
-            <TextField
-              label="휴대전화 번호"
-              type="tel"
-              name="phoneNumber"
-              autoComplete="tel"
-              required
-              value={phoneNumber}
-              help="010으로 시작하는 11자리 번호"
-              error={fieldErrors.phoneNumber ?? null}
-              onChange={(event) => setPhoneNumber(event.target.value)}
-            />
+              {formError !== null && <Alert tone="error" title={formError} />}
 
-            <TextField
-              label="비밀번호"
-              type="password"
-              name="password"
-              autoComplete="new-password"
-              required
-              value={password}
-              help="8~64자, 대문자·소문자·숫자·특수문자 가운데 3종 이상"
-              error={fieldErrors.password ?? null}
-              onChange={(event) => setPassword(event.target.value)}
-            />
+              <TextField
+                label="이메일"
+                type="email"
+                name="email"
+                autoComplete="email"
+                placeholder="example@restaurant.com"
+                required
+                value={email}
+                error={fieldErrors.email ?? null}
+                onChange={(event) => setEmail(event.target.value)}
+              />
 
-            <TextField
-              label="비밀번호 확인"
-              type="password"
-              name="passwordConfirm"
-              autoComplete="new-password"
-              required
-              value={passwordConfirm}
-              error={fieldErrors.passwordConfirm ?? null}
-              onChange={(event) => setPasswordConfirm(event.target.value)}
-            />
+              <TextField
+                label="대표자명"
+                name="displayName"
+                autoComplete="name"
+                placeholder="홍길동"
+                required
+                value={displayName}
+                help="2~50자로 입력해 주세요."
+                error={fieldErrors.displayName ?? null}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
 
-            <Button type="submit" variant="primary" block loading={submitting}>
-              가입하기
-            </Button>
+              <TextField
+                label="휴대전화 번호"
+                type="tel"
+                name="phoneNumber"
+                autoComplete="tel"
+                placeholder="010-0000-0000"
+                required
+                value={phoneNumber}
+                help="010으로 시작하는 11자리 번호"
+                error={fieldErrors.phoneNumber ?? null}
+                onChange={(event) => setPhoneNumber(event.target.value)}
+              />
 
-            <p className="op-auth__switch">
-              이미 계정이 있으신가요?{' '}
-              <Link to={ROUTES.storeOperatorSignIn}>대표자 로그인</Link>
-            </p>
-          </form>
+              <TextField
+                label="비밀번호"
+                type="password"
+                name="password"
+                autoComplete="new-password"
+                required
+                value={password}
+                help="8~64자, 대문자·소문자·숫자·특수문자 가운데 3종 이상"
+                error={fieldErrors.password ?? null}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+
+              <TextField
+                label="비밀번호 확인"
+                type="password"
+                name="passwordConfirm"
+                autoComplete="new-password"
+                required
+                value={passwordConfirm}
+                error={fieldErrors.passwordConfirm ?? null}
+                onChange={(event) => setPasswordConfirm(event.target.value)}
+              />
+
+              <Button type="submit" variant="primary" block loading={submitting}>
+                가입하기
+                <OperatorIcon name="arrow-right" />
+              </Button>
+
+              <p className="op-auth__switch">
+                이미 계정이 있으신가요?{' '}
+                <Link to={ROUTES.storeOperatorSignIn}>대표자 로그인</Link>
+              </p>
+
+              <p className="op-auth__footer">
+                <span>© MiriYum Partners</span>
+              </p>
+            </form>
+          </div>
         </div>
       </div>
     </div>

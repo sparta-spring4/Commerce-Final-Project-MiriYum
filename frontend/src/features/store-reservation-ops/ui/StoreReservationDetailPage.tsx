@@ -139,7 +139,7 @@ function ReservationFacts({
         )}
       </SectionCard>
 
-      <SectionCard title="선택한 메뉴">
+      <SectionCard title="선택한 메뉴" icon="menu-book">
         {reservation.menuSelections.length === 0 ? (
           <p className="op-section__hint">선택한 메뉴가 없습니다.</p>
         ) : (
@@ -178,7 +178,7 @@ function ReservationFacts({
       <ReservationCommandPanel storeId={storeId} reservation={reservation} />
 
       {reservation.status === 'CANCELLED' && (
-        <SectionCard title="취소 정보">
+        <SectionCard title="취소 정보" icon="close">
           <SummaryList
             items={[
               {

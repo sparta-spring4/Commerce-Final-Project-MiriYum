@@ -53,7 +53,7 @@ export function ReservationCommandPanel({
 
   if (reservation.status !== 'CONFIRMED') {
     return (
-      <SectionCard title="예약 처리">
+      <SectionCard title="예약 처리" icon="check">
         <Alert
           tone="info"
           title={`이미 ${RESERVATION_STATUS_LABEL[reservation.status]} 상태입니다.`}

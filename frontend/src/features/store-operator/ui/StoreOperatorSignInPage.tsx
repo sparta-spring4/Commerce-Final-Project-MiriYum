@@ -10,6 +10,7 @@ import { Alert } from '../../../shared/ui/Feedback'
 import { AuthErrorCode } from '../../auth/model/authErrors'
 import { collectErrors, validateEmail } from '../../auth/model/validation'
 import { useStoreOperatorAuth } from '../StoreOperatorAuthProvider'
+import { OperatorIcon } from './OperatorIcon'
 
 /**
  * 식당 대표자 로그인.
@@ -80,84 +81,115 @@ export function StoreOperatorSignInPage() {
   return (
     <div className="op-shell">
       <div className="op-auth">
-        <aside className="op-auth__hero">
-          <div>
-            <p className="op-auth__hero-title">운영의 기준을 세우세요.</p>
-            <p className="op-auth__hero-text">
-              매장 정보·영업시간·예약 접수 시간대·메뉴를 한곳에서 관리합니다.
-              변경은 초안으로 저장한 뒤 게시 시점을 직접 정합니다.
-            </p>
-          </div>
-          {/*
-            시안의 "업무 효율 98%" 같은 수치는 근거가 되는 계약이 없어 넣지 않는다.
-            대신 계약이 보장하는 동작만 문장으로 남긴다.
-          */}
-          <p className="op-auth__hero-text">
-            게시 예약과 게시 취소를 구분하며, 기존 예약을 자동으로 옮기거나
-            취소하지 않습니다.
-          </p>
-        </aside>
-
-        <div className="op-auth__panel">
-          <form
-            className="op-auth__form"
-            onSubmit={handleSubmit}
-            aria-label="식당 대표자 로그인"
-            noValidate
-          >
+        <div className="op-auth__card">
+          <aside className="op-auth__hero">
             <div>
-              <h1 className="op-auth__title">식당 대표자 로그인</h1>
-              <p className="op-auth__subtitle">
-                대표자 계정으로 로그인해 매장을 관리하세요.
+              <p className="op-auth__hero-title">운영의 기준을 세우세요.</p>
+              <p className="op-auth__hero-text">
+                매장 정보·영업시간·예약 접수 시간대·메뉴를 한곳에서 관리합니다.
+                변경은 초안으로 저장한 뒤 게시 시점을 직접 정합니다.
               </p>
             </div>
+            {/*
+              시안 하단의 "업무 효율 98%" 같은 수치는 근거가 되는 계약이 없어
+              넣지 않는다. 자리는 그대로 두고 계약이 보장하는 동작만 적는다.
+            */}
+            <div className="op-auth__hero-points">
+              <div>
+                <p className="op-auth__hero-point-title">게시 시점 지정</p>
+                <p className="op-auth__hero-point-text">
+                  초안을 저장한 뒤 게시와 게시 취소를 따로 정합니다.
+                </p>
+              </div>
+              <div>
+                <p className="op-auth__hero-point-title">기존 예약 보존</p>
+                <p className="op-auth__hero-point-text">
+                  설정을 바꿔도 접수된 예약을 자동으로 옮기거나 취소하지
+                  않습니다.
+                </p>
+              </div>
+            </div>
+          </aside>
 
-            {formError !== null && <Alert tone="error" title={formError} />}
-
-            <TextField
-              label="이메일"
-              type="email"
-              name="email"
-              autoComplete="email"
-              value={email}
-              error={fieldErrors.email ?? null}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-
-            <TextField
-              label="비밀번호"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              value={password}
-              error={fieldErrors.password ?? null}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-
-            <Button
-              type="submit"
-              variant="primary"
-              block
-              disabled={restoring}
-              loading={submitting}
+          <div className="op-auth__panel">
+            <form
+              className="op-auth__form"
+              onSubmit={handleSubmit}
+              aria-label="식당 대표자 로그인"
+              noValidate
             >
-              로그인
-            </Button>
-            {restoring && (
-              <p className="op-auth__switch" role="status">
-                로그인 상태를 확인하는 중입니다. 잠시 후 다시 시도해 주세요.
+              <p className="op-auth__brand">
+                <span className="op-sidebar__mark" aria-hidden="true">
+                  MY
+                </span>
+                MiriYum Partner
               </p>
-            )}
 
-            <p className="op-auth__switch">
-              대표자 계정이 없으신가요?{' '}
-              <Link to={ROUTES.storeOperatorSignUp}>대표자 회원가입</Link>
-            </p>
-            <p className="op-auth__switch">
-              {/* 일반 사용자와 셸이 다르다. 같은 폼에서 역할을 고르게 하지 않는다. */}
-              <Link to={ROUTES.consumerSignIn}>일반 사용자 로그인</Link>
-            </p>
-          </form>
+              <div>
+                <h1 className="op-auth__title">식당 대표자 로그인</h1>
+                <p className="op-auth__subtitle">
+                  대표자 계정으로 로그인해 매장을 관리하세요.
+                </p>
+              </div>
+
+              {formError !== null && <Alert tone="error" title={formError} />}
+
+              <TextField
+                label="이메일"
+                type="email"
+                name="email"
+                autoComplete="email"
+                placeholder="admin@restaurant.com"
+                value={email}
+                error={fieldErrors.email ?? null}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+
+              <TextField
+                label="비밀번호"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                error={fieldErrors.password ?? null}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+
+              <Button
+                type="submit"
+                variant="primary"
+                block
+                disabled={restoring}
+                loading={submitting}
+              >
+                로그인
+                <OperatorIcon name="arrow-right" />
+              </Button>
+              {restoring && (
+                <p className="op-auth__switch" role="status">
+                  로그인 상태를 확인하는 중입니다. 잠시 후 다시 시도해 주세요.
+                </p>
+              )}
+
+              <p className="op-auth__switch">
+                대표자 계정이 없으신가요?{' '}
+                <Link to={ROUTES.storeOperatorSignUp}>대표자 회원가입</Link>
+              </p>
+              <p className="op-auth__switch">
+                {/* 일반 사용자와 셸이 다르다. 같은 폼에서 역할을 고르게 하지 않는다. */}
+                <Link to={ROUTES.consumerSignIn}>일반 사용자 로그인</Link>
+              </p>
+
+              {/*
+                시안의 하단 링크 줄. 이용약관·개인정보처리방침 화면은 아직 route가
+                없으므로 링크를 만들지 않고 표기만 남긴다. 눌러도 아무 일이 없는
+                링크를 두면 없는 화면을 약속하게 된다.
+              */}
+              <p className="op-auth__footer">
+                <span>© MiriYum Partners</span>
+              </p>
+            </form>
+          </div>
         </div>
       </div>
     </div>

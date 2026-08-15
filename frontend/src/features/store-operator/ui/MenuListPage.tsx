@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ROUTES, fillPath } from '../../../app/routes'
 import { Badge } from '../../../shared/ui/Badge'
+import { TextField } from '../../../shared/ui/Field'
 import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
 import { useAdoptStoreFromRoute } from '../CurrentStoreProvider'
 import { useOperatorCatalog } from '../api/queries'
@@ -20,6 +21,7 @@ import {
   MENU_VISIBILITY_LABEL,
   type ManagedMenu,
 } from '../model/types'
+import { OperatorIcon } from './OperatorIcon'
 import { PageHeader } from './PageHeader'
 
 /**
@@ -37,9 +39,22 @@ export function MenuListPage() {
   const menus = useManagedMenus(storeId)
   const categories = useOperatorCatalog('menu-categories')
   const [filter, setFilter] = useState<MenuFilter>('ALL')
+  const [keyword, setKeyword] = useState('')
 
   const categoryName = (code: string) =>
     categories.data?.find((item) => item.code === code)?.displayName ?? code
+
+  /*
+   * 이름 검색은 이미 받아 온 목록 위에서만 걸린다.
+   *
+   * 계약의 목록 조회에는 검색 파라미터가 없다. 서버에 없는 질의를 보내는 대신,
+   * 응답 전체를 화면에서 좁힌다. 목록이 한 번에 다 오는 계약이라 결과가 잘리지
+   * 않는다.
+   */
+  const visible = (menus.data ?? []).filter(
+    (menu) =>
+      matchesMenuFilter(menu, filter) && matchesKeyword(menu, keyword),
+  )
 
   return (
     <>
@@ -51,6 +66,7 @@ export function MenuListPage() {
             className="mi-button mi-button--primary"
             to={fillPath(ROUTES.storeOperatorMenuCreate, { storeId })}
           >
+            <OperatorIcon name="plus" />
             새 메뉴 추가
           </Link>
         }
@@ -58,22 +74,34 @@ export function MenuListPage() {
 
       <section className="mi-card">
         <div className="mi-card__body">
-          <fieldset>
-            <legend className="op-day__group-title">상태 필터</legend>
-            <div className="op-chip-set">
-              {MENU_FILTERS.map((value) => (
-                <button
-                  type="button"
-                  key={value}
-                  className="mi-chip"
-                  aria-pressed={filter === value}
-                  onClick={() => setFilter(value)}
-                >
-                  {MENU_FILTER_LABEL[value]}
-                </button>
-              ))}
+          <div className="op-toolbar">
+            <div className="op-toolbar__search">
+              <TextField
+                label="메뉴 검색"
+                type="search"
+                value={keyword}
+                placeholder="메뉴명으로 찾기"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
             </div>
-          </fieldset>
+
+            <fieldset className="op-toolbar__fieldset">
+              <legend className="op-day__group-title">상태 필터</legend>
+              <div className="op-filter-bar">
+                {MENU_FILTERS.map((value) => (
+                  <button
+                    type="button"
+                    key={value}
+                    className="mi-chip"
+                    aria-pressed={filter === value}
+                    onClick={() => setFilter(value)}
+                  >
+                    {MENU_FILTER_LABEL[value]}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          </div>
 
           {menus.isPending && <Loading label="메뉴를 불러오는 중입니다." />}
 
@@ -86,17 +114,34 @@ export function MenuListPage() {
           )}
 
           {menus.isSuccess && (
-            <MenuTable
-              storeId={storeId}
-              menus={menus.data.filter((menu) => matchesMenuFilter(menu, filter))}
-              total={menus.data.length}
-              categoryName={categoryName}
-            />
+            <>
+              <MenuTable
+                storeId={storeId}
+                menus={visible}
+                total={menus.data.length}
+                categoryName={categoryName}
+              />
+              {visible.length > 0 && (
+                <p className="mi-pagination__status">
+                  {`전체 ${menus.data.length}개 중 ${visible.length}개 표시`}
+                </p>
+              )}
+            </>
           )}
         </div>
       </section>
     </>
   )
+}
+
+/** 대표 버전의 이름으로만 맞춰 본다. 빈 검색어는 아무것도 거르지 않는다. */
+function matchesKeyword(menu: ManagedMenu, keyword: string): boolean {
+  const needle = keyword.trim().toLowerCase()
+  if (needle.length === 0) {
+    return true
+  }
+  const name = primaryMenuVersion(menu)?.name ?? ''
+  return name.toLowerCase().includes(needle)
 }
 
 function MenuTable({
@@ -122,7 +167,7 @@ function MenuTable({
     return (
       <EmptyState
         title="이 상태의 메뉴가 없습니다."
-        description="다른 상태 필터를 선택해 보세요."
+        description="다른 상태 필터를 선택하거나 검색어를 지워 보세요."
       />
     )
   }
@@ -176,11 +221,19 @@ function MenuTable({
                   )}
                 </td>
                 <td>
-                  <Badge
-                    tone={menu.visibility === 'VISIBLE' ? 'positive' : 'neutral'}
+                  {/*
+                    시안은 노출 여부를 작은 점으로 표시한다. 점만으로는 의미가
+                    전달되지 않으므로 문구를 항상 옆에 둔다.
+                  */}
+                  <span
+                    className={
+                      menu.visibility === 'VISIBLE'
+                        ? 'op-dot op-dot--on'
+                        : 'op-dot'
+                    }
                   >
                     {MENU_VISIBILITY_LABEL[menu.visibility]}
-                  </Badge>
+                  </span>
                 </td>
                 <td>
                   <Badge tone={sellingTone(menu.sellingStatus)}>
@@ -194,7 +247,9 @@ function MenuTable({
                       storeId,
                       menuId: menu.menuId,
                     })}
+                    aria-label={`${version?.name ?? `메뉴 #${menu.menuId}`} 상세`}
                   >
+                    <OperatorIcon name="edit" className="op-icon--sm" />
                     상세
                   </Link>
                 </td>

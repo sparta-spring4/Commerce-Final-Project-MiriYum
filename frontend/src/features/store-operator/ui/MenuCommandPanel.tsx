@@ -94,7 +94,7 @@ export function MenuCommandPanel({
 
   if (menu.retired) {
     return (
-      <SectionCard title="운영 종료된 메뉴">
+      <SectionCard title="운영 종료된 메뉴" icon="lock">
         <Alert tone="info" title="이 메뉴는 운영을 종료했습니다.">
           <p>
             종료한 메뉴는 다시 게시하지 않습니다. 기존 예약에 담긴 메뉴 스냅샷은
@@ -109,7 +109,7 @@ export function MenuCommandPanel({
     <div className="op-stack">
       {commandError !== null && <Alert tone="error" title={commandError} />}
 
-      <SectionCard title="버전 상태">
+      <SectionCard title="버전 상태" icon="list">
         <SummaryList
           items={[
             {
@@ -125,7 +125,7 @@ export function MenuCommandPanel({
         />
       </SectionCard>
 
-      <SectionCard title="게시" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
+      <SectionCard title="게시" icon="calendar" hint="초안을 저장한 뒤 게시 시점을 정합니다.">
         <PublicationControls
           version={menu.draft?.versionNumber ?? null}
           timeZoneId={timeZoneId}

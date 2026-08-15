@@ -245,7 +245,7 @@ export function TemporaryClosureSection({
       </div>
 
       <div className="op-stack">
-        <SectionCard title="등록한 임시 휴점">
+        <SectionCard title="등록한 임시 휴점" icon="calendar-off">
           {closure === null ? (
             <p className="op-section__hint">
               이 화면에서 등록한 휴점이 표시됩니다. 지난 휴점을 조회하는 계약은
