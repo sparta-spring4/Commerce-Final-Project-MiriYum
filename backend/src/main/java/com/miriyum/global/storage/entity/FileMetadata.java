@@ -198,6 +198,18 @@ public class FileMetadata {
         changeStatus(FileStorageStatus.FAILED);
     }
 
+    /** 공개·비공개 조회 대상에서 제외할 파일 메타데이터를 삭제 상태로 전환한다. */
+    public void delete(Instant deletedAt) {
+        if (storageStatus != FileStorageStatus.CONFIRMED) {
+            throw new IllegalStateException("저장 완료된 파일 메타데이터만 삭제할 수 있습니다.");
+        }
+        if (deletedAt == null) {
+            throw new IllegalArgumentException("삭제 시각은 필수입니다.");
+        }
+        storageStatus = FileStorageStatus.DELETED;
+        this.deletedAt = deletedAt;
+    }
+
     private void changeStatus(FileStorageStatus nextStatus) {
         if (storageStatus != FileStorageStatus.PENDING) {
             throw new IllegalStateException("대기 상태의 파일 메타데이터만 처리 결과를 기록할 수 있습니다.");

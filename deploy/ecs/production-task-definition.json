@@ -30,7 +30,8 @@
         {"name": "MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED", "value": "true"},
         {"name": "MIRIYUM_WAITING_CLOSURE_ENABLED", "value": "false"},
         {"name": "MIRIYUM_VALKEY_HOST", "value": "REPLACE_WITH_VALKEY_ENDPOINT"},
-        {"name": "MIRIYUM_VALKEY_PORT", "value": "6379"}
+        {"name": "MIRIYUM_VALKEY_PORT", "value": "6379"},
+        {"name": "MIRIYUM_VALKEY_SSL_ENABLED", "value": "true"}
       ],
       "secrets": [
         {"name": "MIRIYUM_DB_URL", "valueFrom": "REPLACE_WITH_APPLICATION_SECRET_ARN:MIRIYUM_DB_URL::"},
