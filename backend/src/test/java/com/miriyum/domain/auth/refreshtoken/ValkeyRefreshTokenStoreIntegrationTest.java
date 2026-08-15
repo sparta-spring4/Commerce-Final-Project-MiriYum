@@ -3,6 +3,9 @@ package com.miriyum.domain.auth.refreshtoken;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -24,6 +27,7 @@ import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Testcontainers
@@ -764,8 +768,46 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 });
     }
 
+    @Test
+    @DisplayName("배포 backfill은 DB, counter, pending marker 중 가장 큰 재사용 횟수를 유지한다")
+    void keepsGreatestOccurrenceCountDuringDeploymentBackfill() throws IOException {
+        String eventKey = RefreshTokenRiskEventKey.forReuse(
+                TokenNamespace.CONSUMER,
+                "family-deployment-backfill",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        String counterKey = RefreshTokenRiskEventKey.occurrenceCounter(
+                TokenNamespace.CONSUMER,
+                "family-deployment-backfill",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        String familyKey = RefreshTokenKey.forFamily(TokenNamespace.CONSUMER, "family-deployment-backfill");
+        redisTemplate.opsForHash().put(familyKey, "status", "REVOKED");
+        redisTemplate.expire(familyKey, 1, TimeUnit.HOURS);
+        redisTemplate.opsForValue().set(counterKey, "4");
+        redisTemplate.opsForHash().put(eventKey, "occurrenceCount", "5");
+
+        Long result = redisTemplate.execute(
+                new DefaultRedisScript<>(deploymentOccurrenceCounterBackfillScript(), Long.class),
+                List.of(counterKey, familyKey, eventKey),
+                "3");
+
+        assertThat(result).isEqualTo(1L);
+        assertThat(redisTemplate.opsForValue().get(counterKey)).isEqualTo("5");
+        long familyTtl = redisTemplate.getExpire(familyKey, TimeUnit.SECONDS);
+        long counterTtl = redisTemplate.getExpire(counterKey, TimeUnit.SECONDS);
+        assertThat(counterTtl).isBetween(familyTtl - 1, familyTtl + 1);
+    }
+
     private void writePendingRiskMarker(String markerKey, String generation) {
         writePendingRiskMarker(markerKey, generation, "1775952000");
+    }
+
+    private String deploymentOccurrenceCounterBackfillScript() throws IOException {
+        String deployScript = Files.readString(Path.of("..", "deploy", "deploy.sh"));
+        String startDelimiter = "REDISCLI_AUTH=\"$MIRIYUM_VALKEY_PASSWORD\" valkey-cli --raw EVAL \"";
+        int scriptStart = deployScript.indexOf(startDelimiter);
+        int scriptEnd = deployScript.indexOf("\" 3 \"$counter_key\"", scriptStart);
+        return deployScript.substring(scriptStart + startDelimiter.length(), scriptEnd)
+                .replace("\\\"", "\"");
     }
 
     private void writeLegacyPendingRiskMarker(String markerKey) {
