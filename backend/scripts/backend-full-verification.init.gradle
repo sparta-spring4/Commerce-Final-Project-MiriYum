@@ -1,0 +1,36 @@
+import org.gradle.api.GradleException
+import org.gradle.api.tasks.testing.Test
+
+def verificationBuildDirectory = gradle.startParameter.systemPropertiesArgs['miriyum.verification.build-dir']
+if (verificationBuildDirectory == null || verificationBuildDirectory.trim().isEmpty()) {
+    throw new GradleException('miriyum.verification.build-dir must be supplied by the backend verification runner.')
+}
+
+gradle.beforeProject { currentProject ->
+    def rootBuildDirectory = new File(verificationBuildDirectory)
+    def projectBuildDirectory = currentProject.path == ':'
+        ? rootBuildDirectory
+        : new File(rootBuildDirectory, currentProject.path.replace(':', '/'))
+    currentProject.layout.buildDirectory.set(projectBuildDirectory)
+}
+
+gradle.projectsEvaluated {
+    rootProject.allprojects { currentProject ->
+        currentProject.tasks.withType(Test).configureEach { testTask ->
+            testTask.maxHeapSize = '1g'
+            testTask.maxParallelForks = 1
+            testTask.doFirst {
+                if (testTask.maxHeapSize != '1g' || testTask.maxParallelForks != 1) {
+                    throw new GradleException(
+                        "Runner Test profile changed before execution: task=${testTask.path} " +
+                            "maxHeapSize=${testTask.maxHeapSize} maxParallelForks=${testTask.maxParallelForks}"
+                    )
+                }
+                testTask.logger.lifecycle(
+                    "MIRIYUM_RUNNER_TEST_PROFILE task=${testTask.path} " +
+                        "maxHeapSize=${testTask.maxHeapSize} maxParallelForks=${testTask.maxParallelForks}"
+                )
+            }
+        }
+    }
+}

@@ -45,6 +45,10 @@ jobs:
             exit 1
           fi
 
+      - name: Run backend verification contracts
+        shell: pwsh
+        run: ./scripts/test-run-backend-full-verification.ps1 -Suite Common,Gradle
+
       - name: Run unit tests
         run: ./gradlew test
 
@@ -164,9 +168,24 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  windows-verification-contract:
+    name: windows-verification-contract
+    runs-on: windows-2025
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run Windows verification contracts
+        shell: pwsh
+        run: ./scripts/test-run-backend-full-verification.ps1 -Suite Common,WindowsNative
+
   backend-ci:
     name: backend-ci
-    needs: [unit-test, integration-test]
+    needs: [unit-test, integration-test, windows-verification-contract]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -175,11 +194,14 @@ jobs:
         env:
           UNIT_TEST_RESULT: ${{ needs.unit-test.result }}
           INTEGRATION_TEST_RESULT: ${{ needs.integration-test.result }}
+          WINDOWS_VERIFICATION_RESULT: ${{ needs.windows-verification-contract.result }}
         run: |
           echo "unit-test=$UNIT_TEST_RESULT"
           echo "integration-test=$INTEGRATION_TEST_RESULT"
+          echo "windows-verification-contract=$WINDOWS_VERIFICATION_RESULT"
           test "$UNIT_TEST_RESULT" = "success"
           test "$INTEGRATION_TEST_RESULT" = "success"
+          test "$WINDOWS_VERIFICATION_RESULT" = "success"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
