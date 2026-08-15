@@ -5,6 +5,7 @@ import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -62,7 +63,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                         'policyVersion', 'AUTH-012-v1',
                         'occurredAt', ARGV[6],
                         'occurrenceCount', '1',
-                        'lastOccurredAt', ARGV[6])
+                        'lastOccurredAt', ARGV[6],
+                        'generation', ARGV[11])
                     redis.call('EXPIREAT', KEYS[3], ARGV[10])
                 else
                     redis.call('HINCRBY', KEYS[3], 'occurrenceCount', 1)
@@ -211,7 +213,8 @@ public class ValkeyRefreshTokenStore implements RefreshTokenStore {
                 epochSeconds(nextFamilyExpiresAt),
                 namespace.value(),
                 familyId,
-                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)));
+                epochSeconds(now.plusSeconds(RISK_EVENT_MARKER_RETENTION_SECONDS)),
+                UUID.randomUUID().toString());
         // ROTATE_SCRIPT는 0(없음/불일치)·1(회전)·3(재사용)만 반환한다. 0만 정상 업무 결과이고,
         // null과 그 밖의 값은 Valkey 실행 이상이므로 인증 오류로 감추지 않고 COMMON_012로 실패시킨다.
         int rotateResult = requireScriptResult(result, "rotate", namespace);

@@ -124,6 +124,7 @@ MiriYum의 일반 사용자, 식당 대표자와 플랫폼 운영자는 결제�
 ### 다중 인스턴스 위험 사건 전달 방침
 
 - 여러 애플리케이션 인스턴스가 실행되면 각 인스턴스의 scheduler가 같은 pending marker를 읽을 수 있다. 이 전달은 정확히 한 번이 아니라 **at-least-once(최소 한 번)** 방식으로 동작하며, 일시적인 MySQL 중복 쓰기는 허용한다.
-- 동일 marker를 여러 인스턴스가 전달해도 `auth_risk_events.event_key` 고유키와 upsert가 발생 횟수·마지막 발생 시각을 큰 값으로 수렴시킨다. 따라서 중복 실행이 별도 위험 사건 행을 만들거나 보안 이력을 유실하지 않는다.
-- marker는 MySQL 저장이 성공한 뒤에도 `occurrenceCount`가 읽은 값과 같을 때만 Lua로 삭제한다. 전달 중 같은 사건이 다시 감지되어 횟수가 증가하면 삭제하지 않아, 새 위험 사건은 다음 주기에 다시 전달된다.
-- 현재는 분산 lock을 추가하지 않는다. lock lease 만료·소유권 확인이라는 새 실패 경로보다, 처리량이 작은 위험 사건을 멱등하게 한 번 더 저장하는 비용이 작기 때문이다. pending 수가 지속적으로 증가하거나 다중 인스턴스의 중복 DB 쓰기가 관측되면, Valkey 기반 lease lock 또는 전용 작업 큐 도입을 별도 결정한다.
+- 동일 marker를 여러 인스턴스가 전달해도 `auth_risk_events.event_key` 고유키와 upsert가 발생 횟수·마지막 발생 시각을 큰 값으로 수렴시킨다. 따라서 중복 실행이 별도 위험 사건 행을 만들지 않는다.
+- marker를 새로 만들 때는 수명 주기를 구분하는 임의 `generation` 값을 한 번 저장한다. 구버전 marker는 읽은 필드 snapshot이 그대로일 때만 generation을 한 번 채워 기존 위험 사건을 보존한다.
+- marker는 MySQL 저장이 성공한 뒤에도 읽은 `occurrenceCount`와 `generation`이 모두 같을 때만 Lua로 삭제한다. 전달 중 같은 사건이 누적되거나, 삭제 뒤 같은 키의 marker가 새로 생성되면 이전 worker는 삭제하지 않아 새 위험 사건을 다음 주기에 전달한다.
+- 현재는 분산 lock을 추가하지 않는다. lock lease 만료·소유권 확인이라는 새 실패 경로보다, 처리량이 작은 위험 사건을 멱등하게 한 번 더 저장하는 비용이 작기 때문이다. `RefreshTokenRiskEventPendingCount`가 지속적으로 증가하거나 `refresh_token_risk_event_marker_long_stay`, `refresh_token_risk_event_delivery_stalled` 로그가 반복되면 Valkey 기반 lease lock 또는 전용 작업 큐 도입을 별도 결정한다.
