@@ -28,6 +28,7 @@ public class JwtTokenProvider {
     private static final String CLAIM_TOKEN_TYPE = "tokenType";
     private static final String CLAIM_FAMILY_ID = "familyId";
     private static final String CLAIM_TOKEN_ID = "tokenId";
+    private static final String CLAIM_FAMILY_CREATED_AT = "familyCreatedAt";
     private static final String CLAIM_SESSION_ID = "sessionId";
     private static final String CLAIM_AUTHORITY_VERSION = "authorityVersion";
     private static final String CLAIM_SESSION_VERSION = "sessionVersion";
@@ -61,7 +62,7 @@ public class JwtTokenProvider {
     }
 
     public String generateAccessToken(TokenNamespace namespace, Long accountId) {
-        return generateToken(namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, null);
+        return generateToken(namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, null, null);
     }
 
     public String generateAccessToken(
@@ -70,12 +71,26 @@ public class JwtTokenProvider {
             SessionTokenClaims sessionClaims
     ) {
         return generateToken(
-                namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, sessionClaims);
+                namespace, accountId, TokenType.ACCESS, ACCESS_TOKEN_VALIDITY, null, null, sessionClaims, null);
     }
 
     public String generateRefreshToken(TokenNamespace namespace, Long accountId, String familyId, String tokenId) {
+        return generateRefreshToken(namespace, accountId, familyId, tokenId, clock.instant(), REFRESH_TOKEN_VALIDITY);
+    }
+
+    public String generateRefreshToken(
+            TokenNamespace namespace,
+            Long accountId,
+            String familyId,
+            String tokenId,
+            Instant familyCreatedAt,
+            Duration validity
+    ) {
+        if (familyCreatedAt == null || validity == null || validity.isZero() || validity.isNegative()) {
+            throw new IllegalArgumentException("Refresh Token family creation time and validity must be positive");
+        }
         return generateToken(
-                namespace, accountId, TokenType.REFRESH, REFRESH_TOKEN_VALIDITY, familyId, tokenId, null);
+                namespace, accountId, TokenType.REFRESH, validity, familyId, tokenId, null, familyCreatedAt);
     }
 
     public String generateRefreshToken(
@@ -92,7 +107,8 @@ public class JwtTokenProvider {
                 REFRESH_TOKEN_VALIDITY,
                 familyId,
                 tokenId,
-                sessionClaims);
+                sessionClaims,
+                null);
     }
 
     public ParsedToken parseAccessToken(String token) {
@@ -131,7 +147,8 @@ public class JwtTokenProvider {
             Duration validity,
             String familyId,
             String tokenId,
-            SessionTokenClaims sessionClaims
+            SessionTokenClaims sessionClaims,
+            Instant familyCreatedAt
     ) {
         Instant now = clock.instant();
         String subject = namespace.value() + ":" + accountId;
@@ -144,6 +161,7 @@ public class JwtTokenProvider {
                 .claim(CLAIM_TOKEN_TYPE, tokenType.name())
                 .claim(CLAIM_FAMILY_ID, familyId)
                 .claim(CLAIM_TOKEN_ID, tokenId)
+                .claim(CLAIM_FAMILY_CREATED_AT, familyCreatedAt == null ? null : familyCreatedAt.getEpochSecond())
                 .claim(CLAIM_SESSION_ID, sessionClaims == null ? null : sessionClaims.sessionId())
                 .claim(CLAIM_AUTHORITY_VERSION, sessionClaims == null ? null : sessionClaims.authorityVersion())
                 .claim(CLAIM_SESSION_VERSION, sessionClaims == null ? null : sessionClaims.sessionVersion())
@@ -207,13 +225,27 @@ public class JwtTokenProvider {
                 throw new ServiceException(invalidCode);
             }
             SessionTokenClaims sessionClaims = parseSessionClaims(claims, namespace, invalidCode);
+            Instant familyCreatedAt = parseFamilyCreatedAt(claims, invalidCode);
             return new ParsedToken(
                     namespace,
                     accountId,
                     claims.get(CLAIM_FAMILY_ID, String.class),
                     claims.get(CLAIM_TOKEN_ID, String.class),
-                    sessionClaims);
+                    sessionClaims,
+                    familyCreatedAt);
         } catch (IllegalArgumentException exception) {
+            throw new ServiceException(invalidCode);
+        }
+    }
+
+    private Instant parseFamilyCreatedAt(Claims claims, ErrorCode invalidCode) {
+        Number epochSeconds = claims.get(CLAIM_FAMILY_CREATED_AT, Number.class);
+        if (epochSeconds == null) {
+            return null;
+        }
+        try {
+            return Instant.ofEpochSecond(epochSeconds.longValue());
+        } catch (RuntimeException exception) {
             throw new ServiceException(invalidCode);
         }
     }

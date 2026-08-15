@@ -4,6 +4,7 @@ import http from 'k6/http'
 
 import { loadConfig } from './config.js'
 import { validateAuthPoolCapacity, validateFixture } from './lib/contracts.js'
+import { COOKIE_LIFETIME_OPTIONS } from './lib/runtime-options.js'
 import {
   createFixtureFingerprint,
   createTargetFingerprint,
@@ -109,6 +110,7 @@ export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(50)', 'p(95)', 'p(99)'],
   summaryTimeUnit: 'ms',
   userAgent: `miriyum-k6-baseline/${config.commitSha.slice(0, 12)}`,
+  ...COOKIE_LIFETIME_OPTIONS,
 }
 
 function resolveCredentials(reference) {
