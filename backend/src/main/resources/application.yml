@@ -10,6 +10,8 @@ spring:
       host: ${MIRIYUM_VALKEY_HOST:localhost}
       port: ${MIRIYUM_VALKEY_PORT:6379}
       password: ${MIRIYUM_VALKEY_PASSWORD:}
+      ssl:
+        enabled: ${MIRIYUM_VALKEY_SSL_ENABLED:false}
       timeout: ${MIRIYUM_VALKEY_TIMEOUT:2s}
   jackson:
     deserialization:
