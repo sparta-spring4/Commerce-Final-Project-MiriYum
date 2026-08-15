@@ -72,6 +72,7 @@ tasks.withType<Test> {
     systemProperty("miriyum.reservation.time-policy.activation-enabled", "false")
     systemProperty("miriyum.store.schedule.activation-enabled", "false")
     systemProperty("miriyum.waiting.closure.enabled", "false")
+    systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
 
 val integrationTag = "integration"

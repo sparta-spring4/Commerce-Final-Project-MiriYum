@@ -1,5 +1,6 @@
 package com.miriyum.global.idempotency;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
@@ -9,6 +10,19 @@ class IdempotencyCommandTest {
 
     private static final String VALID_KEY = "123e4567-e89b-12d3-a456-426614174000";
     private static final String VALID_FINGERPRINT = "a".repeat(64);
+
+    @Test
+    @DisplayName("플랫폼 운영자 명령은 전용 멱등 주체 namespace를 사용한다")
+    void constructor_platformOperatorNamespace_accepted() {
+        IdempotencyCommand command = new IdempotencyCommand(
+                "platform-operator",
+                1L,
+                "OPERATOR_CREATE",
+                VALID_KEY,
+                VALID_FINGERPRINT);
+
+        assertThat(command.principalNamespace()).isEqualTo("platform-operator");
+    }
 
     @Test
     @DisplayName("DB 식별자 길이와 필수값 계약을 벗어난 명령을 거부한다")

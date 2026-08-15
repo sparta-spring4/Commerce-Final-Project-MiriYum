@@ -376,7 +376,7 @@ components:
     AuditEventData:
       type: object
       additionalProperties: false
-      required: [eventKey, source, action, outcome, actorOperatorId, authorityVersion, targetType, targetId, reason, occurredAt]
+      required: [eventKey, source, action, outcome, actorOperatorId, authorityVersion, roles, permissions, beforeRoles, afterRoles, beforePermissions, afterPermissions, targetType, targetId, reason, occurredAt]
       properties:
         eventKey:
           $ref: "#/components/schemas/EventKey"
@@ -400,12 +400,46 @@ components:
           type: array
           items:
             type: string
+        beforeStatus:
+          type: [string, "null"]
+        afterStatus:
+          type: [string, "null"]
+        beforeRoles:
+          type: array
+          items:
+            type: string
+        afterRoles:
+          type: array
+          items:
+            type: string
+        beforePermissions:
+          type: array
+          items:
+            type: string
+        afterPermissions:
+          type: array
+          items:
+            type: string
         targetType:
           type: string
         targetId:
           $ref: "#/components/schemas/PublicId"
         reason:
           type: string
+        correctedAction:
+          type: [string, "null"]
+        correctedOutcome:
+          oneOf:
+            - $ref: "#/components/schemas/AuditOutcome"
+            - type: "null"
+        correctedTargetType:
+          type: [string, "null"]
+        correctedTargetId:
+          type: [string, "null"]
+        correctedReason:
+          oneOf:
+            - $ref: "#/components/schemas/AuditReason"
+            - type: "null"
         correlationId:
           type: string
         originalEventKey:

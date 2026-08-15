@@ -154,6 +154,14 @@
 - `backend/src/test/java/com/miriyum/global/idempotency/IdempotencyCommandTest.java`
 - `backend/src/test/java/com/miriyum/architecture/AudienceOpenApiContractTest.java`
 - `backend/src/test/java/com/miriyum/architecture/HttpApiNamespaceContractTest.java`
+- `backend/src/test/java/com/miriyum/architecture/ApiUrlConvention.java`
+- `backend/src/test/java/com/miriyum/architecture/ApiUrlConventionTest.java`
+- `backend/src/test/java/com/miriyum/architecture/DomainPackageArchitectureTest.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
+- `backend/build.gradle.kts`
+- `backend/src/test/java/com/miriyum/testinfra/MySqlAuditTriggerExtension.java`
+- `backend/src/test/resources/META-INF/services/org.junit.jupiter.api.extension.Extension`
+- `backend/src/test/java/com/miriyum/domain/{notification/payment/store/reservation}/**/*MigrationTest.java` (V43 trigger migration compatibility only)
 
 기존 migration, 다른 도메인의 Entity·Repository·Service·Controller, `SecurityConfig`, frontend, deploy와 `docs/superpowers/**`는 변경하지 않는다. allowlist 밖 변경이 필요하면 중단하고 spec을 다시 승인받는다.
 
