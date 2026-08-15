@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,10 +49,6 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
             """, Long.class);
 
     private static final RedisScript<String> INITIALIZE_LEGACY_MARKER_GENERATION_SCRIPT = new DefaultRedisScript<>("""
-            local generation = redis.call('HGET', KEYS[1], 'generation')
-            if generation ~= false then
-                return generation
-            end
             for index = 1, #ARGV - 1, 3 do
                 local field = ARGV[index]
                 local expectedPresent = ARGV[index + 1]
@@ -64,6 +61,10 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
                 elseif actualValue == false or actualValue ~= expectedValue then
                     return false
                 end
+            end
+            local generation = redis.call('HGET', KEYS[1], 'generation')
+            if generation ~= false then
+                return generation
             end
             generation = ARGV[#ARGV]
             redis.call('HSET', KEYS[1], 'generation', generation)
@@ -116,6 +117,8 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
                         snapshot = withMarkerGeneration(eventKey, values);
                         if (snapshot != null) {
                             events.add(toPendingEvent(eventKey, snapshot));
+                        } else {
+                            log.warn("event=refresh_token_risk_event_legacy_marker_snapshot_changed");
                         }
                     } catch (IllegalArgumentException exception) {
                         quarantineMalformedPendingMarker(eventKey, snapshot);
@@ -305,7 +308,7 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
         if (initializedGeneration == null || initializedGeneration.isBlank()) {
             return null;
         }
-        Map<String, String> snapshot = new java.util.HashMap<>(values);
+        Map<String, String> snapshot = new HashMap<>(values);
         snapshot.put("generation", initializedGeneration);
         return snapshot;
     }

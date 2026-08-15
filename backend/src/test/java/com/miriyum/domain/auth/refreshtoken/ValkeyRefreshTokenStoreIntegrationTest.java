@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.auth.jwt.TokenNamespace;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -23,6 +24,7 @@ import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @Testcontainers
 @Tag("integration")
@@ -520,6 +522,35 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     @Test
+    @DisplayName("구버전 marker의 이전 snapshot은 재생성된 marker 세대를 빌려오지 않는다")
+    void doesNotCombineLegacySnapshotWithRecreatedMarkerGeneration() {
+        String markerKey = "auth:risk:pending:legacy-aba";
+        writeLegacyPendingRiskMarker(markerKey);
+        Map<String, String> staleValues = redisTemplate.<String, String>opsForHash().entries(markerKey);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> firstSnapshot = ReflectionTestUtils.invokeMethod(
+                markerStore, "withMarkerGeneration", markerKey, staleValues);
+        assertThat(firstSnapshot).isNotNull();
+        assertThat(markerStore.deleteIfUnchanged(
+                markerKey,
+                Long.parseLong(firstSnapshot.get("occurrenceCount")),
+                firstSnapshot.get("generation"))).isTrue();
+
+        writePendingRiskMarker(markerKey, "generation-recreated", "1775952001");
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> staleSnapshotAfterRecreation = ReflectionTestUtils.invokeMethod(
+                markerStore, "withMarkerGeneration", markerKey, staleValues);
+
+        assertThat(staleSnapshotAfterRecreation).isNull();
+        assertThat(redisTemplate.<String, String>opsForHash().get(markerKey, "generation"))
+                .isEqualTo("generation-recreated");
+        assertThat(redisTemplate.<String, String>opsForHash().get(markerKey, "lastOccurredAt"))
+                .isEqualTo("1775952001");
+    }
+
+    @Test
     @DisplayName("재사용 위험 marker는 최초 생성 기준 7일 동안 보존하고 재사용으로 TTL을 연장하지 않는다")
     void keepsPendingRiskEventForSevenDaysWithoutExtendingItsTtlOnReuse() {
         Instant now = Instant.now();
@@ -627,7 +658,23 @@ class ValkeyRefreshTokenStoreIntegrationTest {
     }
 
     private void writePendingRiskMarker(String markerKey, String generation) {
-        redisTemplate.<String, String>opsForHash().putAll(markerKey, Map.ofEntries(
+        writePendingRiskMarker(markerKey, generation, "1775952000");
+    }
+
+    private void writeLegacyPendingRiskMarker(String markerKey) {
+        redisTemplate.<String, String>opsForHash().putAll(markerKey, pendingRiskMarkerValues("1775952000"));
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+    }
+
+    private void writePendingRiskMarker(String markerKey, String generation, String lastOccurredAt) {
+        Map<String, String> values = new HashMap<>(pendingRiskMarkerValues(lastOccurredAt));
+        values.put("generation", generation);
+        redisTemplate.<String, String>opsForHash().putAll(markerKey, values);
+        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+    }
+
+    private Map<String, String> pendingRiskMarkerValues(String lastOccurredAt) {
+        return Map.ofEntries(
                 Map.entry("namespace", TokenNamespace.CONSUMER.value()),
                 Map.entry("accountId", "7"),
                 Map.entry("familyId", "family-aba"),
@@ -637,9 +684,7 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 Map.entry("policyVersion", "AUTH-012-v1"),
                 Map.entry("occurredAt", "1775952000"),
                 Map.entry("occurrenceCount", "1"),
-                Map.entry("lastOccurredAt", "1775952000"),
-                Map.entry("generation", generation)));
-        redisTemplate.opsForSet().add(RefreshTokenRiskEventKey.pendingIndex(), markerKey);
+                Map.entry("lastOccurredAt", lastOccurredAt));
     }
 
     private RefreshTokenState state(String familyId, String tokenId, Instant now) {
