@@ -8,5 +8,6 @@ public enum AdminTargetType {
     STORE,
     PAYMENT_RECOVERY_CASE,
     PLATFORM_OPERATOR_ACCOUNT,
+    AUDIT_EVENT,
     INCIDENT
 }
