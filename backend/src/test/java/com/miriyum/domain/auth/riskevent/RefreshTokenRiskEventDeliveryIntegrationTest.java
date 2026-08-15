@@ -78,7 +78,8 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
                 "AUTH-012-v1",
                 Instant.parse("2026-08-10T00:00:00Z"),
                 1L,
-                Instant.parse("2026-08-10T00:00:00Z"));
+                Instant.parse("2026-08-10T00:00:00Z"),
+                "generation-first");
         given(markerStore.findPendingEvents()).willReturn(List.of(event));
 
         delivery.deliverPendingEvents();
@@ -88,7 +89,8 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
         assertThat(count).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT origin_event FROM auth_risk_events", String.class)).isEqualTo("ROTATION");
-        verify(markerStore, times(2)).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+        verify(markerStore, times(2)).deleteIfUnchanged(
+                event.eventKey(), event.occurrenceCount(), event.generation());
     }
 
     @Test
@@ -128,7 +130,8 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
                 "AUTH-012-v1",
                 occurredAt,
                 1L,
-                occurredAt);
+                occurredAt,
+                "generation-utc");
         given(markerStore.findPendingEvents()).willReturn(List.of(recentEvent));
 
         // when
@@ -156,6 +159,7 @@ class RefreshTokenRiskEventDeliveryIntegrationTest {
                 "AUTH-012-v1",
                 Instant.parse("2026-08-10T00:00:00Z"),
                 occurrenceCount,
-                lastOccurredAt);
+                lastOccurredAt,
+                "generation-" + occurrenceCount);
     }
 }

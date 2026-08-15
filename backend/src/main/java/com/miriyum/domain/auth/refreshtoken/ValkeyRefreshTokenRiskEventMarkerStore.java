@@ -12,8 +12,10 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,17 +34,42 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
     private static final long PENDING_EVENT_SCAN_COUNT = 100L;
     private static final List<String> PENDING_EVENT_FIELDS = List.of(
             "namespace", "accountId", "familyId", "tokenHash", "sourceEvent",
-            "originEvent", "policyVersion", "occurredAt", "occurrenceCount", "lastOccurredAt");
+            "originEvent", "policyVersion", "occurredAt", "occurrenceCount", "lastOccurredAt", "generation");
 
     private static final RedisScript<Long> DELETE_IF_UNCHANGED_SCRIPT = new DefaultRedisScript<>("""
             local occurrenceCount = redis.call('HGET', KEYS[1], 'occurrenceCount')
-            if occurrenceCount == false or occurrenceCount ~= ARGV[1] then
+            local generation = redis.call('HGET', KEYS[1], 'generation')
+            if occurrenceCount == false or generation == false
+                    or occurrenceCount ~= ARGV[1] or generation ~= ARGV[2] then
                 return 0
             end
             redis.call('DEL', KEYS[1])
             redis.call('SREM', KEYS[2], KEYS[1])
             return 1
             """, Long.class);
+
+    private static final RedisScript<String> INITIALIZE_LEGACY_MARKER_GENERATION_SCRIPT = new DefaultRedisScript<>("""
+            for index = 1, #ARGV - 1, 3 do
+                local field = ARGV[index]
+                local expectedPresent = ARGV[index + 1]
+                local expectedValue = ARGV[index + 2]
+                local actualValue = redis.call('HGET', KEYS[1], field)
+                if expectedPresent == '0' then
+                    if actualValue ~= false then
+                        return false
+                    end
+                elseif actualValue == false or actualValue ~= expectedValue then
+                    return false
+                end
+            end
+            local generation = redis.call('HGET', KEYS[1], 'generation')
+            if generation ~= false then
+                return generation
+            end
+            generation = ARGV[#ARGV]
+            redis.call('HSET', KEYS[1], 'generation', generation)
+            return generation
+            """, String.class);
 
     private static final RedisScript<Long> REMOVE_STALE_INDEX_MEMBER_SCRIPT = new DefaultRedisScript<>("""
             if redis.call('EXISTS', KEYS[1]) == 1 then
@@ -85,10 +112,16 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
             for (String eventKey : nextPendingMarkerKeys()) {
                 Map<String, String> values = redisTemplate.<String, String>opsForHash().entries(eventKey);
                 if (!values.isEmpty()) {
+                    Map<String, String> snapshot = values;
                     try {
-                        events.add(toPendingEvent(eventKey, values));
+                        snapshot = withMarkerGeneration(eventKey, values);
+                        if (snapshot != null) {
+                            events.add(toPendingEvent(eventKey, snapshot));
+                        } else {
+                            log.warn("event=refresh_token_risk_event_legacy_marker_snapshot_changed");
+                        }
                     } catch (IllegalArgumentException exception) {
-                        quarantineMalformedPendingMarker(eventKey, values);
+                        quarantineMalformedPendingMarker(eventKey, snapshot);
                     }
                 } else {
                     try {
@@ -217,12 +250,15 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
         return snapshot.toArray();
     }
 
-    public boolean deleteIfUnchanged(String eventKey, long occurrenceCount) {
+    public boolean deleteIfUnchanged(String eventKey, long occurrenceCount, String generation) {
+        if (generation == null || generation.isBlank()) {
+            throw new IllegalArgumentException("marker generation must not be blank");
+        }
         try {
             Long deleted = redisTemplate.execute(
                     DELETE_IF_UNCHANGED_SCRIPT,
                     List.of(eventKey, RefreshTokenRiskEventKey.pendingIndex()),
-                    Long.toString(occurrenceCount));
+                    Long.toString(occurrenceCount), generation);
             return deleted != null && deleted > 0;
         } catch (DataAccessException | IllegalArgumentException exception) {
             throw unavailable();
@@ -242,7 +278,8 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
                     required(values, "policyVersion"),
                     Instant.ofEpochSecond(Long.parseLong(required(values, "occurredAt"))),
                     Long.parseLong(required(values, "occurrenceCount")),
-                    Instant.ofEpochSecond(Long.parseLong(required(values, "lastOccurredAt"))));
+                    Instant.ofEpochSecond(Long.parseLong(required(values, "lastOccurredAt"))),
+                    required(values, "generation"));
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException("Malformed pending risk event", exception);
         }
@@ -254,6 +291,41 @@ public class ValkeyRefreshTokenRiskEventMarkerStore {
             throw new IllegalArgumentException("Missing pending risk event field: " + field);
         }
         return value;
+    }
+
+    private Map<String, String> withMarkerGeneration(String eventKey, Map<String, String> values) {
+        String generation = values.get("generation");
+        if (generation != null) {
+            if (generation.isBlank()) {
+                throw new IllegalArgumentException("Blank pending risk event generation");
+            }
+            return values;
+        }
+        String initializedGeneration = redisTemplate.execute(
+                INITIALIZE_LEGACY_MARKER_GENERATION_SCRIPT,
+                List.of(eventKey),
+                legacyMarkerSnapshot(values, UUID.randomUUID().toString()));
+        if (initializedGeneration == null || initializedGeneration.isBlank()) {
+            return null;
+        }
+        Map<String, String> snapshot = new HashMap<>(values);
+        snapshot.put("generation", initializedGeneration);
+        return snapshot;
+    }
+
+    private Object[] legacyMarkerSnapshot(Map<String, String> values, String generation) {
+        List<String> snapshot = new ArrayList<>((PENDING_EVENT_FIELDS.size() - 1) * 3 + 1);
+        for (String field : PENDING_EVENT_FIELDS) {
+            if (field.equals("generation")) {
+                continue;
+            }
+            String value = values.get(field);
+            snapshot.add(field);
+            snapshot.add(value == null ? "0" : "1");
+            snapshot.add(value == null ? "" : value);
+        }
+        snapshot.add(generation);
+        return snapshot.toArray();
     }
 
     private ServiceException unavailable() {

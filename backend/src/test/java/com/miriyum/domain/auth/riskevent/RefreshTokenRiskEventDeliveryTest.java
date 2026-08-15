@@ -61,7 +61,7 @@ class RefreshTokenRiskEventDeliveryTest {
         willThrow(new DataAccessResourceFailureException("mysql unavailable"))
                 .willDoNothing()
                 .given(authRiskEventStore).record(event);
-        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation())).willReturn(true);
 
         int firstDelivered = delivery.deliverPendingEvents();
         int secondDelivered = delivery.deliverPendingEvents();
@@ -69,7 +69,7 @@ class RefreshTokenRiskEventDeliveryTest {
         assertThat(firstDelivered).isZero();
         assertThat(secondDelivered).isEqualTo(1);
         verify(authRiskEventStore, times(2)).record(event);
-        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation());
     }
 
     @Test
@@ -92,7 +92,7 @@ class RefreshTokenRiskEventDeliveryTest {
         given(markerStore.findPendingEvents()).willReturn(List.of(longStayedEvent));
         given(markerStore.pendingEventCount()).willReturn(1L);
         given(markerStore.deleteIfUnchanged(
-                longStayedEvent.eventKey(), longStayedEvent.occurrenceCount())).willReturn(true);
+                longStayedEvent.eventKey(), longStayedEvent.occurrenceCount(), longStayedEvent.generation())).willReturn(true);
 
         delivery.deliverPendingEvents();
 
@@ -111,7 +111,7 @@ class RefreshTokenRiskEventDeliveryTest {
         given(markerStore.findPendingEvents()).willReturn(List.of(event));
         given(markerStore.pendingEventCount()).willThrow(new com.miriyum.global.exception.ServiceException(
                 com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE));
-        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(true);
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation())).willReturn(true);
 
         int delivered = delivery.deliverPendingEvents();
 
@@ -127,13 +127,13 @@ class RefreshTokenRiskEventDeliveryTest {
     void keepsMarkerWhenOccurrenceCountChangedDuringDelivery() {
         PendingRefreshTokenRiskEvent event = event();
         given(markerStore.findPendingEvents()).willReturn(List.of(event));
-        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount())).willReturn(false);
+        given(markerStore.deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation())).willReturn(false);
 
         int delivered = delivery.deliverPendingEvents();
 
         assertThat(delivered).isZero();
         verify(authRiskEventStore).record(event);
-        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+        verify(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation());
     }
 
     @Test
@@ -186,7 +186,7 @@ class RefreshTokenRiskEventDeliveryTest {
         willDoNothing().given(authRiskEventStore).record(event);
         willThrow(new com.miriyum.global.exception.ServiceException(
                 com.miriyum.global.exception.CommonErrorCode.SERVICE_UNAVAILABLE))
-                .given(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount());
+                .given(markerStore).deleteIfUnchanged(event.eventKey(), event.occurrenceCount(), event.generation());
 
         delivery.deliverPendingEvents();
         delivery.deliverPendingEvents();
@@ -238,6 +238,7 @@ class RefreshTokenRiskEventDeliveryTest {
                 "AUTH-012-v1",
                 occurredAt,
                 1L,
-                occurredAt);
+                occurredAt,
+                "generation-test");
     }
 }
