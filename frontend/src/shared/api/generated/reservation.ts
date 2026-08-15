@@ -13,8 +13,7 @@ export interface paths {
     get: operations["getCurrentConsumerReservations"];
     /**
      * 일반 예약과 선택 메뉴 홀드 생성
-     * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
-     * 예약금이 필요하면 수용량·선택 메뉴를 임시 선점하고 필수 PaymentPreparation을 포함한 202를 반환한다.
+     * @description 일반 예약과 선택 메뉴 홀드 생성 요청을 처리한다.
      * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
      */
     post: operations["createReservation"];
@@ -198,22 +197,29 @@ export interface components {
      * @enum {string}
      */
     ReservationDepositProcessStatus: "AWAITING_PAYMENT" | "FINALIZING_RESOURCES" | "COMPLETED" | "ABANDONED" | "EXPIRED" | "COMPENSATION_REQUIRED" | "COMPENSATING" | "COMPENSATED" | "RECOVERY_REQUIRED";
-    /** @description Payment 공개 PaymentPreparation의 HTTP projection. 성공한 예약금 생성 202에서는 항상 존재한다. */
-    ReservationPaymentPreparation: {
+    /**
+     * @description Payment가 예약금 요청 생성 시 반환한 PaymentPreparation의 불변 snapshot이다.
+     * 성공한 생성 202부터 종결 상태의 최신 GET까지 같은 값을 보존하며, status와 sourceExpiresAt을 현재 결제 상태나 현재 결제 가능 여부로 해석하지 않는다.
+     */
+    ReservationPaymentPreparationSnapshot: {
       paymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PaymentId"];
       portOnePaymentId: external["../payment/openapi.yaml"]["components"]["schemas"]["PortOnePaymentId"];
       orderName: string;
       amountMinor: external["../payment/openapi.yaml"]["components"]["schemas"]["MoneyMinor"];
       currency: external["../payment/openapi.yaml"]["components"]["schemas"]["Currency"];
+      /** @description 예약금 요청 생성 시점에 저장한 Hold 만료 시각이며 이후 lifecycle의 현재 시각이나 결제 가능 여부가 아니다. */
       sourceExpiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
-      /** @constant */
+      /**
+       * @description 생성 시점 PaymentPreparation의 고정 상태이며 현재 Payment 상태가 아니다.
+       * @constant
+       */
       status: "READY";
     };
     ReservationRequest: {
       reservationRequestId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       status: components["schemas"]["ReservationDepositProcessStatus"];
       expiresAt: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["OffsetDateTime"];
-      paymentPreparation: components["schemas"]["ReservationPaymentPreparation"];
+      paymentPreparation: components["schemas"]["ReservationPaymentPreparationSnapshot"];
       /**
        * @description 단순 요청 수신 여부가 아니라 COMPLETED 전 process 잠금 아래 포기 의도가 성공적으로 영속화됐는지를 나타낸다.
        * 영속 후에는 payment-driven 조정 상태와 독립적으로 true를 유지하며, 거절된 완료 후 command나 포기와 무관한 보상·복구는 값을 변경하지 않는다.
@@ -431,7 +437,11 @@ export interface components {
     Mvp1ConsumerReservations: {
       /** 내 예약 이력 조회 */
       get: operations["getCurrentConsumerReservationsMvp1"];
-      /** 일반 예약과 선택 메뉴 홀드 생성 */
+      /**
+       * 일반 예약과 선택 메뉴 홀드 생성
+       * @description 일반 예약과 선택 메뉴 홀드 생성 요청을 처리한다.
+       * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
+       */
       post: operations["createReservationMvp1"];
     };
   };
@@ -798,8 +808,7 @@ export interface operations {
   };
   /**
    * 일반 예약과 선택 메뉴 홀드 생성
-   * @description 예약금이 필요하지 않으면 기존 의미대로 Reservation을 즉시 확정해 201을 반환한다.
-   * 예약금이 필요하면 수용량·선택 메뉴를 임시 선점하고 필수 PaymentPreparation을 포함한 202를 반환한다.
+   * @description 일반 예약과 선택 메뉴 홀드 생성 요청을 처리한다.
    * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
    */
   createReservation: {
@@ -1235,7 +1244,11 @@ export interface operations {
       403: components["responses"]["AccountRestricted"];
     };
   };
-  /** 일반 예약과 선택 메뉴 홀드 생성 */
+  /**
+   * 일반 예약과 선택 메뉴 홀드 생성
+   * @description 일반 예약과 선택 메뉴 홀드 생성 요청을 처리한다.
+   * 같은 멱등 키와 같은 요청 지문의 replay는 최신 상태가 아니라 최초 저장 HTTP 상태와 payload를 반환한다.
+   */
   createReservationMvp1: {
     parameters: {
       header: {

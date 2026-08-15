@@ -186,13 +186,22 @@ class ReservationOpenApiContractTest {
         Map<String, Object> projectedPost = map(projection.get("post"));
         assertThat(projectedPost).containsEntry("operationId", "createReservationMvp1");
         Map<String, Object> canonicalCommon = new LinkedHashMap<>(canonicalPost);
-        canonicalCommon.remove("description");
         canonicalCommon.remove("operationId");
-        canonicalCommon.remove("responses");
+        Map<String, Object> canonicalCommonResponses = new LinkedHashMap<>(
+                map(canonicalCommon.remove("responses"))
+        );
+        canonicalCommonResponses.remove("202");
+        canonicalCommonResponses.remove("409");
+
         Map<String, Object> projectedCommon = new LinkedHashMap<>(projectedPost);
         projectedCommon.remove("operationId");
-        projectedCommon.remove("responses");
+        Map<String, Object> projectedCommonResponses = new LinkedHashMap<>(
+                map(projectedCommon.remove("responses"))
+        );
+        projectedCommonResponses.remove("409");
+
         assertThat(projectedCommon).isEqualTo(canonicalCommon);
+        assertThat(projectedCommonResponses).isEqualTo(canonicalCommonResponses);
 
         Map<String, Object> projectedResponses = map(projectedPost.get("responses"));
         assertThat(projectedResponses.keySet())
@@ -215,6 +224,39 @@ class ReservationOpenApiContractTest {
                         "MENU_HOLD_002",
                         "NOTIFICATION_002"
                 );
+    }
+
+    @Test
+    void reservationRequestExposesImmutableCreationPaymentPreparationSnapshot() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> request = map(schemas.get("ReservationRequest"));
+
+        assertThat(list(request.get("required"))).contains("paymentPreparation");
+        assertThat(map(map(request.get("properties")).get("paymentPreparation")))
+                .containsOnlyKeys("$ref")
+                .containsEntry(
+                        "$ref",
+                        "#/components/schemas/ReservationPaymentPreparationSnapshot"
+                );
+
+        Map<String, Object> snapshot = map(schemas.get("ReservationPaymentPreparationSnapshot"));
+        assertThat(snapshot)
+                .containsEntry("type", "object")
+                .containsEntry("additionalProperties", false);
+        assertThat(list(snapshot.get("required"))).containsExactlyInAnyOrder(
+                "paymentId",
+                "portOnePaymentId",
+                "orderName",
+                "amountMinor",
+                "currency",
+                "sourceExpiresAt",
+                "status"
+        );
+        assertThat(map(map(snapshot.get("properties")).get("status")))
+                .containsEntry("const", "READY");
     }
 
     @Test
@@ -284,7 +326,7 @@ class ReservationOpenApiContractTest {
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         assertThat(schemas).containsKeys(
                 "ReservationDepositProcessStatus",
-                "ReservationPaymentPreparation",
+                "ReservationPaymentPreparationSnapshot",
                 "ReservationRequest",
                 "ReservationRequestResponse"
         );
@@ -301,7 +343,9 @@ class ReservationOpenApiContractTest {
                         "RECOVERY_REQUIRED"
                 );
 
-        Map<String, Object> preparation = map(schemas.get("ReservationPaymentPreparation"));
+        Map<String, Object> preparation = map(
+                schemas.get("ReservationPaymentPreparationSnapshot")
+        );
         assertThat(list(preparation.get("required")))
                 .containsExactlyInAnyOrder(
                         "paymentId",
