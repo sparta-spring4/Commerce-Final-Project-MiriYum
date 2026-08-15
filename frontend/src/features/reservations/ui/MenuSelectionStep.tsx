@@ -1,5 +1,5 @@
-import { Button } from '../../../shared/ui/Button'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { formatPrice } from '../../store-search/model/labels'
 import { useMenuHoldAvailability } from '../api/queries'
 import {
@@ -70,7 +70,19 @@ export function MenuSelectionStep({ storeId, draft, onChange }: Props) {
           const max = Math.min(item.availableOnlineQuantity, MAX_MENU_QUANTITY)
 
           return (
-            <li key={item.menuId} className="mi-card menu-selection__item">
+            <li
+              key={item.menuId}
+              className={[
+                'mi-card',
+                'mi-card--roomy',
+                'menu-selection__item',
+                // 시안은 재료 소진 메뉴를 흐리게 낮춘다. 목록에서 지우지는 않는다.
+                soldOut ? 'menu-selection__item--muted' : null,
+                selected > 0 ? 'menu-selection__item--picked' : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
               <div className="mi-card__body">
                 <div className="menu-selection__head">
                   <h3>{item.menuName}</h3>
@@ -86,32 +98,35 @@ export function MenuSelectionStep({ storeId, draft, onChange }: Props) {
                 </p>
 
                 {!soldOut && (
-                  <div className="menu-selection__quantity">
-                    <Button
-                      variant="ghost"
-                      size="sm"
+                  <div className="menu-selection__quantity mi-counter">
+                    <button
+                      type="button"
+                      className="mi-counter__button"
                       aria-label={`${item.menuName} 수량 줄이기`}
                       disabled={selected <= 0}
                       onClick={() =>
                         onChange(withMenuQuantity(draft, item.menuId, selected - 1))
                       }
                     >
-                      −
-                    </Button>
-                    <output aria-label={`${item.menuName} 선택 수량`}>
+                      <Icon name="minus" />
+                    </button>
+                    <output
+                      className="mi-counter__value"
+                      aria-label={`${item.menuName} 선택 수량`}
+                    >
                       {selected}
                     </output>
-                    <Button
-                      variant="ghost"
-                      size="sm"
+                    <button
+                      type="button"
+                      className="mi-counter__button"
                       aria-label={`${item.menuName} 수량 늘리기`}
                       disabled={selected >= max}
                       onClick={() =>
                         onChange(withMenuQuantity(draft, item.menuId, selected + 1))
                       }
                     >
-                      +
-                    </Button>
+                      <Icon name="plus" />
+                    </button>
                   </div>
                 )}
               </div>

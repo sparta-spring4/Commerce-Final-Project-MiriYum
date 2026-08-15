@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link, NavLink, Outlet } from 'react-router'
+import { Icon, type IconName } from '../shared/ui/Icon'
 import { NAVIGATION, ROUTES, type Shell } from './routes'
 
 interface Props {
@@ -9,6 +10,19 @@ interface Props {
    * 두 shell이 각자의 계정 메뉴를 넣고 서로의 상태를 보지 않는다.
    */
   accountSlot?: ReactNode
+}
+
+/**
+ * 하단 탭의 아이콘.
+ *
+ * 경로로 찾는다. 레이블 문자열로 찾으면 문구를 다듬을 때마다 아이콘이 조용히
+ * 사라진다. 표에 없는 경로는 글자만 나오므로 탭이 깨지지는 않는다.
+ */
+const TAB_ICON: Record<string, IconName> = {
+  [ROUTES.home]: 'store',
+  [ROUTES.stores]: 'search',
+  [ROUTES.myReservations]: 'calendar',
+  [ROUTES.myPage]: 'person',
 }
 
 /**
@@ -30,8 +44,13 @@ export function AppLayout({ shell, accountSlot }: Props) {
           <Link className="app-header__brand" to={ROUTES.home}>
             MiriYum
           </Link>
+          {/*
+            시안은 좁은 화면에서 상단 메뉴를 감추고 하단 탭 바로 옮긴다.
+            같은 항목을 두 곳에서 읽히게 하지 않으려고 상단은 aria-hidden이
+            아니라 CSS로 숨긴다. 하단 탭이 같은 역할을 대신한다.
+          */}
           {items.length > 0 && (
-            <nav aria-label="주 메뉴">
+            <nav aria-label="주 메뉴" className="app-header__menu">
               <ul className="app-header__nav">
                 {items.map((item) => (
                   <li key={item.path}>
@@ -57,6 +76,35 @@ export function AppLayout({ shell, accountSlot }: Props) {
       <main id="main" tabIndex={-1}>
         <Outlet />
       </main>
+
+      {/*
+        모바일 하단 탭. 시안의 "Bottom Navigation for ergonomic one-handed use".
+        상단 메뉴와 같은 항목 표를 쓰므로 두 곳이 어긋나지 않는다.
+      */}
+      {items.length > 0 && (
+        <nav className="app-tabbar" aria-label="바로가기">
+          <ul className="app-tabbar__list">
+            {items.map((item) => {
+              const icon = TAB_ICON[item.path]
+              return (
+                <li key={item.path} className="app-tabbar__item">
+                  <NavLink
+                    to={item.path}
+                    className={({ isActive }) =>
+                      isActive
+                        ? 'app-tabbar__link app-tabbar__link--active'
+                        : 'app-tabbar__link'
+                    }
+                  >
+                    {icon !== undefined && <Icon name={icon} />}
+                    <span>{item.label}</span>
+                  </NavLink>
+                </li>
+              )
+            })}
+          </ul>
+        </nav>
+      )}
 
       <footer className="app-footer">
         <div className="mi-container">

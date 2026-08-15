@@ -1,23 +1,71 @@
 /* 가입·로그인 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
 
+/*
+ * 시안의 인증 화면은 자기 색면 위에 카드 하나를 가운데 놓는다.
+ *
+ * 헤더 아래 전체를 채우도록 최소 높이를 잡되, 폼이 길어지면(가입) 카드가
+ * 늘어나고 화면이 스크롤된다. 배경 광원은 이 영역 밖으로 새지 않게 자른다.
+ */
 .auth-page {
-  padding-top: var(--space-6);
-  padding-bottom: var(--space-8);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: calc(100vh - 4rem);
+  padding: var(--space-6) var(--layout-margin-mobile) var(--space-8);
+  background-color: var(--color-surface-container);
 }
 
-.auth-page__header {
-  margin-bottom: var(--space-3);
+@media (min-width: 48rem) {
+  .auth-page {
+    padding-inline: var(--layout-margin-desktop);
+  }
+}
+
+.auth-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 30rem;
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+
+@media (min-width: 30rem) {
+  .auth-card {
+    padding: var(--space-4) var(--layout-margin-desktop);
+  }
+}
+
+.auth-card__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
   text-align: center;
 }
 
-.auth-page__header h1 {
+/* 로고 자리의 워드마크. 헤더 브랜드와 같은 글자·색을 크게 쓴다. */
+.auth-card__mark {
+  margin-bottom: var(--space-1);
   font-size: var(--font-size-headline-lg);
-  line-height: var(--line-height-headline-lg);
   font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--color-primary);
 }
 
-.auth-page__header p {
-  margin-top: 0.375rem;
+.auth-card__header h1 {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 700;
+}
+
+.auth-card__lead {
   color: var(--color-on-surface-variant);
 }
 
@@ -25,24 +73,15 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
-  background-color: var(--color-surface-container-lowest);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
 }
 
-.auth-form__check {
-  display: flex;
-  align-items: center;
+/* 동의 항목 묶음. 시안은 여기만 한 단계 낮은 색면 위에 둔다. */
+.auth-form__consent {
   gap: var(--space-1);
-  font-size: var(--font-size-body-md);
-}
-
-.auth-page__switch {
-  margin-top: var(--space-2);
-  text-align: center;
-  font-size: var(--font-size-label-md);
-  color: var(--color-on-surface-variant);
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
 }
 
 /* 비밀번호 폼과 나란히 놓는 다른 로그인 수단. */
@@ -50,7 +89,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin-top: var(--space-3);
 }
 
 /* 가로선 사이에 문구를 둔다. 축을 나눠 쓰지 않으면 단축 속성이 세로 여백을 지운다. */
@@ -91,6 +129,88 @@
 .auth-social__kakao .mi-spinner {
   border-color: rgba(0, 0, 0, 0.25);
   border-top-color: rgba(0, 0, 0, 0.85);
+}
+
+/* ── 카드 아래 이동 링크 ──────────────────────────────────────────────── */
+
+/*
+ * 시안은 짧은 가로선 하나로 폼과 이동 링크를 나눈다. 가로선은 장식이라
+ * ::before로 그린다.
+ */
+.auth-card__foot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  text-align: center;
+}
+
+.auth-card__foot::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 3rem;
+  height: 1px;
+  background-color: var(--color-surface-variant);
+}
+
+.auth-card__switch {
+  font-size: var(--font-size-body-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* 이동 링크는 코럴이 아니라 머스터드다. 코럴은 주요 행동 버튼이 쓴다. */
+.auth-card__switch-link {
+  font-weight: 700;
+  color: var(--color-secondary);
+}
+
+/* 다른 shell로 나가는 링크. 알약 형태로 폼 행동과 구분한다. */
+.auth-card__aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.auth-card__aside:hover {
+  background-color: var(--color-surface-variant);
+  color: var(--color-on-surface);
+  text-decoration: none;
+}
+
+/* ── 진행 중 오버레이 ─────────────────────────────────────────────────── */
+
+.auth-card__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background-color: rgba(45, 41, 38, 0.4);
+  backdrop-filter: blur(2px);
+  border-radius: var(--radius-lg);
+  color: var(--color-surface-container-lowest);
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+}
+
+.auth-card__overlay-spinner {
+  width: 3rem;
+  height: 3rem;
+  border-width: 4px;
+  border-color: rgba(255, 255, 255, 0.5);
+  border-top-color: var(--color-primary);
 }
 
 /* 헤더의 계정 영역. 두 shell의 상태를 합치지 않고 소비자 shell만 표시한다. */

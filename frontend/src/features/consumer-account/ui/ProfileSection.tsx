@@ -4,6 +4,7 @@ import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { AccountErrorCode } from '../../auth/model/authErrors'
 import {
   normalizePhoneNumber,
@@ -24,21 +25,31 @@ import {
  */
 export function ProfileSection({ account }: { account: ConsumerAccount }) {
   return (
-    <section className="mi-card profile" aria-label="내 프로필">
-      <div className="mi-card__body">
-        <h2>내 프로필</h2>
+    <section className="mi-card mi-card--roomy profile" aria-label="내 프로필">
+      {/* 시안은 프로필 카드 오른쪽 위에 옅은 광원을 하나 둔다. */}
+      <span className="profile__glow" aria-hidden="true" />
+
+      <div className="mi-card__body mi-card__body--roomy">
+        <h2>
+          <Icon name="person" />
+          내 프로필
+        </h2>
 
         <dl className="profile__list">
-          <dt>이메일</dt>
-          <dd>
-            {account.email} <span className="profile__readonly">읽기 전용</span>
-          </dd>
+          <div className="profile__entry">
+            <dt>이메일</dt>
+            <dd>{account.email}</dd>
+            <span className="profile__readonly">읽기 전용</span>
+          </div>
 
-          <dt>휴대전화</dt>
-          <dd>
+          <div className="profile__entry">
+            <dt>휴대전화</dt>
             {/* 서버가 마스킹한 값만 표시한다. 원문을 요구하거나 조합하지 않는다. */}
-            {account.phoneNumber ?? '등록되지 않음'}
-          </dd>
+            <dd>{account.phoneNumber ?? '등록되지 않음'}</dd>
+            {account.phoneNumber !== null && (
+              <span className="profile__readonly">읽기 전용</span>
+            )}
+          </div>
         </dl>
 
         <NicknameEditor account={account} />
@@ -97,12 +108,28 @@ function NicknameEditor({ account }: { account: ConsumerAccount }) {
   if (!editing) {
     return (
       <div className="profile__row">
-        <p>
-          <span className="profile__label">닉네임</span> {account.nickname}
-        </p>
-        <Button variant="ghost" size="sm" onClick={startEditing}>
-          닉네임 변경
-        </Button>
+        <div>
+          <p className="profile__label">닉네임</p>
+          <p className="profile__nickname">
+            {account.nickname}
+            {/*
+              시안은 연필 아이콘 버튼만 둔다. 아이콘만으로는 무엇을 여는지
+              전달되지 않으므로 접근 가능한 이름을 붙인다.
+            */}
+            <button
+              type="button"
+              className="mi-icon-button profile__edit"
+              aria-label="닉네임 변경"
+              onClick={startEditing}
+            >
+              <Icon name="edit" />
+            </button>
+          </p>
+          <p className="profile__note">
+            <Icon name="info" className="mi-icon--sm" />
+            닉네임은 변경 후 일정 기간 다시 바꿀 수 없습니다.
+          </p>
+        </div>
       </div>
     )
   }

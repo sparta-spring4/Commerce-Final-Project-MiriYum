@@ -4,7 +4,8 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
-  size?: 'md' | 'sm'
+  /** `lg`는 시안의 `py-4` 주요 행동 버튼이다. 한 화면에 하나만 둔다. */
+  size?: 'lg' | 'md' | 'sm'
   block?: boolean
   /**
    * 진행 중 표시. 버튼을 비활성화하고 aria-busy로 보조기술에 알린다.
@@ -28,7 +29,7 @@ export function Button({
   const classes = [
     'mi-button',
     `mi-button--${variant}`,
-    size === 'sm' ? 'mi-button--sm' : null,
+    size === 'md' ? null : `mi-button--${size}`,
     block ? 'mi-button--block' : null,
     className,
   ]

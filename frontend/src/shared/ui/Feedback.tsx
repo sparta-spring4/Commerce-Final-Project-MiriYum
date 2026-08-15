@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react'
+import { Icon, type IconName } from './Icon'
 import { toAsyncState, type AsyncAction } from './asyncState'
+
+/**
+ * 배너 아이콘. 시안이 상태마다 다른 글리프를 쓴다.
+ * 뜻은 제목 문구가 전달하므로 아이콘 자체는 장식으로 둔다.
+ */
+const ALERT_ICON: Record<'error' | 'warning' | 'info', IconName> = {
+  error: 'alert',
+  warning: 'alert',
+  info: 'info',
+}
 
 /** 오류·경고·안내 배너. 색만으로 의미를 전달하지 않도록 제목 문구를 항상 둔다. */
 export function Alert({
@@ -18,6 +29,7 @@ export function Alert({
       className={`mi-alert mi-alert--${tone}`}
       role={tone === 'error' ? 'alert' : 'status'}
     >
+      <Icon name={ALERT_ICON[tone]} className="mi-alert__icon" />
       <p className="mi-alert__title">{title}</p>
       {children}
       {actions && <div className="mi-alert__actions">{actions}</div>}

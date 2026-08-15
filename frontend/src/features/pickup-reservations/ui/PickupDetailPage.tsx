@@ -6,6 +6,7 @@ import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
 import { Alert, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { formatPrice } from '../../store-search/model/labels'
 import {
   useCancelPickupReservation,
@@ -63,22 +64,30 @@ export function PickupDetailPage() {
         </Badge>
         <h1>{reservation.storeName}</h1>
         <p className="pickup-detail__meta">
+          <Icon name="bag" />
           {`${reservation.pickupDate} ${reservation.pickupTime} 픽업`}
         </p>
       </header>
 
-      <section className="mi-card pickup-detail__section" aria-label="픽업 내용">
-        <div className="mi-card__body">
+      <section
+        className="mi-card mi-card--roomy pickup-detail__section"
+        aria-label="픽업 내용"
+      >
+        <div className="mi-card__body mi-card__body--roomy">
           <h2>주문 내역</h2>
           <ul className="pickup-detail__items">
             {reservation.items.map((item) => (
               <li key={item.menuId}>
-                {`${item.menuName} x ${item.quantity} · ${formatPrice(item.unitPrice * item.quantity)}`}
+                <span>{`${item.menuName} x ${item.quantity}`}</span>
+                <span className="pickup-detail__amount">
+                  {formatPrice(item.unitPrice * item.quantity)}
+                </span>
               </li>
             ))}
           </ul>
           <p className="pickup-detail__total">
-            {`합계 ${formatPrice(pickupTotalPrice(reservation))}`}
+            <span>합계</span>
+            <span>{formatPrice(pickupTotalPrice(reservation))}</span>
           </p>
 
           {reservation.status === 'CANCELLED' && (
@@ -96,7 +105,12 @@ export function PickupDetailPage() {
             </dl>
           )}
 
-          <Link to={`/stores/${reservation.storeId}`}>매장 정보 보기</Link>
+          <p className="pickup-detail__store-link">
+            <Link to={`/stores/${reservation.storeId}`}>
+              매장 정보 보기
+              <Icon name="arrowRight" className="mi-icon--sm" />
+            </Link>
+          </p>
         </div>
       </section>
 

@@ -4,8 +4,9 @@ import { isApiError, isNetworkError } from '../../../shared/api/apiError'
 import { CommonErrorCode } from '../../../shared/api/envelope'
 import { ROUTES } from '../../../app/routes'
 import { Button } from '../../../shared/ui/Button'
-import { TextField } from '../../../shared/ui/Field'
+import { PasswordField, TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { signUpConsumer } from '../api/consumerAuthApi'
 import { AccountErrorCode } from '../model/authErrors'
 import {
@@ -98,113 +99,148 @@ export function ConsumerSignUpPage() {
   }
 
   return (
-    <div className="mi-container mi-container--form auth-page">
-      <header className="auth-page__header">
-        <h1>회원가입</h1>
-        <p>미리냠과 함께 맛있는 여정을 시작하세요</p>
-      </header>
+    <div className="auth-page">
+      <div className="mi-ambient" aria-hidden="true" />
 
-      {/*
-        noValidate로 브라우저 기본 검증을 끈다. 기본 검증이 먼저 걸리면 우리가
-        입력에 연결한 접근 가능한 오류 문구 대신 브라우저 말풍선이 뜬다.
-        required 속성은 보조기술이 읽도록 남겨 둔다.
-      */}
-      <form
-        className="auth-form"
-        onSubmit={handleSubmit}
-        aria-label="회원가입"
-        noValidate
-      >
-        {formError !== null && <Alert tone="error" title={formError} />}
+      <div className="auth-card mi-ambient-content">
+        <header className="auth-card__header">
+          {/* 로그인 화면과 같은 이유로 로고 자리에 워드마크를 둔다. */}
+          <p className="auth-card__mark" aria-hidden="true">
+            MiriYum
+          </p>
+          <h1>회원가입</h1>
+          <p className="auth-card__lead">
+            미리냠과 함께 맛있는 여정을 시작하세요
+          </p>
+        </header>
 
-        <TextField
-          label="이메일"
-          type="email"
-          name="email"
-          autoComplete="email"
-          required
-          value={form.email}
-          error={fieldErrors.email ?? null}
-          onChange={(event) => update({ email: event.target.value })}
-        />
+        {/*
+          noValidate로 브라우저 기본 검증을 끈다. 기본 검증이 먼저 걸리면 우리가
+          입력에 연결한 접근 가능한 오류 문구 대신 브라우저 말풍선이 뜬다.
+          required 속성은 보조기술이 읽도록 남겨 둔다.
+        */}
+        <form
+          className="auth-form"
+          onSubmit={handleSubmit}
+          aria-label="회원가입"
+          noValidate
+        >
+          <TextField
+            label="이메일"
+            type="email"
+            name="email"
+            autoComplete="email"
+            required
+            placeholder="example@miriyum.com"
+            leadingIcon={<Icon name="mail" />}
+            value={form.email}
+            error={fieldErrors.email ?? null}
+            onChange={(event) => update({ email: event.target.value })}
+          />
 
-        <TextField
-          label="비밀번호"
-          type="password"
-          name="password"
-          autoComplete="new-password"
-          required
-          help="8~64자, 대문자·소문자·숫자·특수문자 가운데 3종 이상"
-          value={form.password}
-          error={fieldErrors.password ?? null}
-          onChange={(event) => update({ password: event.target.value })}
-        />
+          <PasswordField
+            label="비밀번호"
+            name="password"
+            autoComplete="new-password"
+            required
+            help="8~64자, 대문자·소문자·숫자·특수문자 가운데 3종 이상"
+            value={form.password}
+            error={fieldErrors.password ?? null}
+            onChange={(event) => update({ password: event.target.value })}
+          />
 
-        <TextField
-          label="비밀번호 확인"
-          type="password"
-          name="passwordConfirm"
-          autoComplete="new-password"
-          required
-          value={form.passwordConfirm}
-          error={fieldErrors.passwordConfirm ?? null}
-          onChange={(event) => update({ passwordConfirm: event.target.value })}
-        />
+          <PasswordField
+            label="비밀번호 확인"
+            name="passwordConfirm"
+            autoComplete="new-password"
+            required
+            placeholder="비밀번호를 한번 더 입력해 주세요"
+            value={form.passwordConfirm}
+            error={fieldErrors.passwordConfirm ?? null}
+            onChange={(event) => update({ passwordConfirm: event.target.value })}
+          />
 
-        <TextField
-          label="휴대전화 번호"
-          type="tel"
-          name="phoneNumber"
-          autoComplete="tel"
-          required
-          help="010으로 시작하는 11자리 번호"
-          value={form.phoneNumber}
-          error={fieldErrors.phoneNumber ?? null}
-          onChange={(event) => update({ phoneNumber: event.target.value })}
-        />
+          <TextField
+            label="휴대전화 번호"
+            type="tel"
+            name="phoneNumber"
+            autoComplete="tel"
+            required
+            help="010으로 시작하는 11자리 번호"
+            leadingIcon={<Icon name="phone" />}
+            value={form.phoneNumber}
+            error={fieldErrors.phoneNumber ?? null}
+            onChange={(event) => update({ phoneNumber: event.target.value })}
+          />
 
-        <TextField
-          label="닉네임"
-          name="nickname"
-          autoComplete="nickname"
-          required
-          help="2~20자, 한글·영문·숫자와 공백, _, -"
-          value={form.nickname}
-          error={fieldErrors.nickname ?? null}
-          onChange={(event) => update({ nickname: event.target.value })}
-        />
+          <TextField
+            label="닉네임"
+            name="nickname"
+            autoComplete="nickname"
+            required
+            help="2~20자, 한글·영문·숫자와 공백, _, -"
+            placeholder="미리냠에서 사용할 닉네임"
+            leadingIcon={<Icon name="person" />}
+            value={form.nickname}
+            error={fieldErrors.nickname ?? null}
+            onChange={(event) => update({ nickname: event.target.value })}
+          />
 
-        <div className="mi-field">
-          <label className="auth-form__check">
-            <input
-              type="checkbox"
-              name="ageConfirmed"
-              checked={form.ageConfirmed}
-              aria-invalid={fieldErrors.ageConfirmed !== undefined || undefined}
-              aria-describedby={
-                fieldErrors.ageConfirmed !== undefined
-                  ? 'age-confirmed-error'
-                  : undefined
-              }
-              onChange={(event) => update({ ageConfirmed: event.target.checked })}
-            />
-            (필수) 만 14세 이상입니다.
-          </label>
-          {fieldErrors.ageConfirmed !== undefined && (
-            <p className="mi-field__error" id="age-confirmed-error">
-              {fieldErrors.ageConfirmed}
-            </p>
-          )}
-        </div>
+          {/* 시안은 동의 항목을 자기 색면 위에 묶어 폼 입력과 구분한다. */}
+          <div className="mi-field auth-form__consent">
+            <label className="mi-checkbox">
+              <input
+                type="checkbox"
+                className="mi-checkbox__control"
+                name="ageConfirmed"
+                checked={form.ageConfirmed}
+                aria-invalid={
+                  fieldErrors.ageConfirmed !== undefined || undefined
+                }
+                aria-describedby={
+                  fieldErrors.ageConfirmed !== undefined
+                    ? 'age-confirmed-error'
+                    : undefined
+                }
+                onChange={(event) =>
+                  update({ ageConfirmed: event.target.checked })
+                }
+              />
+              (필수) 만 14세 이상입니다.
+            </label>
+            {fieldErrors.ageConfirmed !== undefined && (
+              <p className="mi-field__error" id="age-confirmed-error">
+                {fieldErrors.ageConfirmed}
+              </p>
+            )}
+          </div>
 
-        <Button type="submit" variant="primary" block loading={submitting}>
-          가입하기
-        </Button>
-      </form>
+          {formError !== null && <Alert tone="error" title={formError} />}
 
-      <p className="auth-page__switch">
-        이미 계정이 있으신가요? <Link to={ROUTES.consumerSignIn}>로그인</Link>
-      </p>
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            block
+            loading={submitting}
+          >
+            가입하기
+          </Button>
+        </form>
+
+        <footer className="auth-card__foot">
+          <p className="auth-card__switch">
+            이미 계정이 있으신가요?{' '}
+            <Link className="auth-card__switch-link" to={ROUTES.consumerSignIn}>
+              로그인
+            </Link>
+          </p>
+          <Link className="auth-card__aside" to={ROUTES.storeOperatorSignIn}>
+            <Icon name="store" className="mi-icon--sm" />
+            식당 대표자 서비스로 이동
+          </Link>
+        </footer>
+      </div>
     </div>
   )
 }

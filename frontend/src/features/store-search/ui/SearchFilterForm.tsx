@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '../../../shared/ui/Button'
-import { SelectField, TextField } from '../../../shared/ui/Field'
+import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { REGION_LABEL } from '../model/labels'
 import {
   MAX_PARTY_SIZE,
   MIN_PARTY_SIZE,
   REGIONS,
   canRequestAvailableOnly,
-  isRegion,
   reservationConditionState,
   type CatalogItem,
+  type Region,
   type StoreSearchFilters,
 } from '../model/searchParams'
 
@@ -57,40 +58,43 @@ export function SearchFilterForm({
 
   const conditions = (
     <>
-      <div className="store-search-form__grid">
-        <SelectField
-          label="지역"
-          name="region"
-          value={draft.region ?? ''}
-          onChange={(event) => {
-            const next = event.target.value
-            update({ region: isRegion(next) ? next : null })
-          }}
-        >
-          <option value="">전체 지역</option>
-          {REGIONS.map((region) => (
-            <option key={region} value={region}>
-              {REGION_LABEL[region]}
-            </option>
-          ))}
-        </SelectField>
+      {/*
+        시안의 지역·카테고리는 알약 칩이다. 계약이 지역과 카테고리를 각각
+        하나씩만 받으므로 여러 개를 고를 수 있어 보이는 체크박스 대신
+        누름 상태를 가진 칩으로 둔다. 같은 칩을 다시 누르면 해제된다.
+      */}
+      <ChipGroup label="지역">
+        {REGIONS.map((region) => (
+          <FilterChip
+            key={region}
+            pressed={draft.region === region}
+            onToggle={() =>
+              update({ region: draft.region === region ? null : region })
+            }
+          >
+            {REGION_LABEL[region as Region]}
+          </FilterChip>
+        ))}
+      </ChipGroup>
 
-        <SelectField
-          label="카테고리"
-          name="storeCategoryCode"
-          value={draft.storeCategoryCode ?? ''}
-          onChange={(event) =>
-            update({ storeCategoryCode: event.target.value || null })
-          }
-        >
-          <option value="">전체 카테고리</option>
+      {storeCategories.length > 0 && (
+        <ChipGroup label="카테고리">
           {storeCategories.map((item) => (
-            <option key={item.code} value={item.code}>
+            <FilterChip
+              key={item.code}
+              pressed={draft.storeCategoryCode === item.code}
+              onToggle={() =>
+                update({
+                  storeCategoryCode:
+                    draft.storeCategoryCode === item.code ? null : item.code,
+                })
+              }
+            >
               {item.displayName}
-            </option>
+            </FilterChip>
           ))}
-        </SelectField>
-      </div>
+        </ChipGroup>
+      )}
 
       <fieldset className="store-search-form__conditions">
         <legend>예약 조건</legend>
@@ -125,9 +129,10 @@ export function SearchFilterForm({
           />
         </div>
 
-        <label className="store-search-form__check">
+        <label className="mi-checkbox">
           <input
             type="checkbox"
+            className="mi-checkbox__control"
             name="includesInfants"
             checked={draft.includesInfants}
             onChange={(event) => update({ includesInfants: event.target.checked })}
@@ -135,15 +140,17 @@ export function SearchFilterForm({
           영유아가 함께 방문합니다
         </label>
 
-        <label className="store-search-form__check">
+        {/* 시안 `_4`의 "예약 가능만 보기" 스위치. */}
+        <label className="mi-switch">
+          <span>예약 가능한 매장만 보기</span>
           <input
             type="checkbox"
+            className="mi-switch__control"
             name="availableOnly"
             checked={draft.availableOnly && availableOnlyAllowed}
             disabled={!availableOnlyAllowed}
             onChange={(event) => update({ availableOnly: event.target.checked })}
           />
-          예약 가능한 매장만 보기
         </label>
 
         {conditionState === 'partial' && (
@@ -165,11 +172,6 @@ export function SearchFilterForm({
       aria-label="매장 검색 조건"
     >
       <div className="store-search-form__keyword">
-        {compact && (
-          <span className="store-search-form__search-mark" aria-hidden="true">
-            ⌕
-          </span>
-        )}
         <TextField
           label="검색어"
           // 필 형태에는 레이블 자리가 없다. 지우지 않고 숨겨 보조기술에는 남긴다.
@@ -178,6 +180,7 @@ export function SearchFilterForm({
           value={draft.keyword}
           maxLength={100}
           placeholder="매장 이름이나 메뉴로 검색해 보세요"
+          leadingIcon={<Icon name="search" />}
           onChange={(event) => update({ keyword: event.target.value })}
         />
         {compact && (
@@ -203,6 +206,44 @@ export function SearchFilterForm({
         </>
       )}
     </form>
+  )
+}
+
+/**
+ * 칩 묶음.
+ *
+ * 제목과 칩들을 `group`으로 묶어 보조기술이 "지역 그룹 안의 서울 버튼"처럼
+ * 읽게 한다. 제목만 위에 두면 어느 묶음의 칩인지 전달되지 않는다.
+ */
+function ChipGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="store-search-form__chip-group">
+      <h3 className="store-search-form__chip-label">{label}</h3>
+      <div className="store-search-form__chips" role="group" aria-label={label}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function FilterChip({
+  pressed,
+  onToggle,
+  children,
+}: {
+  pressed: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className="mi-chip"
+      aria-pressed={pressed}
+      onClick={onToggle}
+    >
+      {children}
+    </button>
   )
 }
 

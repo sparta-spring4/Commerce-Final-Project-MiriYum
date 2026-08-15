@@ -241,10 +241,12 @@ describe('픽업 예약 상세', () => {
 
     renderFlow(`/pickup-reservations/${PICKUP_ID}`)
 
+    // 시안은 메뉴와 금액을 한 줄의 양 끝에 놓는다. 두 값은 각각 표시된다.
     expect(
-      await screen.findByText('트러플 크림 파파델레 x 2 · 64,000원'),
+      await screen.findByText('트러플 크림 파파델레 x 2'),
     ).toBeInTheDocument()
-    expect(screen.getByText('합계 64,000원')).toBeInTheDocument()
+    expect(screen.getAllByText('64,000원')).toHaveLength(2)
+    expect(screen.getByText('합계')).toBeInTheDocument()
   })
 
   it('픽업 완료 상태에는 취소 버튼을 두지 않는다', async () => {

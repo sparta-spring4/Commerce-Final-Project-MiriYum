@@ -76,9 +76,11 @@ describe('예약 상세 화면', () => {
 
     renderDetail()
 
+    // 시안은 메뉴와 금액을 한 줄의 양 끝에 놓는다. 두 값은 각각 표시된다.
     expect(
-      await screen.findByText('트러플 크림 파파델레 x 2 · 64,000원'),
+      await screen.findByText('트러플 크림 파파델레 x 2'),
     ).toBeInTheDocument()
+    expect(screen.getByText('64,000원')).toBeInTheDocument()
   })
 
   it('확정 상태에서만 취소 버튼을 보여 준다', async () => {

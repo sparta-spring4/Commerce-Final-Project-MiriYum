@@ -161,13 +161,34 @@ describe('매장 찾기 결과 화면', () => {
     await screen.findByRole('link', { name: '파스타 마스터즈' })
 
     typeInto('검색어', '파스타')
-    fireEvent.change(screen.getByLabelText('지역'), {
-      target: { value: 'BUSAN' },
-    })
+    // 계약이 지역을 하나만 받으므로 화면은 누름 상태를 가진 칩으로 고르게 한다.
+    fireEvent.click(
+      within(screen.getByRole('group', { name: '지역' })).getByRole('button', {
+        name: '부산',
+      }),
+    )
     fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
 
     await waitFor(() => expect(receivedSearch?.get('keyword')).toBe('파스타'))
     expect(receivedSearch?.get('region')).toBe('BUSAN')
+  })
+
+  it('같은 지역 칩을 다시 누르면 조건에서 뺀다', async () => {
+    respondWithStores(storeSummary())
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores?region=SEOUL' })
+
+    await screen.findByRole('link', { name: '파스타 마스터즈' })
+
+    const seoul = within(
+      screen.getByRole('group', { name: '지역' }),
+    ).getByRole('button', { name: '서울' })
+    expect(seoul).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(seoul)
+    fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
+
+    await waitFor(() => expect(receivedSearch?.get('region')).toBeNull())
   })
 
   it('카테고리 표시명은 서버 catalog에서 받아 쓴다', async () => {
@@ -180,9 +201,10 @@ describe('매장 찾기 결과 화면', () => {
     // code가 아니라 서버가 준 displayName이 보여야 한다.
     expect(screen.getByText('서울 · 이탈리안')).toBeInTheDocument()
     expect(
-      within(screen.getByLabelText('카테고리')).getByRole('option', {
-        name: '한식',
-      }),
+      within(screen.getByRole('group', { name: '카테고리' })).getByRole(
+        'button',
+        { name: '한식' },
+      ),
     ).toBeInTheDocument()
   })
 

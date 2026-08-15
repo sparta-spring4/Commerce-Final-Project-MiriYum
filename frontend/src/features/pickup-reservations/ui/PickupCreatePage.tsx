@@ -4,6 +4,7 @@ import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { formatPrice } from '../../store-search/model/labels'
 import { useCreatePickupReservation, usePickupAvailability } from '../api/queries'
 import {
@@ -86,10 +87,16 @@ export function PickupCreatePage() {
 
   return (
     <div className="mi-container mi-container--narrow pickup-create">
-      <header className="pickup-create__header">
-        <h1>픽업 예약</h1>
-        <p>
-          <Link to={`/stores/${storeId}`}>매장 상세로 돌아가기</Link>
+      <header className="mi-page-head pickup-create__header">
+        <p className="pickup-create__back">
+          <Link to={`/stores/${storeId}`}>
+            <Icon name="arrowLeft" className="mi-icon--sm" />
+            매장 상세로 돌아가기
+          </Link>
+        </p>
+        <h1 className="mi-page-head__title">픽업 예약</h1>
+        <p className="mi-page-head__lead">
+          날짜와 시간대를 고르고 가져갈 메뉴를 담아 주세요.
         </p>
       </header>
 
@@ -104,22 +111,29 @@ export function PickupCreatePage() {
           submit()
         }}
       >
-        <TextField
-          label="픽업 날짜"
-          type="date"
-          name="pickupDate"
-          required
-          value={draft.pickupDate}
-          error={errors.pickupDate ?? null}
-          onChange={(event) =>
-            // 날짜가 바뀌면 구간과 메뉴 선택을 모두 다시 고른다.
-            updateDraft({
-              pickupDate: event.target.value,
-              pickupTime: '',
-              menuSelections: new Map(),
-            })
-          }
-        />
+        <section className="mi-card mi-card--roomy pickup-form__section">
+          <div className="mi-card__body mi-card__body--roomy">
+            <h2>픽업 날짜</h2>
+            <TextField
+              label="픽업 날짜"
+              labelHidden
+              type="date"
+              name="pickupDate"
+              required
+              value={draft.pickupDate}
+              error={errors.pickupDate ?? null}
+              leadingIcon={<Icon name="calendar" />}
+              onChange={(event) =>
+                // 날짜가 바뀌면 구간과 메뉴 선택을 모두 다시 고른다.
+                updateDraft({
+                  pickupDate: event.target.value,
+                  pickupTime: '',
+                  menuSelections: new Map(),
+                })
+              }
+            />
+          </div>
+        </section>
 
         {draft.pickupDate.length > 0 && (
           <SlotPicker
@@ -144,6 +158,7 @@ export function PickupCreatePage() {
         <Button
           type="submit"
           variant="primary"
+          size="lg"
           block
           loading={mutation.isPending}
         >
@@ -189,14 +204,14 @@ function SlotPicker({
   }
 
   return (
-    <fieldset className="pickup-form__slots">
+    <fieldset className="mi-card mi-card--roomy pickup-form__slots">
       <legend>픽업 시간대</legend>
       <div className="pickup-form__slot-list">
         {availability.data.slots.map((slot) => (
           <button
             key={slot.pickupTime}
             type="button"
-            className="mi-chip"
+            className="pickup-form__slot"
             aria-pressed={draft.pickupTime === slot.pickupTime}
             onClick={() => onSelect(slot.pickupTime)}
           >
@@ -227,7 +242,7 @@ function SlotMenus({
   }
 
   return (
-    <fieldset className="pickup-form__menus">
+    <fieldset className="mi-card mi-card--roomy pickup-form__menus">
       <legend>픽업 메뉴</legend>
 
       <Alert tone="info" title="지금 보이는 수량은 확정이 아닙니다.">
@@ -241,8 +256,18 @@ function SlotMenus({
           const max = Math.min(menu.availableQuantity, MAX_PICKUP_QUANTITY)
 
           return (
-            <li key={menu.menuId} className="mi-card pickup-form__menu">
-              <div className="mi-card__body">
+            <li
+              key={menu.menuId}
+              className={[
+                'pickup-form__menu',
+                // 시안은 팔지 않는 메뉴를 흐리게 낮춘다. 목록에서 지우지 않는다.
+                soldOut ? 'pickup-form__menu--muted' : null,
+                selected > 0 ? 'pickup-form__menu--picked' : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <div className="pickup-form__menu-info">
                 <div className="pickup-form__menu-head">
                   <h3>{menu.menuName}</h3>
                   {soldOut && (
@@ -257,41 +282,44 @@ function SlotMenus({
                     ? '지금은 선택할 수 없습니다.'
                     : `남은 수량 ${menu.availableQuantity}개`}
                 </p>
-
-                {!soldOut && (
-                  <div className="pickup-form__quantity">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`${menu.menuName} 수량 줄이기`}
-                      disabled={selected <= 0}
-                      onClick={() =>
-                        onChange(
-                          withPickupQuantity(draft, menu.menuId, selected - 1),
-                        )
-                      }
-                    >
-                      −
-                    </Button>
-                    <output aria-label={`${menu.menuName} 선택 수량`}>
-                      {selected}
-                    </output>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`${menu.menuName} 수량 늘리기`}
-                      disabled={selected >= max}
-                      onClick={() =>
-                        onChange(
-                          withPickupQuantity(draft, menu.menuId, selected + 1),
-                        )
-                      }
-                    >
-                      +
-                    </Button>
-                  </div>
-                )}
               </div>
+
+              {!soldOut && (
+                <div className="pickup-form__quantity mi-counter">
+                  <button
+                    type="button"
+                    className="mi-counter__button"
+                    aria-label={`${menu.menuName} 수량 줄이기`}
+                    disabled={selected <= 0}
+                    onClick={() =>
+                      onChange(
+                        withPickupQuantity(draft, menu.menuId, selected - 1),
+                      )
+                    }
+                  >
+                    <Icon name="minus" />
+                  </button>
+                  <output
+                    className="mi-counter__value"
+                    aria-label={`${menu.menuName} 선택 수량`}
+                  >
+                    {selected}
+                  </output>
+                  <button
+                    type="button"
+                    className="mi-counter__button"
+                    aria-label={`${menu.menuName} 수량 늘리기`}
+                    disabled={selected >= max}
+                    onClick={() =>
+                      onChange(
+                        withPickupQuantity(draft, menu.menuId, selected + 1),
+                      )
+                    }
+                  >
+                    <Icon name="plus" />
+                  </button>
+                </div>
+              )}
             </li>
           )
         })}

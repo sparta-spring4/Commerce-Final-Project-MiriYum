@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from 'react-router'
 import { Badge } from '../../../shared/ui/Badge'
 import { EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { Pagination } from '../../../shared/ui/Pagination'
 import { useMyReservations } from '../api/queries'
 import {
@@ -68,15 +69,17 @@ export function MyReservationsPage() {
 
   return (
     <div className="mi-container mypage">
-      <header className="mypage__header">
-        <h1>내 예약 관리</h1>
-        <p>다가오는 미식 경험과 지난 방문 기록을 확인하세요.</p>
+      <header className="mi-page-head">
+        <h1 className="mi-page-head__title">내 예약 관리</h1>
+        <p className="mi-page-head__lead">
+          다가오는 미식 경험과 지난 방문 기록을 확인하세요.
+        </p>
       </header>
 
       <div className="reservation-filters" role="group" aria-label="상태 필터">
         <button
           type="button"
-          className="mi-chip"
+          className="mi-chip mi-chip--tab"
           aria-pressed={status === undefined}
           onClick={() => update({ status: undefined })}
         >
@@ -86,7 +89,7 @@ export function MyReservationsPage() {
           <button
             key={value}
             type="button"
-            className="mi-chip"
+            className="mi-chip mi-chip--tab"
             aria-pressed={status === value}
             onClick={() => update({ status: value })}
           >
@@ -135,24 +138,54 @@ function ReservationList({
     <>
       <ul className="reservation-list">
         {data.items.map((item) => (
-          <li key={item.reservationId} className="mi-card reservation-list__item">
+          <li
+            key={item.reservationId}
+            className="mi-card mi-card--interactive reservation-list__item"
+          >
             <div className="mi-card__body">
-              <Badge tone={RESERVATION_STATUS_TONE[item.status]}>
-                {RESERVATION_STATUS_LABEL[item.status]}
-              </Badge>
+              <div className="reservation-list__head">
+                <div>
+                  <Badge tone={RESERVATION_STATUS_TONE[item.status]}>
+                    {RESERVATION_STATUS_LABEL[item.status]}
+                  </Badge>
+                  <h2 className="reservation-list__store">
+                    <Link to={`/reservations/${item.reservationId}`}>
+                      {item.storeName}
+                    </Link>
+                  </h2>
+                </div>
 
-              <h2 className="reservation-list__store">
-                <Link to={`/reservations/${item.reservationId}`}>
-                  {item.storeName}
+                {/* 시안의 날짜 타일. serviceDate는 항상 오므로 늘 그릴 수 있다. */}
+                <DateTile serviceDate={item.serviceDate} />
+              </div>
+
+              {/*
+                목록 항목 안의 사실 나열이다. `ul`로 감싸면 카드 자체가 목록
+                항목인데 그 안에 또 목록 항목이 생겨 구조가 두 겹이 된다.
+              */}
+              <div className="reservation-list__facts">
+                <p>
+                  <span className="reservation-list__fact-mark" aria-hidden="true">
+                    <Icon name="clock" className="mi-icon--sm" />
+                  </span>
+                  {formatReservationTime(item)}
+                </p>
+                <p>
+                  <span className="reservation-list__fact-mark" aria-hidden="true">
+                    <Icon name="group" className="mi-icon--sm" />
+                  </span>
+                  {formatPartySize(item.partySize)}
+                </p>
+              </div>
+
+              <div className="reservation-list__foot">
+                <Link
+                  className="mi-button mi-button--primary mi-button--block"
+                  to={`/reservations/${item.reservationId}`}
+                >
+                  상세 보기
                 </Link>
-              </h2>
-
-              <p className="reservation-list__meta">
-                {formatReservationTime(item)}
-              </p>
-              <p className="reservation-list__meta">
-                {formatPartySize(item.partySize)}
-              </p>
+              </div>
             </div>
           </li>
         ))}
@@ -166,5 +199,25 @@ function ReservationList({
         onChange={onPageChange}
       />
     </>
+  )
+}
+
+/**
+ * 날짜 타일.
+ *
+ * `serviceDate`는 계약이 `YYYY-MM-DD`로 고정한다. 파싱해서 월·일만 떼어 낸다.
+ * 형식이 어긋나면 타일을 그리지 않는다. 옆의 시각 문구가 날짜를 이미 알린다.
+ */
+function DateTile({ serviceDate }: { serviceDate: string }) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(serviceDate)
+  if (match === null) {
+    return null
+  }
+
+  return (
+    <p className="reservation-list__date" aria-hidden="true">
+      <span className="reservation-list__date-month">{`${Number(match[2])}월`}</span>
+      <span className="reservation-list__date-day">{Number(match[3])}</span>
+    </p>
   )
 }

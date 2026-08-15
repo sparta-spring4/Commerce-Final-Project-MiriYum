@@ -6,6 +6,7 @@ import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
 import { Alert, ErrorState, Loading } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { formatPrice } from '../../store-search/model/labels'
 import {
   RESERVATION_STATUS_LABEL,
@@ -54,9 +55,9 @@ export function ReservationDetailPage() {
   return (
     <div className="mi-container mi-container--narrow reservation-detail">
       <nav aria-label="이동 경로" className="reservation-detail__breadcrumb">
-        <Link to={ROUTES.myReservations}>내 예약</Link>
-        <span aria-hidden="true"> / </span>
-        <span>예약 상세</span>
+        <Link to={ROUTES.myReservations}>
+          <Icon name="arrowLeft" className="mi-icon--sm" />내 예약
+        </Link>
       </nav>
 
       <header className="reservation-detail__header">
@@ -65,50 +66,74 @@ export function ReservationDetailPage() {
         </Badge>
         <h1>{reservation.storeName}</h1>
         <p className="reservation-detail__meta">
+          <Icon name="calendar" />
           {formatReservationTime(reservation)}
         </p>
       </header>
 
-      <section className="mi-card reservation-detail__section" aria-label="예약 내용">
-        <div className="mi-card__body">
-          <dl className="reservation-detail__list">
-            <dt>인원</dt>
-            <dd>
-              {`성인 ${reservation.party.adultCount}명 · 아동 ${reservation.party.childCount}명 · 영유아 ${reservation.party.infantCount}명 (총 ${reservation.party.totalCount}명)`}
-            </dd>
+      <section
+        className="mi-card mi-card--roomy reservation-detail__section"
+        aria-label="예약 내용"
+      >
+        <div className="mi-card__body mi-card__body--roomy">
+          {/* 시안 `_10`의 아이콘 + 레이블 + 값 묶음. */}
+          <div className="reservation-detail__grid">
+            <div className="reservation-detail__item">
+              <Icon name="group" />
+              <div>
+                <p className="reservation-detail__label">인원</p>
+                <p className="reservation-detail__value">
+                  {`성인 ${reservation.party.adultCount}명 · 아동 ${reservation.party.childCount}명 · 영유아 ${reservation.party.infantCount}명 (총 ${reservation.party.totalCount}명)`}
+                </p>
+              </div>
+            </div>
 
-            <dt>미리 선택한 메뉴</dt>
-            <dd>
-              {reservation.menuSelections.length === 0 ? (
-                '선택한 메뉴가 없습니다.'
-              ) : (
-                <ul>
-                  {reservation.menuSelections.map((item) => (
-                    <li key={item.menuId}>
-                      {`${item.menuName} x ${item.quantity} · ${formatPrice(item.unitPrice * item.quantity)}`}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </dd>
+            <div className="reservation-detail__item">
+              <Icon name="store" />
+              <div>
+                <p className="reservation-detail__label">매장</p>
+                <p className="reservation-detail__value">
+                  <Link to={`/stores/${reservation.storeId}`}>매장 정보 보기</Link>
+                </p>
+              </div>
+            </div>
+          </div>
 
-            {reservation.status === 'CANCELLED' && (
-              <>
-                <dt>취소 주체</dt>
-                <dd>
-                  {reservation.cancelledBy === 'CONSUMER'
-                    ? '내가 취소'
-                    : reservation.cancelledBy === 'STORE_OPERATOR'
-                      ? '매장이 취소'
-                      : '확인할 수 없음'}
-                </dd>
-                <dt>취소 사유</dt>
-                <dd>{reservation.cancellationReason ?? '사유 없음'}</dd>
-              </>
+          <div className="reservation-detail__menus">
+            <p className="reservation-detail__menus-head">
+              <Icon name="menu" />
+              미리 선택한 메뉴
+            </p>
+            {reservation.menuSelections.length === 0 ? (
+              <p className="reservation-detail__value">선택한 메뉴가 없습니다.</p>
+            ) : (
+              <ul className="reservation-detail__menu-list">
+                {reservation.menuSelections.map((item) => (
+                  <li key={item.menuId}>
+                    <span>{`${item.menuName} x ${item.quantity}`}</span>
+                    <span className="reservation-detail__amount">
+                      {formatPrice(item.unitPrice * item.quantity)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
-          </dl>
+          </div>
 
-          <Link to={`/stores/${reservation.storeId}`}>매장 정보 보기</Link>
+          {reservation.status === 'CANCELLED' && (
+            <dl className="reservation-detail__list">
+              <dt>취소 주체</dt>
+              <dd>
+                {reservation.cancelledBy === 'CONSUMER'
+                  ? '내가 취소'
+                  : reservation.cancelledBy === 'STORE_OPERATOR'
+                    ? '매장이 취소'
+                    : '확인할 수 없음'}
+              </dd>
+              <dt>취소 사유</dt>
+              <dd>{reservation.cancellationReason ?? '사유 없음'}</dd>
+            </dl>
+          )}
         </div>
       </section>
 

@@ -44,9 +44,11 @@ describe('매장 상세 화면', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: '파스타 마스터즈' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('서울 · 이탈리안')).toBeInTheDocument()
+    // 카테고리는 시안의 알약, 지역과 주소는 그 아래 한 줄이다.
+    // 둘 다 code가 아니라 표시명이어야 한다.
+    expect(screen.getByText('이탈리안')).toBeInTheDocument()
     expect(
-      screen.getByText('서울특별시 성동구 연무장길 14'),
+      screen.getByText('서울 · 서울특별시 성동구 연무장길 14'),
     ).toBeInTheDocument()
   })
 

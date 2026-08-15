@@ -5,8 +5,9 @@ import { CommonErrorCode } from '../../../shared/api/envelope'
 import { ROUTES } from '../../../app/routes'
 import { readReturnTo } from '../../../app/returnTo'
 import { Button } from '../../../shared/ui/Button'
-import { TextField } from '../../../shared/ui/Field'
+import { PasswordField, TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { Icon } from '../../../shared/ui/Icon'
 import { createConsumerKakaoAuthorization } from '../api/consumerAuthApi'
 import { useConsumerAuth } from '../ConsumerAuthProvider'
 import { AuthErrorCode } from '../model/authErrors'
@@ -91,83 +92,118 @@ export function ConsumerSignInPage() {
   }
 
   return (
-    <div className="mi-container mi-container--form auth-page">
-      <header className="auth-page__header">
-        <h1>로그인</h1>
-        <p>맛있는 여정의 시작</p>
-      </header>
+    <div className="auth-page">
+      <div className="mi-ambient" aria-hidden="true" />
 
-      {/*
-        noValidate로 브라우저 기본 검증을 끈다. 기본 검증이 먼저 걸리면 우리가
-        입력에 연결한 접근 가능한 오류 문구 대신 브라우저 말풍선이 뜨고,
-        문구가 브라우저·언어별로 달라진다.
-      */}
-      <form
-        className="auth-form"
-        onSubmit={handleSubmit}
-        aria-label="로그인"
-        noValidate
-      >
-        {formError !== null && (
-          <Alert tone="error" title={formError} />
-        )}
+      <div className="auth-card mi-ambient-content">
+        <header className="auth-card__header">
+          {/*
+            시안은 여기에 로고 이미지를 둔다. ZIP은 로고를 원격 주소로만
+            참조하고 파일을 담고 있지 않다. 외부 호스트를 부르지 않기로 한
+            theme.css의 결정을 따라 같은 자리에 브랜드 워드마크를 둔다.
+          */}
+          <p className="auth-card__mark" aria-hidden="true">
+            MiriYum
+          </p>
+          <h1>로그인</h1>
+          <p className="auth-card__lead">맛있는 여정의 시작</p>
+        </header>
 
-        <TextField
-          label="이메일"
-          type="email"
-          name="email"
-          autoComplete="email"
-          value={email}
-          error={fieldErrors.email ?? null}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-
-        <TextField
-          label="비밀번호"
-          type="password"
-          name="password"
-          autoComplete="current-password"
-          value={password}
-          error={fieldErrors.password ?? null}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-
-        <Button type="submit" variant="primary" block loading={submitting}>
-          로그인
-        </Button>
-      </form>
-
-      {/*
-        form 밖에 둔다. 안에 두면 카카오 버튼이 폼의 제출 대상으로 묶여
-        Enter 키 동작과 검증 흐름이 두 수단에 섞인다.
-      */}
-      <section className="auth-social" aria-label="다른 방법으로 로그인">
-        <p className="auth-social__divider">
-          <span>또는</span>
-        </p>
-
-        {kakaoError !== null && <Alert tone="error" title={kakaoError} />}
-
-        <Button
-          variant="ghost"
-          block
-          className="auth-social__kakao"
-          loading={startingKakao}
-          onClick={() => {
-            void handleKakaoSignIn()
-          }}
+        {/*
+          noValidate로 브라우저 기본 검증을 끈다. 기본 검증이 먼저 걸리면 우리가
+          입력에 연결한 접근 가능한 오류 문구 대신 브라우저 말풍선이 뜨고,
+          문구가 브라우저·언어별로 달라진다.
+        */}
+        <form
+          className="auth-form"
+          onSubmit={handleSubmit}
+          aria-label="로그인"
+          noValidate
         >
-          카카오 로그인
-        </Button>
-      </section>
+          <TextField
+            label="이메일"
+            type="email"
+            name="email"
+            autoComplete="email"
+            placeholder="example@miriyum.com"
+            leadingIcon={<Icon name="mail" />}
+            value={email}
+            error={fieldErrors.email ?? null}
+            onChange={(event) => setEmail(event.target.value)}
+          />
 
-      <p className="auth-page__switch">
-        아직 계정이 없으신가요? <Link to={ROUTES.consumerSignUp}>회원가입</Link>
-      </p>
-      <p className="auth-page__switch">
-        {/* 매장 운영자는 별도 shell이다. 같은 폼에서 역할을 고르게 하지 않는다. */}
-        <Link to={ROUTES.storeOperatorSignIn}>식당 대표자 로그인</Link>
-      </p>
+          <PasswordField
+            label="비밀번호"
+            name="password"
+            autoComplete="current-password"
+            value={password}
+            error={fieldErrors.password ?? null}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+
+          {formError !== null && <Alert tone="error" title={formError} />}
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            block
+            loading={submitting}
+          >
+            로그인
+          </Button>
+        </form>
+
+        {/*
+          form 밖에 둔다. 안에 두면 카카오 버튼이 폼의 제출 대상으로 묶여
+          Enter 키 동작과 검증 흐름이 두 수단에 섞인다.
+        */}
+        <section className="auth-social" aria-label="다른 방법으로 로그인">
+          <p className="auth-social__divider">
+            <span>또는</span>
+          </p>
+
+          {kakaoError !== null && <Alert tone="error" title={kakaoError} />}
+
+          <Button
+            variant="ghost"
+            block
+            className="auth-social__kakao"
+            loading={startingKakao}
+            onClick={() => {
+              void handleKakaoSignIn()
+            }}
+          >
+            카카오 로그인
+          </Button>
+        </section>
+
+        <footer className="auth-card__foot">
+          <p className="auth-card__switch">
+            아직 계정이 없으신가요?{' '}
+            <Link className="auth-card__switch-link" to={ROUTES.consumerSignUp}>
+              회원가입
+            </Link>
+          </p>
+          {/* 매장 운영자는 별도 shell이다. 같은 폼에서 역할을 고르게 하지 않는다. */}
+          <Link className="auth-card__aside" to={ROUTES.storeOperatorSignIn}>
+            <Icon name="store" className="mi-icon--sm" />
+            식당 대표자 로그인
+          </Link>
+        </footer>
+
+        {/*
+          시안의 진행 중 오버레이. 카드 위를 덮어 두 번 제출되는 것을 눈으로도
+          막는다. 상태 자체는 버튼의 aria-busy가 이미 알리므로 여기서는 다시
+          읽히지 않게 숨긴다.
+        */}
+        {submitting && (
+          <div className="auth-card__overlay" aria-hidden="true">
+            <span className="mi-spinner auth-card__overlay-spinner" />
+            <p>로그인 중...</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

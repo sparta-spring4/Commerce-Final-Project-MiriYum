@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ROUTES } from '../../../app/routes'
 import { withReturnTo } from '../../../app/returnTo'
@@ -6,6 +7,7 @@ import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
+import { Icon, type IconName } from '../../../shared/ui/Icon'
 import { useCreateReservation, useMenuHoldAvailability } from '../api/queries'
 import {
   MAX_PARTY_PER_TYPE,
@@ -118,12 +120,15 @@ export function ReservationCreatePage() {
   const currentDestination = `/stores/${storeId}/reserve?${writeDraft(draft).toString()}`
 
   return (
-    <div className="mi-container mi-container--narrow reservation-create">
-      <header className="reservation-create__header">
-        <h1>예약 정보 입력</h1>
-        <p>
-          <Link to={`/stores/${storeId}`}>매장 상세로 돌아가기</Link>
+    <div className="mi-container reservation-create">
+      <header className="mi-page-head reservation-create__header">
+        <p className="reservation-create__back">
+          <Link to={`/stores/${storeId}`}>
+            <Icon name="arrowLeft" className="mi-icon--sm" />
+            매장 상세로 돌아가기
+          </Link>
         </p>
+        <h1 className="mi-page-head__title">{STEP_TITLE[step]}</h1>
       </header>
 
       <ReservationStepper current={step} />
@@ -138,43 +143,135 @@ export function ReservationCreatePage() {
         />
       )}
 
-      {step === 'schedule' && (
-        <ScheduleStep
-          draft={draft}
-          errors={fieldErrors}
-          onChange={updateDraft}
-          onNext={goToMenus}
-        />
-      )}
+      {/*
+        시안은 단계 내용과 요약 패널을 나란히 두고 패널이 따라 붙게 한다.
+        패널의 버튼이 곧 다음 단계로 가는 유일한 주요 행동이다.
+      */}
+      <div className="reservation-create__layout">
+        <div className="reservation-create__main">
+          {step === 'schedule' && (
+            <ScheduleStep
+              draft={draft}
+              errors={fieldErrors}
+              onChange={updateDraft}
+              onNext={goToMenus}
+            />
+          )}
 
-      {step === 'menus' && (
-        <>
-          <MenuSelectionStep
-            storeId={storeId}
-            draft={draft}
-            onChange={updateDraft}
-          />
-          <div className="reservation-create__actions">
-            <Button variant="ghost" onClick={() => setStep('schedule')}>
-              이전
-            </Button>
-            <Button variant="primary" onClick={() => setStep('confirm')}>
-              다음
-            </Button>
+          {step === 'menus' && (
+            <MenuSelectionStep
+              storeId={storeId}
+              draft={draft}
+              onChange={updateDraft}
+            />
+          )}
+
+          {step === 'confirm' && <ConfirmStep storeId={storeId} draft={draft} />}
+        </div>
+
+        <aside className="reservation-create__panel" aria-label="선택 요약">
+          <div className="mi-card mi-card--roomy">
+            <div className="mi-card__body reservation-summary">
+              <h2 className="reservation-summary__title">선택한 조건</h2>
+
+              <ul className="reservation-summary__rows">
+                <SummaryRow icon="calendar" label="방문 날짜">
+                  {draft.serviceDate.length > 0 ? draft.serviceDate : '아직 없음'}
+                </SummaryRow>
+                <SummaryRow icon="clock" label="방문 시간">
+                  {draft.startTime.length > 0 ? draft.startTime : '아직 없음'}
+                </SummaryRow>
+                <SummaryRow icon="group" label="인원">
+                  {`총 ${partyTotal(draft)}명`}
+                </SummaryRow>
+                <SummaryRow icon="menu" label="미리 선택한 메뉴">
+                  {draft.menuSelections.size === 0
+                    ? '없음'
+                    : `${draft.menuSelections.size}종`}
+                </SummaryRow>
+              </ul>
+
+              <div className="reservation-create__actions">
+                {step !== 'schedule' && (
+                  <Button
+                    variant="ghost"
+                    disabled={mutation.isPending}
+                    onClick={() => setStep(step === 'confirm' ? 'menus' : 'schedule')}
+                  >
+                    이전
+                  </Button>
+                )}
+
+                {step === 'schedule' && (
+                  // 폼은 왼쪽 열에 있고 버튼은 패널에 있다. `form` 속성이 둘을
+                  // 잇는다. 이렇게 해야 Enter 키 제출과 검증 흐름이 같아진다.
+                  <Button
+                    type="submit"
+                    form={SCHEDULE_FORM_ID}
+                    variant="primary"
+                    size="lg"
+                    block
+                  >
+                    메뉴 선택으로
+                  </Button>
+                )}
+
+                {step === 'menus' && (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    block
+                    onClick={() => setStep('confirm')}
+                  >
+                    다음
+                  </Button>
+                )}
+
+                {step === 'confirm' && (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    block
+                    loading={mutation.isPending}
+                    onClick={() => submit()}
+                  >
+                    예약하기
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
-        </>
-      )}
-
-      {step === 'confirm' && (
-        <ConfirmStep
-          storeId={storeId}
-          draft={draft}
-          submitting={mutation.isPending}
-          onBack={() => setStep('menus')}
-          onSubmit={() => submit()}
-        />
-      )}
+        </aside>
+      </div>
     </div>
+  )
+}
+
+/** 단계마다 화면 제목이 바뀐다. 시안 `_7`·`_8`·`_10`의 제목 그대로다. */
+const STEP_TITLE: Record<ReservationStep, string> = {
+  schedule: '예약 정보 입력',
+  menus: '메뉴 선택',
+  confirm: '예약 확인',
+}
+
+/** 오른쪽 폼과 왼쪽 버튼을 잇는 id. 화면에 폼이 하나뿐이라 고정값으로 둔다. */
+const SCHEDULE_FORM_ID = 'reservation-schedule-form'
+
+function SummaryRow({
+  icon,
+  label,
+  children,
+}: {
+  icon: IconName
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <li className="reservation-summary__row">
+      <Icon name={icon} />
+      <span className="reservation-summary__label">{label}</span>
+      <span className="reservation-summary__value">{children}</span>
+    </li>
   )
 }
 
@@ -240,6 +337,7 @@ function ScheduleStep({
 }) {
   return (
     <form
+      id={SCHEDULE_FORM_ID}
       className="reservation-form"
       aria-label="예약 조건"
       noValidate
@@ -248,79 +346,144 @@ function ScheduleStep({
         onNext()
       }}
     >
-      <TextField
-        label="방문 날짜"
-        type="date"
-        name="serviceDate"
-        required
-        value={draft.serviceDate}
-        error={errors.serviceDate ?? null}
-        onChange={(event) => onChange({ ...draft, serviceDate: event.target.value })}
-      />
+      {/*
+        시안은 달력 격자와 시간대 칩으로 고르게 한다. 1차 MVP 계약에는 매장의
+        예약 가능 슬롯을 이 화면에서 조회하는 통로가 없어 어떤 칸이 열려 있는지
+        알 수 없다. 열리지 않은 칸까지 고를 수 있는 가짜 달력을 만들지 않고,
+        같은 카드 안에 날짜·시간 입력을 둔다. 실제 판정은 서버가 한다.
+      */}
+      <section className="mi-card mi-card--roomy reservation-form__section">
+        <div className="mi-card__body mi-card__body--roomy">
+          <h2>날짜와 시간</h2>
 
-      <TextField
-        label="방문 시간"
-        type="time"
-        name="startTime"
-        required
-        help="종료 시각은 매장 정책에 따라 서버가 계산합니다."
-        value={draft.startTime}
-        error={errors.startTime ?? null}
-        onChange={(event) => onChange({ ...draft, startTime: event.target.value })}
-      />
+          <div className="reservation-form__grid">
+            <TextField
+              label="방문 날짜"
+              type="date"
+              name="serviceDate"
+              required
+              value={draft.serviceDate}
+              error={errors.serviceDate ?? null}
+              onChange={(event) =>
+                onChange({ ...draft, serviceDate: event.target.value })
+              }
+            />
 
-      <div className="reservation-form__party">
-        <TextField
-          label="성인"
-          type="number"
-          name="adultCount"
-          min={0}
-          max={MAX_PARTY_PER_TYPE}
-          value={draft.adultCount}
-          error={errors.adultCount ?? null}
-          onChange={(event) => onChange({ ...draft, adultCount: event.target.value })}
-        />
-        <TextField
-          label="아동"
-          type="number"
-          name="childCount"
-          min={0}
-          max={MAX_PARTY_PER_TYPE}
-          value={draft.childCount}
-          onChange={(event) => onChange({ ...draft, childCount: event.target.value })}
-        />
-        <TextField
-          label="영유아"
-          type="number"
-          name="infantCount"
-          min={0}
-          max={MAX_PARTY_PER_TYPE}
-          value={draft.infantCount}
-          onChange={(event) => onChange({ ...draft, infantCount: event.target.value })}
-        />
+            <TextField
+              label="방문 시간"
+              type="time"
+              name="startTime"
+              required
+              help="종료 시각은 매장 정책에 따라 서버가 계산합니다."
+              value={draft.startTime}
+              error={errors.startTime ?? null}
+              onChange={(event) =>
+                onChange({ ...draft, startTime: event.target.value })
+              }
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="mi-card mi-card--roomy reservation-form__section">
+        <div className="mi-card__body mi-card__body--roomy">
+          <div className="reservation-form__section-head">
+            <h2>인원 선택</h2>
+            <p className="reservation-form__total">{`총 ${partyTotal(draft)}명`}</p>
+          </div>
+
+          <ul className="reservation-form__party">
+            <PartyRow
+              label="성인"
+              hint="만 13세 이상"
+              value={draft.adultCount}
+              error={errors.adultCount ?? null}
+              onChange={(next) => onChange({ ...draft, adultCount: next })}
+            />
+            <PartyRow
+              label="아동"
+              hint="36개월 ~ 만 12세"
+              value={draft.childCount}
+              onChange={(next) => onChange({ ...draft, childCount: next })}
+            />
+            <PartyRow
+              label="영유아"
+              hint="36개월 미만"
+              value={draft.infantCount}
+              onChange={(next) => onChange({ ...draft, infantCount: next })}
+            />
+          </ul>
+        </div>
+      </section>
+    </form>
+  )
+}
+
+/**
+ * 인원 한 종류.
+ *
+ * 시안은 숫자 입력 대신 − / + 버튼을 쓴다. 값 자체는 draft가 문자열로 들고
+ * 있으므로 여기서도 문자열로 되돌려 준다. 빈 문자열은 0으로 읽는다.
+ */
+function PartyRow({
+  label,
+  hint,
+  value,
+  error,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: string
+  error?: string | null
+  onChange: (next: string) => void
+}) {
+  const count = Number.parseInt(value, 10)
+  const current = Number.isInteger(count) && count > 0 ? count : 0
+
+  return (
+    <li className="reservation-form__party-row">
+      <div>
+        <p className="reservation-form__party-label">{label}</p>
+        <p className="reservation-form__party-hint">{hint}</p>
+        {error !== null && error !== undefined && (
+          <p className="mi-field__error">{error}</p>
+        )}
       </div>
 
-      <p className="reservation-form__total">{`총 ${partyTotal(draft)}명`}</p>
-
-      <Button type="submit" variant="primary" block>
-        메뉴 선택으로
-      </Button>
-    </form>
+      <div className="mi-counter">
+        <button
+          type="button"
+          className="mi-counter__button"
+          aria-label={`${label} 수 줄이기`}
+          disabled={current <= 0}
+          onClick={() => onChange(String(current - 1))}
+        >
+          <Icon name="minus" />
+        </button>
+        <output className="mi-counter__value" aria-label={`${label} 수`}>
+          {current}
+        </output>
+        <button
+          type="button"
+          className="mi-counter__button"
+          aria-label={`${label} 수 늘리기`}
+          disabled={current >= MAX_PARTY_PER_TYPE}
+          onClick={() => onChange(String(current + 1))}
+        >
+          <Icon name="plus" />
+        </button>
+      </div>
+    </li>
   )
 }
 
 function ConfirmStep({
   storeId,
   draft,
-  submitting,
-  onBack,
-  onSubmit,
 }: {
   storeId: string
   draft: ReservationDraft
-  submitting: boolean
-  onBack: () => void
-  onSubmit: () => void
 }) {
   // 같은 query key라 메뉴 단계에서 받은 결과를 그대로 재사용한다.
   const availability = useMenuHoldAvailability(
@@ -337,29 +500,53 @@ function ConfirmStep({
   const selections = [...draft.menuSelections]
 
   return (
-    <section className="mi-card reservation-confirm" aria-label="예약 확인">
-      <div className="mi-card__body">
+    <section
+      className="mi-card mi-card--roomy reservation-confirm"
+      aria-label="예약 확인"
+    >
+      <div className="mi-card__body mi-card__body--roomy">
         <h2>선택하신 내역을 확인해 주세요</h2>
 
-        <dl className="reservation-confirm__list">
-          <dt>일정</dt>
-          <dd>{`${draft.serviceDate} ${draft.startTime}`}</dd>
-          <dt>인원</dt>
-          <dd>
-            {`성인 ${draft.adultCount || 0}명 · 아동 ${draft.childCount || 0}명 · 영유아 ${draft.infantCount || 0}명`}
-          </dd>
-          <dt>선택 메뉴</dt>
-          <dd>
-            {selections.length === 0
-              ? '선택한 메뉴가 없습니다.'
-              : selections
-                  .map(
-                    ([menuId, quantity]) =>
-                      `${menuNames.get(menuId) ?? menuId} x ${quantity}`,
-                  )
-                  .join(', ')}
-          </dd>
-        </dl>
+        {/* 시안 `_10`의 아이콘 + 레이블 + 값 묶음. */}
+        <div className="reservation-confirm__grid">
+          <div className="reservation-confirm__item">
+            <Icon name="calendar" />
+            <div>
+              <p className="reservation-confirm__label">일정</p>
+              <p className="reservation-confirm__value">{draft.serviceDate}</p>
+              <p className="reservation-confirm__value">{draft.startTime}</p>
+            </div>
+          </div>
+
+          <div className="reservation-confirm__item">
+            <Icon name="group" />
+            <div>
+              <p className="reservation-confirm__label">인원</p>
+              <p className="reservation-confirm__value">
+                {`성인 ${draft.adultCount || 0}명 · 아동 ${draft.childCount || 0}명 · 영유아 ${draft.infantCount || 0}명`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="reservation-confirm__menus">
+          <p className="reservation-confirm__menus-head">
+            <Icon name="menu" />
+            선택 메뉴
+          </p>
+          {selections.length === 0 ? (
+            <p className="reservation-confirm__value">선택한 메뉴가 없습니다.</p>
+          ) : (
+            <ul className="reservation-confirm__menu-list">
+              {selections.map(([menuId, quantity]) => (
+                <li key={menuId}>
+                  <span>{menuNames.get(menuId) ?? menuId}</span>
+                  <span className="reservation-confirm__quantity">{`x ${quantity}`}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         <Alert tone="info" title="예약 확정은 서버가 최종 판정합니다.">
           <p>
@@ -367,15 +554,6 @@ function ConfirmStep({
             다시 확인합니다.
           </p>
         </Alert>
-
-        <div className="reservation-create__actions">
-          <Button variant="ghost" onClick={onBack} disabled={submitting}>
-            이전
-          </Button>
-          <Button variant="primary" loading={submitting} onClick={onSubmit}>
-            예약하기
-          </Button>
-        </div>
       </div>
     </section>
   )
