@@ -495,6 +495,7 @@ main
 
     def test_deployment_backfills_pending_index_before_starting_the_new_backend(self):
         main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
+        backend_stop = main_body.index('stop backend')
         valkey_start = main_body.index('up -d mysql valkey')
         pending_index_backfill = main_body.index('backfill_pending_risk_event_index')
         occurrence_counter_backfill = main_body.index(
@@ -502,6 +503,7 @@ main
         )
         backend_start = main_body.index('up -d --remove-orphans')
 
+        self.assertLess(backend_stop, valkey_start)
         self.assertLess(valkey_start, pending_index_backfill)
         self.assertLess(pending_index_backfill, occurrence_counter_backfill)
         self.assertLess(occurrence_counter_backfill, backend_start)
@@ -540,9 +542,11 @@ backfill_risk_event_occurrence_counters
             )
             self.assertIn("auth:risk:occurrence:consumer:family-123:", valkey_arguments)
             self.assertIn("auth:refresh:consumer:family-123", valkey_arguments)
-            self.assertIn(" 2", valkey_arguments)
+            self.assertIn(event_key, valkey_arguments)
+            self.assertIn(" 3", valkey_arguments)
             self.assertIn("EXPIRETIME", valkey_arguments)
             self.assertIn("EXPIREAT", valkey_arguments)
+            self.assertIn("HGET", valkey_arguments)
 
     def test_deployment_backfill_propagates_valkey_scan_failure(self):
         with tempfile.TemporaryDirectory() as directory:

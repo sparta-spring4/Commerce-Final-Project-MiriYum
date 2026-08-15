@@ -158,22 +158,41 @@ backfill_risk_event_occurrence_counters() {
     if ! "${compose[@]}" exec -T valkey sh -ec '
       counter_key="$1"
       family_key="$2"
-      occurrence_count="$3"
+      marker_key="$3"
+      occurrence_count="$4"
       REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli --raw EVAL "
+        local function isPositiveInteger(value)
+          return value ~= false and string.match(value, '^[1-9][0-9]*$') ~= nil
+        end
+
+        local function isGreater(left, right)
+          if string.len(left) ~= string.len(right) then
+            return string.len(left) > string.len(right)
+          end
+          return left > right
+        end
+
         local familyExpiresAt = redis.call(\"EXPIRETIME\", KEYS[2])
         if familyExpiresAt <= 0 then
           redis.call(\"DEL\", KEYS[1])
           return 0
         end
         local currentOccurrenceCount = redis.call(\"GET\", KEYS[1])
-        if currentOccurrenceCount == false
-            or tonumber(currentOccurrenceCount) < tonumber(ARGV[1]) then
-          redis.call(\"SET\", KEYS[1], ARGV[1])
+        local markerOccurrenceCount = redis.call(\"HGET\", KEYS[3], \"occurrenceCount\")
+        local greatestOccurrenceCount = ARGV[1]
+        if isPositiveInteger(currentOccurrenceCount)
+            and isGreater(currentOccurrenceCount, greatestOccurrenceCount) then
+          greatestOccurrenceCount = currentOccurrenceCount
         end
+        if isPositiveInteger(markerOccurrenceCount)
+            and isGreater(markerOccurrenceCount, greatestOccurrenceCount) then
+          greatestOccurrenceCount = markerOccurrenceCount
+        end
+        redis.call(\"SET\", KEYS[1], greatestOccurrenceCount)
         redis.call(\"EXPIREAT\", KEYS[1], familyExpiresAt)
         return 1
-      " 2 "$counter_key" "$family_key" "$occurrence_count" >/dev/null
-    ' sh "${counter_key}" "${family_key}" "${occurrence_count}"; then
+      " 3 "$counter_key" "$family_key" "$marker_key" "$occurrence_count" >/dev/null
+    ' sh "${counter_key}" "${family_key}" "${event_key}" "${occurrence_count}"; then
       echo "Risk event occurrence counter backfill could not update Valkey." >&2
       return 1
     fi
@@ -208,6 +227,12 @@ main() {
 
 # 실행 환경은 서버에만 두고 이미지와 배포 파일만 갱신한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" pull
+  # 구버전 writer를 멈춘 뒤에만 위험 사건 상태를 snapshot/backfill해 전환 중 count가 작아지지 않게 한다.
+  if ! docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" stop backend; then
+    echo "Could not stop the existing backend before risk event state backfill." >&2
+    publish_deployment_health 0
+    return 1
+  fi
   # 새 backend가 pending Set만 읽기 시작하기 전에 Valkey와 기존 marker 인덱스를 준비한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
 
