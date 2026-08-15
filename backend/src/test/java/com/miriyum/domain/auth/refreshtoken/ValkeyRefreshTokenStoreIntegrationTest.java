@@ -482,12 +482,14 @@ class ValkeyRefreshTokenStoreIntegrationTest {
                 .isEqualTo(RefreshTokenRotationResult.Status.ROTATED);
         assertThat(rotate(state, now.plusSeconds(2)).status())
                 .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
-        assertThat(rotate(state, now.plusSeconds(3)).status())
-                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
 
         String markerKey = RefreshTokenRiskEventKey.forReuse(
                 state.namespace(), state.familyId(), state.currentTokenHash());
         PendingRefreshTokenRiskEvent firstSnapshot = markerStore.findPendingEvents().getFirst();
+
+        assertThat(rotate(state, now.plusSeconds(3)).status())
+                .isEqualTo(RefreshTokenRotationResult.Status.REUSED);
+
         assertThat(markerStore.deleteIfUnchanged(
                 markerKey, firstSnapshot.occurrenceCount(), firstSnapshot.generation())).isFalse();
         PendingRefreshTokenRiskEvent updatedSnapshot = markerStore.findPendingEvents().getFirst();
