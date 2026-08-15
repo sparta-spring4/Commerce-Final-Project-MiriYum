@@ -146,7 +146,7 @@
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/{AdminCaseType,AdminCommandPurpose,AdminTargetType,PlatformOperatorAuditAction,PlatformOperatorAuditOutcome,PlatformOperatorAuditReason}.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/repository/{PlatformOperatorAccountRepository,PlatformOperatorAuthEventRepository,PlatformOperatorRoleGrantRepository,PlatformOperatorPermissionGrantRepository,PlatformOperatorReauthenticationApprovalRepository,PlatformOperatorAuditEventRepository}.java`
-- `backend/src/main/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorManagementService,PlatformOperatorAuditService,PlatformOperatorAuditWriter,OperatorAuthorityService,LastSuperAdminPolicy}.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/service/{PlatformOperatorManagementService,PlatformOperatorManagementRequestFingerprint,PlatformOperatorSessionRevocationAfterCommit,PlatformOperatorAuditService,PlatformOperatorAuditWriter,OperatorAuthorityService,LastSuperAdminPolicy}.java`
 
 ### 테스트
 

@@ -51,9 +51,14 @@ class PlatformOperatorManagementAuditMigrationIT {
 
                 long originalId = insertAuditEvent(connection, superAdminId, operatorId, null);
                 long correctionId = insertAuditEvent(connection, superAdminId, operatorId, originalId);
+                long secondCorrectionId = insertAuditEvent(connection, superAdminId, operatorId, originalId);
 
                 assertThat(singleLong(connection, "SELECT original_event_id FROM platform_operator_audit_events "
                         + "WHERE platform_operator_audit_event_id = " + correctionId)).isEqualTo(originalId);
+                assertThat(secondCorrectionId).isGreaterThan(correctionId);
+                assertThat(singleLong(connection, "SELECT COUNT(*) FROM platform_operator_audit_events "
+                        + "WHERE original_event_source = 'ADMIN' AND original_event_id = " + originalId))
+                        .isEqualTo(2L);
                 assertThatThrownBy(() -> executeUpdate(connection,
                         "UPDATE platform_operator_audit_events SET outcome = 'FAILED' "
                                 + "WHERE platform_operator_audit_event_id = " + originalId))

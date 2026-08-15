@@ -24,7 +24,6 @@ import com.miriyum.domain.platformoperator.repository.PlatformOperatorPermission
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
-import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManager;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -66,7 +65,7 @@ class PlatformOperatorManagementServiceTest {
                 highRiskGuard,
                 singletonPolicy,
                 mock(OperatorAuthorityService.class),
-                mock(PlatformOperatorSessionManager.class),
+                mock(PlatformOperatorSessionRevocationAfterCommit.class),
                 mock(PlatformOperatorAuditWriter.class),
                 idempotency,
                 mock(PasswordEncoder.class),

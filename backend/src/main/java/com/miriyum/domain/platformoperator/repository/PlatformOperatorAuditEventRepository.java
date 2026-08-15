@@ -38,19 +38,6 @@ public class PlatformOperatorAuditEventRepository {
         return Optional.ofNullable(entityManager.find(PlatformOperatorAuditEvent.class, id));
     }
 
-    public boolean existsCorrection(String source, long sourceId) {
-        return !entityManager.createQuery("""
-                select event.id from PlatformOperatorAuditEvent event
-                 where event.originalEventSource = :source
-                   and event.originalEventId = :sourceId
-                """, Long.class)
-                .setParameter("source", source)
-                .setParameter("sourceId", sourceId)
-                .setMaxResults(1)
-                .getResultList()
-                .isEmpty();
-    }
-
     public List<PlatformOperatorAuditEvent> findCorrections(String source, long sourceId) {
         return entityManager.createQuery("""
                 select event from PlatformOperatorAuditEvent event

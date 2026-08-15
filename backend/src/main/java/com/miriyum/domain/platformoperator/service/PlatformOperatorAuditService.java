@@ -31,7 +31,6 @@ import com.miriyum.global.response.PageMetadata;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -100,12 +99,10 @@ public class PlatformOperatorAuditService {
                 "AUDIT_EVENT", eventKey, caseId, caseVersion, reason, correlationId);
         PlatformOperatorAuditEventRepository.AuditRow original = repository.findProjected(eventKey)
                 .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.AUDIT_EVENT_NOT_FOUND));
-        PlatformOperatorAuditSearchRequest corrections = new PlatformOperatorAuditSearchRequest(
-                0, 1, "ADMIN", PlatformOperatorAuditAction.AUDIT_CORRECTION, null,
-                null, null, null, null, null, eventKey);
+        EventIdentity identity = requireEventKey(eventKey);
         return new PlatformOperatorAuditDetailData(
-                data(original), repository.search(corrections).content().stream()
-                        .map(PlatformOperatorAuditService::data).toList());
+                data(original), repository.findCorrections(identity.source(), identity.id()).stream()
+                        .map(PlatformOperatorAuditService::storedCorrectionData).toList());
     }
 
     @Transactional
@@ -119,28 +116,25 @@ public class PlatformOperatorAuditService {
             String approval,
             String correlationId
     ) {
-        EventIdentity original = requireEventKey(eventKey);
+        requireEventKey(eventKey);
         singletonPolicy.requireSingletonActor(principal.accountId());
         return idempotency.execute(command, () -> {
-            repository.findProjected(eventKey)
+            PlatformOperatorAuditEventRepository.AuditRow target = repository.findProjected(eventKey)
                     .orElseThrow(() -> new ServiceException(AdminAuthorizationErrorCode.AUDIT_EVENT_NOT_FOUND));
+            if (PlatformOperatorAuditAction.AUDIT_CORRECTION.name().equals(target.action())
+                    || target.originalEventKey() != null) {
+                throw new ServiceException(AdminAuthorizationErrorCode.AUDIT_CORRECTION_CONFLICT);
+            }
             AdminAuditContext context = authorizeCorrection(
                     principal, eventKey, caseId, caseVersion, approval, correlationId);
-            if (repository.existsCorrection(original.source(), original.id())) {
-                throw new ServiceException(AdminAuthorizationErrorCode.AUDIT_CORRECTION_CONFLICT);
-            }
-            try {
-                PlatformOperatorAuditEvent correction = writer.appendCorrection(
-                        new PlatformOperatorAuditWriter.CorrectionEvent(
-                                context, eventKey, request.correctedAction(), request.correctedOutcome(),
-                                request.correctedTargetType(), request.correctedTargetId(),
-                                request.correctedReason(), command.idempotencyKey()));
-                PlatformOperatorAuditEventData response = correctionData(correction, context, eventKey);
-                return new BusinessResult<>(HttpStatus.CREATED.value(), "SUCCESS", "AUDIT_EVENT",
-                        response.eventKey(), response);
-            } catch (DataIntegrityViolationException exception) {
-                throw new ServiceException(AdminAuthorizationErrorCode.AUDIT_CORRECTION_CONFLICT);
-            }
+            PlatformOperatorAuditEvent correction = writer.appendCorrection(
+                    new PlatformOperatorAuditWriter.CorrectionEvent(
+                            context, eventKey, request.correctedAction(), request.correctedOutcome(),
+                            request.correctedTargetType(), request.correctedTargetId(),
+                            request.correctedReason(), command.idempotencyKey()));
+            PlatformOperatorAuditEventData response = correctionData(correction, context, eventKey);
+            return new BusinessResult<>(HttpStatus.CREATED.value(), "SUCCESS", "AUDIT_EVENT",
+                    response.eventKey(), response);
         });
     }
 
@@ -237,6 +231,27 @@ public class PlatformOperatorAuditService {
                 name(event.getCorrectedAction()), name(event.getCorrectedOutcome()),
                 event.getCorrectedTargetType(), event.getCorrectedTargetId(), name(event.getCorrectedReason()),
                 event.getCorrelationId(), originalEventKey, event.getOccurredAt());
+    }
+
+    private static PlatformOperatorAuditEventData storedCorrectionData(PlatformOperatorAuditEvent event) {
+        if (event.getId() == null || event.getOriginalEventId() == null) {
+            throw new IllegalStateException("persisted correction event identity is missing");
+        }
+        return new PlatformOperatorAuditEventData(
+                "ADMIN:" + event.getId(), "ADMIN", event.getAction().name(), event.getOutcome().name(),
+                Long.toString(event.getActorPlatformOperatorAccountId()), event.getActorAuthorityVersion(),
+                event.getActorRoles().stream().map(Enum::name).collect(Collectors.toSet()),
+                event.getActorPermissions().stream().map(Enum::name).collect(Collectors.toSet()),
+                name(event.getBeforeStatus()), name(event.getAfterStatus()),
+                event.getBeforeRoles().stream().map(Enum::name).collect(Collectors.toSet()),
+                event.getAfterRoles().stream().map(Enum::name).collect(Collectors.toSet()),
+                event.getBeforePermissions().stream().map(Enum::name).collect(Collectors.toSet()),
+                event.getAfterPermissions().stream().map(Enum::name).collect(Collectors.toSet()),
+                event.getTargetType(), event.getTargetId(), event.getReason().name(),
+                name(event.getCorrectedAction()), name(event.getCorrectedOutcome()),
+                event.getCorrectedTargetType(), event.getCorrectedTargetId(), name(event.getCorrectedReason()),
+                event.getCorrelationId(), event.getOriginalEventSource() + ":" + event.getOriginalEventId(),
+                event.getOccurredAt());
     }
 
     private static String name(Enum<?> value) {

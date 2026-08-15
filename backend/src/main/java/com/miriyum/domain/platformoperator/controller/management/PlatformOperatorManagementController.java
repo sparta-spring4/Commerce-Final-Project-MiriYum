@@ -4,6 +4,7 @@ import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAccoun
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorAuthorityReplaceRequest;
 import com.miriyum.domain.platformoperator.dto.management.PlatformOperatorSuspensionRequest;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorManagementService;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorManagementRequestFingerprint;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
@@ -32,9 +33,14 @@ import tools.jackson.databind.JsonNode;
 public class PlatformOperatorManagementController {
 
     private final PlatformOperatorManagementService service;
+    private final PlatformOperatorManagementRequestFingerprint fingerprints;
 
-    public PlatformOperatorManagementController(PlatformOperatorManagementService service) {
+    public PlatformOperatorManagementController(
+            PlatformOperatorManagementService service,
+            PlatformOperatorManagementRequestFingerprint fingerprints
+    ) {
         this.service = service;
+        this.fingerprints = fingerprints;
     }
 
     @PostMapping
@@ -47,14 +53,16 @@ public class PlatformOperatorManagementController {
             @Valid @RequestBody PlatformOperatorAccountCreateRequest request
     ) {
         IdempotencyKey key = IdempotencyKey.parse(rawIdempotencyKey);
-        IdempotencyCommand command = command(principal, "OPERATOR_CREATE", key,
-                "POST /api/v1/platform-operators/accounts"
+        String canonicalInput = "POST /api/v1/platform-operators/accounts"
                         + "\nprovisioningId=" + request.provisioningId()
                         + "\nemail=" + request.email().strip().toLowerCase(java.util.Locale.ROOT)
                         + "\ndisplayName=" + request.displayName().strip()
                         + "\nroles=" + sorted(request.roles())
                         + "\npermissions=" + sorted(request.directPermissions())
-                        + "\nreason=" + request.reason());
+                        + "\nreason=" + request.reason();
+        IdempotencyCommand command = commandWithFingerprint(
+                principal, "OPERATOR_CREATE", key,
+                fingerprints.accountCreation(canonicalInput, request.temporaryPassword()));
         IdempotentOutcome outcome = service.createAccount(
                 command, principal, request, caseId, caseVersion, approval, correlation(key));
         return response(outcome, "운영자 계정을 생성했습니다.");
@@ -108,8 +116,18 @@ public class PlatformOperatorManagementController {
             IdempotencyKey key,
             String canonicalInput
     ) {
+        return commandWithFingerprint(
+                principal, commandType, key, RequestFingerprint.of(canonicalInput));
+    }
+
+    private static IdempotencyCommand commandWithFingerprint(
+            PlatformOperatorPrincipal principal,
+            String commandType,
+            IdempotencyKey key,
+            String fingerprint
+    ) {
         return new IdempotencyCommand("platform-operator", principal.accountId(), commandType,
-                key.value(), RequestFingerprint.of(canonicalInput));
+                key.value(), fingerprint);
     }
 
     private static String correlation(IdempotencyKey key) {

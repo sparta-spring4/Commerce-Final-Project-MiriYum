@@ -26,7 +26,6 @@ import com.miriyum.domain.platformoperator.repository.PlatformOperatorPermission
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorReauthenticationApprovalRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
-import com.miriyum.domain.platformoperator.session.PlatformOperatorSessionManager;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
@@ -56,7 +55,7 @@ public class PlatformOperatorManagementService {
     private final HighRiskCommandGuard highRiskGuard;
     private final LastSuperAdminPolicy singletonPolicy;
     private final OperatorAuthorityService authorityService;
-    private final PlatformOperatorSessionManager sessions;
+    private final PlatformOperatorSessionRevocationAfterCommit sessionRevocation;
     private final PlatformOperatorAuditWriter auditWriter;
     private final IdempotencyExecutor idempotency;
     private final PasswordEncoder passwordEncoder;
@@ -72,7 +71,7 @@ public class PlatformOperatorManagementService {
             HighRiskCommandGuard highRiskGuard,
             LastSuperAdminPolicy singletonPolicy,
             OperatorAuthorityService authorityService,
-            PlatformOperatorSessionManager sessions,
+            PlatformOperatorSessionRevocationAfterCommit sessionRevocation,
             PlatformOperatorAuditWriter auditWriter,
             IdempotencyExecutor idempotency,
             PasswordEncoder passwordEncoder,
@@ -87,7 +86,7 @@ public class PlatformOperatorManagementService {
         this.highRiskGuard = highRiskGuard;
         this.singletonPolicy = singletonPolicy;
         this.authorityService = authorityService;
-        this.sessions = sessions;
+        this.sessionRevocation = sessionRevocation;
         this.auditWriter = auditWriter;
         this.idempotency = idempotency;
         this.passwordEncoder = passwordEncoder;
@@ -160,7 +159,7 @@ public class PlatformOperatorManagementService {
             OperatorAuthorityService.AuthorityReplacement replacement = authorityService.replaceAuthority(
                     targetOperatorId, target.getAuthorityVersion(), request.roles(), request.directPermissions());
             if (replacement.changed()) {
-                revokeApprovalsAndSessions(targetOperatorId);
+                revokeApprovalsAndScheduleSessions(targetOperatorId);
             }
             auditWriter.appendManagement(new PlatformOperatorAuditWriter.ManagementEvent(
                     context, PlatformOperatorAuditAction.AUTHORITY_REPLACED,
@@ -194,7 +193,7 @@ public class PlatformOperatorManagementService {
             Set<PlatformOperatorPermission> currentPermissions = currentPermissions(targetOperatorId);
             PlatformOperatorAccountStatus before = target.getStatus();
             target.suspend();
-            revokeApprovalsAndSessions(targetOperatorId);
+            revokeApprovalsAndScheduleSessions(targetOperatorId);
             auditWriter.appendManagement(new PlatformOperatorAuditWriter.ManagementEvent(
                     context, PlatformOperatorAuditAction.ACCOUNT_SUSPENDED,
                     PlatformOperatorAuditOutcome.SUCCESS, request.reason(), command.idempotencyKey(),
@@ -238,13 +237,9 @@ public class PlatformOperatorManagementService {
         return result;
     }
 
-    private void revokeApprovalsAndSessions(long operatorId) {
+    private void revokeApprovalsAndScheduleSessions(long operatorId) {
         approvals.revokeUnconsumedByOperatorId(operatorId, clock.instant());
-        try {
-            sessions.revokeAll(operatorId);
-        } catch (RuntimeException exception) {
-            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
-        }
+        sessionRevocation.schedule(operatorId);
     }
 
     private ServiceException mapIntegrity(DataIntegrityViolationException exception) {

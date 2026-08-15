@@ -58,7 +58,6 @@ CREATE TABLE platform_operator_audit_events (
     PRIMARY KEY (platform_operator_audit_event_id),
     CONSTRAINT fk_platform_operator_audit_events_actor FOREIGN KEY (actor_platform_operator_account_id)
         REFERENCES platform_operator_accounts (platform_operator_account_id) ON DELETE RESTRICT,
-    CONSTRAINT uk_platform_operator_audit_events_original UNIQUE (original_event_source, original_event_id),
     CONSTRAINT ck_platform_operator_audit_events_authority_version CHECK (actor_authority_version >= 1),
     CONSTRAINT ck_platform_operator_audit_events_action CHECK (action IN (
         'LOGIN', 'REAUTHENTICATION', 'LOGOUT', 'REFRESH', 'INITIAL_PASSWORD_CHANGED',
@@ -86,7 +85,9 @@ CREATE TABLE platform_operator_audit_events (
     INDEX ix_platform_operator_audit_events_actor_occurred
         (actor_platform_operator_account_id, occurred_at, platform_operator_audit_event_id),
     INDEX ix_platform_operator_audit_events_target_occurred
-        (target_type, target_id, occurred_at, platform_operator_audit_event_id)
+        (target_type, target_id, occurred_at, platform_operator_audit_event_id),
+    INDEX ix_platform_operator_audit_events_original_occurred
+        (original_event_source, original_event_id, occurred_at, platform_operator_audit_event_id)
 );
 
 DELIMITER $$

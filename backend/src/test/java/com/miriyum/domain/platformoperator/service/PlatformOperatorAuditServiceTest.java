@@ -6,9 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.platformoperator.dto.audit.PlatformOperatorAuditSearchRequest;
 import com.miriyum.domain.platformoperator.dto.audit.PlatformOperatorAuditCorrectionRequest;
+import com.miriyum.domain.platformoperator.entity.PlatformOperatorAuditEvent;
 import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditOutcome;
@@ -108,8 +110,8 @@ class PlatformOperatorAuditServiceTest {
     }
 
     @Test
-    @DisplayName("같은 원 사건에는 두 번째 보정 사건을 만들 수 없다")
-    void correct_duplicateOriginalRejectedWithoutAppending() {
+    @DisplayName("같은 최초 원 사건에는 여러 보정 사건을 append할 수 있다")
+    void correct_sameOriginalAppendsEveryCorrection() {
         OperatorAuthorityReader authorityReader = mock(OperatorAuthorityReader.class);
         AdminCaseAssignmentVerifier assignmentVerifier = mock(AdminCaseAssignmentVerifier.class);
         PlatformOperatorAuditWriter writer = mock(PlatformOperatorAuditWriter.class);
@@ -129,7 +131,19 @@ class PlatformOperatorAuditServiceTest {
                         "PLATFORM_OPERATOR_ACCOUNT", "7", "AUTHENTICATION_EVENT",
                         null, null, null, null, null, "auth-correlation", null,
                         Instant.parse("2026-08-14T00:00:00Z"))));
-        when(repository.existsCorrection("AUTH", 11L)).thenReturn(true);
+        PlatformOperatorAuditEvent firstCorrection = mock(PlatformOperatorAuditEvent.class);
+        PlatformOperatorAuditEvent secondCorrection = mock(PlatformOperatorAuditEvent.class);
+        when(firstCorrection.getId()).thenReturn(21L);
+        when(secondCorrection.getId()).thenReturn(22L);
+        when(firstCorrection.getAction()).thenReturn(PlatformOperatorAuditAction.AUDIT_CORRECTION);
+        when(secondCorrection.getAction()).thenReturn(PlatformOperatorAuditAction.AUDIT_CORRECTION);
+        when(firstCorrection.getOutcome()).thenReturn(PlatformOperatorAuditOutcome.SUCCESS);
+        when(secondCorrection.getOutcome()).thenReturn(PlatformOperatorAuditOutcome.SUCCESS);
+        when(firstCorrection.getReason()).thenReturn(PlatformOperatorAuditReason.RECORD_CORRECTION);
+        when(secondCorrection.getReason()).thenReturn(PlatformOperatorAuditReason.RECORD_CORRECTION);
+        when(firstCorrection.getOccurredAt()).thenReturn(Instant.parse("2026-08-14T00:00:01Z"));
+        when(secondCorrection.getOccurredAt()).thenReturn(Instant.parse("2026-08-14T00:00:02Z"));
+        when(writer.appendCorrection(any())).thenReturn(firstCorrection, secondCorrection);
         when(guard.authorize(any())).thenReturn(new AdminAuditContext(
                 1L, Set.of(PlatformOperatorRole.SUPER_ADMIN),
                 PlatformOperatorRole.SUPER_ADMIN.permissions(), 3L,
@@ -143,7 +157,7 @@ class PlatformOperatorAuditServiceTest {
             return new IdempotentOutcome(false, 201, "SUCCESS", null, null, null);
         });
 
-        assertThatThrownBy(() -> service.correct(
+        service.correct(
                 new IdempotencyCommand("platform-operator", 1L, "AUDIT_CORRECTION",
                         "123e4567-e89b-12d3-a456-426614174000", "a".repeat(64)),
                 principal,
@@ -152,7 +166,63 @@ class PlatformOperatorAuditServiceTest {
                         PlatformOperatorAuditReason.RECORD_CORRECTION,
                         PlatformOperatorAuditAction.LOGIN,
                         null, null, null, null),
-                "audit-review-11", 1L, "approval", "correlation-correction-11"))
+                "audit-review-11", 1L, "approval", "correlation-correction-11");
+        service.correct(
+                new IdempotencyCommand("platform-operator", 1L, "AUDIT_CORRECTION",
+                        "123e4567-e89b-12d3-a456-426614174001", "b".repeat(64)),
+                principal,
+                "AUTH:11",
+                new PlatformOperatorAuditCorrectionRequest(
+                        PlatformOperatorAuditReason.RECORD_CORRECTION,
+                        null, PlatformOperatorAuditOutcome.DENIED,
+                        null, null, null),
+                "audit-review-11", 1L, "approval", "correlation-correction-12");
+
+        verify(writer, times(2)).appendCorrection(any());
+    }
+
+    @Test
+    @DisplayName("보정 사건 자체를 새 원 사건으로 지정하는 보정의 보정은 거부한다")
+    void correct_correctionAsOriginalRejected() {
+        PlatformOperatorAuditEventRepository repository = mock(PlatformOperatorAuditEventRepository.class);
+        PlatformOperatorAuditWriter writer = mock(PlatformOperatorAuditWriter.class);
+        HighRiskCommandGuard guard = mock(HighRiskCommandGuard.class);
+        com.miriyum.global.idempotency.IdempotencyExecutor idempotency =
+                mock(com.miriyum.global.idempotency.IdempotencyExecutor.class);
+        PlatformOperatorAuditService service = new PlatformOperatorAuditService(
+                mock(OperatorAuthorityReader.class), mock(AdminCaseAssignmentVerifier.class), writer,
+                repository, guard, mock(LastSuperAdminPolicy.class), idempotency);
+        PlatformOperatorPrincipal principal = new PlatformOperatorPrincipal(
+                1L, "super@example.com", "session-1", 3L, 3L, false);
+        when(repository.findProjected("ADMIN:21")).thenReturn(java.util.Optional.of(
+                new PlatformOperatorAuditEventRepository.AuditRow(
+                        "ADMIN:21", "ADMIN", "AUDIT_CORRECTION", "SUCCESS", "1", 3L,
+                        Set.of("SUPER_ADMIN"), Set.of(), null, null,
+                        Set.of(), Set.of(), Set.of(), Set.of(),
+                        "AUDIT_EVENT", "AUTH:11", "RECORD_CORRECTION",
+                        null, null, null, null, "SECURITY_RESPONSE",
+                        "correlation-21", "AUTH:11", Instant.parse("2026-08-14T00:00:01Z"))));
+        when(guard.authorize(any())).thenReturn(new AdminAuditContext(
+                1L, Set.of(PlatformOperatorRole.SUPER_ADMIN),
+                PlatformOperatorRole.SUPER_ADMIN.permissions(), 3L,
+                AdminCaseType.AUDIT_REVIEW, "audit-review-21", 1L,
+                AdminCommandPurpose.AUDIT_CORRECTION, AdminTargetType.AUDIT_EVENT,
+                "ADMIN:21", "digest", "correlation-correction-21"));
+        when(idempotency.execute(any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Supplier<com.miriyum.global.idempotency.BusinessResult<Object>> work = invocation.getArgument(1);
+            work.get();
+            return new IdempotentOutcome(false, 201, "SUCCESS", null, null, null);
+        });
+
+        assertThatThrownBy(() -> service.correct(
+                new IdempotencyCommand("platform-operator", 1L, "AUDIT_CORRECTION",
+                        "123e4567-e89b-12d3-a456-426614174002", "c".repeat(64)),
+                principal, "ADMIN:21",
+                new PlatformOperatorAuditCorrectionRequest(
+                        PlatformOperatorAuditReason.RECORD_CORRECTION,
+                        null, PlatformOperatorAuditOutcome.DENIED, null, null, null),
+                "audit-review-21", 1L, "approval", "correlation-correction-21"))
                 .isInstanceOf(ServiceException.class)
                 .satisfies(error -> assertThat(((ServiceException) error).getErrorCode())
                         .isEqualTo(AdminAuthorizationErrorCode.AUDIT_CORRECTION_CONFLICT));

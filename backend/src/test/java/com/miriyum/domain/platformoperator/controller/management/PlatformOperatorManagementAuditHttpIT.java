@@ -90,12 +90,13 @@ class PlatformOperatorManagementAuditHttpIT {
 
         String superToken = activate("super@example.com", "Password1!", "Changed2@");
         String provisioningId = UUID.randomUUID().toString();
+        String creationIdempotencyKey = UUID.randomUUID().toString();
         String creationApproval = approval(superToken, "OPERATOR_CREATION",
                 "PLATFORM_OPERATOR_ACCOUNT", provisioningId, "Changed2@");
 
         MvcResult created = mvc.perform(post("/api/v1/platform-operators/accounts")
                         .header("Authorization", "Bearer " + superToken)
-                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .header("Idempotency-Key", creationIdempotencyKey)
                         .header("X-Admin-Reauthentication", creationApproval)
                         .header("X-Admin-Case-Id", "operator-management-1")
                         .header("X-Admin-Case-Version", "1")
@@ -113,6 +114,24 @@ class PlatformOperatorManagementAuditHttpIT {
                 .andReturn();
         long auditorId = Long.parseLong(JsonPath.read(
                 created.getResponse().getContentAsString(), "$.data.operatorId"));
+
+        mvc.perform(post("/api/v1/platform-operators/accounts")
+                        .header("Authorization", "Bearer " + superToken)
+                        .header("Idempotency-Key", creationIdempotencyKey)
+                        .header("X-Admin-Reauthentication", creationApproval)
+                        .header("X-Admin-Case-Id", "operator-management-1")
+                        .header("X-Admin-Case-Version", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provisioningId":"%s","email":"auditor@example.com",
+                                 "displayName":"auditor","temporaryPassword":"Auditor9!",
+                                 "roles":["AUDIT_READER"],"directPermissions":[],
+                                 "reason":"ACCOUNT_PROVISIONING"}
+                                """.formatted(provisioningId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COMMON_007"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("Auditor9!"))));
 
         String auditorToken = activate("auditor@example.com", "Auditor1!", "Auditor2@");
         assignments.saveAndFlush(AdminCaseAssignment.assign(
@@ -156,12 +175,37 @@ class PlatformOperatorManagementAuditHttpIT {
                 .andExpect(jsonPath("$.data.action").value("AUDIT_CORRECTION"))
                 .andExpect(jsonPath("$.data.correctedReason").value("SECURITY_RESPONSE"));
 
+        String secondCorrectionApproval = approval(superToken, "AUDIT_CORRECTION",
+                "AUDIT_EVENT", originalEventKey, "Changed2@");
+        mvc.perform(post("/api/v1/platform-operators/audit-events/{eventKey}/corrections", originalEventKey)
+                        .header("Authorization", "Bearer " + superToken)
+                        .header("Idempotency-Key", creationIdempotencyKey)
+                        .header("X-Admin-Reauthentication", secondCorrectionApproval)
+                        .header("X-Admin-Case-Id", "audit-review-super")
+                        .header("X-Admin-Case-Version", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"RECORD_CORRECTION","correctedOutcome":"DENIED"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.originalEventKey").value(originalEventKey));
+
+        mvc.perform(get("/api/v1/platform-operators/audit-events/{eventKey}", originalEventKey)
+                        .header("Authorization", "Bearer " + auditorToken)
+                        .header("X-Admin-Case-Id", "audit-review-auditor")
+                        .header("X-Admin-Case-Version", "1")
+                        .header("X-Admin-Reason-Code", "AUDIT_VERIFICATION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.corrections.length()").value(2))
+                .andExpect(jsonPath("$.data.corrections[0].correctedReason").value("SECURITY_RESPONSE"))
+                .andExpect(jsonPath("$.data.corrections[1].correctedOutcome").value("DENIED"));
+
         String[] originalIdentity = originalEventKey.split(":", 2);
         assertThat(jdbc.queryForObject("""
                 select count(*) from platform_operator_audit_events
                  where original_event_source = ? and original_event_id = ?
                    and action = 'AUDIT_CORRECTION' and reason = 'RECORD_CORRECTION'
-                """, Long.class, originalIdentity[0], Long.parseLong(originalIdentity[1]))).isEqualTo(1L);
+                """, Long.class, originalIdentity[0], Long.parseLong(originalIdentity[1]))).isEqualTo(2L);
         assertThat(jdbc.queryForObject("""
                 select count(*) from platform_operator_audit_events
                  where platform_operator_audit_event_id = ? and action = 'ACCOUNT_CREATED'
