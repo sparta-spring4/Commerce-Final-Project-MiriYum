@@ -1,0 +1,283 @@
+/* 픽업 예약 화면 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.pickup-create,
+.pickup-detail {
+  padding-bottom: var(--space-8);
+}
+
+.pickup-create__header {
+  padding-bottom: var(--space-2);
+}
+
+.pickup-create__back {
+  margin-bottom: var(--space-1);
+}
+
+.pickup-create__back a,
+.pickup-detail__store-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.pickup-create__back a:hover,
+.pickup-detail__store-link a:hover {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.pickup-detail__header {
+  padding: var(--space-4) 0 var(--space-3);
+}
+
+.pickup-detail__header h1 {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+.pickup-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-body-lg);
+  color: var(--color-on-surface-variant);
+}
+
+.pickup-detail__meta .mi-icon {
+  color: var(--color-primary);
+}
+
+/* ── 픽업 작성 ────────────────────────────────────────────────────────── */
+
+/* 단계마다 자기 카드를 가진다. 카드의 배경과 그림자는 mi-card가 정한다. */
+.pickup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pickup-form__section h2,
+.pickup-form__slots legend,
+.pickup-form__menus legend {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+/*
+ * `fieldset`을 카드로 쓴다. 브라우저 기본 테두리와 여백을 지우고 legend를
+ * 흐름 안으로 되돌린다. legend는 float 없이 두면 카드 padding 안으로
+ * 들어가지 않고 테두리 위에 걸린다.
+ */
+.pickup-form__slots,
+.pickup-form__menus {
+  margin: 0;
+  padding: var(--space-3);
+  border: 0;
+}
+
+@media (min-width: 48rem) {
+  .pickup-form__slots,
+  .pickup-form__menus {
+    padding: var(--space-4);
+  }
+}
+
+.pickup-form__slots legend,
+.pickup-form__menus legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+
+/* float한 legend 다음 내용이 같은 줄에 붙지 않게 한다. */
+.pickup-form__slots legend + *,
+.pickup-form__menus legend + * {
+  clear: both;
+}
+
+.pickup-form__slot-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
+  gap: var(--space-1);
+}
+
+/*
+ * 시안 `_7`의 시간대 칸. 알약이 아니라 모서리를 둥글린 격자다.
+ * 고른 칸은 코럴로 채워지고 시각 값이 글자로 남아 색만으로 구분하지 않는다.
+ */
+.pickup-form__slot {
+  min-height: 3rem;
+  padding: 0 var(--space-1);
+  background-color: var(--color-surface-container);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-body-md);
+  font-weight: 600;
+  color: var(--color-on-surface);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.pickup-form__slot:hover {
+  background-color: var(--color-surface-variant);
+}
+
+.pickup-form__slot[aria-pressed='true'] {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-2);
+}
+
+.pickup-form__menu-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-2);
+}
+
+/* 메뉴는 카드가 아니라 한 줄씩이다. 시안 `v2_1`의 목록 형태다. */
+.pickup-form__menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.pickup-form__menu + .pickup-form__menu {
+  border-top: 1px solid var(--color-surface-variant);
+}
+
+.pickup-form__menu--muted {
+  opacity: 0.6;
+}
+
+/* 담은 메뉴는 왼쪽에 코럴 표식을 세운다. 수량 숫자도 함께 보인다. */
+.pickup-form__menu--picked {
+  padding-left: var(--space-1);
+  border-left: 3px solid var(--color-primary);
+}
+
+.pickup-form__menu-info {
+  min-width: 0;
+}
+
+.pickup-form__menu-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pickup-form__menu-head h3 {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.pickup-form__menu-price {
+  margin-top: 0.25rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.pickup-form__menu-stock {
+  margin-top: 0.125rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 픽업 상세 ────────────────────────────────────────────────────────── */
+
+.pickup-detail__section {
+  margin-top: var(--space-2);
+}
+
+.pickup-detail__section h2 {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.pickup-detail__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pickup-detail__items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.pickup-detail__amount {
+  flex-shrink: 0;
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+/* 합계는 점선 아래에 크게 둔다. 시안 `v2_2`의 영수증 형태다. */
+.pickup-detail__total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-outline-variant);
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.pickup-detail__list {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.pickup-detail__list dt {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.pickup-detail__list dd {
+  margin: 0;
+}
+
+.pickup-detail__store-link {
+  margin-top: var(--space-3);
+}
+
+.pickup-detail__reason {
+  min-height: 5rem;
+  padding: var(--space-1) var(--space-2);
+  resize: vertical;
+}
+
+.pickup-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
