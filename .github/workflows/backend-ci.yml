@@ -168,7 +168,9 @@ jobs:
     needs: [unit-test, integration-test]
     if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # 집계 단계에서도 Docker Compose 기반 CloudWatch 계약 검증을 실행한다.
+    # 테스트 결과만 확인하는 job이 아니므로 5분 제한으로 중간 취소되지 않게 여유를 둔다.
+    timeout-minutes: 15
     steps:
       - name: Require every test job to succeed
         env:
