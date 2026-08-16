@@ -24,14 +24,13 @@ public class StorePaymentImpactQueryService {
             throw new IllegalArgumentException("reservationIds are required");
         }
         if (reservationIds.isEmpty()) {
-            return new StorePaymentImpact(0, 0);
+            return new StorePaymentImpact(0, 0, Set.of());
         }
         List<String> references = reservationIds.stream()
                 .sorted()
                 .map(String::valueOf)
                 .toList();
-        return new StorePaymentImpact(
-                references.size(),
-                payments.countUnsettledBySourceReferences(RESERVATION_DEPOSIT, references));
+        var ids = payments.findUnsettledIdsBySourceReferences(RESERVATION_DEPOSIT, references);
+        return new StorePaymentImpact(references.size(), ids.size(), Set.copyOf(ids));
     }
 }

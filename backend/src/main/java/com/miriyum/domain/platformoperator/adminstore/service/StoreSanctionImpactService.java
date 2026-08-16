@@ -14,6 +14,8 @@ import com.miriyum.domain.store.service.StoreAdministrationService;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -36,27 +38,36 @@ public class StoreSanctionImpactService {
     public ImpactPreviewData create(PlatformOperatorPrincipal principal, long storeId, String caseId,
                                     long caseVersion, SanctionShape shape) {
         cases.requireAssigned(principal, storeId, caseId, caseVersion);
-        var state=stores.inspect(storeId); var r=reservations.inspect(storeId, clock.instant());
-        var w=waiting.inspect(storeId); var p=pickups.inspect(storeId, clock.instant());
-        var pay=payments.inspectReservationDeposits(r.reservationIds());
+        Instant now=clock.instant(); var state=stores.inspect(storeId); var impact=inspect(storeId,now);
         String fp=StoreSanctionFingerprint.shape(shape.type(), shape.restrictedFeatures(), shape.startsAt(), shape.endsAt());
-        String digest=StoreSanctionFingerprint.digest(caseId, storeId, caseVersion, state.enforcementVersion(), fp,
-                r.confirmedCount(), w.activeTeamCount(), p.confirmedCount(), pay.unsettledCount());
+        String digest=impact.digest(caseId,storeId,caseVersion,state.enforcementVersion(),fp);
         return previews.saveAndFlush(StoreSanctionImpactPreview.create(caseId, storeId, caseVersion,
-                state.enforcementVersion(), r.confirmedCount(), w.activeTeamCount(), p.confirmedCount(),
-                pay.unsettledCount(), fp, digest, clock.instant().plus(Duration.ofMinutes(10)))).data();
+                state.enforcementVersion(), impact.reservations().size(), impact.waiting().size(), impact.pickups().size(),
+                impact.payments().size(), fp, digest, now.plus(Duration.ofMinutes(10)))).data();
     }
     @Transactional(readOnly = true)
     public void verify(long storeId, String caseId, ImpactConfirmation confirmation, SanctionShape shape) {
-        var state=stores.inspect(storeId);
+        Instant now=clock.instant(); var state=stores.inspect(storeId);
         var preview=previews.findById(confirmation.previewId())
                 .orElseThrow(() -> new ServiceException(AdminStoreErrorCode.IMPACT_CONFIRMATION_REQUIRED));
         String fp=StoreSanctionFingerprint.shape(shape.type(), shape.restrictedFeatures(), shape.startsAt(), shape.endsAt());
+        String currentDigest=inspect(storeId,now).digest(caseId,storeId,confirmation.caseVersion(),
+                state.enforcementVersion(),fp);
         if (confirmation.caseVersion()!=preview.getCaseVersion()
                 || confirmation.storeEnforcementVersion()!=state.enforcementVersion()
+                || !currentDigest.equals(preview.getDigest())
                 || !preview.matches(storeId, caseId, confirmation.caseVersion(), state.enforcementVersion(), fp,
-                confirmation.previewDigest(), clock.instant())) {
+                confirmation.previewDigest(), now)) {
             throw new ServiceException(AdminStoreErrorCode.IMPACT_CONFIRMATION_REQUIRED);
         }
     }
+    private ImpactIds inspect(long storeId,Instant now){var r=reservations.inspect(storeId,now);var w=waiting.inspect(storeId);
+        var p=pickups.inspect(storeId,now);var pay=payments.inspectReservationDeposits(r.reservationIds());
+        return new ImpactIds(strings(r.reservationIds()),strings(w.waitingTeamIds()),strings(p.pickupIds()),
+                pay.paymentIds().stream().toList());}
+    private static List<String> strings(java.util.Set<Long> ids){return ids.stream().map(String::valueOf).toList();}
+    private record ImpactIds(List<String> reservations,List<String> waiting,List<String> pickups,List<String> payments){
+        String digest(String caseId,long storeId,long caseVersion,long enforcementVersion,String shape){
+            return StoreSanctionFingerprint.impactDigest(caseId,storeId,caseVersion,enforcementVersion,shape,
+                    reservations,waiting,pickups,payments);}}
 }

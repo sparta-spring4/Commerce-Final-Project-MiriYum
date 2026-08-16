@@ -26,8 +26,7 @@ public class StoreWaitingImpactQueryService {
         if (storeId <= 0) {
             throw new IllegalArgumentException("storeId must be positive");
         }
-        return new StoreWaitingImpact(
-                storeId,
-                waitingTeams.countByStoreIdAndStatusIn(storeId, ACTIVE_STATUSES));
+        var ids = waitingTeams.findIdsByStoreIdAndStatusIn(storeId, ACTIVE_STATUSES);
+        return new StoreWaitingImpact(storeId, ids.size(), Set.copyOf(ids));
     }
 }

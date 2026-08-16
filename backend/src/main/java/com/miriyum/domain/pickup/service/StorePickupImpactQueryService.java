@@ -4,6 +4,7 @@ import com.miriyum.domain.pickup.dto.StorePickupImpact;
 import com.miriyum.domain.pickup.entity.PickupStatus;
 import com.miriyum.domain.pickup.repository.PickupReservationRepository;
 import java.time.Instant;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,9 +22,8 @@ public class StorePickupImpactQueryService {
         if (storeId <= 0 || now == null) {
             throw new IllegalArgumentException("storeId and now are required");
         }
-        return new StorePickupImpact(
-                storeId,
-                pickups.countByStoreIdAndStatusAndPickupAtGreaterThanEqual(
-                        storeId, PickupStatus.CONFIRMED, now));
+        var ids = pickups.findIdsByStoreIdAndStatusAndPickupAtGreaterThanEqual(
+                storeId, PickupStatus.CONFIRMED, now);
+        return new StorePickupImpact(storeId, ids.size(), Set.copyOf(ids));
     }
 }

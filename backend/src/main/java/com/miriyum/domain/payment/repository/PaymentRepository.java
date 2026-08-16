@@ -25,6 +25,16 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             @Param("sourceReferenceIds") List<String> sourceReferenceIds
     );
 
+    @Query("""
+            select payment.paymentId from Payment payment
+            where payment.sourceType = :sourceType
+              and payment.sourceReferenceId in :sourceReferenceIds
+              and payment.status <> :#{T(com.miriyum.domain.payment.entity.Payment.Status).REFUNDED}
+            order by payment.paymentId
+            """)
+    List<String> findUnsettledIdsBySourceReferences(@Param("sourceType") String sourceType,
+            @Param("sourceReferenceIds") List<String> sourceReferenceIds);
+
     Optional<Payment> findBySourceTypeAndSourceReferenceId(String sourceType, String sourceReferenceId);
 
     Optional<Payment> findBySourceTypeAndPreparationIdempotencyKey(

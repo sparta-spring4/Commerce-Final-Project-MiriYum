@@ -27,13 +27,14 @@ class StorePaymentImpactQueryServiceTest {
 
     @Test
     void inspectCountsUnsettledReservationDepositsForGivenReservations() {
-        given(payments.countUnsettledBySourceReferences(
-                "RESERVATION_DEPOSIT", List.of("101", "102"))).willReturn(1L);
+        given(payments.findUnsettledIdsBySourceReferences(
+                "RESERVATION_DEPOSIT", List.of("101", "102"))).willReturn(List.of("pay-1"));
 
         var impact = service.inspectReservationDeposits(Set.of(102L, 101L));
 
         assertThat(impact.reservationCount()).isEqualTo(2L);
         assertThat(impact.unsettledCount()).isEqualTo(1L);
+        assertThat(impact.paymentIds()).containsExactly("pay-1");
     }
 
     @Test
@@ -41,6 +42,6 @@ class StorePaymentImpactQueryServiceTest {
         var impact = service.inspectReservationDeposits(Set.of());
 
         assertThat(impact.unsettledCount()).isZero();
-        then(payments).should(never()).countUnsettledBySourceReferences(anyString(), anyList());
+        then(payments).should(never()).findUnsettledIdsBySourceReferences(anyString(), anyList());
     }
 }

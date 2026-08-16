@@ -24,6 +24,10 @@ public interface PickupReservationRepository
             Instant pickupAt
     );
 
+    @Query("select pickup.id from PickupReservation pickup where pickup.storeId = :storeId and pickup.status = :status and pickup.pickupAt >= :pickupAt order by pickup.id")
+    List<Long> findIdsByStoreIdAndStatusAndPickupAtGreaterThanEqual(@Param("storeId") long storeId,
+            @Param("status") PickupStatus status, @Param("pickupAt") Instant pickupAt);
+
     @Override
     @EntityGraph(attributePaths = "items")
     Optional<PickupReservation> findById(Long id);
