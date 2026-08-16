@@ -7,7 +7,7 @@ services:
       MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}
       MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: ${MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET:?MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET is required}
       # Fixture preparation may create a store through Kakao geocoding; measured k6 requests do not receive this key.
-      MIRIYUM_KAKAO_LOCAL_REST_API_KEY: ${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:-}
+      MIRIYUM_STORE_GEOCODING_REST_API_KEY: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:-}
       # Login, refresh, and public store read cover the harness maximum arrival rate only here.
       # CSRF preparation intentionally inherits the backend default; that budget bounds AUTH_MAX_VUS.
       MIRIYUM_RATE_LIMIT_LOGIN_MAX_REQUESTS: "600000"
