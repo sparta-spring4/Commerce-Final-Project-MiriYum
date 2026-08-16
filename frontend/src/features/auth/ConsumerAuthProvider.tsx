@@ -261,6 +261,9 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   const completeKakaoSignIn = useCallback(
     async (accessToken: string) => {
       sessionGeneration.current += 1
+      // 이메일 로그인과 같은 세션 시작 경계다. 이전 세션의 재발급을
+      // 물려받으면 새 세션의 401이 재발급을 시도해 보지도 못하고 실패한다.
+      refreshInFlight.current = null
 
       const generation = sessionGeneration.current
       await clearConsumerProtectedQueries(queryClient)
