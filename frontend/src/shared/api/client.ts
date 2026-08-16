@@ -3,6 +3,7 @@ import { IDEMPOTENCY_KEY_HEADER } from './idempotencyKey'
 import { checkSuccessEnvelope, isApiErrorBody, type ApiSuccess } from './envelope'
 import type {
   ApiPath,
+  CsrfOf,
   IdempotencyOf,
   MethodOf,
   OperationOf,
@@ -42,6 +43,7 @@ export type RequestOptions<P extends ApiPath, M extends MethodOf<P>> = {
 } & PathParamsOf<P> &
   RequestBodyOf<OperationOf<P, M>> &
   IdempotencyOf<OperationOf<P, M>> &
+  CsrfOf<OperationOf<P, M>> &
   CommonRequestOptions
 
 /** 성공 응답은 봉투 그대로 노출한다. 화면이 code·message·data를 구분해 쓴다. */
@@ -55,6 +57,14 @@ export type ApiClient = <P extends ApiPath, M extends MethodOf<P>>(
 ) => Promise<ApiResult<P, M>>
 
 const JSON_CONTENT_TYPE = 'application/json'
+
+/**
+ * CSRF double-submit 헤더 이름.
+ *
+ * 계약이 `X-CSRF-TOKEN` 하나로 고정하고 서버가 쿠키 값과 대조한다.
+ * 값은 shell이 자기 namespace 쿠키에서 읽어 넘긴다. 이 모듈은 쿠키를 읽지 않는다.
+ */
+const CSRF_TOKEN_HEADER = 'X-CSRF-TOKEN'
 
 /**
  * 2xx 본문을 JSON으로 읽지 못했을 때 쓰는 표식이다.
@@ -97,6 +107,7 @@ export function createApiClient(
       method: string
       body?: unknown
       idempotencyKey?: string
+      csrfToken?: string
       signal?: AbortSignal
     },
   ): Promise<Response> {
@@ -107,6 +118,9 @@ export function createApiClient(
     }
     if (options.idempotencyKey) {
       headers[IDEMPOTENCY_KEY_HEADER] = options.idempotencyKey
+    }
+    if (options.csrfToken) {
+      headers[CSRF_TOKEN_HEADER] = options.csrfToken
     }
     const token = getAccessToken?.()
     if (token) {
@@ -166,16 +180,18 @@ export function createApiClient(
       pathParams,
       body,
       idempotencyKey,
+      csrfToken,
       query,
       signal,
     } = options as RequestOptions<P, M> & {
       pathParams?: Record<string, string | number>
       body?: unknown
       idempotencyKey?: string
+      csrfToken?: string
     }
 
     const url = buildUrl(path, pathParams, query)
-    const sendOptions = { method, body, idempotencyKey, signal }
+    const sendOptions = { method, body, idempotencyKey, csrfToken, signal }
 
     let response = await send(url, sendOptions)
 
