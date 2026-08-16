@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { http } from 'msw'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -17,6 +23,7 @@ import {
   STORE_ID,
   menuHoldAvailability,
   reservationDetail,
+  storeWithMenuHold,
 } from '../test/fixtures'
 import { ReservationCreatePage } from './ReservationCreatePage'
 
@@ -65,6 +72,7 @@ function respondCreateWith(
 ) {
   server.use(
     authenticatedConsumer(),
+    storeWithMenuHold(),
     http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
       successResponse(menuHoldAvailability()),
     ),
@@ -79,9 +87,19 @@ function respondCreateWith(
   )
 }
 
-/** 조건 단계 → 메뉴 단계 → 확인 단계 → 제출 */
-function advanceToSubmit() {
-  fireEvent.click(screen.getByRole('button', { name: '메뉴 선택으로' }))
+
+/**
+ * 일정 단계를 통과한다.
+ *
+ * 매장의 메뉴 정책을 알기 전에는 다음 버튼이 열리지 않는다. 열릴 때까지
+ * 기다렸다가 누른다.
+ */
+async function advanceToSubmit() {
+  const next = await screen.findByRole('button', {
+    name: /메뉴 선택으로|예약 확인으로/,
+  })
+  await waitFor(() => expect(next).toBeEnabled())
+  fireEvent.click(next)
 }
 
 beforeEach(() => {
@@ -95,7 +113,7 @@ describe('예약 생성 화면', () => {
 
     renderCreate()
 
-    advanceToSubmit()
+    await advanceToSubmit()
 
     // 메뉴 수량 선택
     fireEvent.click(
@@ -115,7 +133,7 @@ describe('예약 생성 화면', () => {
     respondCreateWith(() => successResponse(reservationDetail()))
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -135,7 +153,7 @@ describe('예약 생성 화면', () => {
     respondCreateWith(() => successResponse(reservationDetail()))
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -153,7 +171,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -170,7 +188,7 @@ describe('예약 생성 화면', () => {
     respondCreateWith(() => successResponse(reservationDetail()))
 
     renderCreate('serviceDate=2026-09-01&startTime=19:00&adultCount=0')
-    advanceToSubmit()
+    await advanceToSubmit()
 
     expect(
       await screen.findByText('방문 인원을 한 명 이상 입력해 주세요.'),
@@ -188,7 +206,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -213,7 +231,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -230,6 +248,7 @@ describe('예약 생성 화면', () => {
     let attempt = 0
     server.use(
       authenticatedConsumer(),
+      storeWithMenuHold(),
       http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
         successResponse(menuHoldAvailability()),
       ),
@@ -252,7 +271,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
 
     fireEvent.click(
       await screen.findByRole('button', { name: '트러플 크림 파파델레 수량 늘리기' }),
@@ -280,6 +299,7 @@ describe('예약 생성 화면', () => {
     let attempt = 0
     server.use(
       authenticatedConsumer(),
+      storeWithMenuHold(),
       http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
         successResponse(menuHoldAvailability()),
       ),
@@ -298,7 +318,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -327,7 +347,7 @@ describe('예약 생성 화면', () => {
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
     await screen.findByRole('button', { name: '다음' })
     fireEvent.click(screen.getByRole('button', { name: '다음' }))
     fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
@@ -347,23 +367,97 @@ describe('예약 생성 화면', () => {
     respondCreateWith(() => successResponse(reservationDetail()))
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
 
     expect(
       await screen.findByText('지금 보이는 수량은 확정이 아닙니다.'),
     ).toBeInTheDocument()
   })
 
+  /*
+   * 메뉴 미리 선택을 받지 않는 매장은 메뉴 단계를 거치지 않는다. 거치게 하면
+   * 예약 전용 매장에서도 메뉴 가용성을 조회한 뒤 빈 화면을 보여 주고 사용자가
+   * 다시 "다음"을 눌러야 한다.
+   */
+  it('메뉴 홀드를 받지 않는 매장은 메뉴 단계를 건너뛴다', async () => {
+    let availabilityCalls = 0
+
+    server.use(
+      authenticatedConsumer(),
+      storeWithMenuHold(false),
+      http.get(MENU_HOLD_AVAILABILITY_PATH, () => {
+        availabilityCalls += 1
+        return successResponse(menuHoldAvailability())
+      }),
+      http.post(RESERVATIONS_PATH, () =>
+        successResponse(reservationDetail()),
+      ),
+    )
+
+    renderCreate()
+
+    // 단계 표시도 두 칸으로 줄어든다.
+    const stepper = await screen.findByRole('list', { name: '예약 진행 단계' })
+    await waitFor(() =>
+      expect(within(stepper).queryByText('메뉴 선택')).not.toBeInTheDocument(),
+    )
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '예약 확인으로' }),
+    )
+
+    expect(
+      await screen.findByRole('button', { name: '예약하기' }),
+    ).toBeInTheDocument()
+    expect(availabilityCalls).toBe(0)
+  })
+
+  it('영유아 동반 검색에서 넘어오면 인원 구성을 다시 정하게 한다', async () => {
+    respondCreateWith(() => successResponse(reservationDetail()))
+
+    renderCreate(
+      'serviceDate=2026-09-01&startTime=19:00&partySize=3&includesInfants=true',
+    )
+
+    // 총 인원을 성인으로 옮기지 않았으므로 인원이 0명이다.
+    fireEvent.click(
+      await screen.findByRole('button', { name: '메뉴 선택으로' }),
+    )
+
+    expect(
+      await screen.findByText('방문 인원을 한 명 이상 입력해 주세요.'),
+    ).toBeInTheDocument()
+    expect(createBody).toBeNull()
+  })
+
+  it('영유아 동반 검색에서 영유아 0명이면 다음 단계로 넘기지 않는다', async () => {
+    respondCreateWith(() => successResponse(reservationDetail()))
+
+    renderCreate(
+      'serviceDate=2026-09-01&startTime=19:00&adultCount=3&infantCount=0&includesInfants=true',
+    )
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '메뉴 선택으로' }),
+    )
+
+    expect(
+      await screen.findByText(/검색에서 영유아 동반을 선택했습니다/),
+    ).toBeInTheDocument()
+    expect(createBody).toBeNull()
+  })
+
   it('서버 잔여를 넘겨 메뉴 수량을 고를 수 없다', async () => {
     server.use(
       authenticatedConsumer(),
+      storeWithMenuHold(),
       http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
         successResponse(menuHoldAvailability({ availableOnlineQuantity: 1 })),
       ),
     )
 
     renderCreate()
-    advanceToSubmit()
+    await advanceToSubmit()
 
     const increase = await screen.findByRole('button', {
       name: '트러플 크림 파파델레 수량 늘리기',

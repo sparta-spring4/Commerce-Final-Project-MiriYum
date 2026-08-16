@@ -49,6 +49,9 @@ export const EMPTY_DRAFT: ReservationDraft = {
  * 매장 검색에서 넘어온 `partySize`를 성인 인원의 초기값으로 삼는다.
  * 검색의 단일 인원과 예약의 성인·아동·영유아 구성은 다른 개념이므로
  * 나머지 두 값을 추측해 채우지 않고 0으로 둔다.
+ *
+ * 다만 영유아 동반을 선택한 검색에서는 그 이어받기를 하지 않는다.
+ * `carriedPartySize`가 이유를 적어 둔다.
  */
 export function readDraft(search: URLSearchParams): ReservationDraft {
   const menuSelections = new Map<string, number>()
@@ -71,11 +74,28 @@ export function readDraft(search: URLSearchParams): ReservationDraft {
   return {
     serviceDate: matchOrEmpty(search.get('serviceDate'), LOCAL_DATE_PATTERN),
     startTime: matchOrEmpty(search.get('startTime'), LOCAL_TIME_PATTERN),
-    adultCount: readCount(search.get('adultCount') ?? search.get('partySize')),
+    adultCount: readCount(search.get('adultCount') ?? carriedPartySize(search)),
     childCount: readCount(search.get('childCount')) || '0',
     infantCount: readCount(search.get('infantCount')) || '0',
     menuSelections,
   }
+}
+
+/**
+ * 검색의 총 인원을 성인 수로 이어받을지 판정한다.
+ *
+ * 검색은 `partySize` 하나만 받고 구성은 모른다. `includesInfants=true`면 그
+ * 안에 영유아가 몇 명인지 알 수 없어서, 총 인원을 통째로 성인으로 옮기면
+ * "3명(영유아 포함)"으로 확인한 가용성이 "성인 3명·영유아 0명" 예약이 된다.
+ * 그때는 이어받지 않고 비워 두어 사용자가 구성을 다시 정하게 한다.
+ */
+function carriedPartySize(search: URLSearchParams): string | null {
+  return infantsAnnounced(search) ? null : search.get('partySize')
+}
+
+/** 검색에서 영유아 동반을 선택했는지. 예약 화면이 재확인을 요구하는 근거다. */
+export function infantsAnnounced(search: URLSearchParams): boolean {
+  return search.get('includesInfants') === 'true'
 }
 
 function matchOrEmpty(value: string | null, pattern: RegExp): string {
@@ -134,9 +154,20 @@ export function isScheduleComplete(draft: ReservationDraft): boolean {
   )
 }
 
+interface ValidateOptions {
+  /**
+   * 검색에서 영유아 동반을 선택하고 넘어왔는지.
+   *
+   * 그 조건으로 가용성을 확인했으므로 영유아 0명으로 예약하면 확인한 조건과
+   * 실제 예약이 달라진다. 인원 구성을 명시적으로 정하기 전에는 넘어가지 못하게 한다.
+   */
+  infantsAnnounced?: boolean
+}
+
 /** 제출 전 검증. 필드 이름 → 오류 문구. */
 export function validateDraft(
   draft: ReservationDraft,
+  { infantsAnnounced: announced = false }: ValidateOptions = {},
 ): Readonly<Record<string, string>> {
   const errors: Record<string, string> = {}
 
@@ -148,6 +179,10 @@ export function validateDraft(
   }
   if (partyTotal(draft) < MIN_PARTY_TOTAL) {
     errors.adultCount = '방문 인원을 한 명 이상 입력해 주세요.'
+  }
+  if (announced && toCount(draft.infantCount) < 1) {
+    errors.infantCount =
+      '검색에서 영유아 동반을 선택했습니다. 영유아 인원을 입력하거나 매장 상세로 돌아가 조건을 바꿔 주세요.'
   }
   if (draft.menuSelections.size > MAX_MENU_SELECTIONS) {
     errors.menuSelections = `메뉴는 최대 ${MAX_MENU_SELECTIONS}종까지 선택할 수 있습니다.`

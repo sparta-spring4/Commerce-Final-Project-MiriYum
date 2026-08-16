@@ -26,6 +26,23 @@ function respondWithStores(...items: ReturnType<typeof storeSummary>[]) {
   )
 }
 
+/** 응답을 테스트가 원하는 순간까지 붙잡아 전환 구간을 관찰한다. */
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
+/** 두 쪽짜리 결과의 한 쪽. 페이지 번호만 다른 응답을 만든다. */
+function pageOf(name: string, number: number) {
+  return {
+    items: [storeSummary({ name })],
+    page: { number, size: 20, totalElements: 40, totalPages: 2, hasNext: number === 0 },
+  }
+}
+
 function typeInto(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 }
@@ -171,6 +188,85 @@ describe('매장 찾기 결과 화면', () => {
 
     await waitFor(() => expect(receivedSearch?.get('keyword')).toBe('파스타'))
     expect(receivedSearch?.get('region')).toBe('BUSAN')
+  })
+
+  /*
+   * 조건이 바뀌는 동안 이전 결과를 그대로 두면 칩과 총 개수는 새 조건인데
+   * 목록은 이전 조건의 결과인 구간이 생긴다. 그 사이 카드를 누르면 이전
+   * 조건의 매장에 새 예약 조건을 붙여 예약 화면으로 넘어간다.
+   */
+  it('조건이 바뀌면 이전 조건의 결과를 새 결과처럼 보여 주지 않는다', async () => {
+    const second = deferred()
+    let call = 0
+
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', async () => {
+        call += 1
+        if (call === 1) {
+          return successResponse(storePage([storeSummary({ name: '이전 매장' })]))
+        }
+        // 두 번째 조회를 붙잡아 전환 구간을 관찰한다.
+        await second.promise
+        return successResponse(storePage([storeSummary({ name: '새 매장' })]))
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    await screen.findByRole('link', { name: '이전 매장' })
+
+    fireEvent.click(
+      within(screen.getByRole('group', { name: '지역' })).getByRole('button', {
+        name: '부산',
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '이 조건으로 검색' }))
+
+    // 새 조건의 응답을 기다리는 동안 이전 목록이 남아 있으면 안 된다.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('link', { name: '이전 매장' }),
+      ).not.toBeInTheDocument(),
+    )
+
+    second.resolve()
+    expect(
+      await screen.findByRole('link', { name: '새 매장' }),
+    ).toBeInTheDocument()
+  })
+
+  it('페이지만 넘길 때는 이전 목록을 유지해 깜빡이지 않는다', async () => {
+    const second = deferred()
+    let call = 0
+
+    server.use(
+      ...catalogHandlers,
+      http.get('/api/v1/stores', async () => {
+        call += 1
+        if (call === 1) {
+          return successResponse(pageOf('첫 페이지 매장', 0))
+        }
+        await second.promise
+        return successResponse(pageOf('둘째 페이지 매장', 1))
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    await screen.findByRole('link', { name: '첫 페이지 매장' })
+    fireEvent.click(screen.getByRole('button', { name: '다음' }))
+
+    // 같은 조건이므로 다음 페이지가 도착할 때까지 이전 목록을 보여 준다.
+    await waitFor(() => expect(call).toBe(2))
+    expect(
+      screen.getByRole('link', { name: '첫 페이지 매장' }),
+    ).toBeInTheDocument()
+
+    second.resolve()
+    expect(
+      await screen.findByRole('link', { name: '둘째 페이지 매장' }),
+    ).toBeInTheDocument()
   })
 
   it('같은 지역 칩을 다시 누르면 조건에서 뺀다', async () => {

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ROUTES } from '../../../app/routes'
 import { hasErrorCode } from '../../../shared/api/apiError'
-import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
+import { useIdempotentAttempt } from '../../../shared/api/useIdempotentAttempt'
 import { Badge } from '../../../shared/ui/Badge'
 import { Button } from '../../../shared/ui/Button'
 import { Alert, ErrorState, Loading } from '../../../shared/ui/Feedback'
@@ -148,28 +148,40 @@ function CancelSection({ reservationId }: { reservationId: string }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
+
   /*
-   * 이 예약을 취소한다는 의도 하나에 키 하나를 붙인다.
-   *
-   * 사유 문구가 바뀌어도 명령은 여전히 "이 예약 취소"라 새 시도가 아니다.
-   * 재시도 때마다 같은 키가 가서 서버가 결과를 하나로 수렴시킨다.
+   * 취소 사유는 요청 본문이라 요청 지문의 일부다. 사유가 바뀌면 같은 키를
+   * 재사용할 수 없고(`COMMON_007`), 그렇다고 결과 불명 뒤에 새 키를 발급하면
+   * 취소가 두 번 나갈 수 있다. 두 규칙을 attempt가 함께 지킨다.
    */
-  const [idempotencyKey] = useState(createIdempotencyKey)
+  const normalizedReason = reason.trim()
+  const attempt = useIdempotentAttempt(normalizedReason)
 
   const mutation = useCancelReservation(reservationId)
 
   function handleCancel() {
     setError(null)
+
+    const idempotencyKey = attempt.begin()
+    if (idempotencyKey === null) {
+      setError(
+        '앞선 취소 요청의 처리 여부를 확인하지 못했습니다. 사유를 바꿔 다시 보내면 취소가 두 번 처리될 수 있습니다. 최신 상태를 먼저 확인해 주세요.',
+      )
+      return
+    }
+
     mutation.mutate(
-      { reason: reason.trim() || undefined, idempotencyKey },
+      { reason: normalizedReason || undefined, idempotencyKey },
       {
-        onSuccess: () => setOpen(false),
-        /*
-         * 실패해도 멱등 키를 유지한다. 취소가 반영된 뒤 응답만 유실된 경우
-         * 새 키로 다시 보내면 두 번째 취소 명령이 되고, 서버는 이미 취소된
-         * 예약이라 `RESERVATION_005`로 거절한다. 같은 키면 앞선 결과가 그대로 온다.
-         */
-        onError: (cause) => setError(toCancelMessage(cause)),
+        onSuccess: () => {
+          attempt.settle(null)
+          setOpen(false)
+        },
+        onError: (cause) => {
+          // 결과 불명이면 사유를 바꾼 재전송을 막는다.
+          attempt.settle(cause)
+          setError(toCancelMessage(cause))
+        },
       },
     )
   }

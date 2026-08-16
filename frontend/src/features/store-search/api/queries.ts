@@ -98,9 +98,46 @@ export function useStoreSearch(query: StoreSearchQuery, enabled = true) {
       return toPageData(response.data)
     },
     enabled,
-    // 페이지를 넘길 때 목록이 빈 화면으로 깜빡이지 않게 이전 결과를 유지한다.
-    placeholderData: (previous) => previous,
+    /*
+     * 페이지를 넘길 때만 이전 결과를 유지한다.
+     *
+     * 조건이 바뀔 때도 유지하면 칩과 총 개수는 새 조건인데 목록은 이전 조건의
+     * 결과인 구간이 생긴다. 그 사이 카드를 누르면 이전 조건의 매장에 새 예약
+     * 조건을 붙여 예약 화면으로 넘어간다.
+     */
+    placeholderData: (previous, previousQuery) =>
+      keepsSameConditions(previousQuery?.queryKey, query) ? previous : undefined,
   })
+}
+
+/**
+ * 두 검색 query가 페이지 번호만 다른지 판정한다.
+ *
+ * query key의 마지막 칸이 `toSearchQuery`가 만든 조건 객체다. 필드를 손으로
+ * 나열하지 않고 통째로 비교해, 계약에 조건이 추가돼도 판정이 함께 따라간다.
+ */
+function keepsSameConditions(
+  previousKey: unknown,
+  next: StoreSearchQuery,
+): boolean {
+  if (!Array.isArray(previousKey)) {
+    return false
+  }
+  const previous: unknown = previousKey[previousKey.length - 1]
+  if (typeof previous !== 'object' || previous === null) {
+    return false
+  }
+  return (
+    conditionSignature(previous as StoreSearchQuery) === conditionSignature(next)
+  )
+}
+
+function conditionSignature(query: StoreSearchQuery): string {
+  return JSON.stringify(
+    Object.entries(query)
+      .filter(([field]) => field !== 'page')
+      .sort(([a], [b]) => a.localeCompare(b)),
+  )
 }
 
 export function useStoreDetail(storeId: string, query: StoreSearchQuery) {

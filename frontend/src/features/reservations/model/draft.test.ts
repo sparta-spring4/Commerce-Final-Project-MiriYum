@@ -42,6 +42,28 @@ describe('readDraft', () => {
     expect(result.adultCount).toBe('5')
   })
 
+  /*
+   * 검색은 총 인원 하나만 받고 구성은 모른다. 영유아 동반을 선택했으면 그 안에
+   * 영유아가 몇 명인지 알 수 없어서, 총 인원을 통째로 성인으로 옮기면
+   * "3명(영유아 포함)"으로 확인한 가용성이 "성인 3명·영유아 0명" 예약이 된다.
+   */
+  it('영유아 동반 검색에서는 partySize를 성인으로 옮기지 않는다', () => {
+    const result = readDraft(
+      new URLSearchParams('partySize=3&includesInfants=true'),
+    )
+
+    expect(result.adultCount).toBe('')
+    expect(result.infantCount).toBe('0')
+  })
+
+  it('영유아 동반이어도 사용자가 정한 adultCount는 그대로 쓴다', () => {
+    const result = readDraft(
+      new URLSearchParams('partySize=3&includesInfants=true&adultCount=2'),
+    )
+
+    expect(result.adultCount).toBe('2')
+  })
+
   it('메뉴 선택을 menuId:quantity로 읽는다', () => {
     const result = readDraft(new URLSearchParams(`menu=${MENU_ID}:2`))
 
@@ -99,6 +121,28 @@ describe('partyTotal / isScheduleComplete', () => {
 describe('validateDraft', () => {
   it('완전한 draft는 오류가 없다', () => {
     expect(validateDraft(draft())).toEqual({})
+  })
+
+  /*
+   * 영유아 동반 조건으로 가용성을 확인하고 넘어왔는데 영유아 0명으로 예약하면
+   * 확인한 조건과 실제 예약이 달라진다. 구성을 명시적으로 정하게 한다.
+   */
+  it('영유아 동반으로 넘어왔는데 영유아가 0명이면 거절한다', () => {
+    const errors = validateDraft(draft({ infantCount: '0' }), {
+      infantsAnnounced: true,
+    })
+
+    expect(errors.infantCount).toContain('영유아')
+  })
+
+  it('영유아 인원을 채우면 통과한다', () => {
+    expect(
+      validateDraft(draft({ infantCount: '1' }), { infantsAnnounced: true }),
+    ).toEqual({})
+  })
+
+  it('영유아 동반으로 넘어오지 않았으면 영유아 0명도 통과한다', () => {
+    expect(validateDraft(draft({ infantCount: '0' }))).toEqual({})
   })
 
   it('인원이 0명이면 거절한다', () => {

@@ -169,7 +169,92 @@ describe('예약 상세 화면', () => {
     expect(new Set(keys).size).toBe(1)
   })
 
-  it('사유를 고쳐 다시 눌러도 같은 취소 명령이라 키를 바꾸지 않는다', async () => {
+  /*
+   * 취소 사유는 요청 본문이라 `request_fingerprint`의 일부다. 사유가 바뀌면
+   * 같은 키를 재사용할 수 없고 서버가 `COMMON_007`로 거절한다.
+   */
+  it('확정 실패 뒤 사유를 고치면 새 멱등 키로 보낸다', async () => {
+    const keys: string[] = []
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(RESERVATION_DETAIL_PATH, () =>
+        successResponse(reservationDetail()),
+      ),
+      http.post(RESERVATION_CANCEL_PATH, ({ request }) => {
+        attempt += 1
+        const key = request.headers.get('Idempotency-Key')
+        if (key !== null) {
+          keys.push(key)
+        }
+        if (attempt === 1) {
+          // 서버가 거절을 확정했다. 명령은 반영되지 않았다.
+          return errorResponse(
+            409,
+            ReservationErrorCode.CANCELLATION_NOT_ALLOWED,
+            '취소할 수 없습니다.',
+          )
+        }
+        return successResponse(reservationDetail({ status: 'CANCELLED' }))
+      }),
+    )
+
+    renderDetail()
+
+    fireEvent.click(await screen.findByRole('button', { name: '예약 취소하기' }))
+    fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
+    await waitFor(() => expect(attempt).toBe(1))
+
+    fireEvent.change(screen.getByLabelText('취소 사유 (선택)'), {
+      target: { value: '사유를 고쳤습니다.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
+
+    await waitFor(() => expect(attempt).toBe(2))
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  /*
+   * 결과 불명 뒤에는 사유를 바꾼 재전송을 막는다.
+   *
+   * 앞선 명령이 이미 반영됐을 수 있는데 지문이 달라 같은 키를 쓸 수 없고,
+   * 새 키를 발급하면 취소가 두 번 나간다. 어느 쪽도 안전하지 않으므로
+   * 보내지 않고 상태 확인으로 보낸다.
+   */
+  it('결과 불명 뒤 사유를 고친 재전송은 보내지 않고 상태 확인으로 안내한다', async () => {
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(RESERVATION_DETAIL_PATH, () =>
+        successResponse(reservationDetail()),
+      ),
+      http.post(RESERVATION_CANCEL_PATH, () => {
+        attempt += 1
+        return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+      }),
+    )
+
+    renderDetail()
+
+    fireEvent.click(await screen.findByRole('button', { name: '예약 취소하기' }))
+    fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
+    await waitFor(() => expect(attempt).toBe(1))
+
+    fireEvent.change(screen.getByLabelText('취소 사유 (선택)'), {
+      target: { value: '사유를 고쳤습니다.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
+
+    expect(
+      await screen.findByText(/사유를 바꿔 다시 보내면 취소가 두 번 처리될 수 있습니다/),
+    ).toBeInTheDocument()
+    // 두 번째 요청은 나가지 않는다.
+    expect(attempt).toBe(1)
+  })
+
+  it('같은 사유로 다시 누르면 같은 멱등 키를 보낸다', async () => {
     const keys: string[] = []
     let attempt = 0
 
@@ -194,13 +279,14 @@ describe('예약 상세 화면', () => {
     renderDetail()
 
     fireEvent.click(await screen.findByRole('button', { name: '예약 취소하기' }))
+    fireEvent.change(screen.getByLabelText('취소 사유 (선택)'), {
+      target: { value: '일정이 바뀌었습니다.' },
+    })
     fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
     await waitFor(() => expect(attempt).toBe(1))
 
-    // 사유는 부가 정보다. 대상 예약이 같으면 명령도 같다.
-    fireEvent.change(screen.getByLabelText('취소 사유 (선택)'), {
-      target: { value: '사유를 고쳤습니다.' },
-    })
+    // 사유를 그대로 두고 다시 누른다. 요청 지문이 같으므로 같은 키를 유지해야
+    // 서버가 앞선 결과로 수렴시킨다.
     fireEvent.click(screen.getByRole('button', { name: '취소 확정' }))
 
     await waitFor(() => expect(attempt).toBe(2))

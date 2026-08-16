@@ -1,4 +1,7 @@
+import { http } from 'msw'
+import { successResponse } from '../../../test/msw/envelope'
 import type { components as MenuHoldComponents } from '../../../shared/api/generated/menu-hold-pickup'
+import { storeDetail } from '../../store-search/test/fixtures'
 import type { ReservationDetail } from '../model/draft'
 
 export const STORE_ID = '01JBQ8Z4T7K2N9V6M3P5R8W1XA'
@@ -12,6 +15,26 @@ export const RESERVATION_CANCEL_PATH =
   '/api/v1/consumers/me/reservations/:reservationId/cancellations'
 export const MENU_HOLD_AVAILABILITY_PATH =
   '/api/v1/stores/:storeId/menu-hold-availability'
+export const STORE_DETAIL_PATH = '/api/v1/stores/:storeId'
+
+/**
+ * 예약 작성 화면은 매장의 `modes.menuHoldEnabled`를 보고 메뉴 단계를 거칠지
+ * 정한다. 그래서 이 화면 테스트에는 매장 상세 응답이 항상 필요하다.
+ */
+export function storeWithMenuHold(menuHoldEnabled = true) {
+  return http.get(STORE_DETAIL_PATH, () =>
+    successResponse(
+      storeDetail({
+        storeId: STORE_ID,
+        modes: {
+          reservationEnabled: true,
+          menuHoldEnabled,
+          pickupEnabled: false,
+        },
+      }),
+    ),
+  )
+}
 
 type MenuHoldAvailabilityData =
   MenuHoldComponents['schemas']['MenuHoldAvailabilityData']

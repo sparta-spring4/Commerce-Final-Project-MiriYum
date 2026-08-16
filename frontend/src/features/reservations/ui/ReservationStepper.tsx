@@ -1,9 +1,16 @@
 export type ReservationStep = 'schedule' | 'menus' | 'confirm'
 
-const STEPS: readonly { key: ReservationStep; label: string }[] = [
-  { key: 'schedule', label: '정보 입력' },
-  { key: 'menus', label: '메뉴 선택' },
-  { key: 'confirm', label: '예약 확인' },
+const STEP_LABEL: Record<ReservationStep, string> = {
+  schedule: '정보 입력',
+  menus: '메뉴 선택',
+  confirm: '예약 확인',
+}
+
+/** 메뉴를 받지 않는 매장은 메뉴 단계 없이 두 칸으로 진행한다. */
+export const DEFAULT_STEPS: readonly ReservationStep[] = [
+  'schedule',
+  'menus',
+  'confirm',
 ]
 
 /**
@@ -15,12 +22,19 @@ const STEPS: readonly { key: ReservationStep; label: string }[] = [
  * 연결선은 순수 장식이라 별도 목록 항목으로 만들지 않는다. `li`로 두면
  * 보조기술이 빈 항목을 사이사이 읽는다.
  */
-export function ReservationStepper({ current }: { current: ReservationStep }) {
-  const currentIndex = STEPS.findIndex((step) => step.key === current)
+export function ReservationStepper({
+  current,
+  steps = DEFAULT_STEPS,
+}: {
+  current: ReservationStep
+  steps?: readonly ReservationStep[]
+}) {
+  const currentIndex = steps.indexOf(current)
 
   return (
     <ol className="reservation-stepper" aria-label="예약 진행 단계">
-      {STEPS.map((step, index) => {
+      {steps.map((key, index) => {
+        const step = { key, label: STEP_LABEL[key] }
         const state =
           index < currentIndex ? 'done' : index === currentIndex ? 'current' : 'upcoming'
         return (

@@ -9,8 +9,10 @@ import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
 import { Icon, type IconName } from '../../../shared/ui/Icon'
 import { useCreateReservation, useMenuHoldAvailability } from '../api/queries'
+import { useStoreDetail } from '../../store-search/api/queries'
 import {
   MAX_PARTY_PER_TYPE,
+  infantsAnnounced as readInfantsAnnounced,
   partyTotal,
   readDraft,
   toCreateRequest,
@@ -41,6 +43,24 @@ export function ReservationCreatePage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [recovery, setRecovery] = useState<CreateRecovery | null>(null)
 
+  /*
+   * 영유아 동반 선택은 검색에서 한 번 들어오고 draft를 고치면 URL에서 사라진다.
+   * 그 사실 자체는 이 화면에 머무는 동안 유지돼야 하므로 첫 렌더에 붙잡아 둔다.
+   */
+  const [infantsAnnounced] = useState(() => readInfantsAnnounced(searchParams))
+
+  /*
+   * 메뉴 미리 선택을 받지 않는 매장은 메뉴 단계를 거치지 않는다. 거치게 하면
+   * 예약 전용 매장에서도 메뉴 가용성을 조회한 뒤 빈 화면을 보여 주고 사용자가
+   * 다시 "다음"을 눌러야 한다.
+   */
+  const store = useStoreDetail(storeId, {})
+  const menuHoldEnabled = store.data?.modes.menuHoldEnabled ?? null
+  const steps: ReservationStep[] =
+    menuHoldEnabled === false
+      ? ['schedule', 'confirm']
+      : ['schedule', 'menus', 'confirm']
+
   /**
    * 멱등 키. 같은 입력으로 재시도하는 동안 유지하고, 사용자가 입력을 바꿔
    * 새로 제출하면 새 시도이므로 새 키를 만든다.
@@ -56,16 +76,17 @@ export function ReservationCreatePage() {
     setSearchParams(writeDraft(next), { replace: true })
   }
 
-  function goToMenus() {
-    const errors = validateDraft(draft)
+  /** 일정 다음 단계. 메뉴를 받지 않는 매장은 확인으로 곧장 간다. */
+  function goToNextAfterSchedule() {
+    const errors = validateDraft(draft, { infantsAnnounced })
     setFieldErrors(errors)
     if (Object.keys(errors).length === 0) {
-      setStep('menus')
+      setStep(menuHoldEnabled === false ? 'confirm' : 'menus')
     }
   }
 
   function submit(target: ReservationDraft = draft) {
-    const errors = validateDraft(target)
+    const errors = validateDraft(target, { infantsAnnounced })
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) {
       setStep('schedule')
@@ -136,7 +157,7 @@ export function ReservationCreatePage() {
         <h1 className="mi-page-head__title">{STEP_TITLE[step]}</h1>
       </header>
 
-      <ReservationStepper current={step} />
+      <ReservationStepper current={step} steps={steps} />
 
       {recovery !== null && (
         <RecoveryAlert
@@ -159,7 +180,7 @@ export function ReservationCreatePage() {
               draft={draft}
               errors={fieldErrors}
               onChange={updateDraft}
-              onNext={goToMenus}
+              onNext={goToNextAfterSchedule}
             />
           )}
 
@@ -201,7 +222,9 @@ export function ReservationCreatePage() {
                   <Button
                     variant="ghost"
                     disabled={mutation.isPending}
-                    onClick={() => setStep(step === 'confirm' ? 'menus' : 'schedule')}
+                    // 단계 표에서 한 칸 앞으로 간다. 메뉴 단계가 없는 매장은
+                    // 확인에서 곧장 일정으로 돌아간다.
+                    onClick={() => setStep(steps[steps.indexOf(step) - 1])}
                   >
                     이전
                   </Button>
@@ -210,14 +233,18 @@ export function ReservationCreatePage() {
                 {step === 'schedule' && (
                   // 폼은 왼쪽 열에 있고 버튼은 패널에 있다. `form` 속성이 둘을
                   // 잇는다. 이렇게 해야 Enter 키 제출과 검증 흐름이 같아진다.
+                  //
+                  // 매장의 메뉴 정책을 아직 모르면 다음 단계를 정할 수 없다.
+                  // 조회가 끝날 때까지 누르지 못하게 한다.
                   <Button
                     type="submit"
                     form={SCHEDULE_FORM_ID}
                     variant="primary"
                     size="lg"
                     block
+                    disabled={menuHoldEnabled === null}
                   >
-                    메뉴 선택으로
+                    {menuHoldEnabled === false ? '예약 확인으로' : '메뉴 선택으로'}
                   </Button>
                 )}
 
@@ -415,6 +442,7 @@ function ScheduleStep({
               label="영유아"
               hint="36개월 미만"
               value={draft.infantCount}
+              error={errors.infantCount ?? null}
               onChange={(next) => onChange({ ...draft, infantCount: next })}
             />
           </ul>
