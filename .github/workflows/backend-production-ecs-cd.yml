@@ -1,0 +1,230 @@
+# main CI를 통과한 immutable SHA 이미지를 ECR에 push하고, 현재 ECS 설정을 보존한 채 이미지만 교체한다.
+name: Backend CD (Production ECS)
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Deploy an existing immutable 40-character Git SHA image tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # 운영 배포는 순서대로 끝낸다. 진행 중인 배포를 취소하면 ECS 상태를 판단하기 어려워진다.
+  group: backend-cd-production-ecs
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ vars.AWS_ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
+  ECS_CONTAINER_NAME: backend
+
+jobs:
+  verify-source:
+    name: verify-production-deployment-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    outputs:
+      deployable: ${{ steps.source.outputs.deployable }}
+      image_tag: ${{ steps.source.outputs.image_tag }}
+
+    steps:
+      - name: Verify deployment source
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_TAG: ${{ inputs.image_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            current_main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+
+            if [ "$current_main_sha" != "$WORKFLOW_SHA" ]; then
+              echo "deployable=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping stale CI revision $WORKFLOW_SHA; current main is $current_main_sha."
+              exit 0
+            fi
+
+            image_tag="$WORKFLOW_SHA"
+          else
+            image_tag="$MANUAL_TAG"
+          fi
+
+          if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Only a full 40-character Git SHA image tag can be deployed."
+            exit 1
+          fi
+
+          echo "deployable=true" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: build-and-deploy-backend-production-ecs
+    needs: verify-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    if: needs.verify-source.outputs.deployable == 'true'
+
+    steps:
+      - name: Validate deployment configuration
+        env:
+          ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          for value in "$AWS_REGION" "$ECR_REPOSITORY" "$ECS_CLUSTER" "$ECS_SERVICE" "$ROLE_TO_ASSUME"; do
+            if [ -z "$value" ]; then
+              echo "::error::Required production GitHub Actions variable is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Checkout successful CI revision
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          retry-max-attempts: 2
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Check immutable ECR image exists
+        id: ecr-image
+        env:
+          IMAGE_TAG: ${{ needs.verify-source.outputs.image_tag }}
+        run: |
+          image_count=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" \
+            --query 'length(images)' \
+            --output text)
+
+          if [ "$image_count" = "1" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU for ARM64 builds
+        if: github.event_name == 'workflow_run' && steps.ecr-image.outputs.exists != 'true'
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'workflow_run' && steps.ecr-image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build and push ARM64 backend image
+        if: github.event_name == 'workflow_run' && steps.ecr-image.outputs.exists != 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: backend
+          file: backend/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Require an existing image for manual deployment
+        if: github.event_name == 'workflow_dispatch' && steps.ecr-image.outputs.exists != 'true'
+        run: |
+          echo "::error::Manual deployment requires an existing immutable ECR image tag."
+          exit 1
+
+      - name: Register task definition with the new image
+        id: task-definition
+        env:
+          IMAGE_URI: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.verify-source.outputs.image_tag }}
+        run: |
+          current_task_definition=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          aws ecs describe-task-definition \
+            --task-definition "$current_task_definition" \
+            --query taskDefinition \
+            --output json > current-task-definition.json
+
+          jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
+            .containerDefinitions |= map(
+              if .name == $container then .image = $image else . end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+          ' current-task-definition.json > next-task-definition.json
+
+          task_definition_arn=$(aws ecs register-task-definition \
+            --cli-input-json file://next-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "arn=$task_definition_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS service
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --output json >/dev/null
+
+      - name: Wait for ECS service stability
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.task-definition.outputs.arn }}
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+          primary_task_definition=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
+            --output text)
+
+          if [ "$primary_task_definition" != "$TASK_DEFINITION_ARN" ]; then
+            echo "::error::ECS did not retain the new task definition as PRIMARY. The deployment may have rolled back."
+            exit 1
+          fi
+
+          echo "ECS deployment completed with $TASK_DEFINITION_ARN"
