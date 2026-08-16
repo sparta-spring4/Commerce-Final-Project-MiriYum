@@ -5,9 +5,11 @@ import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
-import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
@@ -48,14 +50,14 @@ public class NotificationTaskRepository {
                     Long.parseLong(event.resourceId()),
                     event.resourceVersion(),
                     event.sourceState(),
-                    timestamp(event.occurredAt()),
-                    timestamp(event.scheduledAt()),
-                    event.expiresAt() == null ? null : timestamp(event.expiresAt()),
+                    utcLocalDateTime(event.occurredAt()),
+                    utcLocalDateTime(event.scheduledAt()),
+                    event.expiresAt() == null ? null : utcLocalDateTime(event.expiresAt()),
                     event.timingPolicyVersion(),
                     event.correlationId(),
                     NotificationSourceEventV1.CONTRACT_VERSION,
                     fingerprint,
-                    timestamp(event.scheduledAt())
+                    utcLocalDateTime(event.scheduledAt())
             );
             if (affected != 1) {
                 throw new IllegalStateException("notification task was not recorded");
@@ -77,9 +79,9 @@ public class NotificationTaskRepository {
                                lease_token IS NOT NULL AS lease_recovery
                           FROM notification_tasks
                          WHERE status = 'PENDING'
-                           AND scheduled_at <= FROM_UNIXTIME(?)
-                           AND (next_attempt_at IS NULL OR next_attempt_at <= FROM_UNIXTIME(?))
-                           AND (lease_until IS NULL OR lease_until <= FROM_UNIXTIME(?))
+                           AND scheduled_at <= ?
+                           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                           AND (lease_until IS NULL OR lease_until <= ?)
                          ORDER BY COALESCE(next_attempt_at, scheduled_at), notification_id
                          LIMIT 1
                          FOR UPDATE SKIP LOCKED
@@ -94,14 +96,14 @@ public class NotificationTaskRepository {
                         resultSet.getLong("resource_id"),
                         resultSet.getLong("resource_version"),
                         resultSet.getString("source_state"),
-                        instant(resultSet.getTimestamp("expires_at")),
+                        utcInstant(resultSet.getObject("expires_at", LocalDateTime.class)),
                         resultSet.getString("correlation_id"),
                         resultSet.getInt("attempt_count"),
                         resultSet.getBoolean("lease_recovery")
                 ),
-                epochSeconds(now),
-                epochSeconds(now),
-                epochSeconds(now)
+                utcLocalDateTime(now),
+                utcLocalDateTime(now),
+                utcLocalDateTime(now)
         );
         return rows.stream().findFirst();
     }
@@ -168,7 +170,7 @@ public class NotificationTaskRepository {
         int updated = jdbcTemplate.update("""
                 UPDATE notification_tasks
                    SET lease_owner = ?, lease_token = ?,
-                       lease_until = TIMESTAMPADD(MICROSECOND, ?, NOW(6)),
+                       lease_until = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
                        attempt_count = attempt_count + 1,
                        version = version + 1
                  WHERE notification_id = ? AND status = 'PENDING'
@@ -203,17 +205,17 @@ public class NotificationTaskRepository {
             String title,
             Instant sourceExpiresAt
     ) {
-        BigDecimal sourceExpiry = sourceExpiresAt == null
+        LocalDateTime sourceExpiry = sourceExpiresAt == null
                 ? null
-                : epochSeconds(sourceExpiresAt);
+                : utcLocalDateTime(sourceExpiresAt);
         int updated = jdbcTemplate.update("""
                 UPDATE notification_tasks task
-                  JOIN (SELECT FROM_UNIXTIME(?) AS source_expires_at) boundary
+                  JOIN (SELECT CAST(? AS DATETIME(6)) AS source_expires_at) boundary
                    SET task.status = CASE
                                WHEN task.expires_at IS NOT NULL
-                                    AND NOW(6) >= task.expires_at THEN 'CANCELLED'
+                                    AND UTC_TIMESTAMP(6) >= task.expires_at THEN 'CANCELLED'
                                WHEN boundary.source_expires_at IS NOT NULL
-                                    AND NOW(6) >= boundary.source_expires_at THEN 'CANCELLED'
+                                    AND UTC_TIMESTAMP(6) >= boundary.source_expires_at THEN 'CANCELLED'
                                ELSE 'DELIVERED'
                            END,
                        task.next_attempt_at = NULL,
@@ -221,31 +223,31 @@ public class NotificationTaskRepository {
                        task.lease_until = NULL,
                        task.last_error_code = CASE
                                WHEN task.expires_at IS NOT NULL
-                                    AND NOW(6) >= task.expires_at THEN 'TASK_EXPIRED'
+                                    AND UTC_TIMESTAMP(6) >= task.expires_at THEN 'TASK_EXPIRED'
                                WHEN boundary.source_expires_at IS NOT NULL
-                                    AND NOW(6) >= boundary.source_expires_at
+                                    AND UTC_TIMESTAMP(6) >= boundary.source_expires_at
                                     THEN 'SOURCE_SUPERSEDED'
                                ELSE NULL
                            END,
                        task.title = CASE
-                               WHEN (task.expires_at IS NULL OR NOW(6) < task.expires_at)
+                               WHEN (task.expires_at IS NULL OR UTC_TIMESTAMP(6) < task.expires_at)
                                     AND (boundary.source_expires_at IS NULL
-                                         OR NOW(6) < boundary.source_expires_at)
+                                         OR UTC_TIMESTAMP(6) < boundary.source_expires_at)
                                     THEN ?
                                ELSE NULL
                            END,
                        task.delivered_at = CASE
-                               WHEN (task.expires_at IS NULL OR NOW(6) < task.expires_at)
+                               WHEN (task.expires_at IS NULL OR UTC_TIMESTAMP(6) < task.expires_at)
                                     AND (boundary.source_expires_at IS NULL
-                                         OR NOW(6) < boundary.source_expires_at)
-                                    THEN NOW(6)
+                                         OR UTC_TIMESTAMP(6) < boundary.source_expires_at)
+                                    THEN UTC_TIMESTAMP(6)
                                ELSE NULL
                            END,
                        task.version = task.version + 1
                  WHERE task.notification_id = ?
                    AND task.status = 'PENDING'
                    AND task.lease_token = ?
-                   AND task.lease_until > NOW(6)
+                   AND task.lease_until > UTC_TIMESTAMP(6)
                 """,
                 sourceExpiry,
                 title,
@@ -284,15 +286,15 @@ public class NotificationTaskRepository {
         long retryDelayMicros = Math.multiplyExact(retryDelayMillis, 1_000L);
         return jdbcTemplate.update("""
                 UPDATE notification_tasks
-                   SET next_attempt_at = TIMESTAMPADD(MICROSECOND, ?, NOW(6)),
+                   SET next_attempt_at = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
                        lease_owner = NULL, lease_token = NULL,
                        lease_until = NULL, last_error_code = ?, version = version + 1
                  WHERE notification_id = ?
                    AND status = 'PENDING'
                    AND lease_token = ?
-                   AND lease_until > NOW(6)
+                   AND lease_until > UTC_TIMESTAMP(6)
                    AND (expires_at IS NULL
-                        OR TIMESTAMPADD(MICROSECOND, ?, NOW(6)) < expires_at)
+                        OR TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)) < expires_at)
                 """,
                 retryDelayMicros,
                 reason,
@@ -314,12 +316,12 @@ public class NotificationTaskRepository {
                    SET status = ?, next_attempt_at = NULL,
                        lease_owner = NULL, lease_token = NULL, lease_until = NULL,
                        last_error_code = ?, title = ?,
-                       delivered_at = CASE WHEN ? THEN NOW(6) ELSE NULL END,
+                       delivered_at = CASE WHEN ? THEN UTC_TIMESTAMP(6) ELSE NULL END,
                        version = version + 1
                  WHERE notification_id = ?
                    AND status = 'PENDING'
                    AND lease_token = ?
-                   AND lease_until > NOW(6)
+                   AND lease_until > UTC_TIMESTAMP(6)
                 """,
                 status,
                 errorCode,
@@ -362,13 +364,16 @@ public class NotificationTaskRepository {
         return rows.getFirst();
     }
 
-    private static Timestamp timestamp(java.time.OffsetDateTime value) {
-        return Timestamp.from(value.toInstant());
+    private static LocalDateTime utcLocalDateTime(OffsetDateTime value) {
+        return utcLocalDateTime(value.toInstant());
     }
 
-    private static BigDecimal epochSeconds(Instant value) {
-        return BigDecimal.valueOf(value.getEpochSecond())
-                .add(BigDecimal.valueOf(value.getNano(), 9));
+    private static LocalDateTime utcLocalDateTime(Instant value) {
+        return LocalDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
+    private static Instant utcInstant(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC);
     }
 
     private static Instant instant(Timestamp value) {
