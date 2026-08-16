@@ -125,6 +125,17 @@ class FileMetadataTest {
     }
 
     @Test
+    void discardsPendingMetadataBeforeItBecomesPublic() {
+        FileMetadata metadata = pendingMetadata();
+        Instant discardedAt = Instant.parse("2026-08-15T00:01:00Z");
+
+        metadata.discardPending(discardedAt);
+
+        assertThat(metadata.getStorageStatus()).isEqualTo(FileStorageStatus.DELETED);
+        assertThat(metadata.getDeletedAt()).isEqualTo(discardedAt);
+    }
+
+    @Test
     void rejectsPrivateStoreImageMetadata() {
         assertThatIllegalArgumentException().isThrownBy(() -> new FileStorageMetadata(
                 UUID.randomUUID(),

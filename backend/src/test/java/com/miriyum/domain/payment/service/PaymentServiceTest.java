@@ -21,19 +21,25 @@ import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
@@ -59,9 +65,15 @@ class PaymentServiceTest {
         );
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "uk_payments_source",
+            "payments.uk_payments_source",
+            "uk_payments_preparation_idempotency",
+            "payments.uk_payments_preparation_idempotency"
+    })
     @DisplayName("caller transaction이 없는 준비 경합은 저장된 동일 결과를 재생한다")
-    void replaysPreparationRaceWithoutCallerTransaction() {
+    void replaysPreparationRaceWithoutCallerTransaction(String constraintName) {
         PrepareReservationDepositCommand command = new PrepareReservationDepositCommand(
                 "123",
                 11L,
@@ -81,12 +93,95 @@ class PaymentServiceTest {
                 PaymentStatus.READY
         );
         when(transactions.prepare(command, NOW))
-                .thenThrow(new DataIntegrityViolationException("uk_payments_source"));
+                .thenThrow(preparationConflict(constraintName, 1062));
         when(transactions.replayPreparation(command)).thenReturn(expected);
 
         PaymentPreparation result = paymentService.prepareReservationDeposit(command);
 
         assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("caller transaction의 승인 준비 경합은 DB 원인 없는 전용 신호로 전달한다")
+    void signalsApprovedPreparationConflictToCallerTransaction() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(preparationConflict("uk_payments_source", 1062));
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                    .isInstanceOfSatisfying(
+                            PaymentPreparationRetryableConflictException.class,
+                            exception -> {
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                                assertThat(exception.getCause()).isNull();
+                            });
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
+    @DisplayName("비승인 constraint의 MySQL 1062는 준비 replay 신호가 아니다")
+    void rejectsUnapprovedPreparationConstraint() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(preparationConflict("uk_payments_payment_id", 1062));
+
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception)
+                            .isNotInstanceOf(PaymentPreparationRetryableConflictException.class);
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                });
+    }
+
+    @Test
+    @DisplayName("constraint 이름이 없는 MySQL 1062는 준비 replay 신호가 아니다")
+    void rejectsMysqlDuplicateWithoutConstraintName() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(preparationConflict(null, 1062));
+
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception)
+                            .isNotInstanceOf(PaymentPreparationRetryableConflictException.class);
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                });
+    }
+
+    @Test
+    @DisplayName("승인 constraint여도 MySQL 1062가 아니면 준비 replay 신호가 아니다")
+    void rejectsApprovedConstraintWithDifferentMysqlCode() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(preparationConflict("uk_payments_source", 1452));
+
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception)
+                            .isNotInstanceOf(PaymentPreparationRetryableConflictException.class);
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                });
+    }
+
+    @Test
+    @DisplayName("message-only 준비 무결성 오류는 저장 결과로 추측해 replay하지 않는다")
+    void rejectsMessageOnlyPreparationConflictWithoutReplay() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(new DataIntegrityViolationException("uk_payments_source"));
+
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                .isInstanceOfSatisfying(ServiceException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
     }
 
     @Test
@@ -302,6 +397,31 @@ class PaymentServiceTest {
         return Arrays.stream(type.getRecordComponents())
                 .map(component -> component.getName())
                 .toList();
+    }
+
+    private static PrepareReservationDepositCommand prepareCommand() {
+        return new PrepareReservationDepositCommand(
+                "123",
+                11L,
+                30_000L,
+                "KRW",
+                NOW.plusSeconds(600),
+                7L,
+                "550e8400-e29b-41d4-a716-446655440123"
+        );
+    }
+
+    private static DataIntegrityViolationException preparationConflict(
+            String constraintName,
+            int mysqlCode
+    ) {
+        return new DataIntegrityViolationException(
+                "payment preparation conflict",
+                new ConstraintViolationException(
+                        "payment constraint conflict",
+                        new SQLException("duplicate", "23000", mysqlCode),
+                        "insert into payments",
+                        constraintName));
     }
 
     private static PaymentResult paidResult() {

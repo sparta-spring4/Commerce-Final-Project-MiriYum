@@ -17,6 +17,8 @@ paths:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus"
   /api/v1/stores/{storeId}/menus/{menuId}/alternative-searches:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1stores~1{storeId}~1menus~1{menuId}~1alternative-searches"
+  /api/v1/public-files/{imageId}:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1public-files~1{imageId}"
   /api/v1/store-categories:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-categories"
   /api/v1/menu-categories:

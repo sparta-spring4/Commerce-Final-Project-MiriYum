@@ -21,6 +21,12 @@ public class FileStorageFacade {
 
     /** 대기 상태를 저장한 뒤 파일을 저장하고, 무결성 검증에 성공한 경우에만 완료 상태로 전환한다. */
     public FileStorageMetadata store(FileStorageMetadata metadata, FileStorageRequest request) {
+        FileStorageMetadata pending = storePending(metadata, request);
+        return transactionExecutor.confirm(pending.fileId().toString()).toPublicMetadata();
+    }
+
+    /** 외부 객체만 저장하고 공개 상태 확정은 호출 업무 트랜잭션에 맡긴다. */
+    public FileStorageMetadata storePending(FileStorageMetadata metadata, FileStorageRequest request) {
         validatePendingMetadata(metadata);
         FileMetadata persistedMetadata = FileMetadata.createPending(metadata);
         validateRequest(persistedMetadata, request);
@@ -32,7 +38,15 @@ public class FileStorageFacade {
             markFailedWithoutHidingStorageFailure(persistedMetadata.getFileId(), exception);
             throw exception;
         }
-        return transactionExecutor.confirm(persistedMetadata.getFileId()).toPublicMetadata();
+        return persistedMetadata.toPublicMetadata();
+    }
+
+    /** 바깥 업무 트랜잭션이 성공할 때만 이미 저장된 파일을 공개한다. */
+    public FileStorageMetadata confirmWithinCurrentTransaction(UUID fileId) {
+        if (fileId == null) {
+            throw new IllegalArgumentException("파일 식별자는 필수입니다.");
+        }
+        return transactionExecutor.confirmWithinCurrentTransaction(fileId.toString()).toPublicMetadata();
     }
 
     /**
@@ -53,6 +67,25 @@ public class FileStorageFacade {
         } catch (RuntimeException exception) {
             log.warn(
                     "event=file_storage_object_delete_failed file_id={}",
+                    deleted.fileId(),
+                    exception);
+            throw exception;
+        }
+        return deleted;
+    }
+
+    /** 바깥 업무 롤백으로 남은 대기 파일을 공개 전에 정리한다. */
+    public FileStorageMetadata discardPending(UUID fileId, Instant deletedAt) {
+        if (fileId == null || deletedAt == null) {
+            throw new IllegalArgumentException("파일 식별자와 삭제 시각은 필수입니다.");
+        }
+        FileStorageMetadata deleted = transactionExecutor.discardPendingOrGetDeleted(fileId.toString(), deletedAt)
+                .toPublicMetadata();
+        try {
+            fileStoragePort.delete(deleted.objectKey());
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "event=file_storage_pending_compensation_failed file_id={}",
                     deleted.fileId(),
                     exception);
             throw exception;

@@ -16,6 +16,11 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      # 10MB 파일 본문과 multipart 헤더·boundary를 함께 수용한다.
+      max-file-size: ${MIRIYUM_STORAGE_S3_MAX_SIZE_BYTES:10485760}
+      max-request-size: ${MIRIYUM_STORAGE_MULTIPART_MAX_REQUEST_SIZE:11MB}
 server:
   forward-headers-strategy: native
   tomcat:
