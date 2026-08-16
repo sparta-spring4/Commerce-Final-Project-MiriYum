@@ -37,6 +37,13 @@ Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메�
 aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
 추가하지 않는다.
 
+Issue #271 설정 Runtime은 설정 저장·조회·version 조건부 전체 교체, 신규 접수 gate와
+비활성화 closure 연계까지만 소유한다. 영업 구간을 기준으로 AUTO 접수를 실제로 여는 worker,
+작업 원장과 재시도는 Issue #380이 소유한다. 자동 작업은 조회 predicate의 boolean 결과로
+접수를 열 수 없으며, 실제 접수 상태 변경과 현재 `expectedSettingsVersion` CAS를 같은
+트랜잭션에 결박해야 한다. 따라서 #380 병합 전에는 “오래된 자동 오픈 작업이 최신 설정을
+되돌리지 못한다”는 실행 Runtime 인수 조건을 완료로 표시하지 않는다.
+
 ## 계정당 활성 웨이팅 1개
 
 Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용자 계정당 고정 1건으로
@@ -109,10 +116,8 @@ HAVING COUNT(*) > 1;
 | `version` | `0` |
 
 비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
-시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 종결 가능성
-판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공할 때
-일괄 종결 action과 함께 추가한다. 그 전에는 응답에 노출하지 않는다. 설정 행의 부재를 매장
-부재로 해석하지 않는다.
+시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 설정 행의
+부재를 매장 부재로 해석하지 않는다.
 
 ## 전체 교체와 버전
 
@@ -138,6 +143,19 @@ HAVING COUNT(*) > 1;
 - `disableAction`은 `enabled=false` 요청에서만 허용한다. 활성화 요청에 포함하면
   `400 COMMON_001`이다.
 
+## 신규 접수 설정 gate
+
+일반 사용자 팀 생성은 원장 행을 만들기 전에 같은 트랜잭션에서 현재 매장의 설정 행을
+잠근다. 설정 행이 없거나 `enabled=false`이거나 `receptionMode=PAUSED`이면 팀, 활성
+membership, 순번, 감사와 상태 이벤트를 만들지 않고 `409 WAITING_012
+WAITING_RECEPTION_CLOSED`를 반환한다. 설정 교체도 같은 설정 행을 먼저 잠가 생성과
+직렬화한다. 생성이 먼저 확정된 뒤의 `KEEP_ACTIVE`는 그 팀을 유지하고, 비활성화 또는
+일시중지가 먼저 확정되면 뒤늦은 생성은 실패 폐쇄한다.
+
+현재 활성 OpenAPI에는 일반 사용자 팀 생성 path가 없으므로 #271은 해당 HTTP path를
+추가하지 않는다. `WAITING_012`는 향후 consumer operation이 연결할 공개 Reservation 오류
+계약이며 현재 runtime의 `WaitingCreationService`에서도 동일한 wire code를 사용한다.
+
 ## 비활성화와 활성 팀
 
 Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전과 활성 팀 수를 확인할 수
@@ -148,9 +166,12 @@ Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전�
 - `KEEP_ACTIVE`는 설정을 `enabled=false`, `receptionMode=PAUSED`로 교체해 신규 등록을 막되
   기존 활성 팀을 그대로 유지한다. 기존 팀의 조회·호출·정상 종결 경로는 계속 사용할 수
   있어야 한다.
-- 현재 공개 계약에서 `disableAction`은 `KEEP_ACTIVE`만 허용한다. 활성 팀 일괄 종결은
-  Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공한 뒤
-  이 요청 계약에 추가한다. 그 전에는 일괄 종결 action을 공개 입력으로 노출하지 않는다.
+- `CLOSE_ACTIVE_TEAMS`는 먼저 새 설정 버전으로 비활성화한 뒤 Issue #272의 공개 Service를
+  통해 그 버전에 결박된 비동기 일괄 종결 작업을 생성하고 작업 snapshot과 `202 Accepted`를
+  반환한다. 설정 저장과 작업 생성은 하나의 트랜잭션으로 확정한다.
+- 종결 worker는 각 claim 처리 시 job의 `storeId/settingsVersion`과 현재 설정의 동일 version,
+  `enabled=false`를 설정 행 잠금 아래 다시 확인한다. 설정이 재활성화됐거나 더 최신 version이면
+  팀, membership, 감사와 이벤트를 바꾸지 않고 해당 stale 항목만 완료해 재시도하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
 서버는 명령 시점의 활성 팀과 권한을 다시 확인한다. `RESERVATION_CONVERTING`도 활성 팀이므로

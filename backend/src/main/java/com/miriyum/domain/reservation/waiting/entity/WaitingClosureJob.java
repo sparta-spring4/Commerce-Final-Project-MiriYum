@@ -89,6 +89,7 @@ public class WaitingClosureJob {
 
     public Long getId() { return id; }
     public Long getStoreId() { return storeId; }
+    public long getSettingsVersion() { return settingsVersion; }
     public WaitingClosureJobStatus getStatus() { return status; }
     public long getTargetTeamCount() { return targetTeamCount; }
     public long getCompletedTeamCount() { return completedTeamCount; }

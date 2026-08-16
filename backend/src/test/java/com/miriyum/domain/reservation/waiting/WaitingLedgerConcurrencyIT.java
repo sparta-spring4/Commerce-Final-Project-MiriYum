@@ -123,6 +123,7 @@ class WaitingLedgerConcurrencyIT {
                 "waiting_status_events", "waiting_transition_audits",
                 "waiting_closure_job_items", "waiting_closure_jobs", "waiting_active_memberships",
                 "waiting_teams", "waiting_queue_sequences", "idempotency_commands",
+                "waiting_setting_audits", "waiting_settings",
                 "store_tag_assignment", "stores", "store_operator_accounts", "consumer_accounts"}) {
             jdbc.execute("DELETE FROM " + table);
         }
@@ -144,6 +145,32 @@ class WaitingLedgerConcurrencyIT {
                 .isEqualTo(9L);
         assertThat(count("waiting_transition_audits")).isEqualTo(8);
         assertThat(count("waiting_status_events")).isEqualTo(8);
+    }
+
+    @Test
+    void missingOrPausedSettingRejectsNewWaitingWithoutCreatingLedgerRows() {
+        Fixture fixture = fixture(2);
+        jdbc.update("DELETE FROM waiting_settings WHERE store_id=?", fixture.storeId());
+
+        assertThatThrownBy(() -> creationService.create(
+                fixture.storeId(), fixture.consumerIds().getFirst(), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(90)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_RECEPTION_CLOSED));
+
+        insertWaitingSetting(fixture.storeId(), true, "PAUSED", 1L);
+        assertThatThrownBy(() -> creationService.create(
+                fixture.storeId(), fixture.consumerIds().get(1), BUSINESS_DATE, 2,
+                WaitingSource.REMOTE, key(91)))
+                .isInstanceOfSatisfying(ServiceException.class, failure ->
+                        assertThat(failure.getErrorCode())
+                                .isEqualTo(ReservationErrorCode.WAITING_RECEPTION_CLOSED));
+
+        assertThat(count("waiting_teams")).isZero();
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(count("waiting_transition_audits")).isZero();
+        assertThat(count("waiting_status_events")).isZero();
     }
 
     @Test
@@ -263,6 +290,7 @@ class WaitingLedgerConcurrencyIT {
     void concurrentSameClosureKeyProducesOneImmutableJobAndSnapshot() throws Exception {
         Fixture fixture = fixture(2);
         createTeams(fixture, 400);
+        setWaitingSettingDisabledVersion(fixture.storeId(), 7L);
         IdempotencyKey closureKey = key(410);
 
         List<Attempt<WaitingClosureCommandResult>> attempts = runTogether(2, ignored ->
@@ -284,6 +312,7 @@ class WaitingLedgerConcurrencyIT {
                 WaitingSource.REMOTE, key(450));
         long teamId = Long.parseLong(created.data().waitingTeamId());
         jdbc.update("UPDATE waiting_teams SET status='RESERVATION_CONVERTING' WHERE waiting_team_id=?", teamId);
+        setWaitingSettingDisabledVersion(fixture.storeId(), 7L);
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(451), 7L));
         WaitingClosureClaim claim = closureService.claimPendingItems(
@@ -531,6 +560,7 @@ class WaitingLedgerConcurrencyIT {
     void paidConversionAndClaimedClosureRaceCommitExactlyOneTerminalTransition() throws Exception {
         Fixture fixture = fixture(1);
         PaidConversion paid = paidConversion(fixture, 480);
+        setWaitingSettingDisabledVersion(fixture.storeId(), 7L);
         new TransactionTemplate(transactionManager).execute(status ->
                 closureService.startClosure(
                         fixture.operatorId(), fixture.storeId(), key(483), 7L));
@@ -571,6 +601,7 @@ class WaitingLedgerConcurrencyIT {
     void closedPaidConversionCallbackReplayPreservesTerminalAndOneCompensation() {
         Fixture fixture = fixture(1);
         PaidConversion paid = paidConversion(fixture, 490);
+        setWaitingSettingDisabledVersion(fixture.storeId(), 7L);
         new TransactionTemplate(transactionManager).execute(status ->
                 closureService.startClosure(
                         fixture.operatorId(), fixture.storeId(), key(493), 7L));
@@ -714,6 +745,7 @@ class WaitingLedgerConcurrencyIT {
     void committedPartialBatchRetryResumesWithoutDuplicateEffects() {
         Fixture fixture = fixture(2);
         createTeams(fixture, 500);
+        setWaitingSettingDisabledVersion(fixture.storeId(), 8L);
         new TransactionTemplate(transactionManager).execute(status ->
                 closureService.startClosure(fixture.operatorId(), fixture.storeId(), key(510), 8L));
         List<WaitingClosureClaim> claimed = closureService.claimPendingItems(
@@ -790,10 +822,29 @@ class WaitingLedgerConcurrencyIT {
     }
 
     private long createStore(long operatorId) {
-        return stores.saveAndFlush(Store.create(operatorId, registrationNumber(), BusinessType.CAFE,
+        long storeId = stores.saveAndFlush(Store.create(operatorId, registrationNumber(), BusinessType.CAFE,
                 "Concurrency Store", "", Region.SEOUL, "Seoul", "CAFE_BAKERY", Set.of(),
                 true, true, true, "Asia/Seoul", LocalDateTime.of(2026, 8, 1, 9, 0),
                 "STORE_ONBOARDING_REQUIRED_TERMS_V1")).getId();
+        insertWaitingSetting(storeId, true, "MANUAL", 1L);
+        return storeId;
+    }
+
+    private void insertWaitingSetting(long storeId, boolean enabled, String mode, long version) {
+        jdbc.update("""
+                INSERT INTO waiting_settings (
+                    store_id, enabled, reception_mode, advance_open_minutes, version,
+                    lock_version, created_at, updated_at
+                ) VALUES (?, ?, ?, 60, ?, 0, NOW(6), NOW(6))
+                """, storeId, enabled, mode, version);
+    }
+
+    private void setWaitingSettingDisabledVersion(long storeId, long version) {
+        jdbc.update("""
+                UPDATE waiting_settings
+                   SET enabled=FALSE, reception_mode='PAUSED', version=?, updated_at=NOW(6)
+                 WHERE store_id=?
+                """, version, storeId);
     }
 
     private <T> List<Attempt<T>> runTogether(int participants, ConcurrentWork<T> work) throws Exception {
