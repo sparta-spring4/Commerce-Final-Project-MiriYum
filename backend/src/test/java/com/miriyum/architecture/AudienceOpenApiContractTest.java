@@ -55,6 +55,7 @@ class AudienceOpenApiContractTest {
                             REPRESENTATIVE_MENUS_PATH,
                             "/api/v1/store-operators/stores/{storeId}/images",
                             "/api/v1/store-operators/stores/{storeId}/images/{imageId}",
+                            "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images",
                             "/api/v1/public-files/{imageId}",
                             "/api/v1/consumers/auth/kakao/authorizations",
                             "/api/v1/consumers/auth/kakao/sessions",
