@@ -16,6 +16,11 @@ public interface ReservationDepositProcessRepository
             long processId,
             long consumerAccountId);
 
+    @Query("select process.id from ReservationDepositProcess process "
+            + "where process.reservationHoldId = :reservationHoldId")
+    Optional<Long> findProcessIdByReservationHoldId(
+            @Param("reservationHoldId") long reservationHoldId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select process from ReservationDepositProcess process

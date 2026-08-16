@@ -319,6 +319,36 @@ public class ReservationDepositProcessService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationDepositCommandResult reconcileLinkedExpiration(long processId) {
+        requirePositive(processId, "processId");
+        ReservationDepositProcess process = processRepository.findByIdForUpdate(processId)
+                .orElseThrow(() -> new ServiceException(
+                        ReservationErrorCode.RESERVATION_NOT_FOUND));
+        PaymentResult payment = paymentService.getOwnedPayment(
+                process.getPaymentId(), String.valueOf(process.getConsumerAccountId()));
+        requireSamePayment(process, payment);
+        Instant now = clock.instant();
+        if (payment.status() != PaymentStatus.READY
+                || now.isBefore(process.getExpiresAt())
+                || process.isAbandonmentRequested()) {
+            throw new IllegalStateException(
+                    "linked expiration requires payment reconciliation");
+        }
+        holdTransitionPrimitive.transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        process.getReservationHoldId(),
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:" + process.getReservationHoldId(),
+                        "SYSTEM",
+                        null,
+                        process.getExpiresAt(),
+                        null));
+        process.expire(now);
+        processRepository.saveAndFlush(process);
+        return ReservationDepositCommandResult.pending(toResponse(process));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public ReservationDepositCommandResult abandonOwned(
             long processId,
             long consumerAccountId,

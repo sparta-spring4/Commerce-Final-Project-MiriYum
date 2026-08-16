@@ -221,6 +221,51 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void linkedExpirationLocksProcessByInternalIdBeforeExpiringResources() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdForUpdate(PROCESS_ID))
+                .willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.READY,
+                        PaymentAttemptStatus.NOT_STARTED,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result =
+                service.reconcileLinkedExpiration(PROCESS_ID);
+
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.EXPIRED);
+        verify(processRepository).findByIdForUpdate(PROCESS_ID);
+        verify(processRepository, never())
+                .findByIdAndConsumerAccountIdForUpdate(PROCESS_ID, CONSUMER_ID);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+    }
+
+    @Test
     void readyAbandonmentReleasesResourcesAndReturnsCompletedRequest() {
         ReservationDepositProcessRepository processRepository =
                 mock(ReservationDepositProcessRepository.class);

@@ -91,6 +91,10 @@ public class ReservationDepositProcessCommandFacade {
                         ABANDONMENT_ROUTE)));
     }
 
+    public ReservationDepositCommandResult reconcileLinkedExpiration(long processId) {
+        return executeWithRetry(() -> processService.reconcileLinkedExpiration(processId));
+    }
+
     private <T> T executeWithRetry(Supplier<T> work) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
