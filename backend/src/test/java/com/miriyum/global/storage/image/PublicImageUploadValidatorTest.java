@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.image;
+package com.miriyum.global.storage.image;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;

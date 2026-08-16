@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.image;
+package com.miriyum.global.storage.image;
 
 /** 공개 이미지 검증 실패 사유를 HTTP 오류 계약으로 변환하기 위한 예외다. */
 public class PublicImageValidationException extends IllegalArgumentException {
