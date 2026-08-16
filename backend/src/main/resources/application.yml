@@ -158,6 +158,9 @@ miriyum:
     public-store-read:
       max-requests: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_MAX_REQUESTS:60}
       window-seconds: ${MIRIYUM_RATE_LIMIT_PUBLIC_STORE_READ_WINDOW_SECONDS:60}
+    staging-bypass:
+      runtime-environment: ${MIRIYUM_RUNTIME_ENVIRONMENT:}
+      source-ip: ${MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP:}
   menu:
     schedule:
       enabled: ${MIRIYUM_MENU_SCHEDULE_ENABLED:true}
