@@ -131,6 +131,15 @@ export interface paths {
     /** 메뉴 내용을 수정해 새 초안 등록 */
     put: operations["updateMenu"];
   };
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/image": {
+    /**
+     * 메뉴 공개 이미지 저장 또는 교체
+     * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+     */
+    put: operations["putMenuImage"];
+    /** 메뉴 공개 이미지 삭제 */
+    delete: operations["deleteMenuImage"];
+  };
   "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications": {
     /** 메뉴 초안 즉시 게시 또는 예약 게시 */
     post: operations["publishMenu"];
@@ -733,6 +742,12 @@ export interface components {
     };
     /** @description 매장 이미지 최대 개수 초과 또는 Idempotency-Key를 다른 요청에 재사용함 */
     StorePublicImageConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description Idempotency-Key를 다른 메뉴 이미지 요청에 재사용함 */
+    MenuImageConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -1775,6 +1790,68 @@ export interface operations {
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["MenuNotFound"];
       409: components["responses"]["MenuStateConflict"];
+    };
+  };
+  /**
+   * 메뉴 공개 이미지 저장 또는 교체
+   * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+   */
+  putMenuImage: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        menuId: components["parameters"]["MenuId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": {
+          /** Format: binary */
+          file: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 저장 또는 교체를 완료한 메뉴 공개 이미지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicImageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["MenuNotFound"];
+      409: components["responses"]["MenuImageConflict"];
+      413: components["responses"]["ImageSizeExceeded"];
+      415: components["responses"]["UnsupportedImageMediaType"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 메뉴 공개 이미지 삭제 */
+  deleteMenuImage: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        menuId: components["parameters"]["MenuId"];
+      };
+    };
+    responses: {
+      /** @description 삭제 완료 또는 이미지가 없는 메뉴 */
+      204: {
+        content: never;
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["MenuNotFound"];
+      409: components["responses"]["MenuImageConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
   /** 메뉴 초안 즉시 게시 또는 예약 게시 */
