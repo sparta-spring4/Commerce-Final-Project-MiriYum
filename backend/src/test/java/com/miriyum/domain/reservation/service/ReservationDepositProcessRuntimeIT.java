@@ -8,23 +8,38 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.entity.ReservationDepositCalculationSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
+import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
 import com.miriyum.domain.schedule.closure.service.RegularClosureActivationJob;
 import com.miriyum.domain.schedule.service.StoreScheduleActivationJob;
+import com.miriyum.global.idempotency.IdempotencyKey;
 import jakarta.persistence.EntityManager;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +52,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -77,6 +93,15 @@ class ReservationDepositProcessRuntimeIT {
     private ReservationDepositProcessService processService;
 
     @Autowired
+    private ReservationDepositProcessCommandFacade processCommandFacade;
+
+    @Autowired
+    private ReservationHoldCommandFacade holdCommandFacade;
+
+    @Autowired
+    private TransactionTemplate transactions;
+
+    @Autowired
     private MutableClock clock;
 
     @MockitoBean
@@ -95,7 +120,13 @@ class ReservationDepositProcessRuntimeIT {
         jdbcTemplate.execute("DELETE FROM reservation_deposit_cause_audits");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_calculation_items");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_processes");
+        jdbcTemplate.execute("DELETE FROM reservation_hold_transition_audits");
+        jdbcTemplate.execute("DELETE FROM reservation_hold_capacity_allocations");
+        jdbcTemplate.execute("DELETE FROM reservation_capacity_allocations");
+        jdbcTemplate.execute("DELETE FROM reservations");
         jdbcTemplate.execute("DELETE FROM reservation_holds");
+        jdbcTemplate.execute("DELETE FROM reservation_capacity_buckets");
+        jdbcTemplate.execute("DELETE FROM idempotency_commands");
         jdbcTemplate.execute("DELETE FROM stores");
         jdbcTemplate.execute("DELETE FROM store_operator_accounts");
         jdbcTemplate.execute("DELETE FROM consumer_accounts");
@@ -216,6 +247,119 @@ class ReservationDepositProcessRuntimeIT {
         assertThat(found.getReconciliationClaimToken()).isEqualTo(current.token());
     }
 
+    @Test
+    @DisplayName("만료 정각 Hold 만료와 PAID 확정 경합은 부활 없이 한 번의 전액 환불 의무로 수렴한다")
+    void holdExpirationAndPaidFinalizationRaceNeverResurrectsReservation() throws Exception {
+        seedHoldOwnerAndStore();
+        seedCapacityForHold();
+        ReservationDepositProcess saved = processRepository.saveAndFlush(
+                ReservationDepositProcess.awaitingPayment(
+                        40_077L,
+                        10_077L,
+                        EXPIRES_AT,
+                        new Calculation(
+                                91L,
+                                20,
+                                1L,
+                                2,
+                                4_000L,
+                                "KRW",
+                                13L,
+                                40_000L,
+                                1,
+                                List.of(new ItemSnapshot("101", 4, 40_000))),
+                        new PaymentPreparation(
+                                "900000000000000077",
+                                "deposit-runtime-portone",
+                                "미리윰 식당 예약금",
+                                4_000L,
+                                "KRW",
+                                EXPIRES_AT,
+                                PaymentStatus.READY),
+                        REQUESTED_AT));
+        long processId = saved.getId();
+        Instant paidAt = EXPIRES_AT.minusSeconds(1);
+        org.mockito.Mockito.when(paymentService.getOwnedPayment(
+                "900000000000000077", "10077")).thenReturn(new PaymentResult(
+                        "900000000000000077",
+                        "40077",
+                        4_000L,
+                        0L,
+                        4_000L,
+                        "KRW",
+                        PaymentStatus.PAID,
+                        PaymentAttemptStatus.PAID,
+                        REQUESTED_AT,
+                        paidAt,
+                        EXPIRES_AT,
+                        List.of()));
+        clock.set(EXPIRES_AT);
+
+        RacePair<ReservationHoldContracts.Result, ReservationDepositCommandResult> results =
+                invokePairWhileHoldLocked(
+                        () -> holdCommandFacade.transition(
+                                new ReservationHoldContracts.TransitionCommand(
+                                        40_077L,
+                                        ReservationHoldStatus.EXPIRED,
+                                        "reservation-hold-expire:40077",
+                                        "SYSTEM",
+                                        null,
+                                        EXPIRES_AT,
+                                        null)),
+                        () -> processCommandFacade.finalizeRequest(
+                                10_077L,
+                                processId,
+                                IdempotencyKey.parse(
+                                        "550e8400-e29b-41d4-a716-446655440077")));
+
+        assertThat(results.first().status()).isEqualTo(ReservationHoldStatus.EXPIRED);
+        assertThat(results.second().httpStatus()).isEqualTo(202);
+        assertThat(results.second().reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        assertThat(results.second().reservationRequest().reservation()).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservation_holds WHERE reservation_hold_id = 40077",
+                String.class)).isEqualTo("EXPIRED");
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT occupied_people, occupied_teams
+                  FROM reservation_capacity_buckets
+                 WHERE reservation_capacity_bucket_id = 50077
+                """))
+                .containsEntry("occupied_people", 0)
+                .containsEntry("occupied_teams", 0);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_hold_transition_audits
+                 WHERE reservation_hold_id = 40077
+                   AND command_id = 'reservation-hold-expire:40077'
+                   AND before_status = 'ACTIVE'
+                   AND after_status = 'EXPIRED'
+                """, Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservations", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT status, final_reservation_id
+                  FROM reservation_deposit_processes
+                 WHERE reservation_deposit_process_id = ?
+                """, processId))
+                .containsEntry("status", "COMPENSATION_REQUIRED")
+                .containsEntry("final_reservation_id", null);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_deposit_cause_audits
+                 WHERE reservation_deposit_process_id = ?
+                   AND cause_code = 'UNPROTECTED_LATE_PAID'
+                """, Integer.class, processId)).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_deposit_refund_obligations
+                 WHERE reservation_deposit_process_id = ?
+                   AND payment_id = '900000000000000077'
+                   AND reason_code = 'FULL_DEPOSIT_COMPENSATION'
+                   AND status = 'REQUIRED'
+                """, Integer.class, processId)).isOne();
+    }
+
     private void seedHoldOwnerAndStore() {
         jdbcTemplate.update("""
                 INSERT INTO consumer_accounts (
@@ -265,14 +409,160 @@ class ReservationDepositProcessRuntimeIT {
                 ) VALUES (
                     40077, 10077, 30077, '예약금 런타임 매장', '2026-08-21',
                     '2026-08-21 09:00:00.000000', '2026-08-21 10:00:00.000000',
-                    '2026-08-21 10:10:00.000000', 'Asia/Seoul', 32400, 32400,
-                    32400, 10, 60, 10, 30077, 9, 2, 0, 0,
+                    '2026-08-21 10:10:00.000000', 'UTC', 0, 0,
+                    0, 10, 60, 10, 30077, 9, 2, 0, 0,
                     'consumer:10077:channel:primary', TRUE, 7, 8, 'ACTIVE', 0,
                     'deposit-runtime-hold-77',
                     '2026-08-20 09:00:00.000000',
                     '2026-08-20 09:10:00.000000'
                 )
                 """);
+    }
+
+    private void seedCapacityForHold() {
+        jdbcTemplate.update("""
+                INSERT INTO reservation_capacity_buckets (
+                    reservation_capacity_bucket_id, store_id, service_date,
+                    start_time, end_time, max_people, max_teams,
+                    occupied_people, occupied_teams, min_party_size,
+                    max_party_size, infants_allowed, policy_version
+                ) VALUES (
+                    50077, 30077, '2026-08-21', '09:00:00.000000',
+                    '10:10:00.000000', 10, 5, 2, 1, 1, 10, TRUE, 7
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO reservation_hold_capacity_allocations (
+                    reservation_hold_id, reservation_capacity_bucket_id,
+                    occupied_people, occupied_teams, capacity_policy_version
+                ) VALUES (40077, 50077, 2, 1, 7)
+                """);
+    }
+
+    private <F, S> RacePair<F, S> invokePairWhileHoldLocked(
+            java.util.concurrent.Callable<F> firstInvocation,
+            java.util.concurrent.Callable<S> secondInvocation
+    ) throws Exception {
+        CountDownLatch holderReady = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch workersReady = new CountDownLatch(2);
+        CountDownLatch startWorkers = new CountDownLatch(1);
+        AtomicLong holderConnectionId = new AtomicLong();
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        Future<Long> holder = null;
+        Future<F> first = null;
+        Future<S> second = null;
+        try {
+            holder = executor.submit(() -> transactions.execute(status -> {
+                Long lockedId = jdbcTemplate.queryForObject("""
+                        SELECT reservation_hold_id
+                          FROM reservation_holds
+                         WHERE reservation_hold_id = 40077
+                           FOR UPDATE
+                        """, Long.class);
+                assertThat(lockedId).isEqualTo(40_077L);
+                holderConnectionId.set(jdbcTemplate.queryForObject(
+                        "SELECT CONNECTION_ID()", Long.class));
+                holderReady.countDown();
+                awaitLatch(releaseHolder, "hold row lock release");
+                return lockedId;
+            }));
+            assertThat(holderReady.await(5, TimeUnit.SECONDS)).isTrue();
+            first = executor.submit(() -> invokeAfterStart(
+                    firstInvocation, workersReady, startWorkers));
+            second = executor.submit(() -> invokeAfterStart(
+                    secondInvocation, workersReady, startWorkers));
+            assertThat(workersReady.await(5, TimeUnit.SECONDS)).isTrue();
+            startWorkers.countDown();
+            awaitBlockingHoldWaits(holderConnectionId.get(), 2);
+            releaseHolder.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            return new RacePair<>(
+                    first.get(30, TimeUnit.SECONDS),
+                    second.get(30, TimeUnit.SECONDS));
+        } finally {
+            holderReady.countDown();
+            releaseHolder.countDown();
+            workersReady.countDown();
+            workersReady.countDown();
+            startWorkers.countDown();
+            cancelIfRunning(holder);
+            cancelIfRunning(first);
+            cancelIfRunning(second);
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private static <T> T invokeAfterStart(
+            java.util.concurrent.Callable<T> invocation,
+            CountDownLatch workersReady,
+            CountDownLatch startWorkers
+    ) throws Exception {
+        workersReady.countDown();
+        awaitLatch(startWorkers, "deposit race worker start");
+        return invocation.call();
+    }
+
+    private void awaitBlockingHoldWaits(long holderConnectionId, int expectedWaits) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        int lastObservedCount = 0;
+        try (Connection monitoringConnection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), "root", MYSQL.getPassword())) {
+            monitoringConnection.setReadOnly(true);
+            try (PreparedStatement statement = monitoringConnection.prepareStatement("""
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits AS wait_edge
+                    JOIN performance_schema.data_locks AS blocking_lock
+                      ON blocking_lock.ENGINE = wait_edge.ENGINE
+                     AND blocking_lock.ENGINE_LOCK_ID = wait_edge.BLOCKING_ENGINE_LOCK_ID
+                    JOIN information_schema.INNODB_TRX AS blocking_transaction
+                      ON blocking_transaction.TRX_ID = blocking_lock.ENGINE_TRANSACTION_ID
+                    WHERE blocking_transaction.TRX_MYSQL_THREAD_ID = ?
+                      AND blocking_lock.OBJECT_SCHEMA = DATABASE()
+                      AND blocking_lock.OBJECT_NAME = 'reservation_holds'
+                      AND blocking_lock.INDEX_NAME = 'PRIMARY'
+                    """)) {
+                statement.setLong(1, holderConnectionId);
+                while (System.nanoTime() < deadlineNanos) {
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        if (!resultSet.next()) {
+                            throw new AssertionError("lock wait count query returned no row");
+                        }
+                        lastObservedCount = resultSet.getInt(1);
+                    }
+                    if (lastObservedCount >= expectedWaits) {
+                        return;
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("unable to observe MySQL lock waits", exception);
+        }
+        throw new AssertionError(
+                "expected " + expectedWaits + " waits on reservation_holds.PRIMARY"
+                        + " but observed " + lastObservedCount);
+    }
+
+    private static void awaitLatch(CountDownLatch latch, String name) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(name + " timed out");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(name + " interrupted", exception);
+        }
+    }
+
+    private static void cancelIfRunning(Future<?> future) {
+        if (future != null && !future.isDone()) {
+            future.cancel(true);
+        }
+    }
+
+    private record RacePair<F, S>(F first, S second) {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
