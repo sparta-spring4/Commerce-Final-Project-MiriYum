@@ -43,7 +43,7 @@ These are staging Environment variables, not application secrets. Application an
 ## EC2 runtime setup
 
 1. Copy `deploy/.env.example` to `/opt/miriyum/.env` without committing the copied file.
-2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD` and `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`. Set `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the Kakao Local REST API key used for store address verification; do not reuse the Kakao OAuth key.
+2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD`, `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`, and `MIRIYUM_QR_STORAGE_GENERATION`. The QR storage generation must match `^[A-Za-z0-9._-]{1,64}$` on every backend instance. Set `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the Kakao Local REST API key used for store address verification; do not reuse the Kakao OAuth key.
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
@@ -65,7 +65,13 @@ Before logging in to ECR or restarting containers, `deploy.sh` runs `docker comp
 
 The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Validation includes staging `healthy`, unauthenticated `NOAUTH`, authenticated `PONG`, and no host port exposure. Valkey joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
 
+Auth Valkey must use `maxmemory-policy noeviction`; eviction can remove TTL-free QR epoch hashes or Refresh security state and invalidate the atomic logout contract. The staging/production and standard local Compose commands set this explicitly. Any externally managed Valkey must return `noeviction` from `CONFIG GET maxmemory-policy` before rollout. The opt-in local load-test override is non-production and currently relies on Valkey's default `noeviction`, so verify its runtime value on every run instead of treating the file as an explicit guarantee.
+
 After #140 is deployed, Access JWT validation remains stateless, while Refresh Token login, rotation, revocation, reuse detection, and failure-closed authentication use Valkey through Spring Data Redis/Lettuce. Compose waits for MySQL health before starting the backend, but does not wait for Valkey health. If Valkey is unavailable, the backend still starts and deployment health remains available; only Refresh Token operations fail closed with `503`. Existing Access JWT requests and public endpoints continue without Valkey. The `MIRIYUM_VALKEY_HOST`, `MIRIYUM_VALKEY_PORT`, and `MIRIYUM_VALKEY_PASSWORD` values in the EC2 `.env` must match the internal `valkey` service; port `6379` remains private to the Docker network.
+
+`MIRIYUM_QR_STORAGE_GENERATION` fences account QR epochs from restored Valkey data. Keep the same value for ordinary backend or Valkey restarts. Before restoring any older Valkey snapshot, stop the backend, choose a value that has never been used in that environment, update every backend instance, restore the snapshot, and only then resume the backend. Never reopen an earlier generation value. A missing or invalid value leaves non-QR Access JWT traffic available but makes QR capture/check and a Refresh-authorized Consumer logout mutation fail closed with `COMMON_012`; it must not be treated as a successful server logout or QR revocation.
+
+Alert on `event=qr_epoch_refresh_index_mismatch`. `expected=present` means an ACTIVE family was not found in its account index, while `expected=absent` means an exact completed logout marker still has a stale index member. The application log intentionally omits account, family, token, raw token, Valkey key, and generation values. With restricted Valkey access, inspect only the relevant key types, PTTL values, membership, and family status; preserve a snapshot or equivalent incident evidence, isolate the affected logout path if signals continue, and escalate to the Auth owner. Do not attempt ad hoc repair with standalone `SADD`, `DEL`, or `HSET`: cookie expiry can prevent a user retry while the server family remains ACTIVE, and non-atomic edits can create a second inconsistency. Resume normal mutation only through an owner-approved atomic repair procedure or a known-good recovery path.
 
 After the first staging deployment that includes Valkey, verify the service from the EC2 instance:
 
@@ -74,10 +80,11 @@ cd /opt/miriyum
 sudo docker compose --env-file .env -f docker-compose.prod.yml ps valkey
 sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey valkey-cli ping
 sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli ping'
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T valkey sh -ec 'REDISCLI_AUTH="$MIRIYUM_VALKEY_PASSWORD" valkey-cli CONFIG GET maxmemory-policy'
 sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
 ```
 
-The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
+The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, authenticated `PONG`, and a `maxmemory-policy` value of `noeviction`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
 ## MySQL trigger migration recovery
 
