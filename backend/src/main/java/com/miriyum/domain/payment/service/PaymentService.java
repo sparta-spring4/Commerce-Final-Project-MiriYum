@@ -200,10 +200,12 @@ public class PaymentService {
         while (current != null && visited.add(current)) {
             if (current instanceof ConstraintViolationException violation
                     && violation.getSQLException() != null
-                    && violation.getSQLException().getErrorCode() == 1062
-                    && RESERVATION_PREPARATION_CONSTRAINTS.contains(
-                            violation.getConstraintName())) {
-                return true;
+                    && violation.getSQLException().getErrorCode() == 1062) {
+                String constraintName = violation.getConstraintName();
+                if (constraintName != null
+                        && RESERVATION_PREPARATION_CONSTRAINTS.contains(constraintName)) {
+                    return true;
+                }
             }
             current = current.getCause();
         }

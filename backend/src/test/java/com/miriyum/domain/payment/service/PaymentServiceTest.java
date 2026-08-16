@@ -140,6 +140,22 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("constraint 이름이 없는 MySQL 1062는 준비 replay 신호가 아니다")
+    void rejectsMysqlDuplicateWithoutConstraintName() {
+        PrepareReservationDepositCommand command = prepareCommand();
+        when(transactions.prepare(command, NOW))
+                .thenThrow(preparationConflict(null, 1062));
+
+        assertThatThrownBy(() -> paymentService.prepareReservationDeposit(command))
+                .isInstanceOfSatisfying(ServiceException.class, exception -> {
+                    assertThat(exception)
+                            .isNotInstanceOf(PaymentPreparationRetryableConflictException.class);
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+                });
+    }
+
+    @Test
     @DisplayName("승인 constraint여도 MySQL 1062가 아니면 준비 replay 신호가 아니다")
     void rejectsApprovedConstraintWithDifferentMysqlCode() {
         PrepareReservationDepositCommand command = prepareCommand();
