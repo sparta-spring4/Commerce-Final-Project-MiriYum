@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
 import com.miriyum.domain.store.enums.BusinessType;
@@ -158,6 +159,25 @@ class StoreAdministrationServiceIT {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(StoreErrorCode.STORE_FEATURE_RESTRICTED));
         sibling.requirePlatformManagementAllowed();
+    }
+
+    @Test
+    void releasingLatestOverlappingSanctionKeepsEarlierRestriction() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        StoreEnforcementState state = StoreEnforcementState.initial(target);
+        state.apply(new EnforcementCommand(TARGET_STORE_ID, 0L, 91L, OperationStatus.OPEN,
+                false, true, true, true, true, Set.of(RestrictedFeature.RESERVATION)));
+        state.apply(new EnforcementCommand(TARGET_STORE_ID, 1L, 92L, OperationStatus.OPEN,
+                false, true, true, false, true, Set.of(RestrictedFeature.WAITING)));
+        target.applyPlatformEnforcement(OperationStatus.OPEN, false, true, true, true);
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(state));
+
+        var result = service.release(new ReleaseCommand(TARGET_STORE_ID, 92L));
+
+        assertThat(result.reservationEnabled()).isFalse();
+        assertThat(result.waitingAllowed()).isTrue();
+        assertThat(result.restrictedFeatures()).containsExactly(RestrictedFeature.RESERVATION);
     }
 
     private Store openStore(long storeId, long operatorId) {

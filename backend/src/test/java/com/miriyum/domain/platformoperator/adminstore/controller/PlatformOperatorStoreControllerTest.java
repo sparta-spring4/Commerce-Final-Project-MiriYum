@@ -20,9 +20,13 @@ class PlatformOperatorStoreControllerTest {
  private AdminStoreQueryService queries; private MockMvc mvc;
  @BeforeEach void setUp(){queries=mock(AdminStoreQueryService.class);mvc=MockMvcBuilders.standaloneSetup(new PlatformOperatorStoreController(queries,mock(StoreSanctionCaseService.class),mock(StoreSanctionImpactService.class),mock(StoreSanctionCommandService.class))).setCustomArgumentResolvers(new HandlerMethodArgumentResolver(){public boolean supportsParameter(MethodParameter p){return p.getParameterType()==PlatformOperatorPrincipal.class;}public Object resolveArgument(MethodParameter p,org.springframework.web.method.support.ModelAndViewContainer m,NativeWebRequest r,org.springframework.web.bind.support.WebDataBinderFactory b){return new PlatformOperatorPrincipal(1L,"admin@example.com","sid",1,1,false);}}).build();}
  @Test void platformStoreListUsesDedicatedAdminEndpointAndRequiresReasonHeader() throws Exception {
-  when(queries.search(any(),isNull(),isNull(),eq(0),eq(20))).thenReturn(new StorePage(List.of(),0,20,0,0));
+  when(queries.search(any(),isNull(),isNull(),eq(0),eq(20),any(),any())).thenReturn(new StorePage(List.of(),0,20,0,0));
   mvc.perform(get("/api/v1/platform-operators/stores").header("X-Admin-Reason-Code","STORE_ENFORCEMENT"))
     .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("SUCCESS")).andExpect(jsonPath("$.data.content").isArray());
-  mvc.perform(get("/api/v1/platform-operators/stores")).andExpect(status().isBadRequest());
+ mvc.perform(get("/api/v1/platform-operators/stores")).andExpect(status().isBadRequest());
+ }
+ @Test void rejectsUnknownStructuredAuditReason() throws Exception {
+  mvc.perform(get("/api/v1/platform-operators/stores").header("X-Admin-Reason-Code","FREE_TEXT_REASON"))
+    .andExpect(status().isBadRequest());
  }
 }

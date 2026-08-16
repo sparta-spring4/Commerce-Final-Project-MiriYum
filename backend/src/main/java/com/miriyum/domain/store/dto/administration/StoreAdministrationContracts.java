@@ -56,9 +56,9 @@ public final class StoreAdministrationContracts {
         }
     }
 
-    public record ReleaseCommand(long storeId, long expectedEnforcementVersion, long sanctionId) {
+    public record ReleaseCommand(long storeId, long sanctionId) {
         public ReleaseCommand {
-            if (storeId <= 0 || expectedEnforcementVersion < 1 || sanctionId <= 0) {
+            if (storeId <= 0 || sanctionId <= 0) {
                 throw new IllegalArgumentException("store enforcement release is invalid");
             }
         }

@@ -76,7 +76,9 @@ class StoreSanctionImpactServiceTest {
                 .willReturn(new StorePaymentImpact(1, 1, Set.of("pay-2")));
         StoreSanctionImpactService service = new StoreSanctionImpactService(
                 mock(StoreSanctionCaseService.class), stores, reservations, waiting, pickups,
-                payments, previews, Clock.fixed(now, ZoneOffset.UTC));
+                payments, previews, mock(com.miriyum.domain.platformoperator.service.OperatorAuthorityReader.class),
+                mock(com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter.class),
+                Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.verify(10L, "case-1",
                 new ImpactConfirmation(1L, storedDigest, 3L, 7L), shape))

@@ -12,6 +12,7 @@ import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuditEventRepository;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -66,19 +67,24 @@ public class PlatformOperatorAuditWriter {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public PlatformOperatorAuditEvent appendStore(StoreEvent event) {
-        return repository.append(PlatformOperatorAuditEvent.create(
+        return repository.append(PlatformOperatorAuditEvent.createStore(
                 event.operatorId(), event.authorityVersion(), event.roles(), event.permissions(),
-                event.action(), PlatformOperatorAuditOutcome.SUCCESS, PlatformOperatorAuditReason.STORE_ENFORCEMENT,
-                "STORE", event.storeId(), AdminCaseType.STORE_ENFORCEMENT, event.caseId(),
-                event.caseVersion(), event.idempotencyKey(), null, null, Set.of(), Set.of(),
-                Set.of(), Set.of(), event.correlationId(), clock.instant()));
+                event.action(), event.outcome(), event.reason(), event.targetType(), event.targetId(),
+                event.storeId(), event.caseId(), event.caseVersion(), event.sanctionId(),
+                event.sanctionVersion(), event.storeEnforcementVersion(), event.idempotencyKey(),
+                event.beforeSnapshot(), event.afterSnapshot(), event.correlationId(), clock.instant()));
     }
 
     public record StoreEvent(long operatorId, long authorityVersion, Set<PlatformOperatorRole> roles,
                              Set<PlatformOperatorPermission> permissions,
-                             PlatformOperatorAuditAction action, String storeId, String caseId,
-                             long caseVersion, String idempotencyKey, String correlationId) {
-        public StoreEvent { roles=Set.copyOf(roles); permissions=Set.copyOf(permissions); }
+                             PlatformOperatorAuditAction action, PlatformOperatorAuditOutcome outcome,
+                             PlatformOperatorAuditReason reason, String targetType, String targetId,
+                             Long storeId, String caseId, long caseVersion, Long sanctionId,
+                             Long sanctionVersion, Long storeEnforcementVersion, String idempotencyKey,
+                             Map<String, Object> beforeSnapshot, Map<String, Object> afterSnapshot,
+                             String correlationId) {
+        public StoreEvent { roles=Set.copyOf(roles); permissions=Set.copyOf(permissions);
+            beforeSnapshot=Map.copyOf(beforeSnapshot); afterSnapshot=Map.copyOf(afterSnapshot); }
     }
 
     public record ManagementEvent(

@@ -6,18 +6,23 @@ import com.miriyum.domain.platformoperator.adminstore.entity.*;
 import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionEnums.*;
 import com.miriyum.domain.platformoperator.adminstore.exception.AdminStoreErrorCode;
 import com.miriyum.domain.platformoperator.adminstore.repository.*;
+import com.miriyum.domain.platformoperator.adminstore.model.StoreSanctionPolicyCatalog;
+import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.SanctionShape;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.*;
 import com.miriyum.domain.store.repository.StoreRepository;
+import com.miriyum.domain.store.service.StoreAdministrationService;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.storeoperator.entity.StoreOperatorAccount;
 import com.miriyum.domain.storeoperator.repository.StoreOperatorAccountRepository;
 import com.miriyum.global.exception.ServiceException;
 import java.time.*; import java.util.*; import java.util.concurrent.*;
 import org.junit.jupiter.api.*; import org.springframework.beans.factory.annotation.*; import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.crypto.password.PasswordEncoder; import org.springframework.test.context.*; import org.springframework.transaction.*; import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.junit.jupiter.*; import org.testcontainers.mysql.MySQLContainer;
 
 @Tag("integration") @Tag("integration-shard-a") @Testcontainers
@@ -28,6 +33,8 @@ class StoreSanctionConcurrencyIT {
  @Autowired StoreOperatorAccountRepository operatorAccounts; @Autowired StoreRepository stores;
  @Autowired PlatformOperatorAccountRepository platformAccounts; @Autowired StoreSanctionCaseRepository cases;
  @Autowired StoreSanctionRepository sanctions; @Autowired PlatformTransactionManager transactions; @Autowired PasswordEncoder encoder;
+ @Autowired StoreAdministrationService storeAdministration; @Autowired StoreSanctionPolicyCatalog policy;
+ @Autowired StoreSanctionExpiryTransaction expiryTransaction; @Autowired JdbcTemplate jdbc;
 
  @Test void exactlyOneConcurrentReleaseTransitionSucceeds() throws Exception {
   var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner279@example.com","hash","owner"));
@@ -54,6 +61,37 @@ class StoreSanctionConcurrencyIT {
   try(var executor=Executors.newFixedThreadPool(2)){var expire=executor.submit(()->terminal(s.getId(),c.getPublicId(),store.getId(),true,ready,start));var release=executor.submit(()->terminal(s.getId(),c.getPublicId(),store.getId(),false,ready,start));assertThat(ready.await(10,TimeUnit.SECONDS)).isTrue();start.countDown();outcomes=List.of(expire.get(10,TimeUnit.SECONDS),release.get(10,TimeUnit.SECONDS));}
   assertThat(outcomes).containsExactlyInAnyOrder(true,false);assertThat(sanctions.findById(s.getId()).orElseThrow().getSanctionVersion()).isEqualTo(2);
  }
+ @Test void overlappingSanctionsKeepOnlyTheRemainingEffectInBothReleaseOrders() {
+  assertOverlappingReleaseOrder("latest",false);
+  assertOverlappingReleaseOrder("earlier",true);
+ }
+ @Test void automaticExpiryPersistsStoreSnapshotAuditInTheSameTransaction() {
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-expiry-audit@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567894",BusinessType.CAFE,"expiry-audit","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-expiry-audit@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://expiry-audit"),"ADMIN-007-v1",Instant.now()));
+  StoreSanction sanction=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"expiry-audit",Instant.now().minusSeconds(600),Instant.now().minusSeconds(1),admin.getId(),false,0,Instant.now().minusSeconds(600)));
+  apply(sanction);
+
+  assertThat(expiryTransaction.expire(sanction.getId(),Instant.now())).isTrue();
+
+  Integer count=jdbc.queryForObject("select count(*) from platform_operator_audit_events where action='STORE_SANCTION_EXPIRED' and store_sanction_id=? and before_snapshot is not null and after_snapshot is not null",Integer.class,sanction.getId());
+  assertThat(count).isEqualTo(1);
+ }
+ private void assertOverlappingReleaseOrder(String suffix,boolean releaseEarlier){
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-overlap-"+suffix+"@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),releaseEarlier?"1234567893":"1234567892",BusinessType.CAFE,"overlap-"+suffix,"",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-overlap-"+suffix+"@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://"+suffix),"ADMIN-007-v1",Instant.now()));
+  StoreSanction reservation=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.RESERVATION),"reservation",Instant.now(),null,admin.getId(),false,0,Instant.now()));
+  StoreSanction waiting=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.FEATURE_RESTRICTION,Set.of(RestrictedFeature.WAITING),"waiting",Instant.now(),null,admin.getId(),false,0,Instant.now()));
+  apply(reservation);apply(waiting);StoreSanction target=releaseEarlier?reservation:waiting;releaseApplied(target);
+  var remaining=storeAdministration.inspect(store.getId());
+  if(releaseEarlier){assertThat(remaining.reservationEnabled()).isTrue();assertThat(remaining.waitingAllowed()).isFalse();}
+  else{assertThat(remaining.reservationEnabled()).isFalse();assertThat(remaining.waitingAllowed()).isTrue();}
+ }
+ private void apply(StoreSanction seed){new TransactionTemplate(transactions).executeWithoutResult(status->{var sanction=sanctions.findScopedForUpdate(seed.getId(),seed.getCaseId(),seed.getStoreId()).orElseThrow();var current=storeAdministration.inspect(seed.getStoreId());var shape=new SanctionShape(sanction.getType(),sanction.getRestrictedFeatures(),sanction.getStartsAt(),sanction.getEndsAt());var result=storeAdministration.apply(policy.command(seed.getStoreId(),current.enforcementVersion(),seed.getId(),current,shape));sanction.enforced(result.enforcementVersion());});}
+ private void releaseApplied(StoreSanction seed){new TransactionTemplate(transactions).executeWithoutResult(status->{var sanction=sanctions.findScopedForUpdate(seed.getId(),seed.getCaseId(),seed.getStoreId()).orElseThrow();var result=storeAdministration.release(new ReleaseCommand(seed.getStoreId(),seed.getId()));sanction.release(sanction.getSanctionVersion(),result.enforcementVersion(),Instant.now());});}
  private boolean release(long id,String caseId,long storeId,CountDownLatch ready,CountDownLatch start){ready.countDown();await(start);try{return new TransactionTemplate(transactions).execute(status->{var value=sanctions.findScopedForUpdate(id,caseId,storeId).orElseThrow();value.release(1,2,Instant.now());return true;});}catch(ServiceException e){assertThat(e.getErrorCode()).isEqualTo(AdminStoreErrorCode.SANCTION_STATE_CONFLICT);return false;}}
  private boolean terminal(long id,String caseId,long storeId,boolean expire,CountDownLatch ready,CountDownLatch start){ready.countDown();await(start);try{return new TransactionTemplate(transactions).execute(status->{var value=sanctions.findScopedForUpdate(id,caseId,storeId).orElseThrow();if(expire)value.expire(1,2,Instant.now());else value.release(1,2,Instant.now());return true;});}catch(ServiceException e){assertThat(e.getErrorCode()).isEqualTo(AdminStoreErrorCode.SANCTION_STATE_CONFLICT);return false;}}
  private static void await(CountDownLatch l){try{if(!l.await(10,TimeUnit.SECONDS))throw new AssertionError("timeout");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new AssertionError(e);}}

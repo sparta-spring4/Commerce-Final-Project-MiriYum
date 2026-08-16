@@ -104,6 +104,13 @@ class PlatformOperatorOpenApiContractTest {
     }
 
     @Test
+    void sharedAdminReasonCodeIncludesStoreEnforcement() throws Exception {
+        Map<String, Object> management = document("platform-operator-management-audit/openapi.yaml");
+        Map<String, Object> schemas = map(map(management.get("components")).get("schemas"));
+        assertThat(list(map(schemas.get("AuditReason")).get("enum"))).contains("STORE_ENFORCEMENT");
+    }
+
+    @Test
     void runtimeControllerMethodsCannotDriftFromStaticOperations() throws Exception {
         Map<String, Object> paths = map(document("platform-operator-auth/openapi.yaml").get("paths"));
         Map<String, String> runtime = new LinkedHashMap<>();

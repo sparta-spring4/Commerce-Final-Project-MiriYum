@@ -43,11 +43,11 @@ public class StoreAdministrationService {
                 .orElseGet(() -> enforcementStates.save(StoreEnforcementState.initial(store)));
         state.apply(command);
         store.applyPlatformEnforcement(
-                command.operationStatus(),
-                command.reservationEnabled(),
-                command.menuHoldEnabled(),
-                command.pickupEnabled(),
-                command.storeManagementAllowed());
+                state.effectiveOperationStatus(),
+                state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(),
+                state.effectivePickupEnabled(),
+                state.isStoreManagementAllowed());
         return new EnforcementResult(
                 store.getId(),
                 state.getEnforcementVersion(),
@@ -57,7 +57,7 @@ public class StoreAdministrationService {
                 store.isPickupEnabled(),
                 state.isWaitingAllowed(),
                 state.isStoreManagementAllowed(),
-                command.restrictedFeatures());
+                state.activeRestrictedFeatures());
     }
 
     @Transactional(readOnly = true)
@@ -81,7 +81,8 @@ public class StoreAdministrationService {
         return new EnforcementResult(storeId, state.map(StoreEnforcementState::getEnforcementVersion).orElse(0L),
                 store.getOperationStatus(), store.isReservationEnabled(), store.isMenuHoldEnabled(),
                 store.isPickupEnabled(), state.map(StoreEnforcementState::isWaitingAllowed).orElse(true),
-                state.map(StoreEnforcementState::isStoreManagementAllowed).orElse(true), Set.of());
+                state.map(StoreEnforcementState::isStoreManagementAllowed).orElse(true),
+                state.map(StoreEnforcementState::activeRestrictedFeatures).orElse(Set.of()));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -91,10 +92,11 @@ public class StoreAdministrationService {
         StoreEnforcementState state = enforcementStates.findByStoreIdForUpdate(command.storeId())
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT));
         state.release(command);
-        store.applyPlatformEnforcement(state.getBaseOperationStatus(), state.isBaseReservationEnabled(),
-                state.isBaseMenuHoldEnabled(), state.isBasePickupEnabled(), true);
+        store.applyPlatformEnforcement(state.effectiveOperationStatus(), state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(), state.effectivePickupEnabled(), state.isStoreManagementAllowed());
         return new EnforcementResult(store.getId(), state.getEnforcementVersion(), store.getOperationStatus(),
-                store.isReservationEnabled(), store.isMenuHoldEnabled(), store.isPickupEnabled(), true, true, Set.of());
+                store.isReservationEnabled(), store.isMenuHoldEnabled(), store.isPickupEnabled(),
+                state.isWaitingAllowed(), state.isStoreManagementAllowed(), state.activeRestrictedFeatures());
     }
 
     @Transactional(readOnly = true)

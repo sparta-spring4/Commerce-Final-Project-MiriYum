@@ -8,6 +8,8 @@ import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionImpact
 import com.miriyum.domain.platformoperator.adminstore.exception.AdminStoreErrorCode;
 import com.miriyum.domain.platformoperator.adminstore.repository.StoreSanctionImpactPreviewRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
+import com.miriyum.domain.platformoperator.enums.*;
+import com.miriyum.domain.platformoperator.service.*;
 import com.miriyum.domain.reservation.service.StoreReservationImpactQueryService;
 import com.miriyum.domain.reservation.waiting.service.StoreWaitingImpactQueryService;
 import com.miriyum.domain.store.service.StoreAdministrationService;
@@ -16,6 +18,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -27,23 +30,31 @@ public class StoreSanctionImpactService {
     private final StoreReservationImpactQueryService reservations; private final StoreWaitingImpactQueryService waiting;
     private final StorePickupImpactQueryService pickups; private final StorePaymentImpactQueryService payments;
     private final StoreSanctionImpactPreviewRepository previews; private final Clock clock;
+    private final OperatorAuthorityReader authorities; private final PlatformOperatorAuditWriter audit;
     public StoreSanctionImpactService(StoreSanctionCaseService cases, StoreAdministrationService stores,
             StoreReservationImpactQueryService reservations, StoreWaitingImpactQueryService waiting,
             StorePickupImpactQueryService pickups, StorePaymentImpactQueryService payments,
-            StoreSanctionImpactPreviewRepository previews, Clock clock) {
+            StoreSanctionImpactPreviewRepository previews, OperatorAuthorityReader authorities,
+            PlatformOperatorAuditWriter audit, Clock clock) {
         this.cases=cases; this.stores=stores; this.reservations=reservations; this.waiting=waiting;
-        this.pickups=pickups; this.payments=payments; this.previews=previews; this.clock=clock;
+        this.pickups=pickups; this.payments=payments; this.previews=previews; this.authorities=authorities;this.audit=audit;this.clock=clock;
     }
     @Transactional
     public ImpactPreviewData create(PlatformOperatorPrincipal principal, long storeId, String caseId,
-                                    long caseVersion, SanctionShape shape) {
-        cases.requireAssigned(principal, storeId, caseId, caseVersion);
+                                    long caseVersion, SanctionShape shape,PlatformOperatorAuditReason reason,String correlation) {
+        var c=cases.requireAssigned(principal, storeId, caseId, caseVersion);
         Instant now=clock.instant(); var state=stores.inspect(storeId); var impact=inspect(storeId,now);
         String fp=StoreSanctionFingerprint.shape(shape.type(), shape.restrictedFeatures(), shape.startsAt(), shape.endsAt());
         String digest=impact.digest(caseId,storeId,caseVersion,state.enforcementVersion(),fp);
-        return previews.saveAndFlush(StoreSanctionImpactPreview.create(caseId, storeId, caseVersion,
+        var data=previews.saveAndFlush(StoreSanctionImpactPreview.create(caseId, storeId, caseVersion,
                 state.enforcementVersion(), impact.reservations().size(), impact.waiting().size(), impact.pickups().size(),
                 impact.payments().size(), fp, digest, now.plus(Duration.ofMinutes(10)))).data();
+        var authority=authorities.requireCurrentAuthority(principal.accountId(),principal.authorityVersion());
+        audit.appendStore(new PlatformOperatorAuditWriter.StoreEvent(principal.accountId(),authority.authorityVersion(),
+                authority.roles(),authority.permissions(),PlatformOperatorAuditAction.STORE_IMPACT_PREVIEWED,
+                PlatformOperatorAuditOutcome.SUCCESS,reason,"STORE_IMPACT_PREVIEW",String.valueOf(data.previewId()),
+                storeId,caseId,c.getCaseVersion(),null,null,state.enforcementVersion(),null,Map.of(),
+                Map.of("preview",AdminStoreAuditSnapshots.preview(data),"store",AdminStoreAuditSnapshots.store(state)),correlation));return data;
     }
     @Transactional(readOnly = true)
     public void verify(long storeId, String caseId, ImpactConfirmation confirmation, SanctionShape shape) {

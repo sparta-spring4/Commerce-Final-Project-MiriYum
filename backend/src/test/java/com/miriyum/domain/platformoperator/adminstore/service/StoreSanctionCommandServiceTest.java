@@ -11,6 +11,7 @@ import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionEnums.
 import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanction;
 import com.miriyum.domain.platformoperator.adminstore.model.StoreSanctionPolicyCatalog;
 import com.miriyum.domain.platformoperator.adminstore.repository.*;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditReason;
 import com.miriyum.domain.platformoperator.service.*;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
@@ -39,7 +40,8 @@ class StoreSanctionCommandServiceTest {
 
         IdempotentOutcome result=service.create(command,new PlatformOperatorPrincipal(17L,"a@b.com","sid",1,1,false),
                 10L,"case-1",3L,new SanctionCreate(SanctionType.FEATURE_RESTRICTION,
-                        Set.of(RestrictedFeature.RESERVATION),null,null,"reason",null),null);
+                        Set.of(RestrictedFeature.RESERVATION),null,null,"reason",null),
+                PlatformOperatorAuditReason.STORE_ENFORCEMENT,null);
 
         assertThat(result).isSameAs(stored);
     }

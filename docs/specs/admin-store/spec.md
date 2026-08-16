@@ -88,7 +88,7 @@ AdminCaseAssignmentManager.assign(
 
 ### 3.3 Store별 enforcement
 
-`StoreEnforcementState`는 Store당 하나이며 제재 전 운영 상태·mode snapshot, 합성된 현재 효과, `enforcementVersion`과 마지막 sanction ID를 보존한다. 모든 적용·복구는 `storeId`만으로 계산한다. 겹친 제재 해제 시 남은 활성 제재를 다시 합성한다.
+`StoreEnforcementState`는 Store당 하나이며 제재 전 운영 상태·mode snapshot, 활성 제재별 projection, 합성된 현재 효과, `enforcementVersion`과 마지막 sanction ID를 보존한다. 모든 적용·복구는 `storeId`만으로 계산한다. 겹친 제재는 제한 기능의 합집합과 `CLOSED > TEMPORARILY_CLOSED > 기본 상태` 우선순위로 합성하고, 어느 순서로 해제해도 남은 활성 projection만 다시 합성한다.
 
 Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 하지 않는다. 모든 Store scoped 관리 권한과 신규 거래는 Store 정본과 중앙 enforcement 상태를 요청마다 검사한다. 현재 Store application cache는 없으므로 새 API도 cache하지 않는다. 향후 cache key는 `storeId + enforcementVersion`이어야 한다.
 
@@ -103,7 +103,9 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 5. 조건부 상태 전이와 Store 정본 변경을 수행한다.
 6. 같은 트랜잭션에서 불변 감사 이벤트를 append한다.
 
-동일 version의 동시 승인·해제·만료 중 하나만 성공하고 패자는 `409 ADMIN_STORE_005`를 받는다.
+동일 version의 동시 승인·해제·만료 중 하나만 성공하고 패자는 `409 ADMIN_STORE_005`를 받는다. 해제 port는 stale한 호출자 version을 전달받지 않고 Store 잠금 안에서 현재 projection을 제거·재합성하여 새 `enforcementVersion`을 반환한다.
+
+기간 제재 만료 조회는 최대 100개 ID만 읽고, 각 ID를 별도의 `REQUIRES_NEW` 트랜잭션에서 다시 잠근 뒤 상태를 확인한다. 한 건의 실패는 경고로 남기고 다음 ID를 계속 처리하므로 전체 batch를 rollback하거나 이후 만료를 막지 않는다. 만료 작업은 단일 thread의 전용 `storeSanctionTaskScheduler`를 사용해 공용 scheduler를 점유하지 않는다.
 
 ## 4. 거래 영향 미리보기
 
@@ -130,9 +132,9 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 - 고위험 명령: `HighRiskCommandGuard`와 `STORE_SANCTION` 목적 재인증
 - 영구 퇴점·전체 기능 제한: 제안자와 다른 `SUPER_ADMIN`
 
-감사 action은 `STORE_CASE_CREATED`, `STORE_CASE_ASSIGNED`, `STORE_CASE_DETAIL_READ`, `STORE_IMPACT_PREVIEWED`, `STORE_SANCTION_PROPOSED`, `STORE_SANCTION_APPROVED`, `STORE_SANCTION_APPLIED`, `STORE_SANCTION_RELEASED`, `STORE_SANCTION_EXPIRED`, `STORE_SANCTION_REJECTED`다.
+감사 action은 `STORE_SEARCHED`, `STORE_DETAIL_READ`, `STORE_CASE_CREATED`, `STORE_CASE_ASSIGNED`, `STORE_CASE_DETAIL_READ`, `STORE_IMPACT_PREVIEWED`, `STORE_SANCTION_PROPOSED`, `STORE_SANCTION_APPROVED`, `STORE_SANCTION_APPLIED`, `STORE_SANCTION_RELEASED`, `STORE_SANCTION_EXPIRED`, `STORE_SANCTION_REJECTED`다.
 
-감사에는 actor, 공통 case, reason, Store/sanction ID, 멱등 key, 결과, 이전·이후 사건/제재/Store snapshot과 세 version을 기록한다. 상태 변경과 audit append는 같은 트랜잭션이다. `#282` update/delete 차단 trigger를 유지한다.
+모든 endpoint의 `X-Admin-Reason-Code`는 구조화 enum으로 검증하며 감사에는 actor, 공통 case, reason, Store/sanction ID, 멱등 key, 결과, 이전·이후 사건/제재/Store snapshot과 세 version을 기록한다. snapshot은 응답 record를 보관하지 않고 JSON 원시 값으로 정규화한다. 상태 변경과 audit append는 같은 트랜잭션이다. 자동 만료는 원 제재 생성자의 최신 권한 snapshot과 `automation=true`를 기록한다. `PlatformOperatorAuditEvent`는 Hibernate `@Immutable`이고 `#282` update/delete 차단 trigger도 유지한다.
 
 ## 6. HTTP 계약
 
@@ -152,7 +154,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 ## 7. migration 선택 gate
 
-현재 dev 최대 migration은 V46이지만 #279 번호를 미리 고정하지 않는다. migration 생성 직전에 최신 `origin/dev`를 fetch하고 모든 열린 PR의 migration 파일을 조회한다. 병합 dev와 열린 PR 어디에도 없는 다음 번호 하나를 선택해 `V{N}__create_store_sanctions.sql` 하나만 만든다.
+구현 직전과 리뷰 보완 시점에 최신 `origin/dev`와 열린 PR의 migration 파일을 다시 조회했다. V47·V48은 dev에 병합됐고 열린 PR `#394`가 V49, `#388`이 V50, `#389`가 V51을 사용하므로 겹치지 않는 V52를 선택했다. 이후 dev 동기화에서도 번호 충돌이 없음을 다시 확인한다.
 
 ## 8. 정확한 변경 파일 allowlist
 
@@ -162,12 +164,14 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 - `docs/specs/admin-store/spec.md`
 - `docs/specs/admin-store/openapi.yaml`
+- `docs/specs/platform-operator-management-audit/openapi.yaml` (`#278` 공통 `AdminReasonCode`가 참조하는 enum에 `STORE_ENFORCEMENT`를 추가)
 - `docs/specs/README.md`
 - `docs/specs/platform-operator-openapi.yaml`
 - `redocly.yaml`
 
 ### admin-store
 
+- `backend/src/main/java/com/miriyum/domain/platformoperator/config/PlatformOperatorStoreSanctionSchedulingConfig.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/PlatformOperatorStoreController.java` (플랫폼 운영자 namespace와 management purpose HTTP boundary)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/dto/AdminStoreRequests.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/dto/AdminStoreResponses.java`
@@ -186,7 +190,9 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionImpactService.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionCommandService.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionExpiryService.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionExpiryTransaction.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionFingerprint.java`
+- `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/service/AdminStoreAuditSnapshots.java` (감사 JSON에는 응답 record 대신 원시 값 snapshot만 저장)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/exception/AdminStoreErrorCode.java`
 
 ### Store contract-first
@@ -207,6 +213,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationRepository.java`
 - `backend/src/main/java/com/miriyum/domain/reservation/service/StoreReservationImpactQueryService.java`
 - `backend/src/main/java/com/miriyum/domain/reservation/waiting/dto/StoreWaitingImpact.java`
+- `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java` (활성 Waiting ID의 읽기 전용 projection query)
 - `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/StoreWaitingImpactQueryService.java`
 - `backend/src/main/java/com/miriyum/domain/reservation/waiting/service/WaitingCreationService.java`
 - `backend/src/main/java/com/miriyum/domain/pickup/dto/StorePickupImpact.java`
@@ -222,7 +229,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditAction.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditReason.java` (구조화된 `STORE_ENFORCEMENT` 사유)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/PlatformOperatorAuditWriter.java`
-- `backend/src/main/resources/db/migration/V49__create_store_sanctions.sql`
+- `backend/src/main/resources/db/migration/V52__create_store_sanctions.sql`
 
 ### 테스트
 
@@ -231,6 +238,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/AdminStoreQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionImpactServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionCommandServiceTest.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionExpiryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/model/StoreSanctionPolicyCatalogTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionConcurrencyIT.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/controller/AdminStoreHttpIT.java`

@@ -10,14 +10,29 @@ ALTER TABLE platform_operator_audit_events
         'LOGIN', 'REAUTHENTICATION', 'LOGOUT', 'REFRESH', 'INITIAL_PASSWORD_CHANGED',
         'SESSION_REVOKED', 'ACCOUNT_CREATED', 'AUTHORITY_REPLACED', 'ACCOUNT_SUSPENDED',
         'AUDIT_SEARCH', 'AUDIT_DETAIL_READ', 'AUDIT_CORRECTION',
-        'STORE_CASE_CREATED', 'STORE_CASE_ASSIGNED', 'STORE_IMPACT_PREVIEWED',
-        'STORE_SANCTION_CREATED', 'STORE_SANCTION_APPROVED', 'STORE_SANCTION_RELEASED'
+        'STORE_SEARCHED', 'STORE_DETAIL_READ', 'STORE_CASE_CREATED', 'STORE_CASE_ASSIGNED',
+        'STORE_CASE_DETAIL_READ', 'STORE_IMPACT_PREVIEWED', 'STORE_SANCTION_PROPOSED',
+        'STORE_SANCTION_APPROVED', 'STORE_SANCTION_APPLIED', 'STORE_SANCTION_RELEASED',
+        'STORE_SANCTION_EXPIRED', 'STORE_SANCTION_REJECTED'
     )),
     ADD CONSTRAINT ck_platform_operator_audit_events_reason CHECK (reason IN (
         'AUTHENTICATION_EVENT', 'ACCOUNT_PROVISIONING', 'RESPONSIBILITY_CHANGE',
         'EMPLOYMENT_END', 'SECURITY_RESPONSE', 'AUDIT_VERIFICATION', 'RECORD_CORRECTION',
         'STORE_ENFORCEMENT'
     ));
+
+ALTER TABLE platform_operator_audit_events
+    ADD COLUMN store_id BIGINT NULL,
+    ADD COLUMN store_sanction_id BIGINT NULL,
+    ADD COLUMN store_sanction_version BIGINT NULL,
+    ADD COLUMN store_enforcement_version BIGINT NULL,
+    ADD COLUMN before_snapshot JSON NULL,
+    ADD COLUMN after_snapshot JSON NULL,
+    ADD INDEX ix_platform_operator_audit_store (store_id, occurred_at),
+    ADD CONSTRAINT ck_platform_operator_audit_events_store_versions CHECK (
+        (store_sanction_version IS NULL OR store_sanction_version >= 1)
+        AND (store_enforcement_version IS NULL OR store_enforcement_version >= 0)
+    );
 
 CREATE TABLE store_enforcement_states (
     store_enforcement_state_id BIGINT NOT NULL AUTO_INCREMENT,
@@ -30,6 +45,7 @@ CREATE TABLE store_enforcement_states (
     waiting_allowed BOOLEAN NOT NULL DEFAULT TRUE,
     store_management_allowed BOOLEAN NOT NULL DEFAULT TRUE,
     last_sanction_id BIGINT NULL,
+    active_enforcements JSON NOT NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (store_enforcement_state_id),
@@ -108,11 +124,7 @@ CREATE TABLE store_sanctions (
     created_by BIGINT NOT NULL,
     created_at DATETIME(6) NOT NULL,
     released_at DATETIME(6) NULL,
-    active_store_marker TINYINT GENERATED ALWAYS AS (
-        CASE WHEN status IN ('PENDING_APPROVAL', 'ACTIVE') THEN 1 ELSE NULL END
-    ) STORED,
     PRIMARY KEY (store_sanction_id),
-    CONSTRAINT uk_store_sanctions_active UNIQUE (store_id, active_store_marker),
     CONSTRAINT fk_store_sanctions_case FOREIGN KEY (case_public_id)
         REFERENCES store_sanction_cases (case_public_id) ON DELETE RESTRICT,
     CONSTRAINT fk_store_sanctions_store FOREIGN KEY (store_id)
@@ -129,6 +141,7 @@ CREATE TABLE store_sanctions (
         sanction_version >= 1 AND store_enforcement_version >= 0
     ),
     INDEX ix_store_sanctions_case (case_public_id, store_sanction_id),
+    INDEX ix_store_sanctions_store_status (store_id, status, store_sanction_id),
     INDEX ix_store_sanctions_expiry (status, ends_at, store_sanction_id)
 );
 

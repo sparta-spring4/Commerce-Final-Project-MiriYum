@@ -13,10 +13,14 @@ import com.miriyum.domain.platformoperator.dto.authorization.AdminCaseAssignment
 import com.miriyum.domain.platformoperator.dto.authorization.OperatorAuthority;
 import com.miriyum.domain.platformoperator.enums.AdminCaseType;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorAuditReason;
 import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
+import com.miriyum.domain.platformoperator.service.PlatformOperatorAuditWriter;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.service.StoreAdministrationService;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementResult;
+import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
@@ -46,19 +50,23 @@ class StoreSanctionCaseServiceTest {
         given(authorities.requireCurrentAuthority(17L, 3L)).willReturn(new OperatorAuthority(
                 17L, 3L, Set.of(), Set.of(PlatformOperatorPermission.STORE_SANCTION)));
         given(cases.save(org.mockito.ArgumentMatchers.any())).willAnswer(invocation -> invocation.getArgument(0));
+        given(stores.inspect(101L)).willReturn(new EnforcementResult(101L,0L,OperationStatus.OPEN,
+                true,true,true,true,true,Set.of()));
         StoreSanctionCaseService service = new StoreSanctionCaseService(
                 cases, stores, assignments, mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),
-                authorities, idempotency, CLOCK);
+                authorities, mock(PlatformOperatorAuditWriter.class), idempotency, CLOCK);
 
         var created = service.create(command("STORE_CASE_CREATE"), PRINCIPAL, 101L,
-                new CaseCreate("FRAUD", Set.of("evidence://101"), "ADMIN-007-v1"));
+                new CaseCreate("FRAUD", Set.of("evidence://101"), "ADMIN-007-v1"),
+                PlatformOperatorAuditReason.STORE_ENFORCEMENT,"correlation-case-create");
         ArgumentCaptor<StoreSanctionCase> savedCase = ArgumentCaptor.forClass(StoreSanctionCase.class);
         then(cases).should().save(savedCase.capture());
         String caseId=created.data().get("caseId").asText();
         given(cases.findByPublicIdAndStoreIdForUpdate(caseId, 101L))
                 .willReturn(Optional.of(savedCase.getValue()));
 
-        var assigned = service.assign(command("STORE_CASE_ASSIGN"),PRINCIPAL, 101L, caseId, 1L);
+        var assigned = service.assign(command("STORE_CASE_ASSIGN"),PRINCIPAL, 101L, caseId, 1L,
+                PlatformOperatorAuditReason.STORE_ENFORCEMENT,"correlation-case-assign");
 
         assertThat(assigned.data().get("storeId").asLong()).isEqualTo(101L);
         assertThat(assigned.data().get("caseVersion").asLong()).isEqualTo(2L);
@@ -79,8 +87,9 @@ class StoreSanctionCaseServiceTest {
         StoreSanctionCaseService service=new StoreSanctionCaseService(mock(StoreSanctionCaseRepository.class),
                 mock(StoreAdministrationService.class),mock(AdminCaseAssignmentManager.class),
                 mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),authorities,
-                executingIdempotency(),CLOCK);
-        assertThatThrownBy(()->service.create(command("STORE_CASE_CREATE"),PRINCIPAL,101L,new CaseCreate("FRAUD",Set.of("evidence://101"),"ADMIN-007-v1")))
+                mock(PlatformOperatorAuditWriter.class),executingIdempotency(),CLOCK);
+        assertThatThrownBy(()->service.create(command("STORE_CASE_CREATE"),PRINCIPAL,101L,new CaseCreate("FRAUD",Set.of("evidence://101"),"ADMIN-007-v1"),
+                PlatformOperatorAuditReason.STORE_ENFORCEMENT,"correlation-denied"))
                 .isInstanceOf(com.miriyum.global.exception.ServiceException.class)
                 .extracting(e->((com.miriyum.global.exception.ServiceException)e).getErrorCode())
                 .isEqualTo(com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);

@@ -27,7 +27,7 @@ class AdminStoreHttpIT {
     @Test
     void replayedCaseCreationUsesStoredStatusAndPayload() throws Exception {
         StoreSanctionCaseService cases=mock(StoreSanctionCaseService.class);
-        given(cases.create(any(),any(),eq(10L),any())).willReturn(new IdempotentOutcome(true,201,"SUCCESS",
+        given(cases.create(any(),any(),eq(10L),any(),any(),any())).willReturn(new IdempotentOutcome(true,201,"SUCCESS",
                 "STORE_SANCTION_CASE","case-1",new ObjectMapper().readTree("{\"caseId\":\"case-1\",\"storeId\":10}")));
         MockMvc mvc=MockMvcBuilders.standaloneSetup(new PlatformOperatorStoreController(mock(AdminStoreQueryService.class),
                 cases,mock(StoreSanctionImpactService.class),mock(StoreSanctionCommandService.class)))
