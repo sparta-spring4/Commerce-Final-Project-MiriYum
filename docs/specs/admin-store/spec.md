@@ -166,7 +166,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 ### admin-store
 
-- `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/controller/management/PlatformOperatorStoreController.java` (architecture의 purpose HTTP boundary)
+- `backend/src/main/java/com/miriyum/domain/platformoperator/controller/management/PlatformOperatorStoreController.java` (플랫폼 운영자 namespace와 management purpose HTTP boundary)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/dto/AdminStoreRequests.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/dto/AdminStoreResponses.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/adminstore/entity/StoreSanctionCase.java`

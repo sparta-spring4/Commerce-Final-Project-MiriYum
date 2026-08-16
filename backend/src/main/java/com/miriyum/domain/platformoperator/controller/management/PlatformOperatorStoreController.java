@@ -1,4 +1,4 @@
-package com.miriyum.domain.platformoperator.adminstore.controller.management;
+package com.miriyum.domain.platformoperator.controller.management;
 
 import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.*;
 import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreResponses.*;

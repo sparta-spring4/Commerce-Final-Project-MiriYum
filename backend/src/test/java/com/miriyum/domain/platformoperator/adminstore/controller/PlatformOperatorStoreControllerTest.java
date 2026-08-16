@@ -6,7 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreResponses.StorePage;
 import com.miriyum.domain.platformoperator.adminstore.service.*;
-import com.miriyum.domain.platformoperator.adminstore.controller.management.PlatformOperatorStoreController;
+import com.miriyum.domain.platformoperator.controller.management.PlatformOperatorStoreController;
 import java.util.List;
 import org.junit.jupiter.api.*;
 import org.springframework.test.web.servlet.MockMvc;
