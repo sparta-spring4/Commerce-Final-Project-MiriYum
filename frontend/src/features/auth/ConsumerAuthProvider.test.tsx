@@ -101,6 +101,15 @@ function signOutNotice() {
   return screen.getByTestId('sign-out-notice').textContent
 }
 
+/** 응답을 테스트가 원하는 순간까지 붙잡아 경합 구간을 만든다. */
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
 afterEach(() => {
   document.cookie = `${CONSUMER_CSRF_COOKIE}=; Max-Age=0; path=/`
 })
@@ -392,6 +401,47 @@ describe('일반 사용자 인증 shell', () => {
     expect(deleteCalls).toBe(1)
     expect(sentCsrfHeader).toBe('token-from-body')
     expect(signOutNotice()).toBe('none')
+  })
+
+  /*
+   * 세션 되살아남 회귀.
+   *
+   * 재발급이 떠 있는 동안 로그아웃하면, 늦게 도착한 응답이 Access Token과
+   * `authenticated`를 다시 써서 세션이 되살아난다. 공용 PC에서 로그아웃하고
+   * 자리를 뜬 뒤에 벌어지는 일이라 화면만 로그아웃된 것보다 나쁘다.
+   */
+  it('로그아웃 뒤 늦게 도착한 재발급 결과로 세션이 되살아나지 않는다', async () => {
+    const refresh = deferred()
+    let authorization: string | null = 'not-called'
+
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, async () => {
+        await refresh.promise
+        return successResponse(tokenData('late-token'))
+      }),
+      ...signOutHandlers(),
+      http.get(PROTECTED_PATH, ({ request }) => {
+        authorization = request.headers.get('Authorization')
+        return successResponse(null)
+      }),
+    )
+
+    renderProvider()
+
+    // 복구 재발급이 응답을 기다리는 동안 로그아웃한다.
+    await waitFor(() => expect(status()).toBe('restoring'))
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+
+    refresh.resolve()
+
+    // 늦게 온 토큰이 상태를 되돌리지 않는다.
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    expect(status()).toBe('unauthenticated')
+
+    // 토큰도 남지 않아 보호 API에 실리지 않는다.
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }))
+    await waitFor(() => expect(authorization).toBeNull())
   })
 
   it('다시 로그인하면 지난 로그아웃 안내를 지운다', async () => {

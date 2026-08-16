@@ -136,6 +136,18 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
    */
   const refreshInFlight = useRef<Promise<boolean> | null>(null)
 
+  /**
+   * 세션 세대.
+   *
+   * 세션이 끝나거나 새로 시작할 때마다 올라간다. 재발급은 시작 시점의 세대를
+   * 붙잡아 두었다가, 응답이 도착했을 때 세대가 달라졌으면 결과를 버린다.
+   *
+   * 이 장치가 없으면 재발급이 떠 있는 동안 로그아웃한 사용자의 세션이
+   * 되살아난다. 늦게 도착한 응답이 Access Token과 `authenticated`를 다시
+   * 써 버리기 때문이다. 공용 PC에서 로그아웃하고 자리를 뜬 뒤에 벌어진다.
+   */
+  const sessionGeneration = useRef(0)
+
   const queryClient = useQueryClient()
 
   /**
@@ -149,18 +161,29 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
    * 곧바로 물러난다. 취소·삭제는 동기적으로 캐시에서 데이터를 걷어낸다.
    */
   const clearSession = useCallback(() => {
+    // 세대를 먼저 올린다. 지금 떠 있는 재발급의 결과는 이 세션의 것이 아니다.
+    sessionGeneration.current += 1
     accessTokenRef.current = null
     setStatus('unauthenticated')
     void clearConsumerProtectedQueries(queryClient)
   }, [queryClient])
 
   const runRefresh = useCallback(async (): Promise<boolean> => {
+    const generation = sessionGeneration.current
     try {
       const token = await refreshConsumerToken()
+      // 재발급이 오가는 사이 로그아웃했거나 다른 세션이 시작됐다.
+      if (generation !== sessionGeneration.current) {
+        return false
+      }
       accessTokenRef.current = token.accessToken
       setStatus('authenticated')
       return true
     } catch {
+      // 이미 끝난 세션의 실패는 지금 상태를 건드릴 이유가 없다.
+      if (generation !== sessionGeneration.current) {
+        return false
+      }
       // 재발급 실패는 오류 화면이 아니라 비로그인 상태다.
       clearSession()
       return false
@@ -204,8 +227,18 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
    */
   const signIn = useCallback(
     async (credentials: LoginRequest) => {
+      // 새 세션의 시작이다. 이전 세션에서 떠난 재발급 결과가 이 세션의 토큰을
+      // 덮어쓰지 못하게 세대를 먼저 올린다.
+      sessionGeneration.current += 1
+      const generation = sessionGeneration.current
+
       await clearConsumerProtectedQueries(queryClient)
       const token = await signInConsumer(credentials)
+
+      // 로그인 응답을 기다리는 사이 로그아웃했다면 이 결과도 남기지 않는다.
+      if (generation !== sessionGeneration.current) {
+        return
+      }
       accessTokenRef.current = token.accessToken
       setStatus('authenticated')
       // 새 세션이 열렸으므로 지난 로그아웃 안내는 더 이상 보여 줄 것이 아니다.
