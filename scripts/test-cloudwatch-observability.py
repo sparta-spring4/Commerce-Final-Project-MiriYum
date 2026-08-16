@@ -15,6 +15,7 @@ COMPOSE_PATH = ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / "deploy" / ".env.example"
 DEPLOY_SCRIPT_PATH = ROOT / "deploy" / "deploy.sh"
 OBSERVABILITY_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "cloudwatch-staging-observability.md"
+DEPLOYMENT_DOCUMENT_PATH = ROOT / "docs" / "deployment" / "docker-ecr-ssm-cd.md"
 RISK_EVENT_DELIVERY_PATH = (
     ROOT
     / "backend"
@@ -44,6 +45,7 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         cls.compose = COMPOSE_PATH.read_text(encoding="utf-8")
         cls.deploy_script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
         cls.observability_document = OBSERVABILITY_DOCUMENT_PATH.read_text(encoding="utf-8")
+        cls.deployment_document = DEPLOYMENT_DOCUMENT_PATH.read_text(encoding="utf-8")
         cls.risk_event_delivery = RISK_EVENT_DELIVERY_PATH.read_text(encoding="utf-8")
         cls.compose_config = cls.load_compose_config(ENV_EXAMPLE_PATH)
 
@@ -115,6 +117,20 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         self.assertIn("awslogs-group: /miriyum/staging/docker", self.compose)
         self.assertNotIn("logs", self.config)
         self.assertNotIn("/var/lib/docker/containers/*", json.dumps(self.config))
+
+    def test_mysql_allows_trigger_migrations_when_binary_logging_is_enabled(self):
+        mysql_command = self.compose_config["services"]["mysql"]["command"]
+
+        self.assertIn("--log-bin-trust-function-creators=1", mysql_command)
+
+    def test_deployment_runbook_keeps_trigger_migration_recovery_manual_and_verifiable(self):
+        for expected_text in (
+            "log_bin_trust_function_creators",
+            "flyway_schema_history",
+            "SHOW TRIGGERS",
+            "Never automatically delete objects or modify Flyway history.",
+        ):
+            self.assertIn(expected_text, self.deployment_document)
 
     def test_observability_document_lists_all_docker_log_streams(self):
         self.assertIn("`mysql`, `backend`, `nginx`, `valkey`", self.observability_document)
