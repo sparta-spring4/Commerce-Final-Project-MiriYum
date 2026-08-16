@@ -165,6 +165,54 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void readyAtExactExpiryReleasesResourcesAndMarksExpired() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.READY,
+                        PaymentAttemptStatus.NOT_STARTED,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                Clock.fixed(expiresAt, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174002");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.EXPIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
     void finalizationCopiesHeldCapacityWithoutMutatingOccupiedTotals() {
         ReservationHoldRepository holdRepository = mock(ReservationHoldRepository.class);
         ReservationHoldCapacityAllocationRepository holdAllocationRepository =

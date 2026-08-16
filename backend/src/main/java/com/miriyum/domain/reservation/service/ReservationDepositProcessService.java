@@ -102,6 +102,21 @@ public class ReservationDepositProcessService {
                             now,
                             null));
         }
+        if (payment.status() == PaymentStatus.READY
+                && !now.isBefore(process.getExpiresAt())
+                && !process.isAbandonmentRequested()) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.EXPIRED,
+                            "reservation-hold-expire:" + process.getReservationHoldId(),
+                            "SYSTEM",
+                            null,
+                            process.getExpiresAt(),
+                            null));
+            process.expire(now);
+            processRepository.saveAndFlush(process);
+        }
         return ReservationDepositCommandResult.pending(toResponse(process));
     }
 

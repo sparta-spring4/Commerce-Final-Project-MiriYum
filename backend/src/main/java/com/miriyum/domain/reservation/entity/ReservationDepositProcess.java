@@ -136,6 +136,17 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.COMPLETED;
     }
 
+    public void expire(Instant expiredAt) {
+        Instant occurredAt = requireTime(expiredAt);
+        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT
+                || abandonmentRequested
+                || occurredAt.isBefore(expiresAt)) {
+            throw invalidTransition();
+        }
+        completedAt = occurredAt;
+        status = ReservationDepositProcessStatus.EXPIRED;
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");
