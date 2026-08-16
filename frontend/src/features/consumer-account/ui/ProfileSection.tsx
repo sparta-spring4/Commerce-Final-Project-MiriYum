@@ -173,6 +173,17 @@ function ContactRegistration() {
 
   const mutation = useRegisterContact()
 
+  /**
+   * 번호가 바뀌면 새 시도다.
+   *
+   * 키가 새로 만들어지는 유일한 지점이다. 실패했다는 이유로 바꾸지 않는다.
+   */
+  function updatePhoneNumber(next: string) {
+    setPhoneNumber(next)
+    setFormError(null)
+    setIdempotencyKey(createIdempotencyKey())
+  }
+
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
 
@@ -186,11 +197,13 @@ function ContactRegistration() {
     mutation.mutate(
       { phoneNumber: normalizePhoneNumber(phoneNumber), idempotencyKey },
       {
-        onError: (error) => {
-          setFormError(contactErrorMessage(error))
-          // 중복 등 확정 실패 뒤에는 다음 제출이 새 시도가 되게 키를 바꾼다.
-          setIdempotencyKey(createIdempotencyKey())
-        },
+        /*
+         * 실패해도 멱등 키를 유지한다. 응답이 유실됐을 뿐 서버가 이미 번호를
+         * 등록했을 수 있고, 연락처는 최초 1회만 등록할 수 있어 새 키로 다시
+         * 보내면 두 번째 요청이 `ACCOUNT_007`로 막힌다. 같은 키를 유지하면
+         * 서버가 앞선 결과를 그대로 돌려준다.
+         */
+        onError: (error) => setFormError(contactErrorMessage(error)),
       },
     )
   }
@@ -216,7 +229,7 @@ function ContactRegistration() {
         help="010으로 시작하는 11자리 번호"
         value={phoneNumber}
         error={fieldError}
-        onChange={(event) => setPhoneNumber(event.target.value)}
+        onChange={(event) => updatePhoneNumber(event.target.value)}
       />
 
       <Button type="submit" variant="primary" loading={mutation.isPending}>

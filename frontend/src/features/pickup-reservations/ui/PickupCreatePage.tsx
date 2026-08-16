@@ -73,10 +73,12 @@ export function PickupCreatePage() {
             { replace: true },
           )
         },
-        onError: (error) => {
-          setFormError(toPickupCreateMessage(error))
-          setAttemptKey(createIdempotencyKey())
-        },
+        /*
+         * 실패해도 멱등 키를 바꾸지 않는다. 응답만 유실된 경우 첫 요청이
+         * 이미 커밋됐을 수 있고, 새 키로 다시 보내면 픽업이 두 건 잡힌다.
+         * 키는 사용자가 입력을 바꿀 때만 새로 만든다(updateDraft).
+         */
+        onError: (error) => setFormError(toPickupCreateMessage(error)),
       },
     )
   }

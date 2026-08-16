@@ -129,7 +129,11 @@ function CancelSection({
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey)
+  /*
+   * 이 픽업 예약을 취소한다는 의도 하나에 키 하나를 붙인다.
+   * 사유 문구가 바뀌어도 명령은 그대로라 새 시도가 아니다.
+   */
+  const [idempotencyKey] = useState(createIdempotencyKey)
 
   const mutation = useCancelPickupReservation(pickupReservationId)
 
@@ -139,10 +143,12 @@ function CancelSection({
       { reason: reason.trim() || undefined, idempotencyKey },
       {
         onSuccess: () => setOpen(false),
-        onError: (cause) => {
-          setError(toPickupCancelMessage(cause))
-          setIdempotencyKey(createIdempotencyKey())
-        },
+        /*
+         * 실패해도 멱등 키를 유지한다. 취소가 서버에 반영된 뒤 응답만 유실된
+         * 경우 새 키로 다시 보내면 두 번째 취소 명령이 되고, 서버는 이미 취소된
+         * 예약이라 `INVALID_STATE`로 거절한다. 같은 키면 앞선 결과가 그대로 온다.
+         */
+        onError: (cause) => setError(toPickupCancelMessage(cause)),
       },
     )
   }

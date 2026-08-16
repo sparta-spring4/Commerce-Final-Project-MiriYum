@@ -1,5 +1,6 @@
 import type { BadgeTone } from '../../../shared/ui/Badge'
 import { isApiError } from '../../../shared/api/apiError'
+import { isOutcomeUnknown } from '../../../shared/api/idempotencyKey'
 import type { components } from '../../../shared/api/generated/menu-hold-pickup'
 
 export type PickupReservation = components['schemas']['PickupReservation']
@@ -184,6 +185,10 @@ export function pickupTotalPrice(
 
 /** 생성 실패 문구. 서버 code로만 분기한다. */
 export function toPickupCreateMessage(error: unknown): string {
+  // 서버 반영 여부를 모르면 재시도가 중복 주문이 된다. 확인을 안내한다.
+  if (isOutcomeUnknown(error)) {
+    return '픽업 예약 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 내 예약에서 상태를 확인해 주세요.'
+  }
   if (!isApiError(error)) {
     return '픽업 예약을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.'
   }
@@ -205,6 +210,9 @@ export function toPickupCreateMessage(error: unknown): string {
  * 취소는 상태 전이 불가와 정책 불가로만 갈린다. 생성 오류를 섞지 않는다.
  */
 export function toPickupCancelMessage(error: unknown): string {
+  if (isOutcomeUnknown(error)) {
+    return '취소 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 최신 상태를 확인해 주세요.'
+  }
   if (!isApiError(error)) {
     return '픽업 예약을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.'
   }

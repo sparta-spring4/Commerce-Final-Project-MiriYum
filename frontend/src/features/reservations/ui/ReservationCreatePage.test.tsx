@@ -266,8 +266,55 @@ describe('예약 생성 화면', () => {
 
     await waitFor(() => expect(attempt).toBe(2))
     expect(createBody?.menuSelections).toEqual([])
-    // 확정 실패 뒤 재시도는 새 시도이므로 새 멱등 키를 쓴다.
+    // 메뉴를 뺀 것은 입력이 바뀐 새 시도다. 그때만 새 멱등 키를 쓴다.
     expect(new Set(createKeys).size).toBe(2)
+  })
+
+  /*
+   * 결과 불명 회귀.
+   *
+   * 첫 요청이 서버에 커밋되고 응답만 유실됐을 수 있다. 그때 새 키로 다시 보내면
+   * 같은 의도가 두 건의 예약이 된다. 입력이 그대로면 키도 그대로여야 한다.
+   */
+  it('결과를 알 수 없는 실패 뒤 같은 입력 재시도는 멱등 키를 유지한다', async () => {
+    let attempt = 0
+    server.use(
+      authenticatedConsumer(),
+      http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
+        successResponse(menuHoldAvailability()),
+      ),
+      http.post(RESERVATIONS_PATH, ({ request }) => {
+        attempt += 1
+        const key = request.headers.get('Idempotency-Key')
+        if (key !== null) {
+          createKeys.push(key)
+        }
+        // 5xx는 서버가 처리 도중 끊겼을 수 있어 반영 여부가 불명이다.
+        if (attempt === 1) {
+          return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+        }
+        return successResponse(reservationDetail())
+      }),
+    )
+
+    renderCreate()
+    advanceToSubmit()
+    await screen.findByRole('button', { name: '다음' })
+    fireEvent.click(screen.getByRole('button', { name: '다음' }))
+    fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
+
+    // 재시도를 권하지 않고 결과 확인을 안내한다.
+    expect(
+      await screen.findByText(
+        '예약 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 내 예약에서 상태를 확인해 주세요.',
+      ),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '예약하기' }))
+
+    await waitFor(() => expect(attempt).toBe(2))
+    // 같은 의도의 재시도이므로 서버는 같은 키를 받아 결과를 하나로 수렴시킨다.
+    expect(new Set(createKeys).size).toBe(1)
   })
 
   it('ACCOUNT_006은 draft를 보존한 채 연락처 등록으로 안내한다', async () => {

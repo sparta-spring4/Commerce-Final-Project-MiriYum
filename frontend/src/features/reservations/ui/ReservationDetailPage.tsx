@@ -148,7 +148,13 @@ function CancelSection({ reservationId }: { reservationId: string }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey)
+  /*
+   * 이 예약을 취소한다는 의도 하나에 키 하나를 붙인다.
+   *
+   * 사유 문구가 바뀌어도 명령은 여전히 "이 예약 취소"라 새 시도가 아니다.
+   * 재시도 때마다 같은 키가 가서 서버가 결과를 하나로 수렴시킨다.
+   */
+  const [idempotencyKey] = useState(createIdempotencyKey)
 
   const mutation = useCancelReservation(reservationId)
 
@@ -158,11 +164,12 @@ function CancelSection({ reservationId }: { reservationId: string }) {
       { reason: reason.trim() || undefined, idempotencyKey },
       {
         onSuccess: () => setOpen(false),
-        onError: (cause) => {
-          setError(toCancelMessage(cause))
-          // 확정 실패 뒤 다음 제출은 새 시도다.
-          setIdempotencyKey(createIdempotencyKey())
-        },
+        /*
+         * 실패해도 멱등 키를 유지한다. 취소가 반영된 뒤 응답만 유실된 경우
+         * 새 키로 다시 보내면 두 번째 취소 명령이 되고, 서버는 이미 취소된
+         * 예약이라 `RESERVATION_005`로 거절한다. 같은 키면 앞선 결과가 그대로 온다.
+         */
+        onError: (cause) => setError(toCancelMessage(cause)),
       },
     )
   }

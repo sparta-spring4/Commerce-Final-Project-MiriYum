@@ -8,8 +8,10 @@ import {
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { createApiClient, type ApiClient } from '../../shared/api/client'
 import { isApiError } from '../../shared/api/apiError'
+import { clearConsumerProtectedQueries } from '../../shared/api/consumerSession'
 import {
   prepareConsumerCsrfToken,
   refreshConsumerToken,
@@ -74,10 +76,23 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
    */
   const refreshInFlight = useRef<Promise<boolean> | null>(null)
 
+  const queryClient = useQueryClient()
+
+  /**
+   * 세션 종료의 유일한 경계.
+   *
+   * 로그아웃, 복구 실패, 재발급할 수 없는 401이 모두 여기로 모인다. 토큰만
+   * 비우면 보호 데이터가 전역 캐시에 남아, 같은 탭에서 다음 사용자가 로그인할 때
+   * 이전 사용자의 프로필·예약이 먼저 그려진다. 토큰과 캐시를 한자리에서 함께 비운다.
+   *
+   * 정리는 기다리지 않는다. 상태를 즉시 `unauthenticated`로 바꿔야 보호 화면이
+   * 곧바로 물러난다. 취소·삭제는 동기적으로 캐시에서 데이터를 걷어낸다.
+   */
   const clearSession = useCallback(() => {
     accessTokenRef.current = null
     setStatus('unauthenticated')
-  }, [])
+    void clearConsumerProtectedQueries(queryClient)
+  }, [queryClient])
 
   const runRefresh = useCallback(async (): Promise<boolean> => {
     try {
@@ -120,11 +135,22 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
     void refreshOnce()
   }, [refreshOnce])
 
-  const signIn = useCallback(async (credentials: LoginRequest) => {
-    const token = await signInConsumer(credentials)
-    accessTokenRef.current = token.accessToken
-    setStatus('authenticated')
-  }, [])
+  /**
+   * 세션 시작 경계.
+   *
+   * 로그인 직전에도 캐시를 비운다. 정상 흐름에서는 로그아웃이 이미 비웠지만,
+   * 세션이 끊기지 않은 채 다른 계정으로 들어오는 경로가 생기면 그때도
+   * 이전 계정의 데이터가 남지 않아야 한다.
+   */
+  const signIn = useCallback(
+    async (credentials: LoginRequest) => {
+      await clearConsumerProtectedQueries(queryClient)
+      const token = await signInConsumer(credentials)
+      accessTokenRef.current = token.accessToken
+      setStatus('authenticated')
+    },
+    [queryClient],
+  )
 
   const signOut = useCallback(async () => {
     try {

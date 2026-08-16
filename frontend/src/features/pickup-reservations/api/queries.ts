@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CONSUMER_PROTECTED_QUERY_ROOTS } from '../../../shared/api/consumerSession'
 import { publicApiClient } from '../../../shared/api/publicApiClient'
 import { useConsumerAuth } from '../../auth'
 import { storeSearchKeys } from '../../store-search/api/queries'
@@ -8,7 +9,8 @@ import type {
 } from '../model/pickup'
 
 export const pickupKeys = {
-  all: ['pickup-reservations'] as const,
+  // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
+  all: CONSUMER_PROTECTED_QUERY_ROOTS.pickupReservations,
   availability: (storeId: string, pickupDate: string) =>
     [...pickupKeys.all, 'availability', storeId, pickupDate] as const,
   detail: (pickupReservationId: string) =>

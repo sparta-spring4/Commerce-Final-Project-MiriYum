@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '../../../shared/api/client'
+import { CONSUMER_PROTECTED_QUERY_ROOTS } from '../../../shared/api/consumerSession'
 import type { components } from '../../../shared/api/generated/auth-account'
 import { useConsumerAuth } from '../../auth'
 import type {
@@ -10,7 +11,8 @@ import type {
 export type ConsumerAccount = components['schemas']['ConsumerAccount']
 
 export const consumerAccountKeys = {
-  all: ['consumer-account'] as const,
+  // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
+  all: CONSUMER_PROTECTED_QUERY_ROOTS.account,
   me: () => [...consumerAccountKeys.all, 'me'] as const,
   reservations: (query: ReservationHistoryQuery) =>
     [...consumerAccountKeys.all, 'me', 'reservations', query] as const,

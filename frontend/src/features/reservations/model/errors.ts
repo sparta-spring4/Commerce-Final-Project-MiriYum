@@ -1,4 +1,5 @@
 import { isApiError } from '../../../shared/api/apiError'
+import { isOutcomeUnknown } from '../../../shared/api/idempotencyKey'
 import { AccountErrorCode } from '../../auth/model/authErrors'
 
 /** backend `ReservationErrorCode`·`MenuHoldErrorCode`와 1:1로 맞춘다. */
@@ -31,6 +32,20 @@ export type CreateRecovery =
   | { kind: 'none'; message: string }
 
 export function toCreateRecovery(error: unknown): CreateRecovery {
+  /*
+   * 서버 반영 여부를 모르는 실패다.
+   *
+   * 여기서 "다시 시도"를 권하면 첫 요청이 이미 커밋된 경우 같은 의도가 두 건이
+   * 된다. 재시도 대신 결과를 확인하게 한다. 판정은 code 이전에 한다.
+   */
+  if (isOutcomeUnknown(error)) {
+    return {
+      kind: 'none',
+      message:
+        '예약 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 내 예약에서 상태를 확인해 주세요.',
+    }
+  }
+
   if (!isApiError(error)) {
     return {
       kind: 'retry',
@@ -98,6 +113,10 @@ export function toCreateRecovery(error: unknown): CreateRecovery {
  * 생성 오류나 메뉴 재선택 안내를 취소 흐름에 섞지 않는다.
  */
 export function toCancelMessage(error: unknown): string {
+  // 취소도 서버에 반영됐을 수 있다. 재시도를 권하지 않고 상태 확인을 안내한다.
+  if (isOutcomeUnknown(error)) {
+    return '취소 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 최신 상태를 확인해 주세요.'
+  }
   if (!isApiError(error)) {
     return '예약을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.'
   }

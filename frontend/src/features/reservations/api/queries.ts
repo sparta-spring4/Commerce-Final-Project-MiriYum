@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CONSUMER_PROTECTED_QUERY_ROOTS } from '../../../shared/api/consumerSession'
 import { publicApiClient } from '../../../shared/api/publicApiClient'
 import { useConsumerAuth } from '../../auth'
 import { consumerAccountKeys } from '../../consumer-account'
@@ -6,7 +7,8 @@ import { storeSearchKeys } from '../../store-search/api/queries'
 import type { ReservationCreateRequest, ReservationDetail } from '../model/draft'
 
 export const reservationKeys = {
-  all: ['reservations'] as const,
+  // 뿌리는 shared가 소유한다. 세션 종료 정리가 같은 값을 보고 지운다.
+  all: CONSUMER_PROTECTED_QUERY_ROOTS.reservations,
   detail: (reservationId: string) =>
     [...reservationKeys.all, reservationId] as const,
   menuHoldAvailability: (

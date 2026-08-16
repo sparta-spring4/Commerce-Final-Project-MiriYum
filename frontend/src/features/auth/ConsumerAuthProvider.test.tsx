@@ -1,8 +1,13 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import type { QueryClient } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 import { errorResponse, successResponse } from '../../test/msw/envelope'
 import { server } from '../../test/msw/server'
+import { TestQueryProvider } from '../../test/TestQueryProvider'
+import { consumerAccountKeys } from '../consumer-account'
+import { pickupKeys } from '../pickup-reservations/api/queries'
+import { reservationKeys } from '../reservations/api/queries'
 import { ConsumerAuthProvider, useConsumerAuth } from './ConsumerAuthProvider'
 import { AuthErrorCode } from './model/authErrors'
 import { CONSUMER_CSRF_COOKIE } from './model/csrfCookie'
@@ -50,11 +55,40 @@ function Probe() {
 }
 
 function renderProvider() {
-  return render(
-    <ConsumerAuthProvider>
-      <Probe />
-    </ConsumerAuthProvider>,
+  let queryClient: QueryClient | null = null
+
+  const rendered = render(
+    <TestQueryProvider
+      onReady={(client) => {
+        queryClient = client
+      }}
+    >
+      <ConsumerAuthProvider>
+        <Probe />
+      </ConsumerAuthProvider>
+    </TestQueryProvider>,
   )
+
+  if (queryClient === null) {
+    throw new Error('TestQueryProvider가 QueryClient를 넘겨주지 않았습니다.')
+  }
+
+  return { ...rendered, queryClient: queryClient as QueryClient }
+}
+
+/** 보호 데이터가 캐시에 남아 있는 상태를 만든다. */
+function seedProtectedCache(queryClient: QueryClient, owner: string) {
+  queryClient.setQueryData(consumerAccountKeys.me(), { nickname: owner })
+  queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: owner })
+  queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: owner })
+}
+
+function cachedOwners(queryClient: QueryClient): unknown[] {
+  return [
+    queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(reservationKeys.detail('r-1')),
+    queryClient.getQueryData(pickupKeys.detail('p-1')),
+  ]
 }
 
 function status() {
@@ -260,5 +294,81 @@ describe('일반 사용자 인증 shell', () => {
 
     screen.getByRole('button', { name: '보호 API 호출' }).click()
     await waitFor(() => expect(authorization).toBeNull())
+  })
+
+  /*
+   * 계정 전환 회귀.
+   *
+   * query key에 계정 식별자가 없다. 세션이 끝날 때 캐시를 비우지 않으면 같은
+   * 탭에서 다음 사용자가 로그인했을 때 이전 사용자의 프로필·예약이 먼저 그려진다.
+   */
+  it('로그아웃하면 이전 사용자의 보호 데이터를 캐시에서 지운다', async () => {
+    server.use(authenticatedConsumer(), ...signOutHandlers())
+
+    const { queryClient } = renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    seedProtectedCache(queryClient, 'A')
+    expect(cachedOwners(queryClient)).not.toContain(undefined)
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+
+    await waitFor(() =>
+      expect(cachedOwners(queryClient)).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]),
+    )
+  })
+
+  it('재발급할 수 없는 401로 세션이 끊겨도 보호 데이터를 지운다', async () => {
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, () => successResponse(tokenData())),
+      http.get(PROTECTED_PATH, () =>
+        errorResponse(
+          401,
+          AuthErrorCode.TOKEN_NAMESPACE_MISMATCH,
+          '토큰 namespace가 일치하지 않습니다.',
+        ),
+      ),
+    )
+
+    const { queryClient } = renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    seedProtectedCache(queryClient, 'A')
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }))
+
+    // 로그아웃을 거치지 않고 끊긴 세션도 같은 정리를 거쳐야 한다.
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    await waitFor(() =>
+      expect(cachedOwners(queryClient)).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]),
+    )
+  })
+
+  it('다른 계정으로 로그인하면 이전 계정의 캐시를 넘겨받지 않는다', async () => {
+    server.use(
+      unauthenticatedConsumer,
+      http.post(CONSUMER_SESSIONS_PATH, () =>
+        successResponse(tokenData('b-token')),
+      ),
+    )
+
+    const { queryClient } = renderProvider()
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+
+    // A가 남기고 간 캐시.
+    seedProtectedCache(queryClient, 'A')
+
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
   })
 })

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ROUTES } from '../../../app/routes'
 import { errorResponse, successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
+import { TestQueryProvider } from '../../../test/TestQueryProvider'
 import { ConsumerAuthProvider } from '../ConsumerAuthProvider'
 import { AuthErrorCode } from '../model/authErrors'
 import { browserRedirect, KAKAO_CALLBACK_PATH } from '../model/kakaoOAuth'
@@ -23,15 +24,20 @@ function LocationProbe() {
 
 function renderSignInAt(route: string = ROUTES.consumerSignIn) {
   return render(
-    <ConsumerAuthProvider>
-      <MemoryRouter initialEntries={[route]}>
-        <Routes>
-          <Route path={ROUTES.consumerSignIn} element={<ConsumerSignInPage />} />
-          <Route path={ROUTES.home} element={<LocationProbe />} />
-          <Route path="/mypage" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </ConsumerAuthProvider>,
+    <TestQueryProvider>
+      <ConsumerAuthProvider>
+        <MemoryRouter initialEntries={[route]}>
+          <Routes>
+            <Route
+              path={ROUTES.consumerSignIn}
+              element={<ConsumerSignInPage />}
+            />
+            <Route path={ROUTES.home} element={<LocationProbe />} />
+            <Route path="/mypage" element={<LocationProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </ConsumerAuthProvider>
+    </TestQueryProvider>,
   )
 }
 

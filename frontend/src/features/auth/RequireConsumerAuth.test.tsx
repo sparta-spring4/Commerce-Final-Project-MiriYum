@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { ROUTES } from '../../app/routes'
 import { readReturnTo } from '../../app/returnTo'
 import { server } from '../../test/msw/server'
+import { TestQueryProvider } from '../../test/TestQueryProvider'
 import { ConsumerAuthProvider } from './ConsumerAuthProvider'
 import { RequireConsumerAuth } from './RequireConsumerAuth'
 import { authenticatedConsumer, unauthenticatedConsumer } from './test/handlers'
@@ -19,16 +20,18 @@ function SignInProbe() {
 
 function renderGuardedAt(route: string) {
   return render(
-    <ConsumerAuthProvider>
-      <MemoryRouter initialEntries={[route]}>
-        <Routes>
-          <Route element={<RequireConsumerAuth />}>
-            <Route path="/mypage" element={<p>마이페이지 내용</p>} />
-          </Route>
-          <Route path={ROUTES.consumerSignIn} element={<SignInProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </ConsumerAuthProvider>,
+    <TestQueryProvider>
+      <ConsumerAuthProvider>
+        <MemoryRouter initialEntries={[route]}>
+          <Routes>
+            <Route element={<RequireConsumerAuth />}>
+              <Route path="/mypage" element={<p>마이페이지 내용</p>} />
+            </Route>
+            <Route path={ROUTES.consumerSignIn} element={<SignInProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </ConsumerAuthProvider>
+    </TestQueryProvider>,
   )
 }
 

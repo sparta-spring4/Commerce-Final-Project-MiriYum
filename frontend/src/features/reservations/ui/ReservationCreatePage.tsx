@@ -90,11 +90,16 @@ export function ReservationCreatePage() {
             replace: true,
           })
         },
-        onError: (error) => {
-          setRecovery(toCreateRecovery(error))
-          // 확정 실패 뒤 다음 제출은 새 시도다. 같은 키를 재사용하면 COMMON_007이 된다.
-          setAttemptKey(createIdempotencyKey())
-        },
+        /*
+         * 실패해도 멱등 키를 바꾸지 않는다.
+         *
+         * 응답이 유실된 실패에서는 첫 요청이 서버에 이미 커밋됐을 수 있다.
+         * 그때 새 키로 다시 보내면 같은 의도가 두 건의 예약이 된다. 같은 키를
+         * 유지해야 서버가 앞선 결과를 그대로 돌려주며 하나로 수렴한다.
+         *
+         * 키는 사용자가 입력을 바꿀 때만 새로 만든다(updateDraft).
+         */
+        onError: (error) => setRecovery(toCreateRecovery(error)),
       },
     )
   }
