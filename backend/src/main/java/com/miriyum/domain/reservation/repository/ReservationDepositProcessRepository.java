@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.repository;
 
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -20,6 +21,15 @@ public interface ReservationDepositProcessRepository
             + "where process.reservationHoldId = :reservationHoldId")
     Optional<Long> findProcessIdByReservationHoldId(
             @Param("reservationHoldId") long reservationHoldId);
+
+    @Query("""
+            select process.reservationHoldId from ReservationDepositProcess process
+            where process.finalReservationId in :finalReservationIds
+              and process.reservationHoldId in :reservationHoldIds
+            """)
+    List<Long> findLinkedHoldIdsForFinalReservations(
+            @Param("finalReservationIds") List<Long> finalReservationIds,
+            @Param("reservationHoldIds") List<Long> reservationHoldIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
