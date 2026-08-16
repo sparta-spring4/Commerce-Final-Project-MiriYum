@@ -134,10 +134,13 @@ export interface paths {
   "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images": {
     /**
      * 메뉴 공개 이미지 저장 또는 교체
-     * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+     * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
      */
     put: operations["putMenuImage"];
-    /** 메뉴 공개 이미지 삭제 */
+    /**
+     * 메뉴 공개 이미지 삭제
+     * @description 메뉴의 공개 이미지를 삭제한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
+     */
     delete: operations["deleteMenuImage"];
   };
   "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications": {
@@ -756,8 +759,14 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description Idempotency-Key를 다른 메뉴 이미지 요청에 재사용함 */
-    MenuImageConflict: {
+    /** @description 요청한 매장 또는 메뉴를 찾을 수 없음 */
+    MenuImageTargetNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 현재 매장 상태 또는 Idempotency-Key 충돌로 메뉴 이미지를 변경할 수 없음 */
+    MenuImageStateConflict: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -1804,7 +1813,7 @@ export interface operations {
   };
   /**
    * 메뉴 공개 이미지 저장 또는 교체
-   * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+   * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
    */
   putMenuImage: {
     parameters: {
@@ -1834,14 +1843,17 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["MenuNotFound"];
-      409: components["responses"]["MenuImageConflict"];
+      404: components["responses"]["MenuImageTargetNotFound"];
+      409: components["responses"]["MenuImageStateConflict"];
       413: components["responses"]["ImageSizeExceeded"];
       415: components["responses"]["UnsupportedImageMediaType"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
-  /** 메뉴 공개 이미지 삭제 */
+  /**
+   * 메뉴 공개 이미지 삭제
+   * @description 메뉴의 공개 이미지를 삭제한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
+   */
   deleteMenuImage: {
     parameters: {
       header: {
@@ -1860,8 +1872,8 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["MenuNotFound"];
-      409: components["responses"]["MenuImageConflict"];
+      404: components["responses"]["MenuImageTargetNotFound"];
+      409: components["responses"]["MenuImageStateConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };

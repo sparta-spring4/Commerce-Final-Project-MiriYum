@@ -3,6 +3,7 @@ package com.miriyum.domain.menu.controller.storeoperator;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,7 +16,9 @@ import com.miriyum.domain.menu.image.MenuImageCommandResult;
 import com.miriyum.domain.menu.image.MenuImageService;
 import com.miriyum.domain.menu.image.MenuPublicImageResponse;
 import com.miriyum.domain.store.config.StoreManagementSecurityConfig;
+import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
+import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +75,34 @@ class MenuImageControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
                         .header("Idempotency-Key", KEY))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void putMenuImageReturnsStoreNotFoundWhenManagementTargetDoesNotExist() throws Exception {
+        given(menuImageService.putMenuImage(eq(11L), eq(7L), eq(13L), any(IdempotencyKey.class), any()))
+                .willThrow(new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        MockMultipartFile image = new MockMultipartFile("file", "menu.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/v1/store-operators/stores/7/menus/13/images")
+                        .file(image)
+                        .with(request -> { request.setMethod("PUT"); return request; })
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("STORE_001"));
+    }
+
+    @Test
+    void deleteMenuImageReturnsVerificationConflictWhenStoreCannotBeManaged() throws Exception {
+        willThrow(new ServiceException(StoreErrorCode.VERIFICATION_STATE_CONFLICT))
+                .given(menuImageService)
+                .deleteMenuImage(eq(11L), eq(7L), eq(13L), any(IdempotencyKey.class));
+
+        mockMvc.perform(delete("/api/v1/store-operators/stores/7/menus/13/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STORE_007"));
     }
 
     @Test
