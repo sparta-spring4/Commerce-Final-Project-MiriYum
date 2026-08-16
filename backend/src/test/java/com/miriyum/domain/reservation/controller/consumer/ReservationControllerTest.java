@@ -109,6 +109,35 @@ class ReservationControllerTest {
     }
 
     @Test
+    void returnsCompletedDepositRequestWithTheFinalReservation() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationDepositProcessService.getOwnedRequest(901L, 11L))
+                .willReturn(requestResponse(
+                        ReservationDepositProcessStatus.COMPLETED,
+                        false,
+                        detailResponse()));
+
+        mockMvc.perform(get(REQUEST_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.reservation.reservationId").value("77"))
+                .andExpect(jsonPath("$.data.reservation.status").value("CONFIRMED"));
+    }
+
+    @Test
+    void hidesMissingOrForeignDepositRequestBehindReservationNotFound() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationDepositProcessService.getOwnedRequest(901L, 11L))
+                .willThrow(new ServiceException(ReservationErrorCode.RESERVATION_NOT_FOUND));
+
+        mockMvc.perform(get(REQUEST_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESERVATION_001"));
+    }
+
+    @Test
     void finalizesDepositRequestWithTypedAcceptedResponse() throws Exception {
         authenticateConsumer(11L);
         given(reservationDepositProcessCommandFacade.finalizeRequest(
@@ -141,6 +170,68 @@ class ReservationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ABANDONED"))
                 .andExpect(jsonPath("$.data.abandonmentRequested").value(true));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"finalizations", "abandonments"})
+    void rejectsMissingIdempotencyKeyForDepositCommands(String command) throws Exception {
+        authenticateConsumer(11L);
+
+        mockMvc.perform(post(REQUEST_URL + "/" + command)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_003"));
+
+        then(reservationDepositProcessCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/finalizations", "/abandonments"})
+    void rejectsMissingAuthenticationForEveryDepositRequestRoute(String suffix)
+            throws Exception {
+        if (suffix.isEmpty()) {
+            mockMvc.perform(get(REQUEST_URL))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_001"));
+        } else {
+            mockMvc.perform(post(REQUEST_URL + suffix)
+                            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_001"));
+        }
+
+        then(reservationDepositProcessService).shouldHaveNoInteractions();
+        then(reservationDepositProcessCommandFacade).shouldHaveNoInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/finalizations", "/abandonments"})
+    void rejectsStoreOperatorNamespaceForEveryDepositRequestRoute(String suffix)
+            throws Exception {
+        given(jwtTokenProvider.parseAccessToken("store-token"))
+                .willReturn(new ParsedToken(TokenNamespace.STORE_OPERATOR, 33L));
+
+        if (suffix.isEmpty()) {
+            mockMvc.perform(get(REQUEST_URL)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_004"));
+        } else {
+            mockMvc.perform(post(REQUEST_URL + suffix)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_004"));
+        }
+
+        then(reservationDepositProcessService).shouldHaveNoInteractions();
+        then(reservationDepositProcessCommandFacade).shouldHaveNoInteractions();
     }
 
     @Test
@@ -736,6 +827,14 @@ class ReservationControllerTest {
             ReservationDepositProcessStatus status,
             boolean abandonmentRequested
     ) {
+        return requestResponse(status, abandonmentRequested, null);
+    }
+
+    private ReservationRequestResponse requestResponse(
+            ReservationDepositProcessStatus status,
+            boolean abandonmentRequested,
+            ReservationDetailResponse reservation
+    ) {
         return new ReservationRequestResponse(
                 "901",
                 status,
@@ -747,9 +846,9 @@ class ReservationControllerTest {
                         4_000L,
                         "KRW",
                         OffsetDateTime.parse("2026-08-03T18:10:00+09:00"),
-                        "READY"),
+                "READY"),
                 abandonmentRequested,
-                null);
+                reservation);
     }
 
     private ReservationDetailResponse cancelledDetailResponse(String cancelledBy) {
