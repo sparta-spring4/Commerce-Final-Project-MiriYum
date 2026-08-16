@@ -23,6 +23,8 @@ import com.miriyum.domain.reservation.dto.response.ReservationHistoryItemRespons
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationPartyResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
@@ -303,6 +305,46 @@ class ReservationControllerTest {
         Assertions.assertThat(keyCaptor.getValue().value()).isEqualTo(IDEMPOTENCY_KEY);
         Assertions.assertThat(requestCaptor.getValue().storeId()).isEqualTo("22");
         Assertions.assertThat(requestCaptor.getValue().party().totalCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("예약금 생성은 불변 PaymentPreparation을 포함한 202를 반환한다")
+    void returnsAcceptedReservationRequestWithPaymentPreparation() throws Exception {
+        authenticateConsumer(11L);
+        ReservationRequestResponse response = new ReservationRequestResponse(
+                "901",
+                ReservationDepositProcessStatus.AWAITING_PAYMENT,
+                OffsetDateTime.parse("2026-08-03T18:10:00+09:00"),
+                new ReservationRequestResponse.PaymentPreparationSnapshot(
+                        "pay_901",
+                        "portone_901",
+                        "미리윰 식당 예약금",
+                        4_000L,
+                        "KRW",
+                        OffsetDateTime.parse("2026-08-03T18:10:00+09:00"),
+                        "READY"),
+                false,
+                null);
+        given(reservationCreationCommandFacade.create(
+                eq(11L), any(IdempotencyKey.class), any()))
+                .willReturn(ReservationCreationCommandResult.depositRequested(response));
+
+        mockMvc.perform(post(ROOT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validReservationJson()))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.reservationRequestId").value("901"))
+                .andExpect(jsonPath("$.data.status").value("AWAITING_PAYMENT"))
+                .andExpect(jsonPath("$.data.expiresAt")
+                        .value("2026-08-03T18:10:00+09:00"))
+                .andExpect(jsonPath("$.data.paymentPreparation.paymentId")
+                        .value("pay_901"))
+                .andExpect(jsonPath("$.data.paymentPreparation.amountMinor").value(4_000))
+                .andExpect(jsonPath("$.data.paymentPreparation.status").value("READY"))
+                .andExpect(jsonPath("$.data.abandonmentRequested").value(false))
+                .andExpect(jsonPath("$.data.reservation").isEmpty());
     }
 
     @Test

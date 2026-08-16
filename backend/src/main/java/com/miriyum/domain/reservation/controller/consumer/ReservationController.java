@@ -47,7 +47,7 @@ public class ReservationController {
      * @return facade-selected HTTP status with the common success envelope
      */
     @PostMapping("/reservations")
-    public ResponseEntity<ApiResponse<ReservationDetailResponse>> createReservation(
+    public ResponseEntity<ApiResponse<Object>> createReservation(
             @AuthenticationPrincipal AuthenticatedPrincipal principal,
             @RequestHeader(value = "Idempotency-Key", required = false) String rawKey,
             @Valid @RequestBody ReservationCreateRequest request
@@ -57,7 +57,7 @@ public class ReservationController {
                 IdempotencyKey.parse(rawKey),
                 request);
         return ResponseEntity.status(result.httpStatus())
-                .body(ApiResponse.success("예약이 생성되었습니다.", result.data()));
+                .body(ApiResponse.success("예약이 생성되었습니다.", result.responseData()));
     }
 
     /**
