@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
@@ -98,8 +99,16 @@ public class ReservationDepositProcessService {
                 .findByIdAndConsumerAccountIdForUpdate(processId, consumerAccountId)
                 .orElseThrow(() -> new ServiceException(
                         ReservationErrorCode.RESERVATION_NOT_FOUND));
-        PaymentResult payment = paymentService.getOwnedPayment(
-                process.getPaymentId(), String.valueOf(consumerAccountId));
+        PaymentResult payment;
+        try {
+            payment = paymentService.getOwnedPayment(
+                    process.getPaymentId(), String.valueOf(consumerAccountId));
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode() != PaymentErrorCode.PAYMENT_NOT_FOUND) {
+                throw exception;
+            }
+            return requirePaymentRecovery(process, clock.instant());
+        }
         requireSamePayment(process, payment);
         Instant now = clock.instant();
         if (payment.status() == PaymentStatus.PAID
@@ -160,8 +169,16 @@ public class ReservationDepositProcessService {
                         ReservationErrorCode.RESERVATION_NOT_FOUND));
         Instant now = clock.instant();
         process.requestAbandonment(now);
-        PaymentResult payment = paymentService.getOwnedPayment(
-                process.getPaymentId(), String.valueOf(consumerAccountId));
+        PaymentResult payment;
+        try {
+            payment = paymentService.getOwnedPayment(
+                    process.getPaymentId(), String.valueOf(consumerAccountId));
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode() != PaymentErrorCode.PAYMENT_NOT_FOUND) {
+                throw exception;
+            }
+            return requirePaymentRecovery(process, now);
+        }
         requireSamePayment(process, payment);
         if (payment.status() == PaymentStatus.READY) {
             holdTransitionPrimitive.transition(
@@ -255,6 +272,31 @@ public class ReservationDepositProcessService {
                 reasonCode)) {
             throw new IllegalStateException("deposit refund obligation meaning changed");
         }
+    }
+
+    private ReservationDepositCommandResult requirePaymentRecovery(
+            ReservationDepositProcess process,
+            Instant observedAt
+    ) {
+        String causeCode = "PAYMENT_NOT_FOUND";
+        ReservationDepositCauseAudit existing = causeRepository
+                .findByReservationDepositProcessIdAndCauseCode(
+                        process.getId(), causeCode)
+                .orElse(null);
+        if (existing == null) {
+            causeRepository.save(ReservationDepositCauseAudit.record(
+                    process.getId(),
+                    causeCode,
+                    process.getPaymentId(),
+                    "NOT_FOUND",
+                    null,
+                    observedAt));
+        } else if (!existing.matches(process.getPaymentId(), "NOT_FOUND", null)) {
+            throw new IllegalStateException("payment recovery cause meaning changed");
+        }
+        process.requireRecovery(observedAt);
+        processRepository.saveAndFlush(process);
+        return ReservationDepositCommandResult.pending(toResponse(process));
     }
 
     private void protectResources(

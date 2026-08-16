@@ -13,6 +13,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
@@ -50,6 +51,7 @@ import java.util.List;
 import java.util.Optional;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import com.miriyum.global.exception.ServiceException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -391,6 +393,89 @@ class ReservationDepositProcessServiceTest {
                 stableKey,
                 "FULL_DEPOSIT_COMPENSATION")).isTrue();
         verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
+    void missingStoredPaymentBecomesRecoveryRequiredInsteadOfConsumerNotFound() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willThrow(new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174006");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.RECOVERY_REQUIRED);
+        ArgumentCaptor<ReservationDepositCauseAudit> cause =
+                ArgumentCaptor.forClass(ReservationDepositCauseAudit.class);
+        verify(causeRepository).save(cause.capture());
+        assertThat(cause.getValue().getCauseCode()).isEqualTo("PAYMENT_NOT_FOUND");
+        assertThat(cause.getValue().getPaymentId()).isEqualTo("9001");
+        verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+        verify(refundRepository, never()).save(any());
+    }
+
+    @Test
+    void missingStoredPaymentDuringAbandonmentKeepsStickyIntentForRecovery() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositProcess process = depositProcess();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willThrow(new ServiceException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                mock(ReservationDepositFinalizationPrimitive.class),
+                mock(ReservationHoldTransitionPrimitive.class),
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.abandonOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174007");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.RECOVERY_REQUIRED);
+        assertThat(result.reservationRequest().abandonmentRequested()).isTrue();
+        verify(processRepository).saveAndFlush(process);
     }
 
     @Test

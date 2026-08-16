@@ -184,6 +184,15 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.COMPENSATED;
     }
 
+    public void requireRecovery(Instant requiredAt) {
+        requireTime(requiredAt);
+        if (status == ReservationDepositProcessStatus.COMPLETED
+                || status == ReservationDepositProcessStatus.COMPENSATED) {
+            throw invalidTransition();
+        }
+        status = ReservationDepositProcessStatus.RECOVERY_REQUIRED;
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");
