@@ -10,6 +10,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.password.Sha256BCryptPasswordEncoder;
 import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.auth.ratelimit.StagingRateLimitBypass;
 import com.miriyum.domain.platformoperator.config.membersupport.MemberRestrictionFilter;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +18,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.Order;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -33,6 +35,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  */
 @Configuration
 @EnableWebSecurity
+@EnableConfigurationProperties(StagingRateLimitBypass.class)
 public class SecurityConfig {
 
     /**
@@ -128,7 +131,8 @@ public class SecurityConfig {
     public SecurityFilterChain publicAuthFilterChain(
             HttpSecurity http,
             RateLimiter rateLimiter,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            StagingRateLimitBypass stagingBypass
     ) {
         http
                 .securityMatcher(
@@ -140,7 +144,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-                .addFilterBefore(new RateLimitFilter(rateLimiter, objectMapper), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(
+                        new RateLimitFilter(rateLimiter, objectMapper, stagingBypass),
+                        UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
