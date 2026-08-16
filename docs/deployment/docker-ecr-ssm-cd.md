@@ -43,10 +43,23 @@ These are staging Environment variables, not application secrets. Application an
 ## EC2 runtime setup
 
 1. Copy `deploy/.env.example` to `/opt/miriyum/.env` without committing the copied file.
-2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD` and `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`.
+2. Replace every `replace-with-...` value with a unique staging value, including `MIRIYUM_VALKEY_PASSWORD` and `MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET`. Set `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the Kakao Local REST API key used for store address verification; do not reuse the Kakao OAuth key.
 3. Run `chmod 600 /opt/miriyum/.env`.
 4. Confirm the instance role has `AmazonEC2ContainerRegistryReadOnly` and Systems Manager access.
 5. Confirm the security group allows TCP `80` only as required for the API. Do not expose MySQL `3306`, backend `8080`, or Valkey `6379`.
+
+### Store geocoding secret migration
+
+The staging Compose file forwards `MIRIYUM_STORE_GEOCODING_REST_API_KEY` only to the backend container. An empty value keeps the existing fail-closed `503 COMMON_012` behavior for store registration, so a configured value is a prerequisite for staging store-registration smoke and k6 fixture preparation.
+
+Migrate without recording the value in Git, Actions logs, SSM parameters, or deployment artifacts:
+
+1. Add `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the server-local `/opt/miriyum/.env` before deploying the Compose revision that consumes it. Do not rely on `MIRIYUM_KAKAO_LOCAL_REST_API_KEY` as a staging fallback: staging Compose has never forwarded that legacy name to the backend, so retaining it in the host `.env` does not create a rollback window. The temporary legacy overlap documented for production ECS applies only to that environment.
+2. Deploy the compatibility revision whose application configuration prefers the canonical name and retains the legacy name only as a fallback.
+3. Create one synthetic staging store through the public API and verify successful geocoding without printing the key, request authorization header, provider response body, or precise fixture coordinates in logs or artifacts.
+4. After the same canonical-name evidence exists for production ECS, remove the legacy value from the environment. Remove the application fallback only in a later reviewed change after both environments no longer depend on it.
+
+This migration configures the deployment boundary; it does not by itself prove the staging smoke or baseline in #357.
 
 Before logging in to ECR or restarting containers, `deploy.sh` runs `docker compose config --quiet` with the server-local `.env`. A missing required key therefore stops the deployment before image pull and container replacement. Compose prints only the missing key name; the workflow and deployment script never print secret values or create the `.env` file.
 
@@ -65,6 +78,26 @@ sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
 ```
 
 The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
+
+## MySQL trigger migration recovery
+
+The MySQL Compose command includes `--log-bin-trust-function-creators=1`, which configures MySQL's `log_bin_trust_function_creators` setting. When binary logging is enabled, this lets Flyway create audit triggers without requiring a privileged database account. The option is part of the Compose-managed MySQL startup command, so it is applied again whenever the staging MySQL container is recreated. Do not remove the option simply because a later migration succeeds.
+
+If a Flyway migration that creates a trigger fails, first preserve the failure evidence and inspect the current state. Never automatically delete objects or modify Flyway history.
+
+```bash
+cd /opt/miriyum
+sudo docker compose --env-file .env -f docker-compose.prod.yml ps mysql backend
+sudo docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 backend
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T mysql sh -ec \
+  'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SELECT installed_rank, version, description, type, script, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 20;"'
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T mysql sh -ec \
+  'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SHOW TRIGGERS;"'
+```
+
+Use the failed migration script and backend log to identify the expected trigger, then compare its name and definition with the `SHOW TRIGGERS` result. Deleting a partial trigger or changing a failed `flyway_schema_history` row is a manual recovery decision: the Deploy/Platform owner must first confirm the staging backup, the expected migration source, and the existing object state. This runbook deliberately provides no automatic cleanup or Flyway repair command.
+
+After that manual decision is complete, rerun the selected immutable SHA deployment. Re-run the four commands above, confirm the migration row is successful, confirm the intended trigger exists, and then verify `http://127.0.0.1:8080/actuator/health` is `UP` before recording the recovery as complete.
 
 ## Release and rollback
 

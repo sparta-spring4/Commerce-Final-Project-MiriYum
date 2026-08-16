@@ -20,13 +20,26 @@ Create one JSON secret named `miriyum/production/application` after team approva
   "MIRIYUM_DB_USERNAME": "...",
   "MIRIYUM_DB_PASSWORD": "...",
   "MIRIYUM_JWT_SECRET": "...",
-  "MIRIYUM_KAKAO_LOCAL_REST_API_KEY": "...",
+  "MIRIYUM_STORE_GEOCODING_REST_API_KEY": "...",
   "MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET": "...",
   "MIRIYUM_VALKEY_PASSWORD": "..."
 }
 ```
 
 Do not commit values, the final secret ARN, database endpoints, ALB domain names, or task role ARNs.
+
+## Store geocoding key migration
+
+`MIRIYUM_STORE_GEOCODING_REST_API_KEY` is the canonical production JSON key for store address verification. It is independent from the conditional Kakao OAuth keys. The application compatibility configuration prefers the canonical key and reads `MIRIYUM_KAKAO_LOCAL_REST_API_KEY` only as a temporary fallback.
+
+Use this order when changing the real production secret:
+
+1. Add the canonical JSON key to the approved Secrets Manager secret while retaining the legacy JSON key.
+2. Register and deploy the task definition that selects the canonical JSON key. Do not place either value in the task definition.
+3. Verify one synthetic store-registration smoke and confirm that task logs and deployment artifacts contain neither key value nor provider response body.
+4. Remove the legacy JSON key only after staging Compose and production ECS both have canonical-name runtime evidence. Remove the application fallback in a later reviewed change.
+
+The value-free repository template and verifier prove the reference contract only. They are not evidence that the real Secrets Manager value or production runtime is configured.
 
 ## Conditional secrets
 
