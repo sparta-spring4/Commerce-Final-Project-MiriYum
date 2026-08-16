@@ -54,14 +54,20 @@ paths:
     $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores"
   /api/v1/platform-operators/stores/{storeId}:
     $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}"
-  /api/v1/platform-operators/stores/{storeId}/sanction-impact-previews:
-    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-impact-previews"
-  /api/v1/platform-operators/stores/{storeId}/sanctions:
-    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanctions"
-  /api/v1/platform-operators/stores/{storeId}/sanctions/{sanctionId}/approvals:
-    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanctions~1{sanctionId}~1approvals"
-  /api/v1/platform-operators/stores/{storeId}/sanctions/{sanctionId}/releases:
-    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanctions~1{sanctionId}~1releases"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/assignments:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1assignments"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/impact-previews:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1impact-previews"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/approvals:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1approvals"
+  /api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases:
+    $ref: "./admin-store/openapi.yaml#/paths/~1api~1v1~1platform-operators~1stores~1{storeId}~1sanction-cases~1{caseId}~1sanctions~1{sanctionId}~1releases"
 components:
   securitySchemes:
     platformOperatorBearerAuth:
