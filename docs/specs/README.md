@@ -17,3 +17,4 @@
 - [플랫폼 운영자 권한·재인증·고위험 명령 공통 기반](platform-operator-authorization/spec.md): #276이 소유하는 RBAC·사건 배정·일회 승인·guard 계약
 - [회원 조회·계정 복구·제재 사건 관리](member-support/spec.md): #278이 소유하는 최소 회원 조회·mock 확인·복구·제재·이의 계약
 - [운영자 계정·권한 관리 및 감사 이력](platform-operator-management-audit/spec.md): #282가 소유하는 단일 슈퍼관리자 기반 운영자 관리와 불변 감사 조회·보정 계약
+- [플랫폼 매장 조회·제재·운영 중지 관리](admin-store/spec.md): #279가 소유하는 Store 단위 최소 조회·영향 확인·제재·불변 감사 계약
