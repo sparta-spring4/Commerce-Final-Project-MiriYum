@@ -384,6 +384,12 @@ esac
         self.assertIn("while :; do", self.deploy_script)
         self.assertIn("sleep 2", self.deploy_script)
 
+    def test_mysql_health_wait_covers_the_compose_healthcheck_budget(self):
+        self.assertIn(
+            'MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-150}"',
+            self.deploy_script,
+        )
+
     def test_deployment_fails_when_valkey_health_wait_times_out(self):
         self.assertIn("verify_valkey()", self.deploy_script)
         self.assertIn("Valkey health check timed out after", self.deploy_script)
@@ -995,6 +1001,56 @@ main
 
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+
+    def test_main_publishes_failed_health_when_mysql_never_becomes_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            compose_path = temporary_path / "compose-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$MYSQL_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  if [[ "$1" == "compose" && "$*" == *"logs --tail 100 mysql"* ]]; then
+    printf '%s\\n' "$*" > "$MYSQL_TEST_COMPOSE"
+  fi
+  return 0
+}
+curl() { return 1; }
+sleep() { :; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "MYSQL_HEALTH_TIMEOUT_SECONDS": "0",
+                    "MYSQL_TEST_METRIC": self.to_bash_path(metric_path),
+                    "MYSQL_TEST_COMPOSE": self.to_bash_path(compose_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertIn(
+                "logs --tail 100 mysql", compose_path.read_text(encoding="utf-8")
+            )
 
     @staticmethod
     def run_deploy_script(script, extra_environment):
