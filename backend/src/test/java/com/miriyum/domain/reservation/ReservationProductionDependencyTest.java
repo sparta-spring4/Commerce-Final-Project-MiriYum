@@ -7,6 +7,7 @@ import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.service.ReservationDepositFinalizationPrimitive;
 import com.miriyum.domain.reservation.service.ReservationHoldCreationPrimitive;
 import com.miriyum.domain.reservation.service.ReservationHoldService;
 import com.miriyum.domain.reservation.service.ReservationHoldTransitionPrimitive;
@@ -69,6 +70,19 @@ class ReservationProductionDependencyTest {
                 .anyMatch(field -> field.getType()
                         == ReservationHoldTransitionPrimitive.class))
                 .isTrue();
+    }
+
+    @Test
+    void reservationDepositFinalizationUsesTheMandatoryPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationDepositFinalizationPrimitive.class
+                .getMethod(
+                        "finalizeResources",
+                        ReservationDepositFinalizationPrimitive.Command.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
     }
 
     @Test
