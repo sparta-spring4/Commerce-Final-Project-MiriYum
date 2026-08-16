@@ -11,13 +11,10 @@ import static org.mockito.Mockito.when;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
-import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
-import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
-import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -43,21 +40,18 @@ class WaitingCreationServiceTest {
         WaitingActiveMembershipRepository membershipRepository = mock(WaitingActiveMembershipRepository.class);
         WaitingTransitionAuditRepository auditRepository = mock(WaitingTransitionAuditRepository.class);
         WaitingStatusEventRepository eventRepository = mock(WaitingStatusEventRepository.class);
-        WaitingSettingRepository settingRepository = mock(WaitingSettingRepository.class);
+        WaitingReceptionGate receptionGate = mock(WaitingReceptionGate.class);
         IdempotencyExecutor idempotencyExecutor = mock(IdempotencyExecutor.class);
         WaitingCreationTransactionExecutor transactionExecutor = mock(WaitingCreationTransactionExecutor.class);
         when(membershipRepository.findByConsumerAccountId(200L))
                 .thenReturn(Optional.of(mock(WaitingActiveMembership.class)));
-        when(settingRepository.findByStoreIdForUpdate(100L)).thenReturn(Optional.of(
-                WaitingSetting.create(100L, true, WaitingReceptionMode.MANUAL, 60,
-                        Instant.parse("2026-08-14T00:00:00Z"))));
         when(transactionExecutor.execute(any())).thenAnswer(invocation ->
                 ((Supplier<?>) invocation.getArgument(0)).get());
         when(idempotencyExecutor.execute(any(), any())).thenAnswer(invocation ->
                 ((Supplier<?>) invocation.getArgument(1)).get());
         WaitingCreationService service = new WaitingCreationService(
                 sequenceRepository, teamRepository, membershipRepository, auditRepository, eventRepository,
-                settingRepository,
+                receptionGate,
                 idempotencyExecutor, transactionExecutor, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-08-14T00:00:00Z"), ZoneOffset.UTC),
                 attempt -> 0L, millis -> { });
@@ -69,6 +63,8 @@ class WaitingCreationServiceTest {
                         assertThat(failure.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS));
 
+        verify(receptionGate).requireOpen(
+                100L, LocalDate.of(2026, 8, 14), Instant.parse("2026-08-14T00:00:00Z"));
         verify(membershipRepository).findByConsumerAccountId(200L);
         verifyNoMoreInteractions(membershipRepository);
         verifyNoInteractions(sequenceRepository, teamRepository, auditRepository, eventRepository);

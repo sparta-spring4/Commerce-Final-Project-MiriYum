@@ -37,12 +37,67 @@ Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메�
 aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
 추가하지 않는다.
 
-Issue #271 설정 Runtime은 설정 저장·조회·version 조건부 전체 교체, 신규 접수 gate와
-비활성화 closure 연계까지만 소유한다. 영업 구간을 기준으로 AUTO 접수를 실제로 여는 worker,
-작업 원장과 재시도는 Issue #380이 소유한다. 자동 작업은 조회 predicate의 boolean 결과로
-접수를 열 수 없으며, 실제 접수 상태 변경과 현재 `expectedSettingsVersion` CAS를 같은
-트랜잭션에 결박해야 한다. 따라서 #380 병합 전에는 “오래된 자동 오픈 작업이 최신 설정을
-되돌리지 못한다”는 실행 Runtime 인수 조건을 완료로 표시하지 않는다.
+Issue #271 설정 Runtime은 설정 저장·조회·version 조건부 전체 교체와 비활성화 closure
+연계를 소유한다. Issue #380 AUTO 오픈 Runtime은 아래의 영속 작업·접수 원장과 CAS로 이
+설정을 소비한다. 자동 작업은 조회 predicate의 boolean 결과만으로 접수를 열지 않는다.
+
+## AUTO 접수 오픈 Runtime (Issue #380)
+
+AUTO planner는 현재 `enabled=true`, `receptionMode=AUTO`인 설정과 Store/Schedule 공개
+영업 구간 DTO를 읽어 `waiting_auto_open_jobs`에 작업을 만든다. 작업의 논리 식별자는
+`storeId + businessIntervalKey + expectedSettingsVersion`이며 SHA-256 멱등 키와 DB unique
+제약으로 중복 계획을 흡수한다. 작업에는 다음 값이 불변 snapshot으로 남는다.
+
+- `storeId`, Schedule이 발급한 opaque `businessIntervalKey`, 현지 `businessDate`
+- 영업 구간 UTC 시작·종료와 `scheduledAt = startsAt - advanceOpenMinutes`
+- `expectedSettingsVersion`, `expectedAdvanceOpenMinutes`, 멱등 키
+
+worker는 기본적으로 꺼져 있다. `MIRIYUM_WAITING_AUTO_OPEN_ENABLED=true`와 worker ID,
+계획 horizon·batch, claim batch, lease, 재시도, poll 값을 모두 명시한 배포에서만 켠다.
+여러 worker는 MySQL `FOR UPDATE SKIP LOCKED`로 due 작업을 claim한다. claim마다 attempt와
+단조 증가 fencing token을 올리고 lease owner/만료를 기록한다. 만료된 lease는 다른 worker가
+더 높은 token으로 회수할 수 있고, 이전 owner/token은 완료·실패 기록을 쓰지 못한다.
+
+실제 OPEN 효과의 직렬화 순서는 하나의 짧은 `READ_COMMITTED` 트랜잭션 안에서 다음과 같다.
+
+1. Store 공개 Service를 통한 Store 행 잠금
+2. Schedule 공개 Service 내부의 현재 schedule state 잠금과 영업 구간 재구성
+3. 작업 행 잠금과 owner·fencing token·lease 재검증
+4. `waiting_settings`의 `enabled=true`, `AUTO`, settings version, 사전 오픈 분 조건부 CAS
+5. immutable `waiting_reception_windows` 한 건 삽입
+6. 작업 `COMPLETED`
+
+CAS는 내부 JPA `lock_version`만 증가시키고 공개 settings `version`은 바꾸지 않는다. CAS가
+0건이면 작업을 `INVALIDATED`로 닫고 접수 원장을 만들지 않는다. window unique 제약은
+재시도·중복 실행의 마지막 방어선이다. window 삽입 또는 작업 완료가 실패하면 CAS를 포함한
+전체 트랜잭션이 롤백된다. 따라서 check 직후 설정이 바뀌어도 오래된 작업은 OPEN 효과를
+확정할 수 없다.
+
+설정 비활성화, `MANUAL`/`PAUSED` 전환, settings version 또는 `advanceOpenMinutes` 변경은
+미claim 이전 작업을 제한 batch로 선제 무효화한다. 이미 claim된 작업도 실행 CAS가 같은
+조건을 다시 검사해 실패 폐쇄한다. Store 부적격, schedule 교체, 정기·임시 휴무, 영업 구간
+key/경계 변경도 현재 구간 재구성 실패로 무효화한다. DB deadlock·lock timeout·일시 연결
+장애만 bounded exponential retry 대상으로 삼고, 알 수 없는 오류와 무결성 오류는
+`RECONCILIATION_REQUIRED`로 격리한다.
+
+접수 생성 gate는 먼저 Store/Schedule 현재 구간을 잠그고 그 다음 settings 행을 잠근다.
+AUTO는 현재 settings version과 같은 `waiting_reception_windows`가 `acceptingFrom <= now <
+acceptingUntil`인 경우만 허용한다. MANUAL은 `enabled=true`, `MANUAL`이고 Store 현지
+`businessDate 00:00 <= now < 해당 영업일의 마지막 구간 종료`일 때만 허용한다. disabled,
+PAUSED, Store 부적격, 휴무, stale/missing 구간, 정확한 종료 경계는 모두
+`WAITING_012 WAITING_RECEPTION_CLOSED`로 실패 폐쇄하며 팀·membership·순번·감사·이벤트를
+쓰기 전에 거절한다.
+
+Waiting production 코드는 Store Entity·Repository를 직접 참조하지 않는다. 경계 adapter는
+Store의 `StoreService`/`StoreWaitingReceptionProfile`과 Schedule의
+`WaitingOperatingIntervalService`/`WaitingOperatingIntervalSnapshot` 공개 계약만 소비하고,
+Waiting 소유 값으로 즉시 매핑한다. 이 worker는 내부 HTTP path, operation 또는 OpenAPI
+schema를 추가하지 않는다.
+
+관측 metric은 bounded `outcome`과 안정된 `failure_class` label만 사용한다. 구조화 로그는
+job/store/interval/settings version/owner/fence/attempt만 기록하며 사용자·연락처·좌표·자유
+입력은 기록하지 않는다. 장애 복구는 lease 회수와 retry 원장을 사용하며 격리 backlog는
+운영자가 원인을 확인한 뒤 별도 복구한다.
 
 ## 계정당 활성 웨이팅 1개
 
