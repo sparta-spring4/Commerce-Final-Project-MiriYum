@@ -34,7 +34,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 /** 파일 메타데이터 상태 기록이 외부 파일 저장 흐름과 독립적으로 남는지 검증한다. */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,

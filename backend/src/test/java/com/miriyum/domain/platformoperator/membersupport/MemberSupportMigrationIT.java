@@ -17,7 +17,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-c")
 @Testcontainers
 class MemberSupportMigrationIT {
 
