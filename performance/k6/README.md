@@ -69,7 +69,7 @@ docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 inspect 
 
 기본 개발 stack은 `docker-compose.dev.yml`만 사용한다. 부하 테스트를 할 때만 별도 override와 `loadtest` profile을 함께 지정한다.
 
-빈 로컬 DB에서 검색·예약 fixture용 합성 매장을 공개 API로 생성하려면 카카오 개발자 앱의 REST API 키를 `deploy/local/.env`의 `MIRIYUM_KAKAO_LOCAL_REST_API_KEY`에 입력한다. 이 값은 loadtest override를 통해 backend에만 전달되며 k6 container, fixture, 결과에는 전달하지 않는다. 매장 준비가 끝난 뒤 측정하는 검색·예약 요청은 카카오 API를 직접 호출하지 않는다. 다른 시나리오만 실행할 때는 빈 값으로 둘 수 있다.
+빈 로컬 DB에서 검색·예약 fixture용 합성 매장을 공개 API로 생성하려면 카카오 개발자 앱의 REST API 키를 `deploy/local/.env`의 `MIRIYUM_STORE_GEOCODING_REST_API_KEY`에 입력한다. 이 값은 loadtest override를 통해 backend에만 전달되며 k6 container, fixture, 결과에는 전달하지 않는다. 매장 준비가 끝난 뒤 측정하는 검색·예약 요청은 카카오 API를 직접 호출하지 않는다. 다른 시나리오만 실행할 때는 빈 값으로 둘 수 있다. Kakao OAuth의 `MIRIYUM_KAKAO_REST_API_KEY`와는 용도와 값을 분리한다.
 
 ```powershell
 Copy-Item deploy/local/.env.example deploy/local/.env
