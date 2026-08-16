@@ -100,7 +100,11 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
         healthcheck = self.compose_config["services"][service]["healthcheck"]
         healthcheck_budget = (
             self.duration_seconds(healthcheck["start_period"])
-            + healthcheck["retries"] * self.duration_seconds(healthcheck["interval"])
+            + healthcheck["retries"]
+            * (
+                self.duration_seconds(healthcheck["interval"])
+                + self.duration_seconds(healthcheck["timeout"])
+            )
         )
         timeout_match = re.search(
             rf'{timeout_variable}="\$\{{{timeout_variable}:-(\d+)\}}"',
