@@ -7,6 +7,7 @@ import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.ReservationNotificationSource;
+import com.miriyum.domain.notification.port.WaitingNotificationSource;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -19,15 +20,18 @@ public class NotificationSourceRegistry {
     private final Optional<ReservationNotificationSource> reservationSource;
     private final Optional<MenuHoldNotificationSource> menuHoldSource;
     private final Optional<PickupNotificationSource> pickupSource;
+    private final Optional<WaitingNotificationSource> waitingSource;
 
     public NotificationSourceRegistry(
             Optional<ReservationNotificationSource> reservationSource,
             Optional<MenuHoldNotificationSource> menuHoldSource,
-            Optional<PickupNotificationSource> pickupSource
+            Optional<PickupNotificationSource> pickupSource,
+            Optional<WaitingNotificationSource> waitingSource
     ) {
         this.reservationSource = reservationSource;
         this.menuHoldSource = menuHoldSource;
         this.pickupSource = pickupSource;
+        this.waitingSource = waitingSource;
     }
 
     public NotificationSourceContextV1 readContext(
@@ -36,6 +40,31 @@ public class NotificationSourceRegistry {
             long resourceId,
             long resourceVersion,
             long recipientAccountId
+    ) {
+        return readContext(
+                sourceDomain, resourceType, resourceId, resourceVersion,
+                recipientAccountId, false);
+    }
+
+    public NotificationSourceContextV1 readContextForDelivery(
+            NotificationSourceDomain sourceDomain,
+            NotificationResourceType resourceType,
+            long resourceId,
+            long resourceVersion,
+            long recipientAccountId
+    ) {
+        return readContext(
+                sourceDomain, resourceType, resourceId, resourceVersion,
+                recipientAccountId, true);
+    }
+
+    private NotificationSourceContextV1 readContext(
+            NotificationSourceDomain sourceDomain,
+            NotificationResourceType resourceType,
+            long resourceId,
+            long resourceVersion,
+            long recipientAccountId,
+            boolean delivery
     ) {
         String resource = Long.toString(resourceId);
         String recipient = Long.toString(recipientAccountId);
@@ -60,6 +89,15 @@ public class NotificationSourceRegistry {
                 requireResource(resourceType, NotificationResourceType.PICKUP_RESERVATION);
                 yield pickupSource
                         .map(source -> source.readContext(resource, resourceVersion, recipient))
+                        .orElseGet(NotificationSourceRegistry::temporarilyUnavailable);
+            }
+            case WAITING -> {
+                requireResource(resourceType, NotificationResourceType.WAITING_TEAM);
+                yield waitingSource
+                        .map(source -> delivery
+                                ? source.readContextForDelivery(
+                                        resource, resourceVersion, recipient)
+                                : source.readContext(resource, resourceVersion, recipient))
                         .orElseGet(NotificationSourceRegistry::temporarilyUnavailable);
             }
         };

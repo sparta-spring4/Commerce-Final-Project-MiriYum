@@ -14,6 +14,7 @@ import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.ReservationNotificationSource;
+import com.miriyum.domain.notification.port.WaitingNotificationSource;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -61,10 +62,12 @@ class NotificationDeliveryServiceTest {
                 mock(ReservationNotificationSource.class);
         MenuHoldNotificationSource menuHold = mock(MenuHoldNotificationSource.class);
         PickupNotificationSource pickup = mock(PickupNotificationSource.class);
+        WaitingNotificationSource waiting = mock(WaitingNotificationSource.class);
         NotificationSourceContextV1 context = mock(NotificationSourceContextV1.class);
         given(pickup.readContext("21", 3L, "11")).willReturn(context);
         NotificationSourceRegistry registry = new NotificationSourceRegistry(
-                Optional.of(reservation), Optional.of(menuHold), Optional.of(pickup));
+                Optional.of(reservation), Optional.of(menuHold), Optional.of(pickup),
+                Optional.of(waiting));
 
         assertThat(registry.readContext(
                 NotificationSourceDomain.PICKUP,
@@ -81,5 +84,36 @@ class NotificationDeliveryServiceTest {
                 3L,
                 11L
         )).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void waitingTeamUsesOnlyTheWaitingSource() {
+        ReservationNotificationSource reservation = mock(ReservationNotificationSource.class);
+        MenuHoldNotificationSource menuHold = mock(MenuHoldNotificationSource.class);
+        PickupNotificationSource pickup = mock(PickupNotificationSource.class);
+        WaitingNotificationSource waiting = mock(WaitingNotificationSource.class);
+        NotificationSourceContextV1 context = mock(NotificationSourceContextV1.class);
+        NotificationSourceContextV1 deliveryContext = mock(NotificationSourceContextV1.class);
+        given(waiting.readContext("31", 4L, "11")).willReturn(context);
+        given(waiting.readContextForDelivery("31", 4L, "11")).willReturn(deliveryContext);
+        NotificationSourceRegistry registry = new NotificationSourceRegistry(
+                Optional.of(reservation), Optional.of(menuHold), Optional.of(pickup),
+                Optional.of(waiting));
+
+        assertThat(registry.readContext(
+                NotificationSourceDomain.WAITING,
+                NotificationResourceType.WAITING_TEAM,
+                31L,
+                4L,
+                11L
+        )).isSameAs(context);
+        assertThat(registry.readContextForDelivery(
+                NotificationSourceDomain.WAITING,
+                NotificationResourceType.WAITING_TEAM,
+                31L,
+                4L,
+                11L
+        )).isSameAs(deliveryContext);
+        verifyNoInteractions(reservation, menuHold, pickup);
     }
 }

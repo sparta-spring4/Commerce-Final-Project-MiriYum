@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,9 @@ class ReservationProductionDependencyTest {
         assertThat(StoreService.class.getMethod(
                 "getManagedStore", long.class, long.class).getReturnType())
                 .isEqualTo(ManagedStoreResponse.class);
+        assertThat(StoreService.class.getMethod(
+                "findDisplayName", long.class).getReturnType())
+                .isEqualTo(Optional.class);
         assertThat(WaitingStoreAuthorityPort.class.getMethod(
                 "requireRead", long.class, long.class).getReturnType())
                 .isEqualTo(WaitingStoreAuthority.class);

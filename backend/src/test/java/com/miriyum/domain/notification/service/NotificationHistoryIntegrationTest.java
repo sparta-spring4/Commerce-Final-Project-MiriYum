@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository;
 import com.miriyum.domain.notification.repository.NotificationTaskRepository.HistoryBoundary;
-import java.sql.Timestamp;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -134,18 +133,19 @@ class NotificationHistoryIntegrationTest {
                     payload_fingerprint, status, title, delivered_at
                 ) VALUES (?, 'PICKUP', ?, 'PICKUP_RESERVATION_CONFIRMED',
                           ?, 7, 'PICKUP_RESERVATION', 31, 3, 'CONFIRMED',
-                          ?, ?, ?, 'notification-source-event-v1',
-                          ?, ?, '픽업 예약이 확정되었습니다.', ?)
+                          FROM_UNIXTIME(?), FROM_UNIXTIME(?),
+                          ?, 'notification-source-event-v1',
+                          ?, ?, '픽업 예약이 확정되었습니다.', FROM_UNIXTIME(?))
                 """,
                 notificationId,
                 "history-event-" + notificationId,
                 recipientAccountId,
-                Timestamp.from(occurredAt),
-                Timestamp.from(occurredAt),
+                occurredAt.getEpochSecond(),
+                occurredAt.getEpochSecond(),
                 "history-correlation-" + notificationId,
                 String.format("%064d", notificationId),
                 status,
-                deliveredAt == null ? null : Timestamp.from(deliveredAt)
+                deliveredAt == null ? null : deliveredAt.getEpochSecond()
         );
     }
 
