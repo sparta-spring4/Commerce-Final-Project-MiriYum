@@ -80,6 +80,7 @@ jobs:
   deploy:
     name: build-and-deploy-backend-production-ecs
     needs: verify-source
+    environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
