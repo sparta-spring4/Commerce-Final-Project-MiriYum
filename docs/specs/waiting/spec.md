@@ -332,6 +332,40 @@ callback이 후속 보상을 식별할 수 있게 한다.
 취소가 먼저 확정되면 예약 선점 해제 또는 뒤늦은 결제 승인 취소·환불 후속 작업을 기록하도록
 조건부 version과 활성 membership 제약을 함께 사용한다.
 
+### IN_APP 알림 사건 handoff
+
+Waiting의 상태 전이 트랜잭션은 `waiting_status_events`에 team ID, 1부터 시작하는
+`eventSequence`, 공개 상태와 중앙 발생 시각을 `PENDING`으로 기록한다. `eventSequence`는
+Notification의 양수 `resourceVersion` 계약을 위해 `WaitingTeam.version + 1`로 고정하며,
+생성 상태의 team version `0`은 event sequence `1`이다. 상태 사건 저장 실패는 해당 상태
+전이도 rollback하고, 사건 저장 뒤 Notification 전달 실패는 이미 확정된 Waiting 상태를
+되돌리지 않는다.
+
+IN_APP dispatcher는 상태 사건 ID 순서로 한 행씩 잠그고 `CALLED`, `CANCELLED`, `NO_SHOW`,
+`CHECKED_IN`, `CLOSED_BY_STORE`만 각각 `WAITING_CALLED`, `WAITING_CANCELLED`,
+`WAITING_NO_SHOW`, `WAITING_CHECKED_IN`, `WAITING_CLOSED_BY_STORE`로 기록한다. `WAITING`,
+`ARRIVED`, `RESERVATION_CONVERTING`, `RESERVATION_CONVERTED`는 상태 알림 작업을 만들지 않는다.
+모든 적용 가능한 Notification 작업이 내구성 원장에 기록된 뒤에만 상태 사건을
+`PUBLISHED`로 바꾼다. 같은 사건 재처리는 동일한 source event ID와 payload로 기존 논리
+알림에 수렴한다.
+
+입장 임박은 상태 전이가 아니므로 별도 `waiting_entry_imminent_events` 원장을 사용한다.
+앞선 활성 팀이 최초로 2팀 이하가 된 순간의 team ID·event sequence·발생 시각을 저장하고
+team ID 유일성 제약으로 팀별 한 건만 허용한다. 등록 시 이미 2팀 이하인 팀과 순번에 영향을
+주는 종결 사건 뒤 새로 적격이 된 팀을 같은 기준으로 판정한다. 임박 사건의 생성·재처리·알림
+실패는 team 상태, queue sequence와 실제 호출 횟수를 변경하지 않는다.
+
+Notification은 `WaitingNotificationSource`로 현재 team 상태, `consumerAccountId`,
+`eventSequence = version + 1`, 매장 표시명과 호출 제한 시각을 재검증한다. `CALLED` 목적은
+중앙 `calledAt`과 정확히 10분 뒤 `arrivalDeadline`을 사용한다. 더 최신 `ARRIVED` 또는 종결
+상태가 확인되면 오래된 호출·입장 임박 작업을 `SUPERSEDED`로 처리하며 알림의 지연·실패가
+도착·체크인·취소·미응답·매장 종료를 바꾸지 않는다.
+
+이번 단계의 `PENDING`/`PUBLISHED`는 IN_APP dispatcher 진행 상태만 나타낸다. SSE endpoint,
+재연결 cursor와 실시간 fan-out은 후속 계약에서 immutable 사건 ID를 독립적으로 소비하며 이
+publication state를 SSE 소비 완료로 재사용하지 않는다. AUTO 접수 오픈 worker와 settings
+version CAS는 Issue #380이 별도로 소유한다.
+
 ### 운영자 응답 개인정보 경계
 
 목록 item은 `waitingTeamId`, `status`, `queueSequence`, `partySize`, `createdAt`, `version`만
