@@ -14,6 +14,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.domain.auth.dto.request.LoginRequest;
 import com.miriyum.domain.auth.contact.PhoneNumberPolicy;
 import com.miriyum.domain.auth.contact.ReservationContactReferenceGenerator;
@@ -28,6 +31,7 @@ import com.miriyum.domain.auth.jwt.TokenPair;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrLogoutCoordinator;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationResult;
@@ -37,8 +41,9 @@ import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import java.util.Optional;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +52,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,6 +86,9 @@ class ConsumerAuthServiceTest {
     @Mock
     private RefreshTokenManager refreshTokenManager;
 
+    @Mock
+    private ConsumerQrLogoutCoordinator consumerQrLogoutCoordinator;
+
     private final NicknamePolicy nicknamePolicy = new NicknamePolicy();
     private final PasswordPolicy passwordPolicy = new PasswordPolicy();
 
@@ -89,7 +98,8 @@ class ConsumerAuthServiceTest {
     void setUp() {
         consumerAuthService = new ConsumerAuthService(
                 consumerAccountRepository, passwordEncoder, jwtTokenProvider, nicknamePolicy, passwordPolicy,
-                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(), refreshTokenManager);
+                loginDelayGuard, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(),
+                refreshTokenManager, consumerQrLogoutCoordinator);
     }
 
     @Test
@@ -401,21 +411,114 @@ class ConsumerAuthServiceTest {
     void logoutWithExpiredRefreshTokenIsIdempotent() {
         given(jwtTokenProvider.parseRefreshTokenForLogout("expired-refresh-token")).willReturn(null);
 
-        assertThatCode(() -> consumerAuthService.logout("expired-refresh-token"))
+        assertThatCode(() -> consumerAuthService.logout("expired-refresh-token", "Bearer access-token"))
                 .doesNotThrowAnyException();
 
-        verifyNoInteractions(refreshTokenManager);
+        verifyNoInteractions(refreshTokenManager, consumerQrLogoutCoordinator);
+        verifyNoMoreInteractions(jwtTokenProvider);
     }
 
     @Test
     @DisplayName("Refresh Token 쿠키가 없어도 로그아웃하면 같은 성공 결과로 수렴한다")
     void logoutWithoutRefreshTokenIsIdempotent() {
-        assertThatCode(() -> consumerAuthService.logout(null))
+        assertThatCode(() -> consumerAuthService.logout(null, "Bearer access-token"))
                 .doesNotThrowAnyException();
-        assertThatCode(() -> consumerAuthService.logout(" "))
+        assertThatCode(() -> consumerAuthService.logout(" ", "Bearer access-token"))
                 .doesNotThrowAnyException();
 
-        verifyNoInteractions(jwtTokenProvider, refreshTokenManager);
+        verifyNoInteractions(jwtTokenProvider, refreshTokenManager, consumerQrLogoutCoordinator);
+    }
+
+    @Test
+    void activeRefreshAuthorizesQrEpochAdvanceWithoutAccessToken() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+
+        consumerAuthService.logout("refresh-token", null);
+
+        verify(consumerQrLogoutCoordinator).advanceForLogout(
+                TokenNamespace.CONSUMER, refresh, "refresh-token");
+        verifyNoInteractions(refreshTokenManager);
+    }
+
+    @Test
+    void matchingValidAccessDoesNotChangeRefreshAuthorizedLogout() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        ParsedToken access = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID);
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+        given(jwtTokenProvider.parseAccessToken("access-token")).willReturn(access);
+
+        consumerAuthService.logout("refresh-token", "Bearer access-token");
+
+        verify(consumerQrLogoutCoordinator).advanceForLogout(
+                TokenNamespace.CONSUMER, refresh, "refresh-token");
+    }
+
+    @Test
+    void differentValidAccessDoesNotBlockRefreshLogoutAndWritesNonSensitiveAuditEvent() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        ParsedToken access = new ParsedToken(TokenNamespace.CONSUMER, 2L);
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+        given(jwtTokenProvider.parseAccessToken("access-token")).willReturn(access);
+
+        List<ILoggingEvent> auditLogs = captureConsumerAuthLogs(
+                () -> consumerAuthService.logout("refresh-token", "Bearer access-token"));
+
+        assertThat(auditLogs).singleElement().satisfies(log ->
+                assertThat(log.getFormattedMessage())
+                        .isEqualTo("event=consumer_logout_access_refresh_subject_mismatch"));
+        verify(consumerQrLogoutCoordinator).advanceForLogout(
+                TokenNamespace.CONSUMER, refresh, "refresh-token");
+    }
+
+    @Test
+    void expiredAccessDoesNotBlockActiveRefreshLogout() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+        given(jwtTokenProvider.parseAccessToken("expired-access-token"))
+                .willThrow(new ServiceException(AuthErrorCode.ACCESS_TOKEN_EXPIRED));
+
+        consumerAuthService.logout("refresh-token", "Bearer expired-access-token");
+
+        verify(consumerQrLogoutCoordinator).advanceForLogout(
+                TokenNamespace.CONSUMER, refresh, "refresh-token");
+    }
+
+    @Test
+    void anyAccessParsingServiceExceptionDoesNotBlockActiveRefreshLogout() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+        given(jwtTokenProvider.parseAccessToken("unavailable-access-token"))
+                .willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE));
+
+        assertThatCode(() -> consumerAuthService.logout("refresh-token", "Bearer unavailable-access-token"))
+                .doesNotThrowAnyException();
+
+        verify(consumerQrLogoutCoordinator).advanceForLogout(
+                TokenNamespace.CONSUMER, refresh, "refresh-token");
+    }
+
+    @Test
+    void unexpectedAccessParsingRuntimeExceptionIsNotSwallowed() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.CONSUMER, ACCOUNT_ID, "family-id", "token-id");
+        IllegalStateException failure = new IllegalStateException("jwt configuration failure");
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+        given(jwtTokenProvider.parseAccessToken("access-token")).willThrow(failure);
+
+        assertThatThrownBy(() -> consumerAuthService.logout("refresh-token", "Bearer access-token"))
+                .isSameAs(failure);
+
+        verifyNoInteractions(consumerQrLogoutCoordinator);
+    }
+
+    @Test
+    void nonConsumerRefreshCannotAuthorizeQrEpochAdvance() {
+        ParsedToken refresh = new ParsedToken(TokenNamespace.STORE_OPERATOR, ACCOUNT_ID, "family-id", "token-id");
+        given(jwtTokenProvider.parseRefreshTokenForLogout("refresh-token")).willReturn(refresh);
+
+        assertThatCode(() -> consumerAuthService.logout("refresh-token", null)).doesNotThrowAnyException();
+
+        verifyNoInteractions(consumerQrLogoutCoordinator);
     }
 
     /**
@@ -439,6 +542,21 @@ class ConsumerAuthServiceTest {
                 .isInstanceOfSatisfying(ServiceException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_RESTRICTED));
     }
+
+    private List<ILoggingEvent> captureConsumerAuthLogs(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ConsumerAuthService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+            return List.copyOf(appender.list);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
     private void delegatePasswordCheckToEncoder() {
         given(loginDelayGuard.tryAcquireAttempt(any(), anyLong()))
                 .willReturn(LoginAttempt.acquired("attempt-token"));
