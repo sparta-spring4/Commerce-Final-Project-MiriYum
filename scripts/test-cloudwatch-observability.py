@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -79,6 +80,35 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             TEST_NOTIFICATION_HISTORY_CURSOR_SECRET
         )
         return environment
+
+    @staticmethod
+    def duration_seconds(value):
+        match = re.fullmatch(r"(\d+)(ms|s|m|h)", value)
+        if match is None:
+            raise ValueError(f"Unsupported Compose duration: {value}")
+
+        amount = int(match.group(1))
+        unit = match.group(2)
+        return {
+            "ms": amount / 1000,
+            "s": amount,
+            "m": amount * 60,
+            "h": amount * 60 * 60,
+        }[unit]
+
+    def assert_health_wait_covers_compose_budget(self, service, timeout_variable):
+        healthcheck = self.compose_config["services"][service]["healthcheck"]
+        healthcheck_budget = (
+            self.duration_seconds(healthcheck["start_period"])
+            + healthcheck["retries"] * self.duration_seconds(healthcheck["interval"])
+        )
+        timeout_match = re.search(
+            rf'{timeout_variable}="\$\{{{timeout_variable}:-(\d+)\}}"',
+            self.deploy_script,
+        )
+
+        self.assertIsNotNone(timeout_match)
+        self.assertGreaterEqual(int(timeout_match.group(1)), healthcheck_budget)
 
     def test_disk_metric_has_instance_only_aggregation(self):
         metrics = self.config["metrics"]
@@ -374,20 +404,18 @@ esac
         )
 
     def test_deployment_waits_for_valkey_startup_before_runtime_verification(self):
-        self.assertIn(
-            'VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-60}"',
-            self.deploy_script,
-        )
         self.assertIn("wait_for_valkey_health()", self.deploy_script)
         self.assertIn('ps -q valkey', self.deploy_script)
         self.assertIn('"${health}" == "healthy"', self.deploy_script)
         self.assertIn("while :; do", self.deploy_script)
         self.assertIn("sleep 2", self.deploy_script)
 
-    def test_mysql_health_wait_covers_the_compose_healthcheck_budget(self):
-        self.assertIn(
-            'MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-150}"',
-            self.deploy_script,
+    def test_service_health_waits_cover_their_compose_healthcheck_budgets(self):
+        self.assert_health_wait_covers_compose_budget(
+            "mysql", "MYSQL_HEALTH_TIMEOUT_SECONDS"
+        )
+        self.assert_health_wait_covers_compose_budget(
+            "valkey", "VALKEY_HEALTH_TIMEOUT_SECONDS"
         )
 
     def test_deployment_fails_when_valkey_health_wait_times_out(self):
