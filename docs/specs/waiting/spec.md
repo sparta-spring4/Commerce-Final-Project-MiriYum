@@ -345,9 +345,13 @@ IN_APP dispatcher는 상태 사건 ID 순서로 한 행씩 잠그고 `CALLED`, `
 `CHECKED_IN`, `CLOSED_BY_STORE`만 각각 `WAITING_CALLED`, `WAITING_CANCELLED`,
 `WAITING_NO_SHOW`, `WAITING_CHECKED_IN`, `WAITING_CLOSED_BY_STORE`로 기록한다. `WAITING`,
 `ARRIVED`, `RESERVATION_CONVERTING`, `RESERVATION_CONVERTED`는 상태 알림 작업을 만들지 않는다.
-모든 적용 가능한 Notification 작업이 내구성 원장에 기록된 뒤에만 상태 사건을
-`PUBLISHED`로 바꾼다. 같은 사건 재처리는 동일한 source event ID와 payload로 기존 논리
-알림에 수렴한다.
+그러나 모든 상태 사건은 새 작업 생성 여부와 별개로 Notification 소유 재판정 Service에 team
+ID, 상태 사건 ID와 `eventSequence`를 전달한다. 이 Service는 해당 팀의 모든 `PENDING`
+`WAITING_ENTRY_IMMINENT` 작업을 lease·보류 여부와 무관하게 재판정 대상으로 전환한다.
+모든 적용 가능한 Notification 작업 기록과 재판정 갱신이 같은 MySQL 트랜잭션에서 내구성 있게
+확정된 뒤에만 상태 사건을 `PUBLISHED`로 바꾼다. 대상 작업이 없거나 이미 종결된 경우도
+상태를 되돌리지 않는 멱등 no-op으로 확정한 뒤 `PUBLISHED`한다. 같은 사건 재처리는 동일한
+source event ID와 payload의 논리 알림 및 동일한 재판정 결과로 수렴한다.
 
 입장 임박은 상태 전이가 아니므로 별도 `waiting_entry_imminent_events` 원장을 사용한다.
 앞선 활성 팀이 최초로 2팀 이하가 된 순간의 team ID·event sequence·발생 시각을 저장하고
@@ -367,11 +371,20 @@ context의 `resourceVersion`으로 반환한다. `CALLED` 목적은 중앙 `call
 `RESERVATION_CONVERTING`이면 전환 결과가 확정될 때까지 작업을 취소하거나 최종 실패로 보내지 않는
 Waiting 전용 `TEMPORARILY_UNAVAILABLE` 보류다. 이 context는 요청된 event sequence와
 `sourceState=RESERVATION_CONVERTING`을 반환해 원장 조회 장애와 구분한다. 보류는 일반 일시 장애의
-bounded retry 횟수를 소비하지 않으며 전환 결과 상태 사건이 다시 판정을 깨운다. 전환 실패로 같은
+bounded retry 횟수를 소비하지 않으며 전환 결과 상태 사건 기반 재판정과 유한한 주기 재조회가
+다시 판정을 깨운다. 전환 실패로 같은
 활성 membership의 `WAITING`에 복귀하면 최초 사건은 다시 `FOUND`다. 실제 호출 `CALLED`, 도착
 `ARRIVED`, 예약 전환 완료 또는 다른 종결 상태가 확정되면 오래된 입장 임박 작업을 `SUPERSEDED`로
 처리한다. 상태 사건 목적도 현재 상태가 해당 목적과 일치할 때만 `FOUND`이며 더 최신 상태가 있으면
 `SUPERSEDED`다. 알림의 지연·실패는 도착·체크인·취소·미응답·매장 종료를 바꾸지 않는다.
+
+Notification 재판정은 기존 작업 version을 증가시키고 lease를 무효화하며 `nextAttemptAt`을 DB
+현재 시각으로 당긴다. Worker의 전달·취소·실패·재시도·보류는 획득한 lease와 작업 version이
+모두 일치할 때만 성공한다. Worker 보류가 먼저 확정되면 상태 사건 재판정이 작업을 깨우고,
+상태 사건 재판정이 먼저 확정되면 이전 version의 Worker 보류가 실패해 최신 상태를 다시 읽는다.
+따라서 전환 실패 `WAITING` 사건이 Worker 보류 기록보다 먼저 처리돼도 입장 임박 작업이 영구
+정지하지 않는다. 주기 재조회 시점은 versioned Notification runtime 정책이 유한하게 정하며,
+Waiting dispatcher가 별도 worker 설정이나 Notification repository 직접 접근을 만들지 않는다.
 
 이번 단계의 `PENDING`/`PUBLISHED`는 IN_APP dispatcher 진행 상태만 나타낸다. SSE endpoint,
 재연결 cursor와 실시간 fan-out은 후속 계약에서 immutable 사건 ID를 독립적으로 소비하며 이
