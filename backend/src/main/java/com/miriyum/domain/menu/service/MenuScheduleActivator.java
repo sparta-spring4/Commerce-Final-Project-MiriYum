@@ -18,6 +18,7 @@ import com.miriyum.domain.menu.repository.MenuRepository;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ public class MenuScheduleActivator {
     private final MenuRepository menuRepository;
     private final MenuPublicationEventRepository eventRepository;
     private final MenuDatabaseClock databaseClock;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
     public boolean activateDue(long menuId) {
@@ -82,6 +84,8 @@ public class MenuScheduleActivator {
                 MenuImpactCheckStatus.NOT_EVALUATED,
                 null,
                 MenuRecoveryResult.NOT_EVALUATED)));
+        applicationEventPublisher.publishEvent(
+                new MenuCommandService.SemanticIndexChanged(menu.getId(), now));
         return true;
     }
 }

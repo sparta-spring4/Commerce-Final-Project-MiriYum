@@ -80,7 +80,7 @@ HTTP 호출자 구분은 Controller와 HTTP DTO에서만 표현한다. `publicap
 - 동기 추천 가용성 조회: `1차 MVP` 매장 목록·검색의 `availableOnly`·`reservationAvailability`는 기존 `ReservationService` 공개 일괄 가용성 조회 계약을 사용한다. 선구현 금지는 `2차 추천 전용` 신규 `BulkAvailabilityPort` 또는 신규 batch 계약에만 적용하며, 해당 계약은 `2차 MVP` 진입 전 별도 contract-first Issue/PR에서 기존 1차 계약의 재사용·확장 여부와 함께 확정한다.
 - 카카오 좌표 포트: 입점·주소 변경 때만 Kakao Local REST를 호출한다. 지도 SDK는 결과 표시와 매장 운영자의 좌표 확인에만 사용한다.
 
-품절 대안은 `com.miriyum.domain.alternative`에서 같은 매장 후보를 먼저 검증하고, 후보가 없을 때만 원 매장의 검증된 저장 좌표 기준 **3km 이내**의 매장을 허용한다. bounding box로 후보를 줄인 뒤 Java Haversine으로 3km 포함 경계를 확정한다. 대안 요청 중 외부 지도 호출은 하지 않으며 사용자 현재 위치도 요청·저장·사용하지 않는다. AI/LLM, Spring AI, 벡터 DB, 검색엔진, 추천 전용 서비스·DB·캐시는 `2차 MVP`에 없다.
+품절·판매 중단 대안은 `com.miriyum.domain.alternative`에서 같은 매장 후보를 먼저 검증하고, 후보가 없을 때만 원 매장의 검증된 저장 좌표 기준 **3km 이내**의 매장을 허용한다. bounding box로 후보를 줄인 뒤 Java Haversine으로 3km 포함 경계를 확정한다. 대안 요청 중 외부 지도 호출은 하지 않으며 사용자 현재 위치도 요청·저장·사용하지 않는다. 2차 MVP의 OpenAI 임베딩과 Qdrant는 MySQL 정확 검색·대체 후보를 보완하는 재구축 가능 인덱스이며 생성형 결과를 만들지 않는다.
 
 ## `고도화` 기술 확장
 
@@ -119,3 +119,4 @@ Kafka, 범용 Outbox, 마이크로서비스, WebSocket과 검색 클러스터는
 - [ADR-005 PortOne V2](adr/ADR-005-portone-v2-payment-adapter.md)
 - [ADR-006 JWT·Valkey 전환](adr/ADR-006-jwt-valkey-refresh-token.md)
 - [ADR-007 규칙 기반 통합 검색](adr/ADR-007-unified-search-mysql.md)
+- [ADR-009 MySQL 우선 하이브리드 의미 검색](adr/ADR-009-hybrid-semantic-search-qdrant.md)

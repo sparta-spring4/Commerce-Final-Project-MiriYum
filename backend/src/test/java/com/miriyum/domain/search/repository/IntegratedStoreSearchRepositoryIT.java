@@ -7,7 +7,7 @@ import static org.mockito.BDDMockito.given;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.enums.BusinessType;
 import com.miriyum.domain.store.enums.Region;
@@ -25,10 +25,12 @@ import com.miriyum.domain.menu.repository.MenuRepository;
 import com.miriyum.domain.search.interpreter.InterpretationResult;
 import com.miriyum.domain.search.interpreter.InterpretedSearchCondition;
 import com.miriyum.domain.search.interpreter.PriceRange;
+import com.miriyum.domain.search.geo.BoundingBox;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.service.IntegratedSearchInterpreter;
 import com.miriyum.domain.search.service.IntegratedStoreSearchService;
+import com.miriyum.domain.search.semantic.SemanticMenuHit;
 import com.miriyum.domain.storeoperator.dto.auth.StoreOperatorSignUpRequest;
 import com.miriyum.domain.storeoperator.service.StoreOperatorAuthService;
 import jakarta.persistence.EntityManager;
@@ -118,7 +120,7 @@ class IntegratedStoreSearchRepositoryIT {
     private IntegratedSearchInterpreter integratedSearchInterpreter;
 
     @MockitoBean
-    private ReservationService reservationService;
+    private ReservationSearchAvailabilityService reservationService;
 
     private Long operatorId;
 
@@ -191,12 +193,15 @@ class IntegratedStoreSearchRepositoryIT {
 
     @Test
     @Transactional
-    void soldOutMenuRemainsAVisibleSourceButNeverBecomesAnAlternativeCandidate() {
+    void unavailableMenuRemainsAVisibleSourceButNeverBecomesAnAlternativeCandidate() {
         Store store = createStore(
                 "대안 검색 매장", Region.SEOUL, "CAFE_BAKERY", Set.of(), false);
         Menu soldOutSource = publishMenu(
                 store, "품절 원본", 10_000, "BEVERAGE", List.of(),
                 MenuSellingStatus.SOLD_OUT, MenuVisibility.VISIBLE, false);
+        Menu pausedSource = publishMenu(
+                store, "판매 중단 원본", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.PAUSED, MenuVisibility.VISIBLE, false);
         Menu sellingCandidate = publishMenu(
                 store, "판매 후보", 11_000, "BEVERAGE", List.of(),
                 MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
@@ -210,11 +215,81 @@ class IntegratedStoreSearchRepositoryIT {
                 .get()
                 .extracting(source -> source.menuId())
                 .isEqualTo(soldOutSource.getId());
+        assertThat(alternativeCandidateRepository.findSource(
+                store.getId(), pausedSource.getId()))
+                .get()
+                .extracting(source -> source.menuId())
+                .isEqualTo(pausedSource.getId());
         assertThat(alternativeCandidateRepository.findSameStoreCandidates(
                 store.getId(), soldOutSource.getId(), 20))
                 .extracting(candidate -> candidate.menuId())
                 .containsExactly(sellingCandidate.getId())
                 .doesNotContain(soldOutCandidate.getId());
+    }
+
+    @Test
+    @Transactional
+    void semanticHitsAreRevalidatedAgainstCurrentPublishedMenuVersion() {
+        Store store = createStore(
+                "의미 검색 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu menu = publishMenu(
+                store, "김치찌개", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        int currentVersion = menu.getPublishedVersionNumber();
+        flushAndClear();
+        IntegratedStoreSearchQuery query = query(condition(
+                List.of("SEOUL"), List.of(), List.of(), List.of(), null,
+                "얼큰한 국물"), null, null, 20);
+
+        IntegratedStoreSearchSlice current = repository.searchSemantic(
+                query, List.of(new SemanticMenuHit(
+                        menu.getId(), store.getId(), currentVersion, 0.91)));
+        IntegratedStoreSearchSlice stale = repository.searchSemantic(
+                query, List.of(new SemanticMenuHit(
+                        menu.getId(), store.getId(), currentVersion + 1, 0.99)));
+
+        assertThat(ids(current)).containsExactly(store.getId());
+        assertThat(stale.content()).isEmpty();
+        assertThat(alternativeCandidateRepository.findCurrent(menu.getId()))
+                .get()
+                .satisfies(document -> {
+                    assertThat(document.storeId()).isEqualTo(store.getId());
+                    assertThat(document.versionNumber()).isEqualTo(currentVersion);
+                    assertThat(document.text()).contains("김치찌개", "BEVERAGE");
+                });
+    }
+
+    @Test
+    @Transactional
+    void semanticAlternativeHitsRequireCurrentStoreAndPublishedVersionCoordinates() {
+        Store sourceStore = createStore(
+                "대체 원본 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        Menu source = publishMenu(
+                sourceStore, "원본 메뉴", 10_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SOLD_OUT, MenuVisibility.VISIBLE, false);
+        Menu sameStoreCandidate = publishMenu(
+                sourceStore, "동일 매장 후보", 11_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        Store nearbyStore = createStore(
+                "인근 후보 매장", Region.SEOUL, "KOREAN", Set.of(), false);
+        setVerifiedCoordinates(sourceStore, "37.566500000000000", "126.978000000000000");
+        setVerifiedCoordinates(nearbyStore, "37.566600000000000", "126.978100000000000");
+        Menu nearbyCandidate = publishMenu(
+                nearbyStore, "인근 매장 후보", 12_000, "BEVERAGE", List.of(),
+                MenuSellingStatus.SELLING, MenuVisibility.VISIBLE, false);
+        flushAndClear();
+        BoundingBox box = new BoundingBox(37.5, 37.6, 126.9, 127.1);
+
+        assertThat(alternativeCandidateRepository.findSameStoreSemanticCandidates(
+                sourceStore.getId(), source.getId(), List.of(new SemanticMenuHit(
+                        sameStoreCandidate.getId(), sourceStore.getId(),
+                        sameStoreCandidate.getPublishedVersionNumber() + 1, 0.99)), 20))
+                .isEmpty();
+        assertThat(alternativeCandidateRepository.findNearbySemanticCandidates(
+                sourceStore.getId(), source.getId(), box, List.of(new SemanticMenuHit(
+                        nearbyCandidate.getId(), nearbyStore.getId() + 1,
+                        nearbyCandidate.getPublishedVersionNumber(), 0.99)), 20))
+                .isEmpty();
     }
 
     @Test

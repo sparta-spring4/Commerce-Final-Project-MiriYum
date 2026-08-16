@@ -4,12 +4,13 @@ import static com.miriyum.domain.reservation.dto.response.ReservationAvailabilit
 import static com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus.UNAVAILABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.enums.Region;
 import com.miriyum.domain.recommendation.ranking.RankedRecommendation;
@@ -28,6 +29,8 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchRepository;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchSlice;
+import com.miriyum.domain.search.semantic.SemanticMenuHit;
+import com.miriyum.domain.search.semantic.SemanticMenuSearchService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -52,9 +55,10 @@ class IntegratedStoreSearchServiceTest {
 
     @Mock IntegratedSearchInterpreter interpreter;
     @Mock IntegratedStoreSearchRepository repository;
-    @Mock ReservationService reservationService;
+    @Mock ReservationSearchAvailabilityService reservationService;
     @Mock StoreSearchCandidateLimit candidateLimit;
     @Mock StoreRecommendationService recommendationService;
+    @Mock SemanticMenuSearchService semanticSearchService;
 
     private final Clock clock = Clock.fixed(
             Instant.parse("2026-08-06T06:00:00Z"), ZoneOffset.UTC);
@@ -102,6 +106,97 @@ class IntegratedStoreSearchServiceTest {
                 "내일 18시 2명", false, true, null, null, 20);
 
         assertThat(data.items()).isEmpty();
+    }
+
+    @Test
+    void dateOnlyAvailableSearchUsesPartialReservationCondition() {
+        InterpretedSearchCondition condition = condition(
+                LocalDate.of(2026, 8, 8), null, null, "김치찌개");
+        given(interpreter.interpret("서울 내일 김치찌개")).willReturn(result(condition));
+        IntegratedStoreSearchCandidate candidate = candidate(1L, "찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, AVAILABLE)));
+
+        var data = service().search(
+                "서울 내일 김치찌개", false, true, null, null, 20);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("1");
+        then(reservationService).should().getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(1L)),
+                argThat(value -> value.serviceDate().equals(LocalDate.of(2026, 8, 8))
+                        && value.startTime() == null
+                        && value.partySize() == null
+                        && !value.includesInfants()));
+    }
+
+    @Test
+    void dateAndTimeKeepPartySizeUnspecifiedForReservationSearch() {
+        assertPartialReservationCondition(
+                "서울 내일 18시 김치찌개", LocalTime.of(18, 0), null);
+    }
+
+    @Test
+    void dateAndPartyKeepStartTimeUnspecifiedForReservationSearch() {
+        assertPartialReservationCondition(
+                "서울 내일 2명 김치찌개", null, 2);
+    }
+
+    @Test
+    void usesMySqlRevalidatedSemanticCandidatesWhenExactSearchIsEmpty() {
+        InterpretedSearchCondition condition = condition(null, null, null, "얼큰한 국물");
+        given(interpreter.interpret("서울 얼큰한 국물")).willReturn(result(condition));
+        SemanticMenuHit hit = new SemanticMenuHit(11L, 2L, 3, 0.91);
+        IntegratedStoreSearchCandidate candidate = candidate(2L, "김치찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(), null));
+        given(semanticSearchService.search("얼큰한 국물", 5_000))
+                .willReturn(List.of(hit));
+        given(repository.searchSemantic(any(), org.mockito.ArgumentMatchers.eq(List.of(hit))))
+                .willReturn(
+                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
+
+        var data = service().search(
+                "서울 얼큰한 국물", false, false, null, null, 20);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("2");
+        assertThat(data.items().getFirst().reservationAvailability())
+                .isEqualTo(ReservationAvailability.NOT_REQUESTED);
+    }
+
+    @Test
+    void availableOnlyKeepsScanningSemanticPoolAfterEarlierCandidatesAreUnavailable() {
+        InterpretedSearchCondition condition = condition(
+                LocalDate.of(2026, 8, 8), null, null, "얼큰한 국물");
+        given(interpreter.interpret("서울 내일 얼큰한 국물")).willReturn(result(condition));
+        SemanticMenuHit firstHit = new SemanticMenuHit(11L, 1L, 1, 0.99);
+        SemanticMenuHit secondHit = new SemanticMenuHit(12L, 2L, 1, 0.98);
+        IntegratedStoreSearchCandidate unavailable = candidate(1L, "품절 후보");
+        IntegratedStoreSearchCandidate available = candidate(2L, "김치찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(), null));
+        given(semanticSearchService.search("얼큰한 국물", 5_000))
+                .willReturn(List.of(firstHit, secondHit));
+        given(repository.searchSemantic(any(), org.mockito.ArgumentMatchers.eq(
+                List.of(firstHit, secondHit))))
+                .willReturn(new IntegratedStoreSearchSlice(
+                        List.of(unavailable, available), null));
+        given(repository.refreshCurrentlyPublic(any()))
+                .willAnswer(invocation -> List.copyOf(invocation.getArgument(0)));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, UNAVAILABLE),
+                new ReservationAvailabilityResult(2L, AVAILABLE)));
+
+        var data = service().search(
+                "서울 내일 얼큰한 국물", false, true, null, null, 1);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("2");
+        assertThat(data.nextCursor()).isNull();
     }
 
     @Test
@@ -253,7 +348,35 @@ class IntegratedStoreSearchServiceTest {
                 candidateLimit,
                 CURSOR_CODEC,
                 recommendationService,
+                semanticSearchService,
                 clock);
+    }
+
+    private void assertPartialReservationCondition(
+            String input,
+            LocalTime expectedTime,
+            Integer expectedPartySize
+    ) {
+        LocalDate date = LocalDate.of(2026, 8, 8);
+        InterpretedSearchCondition condition = condition(
+                date, expectedTime, expectedPartySize, "김치찌개");
+        given(interpreter.interpret(input)).willReturn(result(condition));
+        IntegratedStoreSearchCandidate candidate = candidate(1L, "찌개집");
+        given(repository.search(any())).willReturn(
+                new IntegratedStoreSearchSlice(List.of(candidate), null));
+        given(repository.refreshCurrentlyPublic(List.of(candidate)))
+                .willReturn(List.of(candidate));
+        given(reservationService.getAvailabilities(any(), any())).willReturn(List.of(
+                new ReservationAvailabilityResult(1L, AVAILABLE)));
+
+        var data = service().search(input, false, true, null, null, 20);
+
+        assertThat(data.items()).extracting(item -> item.storeId()).containsExactly("1");
+        then(reservationService).should().getAvailabilities(
+                org.mockito.ArgumentMatchers.eq(List.of(1L)),
+                argThat(value -> value.serviceDate().equals(date)
+                        && java.util.Objects.equals(value.startTime(), expectedTime)
+                        && java.util.Objects.equals(value.partySize(), expectedPartySize)));
     }
 
     private static InterpretationResult result(InterpretedSearchCondition condition) {

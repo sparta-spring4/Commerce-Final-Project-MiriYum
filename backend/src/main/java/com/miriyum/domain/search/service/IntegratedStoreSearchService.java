@@ -1,9 +1,9 @@
 package com.miriyum.domain.search.service;
 
-import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
+import com.miriyum.domain.reservation.dto.request.ReservationSearchAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult;
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
-import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationSearchAvailabilityService;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.recommendation.ranking.RankedRecommendation;
 import com.miriyum.domain.recommendation.ranking.RecommendationAvailability;
@@ -27,6 +27,8 @@ import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.query.IntegratedStoreSearchSort;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchCandidate;
 import com.miriyum.domain.search.repository.IntegratedStoreSearchRepository;
+import com.miriyum.domain.search.repository.IntegratedStoreSearchSlice;
+import com.miriyum.domain.search.semantic.SemanticMenuSearchService;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
@@ -44,19 +46,21 @@ public class IntegratedStoreSearchService {
 
     private final IntegratedSearchInterpreter interpreter;
     private final IntegratedStoreSearchRepository repository;
-    private final ReservationService reservationService;
+    private final ReservationSearchAvailabilityService reservationService;
     private final StoreSearchCandidateLimit candidateLimit;
     private final IntegratedSearchCursorCodec cursorCodec;
     private final StoreRecommendationService recommendationService;
+    private final SemanticMenuSearchService semanticSearchService;
     private final Clock clock;
 
     public IntegratedStoreSearchService(
             IntegratedSearchInterpreter interpreter,
             IntegratedStoreSearchRepository repository,
-            ReservationService reservationService,
+            ReservationSearchAvailabilityService reservationService,
             StoreSearchCandidateLimit candidateLimit,
             IntegratedSearchCursorCodec cursorCodec,
             StoreRecommendationService recommendationService,
+            SemanticMenuSearchService semanticSearchService,
             Clock clock
     ) {
         this.interpreter = interpreter;
@@ -65,6 +69,7 @@ public class IntegratedStoreSearchService {
         this.candidateLimit = candidateLimit;
         this.cursorCodec = cursorCodec;
         this.recommendationService = recommendationService;
+        this.semanticSearchService = semanticSearchService;
         this.clock = clock;
     }
 
@@ -101,8 +106,8 @@ public class IntegratedStoreSearchService {
     ) {
         InterpretationResult interpretation = interpreter.interpret(searchInput);
         InterpretedSearchCondition condition = interpretation.condition();
-        boolean completeReservation = hasCompleteReservation(condition);
-        if ((includesInfants || availableOnly) && !completeReservation) {
+        boolean reservationRequested = hasReservationDate(condition);
+        if ((includesInfants || availableOnly) && !reservationRequested) {
             throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);
         }
 
@@ -144,7 +149,9 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     requestedSize,
                     cursorCodec);
-            var slice = repository.search(query);
+            CandidateBatch batch = supplementWithSemanticCandidates(
+                    query, repository.search(query), scanLimit);
+            IntegratedStoreSearchSlice slice = batch.slice();
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -173,18 +180,19 @@ public class IntegratedStoreSearchService {
                 ReservationAvailability candidateAvailability =
                         availability.values().getOrDefault(
                                 current.storeId(),
-                                completeReservation
+                                reservationRequested
                                         ? ReservationAvailability.UNAVAILABLE
                                         : ReservationAvailability.NOT_REQUESTED);
                 candidateAvailability = reconcileCurrentState(
-                        current, candidateAvailability, completeReservation);
+                        current, candidateAvailability, reservationRequested);
                 if (availableOnly
                         && candidateAvailability != ReservationAvailability.AVAILABLE) {
                     continue;
                 }
                 items.add(toItem(current, candidateAvailability));
                 if (items.size() == requestedSize) {
-                    boolean hasMore = scannedCandidates < scanLimit
+                    boolean hasMore = !batch.semanticSupplemented()
+                            && scannedCandidates < scanLimit
                             && (!originalCandidate.equals(original.getLast())
                             || slice.nextCursor() != null);
                     responseCursor = hasMore
@@ -249,7 +257,9 @@ public class IntegratedStoreSearchService {
                     scanCursor,
                     scanPageSize,
                     cursorCodec);
-            var slice = repository.search(scanQuery);
+            CandidateBatch batch = supplementWithSemanticCandidates(
+                    scanQuery, repository.search(scanQuery), scanLimit);
+            IntegratedStoreSearchSlice slice = batch.slice();
             List<IntegratedStoreSearchCandidate> original = slice.content();
             List<IntegratedStoreSearchCandidate> before =
                     repository.refreshCurrentlyPublic(original);
@@ -274,13 +284,13 @@ public class IntegratedStoreSearchService {
                 ReservationAvailability candidateAvailability =
                         availability.values().getOrDefault(
                                 current.storeId(),
-                                hasCompleteReservation(condition)
+                                hasReservationDate(condition)
                                         ? ReservationAvailability.UNAVAILABLE
                                         : ReservationAvailability.NOT_REQUESTED);
                 candidateAvailability = reconcileCurrentState(
                         current,
                         candidateAvailability,
-                        hasCompleteReservation(condition));
+                        hasReservationDate(condition));
                 if (availableOnly
                         && candidateAvailability != ReservationAvailability.AVAILABLE) {
                     continue;
@@ -371,7 +381,7 @@ public class IntegratedStoreSearchService {
             boolean includesInfants
     ) {
         Map<Long, ReservationAvailability> byId = new LinkedHashMap<>();
-        if (!hasCompleteReservation(condition)) {
+        if (!hasReservationDate(condition)) {
             candidates.forEach(candidate -> byId.put(
                     candidate.storeId(), ReservationAvailability.NOT_REQUESTED));
             return new AvailabilityBatch(true, byId);
@@ -384,7 +394,7 @@ public class IntegratedStoreSearchService {
         }
         List<ReservationAvailabilityResult> results = reservationService.getAvailabilities(
                 storeIds,
-                new ReservationAvailabilityCondition(
+                new ReservationSearchAvailabilityCondition(
                         condition.reservationDate(),
                         condition.reservationTime(),
                         null,
@@ -399,6 +409,30 @@ public class IntegratedStoreSearchService {
                         ? ReservationAvailability.AVAILABLE
                         : ReservationAvailability.UNAVAILABLE));
         return new AvailabilityBatch(true, byId);
+    }
+
+    private CandidateBatch supplementWithSemanticCandidates(
+            IntegratedStoreSearchQuery query,
+            IntegratedStoreSearchSlice exact,
+            int scanLimit
+    ) {
+        if (query.cursor().isPresent()
+                || exact.nextCursor() != null
+                || exact.content().size() >= query.size()
+                || query.remainingKeyword().isBlank()) {
+            return new CandidateBatch(exact, false);
+        }
+        var hits = semanticSearchService.search(query.remainingKeyword(), scanLimit);
+        if (hits.isEmpty()) {
+            return new CandidateBatch(exact, false);
+        }
+        IntegratedStoreSearchSlice semantic = repository.searchSemantic(query, hits);
+        Map<Long, IntegratedStoreSearchCandidate> merged = new LinkedHashMap<>();
+        exact.content().forEach(candidate -> merged.put(candidate.storeId(), candidate));
+        semantic.content().forEach(candidate -> merged.putIfAbsent(
+                candidate.storeId(), candidate));
+        return new CandidateBatch(new IntegratedStoreSearchSlice(
+                List.copyOf(merged.values()), null), true);
     }
 
     private static boolean matches(
@@ -432,10 +466,8 @@ public class IntegratedStoreSearchService {
         return availability;
     }
 
-    private static boolean hasCompleteReservation(InterpretedSearchCondition condition) {
-        return condition.partySize() != null
-                && condition.reservationDate() != null
-                && condition.reservationTime() != null;
+    private static boolean hasReservationDate(InterpretedSearchCondition condition) {
+        return condition.reservationDate() != null;
     }
 
     private static RecommendationAvailability toRecommendationAvailability(
@@ -512,6 +544,12 @@ public class IntegratedStoreSearchService {
     private record RankedCandidateState(
             RankedRecommendation ranked,
             CandidateState state
+    ) {
+    }
+
+    private record CandidateBatch(
+            IntegratedStoreSearchSlice slice,
+            boolean semanticSupplemented
     ) {
     }
 }

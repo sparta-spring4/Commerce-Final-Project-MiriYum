@@ -5,7 +5,7 @@
 `적용 단계`는 다음 네 값 또는 필요한 조합으로 구분한다.
 
 - `1차 MVP`: 계정, 구조화 사업자 정보의 자동 입점, 텍스트 기반 매장·메뉴 탐색과 예약·메뉴 홀드·픽업 예약의 기본 거래.
-- `2차 MVP`: AI 없는 규칙 해석, QueryDSL 조회, 이력 기반 결정적 추천, 품절 대안과 지도 탐색.
+- `2차 MVP`: 규칙 기반 구조화 해석, QueryDSL 정확 조회, OpenAI 임베딩·Qdrant 의미 검색 보완, 이력 기반 결정적 추천, 품절·판매 중단 대안과 지도 탐색.
 - `고도화`: 단계 진입 시 모두 구현·활성화·검증해야 하는 웨이팅·SSE, 결제·환불, 체크인·노쇼, 일반 취소 승계, Free 기본 통계, 플랫폼 운영자와 알림.
 - `향후 고도화`: 현재 활성화하지 않으며 시간과 근거가 남을 때 별도 승인해 검토하는 코스·구독·리뷰·광고 상품·Pro 및 AI 설명·채팅 후보.
 
@@ -32,7 +32,7 @@
 | 취소 자리 자동 승계 | TRANSFER-001, TRANSFER-002, TRANSFER-003, TRANSFER-004, TRANSFER-005, TRANSFER-006, TRANSFER-007, TRANSFER-008, TRANSFER-009 | 확정 | `고도화` | reservation | [정책 원본](service-policies/10-waitlist-transfer.md) | 확정 예약의 유효한 일반 취소로 반환된 예약 가능분만 대상이다. 변경 감소·거절·만료·시간 경과·노쇼와 메뉴 홀드 취소·수량 복구는 원인이 아니다. |
 | 사용자·매장 구독 | SUB-001, SUB-002, SUB-003, SUB-004, SUB-005, SUB-006, SUB-007, SUB-008, SUB-009, SUB-010 | 확정·TODO 혼재 | `향후 고도화` | payment | [정책 원본](service-policies/11-subscription.md) | 사용자 구독·매장 Pro·유료 혜택은 향후 고도화 전까지 활성화하지 않는다. |
 | 리뷰·신뢰·어뷰징 | TRUST-001, TRUST-002, TRUST-003, TRUST-004, TRUST-005, TRUST-006, TRUST-007, TRUST-008, TRUST-009, TRUST-010, TRUST-011, TRUST-012 | 확정 | `향후 고도화` | review | [정책 원본](service-policies/12-review-trust.md) | 리뷰·신고·답글·조작 탐지·신뢰 점수는 향후 도입 기준만 보존한다. |
-| 광고·추천 | ADS-001, ADS-002, ADS-003, ADS-004, ADS-005, ADS-006, ADS-007, ADS-008 | 확정·TODO 혼재 | `2차 MVP`, `향후 고도화` | store | [정책 원본](service-policies/13-ad-recommendation.md) | 2차는 `RuleInterpreter`, QueryDSL, 결정적 Java 점수화·이력 추천, 같은 매장 우선과 원 매장의 검증된 저장 좌표 기준 3km 품절 대안, 카카오맵 표시다. 사용자 현재 위치와 추천 중 외부 지도 호출은 사용하지 않는다. 향후 LLM은 코드가 정한 TOP3 설명만 생성하고 실패 시 템플릿을 사용한다. 광고 상품도 향후 경계다. |
+| 광고·추천 | ADS-001, ADS-002, ADS-003, ADS-004, ADS-005, ADS-006, ADS-007, ADS-008 | 확정·TODO 혼재 | `2차 MVP`, `향후 고도화` | store | [정책 원본](service-policies/13-ad-recommendation.md) | 2차는 `RuleInterpreter`, QueryDSL 정확 검색, 부족한 최초 응답에 한정한 OpenAI 구조화 개념 해석과 MySQL 보완 조회, 결정적 Java 점수화·이력 추천, 같은 매장 우선과 원 매장의 검증된 저장 좌표 기준 3km 품절·판매 중단 대안, 카카오맵 표시다. MySQL 최신 상태와 예약·재고를 최종 재검증하고 외부 해석 장애에는 정확·일반 후보로 폴백한다. 사용자 현재 위치와 추천 중 외부 지도 호출은 사용하지 않는다. LLM은 결과·가용성·안전 판단을 직접 만들지 않는다. 광고 상품은 향후 경계다. |
 | 분석·수요 리포트 | ANALYTICS-001, ANALYTICS-002, ANALYTICS-003, ANALYTICS-004, ANALYTICS-005, ANALYTICS-006, ANALYTICS-007, ANALYTICS-008, ANALYTICS-009 | 확정 | `고도화`, `향후 고도화` | store | [정책 원본](service-policies/14-analytics-report.md) · [활성 Free 대시보드 기능 명세](specs/analytics/spec.md) | Free 기본 운영 통계는 고도화, Pro 비교·해석·추천·자동 리포트·내보내기는 향후 고도화다. |
 | 플랫폼 운영자·분쟁·수동 복구 | ADMIN-001, ADMIN-002, ADMIN-003, ADMIN-004, ADMIN-005, ADMIN-006, ADMIN-007, ADMIN-008, ADMIN-009, ADMIN-010, ADMIN-011, ADMIN-012 | 확정·TODO 혼재 | `고도화` | 모든 고도화 도메인 | [정책 원본](service-policies/15-admin-operation.md) · [인증·세션 기능 명세](specs/platform-operator-auth/spec.md) · [권한·재인증 기능 명세](specs/platform-operator-authorization/spec.md) · [회원지원 기능 명세](specs/member-support/spec.md) · [운영자 관리·감사 기능 명세](specs/platform-operator-management-audit/spec.md) · [매장 제재 기능 명세](specs/admin-store/spec.md) | 별도 플랫폼 운영자 인증·권한 기반 위에 최소 회원 조회, mock 확인 기반 수동 복구, 단계형 제재와 이의 사건 관리를 활성화한다. 교체되지 않는 단일 슈퍼관리자는 담당 도메인별 비슈퍼관리자 계정·권한을 관리하고 불변 감사 원장과 최소 권한 조회를 제공하되 ADMIN-009 공통 보존기간은 미정으로 유지한다. |
 | 알림 | NOTI-001, NOTI-002, NOTI-003, NOTI-004, NOTI-005, NOTI-006, NOTI-007, NOTI-008, NOTI-009, NOTI-010 | 확정·TODO 혼재 | `고도화` | notification | [정책 원본](service-policies/16-notification.md) | 거래·웨이팅·결제·체크인·운영 알림과 실패 처리를 고도화에서 제공한다. `NOTI-009` 보관 기간은 TODO다. |

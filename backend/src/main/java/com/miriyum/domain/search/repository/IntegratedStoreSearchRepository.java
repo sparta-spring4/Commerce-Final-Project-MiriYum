@@ -6,6 +6,7 @@ import com.miriyum.domain.search.query.IntegratedSearchCursor;
 import com.miriyum.domain.search.query.IntegratedSearchCursorCodec;
 import com.miriyum.domain.search.query.IntegratedStoreSearchQuery;
 import com.miriyum.domain.search.query.IntegratedStoreSearchSort;
+import com.miriyum.domain.search.semantic.SemanticMenuHit;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import com.querydsl.core.BooleanBuilder;
@@ -84,6 +85,55 @@ public class IntegratedStoreSearchRepository {
                 ? encodeCursor(query, content.getLast())
                 : null;
         return new IntegratedStoreSearchSlice(content, nextCursor);
+    }
+
+    /** Qdrant 식별자를 현재 공개 Store·Menu 버전과 대조하고 유사도 순서를 유지한다. */
+    public IntegratedStoreSearchSlice searchSemantic(
+            IntegratedStoreSearchQuery query,
+            List<SemanticMenuHit> hits
+    ) {
+        if (hits.isEmpty()) {
+            return new IntegratedStoreSearchSlice(List.of(), null);
+        }
+        QStore store = QStore.store;
+        BooleanBuilder predicate = IntegratedStoreSearchPredicates.createSemantic(
+                store, query, hits);
+        BooleanExpression currentVerifiedCoordinates = store.geocodingStatus
+                .eq(GeocodingStatus.VERIFIED)
+                .and(store.geocodingAddressVersion.eq(store.addressVersion));
+        List<IntegratedStoreSearchCandidate> fetched = queryFactory
+                .select(Projections.constructor(
+                        IntegratedStoreSearchCandidate.class,
+                        store.id,
+                        store.name,
+                        store.region,
+                        store.address,
+                        store.storeCategoryCode,
+                        store.operationStatus,
+                        store.reservationEnabled,
+                        store.menuHoldEnabled,
+                        store.pickupEnabled,
+                        store.createdAt,
+                        Expressions.asNumber(1),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.latitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class)),
+                        new CaseBuilder().when(currentVerifiedCoordinates)
+                                .then(store.longitude)
+                                .otherwise(Expressions.nullExpression(BigDecimal.class))))
+                .from(store)
+                .where(predicate)
+                .limit(hits.size())
+                .fetch();
+        Map<Long, Integer> rankByStore = new LinkedHashMap<>();
+        for (SemanticMenuHit hit : hits) {
+            rankByStore.putIfAbsent(hit.storeId(), rankByStore.size());
+        }
+        List<IntegratedStoreSearchCandidate> ordered = fetched.stream()
+                .sorted(java.util.Comparator.comparingInt(candidate ->
+                        rankByStore.getOrDefault(candidate.storeId(), Integer.MAX_VALUE)))
+                .toList();
+        return new IntegratedStoreSearchSlice(ordered, null);
     }
 
     /** 후보 순서를 유지하며 응답 직전 공개·운영·모드·검증 좌표를 다시 읽는다. */
