@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
@@ -65,6 +67,8 @@ class ReservationDepositProcessServiceTest {
         PaymentService paymentService = mock(PaymentService.class);
         ReservationDepositFinalizationPrimitive finalizationPrimitive =
                 mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
         ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
         ReservationDepositProcess process = depositProcess();
         Reservation reservation = confirmedReservation();
@@ -83,6 +87,7 @@ class ReservationDepositProcessServiceTest {
                 processRepository,
                 paymentService,
                 finalizationPrimitive,
+                holdTransitionPrimitive,
                 menuHoldPort,
                 Clock.fixed(NOW, ZoneId.of("UTC")));
 
@@ -111,6 +116,52 @@ class ReservationDepositProcessServiceTest {
                         "CONSUMER",
                         CONSUMER_ID,
                         NOW));
+    }
+
+    @Test
+    void confirmingBeforeExpiryProtectsResourcesAndReturnsAccepted() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.CONFIRMING,
+                        PaymentAttemptStatus.PENDING,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174001");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.AWAITING_PAYMENT);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        "reservation-deposit-protect:99:123e4567-e89b-12d3-a456-426614174001",
+                        "CONSUMER",
+                        CONSUMER_ID,
+                        NOW,
+                        null));
+        verify(finalizationPrimitive, never()).finalizeResources(any());
     }
 
     @Test
@@ -240,6 +291,14 @@ class ReservationDepositProcessServiceTest {
     }
 
     private static PaymentResult paidResult(Instant paidAt) {
+        return paymentResult(PaymentStatus.PAID, PaymentAttemptStatus.PAID, paidAt);
+    }
+
+    private static PaymentResult paymentResult(
+            PaymentStatus status,
+            PaymentAttemptStatus attemptStatus,
+            Instant paidAt
+    ) {
         return new PaymentResult(
                 "9001",
                 String.valueOf(HOLD_ID),
@@ -247,8 +306,8 @@ class ReservationDepositProcessServiceTest {
                 0L,
                 4_000L,
                 "KRW",
-                PaymentStatus.PAID,
-                PaymentAttemptStatus.PAID,
+                status,
+                attemptStatus,
                 NOW.minusSeconds(60),
                 paidAt,
                 NOW,

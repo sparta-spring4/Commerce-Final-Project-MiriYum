@@ -3,11 +3,13 @@ package com.miriyum.domain.reservation.service;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse.PaymentPreparationSnapshot;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
@@ -30,6 +32,7 @@ public class ReservationDepositProcessService {
     private final ReservationDepositProcessRepository processRepository;
     private final PaymentService paymentService;
     private final ReservationDepositFinalizationPrimitive finalizationPrimitive;
+    private final ReservationHoldTransitionPrimitive holdTransitionPrimitive;
     private final ReservationMenuHoldPort menuHoldPort;
     private final Clock clock;
 
@@ -37,12 +40,14 @@ public class ReservationDepositProcessService {
             ReservationDepositProcessRepository processRepository,
             PaymentService paymentService,
             ReservationDepositFinalizationPrimitive finalizationPrimitive,
+            ReservationHoldTransitionPrimitive holdTransitionPrimitive,
             ReservationMenuHoldPort menuHoldPort,
             Clock clock
     ) {
         this.processRepository = processRepository;
         this.paymentService = paymentService;
         this.finalizationPrimitive = finalizationPrimitive;
+        this.holdTransitionPrimitive = holdTransitionPrimitive;
         this.menuHoldPort = menuHoldPort;
         this.clock = clock;
     }
@@ -82,6 +87,20 @@ public class ReservationDepositProcessService {
                     ReservationDetailResponse.from(
                             reservation,
                             menuHoldPort.findSnapshots(reservation.getId())));
+        }
+        if ((payment.status() == PaymentStatus.CONFIRMING
+                || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
+                && now.isBefore(process.getExpiresAt())
+                && !process.isAbandonmentRequested()) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                            "reservation-deposit-protect:" + processId + ":" + idempotencyKey,
+                            "CONSUMER",
+                            consumerAccountId,
+                            now,
+                            null));
         }
         return ReservationDepositCommandResult.pending(toResponse(process));
     }
