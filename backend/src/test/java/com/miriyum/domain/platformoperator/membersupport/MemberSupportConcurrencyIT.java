@@ -19,7 +19,8 @@ import org.testcontainers.mysql.MySQLContainer;
 class MemberSupportConcurrencyIT {
     @Test
     void recoveryAndSanctionCompareAndSetHaveExactlyOneWinner() throws Exception {
-        try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")) {
+        try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")
+                .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
             Flyway.configure().dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
                     .load().migrate();
