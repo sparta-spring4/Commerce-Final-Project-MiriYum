@@ -3,6 +3,7 @@ package com.miriyum.domain.platformoperator.config;
 import com.miriyum.domain.auth.jwt.JwtAuthenticationEntryPoint;
 import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.auth.ratelimit.StagingRateLimitBypass;
 import com.miriyum.domain.platformoperator.service.PlatformOperatorAuthService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -22,7 +23,12 @@ public class PlatformOperatorSecurityConfig {
     @Bean
     @Order(1)
     @ConditionalOnProperty(prefix = "miriyum.platform-operator", name = "enabled", havingValue = "true")
-    SecurityFilterChain platformOperatorPublicChain(HttpSecurity http, RateLimiter limiter, ObjectMapper mapper) {
+    SecurityFilterChain platformOperatorPublicChain(
+            HttpSecurity http,
+            RateLimiter limiter,
+            ObjectMapper mapper,
+            StagingRateLimitBypass stagingBypass
+    ) {
         http.securityMatcher(
                         "/api/v1/platform-operators/auth/sessions",
                         "/api/v1/platform-operators/auth/token-refreshes",
@@ -33,7 +39,9 @@ public class PlatformOperatorSecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-                .addFilterBefore(new RateLimitFilter(limiter, mapper), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(
+                        new RateLimitFilter(limiter, mapper, stagingBypass),
+                        UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 

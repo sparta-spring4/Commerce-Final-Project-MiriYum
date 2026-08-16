@@ -253,7 +253,6 @@ public class ReservationHoldService {
                 command.menuSelections());
     }
 
-
     private void verifyMenuCreationReplay(
             ReservationHold hold,
             List<ReservationTemporaryMenuHoldSelection> selections

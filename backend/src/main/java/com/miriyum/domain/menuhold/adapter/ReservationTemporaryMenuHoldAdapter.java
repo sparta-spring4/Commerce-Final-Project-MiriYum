@@ -85,6 +85,7 @@ public class ReservationTemporaryMenuHoldAdapter implements ReservationTemporary
                     case RELEASED -> ReservationTemporaryMenuHoldResult.State.RELEASED;
                     case EXPIRED -> ReservationTemporaryMenuHoldResult.State.EXPIRED;
                     case FULFILLED -> ReservationTemporaryMenuHoldResult.State.FULFILLED;
+                    case FORFEITED -> ReservationTemporaryMenuHoldResult.State.FORFEITED;
                 };
         return new ReservationTemporaryMenuHoldResult(
                 presence, state, result.finalReservationId());

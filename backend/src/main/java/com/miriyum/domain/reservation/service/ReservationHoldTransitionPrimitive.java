@@ -562,7 +562,8 @@ public class ReservationHoldTransitionPrimitive {
         }
         return currentHoldStatus == ReservationHoldStatus.CONFIRMED
                 && (menuHold.state() == ReservationTemporaryMenuHoldResult.State.RELEASED
-                || menuHold.state() == ReservationTemporaryMenuHoldResult.State.FULFILLED)
+                || menuHold.state() == ReservationTemporaryMenuHoldResult.State.FULFILLED
+                || menuHold.state() == ReservationTemporaryMenuHoldResult.State.FORFEITED)
                 && menuHold.finalReservationId() != null
                 && menuHold.finalReservationId() > 0;
     }
