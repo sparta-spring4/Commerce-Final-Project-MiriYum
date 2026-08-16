@@ -19,13 +19,24 @@ import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import org.springframework.stereotype.Service;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Payment의 유일한 공개 use-case Service이며 외부 호출을 DB transaction 밖에서 수행한다. */
 @Service
 public class PaymentService {
+
+    private static final Set<String> RESERVATION_PREPARATION_CONSTRAINTS = Set.of(
+            "uk_payments_source",
+            "payments.uk_payments_source",
+            "uk_payments_preparation_idempotency",
+            "payments.uk_payments_preparation_idempotency"
+    );
 
     private final PaymentTransactionService transactions;
     private final PaymentProviderClient providerClient;
@@ -47,8 +58,11 @@ public class PaymentService {
         try {
             return transactions.prepare(command, now());
         } catch (DataIntegrityViolationException race) {
-            if (callerTransactionActive) {
+            if (!isRetryableReservationPreparationConflict(race)) {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
+            if (callerTransactionActive) {
+                throw new PaymentPreparationRetryableConflictException();
             }
             return transactions.replayPreparation(command);
         }
@@ -178,6 +192,24 @@ public class PaymentService {
 
     private Instant now() {
         return clock.instant().truncatedTo(ChronoUnit.MICROS);
+    }
+
+    private static boolean isRetryableReservationPreparationConflict(Throwable failure) {
+        Throwable current = failure;
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        while (current != null && visited.add(current)) {
+            if (current instanceof ConstraintViolationException violation
+                    && violation.getSQLException() != null
+                    && violation.getSQLException().getErrorCode() == 1062) {
+                String constraintName = violation.getConstraintName();
+                if (constraintName != null
+                        && RESERVATION_PREPARATION_CONSTRAINTS.contains(constraintName)) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static boolean matchesProviderMapping(

@@ -87,6 +87,18 @@ PaymentPreparation prepareReservationDeposit(PrepareReservationDepositCommand co
 
 같은 source·멱등 키·지문은 기존 결과를 반환한다. 같은 멱등 키의 다른 지문, 만료됐거나 금액이 0 이하인 source, 같은 source의 다른 활성 결제는 실패 폐쇄한다.
 
+예약금 준비의 unique 경합은 Payment 내부에서만 구조화된 원인을 판정한다. Hibernate
+`ConstraintViolationException`의 MySQL vendor code가 `1062`이고 constraint 이름이
+`uk_payments_source`, `payments.uk_payments_source`,
+`uk_payments_preparation_idempotency`,
+`payments.uk_payments_preparation_idempotency` 중 하나인 경우만 승인된 준비 경합이다.
+caller transaction에 참여한 승인 경합은 DB 원인을 노출하지 않는
+`PaymentPreparationRetryableConflictException`으로 전달하며 외부 오류 의미는 `COMMON_008`을
+유지한다. 호출자는 실패한 transaction이 완전히 종료된 뒤에만 제한 재진입할 수 있다. caller
+transaction이 없는 승인 경합은 실패 transaction 종료 뒤 저장된 준비 결과를 replay한다.
+message-only 판정, 다른 constraint, 다른 vendor code와 일반
+`DataIntegrityViolationException`은 전용 신호나 replay 대상이 아니며 `COMMON_008`로 실패한다.
+
 ### 결제 확정
 
 ```java

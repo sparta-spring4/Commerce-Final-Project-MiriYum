@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -30,10 +31,15 @@ import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderStatus;
-import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.exception.CommonErrorCode;
+import com.miriyum.global.exception.ServiceException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -47,8 +53,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -314,19 +322,84 @@ class PaymentPersistenceIT {
                 command.sourceExpiresAt(),
                 PaymentStatus.READY
         );
-        doThrow(new DataIntegrityViolationException("uk_payments_source"))
+        doThrow(preparationConflict("uk_payments_source", 1062))
                 .when(transactions).prepare(eq(command), any(Instant.class));
         doReturn(misleadingReplay).when(transactions).replayPreparation(command);
 
-        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(
-                ignored -> paymentService.prepareReservationDeposit(command)))
-                .isInstanceOf(ServiceException.class)
-                .extracting(error -> ((ServiceException) error).getErrorCode())
-                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION);
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            try {
+                paymentService.prepareReservationDeposit(command);
+            } catch (PaymentPreparationRetryableConflictException conflict) {
+                assertThat(status.isRollbackOnly()).isTrue();
+                throw conflict;
+            }
+        }))
+                .isInstanceOfSatisfying(
+                        PaymentPreparationRetryableConflictException.class,
+                        error -> assertThat(error.getErrorCode())
+                                .isEqualTo(CommonErrorCode.CONCURRENT_MODIFICATION));
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM payments", Long.class))
                 .isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM payment_ledger_entries", Long.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("실제 준비 unique 경합은 실패 transaction 뒤 단일 Payment 원장을 replay한다")
+    void replaysActualPreparationUniqueRaceAfterFailedTransaction() throws Exception {
+        PrepareReservationDepositCommand command = prepareCommand("155", 30_000L);
+        CountDownLatch holderPrepared = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        AtomicReference<DataIntegrityViolationException> observedConflict =
+                new AtomicReference<>();
+        doAnswer(invocation -> {
+            try {
+                return invocation.callRealMethod();
+            } catch (DataIntegrityViolationException conflict) {
+                observedConflict.compareAndSet(null, conflict);
+                throw conflict;
+            }
+        }).when(transactions).prepare(eq(command), any(Instant.class));
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<PaymentPreparation> holder = executor.submit(() ->
+                    transactionTemplate.execute(status -> {
+                        PaymentPreparation prepared =
+                                paymentService.prepareReservationDeposit(command);
+                        holderPrepared.countDown();
+                        awaitLatch(releaseHolder, "holder release");
+                        return prepared;
+                    }));
+            assertThat(holderPrepared.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<PaymentPreparation> replay = executor.submit(() ->
+                    paymentService.prepareReservationDeposit(command));
+            try {
+                awaitPaymentPreparationUniqueWait();
+                assertThat(replay.isDone()).isFalse();
+            } finally {
+                releaseHolder.countDown();
+            }
+
+            PaymentPreparation committed = holder.get(5, TimeUnit.SECONDS);
+            PaymentPreparation replayed = replay.get(5, TimeUnit.SECONDS);
+
+            assertThat(replayed).isEqualTo(committed);
+        }
+
+        ConstraintViolationException violation = findCause(
+                observedConflict.get(), ConstraintViolationException.class);
+        assertThat(violation).isNotNull();
+        assertThat(violation.getSQLException().getErrorCode()).isEqualTo(1062);
+        assertThat(violation.getConstraintName()).isIn(
+                "uk_payments_source",
+                "payments.uk_payments_source",
+                "uk_payments_preparation_idempotency",
+                "payments.uk_payments_preparation_idempotency");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payments", Long.class)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM payment_ledger_entries", Long.class)).isEqualTo(1L);
     }
 
     @Test
@@ -1228,6 +1301,73 @@ class PaymentPersistenceIT {
                 "550e8400-e29b-41d4-a716-" + String.format("%012d", Long.parseLong(reservationReferenceId))
         ));
         return preparation;
+    }
+
+    private void awaitPaymentPreparationUniqueWait() {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT COUNT(*)
+                     FROM performance_schema.data_lock_waits AS wait_edge
+                     JOIN performance_schema.data_locks AS requested_lock
+                       ON requested_lock.ENGINE = wait_edge.ENGINE
+                      AND requested_lock.ENGINE_LOCK_ID = wait_edge.REQUESTING_ENGINE_LOCK_ID
+                     WHERE requested_lock.OBJECT_SCHEMA = DATABASE()
+                       AND requested_lock.OBJECT_NAME = 'payments'
+                       AND requested_lock.INDEX_NAME IN (
+                           'uk_payments_source',
+                           'uk_payments_preparation_idempotency'
+                       )
+                     """)) {
+            while (System.nanoTime() < deadlineNanos) {
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    if (resultSet.next() && resultSet.getInt(1) > 0) {
+                        return;
+                    }
+                }
+                Thread.onSpinWait();
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException(
+                    "unable to observe Payment preparation unique lock wait", exception);
+        }
+        throw new AssertionError("Payment preparation never entered a unique lock wait");
+    }
+
+    private static void awaitLatch(CountDownLatch latch, String boundary) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError(boundary + " was not reached within 5 seconds");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while awaiting " + boundary, exception);
+        }
+    }
+
+    private static DataIntegrityViolationException preparationConflict(
+            String constraintName,
+            int mysqlCode
+    ) {
+        return new DataIntegrityViolationException(
+                "payment preparation conflict",
+                new ConstraintViolationException(
+                        "payment constraint conflict",
+                        new SQLException("duplicate", "23000", mysqlCode),
+                        "insert into payments",
+                        constraintName));
+    }
+
+    private static <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
+        Throwable current = failure;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private static String webhookSignature(String messageId, String timestamp, String body)
