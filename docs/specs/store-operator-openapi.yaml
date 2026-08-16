@@ -80,6 +80,8 @@ paths:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}"
+  /api/v1/store-operators/stores/{storeId}/menus/{menuId}/images:
+    $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1images"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications:
     $ref: "./store-search/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menus~1{menuId}~1publications"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations:
