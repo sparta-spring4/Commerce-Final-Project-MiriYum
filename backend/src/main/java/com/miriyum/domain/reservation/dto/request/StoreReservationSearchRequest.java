@@ -11,7 +11,7 @@ import org.springframework.data.domain.Sort;
  * 매장 운영자가 관리 권한이 있는 매장의 예약 목록을 조회하는 조건이다.
  *
  * @param serviceDate 선택한 예약 서비스 날짜, 전체 조회면 {@code null}
- * @param status 선택한 1차 MVP 예약 상태, 전체 조회면 {@code null}
+ * @param status 선택한 공개 예약 상태, 전체 조회면 {@code null}
  * @param page 0부터 시작하는 페이지 번호
  * @param size 페이지 크기
  * @param order OpenAPI가 허용한 단일 정렬
@@ -64,12 +64,13 @@ public record StoreReservationSearchRequest(
     }
 
     /**
-     * 운영자 목록 조회에 공개하는 1차 MVP 예약 상태다.
+     * 운영자 목록 조회에 공개하는 예약 상태다.
      */
     public enum Status {
         CONFIRMED,
         CANCELLED,
-        FULFILLED;
+        FULFILLED,
+        NO_SHOW;
 
         private static Status fromNullable(String value) {
             if (value == null) {

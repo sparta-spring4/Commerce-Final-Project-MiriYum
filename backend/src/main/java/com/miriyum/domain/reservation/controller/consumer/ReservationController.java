@@ -6,11 +6,14 @@ import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationCheckInQrGrantResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationCheckInQrGrantCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCheckInQrGrantResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
@@ -36,6 +39,7 @@ public class ReservationController {
     private final ReservationService reservationService;
     private final ReservationCreationCommandFacade reservationCreationCommandFacade;
     private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
+    private final ReservationCheckInQrGrantCommandFacade reservationCheckInQrGrantCommandFacade;
     private final ConsumerAccountService consumerAccountService;
 
     /**
@@ -77,6 +81,20 @@ public class ReservationController {
                 reservationId
         );
         return ApiResponse.success("조회되었습니다.", response);
+    }
+
+    /** 본인 확정 예약의 current QR grant를 회전하고 raw credential을 한 번 반환한다. */
+    @PostMapping("/reservations/{reservationId}/check-in-qr-grants")
+    public ResponseEntity<ApiResponse<ReservationCheckInQrGrantResponse>> issueCheckInQrGrant(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long reservationId
+    ) {
+        ReservationCheckInQrGrantResult result =
+                reservationCheckInQrGrantCommandFacade.issue(
+                        principal.accountId(), reservationId
+                );
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("체크인 QR이 발급되었습니다.", result.data()));
     }
 
     /** Cancels the authenticated consumer's reservation through the cancellation facade. */

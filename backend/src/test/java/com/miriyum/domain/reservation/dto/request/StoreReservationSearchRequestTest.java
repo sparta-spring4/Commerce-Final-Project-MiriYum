@@ -39,9 +39,10 @@ class StoreReservationSearchRequestTest {
     @CsvSource({
         "CONFIRMED, CONFIRMED",
         "CANCELLED, CANCELLED",
-        "FULFILLED, FULFILLED"
+        "FULFILLED, FULFILLED",
+        "NO_SHOW, NO_SHOW"
     })
-    @DisplayName("1차 MVP 예약 상태만 운영자 목록 조건으로 허용한다")
+    @DisplayName("공개 예약 상태를 운영자 목록 조건으로 허용한다")
     void acceptsApprovedReservationStatuses(
             String rawStatus,
             StoreReservationSearchRequest.Status expected
@@ -117,7 +118,7 @@ class StoreReservationSearchRequestTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"REQUESTED", "NO_SHOW", ""})
+    @ValueSource(strings = {"REQUESTED", ""})
     @DisplayName("허용하지 않은 예약 상태는 COMMON_001로 거절한다")
     void invalidStatusIsRejected(String status) {
         // given & when & then
