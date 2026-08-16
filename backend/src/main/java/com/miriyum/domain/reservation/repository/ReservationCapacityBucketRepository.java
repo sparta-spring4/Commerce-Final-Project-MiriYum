@@ -104,6 +104,28 @@ public interface ReservationCapacityBucketRepository
             @Param("serviceDate") LocalDate serviceDate
     );
 
+    /** 여러 매장의 업무 날짜별 최신 수용량 정책 전체를 한 번에 조회한다. */
+    @Query("""
+            select bucket
+            from ReservationCapacityBucket bucket
+            where bucket.storeId in :storeIds
+              and bucket.serviceDate = :serviceDate
+              and bucket.policyVersion = (
+                  select max(latest.policyVersion)
+                  from ReservationCapacityBucket latest
+                  where latest.storeId = bucket.storeId
+                    and latest.serviceDate = bucket.serviceDate
+              )
+            order by bucket.storeId asc,
+                     bucket.startTime asc,
+                     bucket.endTime asc,
+                     bucket.id asc
+            """)
+    List<ReservationCapacityBucket> findLatestPolicyBuckets(
+            @Param("storeIds") Collection<Long> storeIds,
+            @Param("serviceDate") LocalDate serviceDate
+    );
+
     /**
      * 여러 매장의 업무 날짜별 최신 정책에서 요청 구간과 겹치는 버킷을 한 번에 조회한다.
      *
