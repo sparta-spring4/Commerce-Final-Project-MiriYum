@@ -48,6 +48,11 @@ public class StoreSanction {
         if(status!=SanctionStatus.ACTIVE||sanctionVersion!=expectedVersion) conflict();
         status=SanctionStatus.RELEASED;sanctionVersion++;storeEnforcementVersion=enforcementVersion;releasedAt=now;
     }
+    public void expire(long expectedVersion,long enforcementVersion,Instant now) {
+        if(type!=SanctionType.TEMPORARY_SUSPENSION||status!=SanctionStatus.ACTIVE
+                || sanctionVersion!=expectedVersion||endsAt==null||endsAt.isAfter(now)) conflict();
+        status=SanctionStatus.EXPIRED;sanctionVersion++;storeEnforcementVersion=enforcementVersion;releasedAt=now;
+    }
     public void enforced(long version){storeEnforcementVersion=version;}
     public SanctionData data(){return new SanctionData(id,caseId,storeId,type,status,sanctionVersion,
             storeEnforcementVersion,restrictedFeatures,startsAt,endsAt,createdAt);}

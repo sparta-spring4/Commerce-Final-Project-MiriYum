@@ -17,6 +17,10 @@ import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentManager;
 import com.miriyum.domain.platformoperator.service.OperatorAuthorityReader;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.service.StoreAdministrationService;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -24,6 +28,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
 
 class StoreSanctionCaseServiceTest {
     private static final Clock CLOCK = Clock.fixed(
@@ -37,29 +42,31 @@ class StoreSanctionCaseServiceTest {
         StoreAdministrationService stores = mock(StoreAdministrationService.class);
         AdminCaseAssignmentManager assignments = mock(AdminCaseAssignmentManager.class);
         OperatorAuthorityReader authorities = mock(OperatorAuthorityReader.class);
+        IdempotencyExecutor idempotency = executingIdempotency();
         given(authorities.requireCurrentAuthority(17L, 3L)).willReturn(new OperatorAuthority(
                 17L, 3L, Set.of(), Set.of(PlatformOperatorPermission.STORE_SANCTION)));
         given(cases.save(org.mockito.ArgumentMatchers.any())).willAnswer(invocation -> invocation.getArgument(0));
         StoreSanctionCaseService service = new StoreSanctionCaseService(
                 cases, stores, assignments, mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),
-                authorities, CLOCK);
+                authorities, idempotency, CLOCK);
 
-        var created = service.create(PRINCIPAL, 101L,
+        var created = service.create(command("STORE_CASE_CREATE"), PRINCIPAL, 101L,
                 new CaseCreate("FRAUD", Set.of("evidence://101"), "ADMIN-007-v1"));
         ArgumentCaptor<StoreSanctionCase> savedCase = ArgumentCaptor.forClass(StoreSanctionCase.class);
         then(cases).should().save(savedCase.capture());
-        given(cases.findByPublicIdAndStoreIdForUpdate(created.caseId(), 101L))
+        String caseId=created.data().get("caseId").asText();
+        given(cases.findByPublicIdAndStoreIdForUpdate(caseId, 101L))
                 .willReturn(Optional.of(savedCase.getValue()));
 
-        var assigned = service.assign(PRINCIPAL, 101L, created.caseId(), 1L);
+        var assigned = service.assign(command("STORE_CASE_ASSIGN"),PRINCIPAL, 101L, caseId, 1L);
 
-        assertThat(assigned.storeId()).isEqualTo(101L);
-        assertThat(assigned.caseVersion()).isEqualTo(2L);
+        assertThat(assigned.data().get("storeId").asLong()).isEqualTo(101L);
+        assertThat(assigned.data().get("caseVersion").asLong()).isEqualTo(2L);
         ArgumentCaptor<AdminCaseAssignmentCommand> command =
                 ArgumentCaptor.forClass(AdminCaseAssignmentCommand.class);
         then(assignments).should().assign(command.capture());
         assertThat(command.getValue().caseType()).isEqualTo(AdminCaseType.STORE_ENFORCEMENT);
-        assertThat(command.getValue().caseId()).isEqualTo(created.caseId());
+        assertThat(command.getValue().caseId()).isEqualTo(caseId);
         assertThat(command.getValue().caseVersion()).isEqualTo(2L);
         then(stores).should().requireStoreExists(101L);
     }
@@ -71,10 +78,18 @@ class StoreSanctionCaseServiceTest {
                 new OperatorAuthority(17L,3L,Set.of(),Set.of(PlatformOperatorPermission.STORE_READ_MINIMAL)));
         StoreSanctionCaseService service=new StoreSanctionCaseService(mock(StoreSanctionCaseRepository.class),
                 mock(StoreAdministrationService.class),mock(AdminCaseAssignmentManager.class),
-                mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),authorities,CLOCK);
-        assertThatThrownBy(()->service.create(PRINCIPAL,101L,new CaseCreate("FRAUD",Set.of("evidence://101"),"ADMIN-007-v1")))
+                mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),authorities,
+                executingIdempotency(),CLOCK);
+        assertThatThrownBy(()->service.create(command("STORE_CASE_CREATE"),PRINCIPAL,101L,new CaseCreate("FRAUD",Set.of("evidence://101"),"ADMIN-007-v1")))
                 .isInstanceOf(com.miriyum.global.exception.ServiceException.class)
                 .extracting(e->((com.miriyum.global.exception.ServiceException)e).getErrorCode())
                 .isEqualTo(com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
     }
+    private static IdempotencyCommand command(String type){return new IdempotencyCommand("platform-operator",17L,type,
+            "123e4567-e89b-12d3-a456-426614174000","a".repeat(64));}
+    @SuppressWarnings("unchecked") private static IdempotencyExecutor executingIdempotency(){IdempotencyExecutor value=mock(IdempotencyExecutor.class);
+        given(value.execute(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any())).willAnswer(invocation->{
+            BusinessResult<Object> result=((java.util.function.Supplier<BusinessResult<Object>>)invocation.getArgument(1)).get();
+            return new IdempotentOutcome(false,result.httpStatus(),result.responseCode(),result.resourceType(),result.resourceId(),
+                    new ObjectMapper().valueToTree(result.data()));});return value;}
 }

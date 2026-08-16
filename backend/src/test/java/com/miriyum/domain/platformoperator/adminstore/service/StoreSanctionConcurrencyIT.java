@@ -44,6 +44,17 @@ class StoreSanctionConcurrencyIT {
   assertThat(outcomes).containsExactlyInAnyOrder(true,false);
   assertThat(sanctions.findById(s.getId()).orElseThrow().getSanctionVersion()).isEqualTo(2);
  }
+ @Test void automaticExpiryAndManualReleaseAllowOnlyOneTerminalTransition() throws Exception {
+  var owner=operatorAccounts.saveAndFlush(StoreOperatorAccount.create("owner-expiry279@example.com","hash","owner"));
+  Store store=stores.saveAndFlush(Store.create(owner.getId(),"1234567891",BusinessType.CAFE,"expiry-race-store","",Region.SEOUL,"서울","CAFE_BAKERY",Set.of("DATE"),true,true,true,"Asia/Seoul",LocalDateTime.now(),"v1"));
+  var admin=platformAccounts.saveAndFlush(PlatformOperatorAccount.createTemporary("admin-expiry279@example.com",encoder.encode("Password1!"),"admin",Instant.now().plusSeconds(600)));
+  StoreSanctionCase c=cases.saveAndFlush(StoreSanctionCase.create(store.getId(),admin.getId(),"FRAUD",Set.of("evidence://expiry-race"),"ADMIN-007-v1",Instant.now()));
+  StoreSanction s=sanctions.saveAndFlush(StoreSanction.create(c.getPublicId(),store.getId(),SanctionType.TEMPORARY_SUSPENSION,Set.of(),"race",Instant.now().minusSeconds(60),Instant.now().minusSeconds(1),admin.getId(),false,1,Instant.now().minusSeconds(60)));
+  CountDownLatch ready=new CountDownLatch(2),start=new CountDownLatch(1);List<Boolean> outcomes;
+  try(var executor=Executors.newFixedThreadPool(2)){var expire=executor.submit(()->terminal(s.getId(),c.getPublicId(),store.getId(),true,ready,start));var release=executor.submit(()->terminal(s.getId(),c.getPublicId(),store.getId(),false,ready,start));assertThat(ready.await(10,TimeUnit.SECONDS)).isTrue();start.countDown();outcomes=List.of(expire.get(10,TimeUnit.SECONDS),release.get(10,TimeUnit.SECONDS));}
+  assertThat(outcomes).containsExactlyInAnyOrder(true,false);assertThat(sanctions.findById(s.getId()).orElseThrow().getSanctionVersion()).isEqualTo(2);
+ }
  private boolean release(long id,String caseId,long storeId,CountDownLatch ready,CountDownLatch start){ready.countDown();await(start);try{return new TransactionTemplate(transactions).execute(status->{var value=sanctions.findScopedForUpdate(id,caseId,storeId).orElseThrow();value.release(1,2,Instant.now());return true;});}catch(ServiceException e){assertThat(e.getErrorCode()).isEqualTo(AdminStoreErrorCode.SANCTION_STATE_CONFLICT);return false;}}
+ private boolean terminal(long id,String caseId,long storeId,boolean expire,CountDownLatch ready,CountDownLatch start){ready.countDown();await(start);try{return new TransactionTemplate(transactions).execute(status->{var value=sanctions.findScopedForUpdate(id,caseId,storeId).orElseThrow();if(expire)value.expire(1,2,Instant.now());else value.release(1,2,Instant.now());return true;});}catch(ServiceException e){assertThat(e.getErrorCode()).isEqualTo(AdminStoreErrorCode.SANCTION_STATE_CONFLICT);return false;}}
  private static void await(CountDownLatch l){try{if(!l.await(10,TimeUnit.SECONDS))throw new AssertionError("timeout");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new AssertionError(e);}}
 }

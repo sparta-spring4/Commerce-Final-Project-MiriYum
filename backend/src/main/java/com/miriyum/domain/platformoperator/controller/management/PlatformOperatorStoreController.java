@@ -12,8 +12,13 @@ import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
+import tools.jackson.databind.JsonNode;
 
 @RestController
 @RequestMapping("/api/v1/platform-operators/stores")
@@ -33,14 +38,16 @@ public class PlatformOperatorStoreController {
   @PathVariable long storeId,@RequestHeader("X-Admin-Reason-Code")String reason){return ApiResponse.success("매장을 조회했습니다.",queries.get(p,storeId));}
 
  @PostMapping("/{storeId}/sanction-cases") @ResponseStatus(HttpStatus.CREATED)
- public ApiResponse<CaseData> createCase(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
+ public ResponseEntity<ApiResponse<JsonNode>> createCase(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
   @RequestHeader("Idempotency-Key")String key,@RequestHeader("X-Admin-Reason-Code")String reason,
-  @Valid @RequestBody CaseCreate request){IdempotencyKey.parse(key);return ApiResponse.success("제재 사건을 생성했습니다.",cases.create(p,storeId,request));}
+  @Valid @RequestBody CaseCreate request){IdempotencyKey parsed=IdempotencyKey.parse(key);return response(cases.create(command(p,"STORE_CASE_CREATE",parsed,
+          "store="+storeId+"|violation="+request.violationType()+"|evidence="+request.evidenceReferences().stream().sorted().toList()+"|policy="+request.policyVersion()),p,storeId,request),"제재 사건을 생성했습니다.");}
 
  @PostMapping("/{storeId}/sanction-cases/{caseId}/assignments")
- public ApiResponse<CaseData> assign(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
+ public ResponseEntity<ApiResponse<JsonNode>> assign(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
   @PathVariable String caseId,@RequestHeader("Idempotency-Key")String key,
-  @RequestHeader("X-Admin-Reason-Code")String reason,@Valid @RequestBody CaseAssignment request){IdempotencyKey.parse(key);return ApiResponse.success("제재 사건을 배정했습니다.",cases.assign(p,storeId,caseId,request.expectedCaseVersion()));}
+  @RequestHeader("X-Admin-Reason-Code")String reason,@Valid @RequestBody CaseAssignment request){IdempotencyKey parsed=IdempotencyKey.parse(key);return response(cases.assign(command(p,"STORE_CASE_ASSIGN",parsed,
+          "store="+storeId+"|case="+caseId+"|version="+request.expectedCaseVersion()),p,storeId,caseId,request.expectedCaseVersion()),"제재 사건을 배정했습니다.");}
 
  @GetMapping("/{storeId}/sanction-cases/{caseId}")
  public ApiResponse<CaseDetail> caseDetail(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
@@ -54,26 +61,38 @@ public class PlatformOperatorStoreController {
   @Valid @RequestBody SanctionShape request){sameCase(caseId,headerCaseId);return ApiResponse.success("거래 영향을 확인했습니다.",impacts.create(p,storeId,caseId,version,request));}
 
  @PostMapping("/{storeId}/sanction-cases/{caseId}/sanctions") @ResponseStatus(HttpStatus.CREATED)
- public ApiResponse<SanctionData> createSanction(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
+ public ResponseEntity<ApiResponse<JsonNode>> createSanction(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
   @PathVariable String caseId,@RequestHeader("X-Admin-Case-Id")String headerCaseId,
   @RequestHeader("X-Admin-Case-Version")long version,@RequestHeader("X-Admin-Reason-Code")String reason,
   @RequestHeader("Idempotency-Key")String key,@RequestHeader(value="X-Correlation-Id",required=false)String correlation,
-  @Valid @RequestBody SanctionCreate request){sameCase(caseId,headerCaseId);return ApiResponse.success("매장 제재를 생성했습니다.",sanctions.create(p,storeId,caseId,version,request,IdempotencyKey.parse(key).value(),correlation));}
+  @Valid @RequestBody SanctionCreate request){sameCase(caseId,headerCaseId);IdempotencyKey parsed=IdempotencyKey.parse(key);return response(sanctions.create(command(p,"STORE_SANCTION_CREATE",parsed,
+          "store="+storeId+"|case="+caseId+"|version="+version+"|request="+canonical(request)),p,storeId,caseId,version,request,correlation(parsed.value(),correlation)),"매장 제재를 생성했습니다.");}
 
  @PostMapping("/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/approvals")
- public ApiResponse<SanctionData> approve(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
+ public ResponseEntity<ApiResponse<JsonNode>> approve(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
   @PathVariable String caseId,@PathVariable long sanctionId,@RequestHeader("X-Admin-Case-Id")String headerCaseId,
   @RequestHeader("X-Admin-Case-Version")long version,@RequestHeader("X-Admin-Reason-Code")String reason,
   @RequestHeader("Idempotency-Key")String key,@RequestHeader("X-Admin-Reauthentication")String approval,
-  @RequestHeader(value="X-Correlation-Id",required=false)String correlation,@Valid @RequestBody SanctionApproval request){sameCase(caseId,headerCaseId);String parsed=IdempotencyKey.parse(key).value();return ApiResponse.success("매장 제재를 승인했습니다.",sanctions.approve(p,storeId,caseId,version,sanctionId,request,approval,parsed,correlation(parsed,correlation)));}
+  @RequestHeader(value="X-Correlation-Id",required=false)String correlation,@Valid @RequestBody SanctionApproval request){sameCase(caseId,headerCaseId);IdempotencyKey parsed=IdempotencyKey.parse(key);return response(sanctions.approve(command(p,"STORE_SANCTION_APPROVE",parsed,
+          "store="+storeId+"|case="+caseId+"|version="+version+"|sanction="+sanctionId+"|request="+canonical(request)),p,storeId,caseId,version,sanctionId,request,approval,correlation(parsed.value(),correlation)),"매장 제재를 승인했습니다.");}
 
  @PostMapping("/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases")
- public ApiResponse<SanctionData> release(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
+ public ResponseEntity<ApiResponse<JsonNode>> release(@AuthenticationPrincipal PlatformOperatorPrincipal p,@PathVariable long storeId,
   @PathVariable String caseId,@PathVariable long sanctionId,@RequestHeader("X-Admin-Case-Id")String headerCaseId,
   @RequestHeader("X-Admin-Case-Version")long version,@RequestHeader("X-Admin-Reason-Code")String reason,
   @RequestHeader("Idempotency-Key")String key,@RequestHeader("X-Admin-Reauthentication")String approval,
-  @RequestHeader(value="X-Correlation-Id",required=false)String correlation,@Valid @RequestBody SanctionRelease request){sameCase(caseId,headerCaseId);String parsed=IdempotencyKey.parse(key).value();return ApiResponse.success("매장 제재를 해제했습니다.",sanctions.release(p,storeId,caseId,version,sanctionId,request,approval,parsed,correlation(parsed,correlation)));}
+  @RequestHeader(value="X-Correlation-Id",required=false)String correlation,@Valid @RequestBody SanctionRelease request){sameCase(caseId,headerCaseId);IdempotencyKey parsed=IdempotencyKey.parse(key);return response(sanctions.release(command(p,"STORE_SANCTION_RELEASE",parsed,
+          "store="+storeId+"|case="+caseId+"|version="+version+"|sanction="+sanctionId+"|request="+canonical(request)),p,storeId,caseId,version,sanctionId,request,approval,correlation(parsed.value(),correlation)),"매장 제재를 해제했습니다.");}
 
  private static void sameCase(String path,String header){if(!path.equals(header))throw new ServiceException(CommonErrorCode.VALIDATION_FAILED);}
  private static String correlation(String key,String value){return value==null||value.isBlank()?"platform-operator:"+key:value;}
+ private static IdempotencyCommand command(PlatformOperatorPrincipal p,String type,IdempotencyKey key,String input){return new IdempotencyCommand(
+         "platform-operator",p.accountId(),type,key.value(),RequestFingerprint.of(input));}
+ private static ResponseEntity<ApiResponse<JsonNode>> response(IdempotentOutcome value,String message){return ResponseEntity.status(value.httpStatus())
+         .body(ApiResponse.success(message,value.data()));}
+ private static String canonical(SanctionCreate r){return r.type()+"|"+r.restrictedFeatures().stream().map(Enum::name).sorted().toList()
+         +"|"+r.startsAt()+"|"+r.endsAt()+"|"+r.reason()+"|"+canonical(r.impactConfirmation());}
+ private static String canonical(SanctionApproval r){return r.expectedSanctionVersion()+"|"+canonical(r.impactConfirmation())+"|"+r.note();}
+ private static String canonical(SanctionRelease r){return r.expectedSanctionVersion()+"|"+r.reason();}
+ private static String canonical(ImpactConfirmation c){return c==null?"null":c.previewId()+"|"+c.previewDigest()+"|"+c.caseVersion()+"|"+c.storeEnforcementVersion();}
 }

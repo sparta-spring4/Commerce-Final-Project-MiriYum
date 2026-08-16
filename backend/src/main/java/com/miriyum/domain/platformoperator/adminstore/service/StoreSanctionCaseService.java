@@ -15,11 +15,16 @@ import com.miriyum.domain.platformoperator.service.*;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.store.service.StoreAdministrationService;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Duration;
 import org.springframework.stereotype.Service;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.HttpStatus;
 
 @Service
 @ConditionalOnProperty(prefix="miriyum.platform-operator",name="enabled",havingValue="true")
@@ -29,33 +34,36 @@ public class StoreSanctionCaseService {
     private final AdminCaseAssignmentManager assignments;
     private final AdminCaseAssignmentVerifier assignmentVerifier;
     private final OperatorAuthorityReader authorities;
+    private final IdempotencyExecutor idempotency;
     private final Clock clock;
 
     public StoreSanctionCaseService(StoreSanctionCaseRepository cases, StoreAdministrationService stores,
                                     AdminCaseAssignmentManager assignments,
                                     AdminCaseAssignmentVerifier assignmentVerifier,
-                                    OperatorAuthorityReader authorities, Clock clock) {
+                                    OperatorAuthorityReader authorities, IdempotencyExecutor idempotency, Clock clock) {
         this.cases = cases; this.stores = stores; this.assignments = assignments;
-        this.assignmentVerifier = assignmentVerifier; this.authorities = authorities; this.clock = clock;
+        this.assignmentVerifier = assignmentVerifier; this.authorities = authorities;
+        this.idempotency=idempotency; this.clock = clock;
     }
 
     @Transactional
-    public CaseData create(PlatformOperatorPrincipal principal, long storeId, CaseCreate request) {
-        requirePermission(principal); stores.requireStoreExists(storeId);
-        return cases.save(StoreSanctionCase.create(storeId, principal.accountId(), request.violationType(),
-                request.evidenceReferences(), request.policyVersion(), clock.instant())).data();
+    public IdempotentOutcome create(IdempotencyCommand command,PlatformOperatorPrincipal principal, long storeId, CaseCreate request) {
+        return idempotency.execute(command,()->{requirePermission(principal); stores.requireStoreExists(storeId);
+            CaseData data=cases.save(StoreSanctionCase.create(storeId, principal.accountId(), request.violationType(),
+                    request.evidenceReferences(), request.policyVersion(), clock.instant())).data();
+            return success(HttpStatus.CREATED,data.caseId(),data);});
     }
 
     @Transactional
-    public CaseData assign(PlatformOperatorPrincipal principal, long storeId, String caseId,
+    public IdempotentOutcome assign(IdempotencyCommand command,PlatformOperatorPrincipal principal, long storeId, String caseId,
                            long expectedCaseVersion) {
-        requirePermission(principal);
-        StoreSanctionCase value = locked(storeId, caseId);
-        value.assign(principal.accountId(), expectedCaseVersion);
-        assignments.assign(new AdminCaseAssignmentCommand(AdminCaseType.STORE_ENFORCEMENT,
-                caseId, value.getCaseVersion(), principal.accountId(),
-                clock.instant().plus(Duration.ofMinutes(30))));
-        return value.data();
+        return idempotency.execute(command,()->{requirePermission(principal);
+            StoreSanctionCase value = locked(storeId, caseId);
+            value.assign(principal.accountId(), expectedCaseVersion);
+            assignments.assign(new AdminCaseAssignmentCommand(AdminCaseType.STORE_ENFORCEMENT,
+                    caseId, value.getCaseVersion(), principal.accountId(),
+                    clock.instant().plus(Duration.ofMinutes(30))));
+            CaseData data=value.data();return success(HttpStatus.OK,caseId,data);});
     }
 
     @Transactional
@@ -81,4 +89,6 @@ public class StoreSanctionCaseService {
             throw new ServiceException(AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
         }
     }
+    private static <T> BusinessResult<T> success(HttpStatus status,String id,T data){return new BusinessResult<>(
+            status.value(),"SUCCESS","STORE_SANCTION_CASE",id,data);}
 }

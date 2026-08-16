@@ -243,7 +243,11 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      schema: {type: string, minLength: 8, maxLength: 100}
+      description: 동일 principal·command·payload 재요청은 최초 status와 payload를 replay하며 다른 payload 재사용은 COMMON_007이다.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     AdminCaseId:
       name: X-Admin-Case-Id
       in: header

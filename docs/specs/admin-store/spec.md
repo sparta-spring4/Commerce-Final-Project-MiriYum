@@ -79,12 +79,12 @@ AdminCaseAssignmentManager.assign(
 |---|---|---|---|
 | `WARNING` | 없음 | 아니오 | 없음 |
 | `FEATURE_RESTRICTION` | 지정 기능만 차단 | 전체 기능 제한일 때 | 전체 기능이면 다른 `SUPER_ADMIN` |
-| `TEMPORARY_SUSPENSION` | 기간 중 신규 거래·관리 중지 | 예 | 없음 |
+| `TEMPORARY_SUSPENSION` | 기간 중 신규 거래·관리 중지 | 예 | 다른 `SUPER_ADMIN` |
 | `PERMANENT_EXIT` | 조건부 폐점 | 예 | 다른 `SUPER_ADMIN` |
 
 기능은 `RESERVATION`, `WAITING`, `MENU_HOLD`, `PICKUP`, `STORE_MANAGEMENT`다. 각 사건은 위반 유형·증거 참조·영향 기능·시작/종료 조건·`policyVersion`을 가진다. `StoreSanctionPolicyCatalog`가 허용 위반 유형, 증거 요건, 기본 단계, 가중·감경 조건과 기간을 version별로 검증하므로 담당자가 임의 기간을 만들 수 없다.
 
-제재 상태는 `PENDING_APPROVAL`, `ACTIVE`, `RELEASED`, `EXPIRED`, `REJECTED`다. 임시 제재는 영구 퇴점으로 자동 승격하지 않는다.
+제재 상태는 `PENDING_APPROVAL`, `ACTIVE`, `RELEASED`, `EXPIRED`, `REJECTED`다. 임시 제재는 영구 퇴점으로 자동 승격하지 않는다. 예약 활성화 worker는 제공하지 않으므로 미래 `startsAt`은 거부하고 즉시 시작만 허용하며, `endsAt` 도래 시 잠금·version 경계로 자동 만료한다.
 
 ### 3.3 Store별 enforcement
 
@@ -110,15 +110,17 @@ Store 운영자 refresh token은 계정 단위이므로 계정 전체 revoke를 
 미리보기는 사건과 요청 제재 shape에 결속하여 다음을 저장한다.
 
 - 미래 확정 Reservation 수와 ID 집합
-- 활성 Waiting 팀 수
-- 미래 확정 Pickup 수
-- 연결된 미종결 Payment·환불 조정 수
+- 활성 Waiting 팀 수와 ID 집합
+- 미래 확정 Pickup 수와 ID 집합
+- 연결된 미종결 Payment 수와 ID 집합
 - `caseVersion`, `enforcementVersion`
 - 제재 유형·기능·기간, SHA-256 digest, 10분 만료 시각
 
 `TEMPORARY_SUSPENSION`, `PERMANENT_EXIT`, 전체 기능 제한은 `previewId`, digest와 두 version을 요구한다. 만료·digest 불일치·version 변경·재조회 결과 변경이면 `409 ADMIN_STORE_004`로 거부한다.
 
 제재 집행 서비스는 Reservation·Waiting·Pickup·Payment command service에 의존하지 않는다. 기존 확정 거래는 영향 자료로만 표시하고 별도 원 도메인 절차 없이 변경하지 않는다.
+
+모든 mutation은 principal·command type·정규화 payload fingerprint에 결속된 공통 `IdempotencyExecutor` 안에서 실행한다. 같은 key와 같은 payload는 최초 HTTP status와 payload를 replay하고 다른 payload는 `COMMON_007`로 거부한다.
 
 ## 5. 권한과 감사
 
@@ -220,7 +222,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditAction.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditReason.java` (구조화된 `STORE_ENFORCEMENT` 사유)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/PlatformOperatorAuditWriter.java`
-- `backend/src/main/resources/db/migration/V{implementation-gate-selected}__create_store_sanctions.sql` (정확히 1개)
+- `backend/src/main/resources/db/migration/V48__create_store_sanctions.sql`
 
 ### 테스트
 
@@ -231,7 +233,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionCommandServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/model/StoreSanctionPolicyCatalogTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionConcurrencyIT.java`
-- `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/AdminStoreHttpIT.java`
+- `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/controller/AdminStoreHttpIT.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/repository/StoreSanctionMigrationIT.java`
 - `backend/src/test/java/com/miriyum/domain/store/service/StoreAdministrationServiceIT.java`
 - `backend/src/test/java/com/miriyum/domain/store/service/StoreTransactionEligibilityServiceTest.java`
