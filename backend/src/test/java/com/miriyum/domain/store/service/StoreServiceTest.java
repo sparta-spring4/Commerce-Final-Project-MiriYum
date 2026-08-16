@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
 import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
@@ -126,7 +127,8 @@ class StoreServiceTest {
                 objectMapper,
                 FIXED_CLOCK);
         menuTransactionFacade = new MenuTransactionFacade(
-                new StoreTransactionEligibilityService(storeRepository),
+                new StoreTransactionEligibilityService(
+                        storeRepository, mock(StoreAdministrationService.class)),
                 menuRepository);
     }
 

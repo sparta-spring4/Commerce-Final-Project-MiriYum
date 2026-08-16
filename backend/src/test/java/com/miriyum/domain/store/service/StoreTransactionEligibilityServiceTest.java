@@ -33,11 +33,15 @@ class StoreTransactionEligibilityServiceTest {
     @Mock
     private StoreRepository storeRepository;
 
+    @Mock
+    private StoreAdministrationService storeAdministrationService;
+
     private StoreTransactionEligibilityService eligibilityService;
 
     @BeforeEach
     void setUp() {
-        eligibilityService = new StoreTransactionEligibilityService(storeRepository);
+        eligibilityService = new StoreTransactionEligibilityService(
+                storeRepository, storeAdministrationService);
     }
 
     @Test
@@ -174,6 +178,20 @@ class StoreTransactionEligibilityServiceTest {
                         STORE_ID, "미리윰", "Asia/Seoul"));
         then(storeRepository).should().findByIdForUpdate(STORE_ID);
         then(storeRepository).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    void waitingEligibilityChecksStoreAndStoreScopedEnforcement() {
+        given(storeRepository.findByIdForUpdate(STORE_ID))
+                .willReturn(Optional.of(eligibleStore(true, true)));
+
+        eligibilityService.requireWaitingTransactionEligibility(STORE_ID);
+
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
+        then(storeAdministrationService).should().requireFeatureAllowed(
+                STORE_ID,
+                com.miriyum.domain.store.dto.administration.StoreAdministrationContracts
+                        .RestrictedFeature.WAITING);
     }
 
     private void assertStoreError(ThrowingCallable invocation, StoreErrorCode expected) {

@@ -237,6 +237,8 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/test/java/com/miriyum/domain/reservation/service/StoreReservationImpactQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/StoreWaitingImpactQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingCreationServiceTest.java`
+- `backend/src/test/java/com/miriyum/domain/reservation/waiting/service/WaitingCreationFailureClassifierTest.java` (생성자 fixture의 Store 거래 자격 port 주입)
+- `backend/src/test/java/com/miriyum/domain/store/service/StoreServiceTest.java` (생성자 fixture의 Store 제재 판정 port 주입)
 - `backend/src/test/java/com/miriyum/domain/pickup/service/StorePickupImpactQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/payment/service/StorePaymentImpactQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/service/PlatformOperatorAuditWriterTest.java`
