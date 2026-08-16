@@ -18,11 +18,9 @@ import com.miriyum.global.storage.FileStoragePurpose;
 import com.miriyum.global.storage.FileStorageRequest;
 import com.miriyum.global.storage.FileStorageStatus;
 import com.miriyum.global.storage.FileStorageVisibility;
-import com.miriyum.global.storage.entity.FileMetadata;
 import com.miriyum.global.storage.image.PublicImageUploadValidator;
 import com.miriyum.global.storage.image.PublicImageValidationException;
 import com.miriyum.global.storage.image.ValidatedPublicImage;
-import com.miriyum.global.storage.repository.FileMetadataRepository;
 import com.miriyum.global.storage.service.FileStorageFacade;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -31,6 +29,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -57,7 +56,6 @@ public class MenuImageService {
 
     private final StoreService storeService;
     private final MenuRepository menuRepository;
-    private final FileMetadataRepository fileMetadataRepository;
     private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
@@ -75,20 +73,19 @@ public class MenuImageService {
             MultipartFile file
     ) {
         ValidatedPublicImage image = validate(file);
+        requireManagementAuthority(operatorAccountId, storeId);
         IdempotentOutcome outcome = idempotencyExecutor.execute(command(
                 operatorAccountId, "MENU_IMAGE_PUT", idempotencyKey,
                 "storeId=" + storeId + "|menuId=" + menuId + "|checksum=" + checksum(image.bytes())), () -> {
             requireLockedManagedMenu(operatorAccountId, storeId, menuId);
-            FileStorageMetadata previous = confirmedImages(menuId).stream()
-                    .findFirst()
-                    .map(FileMetadata::toPublicMetadata)
-                    .orElse(null);
+            List<FileStorageMetadata> previous = confirmedImages(menuId);
             FileStorageMetadata stored = storePending(image, menuId);
             registerBeforeCommitConfirmation(stored.fileId());
             registerRollbackCleanup(stored.fileId());
-            if (previous != null) {
-                registerCommittedReplacementCleanup(previous.fileId());
+            for (FileStorageMetadata existing : previous) {
+                requireFacade().markDeletedWithinCurrentTransaction(existing.fileId(), clock.instant());
             }
+            registerCommittedReplacementCleanup(previous);
             MenuPublicImageResponse response = MenuPublicImageResponse.from(stored);
             return success(HttpStatus.OK, stored.fileId().toString(), response);
         });
@@ -105,17 +102,29 @@ public class MenuImageService {
             long menuId,
             IdempotencyKey idempotencyKey
     ) {
-        idempotencyExecutor.execute(command(operatorAccountId, "MENU_IMAGE_DELETE", idempotencyKey,
+        requireManagementAuthority(operatorAccountId, storeId);
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command(operatorAccountId, "MENU_IMAGE_DELETE", idempotencyKey,
                 "storeId=" + storeId + "|menuId=" + menuId), () -> {
             requireLockedManagedMenu(operatorAccountId, storeId, menuId);
-            confirmedImages(menuId).stream().findFirst().ifPresent(this::delete);
+            List<FileStorageMetadata> existing = confirmedImages(menuId);
+            for (FileStorageMetadata metadata : existing) {
+                requireFacade().markDeletedWithinCurrentTransaction(metadata.fileId(), clock.instant());
+            }
+            registerCommittedReplacementCleanup(existing);
             return success(HttpStatus.NO_CONTENT, null, null);
         });
+        if (outcome.replayed()) {
+            retryDeletedImageCleanup(menuId);
+        }
+    }
+
+    private void requireManagementAuthority(long operatorAccountId, long storeId) {
+        storeService.requireManagementOwnership(operatorAccountId, storeId);
+        storeService.requireMenuMutationAuthority(operatorAccountId, storeId);
     }
 
     private void requireLockedManagedMenu(long operatorAccountId, long storeId, long menuId) {
-        storeService.requireManagementOwnership(operatorAccountId, storeId);
-        storeService.requireMenuMutationAuthority(operatorAccountId, storeId);
+        requireManagementAuthority(operatorAccountId, storeId);
         Menu menu = menuRepository.findByIdForUpdate(menuId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.MENU_NOT_FOUND));
         if (menu.getStoreId() != storeId) {
@@ -123,19 +132,17 @@ public class MenuImageService {
         }
     }
 
-    private List<FileMetadata> confirmedImages(long menuId) {
+    private List<FileStorageMetadata> confirmedImages(long menuId) {
         return images(menuId, FileStorageStatus.CONFIRMED);
     }
 
-    private List<FileMetadata> deletedImages(long menuId) {
+    private List<FileStorageMetadata> deletedImages(long menuId) {
         return images(menuId, FileStorageStatus.DELETED);
     }
 
-    private List<FileMetadata> images(long menuId, FileStorageStatus status) {
-        return fileMetadataRepository
-                .findAllByOwnerTypeAndOwnerIdAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
-                        "MENU", menuId, FileStoragePurpose.MENU_IMAGE,
-                        FileStorageVisibility.PUBLIC, status);
+    private List<FileStorageMetadata> images(long menuId, FileStorageStatus status) {
+        return requireFacade().findPublicMetadata(
+                new FileStorageOwner("MENU", menuId), FileStoragePurpose.MENU_IMAGE, EnumSet.of(status));
     }
 
     private ValidatedPublicImage validate(MultipartFile file) {
@@ -206,22 +213,27 @@ public class MenuImageService {
         });
     }
 
-    private void registerCommittedReplacementCleanup(UUID imageId) {
+    private void registerCommittedReplacementCleanup(List<FileStorageMetadata> images) {
+        if (images.isEmpty()) {
+            return;
+        }
         requireSynchronization();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                try {
-                    delete(imageId);
-                } catch (ServiceException exception) {
-                    log.warn("event=menu_image_replacement_cleanup_failed image_id={}", imageId);
-                }
+                images.forEach(image -> {
+                    try {
+                        delete(image);
+                    } catch (ServiceException exception) {
+                        log.warn("event=menu_image_replacement_cleanup_failed");
+                    }
+                });
             }
         });
     }
 
-    private void delete(FileMetadata metadata) {
-        delete(UUID.fromString(metadata.getFileId()));
+    private void delete(FileStorageMetadata metadata) {
+        delete(metadata.fileId());
     }
 
     private void delete(UUID imageId) {
@@ -238,7 +250,7 @@ public class MenuImageService {
             try {
                 delete(metadata);
             } catch (ServiceException exception) {
-                log.warn("event=menu_image_replacement_cleanup_retry_failed image_id={}", metadata.getFileId());
+                log.warn("event=menu_image_replacement_cleanup_retry_failed image_id={}", metadata.fileId());
             }
         });
     }

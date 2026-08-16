@@ -73,4 +73,23 @@ class MenuImageControllerTest {
                         .header("Idempotency-Key", KEY))
                 .andExpect(status().isNoContent());
     }
+
+    @Test
+    void nonPositivePathVariablesReturnCommonValidationError() throws Exception {
+        MockMultipartFile image = new MockMultipartFile("file", "menu.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/v1/store-operators/stores/0/menus/-1/images")
+                        .file(image)
+                        .with(request -> { request.setMethod("PUT"); return request; })
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+
+        mockMvc.perform(delete("/api/v1/store-operators/stores/-1/menus/0/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer store-token")
+                        .header("Idempotency-Key", KEY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_001"));
+    }
 }
