@@ -581,6 +581,18 @@
 - Valkey 상태를 확인할 수 없으면 로그인·갱신·로그아웃처럼 해당 상태 확인이 필요한 요청을 실패 폐쇄하며 MySQL이나 로컬 상태로 우회하지 않는다.
 - Valkey 장애 중에도 기존 유효 Access JWT 요청은 서명·만료·현재 계정·권한 검증 경계를 통과한 경우에만 처리한다. Valkey 장애만으로 비회원 공개 조회를 중단하지 않는다.
 
+#### 고도화 Consumer QR 계정 세대와 로그아웃
+
+- Auth는 일반 사용자 계정별 QR 전용 세대를 Valkey의 TTL 없는 salt·counter hash로 소유한다. backend가 Java `SecureRandom`으로 128-bit 후보 salt를 만들고 Lua는 hash가 없을 때 그 후보를 원자적으로 최초 선점할 뿐 난수를 생성하지 않는다. 이 값은 Refresh session epoch와 별도이며 일반 보호 API의 Access JWT 검증에는 조회하지 않는다.
+- 현재 `ACTIVE` family의 namespace·accountId·familyId·current token ID·Refresh 원문 hash가 모두 일치할 때만 한 single-node Valkey Lua에서 family 폐기, account active-index 제거, 정확한 logout marker 기록과 QR counter 증가를 함께 확정한다. 쓰기 전에 family와 `ACTIVE` account index의 만료 시각이 존재하고 index 만료 시각이 family보다 이르지 않은지 확인한다. 동일 자격의 중복·동시 요청은 marker에 수렴해 counter를 한 번만 증가시킨다.
+- 현재 ACTIVE Refresh가 로그아웃 mutation의 유일한 권한이다. 선택적 Access JWT는 감사 보조값이며 필수 공격 방어 경계가 아니다. `/auth/**` 공개 SecurityFilterChain은 Authorization을 인증하지 않으므로 Consumer 로그아웃 controller가 원문 헤더를 Auth service에 명시적으로 전달하고, service가 정확한 Bearer 형식만 `JwtTokenProvider`로 선택 파싱한다. Access 파싱의 모든 `ServiceException`은 Access 부재로 취급하지만 예상하지 못한 `RuntimeException`은 숨기지 않는다. 각각 유효한 Access·Refresh subject가 달라도 민감 식별자 없는 감사 event만 남기고 현재 Refresh의 family·index·QR mutation을 계속한다.
+- Access-only 또는 Refresh 부재·무효·만료·회전·폐기·저장소 없음은 CSRF 검증 뒤 브라우저 쿠키만 만료하는 cleanup-only `200`이며 서버 Refresh·QR 폐기 성공으로 표현하지 않는다. 회전 응답 유실 뒤 R1 요청은 ACTIVE R2 family를 폐기하지 않고, family 부재 시 account index를 조회·변경하지 않아 dangling member가 기존 index TTL까지 남을 수 있다. CSRF 검증 뒤 서버 mutation이 `COMMON_012`로 실패해도 Refresh 쿠키 만료 헤더를 유지하되 서버 폐기 성공을 뜻하지 않는다. CSRF 실패는 쿠키를 만료하지 않는다.
+- 외부 `ConsumerQrEpochSnapshot(accountId, opaqueVersion)`은 equality-only 계약이다. `opaqueVersion`은 외부에 공개하지 않는 128-bit salt를 포함한 `Base64URL(SHA-256("v1\\0" + generation + accountId + salt + counter))` 형태라 accountId·counter를 원문으로 인코딩하지 않는다. 각 입력 항목은 NUL 구분자로 직렬화한다. `captureCurrent(accountId)`와 `requireCurrent(expectedAccountId, snapshot)`만 공개하며, expected accountId는 QR payload가 아니라 Reservation 원장의 값이다. account 또는 epoch 불일치는 모두 `AUTH_017`이고 현재값을 응답하지 않는다.
+- `MIRIYUM_QR_STORAGE_GENERATION`은 Valkey 복원 데이터 밖의 공통 배포 값이다. 정상 재시작에는 유지하고 과거 snapshot 복원 전에는 사용한 적 없는 값으로 바꾼다. 이전 generation namespace는 다시 열지 않는다. 누락·형식 오류·Valkey 손상·overflow는 `COMMON_012`로 실패 폐쇄한다. ACTIVE family의 account index 누락 또는 완료 marker의 stale index member는 식별자 없는 `qr_epoch_refresh_index_mismatch` 로그로 구분해 탐지하되 자동 복구하지 않는다.
+- 한 기기의 유효 로그아웃은 그 계정의 기존 QR만 함께 폐기하며 다른 기기의 일반 로그인·Refresh·Access JWT는 유지한다. 새 QR은 사용자가 명시적으로 재발급하며 폐기된 grant를 새 세대로 자동 승격하지 않는다.
+- 현재 원자 연산은 단일 Valkey 노드만 지원한다. Cluster 전환 전에는 QR epoch·Refresh family·account index의 동일 hash slot 재설계를 선행한다.
+- Auth Valkey는 TTL 없는 QR epoch hash와 Refresh 보안 상태를 임의 축출하지 않도록 `maxmemory-policy noeviction`을 사용한다. 외부 관리형 Valkey도 배포 전에 같은 값을 확인하며, 비운영 load-test override가 기본값에 의존할 때는 runtime 설정을 별도로 검증한다.
+
 ### 단계 공통 확정 세부
 
 - Access JWT 유효기간은 발급 시각부터 15분이다.
@@ -645,6 +657,7 @@
 | 2026-08-13 | AUTH-007 | 전체 폐기(session epoch 증가)는 Refresh 상태만 종료하고 이미 발급된 Access JWT는 무효화하지 않음을 경계로 명시 | 확정 | 매 요청 중앙 상태 조회는 무상태 검증 설계(ADR-006)를 뒤집고 Valkey 장애를 전체 API 장애로 확대하므로, 무효화 대신 잔여 노출 창을 유효기간으로 제한 |
 | 2026-08-13 | AUTH-007 | Access JWT 유효기간을 1시간에서 15분으로 축소하여 2026-07-28 결정을 대체 | 확정 | 위 경계에서 잔여 노출 창이 곧 Access JWT 유효기간이므로, 재발급 빈도 증가를 감수하고 정지·폐기 후 통과 가능 시간을 줄임 |
 | 2026-08-13 | AUTH-007 | Refresh Token은 회전마다 최대 14일을 연장하되 최초 로그인부터 최대 30일의 절대 세션 수명을 적용 | 변경 검토 | 팀 합의 전까지 기존 sliding 만료를 유지한다. 30일은 새 Access·Refresh 발급 권한의 상한이며, 이미 발급된 stateless Access JWT는 최대 15분 더 통과할 수 있다. 배포 전 `familyCreatedAt` 없는 family는 회전해도 기존 만료를 연장하지 않아, 배포 시점의 잔여 수명에 따라 즉시 또는 최대 14일 안에 종료된다. 새 만료 시각이 최초 로그인 + 30일에 의해 잘리는 회전은 민감 식별자 없는 `상한 적용 회전 수` 로그·지표로 관측한다. 이 값은 30일 만료에 실제로 도달했거나 재로그인한 세션 수가 아니라 절대 상한 계산이 적용된 회전 수다. 상한 뒤 만료된 Refresh JWT는 기존 `AUTH_008`로 종료되며 재사용 위험 사건으로 기록하지 않는다. |
+| 2026-08-14 | AUTH-007 | 현재 Consumer Refresh가 승인한 로그아웃에 계정 QR 세대 1회 증가를 원자 결합하고 restore generation fence·공개 snapshot 검증 계약 확정 | 확정 | #305 인수와 CHECK 기존 QR 전체 폐기 요구를 다른 기기 로그인 유지·무상태 Access 경계와 양립시킴 |
 | 2026-07-28 | AUTH-007 | 새 공통 추가 인증을 만들지 않고 기존 계정·권한·소속·소유권·매장 상태 중앙 재검증 경계를 유지 | 확정 | 활성 정책의 권한 검증을 보존하면서 정책 근거 없는 재인증 범위 확대를 방지 |
 | 2026-07-28 | AUTH-001·AUTH-007 | 1차 MVP는 일반 사용자·매장 운영자 계정과 JWT만 구현하고 플랫폼 운영자 계정·JWT·API·UI는 고도화로 이동 | 확정 | 실제 구현 범위와 인증 정책·제품 비전·공통 계약을 일치시킴 |
 

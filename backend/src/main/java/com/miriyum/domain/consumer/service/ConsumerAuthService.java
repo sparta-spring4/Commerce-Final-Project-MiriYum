@@ -16,12 +16,15 @@ import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.password.PasswordPolicy;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenRotationAttempt;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrLogoutCoordinator;
 import com.miriyum.domain.consumer.dto.auth.ConsumerSignUpRequest;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -29,6 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ConsumerAuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(ConsumerAuthService.class);
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final ConsumerAccountRepository consumerAccountRepository;
     private final PasswordEncoder passwordEncoder;
@@ -39,6 +45,7 @@ public class ConsumerAuthService {
     private final PhoneNumberPolicy phoneNumberPolicy;
     private final ReservationContactReferenceGenerator contactReferenceGenerator;
     private final RefreshTokenManager refreshTokenManager;
+    private final ConsumerQrLogoutCoordinator consumerQrLogoutCoordinator;
 
     public ConsumerAuthService(
             ConsumerAccountRepository consumerAccountRepository,
@@ -49,7 +56,8 @@ public class ConsumerAuthService {
             LoginDelayGuard loginDelayGuard,
             PhoneNumberPolicy phoneNumberPolicy,
             ReservationContactReferenceGenerator contactReferenceGenerator,
-            RefreshTokenManager refreshTokenManager
+            RefreshTokenManager refreshTokenManager,
+            ConsumerQrLogoutCoordinator consumerQrLogoutCoordinator
     ) {
         this.consumerAccountRepository = consumerAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -60,6 +68,7 @@ public class ConsumerAuthService {
         this.phoneNumberPolicy = phoneNumberPolicy;
         this.contactReferenceGenerator = contactReferenceGenerator;
         this.refreshTokenManager = refreshTokenManager;
+        this.consumerQrLogoutCoordinator = consumerQrLogoutCoordinator;
     }
 
     @Transactional
@@ -176,7 +185,7 @@ public class ConsumerAuthService {
         return tokenPair;
     }
 
-    public void logout(String refreshToken) {
+    public void logout(String refreshToken, String authorizationHeader) {
         if (refreshToken == null || refreshToken.isBlank()) {
             return;
         }
@@ -185,7 +194,30 @@ public class ConsumerAuthService {
         if (parsed == null || parsed.namespace() != TokenNamespace.CONSUMER) {
             return;
         }
-        refreshTokenManager.revoke(TokenNamespace.CONSUMER, parsed);
+
+        ParsedToken access = parseOptionalAccessToken(authorizationHeader);
+        boolean accessSubjectDiffers = access != null && (access.namespace() != parsed.namespace()
+                || !access.accountId().equals(parsed.accountId()));
+        if (accessSubjectDiffers) {
+            log.info("event=consumer_logout_access_refresh_subject_mismatch");
+        }
+
+        consumerQrLogoutCoordinator.advanceForLogout(TokenNamespace.CONSUMER, parsed, refreshToken);
+    }
+
+    private ParsedToken parseOptionalAccessToken(String authorizationHeader) {
+        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {
+            return null;
+        }
+        String rawAccessToken = authorizationHeader.substring(BEARER_PREFIX.length());
+        if (rawAccessToken.isBlank()) {
+            return null;
+        }
+        try {
+            return jwtTokenProvider.parseAccessToken(rawAccessToken);
+        } catch (ServiceException ignored) {
+            return null;
+        }
     }
 
     private TokenPair issueTokenPair(Long accountId, long sessionEpoch) {

@@ -16,6 +16,7 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.logindelay.LoginAttempt;
 import com.miriyum.domain.auth.logindelay.LoginDelayGuard;
 import com.miriyum.domain.auth.password.PasswordPolicy;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrLogoutCoordinator;
 import com.miriyum.domain.auth.refreshtoken.RefreshTokenManager;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
@@ -37,7 +38,8 @@ class ConsumerRecoveryLoginGuardTest {
         RefreshTokenManager refreshTokens = mock(RefreshTokenManager.class);
         ConsumerAuthService service = new ConsumerAuthService(
                 accounts, encoder, mock(JwtTokenProvider.class), new NicknamePolicy(), new PasswordPolicy(),
-                delay, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(), refreshTokens);
+                delay, new PhoneNumberPolicy(), new ReservationContactReferenceGenerator(), refreshTokens,
+                mock(ConsumerQrLogoutCoordinator.class));
         ConsumerAccount account = ConsumerAccount.create("old@example.com", "old-hash", "consumer");
         ReflectionTestUtils.setField(account, "id", 41L);
         account.approveRecovery("new@example.com");

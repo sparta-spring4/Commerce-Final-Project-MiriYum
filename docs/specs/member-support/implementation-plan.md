@@ -15,7 +15,7 @@
 - Controllers and services exist only when both `miriyum.platform-operator.enabled=true` and `miriyum.member-support.enabled=true`; the external paths are real MVC 404 when disabled.
 - The dev mock verifier is usable only when `miriyum.identity-verification.dev-stub-enabled=true`; otherwise verification fails closed.
 - Member-support configuration uses a distinct `proof-digest-secret` plus versioned AES-256-GCM `pii-encryption-active-key-version`/`pii-encryption-active-key` and optional matching previous pair. Ciphertext is `version || nonce || ciphertext`, new writes use only active, and reads accept active/previous during rotation.
-- Permission checks happen before account lookup. Missing IDs and IDs in the other account type both become `AUTH_016`; anonymous recovery/appeal submissions always return the same 202 body.
+- Permission checks happen before account lookup. Missing IDs and IDs in the other account type both become `AUTH_018`; anonymous recovery/appeal submissions always return the same 202 body.
 - Never return or log password, JWT, cookie, OTP, raw reauthentication approval, mock proof, email, phone, business number, or representative name. Store the pending new email only as AES-256-GCM ciphertext and its equality digest.
 - Warning has no expiry, feature restriction lasts exactly 7 days, temporary suspension lasts exactly 30 days, and permanent suspension needs a different SUPER_ADMIN with `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
 - Recovery approval, sanction application, permanent approval, and appeal decision must CAS one target `support_version`. A concurrent loser rolls back case state, approval consumption, and audit.
@@ -46,7 +46,7 @@
 
 **Interfaces:**
 - Produces account fields `boolean passwordResetRequired` and `long supportVersion` plus methods `approveRecovery(String email)`, `replaceRecoveredPassword(String hash)`, `applySuspension()`, `clearSuspension()`, and `assertSupportVersion(long expected)`.
-- Produces error codes `AUTH_016 MEMBER_SUPPORT_NOT_FOUND`, `AUTH_017 MEMBER_SUPPORT_STATE_CONFLICT`, and `AUTH_018 PERMANENT_SANCTION_APPROVAL_CONFLICT`.
+- Produces error codes `AUTH_018 MEMBER_SUPPORT_NOT_FOUND`, `AUTH_019 MEMBER_SUPPORT_STATE_CONFLICT`, and `AUTH_020 PERMANENT_SANCTION_APPROVAL_CONFLICT`.
 
 - [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V44, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V44 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
 
@@ -236,7 +236,7 @@ Commit: `feat: accept private member support submissions`
 - Assignment moves a case to `ASSIGNED`, increments case version, then calls `AdminCaseAssignmentManager.assign` with that new version in the same transaction.
 - A direct sanction request creates an enforcement case, assigns its current version to the caller, then invokes the guard in the same transaction. A permanent proposal closes that assignment and increments the case version; the different SUPER_ADMIN must assign the new version before additional approval.
 
-- [ ] **Step 1: Write permission/existence tests.** A port fake that throws if touched proves an unauthorized query returns `ADMIN_001` before lookup. Missing and wrong-type detail requests both assert `AUTH_016` and the wrong port remains untouched.
+- [ ] **Step 1: Write permission/existence tests.** A port fake that throws if touched proves an unauthorized query returns `ADMIN_001` before lookup. Missing and wrong-type detail requests both assert `AUTH_018` and the wrong port remains untouched.
 
 - [ ] **Step 2: Run RED.**
 
@@ -336,7 +336,7 @@ assertThat(service.decideAppeal(command(REDUCE))).satisfies(result -> {
 
 Run: `backend\gradlew.bat test --tests "*MemberAppealServiceTest"`
 
-- [ ] **Step 3: Implement immutable revisions and high-risk audit.** Reject equal/higher “reduction”, missing feature sets, stale versions, and terminal cases with `AUTH_017`.
+- [ ] **Step 3: Implement immutable revisions and high-risk audit.** Reject equal/higher “reduction”, missing feature sets, stale versions, and terminal cases with `AUTH_019`.
 
 - [ ] **Step 4: Run GREEN and commit.**
 
@@ -358,7 +358,7 @@ Commit: `feat: decide member sanction appeals`
 - Modify: `docs/specs/member-support/spec.md`
 
 **Interfaces:**
-- Produces executable proof that recovery-versus-sanction races have exactly one success, one `AUTH_017`, one audit row, one consumed admin approval, and one support-version increment.
+- Produces executable proof that recovery-versus-sanction races have exactly one success, one `AUTH_019`, one audit row, one consumed admin approval, and one support-version increment.
 
 - [ ] **Step 1: Write the failing race and contract tests.** Use two real transactions, `CountDownLatch`, and MySQL 8.0.40. Do not use sleeps. Capture both results and inspect committed ledgers afterward.
 
@@ -496,7 +496,7 @@ Run: `backend\gradlew.bat test --tests "*MemberRecoveryPasswordResetTest"`
 - `advanceSupportVersion(accountId, expectedVersion)` locks the owned account, checks the expected version and increments exactly once without changing suspension/password state.
 - WARNING, FEATURE_RESTRICTION, UPHOLD, and any reduction/cancellation that does not call suspension transition use this CAS operation.
 
-- [ ] **Step 1: Add failing unit tests and a MySQL recovery-versus-feature-restriction race.** Assert one success, one `AUTH_017`, and rollback of losing case/reauthentication/audit state.
+- [ ] **Step 1: Add failing unit tests and a MySQL recovery-versus-feature-restriction race.** Assert one success, one `AUTH_019`, and rollback of losing case/reauthentication/audit state.
 - [ ] **Step 2: Run RED.**
 - [ ] **Step 3: Add the owned account CAS operation and call it exactly once per final command.**
 - [ ] **Step 4: Run GREEN for unit and real MySQL concurrency tests.**

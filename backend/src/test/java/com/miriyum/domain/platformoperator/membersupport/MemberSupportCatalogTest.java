@@ -23,9 +23,9 @@ class MemberSupportCatalogTest {
 
     @Test
     void exposesNonEnumeratingMemberSupportErrors() {
-        assertThat(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND.getCode()).isEqualTo("AUTH_016");
-        assertThat(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT.getCode()).isEqualTo("AUTH_017");
-        assertThat(AuthErrorCode.PERMANENT_SANCTION_APPROVAL_CONFLICT.getCode()).isEqualTo("AUTH_018");
+        assertThat(AuthErrorCode.MEMBER_SUPPORT_NOT_FOUND.getCode()).isEqualTo("AUTH_018");
+        assertThat(AuthErrorCode.MEMBER_SUPPORT_STATE_CONFLICT.getCode()).isEqualTo("AUTH_019");
+        assertThat(AuthErrorCode.PERMANENT_SANCTION_APPROVAL_CONFLICT.getCode()).isEqualTo("AUTH_020");
     }
 
     @Test

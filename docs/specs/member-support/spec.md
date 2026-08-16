@@ -35,7 +35,7 @@
 | 영구 정지 추가 승인 | `ACCOUNT_PERMANENT_SANCTION_APPROVE` | 제안자와 다른 `SUPER_ADMIN`, 별도 재인증 |
 | 이의 배정·결정 | `ACCOUNT_APPEAL_REVIEW` | 현재 배정, 사건 version, `ACCOUNT_APPEAL_DECISION` 재인증 |
 
-운영자 API는 권한을 먼저 검사하고 그 뒤 계정 유형별 public lookup service를 호출한다. 존재하지 않는 ID와 요청한 계정 유형에 속하지 않는 ID는 모두 `404 AUTH_016`으로 정규화한다. 권한 없는 요청은 조회 자체를 수행하지 않고 `403 ADMIN_001`을 반환하므로 다른 계정 유형의 동일 ID 존재 여부, 이메일, 전화번호, 제재 상세를 추론할 수 없다.
+운영자 API는 권한을 먼저 검사하고 그 뒤 계정 유형별 public lookup service를 호출한다. 존재하지 않는 ID와 요청한 계정 유형에 속하지 않는 ID는 모두 `404 AUTH_018`으로 정규화한다. 권한 없는 요청은 조회 자체를 수행하지 않고 `403 ADMIN_001`을 반환하므로 다른 계정 유형의 동일 ID 존재 여부, 이메일, 전화번호, 제재 상세를 추론할 수 없다.
 
 사용자 복구·이의 접수 API는 계정 없음, 유형 불일치, 등록 정보 불일치, 증거 없음·만료·재사용을 모두 같은 `202 Accepted` envelope로 반환한다. 복구 확인 요청에는 유효 여부와 무관하게 같은 이름·속성·길이의 opaque 쿠키를 발급하고 유효한 요청의 digest만 저장한다. 유효한 요청에만 내부 사건을 생성하며 응답·헤더로 검증 성공, 생성 여부나 사건 ID를 공개하지 않는다.
 
@@ -61,7 +61,7 @@
 6. 승인 후 사용자는 추적 쿠키를 한 번 교환해 별도 목적에 결속된 15분·1회용 비밀번호 재설정 쿠키를 받는다. 교환 성공 여부도 같은 202와 같은 쿠키 형태로 감춘다. 교환은 승인 시점부터 30일까지만 가능하며 사용한 추적 쿠키와 발급된 재설정 자격은 재사용할 수 없다.
 7. 사용자는 비밀번호 재설정 쿠키로 새 비밀번호를 설정한다. 성공 시 자격과 사건 완료 상태를 한 번 소비하고 모든 세션을 폐기한 뒤 `password_reset_required=false`로 바꾸되 현재 제재는 제거하지 않는다. 자동 로그인하지 않는다.
 
-복구 상태는 `SUBMITTED -> ASSIGNED -> APPROVED | REJECTED`만 허용한다. 종결 사건의 재결정과 stale version은 `409 AUTH_017`이다.
+복구 상태는 `SUBMITTED -> ASSIGNED -> APPROVED | REJECTED`만 허용한다. 종결 사건의 재결정과 stale version은 `409 AUTH_019`이다.
 
 ## 제재
 
@@ -76,7 +76,7 @@
 
 기능 묶음은 `RESERVATION`, `WAITING`, `PICKUP`, `STORE_OPERATION`, `MENU_OPERATION` 중 하나 이상이다. 소비자와 식당 운영자에게 의미 없는 기능을 요청하면 400으로 거절한다. 기능 제한 중에는 인증과 읽기, 복구와 이의 접수는 허용하고 해당 쓰기 명령만 post-auth 정책 filter에서 거절한다.
 
-경고·기능 제한·기간 정지는 한 명의 `ACCOUNT_SANCTION` 운영자가 적용한다. 영구 정지는 먼저 `PENDING_ADDITIONAL_APPROVAL`로 제안하고, 제안자와 다른 `SUPER_ADMIN`이 `ACCOUNT_PERMANENT_SANCTION_APPROVE` 권한과 별도 일회 재인증으로 승인해야 `APPLIED`가 된다. 같은 승인자, 중복 승인, 이미 종결된 제안은 `409 AUTH_018`이다. 승인 원장에는 제안자·추가 승인자 public operator ID, 사건·정책 version, 결정 코드와 시각만 저장한다.
+경고·기능 제한·기간 정지는 한 명의 `ACCOUNT_SANCTION` 운영자가 적용한다. 영구 정지는 먼저 `PENDING_ADDITIONAL_APPROVAL`로 제안하고, 제안자와 다른 `SUPER_ADMIN`이 `ACCOUNT_PERMANENT_SANCTION_APPROVE` 권한과 별도 일회 재인증으로 승인해야 `APPLIED`가 된다. 같은 승인자, 중복 승인, 이미 종결된 제안은 `409 AUTH_020`이다. 승인 원장에는 제안자·추가 승인자 public operator ID, 사건·정책 version, 결정 코드와 시각만 저장한다.
 
 만료 작업은 기능 제한·기간 정지를 여러 인스턴스에서 멱등하게 종료한다. 제재 원장은 삭제하거나 덮어쓰지 않는다.
 
@@ -92,7 +92,7 @@
 
 소비자·식당 운영자 계정은 각각 `support_version`을 가진다. 복구 승인, 제재 적용, 영구 정지 추가 승인과 이의 결정은 대상 계정의 현재 version을 비교·증가시키는 CAS와 사건 row lock을 같은 transaction에서 수행한다.
 
-같은 계정에 복구 승인과 제재 적용이 동시에 도착하면 먼저 `support_version`을 증가시킨 명령 하나만 성공한다. 패자는 `409 AUTH_017`로 전체 rollback하며 사건 상태, 일회 재인증 소비, mock 증거 소비와 감사 행도 남기지 않는다. 클라이언트는 최신 계정·사건 version을 다시 읽은 뒤 명시적으로 재시도해야 한다.
+같은 계정에 복구 승인과 제재 적용이 동시에 도착하면 먼저 `support_version`을 증가시킨 명령 하나만 성공한다. 패자는 `409 AUTH_019`로 전체 rollback하며 사건 상태, 일회 재인증 소비, mock 증거 소비와 감사 행도 남기지 않는다. 클라이언트는 최신 계정·사건 version을 다시 읽은 뒤 명시적으로 재시도해야 한다.
 
 ## 감사와 데이터 최소화
 
@@ -115,9 +115,9 @@
 | --- | --- | --- |
 | 권한·배정·재인증 전제 불충족 | 403 | `ADMIN_001` |
 | 운영자 세션·권한 version 무효 | 401 | `AUTH_015` |
-| 계정 없음 또는 요청 유형과 불일치 | 404 | `AUTH_016` |
-| stale version·종결 상태·동시 전이 패배 | 409 | `AUTH_017` |
-| 영구 정지 자기 승인·중복 승인 | 409 | `AUTH_018` |
+| 계정 없음 또는 요청 유형과 불일치 | 404 | `AUTH_018` |
+| stale version·종결 상태·동시 전이 패배 | 409 | `AUTH_019` |
+| 영구 정지 자기 승인·중복 승인 | 409 | `AUTH_020` |
 | 중앙 상태 저장소 장애 | 503 | `COMMON_012` |
 
 ## migration
