@@ -6,5 +6,6 @@ public enum MenuHoldStatus {
     CONFIRMED,
     RELEASED,
     FULFILLED,
+    FORFEITED,
     EXPIRED
 }

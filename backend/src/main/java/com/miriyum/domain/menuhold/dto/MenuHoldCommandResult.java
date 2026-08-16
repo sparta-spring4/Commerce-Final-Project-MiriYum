@@ -10,7 +10,8 @@ public record MenuHoldCommandResult(
         NO_HOLD,
         CONFIRMED,
         RELEASED,
-        FULFILLED
+        FULFILLED,
+        FORFEITED
     }
 
     public MenuHoldCommandResult {
@@ -36,5 +37,9 @@ public record MenuHoldCommandResult(
 
     public static MenuHoldCommandResult fulfilled(long reservationId) {
         return new MenuHoldCommandResult(reservationId, Outcome.FULFILLED);
+    }
+
+    public static MenuHoldCommandResult forfeited(long reservationId) {
+        return new MenuHoldCommandResult(reservationId, Outcome.FORFEITED);
     }
 }

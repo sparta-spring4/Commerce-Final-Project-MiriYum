@@ -92,18 +92,43 @@ class MenuHoldTest {
     }
 
     @Test
+    void forfeitsConfirmedHoldAndTreatsRepeatedForfeitAsIdempotent() {
+        MenuHold hold = confirmedHold();
+
+        assertThat(hold.forfeit()).isTrue();
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(hold.getReservationHoldId()).isNull();
+        assertThat(hold.getExpiresAt()).isNull();
+        assertThat(hold.forfeit()).isFalse();
+    }
+
+    @Test
     void rejectsAConflictingTerminalTransition() {
         MenuHold released = confirmedHold();
         released.release();
         MenuHold fulfilled = confirmedHold();
         fulfilled.fulfill();
+        MenuHold forfeited = confirmedHold();
+        forfeited.forfeit();
 
         assertThatThrownBy(released::fulfill)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("released menu hold cannot be fulfilled");
+        assertThatThrownBy(released::forfeit)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("released menu hold cannot be forfeited");
         assertThatThrownBy(fulfilled::release)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("fulfilled menu hold cannot be released");
+        assertThatThrownBy(fulfilled::forfeit)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("fulfilled menu hold cannot be forfeited");
+        assertThatThrownBy(forfeited::release)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("forfeited menu hold cannot be released");
+        assertThatThrownBy(forfeited::fulfill)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("forfeited menu hold cannot be fulfilled");
     }
 
     @Test
@@ -166,6 +191,18 @@ class MenuHoldTest {
         assertThat(fulfilled.fulfill()).isTrue();
         assertThat(fulfilled.getStatus()).isEqualTo(MenuHoldStatus.FULFILLED);
         assertThat(fulfilled.fulfill()).isFalse();
+    }
+
+    @Test
+    void finalReservationForfeitsConfirmedTemporaryHold() {
+        MenuHold hold = temporaryHold();
+        hold.confirmTemporary(101L);
+
+        assertThat(hold.forfeit()).isTrue();
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(hold.getReservationId()).isEqualTo(101L);
+        assertThat(hold.getReservationHoldId()).isEqualTo(11L);
+        assertThat(hold.forfeit()).isFalse();
     }
 
     @Test
@@ -251,6 +288,8 @@ class MenuHoldTest {
         assertThatThrownBy(hold::release)
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(hold::fulfill)
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(hold::forfeit)
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.ACTIVE);

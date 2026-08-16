@@ -11,6 +11,7 @@ import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
@@ -317,6 +318,26 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("노쇼 몰수는 홀드만 종결하고 메뉴 수량과 복구 원장을 변경하지 않는다")
+    void forfeitTerminatesHoldWithoutRestoringInventory() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "forfeit-acquire")));
+
+        transactions.executeWithoutResult(status -> service.forfeit(
+                new MenuHoldForfeitCommand(reservation.getId(), "forfeit-operation")));
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("forfeit-acquire")).isZero();
+    }
+
+    @Test
     void terminalCommandsRequireCallerTransaction() {
         assertThatThrownBy(() -> service.lockForTermination(Long.MAX_VALUE))
                 .isInstanceOf(IllegalTransactionStateException.class);
@@ -325,6 +346,9 @@ class MenuHoldRuntimeIT {
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> service.fulfill(
                 new MenuHoldFulfillCommand(Long.MAX_VALUE, "no-transaction-fulfill")))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> service.forfeit(
+                new MenuHoldForfeitCommand(Long.MAX_VALUE, "no-transaction-forfeit")))
                 .isInstanceOf(IllegalTransactionStateException.class);
     }
 
@@ -530,6 +554,29 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    void callerFailureRollsBackForfeitState() {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "rollback-forfeit-acquire")));
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            service.forfeit(new MenuHoldForfeitCommand(
+                    reservation.getId(), "rollback-forfeit-operation"));
+            throw new IllegalStateException("caller failure");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("caller failure");
+
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.CONFIRMED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("rollback-forfeit-acquire")).isZero();
+    }
+
+    @Test
     @DisplayName("수량 복구 오류는 원형 전달되고 홀드 상태도 롤백된다")
     void inventoryRestoreFailurePropagatesAndRollsBackHoldState() {
         MenuInventoryBucket bucket = transactions.execute(status ->
@@ -587,6 +634,37 @@ class MenuHoldRuntimeIT {
     }
 
     @Test
+    @DisplayName("동시 몰수는 둘 다 멱등 성공하고 수량과 복구 원장을 변경하지 않는다")
+    void concurrentForfeitIsIdempotentWithoutRestore() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "concurrent-forfeit-acquire")));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Object> first = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "concurrent-forfeit-1", ready, start));
+            Future<Object> second = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "concurrent-forfeit-2", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS),
+                    second.get(20, TimeUnit.SECONDS)))
+                    .containsOnly(MenuHoldCommandResult.Outcome.FORFEITED);
+        }
+        assertThat(holdFor(reservation.getId()).getStatus())
+                .isEqualTo(MenuHoldStatus.FORFEITED);
+        assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                .getOnlineHoldRemaining()).isZero();
+        assertThat(restoreLedgerCount("concurrent-forfeit-acquire")).isZero();
+    }
+
+    @Test
     @DisplayName("해제와 이행 경합은 하나의 최종 상태만 확정한다")
     void concurrentReleaseAndFulfillCommitOneTerminalState() throws Exception {
         MenuInventoryBucket bucket = transactions.execute(status ->
@@ -623,6 +701,56 @@ class MenuHoldRuntimeIT {
                     com.miriyum.domain.menuhold.dto.MenuHoldCommandResult.Outcome.FULFILLED);
             assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
                     .getOnlineHoldRemaining()).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("해제·이행·몰수 경합은 정확히 하나의 최종 상태만 확정한다")
+    void concurrentReleaseFulfillAndForfeitCommitOneTerminalState() throws Exception {
+        MenuInventoryBucket bucket = transactions.execute(status ->
+                bucketRepository.saveAndFlush(bucket(1)));
+        Reservation reservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        transactions.executeWithoutResult(status -> service.create(
+                command(reservation.getId(), 1, "three-way-terminal-race-acquire")));
+        CountDownLatch ready = new CountDownLatch(3);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Object> results;
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            Future<Object> release = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "three-way-release", true, ready, start));
+            Future<Object> fulfill = executor.submit(() -> terminalConcurrently(
+                    reservation.getId(), "three-way-fulfill", false, ready, start));
+            Future<Object> forfeit = executor.submit(() -> forfeitConcurrently(
+                    reservation.getId(), "three-way-forfeit", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            results = List.of(release.get(20, TimeUnit.SECONDS),
+                    fulfill.get(20, TimeUnit.SECONDS),
+                    forfeit.get(20, TimeUnit.SECONDS));
+        }
+
+        assertThat(results.stream()
+                .filter(MenuHoldErrorCode.INVENTORY_STATE_CONFLICT::equals)
+                .count()).isEqualTo(2L);
+        MenuHoldStatus finalStatus = holdFor(reservation.getId()).getStatus();
+        if (finalStatus == MenuHoldStatus.RELEASED) {
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.RELEASED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isEqualTo(1);
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isEqualTo(1);
+        } else if (finalStatus == MenuHoldStatus.FULFILLED) {
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.FULFILLED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isZero();
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isZero();
+        } else {
+            assertThat(finalStatus).isEqualTo(MenuHoldStatus.FORFEITED);
+            assertThat(results).contains(MenuHoldCommandResult.Outcome.FORFEITED);
+            assertThat(bucketRepository.findById(bucket.getId()).orElseThrow()
+                    .getOnlineHoldRemaining()).isZero();
+            assertThat(restoreLedgerCount("three-way-terminal-race-acquire")).isZero();
         }
     }
 
@@ -791,6 +919,27 @@ class MenuHoldRuntimeIT {
                 "CONFIRMED"))
                 .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("ck_menu_holds_parent_and_status");
+        assertThatThrownBy(() -> insertMenuHold(
+                null,
+                secondParentId,
+                secondExpiry,
+                operationPrefix + "unlinked-forfeited",
+                "FORFEITED"))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_menu_holds_parent_and_status");
+
+        Reservation linkedTemporaryReservation = transactions.execute(status ->
+                reservationRepository.saveAndFlush(reservation()));
+        insertMenuHold(
+                linkedTemporaryReservation.getId(),
+                secondParentId,
+                secondExpiry,
+                operationPrefix + "linked-forfeited",
+                "FORFEITED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM menu_holds WHERE reservation_id = ?",
+                String.class,
+                linkedTemporaryReservation.getId())).isEqualTo("FORFEITED");
 
         Reservation legacyReservation = transactions.execute(status ->
                 reservationRepository.saveAndFlush(reservation()));
@@ -1132,6 +1281,27 @@ class MenuHoldRuntimeIT {
                             .outcome()
                     : service.fulfill(new MenuHoldFulfillCommand(reservationId, operationId))
                             .outcome());
+        } catch (ServiceException exception) {
+            return exception.getErrorCode();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return InterruptedException.class;
+        }
+    }
+
+    private Object forfeitConcurrently(
+            long reservationId,
+            String operationId,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) {
+        try {
+            ready.countDown();
+            if (!start.await(10, TimeUnit.SECONDS)) {
+                return AssertionError.class;
+            }
+            return transactions.execute(status -> service.forfeit(
+                    new MenuHoldForfeitCommand(reservationId, operationId)).outcome());
         } catch (ServiceException exception) {
             return exception.getErrorCode();
         } catch (InterruptedException exception) {
