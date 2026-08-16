@@ -210,6 +210,18 @@ public class FileMetadata {
         this.deletedAt = deletedAt;
     }
 
+    /** 바깥 업무 트랜잭션이 롤백된 대기 파일을 공개 전에 폐기한다. */
+    public void discardPending(Instant deletedAt) {
+        if (storageStatus != FileStorageStatus.PENDING) {
+            throw new IllegalStateException("대기 상태의 파일 메타데이터만 보상 폐기할 수 있습니다.");
+        }
+        if (deletedAt == null) {
+            throw new IllegalArgumentException("삭제 시각은 필수입니다.");
+        }
+        storageStatus = FileStorageStatus.DELETED;
+        this.deletedAt = deletedAt;
+    }
+
     private void changeStatus(FileStorageStatus nextStatus) {
         if (storageStatus != FileStorageStatus.PENDING) {
             throw new IllegalStateException("대기 상태의 파일 메타데이터만 처리 결과를 기록할 수 있습니다.");

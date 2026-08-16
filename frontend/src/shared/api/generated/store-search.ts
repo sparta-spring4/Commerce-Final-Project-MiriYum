@@ -36,9 +36,34 @@ export interface paths {
     /** 매장 태그 조회 */
     get: operations["getStoreTags"];
   };
+  "/api/v1/public-files/{imageId}": {
+    /**
+     * 공개 이미지 원본 조회
+     * @description CONFIRMED 상태의 PUBLIC 이미지만 반환한다. S3 객체 키·버킷 URL·체크섬·원본 파일명은 응답에 포함하지 않는다.
+     */
+    get: operations["getPublicImageFile"];
+  };
   "/api/v1/store-operators/stores": {
     /** 매장 등록 */
     post: operations["createStore"];
+  };
+  "/api/v1/store-operators/stores/{storeId}/images": {
+    /** 매장 공개 이미지 목록 조회 */
+    get: operations["listManagedStoreImages"];
+    /**
+     * 매장 공개 이미지 추가
+     * @description JPEG, PNG, WebP 파일만 허용하며 매장당 최대 10장까지 유지한다.
+     */
+    post: operations["uploadStoreImage"];
+  };
+  "/api/v1/store-operators/stores/{storeId}/images/{imageId}": {
+    /**
+     * 매장 공개 이미지 교체
+     * @description 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+     */
+    put: operations["replaceStoreImage"];
+    /** 매장 공개 이미지 삭제 */
+    delete: operations["deleteStoreImage"];
   };
   "/api/v1/store-operators/stores/{storeId}": {
     /** 운영 매장 정보 조회 */
@@ -577,6 +602,21 @@ export interface components {
       originDisclosures: components["schemas"]["OriginDisclosure"][];
       alcoholic: boolean;
     }, "name" | "description" | "price" | "representative" | "primaryCategoryCode" | "secondaryCategoryCodes" | "localTags" | "holdSelectionAllowed" | "pickupSelectionAllowed" | "allergenInformationStatus" | "allergenDisclosures" | "originInformationStatus" | "originDisclosures" | "alcoholic">;
+    PublicImage: {
+      /** Format: uuid */
+      imageId: string;
+      url: string;
+    };
+    PublicImageSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["PublicImage"];
+    };
+    PublicImageListSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["PublicImage"][];
+    };
     MenuPublicationRequest: WithRequired<{
       /** @enum {string} */
       mode: "IMMEDIATE" | "SCHEDULED";
@@ -685,6 +725,36 @@ export interface components {
     };
   };
   responses: {
+    /** @description 공개 이미지를 찾을 수 없음 */
+    PublicImageNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 이미지 최대 개수 초과 또는 Idempotency-Key를 다른 요청에 재사용함 */
+    StorePublicImageConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 또는 교체 대상 공개 이미지를 찾을 수 없음 */
+    StoreImageTargetNotFound: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 이미지 크기 제한 초과 */
+    ImageSizeExceeded: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 지원하지 않는 이미지 형식 */
+    UnsupportedImageMediaType: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 매장을 찾을 수 없음 */
     StoreNotFound: {
       content: {
@@ -750,6 +820,7 @@ export interface components {
     StoreId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
     ScheduleVersion: number;
     MenuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
+    ImageId: string;
   };
   requestBodies: never;
   headers: never;
@@ -1035,6 +1106,29 @@ export interface operations {
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
+  /**
+   * 공개 이미지 원본 조회
+   * @description CONFIRMED 상태의 PUBLIC 이미지만 반환한다. S3 객체 키·버킷 URL·체크섬·원본 파일명은 응답에 포함하지 않는다.
+   */
+  getPublicImageFile: {
+    parameters: {
+      path: {
+        imageId: components["parameters"]["ImageId"];
+      };
+    };
+    responses: {
+      /** @description 공개 이미지 바이트 */
+      200: {
+        content: {
+          "image/jpeg": string;
+          "image/png": string;
+          "image/webp": string;
+        };
+      };
+      404: components["responses"]["PublicImageNotFound"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
   /** 매장 등록 */
   createStore: {
     parameters: {
@@ -1058,6 +1152,125 @@ export interface operations {
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Forbidden"];
       409: components["responses"]["StoreConflict"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 매장 공개 이미지 목록 조회 */
+  listManagedStoreImages: {
+    parameters: {
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    responses: {
+      /** @description 매장 공개 이미지 목록 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicImageListSuccessResponse"];
+        };
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
+    };
+  };
+  /**
+   * 매장 공개 이미지 추가
+   * @description JPEG, PNG, WebP 파일만 허용하며 매장당 최대 10장까지 유지한다.
+   */
+  uploadStoreImage: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": {
+          /** Format: binary */
+          file: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 저장·검증을 완료한 공개 이미지 */
+      201: {
+        content: {
+          "application/json": components["schemas"]["PublicImageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["StorePublicImageConflict"];
+      413: components["responses"]["ImageSizeExceeded"];
+      415: components["responses"]["UnsupportedImageMediaType"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /**
+   * 매장 공개 이미지 교체
+   * @description 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+   */
+  replaceStoreImage: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        imageId: components["parameters"]["ImageId"];
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": {
+          /** Format: binary */
+          file: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 교체된 공개 이미지 */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PublicImageSuccessResponse"];
+        };
+      };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreImageTargetNotFound"];
+      409: components["responses"]["StorePublicImageConflict"];
+      413: components["responses"]["ImageSizeExceeded"];
+      415: components["responses"]["UnsupportedImageMediaType"];
+      503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
+    };
+  };
+  /** 매장 공개 이미지 삭제 */
+  deleteStoreImage: {
+    parameters: {
+      header: {
+        "Idempotency-Key": external["../mvp1-common/openapi.yaml"]["components"]["parameters"]["IdempotencyKey"];
+      };
+      path: {
+        storeId: components["parameters"]["StoreId"];
+        imageId: components["parameters"]["ImageId"];
+      };
+    };
+    responses: {
+      /** @description 삭제 완료 또는 이미 삭제된 이미지 */
+      204: {
+        content: never;
+      };
+      401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
+      403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["StorePublicImageConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
