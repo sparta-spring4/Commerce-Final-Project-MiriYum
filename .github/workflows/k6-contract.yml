@@ -42,6 +42,7 @@ jobs:
         shell: bash
         env:
           MIRIYUM_STORE_GEOCODING_REST_API_KEY: contract-test-kakao-key
+          MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: contract-test-notification-cursor-secret-32bytes
         run: |
           set -euo pipefail
           combined_config="$RUNNER_TEMP/loadtest-compose.json"
