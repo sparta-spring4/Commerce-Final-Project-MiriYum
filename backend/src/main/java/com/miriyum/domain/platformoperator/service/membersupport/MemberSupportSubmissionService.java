@@ -5,7 +5,7 @@ import com.miriyum.domain.auth.membersupport.MemberAccountType;
 import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
-import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseSubmissionStore;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanctionStatus;
 import java.nio.charset.StandardCharsets;
@@ -21,13 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class MemberSupportSubmissionService {
     private final MockMemberIdentityVerificationService verifications;
     private final MemberAccountSupportRegistry accounts;
-    private final MemberSupportCaseRepository cases;
+    private final MemberSupportCaseSubmissionStore cases;
     private final MemberSanctionRepository sanctions;
     private final Clock clock;
 
     public MemberSupportSubmissionService(MockMemberIdentityVerificationService verifications,
                                           MemberAccountSupportRegistry accounts,
-                                          MemberSupportCaseRepository cases,
+                                          MemberSupportCaseSubmissionStore cases,
                                           MemberSanctionRepository sanctions,
                                           Clock clock) {
         this.verifications = verifications;
@@ -50,7 +50,7 @@ public class MemberSupportSubmissionService {
                                 .map(account -> MemberSupportCase.appeal(
                                         accountType, account.accountId(), sanction.getId(), verificationId,
                                         account.supportVersion(), LocalDateTime.now(clock)))))
-                .ifPresent(cases::save);
+                .ifPresent(cases::insertIfAbsent);
     }
 
     @Transactional
@@ -61,7 +61,7 @@ public class MemberSupportSubmissionService {
                         .map(account -> MemberSupportCase.recovery(
                                 accountType, account.accountId(), consumed.verificationId(),
                                 account.supportVersion(), LocalDateTime.now(clock))))
-                .ifPresent(cases::save);
+                .ifPresent(cases::insertIfAbsent);
     }
 
     private boolean equal(String first, String second) {

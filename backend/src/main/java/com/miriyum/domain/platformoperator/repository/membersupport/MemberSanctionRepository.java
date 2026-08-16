@@ -48,7 +48,7 @@ public interface MemberSanctionRepository extends JpaRepository<MemberSanction, 
     List<MemberSanction> findExpiredForUpdate(@Param("now") LocalDateTime now);
 
     @Query(value = """
-            select count(*) > 0 from member_sanctions
+            select count(*) from member_sanctions
              where account_type = :#{#accountType.name()}
                and account_id = :accountId
                and member_sanction_id <> :excludedId
@@ -56,7 +56,7 @@ public interface MemberSanctionRepository extends JpaRepository<MemberSanction, 
                and status = 'APPLIED'
                and (ends_at is null or ends_at > :now)
             """, nativeQuery = true)
-    boolean existsOtherActiveSuspension(
+    long countOtherActiveSuspensions(
             @Param("accountType") com.miriyum.domain.auth.membersupport.MemberAccountType accountType,
             @Param("accountId") long accountId,
             @Param("excludedId") long excludedId,

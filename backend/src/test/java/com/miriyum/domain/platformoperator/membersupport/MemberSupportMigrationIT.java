@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.membersupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -50,7 +51,8 @@ class MemberSupportMigrationIT {
                 assertThat(columns(connection, "member_identity_verifications"))
                         .contains("source_sanction_id", "consumed_at", "expires_at");
                 assertThat(columns(connection, "member_support_cases"))
-                        .contains("password_reset_verification_id", "password_reset_completed_at");
+                        .contains("password_reset_verification_id", "password_reset_completed_at",
+                                "active_case_scope_id");
 
                 long operatorId = insertOperator(connection);
                 try (var statement = connection.prepareStatement("""
@@ -65,6 +67,98 @@ class MemberSupportMigrationIT {
                         connection, operatorId, "ACCOUNT_APPEAL_DECISION", "a");
                 assertReauthenticationPurposeAccepted(
                         connection, operatorId, "PERMANENT_ACCOUNT_SANCTION_APPROVAL", "b");
+                assertAppealUniquenessIsScopedToSourceSanction(connection, operatorId);
+            }
+        }
+    }
+
+    private static void assertAppealUniquenessIsScopedToSourceSanction(
+            Connection connection, long operatorId) throws SQLException {
+        long accountId = insertConsumer(connection);
+        long firstEnforcement = insertCase(
+                connection, "enforcement-1", "ACCOUNT_SANCTION", accountId, null, "APPROVED");
+        long secondEnforcement = insertCase(
+                connection, "enforcement-2", "ACCOUNT_SANCTION", accountId, null, "APPROVED");
+        long firstSanction = insertSanction(
+                connection, "sanction-1", firstEnforcement, accountId,
+                "TEMPORARY_SUSPENSION", operatorId);
+        long secondSanction = insertSanction(
+                connection, "sanction-2", secondEnforcement, accountId,
+                "PERMANENT_SUSPENSION", operatorId);
+
+        assertThat(insertCase(
+                connection, "appeal-1", "ACCOUNT_APPEAL", accountId, firstSanction, "SUBMITTED"))
+                .isPositive();
+        assertThat(insertCase(
+                connection, "appeal-2", "ACCOUNT_APPEAL", accountId, secondSanction, "SUBMITTED"))
+                .isPositive();
+        assertThatThrownBy(() -> insertCase(
+                connection, "appeal-1-duplicate", "ACCOUNT_APPEAL", accountId,
+                firstSanction, "SUBMITTED"))
+                .isInstanceOf(SQLException.class);
+    }
+
+    private static long insertConsumer(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                INSERT INTO consumer_accounts
+                    (email, password_hash, name, password_reset_required, support_version,
+                     status, created_at, updated_at)
+                VALUES ('appeal-scope@example.com', 'hash', 'appeal-scope', FALSE, 0,
+                        'ACTIVE', NOW(6), NOW(6))
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                keys.next();
+                return keys.getLong(1);
+            }
+        }
+    }
+
+    private static long insertCase(Connection connection, String publicId, String type,
+                                   long accountId, Long sourceSanctionId, String status)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                INSERT INTO member_support_cases
+                    (case_public_id, case_type, account_type, account_id, source_sanction_id,
+                     status, target_support_version, row_version, submitted_at, created_at, updated_at)
+                VALUES (?, ?, 'CONSUMER', ?, ?, ?, 0, 1, NOW(6), NOW(6), NOW(6))
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, publicId);
+            statement.setString(2, type);
+            statement.setLong(3, accountId);
+            if (sourceSanctionId == null) statement.setNull(4, java.sql.Types.BIGINT);
+            else statement.setLong(4, sourceSanctionId);
+            statement.setString(5, status);
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                keys.next();
+                return keys.getLong(1);
+            }
+        }
+    }
+
+    private static long insertSanction(Connection connection, String publicId, long caseId,
+                                       long accountId, String level, long operatorId)
+            throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                INSERT INTO member_sanctions
+                    (sanction_public_id, member_support_case_id, account_type, account_id,
+                     level, status, restricted_features, reason_code, policy_version,
+                     proposed_by_operator_id, applied_by_operator_id, proposed_at, applied_at,
+                     ends_at, row_version, created_at, updated_at)
+                VALUES (?, ?, 'CONSUMER', ?, ?, 'APPLIED', JSON_ARRAY(), 'ABUSE', 'v1',
+                        ?, ?, NOW(6), NOW(6), NULL, 1, NOW(6), NOW(6))
+                """, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, publicId);
+            statement.setLong(2, caseId);
+            statement.setLong(3, accountId);
+            statement.setString(4, level);
+            statement.setLong(5, operatorId);
+            statement.setLong(6, operatorId);
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                keys.next();
+                return keys.getLong(1);
             }
         }
     }

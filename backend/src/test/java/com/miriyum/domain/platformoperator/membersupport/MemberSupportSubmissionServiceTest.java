@@ -14,7 +14,7 @@ import com.miriyum.domain.auth.membersupport.MemberVerificationChannel;
 import com.miriyum.domain.platformoperator.dto.membersupport.PublicMemberSupportRequests.ConsumedVerification;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberVerificationPurpose;
-import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseSubmissionStore;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanctionStatus;
@@ -34,7 +34,7 @@ class MemberSupportSubmissionServiceTest {
     @Test
     void validProofCreatesRecoveryCaseWithoutContactData() {
         MockMemberIdentityVerificationService verifications = mock(MockMemberIdentityVerificationService.class);
-        MemberSupportCaseRepository cases = mock(MemberSupportCaseRepository.class);
+        MemberSupportCaseSubmissionStore cases = mock(MemberSupportCaseSubmissionStore.class);
         MemberAccountSupportPort port = mock(MemberAccountSupportPort.class);
         when(port.accountType()).thenReturn(MemberAccountType.CONSUMER);
         when(port.findMinimal(41)).thenReturn(Optional.of(new MemberAccountSnapshot(
@@ -50,7 +50,7 @@ class MemberSupportSubmissionServiceTest {
         service.submitRecovery(MemberAccountType.CONSUMER, "proof", "new@example.com");
 
         ArgumentCaptor<MemberSupportCase> saved = ArgumentCaptor.forClass(MemberSupportCase.class);
-        verify(cases).save(saved.capture());
+        verify(cases).insertIfAbsent(saved.capture());
         assertThat(saved.getValue().getAccountId()).isEqualTo(41);
         assertThat(saved.getValue().getTargetSupportVersion()).isEqualTo(3);
         assertThat(saved.getValue().toString()).doesNotContain("new@example.com", "proof");
@@ -59,7 +59,7 @@ class MemberSupportSubmissionServiceTest {
     @Test
     void invalidOrMismatchedProofStillReturnsNormallyWithoutCreatingCase() {
         MockMemberIdentityVerificationService verifications = mock(MockMemberIdentityVerificationService.class);
-        MemberSupportCaseRepository cases = mock(MemberSupportCaseRepository.class);
+        MemberSupportCaseSubmissionStore cases = mock(MemberSupportCaseSubmissionStore.class);
         MemberAccountSupportRegistry accounts = mock(MemberAccountSupportRegistry.class);
         when(verifications.consumeForSubmission(
                 "bad", MemberAccountType.CONSUMER, MemberVerificationPurpose.MEMBER_RECOVERY))
@@ -69,12 +69,12 @@ class MemberSupportSubmissionServiceTest {
 
         service.submitRecovery(MemberAccountType.CONSUMER, "bad", "new@example.com");
 
-        verify(cases, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(cases, never()).insertIfAbsent(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void appealSubmissionStoresNoContactOrStatement() {
-        MemberSupportCaseRepository cases = mock(MemberSupportCaseRepository.class);
+        MemberSupportCaseSubmissionStore cases = mock(MemberSupportCaseSubmissionStore.class);
         MemberSanctionRepository sanctions = mock(MemberSanctionRepository.class);
         MemberSanction sanction = mock(MemberSanction.class);
         when(sanction.getAccountType()).thenReturn(MemberAccountType.CONSUMER);
@@ -97,7 +97,7 @@ class MemberSupportSubmissionServiceTest {
                 MemberVerificationChannel.REGISTERED_EMAIL, "private contact", "private statement");
 
         ArgumentCaptor<MemberSupportCase> saved = ArgumentCaptor.forClass(MemberSupportCase.class);
-        verify(cases).save(saved.capture());
+        verify(cases).insertIfAbsent(saved.capture());
         assertThat(saved.getValue().toString()).doesNotContain("private contact", "private statement");
         assertThat(saved.getValue().getIdentityVerificationId()).isEqualTo(17L);
     }

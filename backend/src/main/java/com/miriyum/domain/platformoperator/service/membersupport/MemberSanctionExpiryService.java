@@ -32,8 +32,8 @@ public class MemberSanctionExpiryService {
             var port = accounts.require(sanction.getAccountType());
             port.findMinimal(sanction.getAccountId()).ifPresent(snapshot -> {
                 if (sanction.getLevel() == MemberSanctionLevel.TEMPORARY_SUSPENSION
-                        && !sanctions.existsOtherActiveSuspension(
-                        sanction.getAccountType(), sanction.getAccountId(), sanction.getId(), now)) {
+                        && sanctions.countOtherActiveSuspensions(
+                        sanction.getAccountType(), sanction.getAccountId(), sanction.getId(), now) == 0) {
                     port.clearSuspension(sanction.getAccountId(), snapshot.supportVersion());
                 } else {
                     port.advanceSupportVersion(sanction.getAccountId(), snapshot.supportVersion());

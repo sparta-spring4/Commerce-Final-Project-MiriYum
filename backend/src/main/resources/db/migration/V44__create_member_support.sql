@@ -87,14 +87,15 @@ CREATE TABLE member_support_cases (
     decided_at DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
-    active_case_marker TINYINT GENERATED ALWAYS AS (
+    active_case_scope_id BIGINT GENERATED ALWAYS AS (
         CASE WHEN status IN ('SUBMITTED', 'ASSIGNED', 'PENDING_ADDITIONAL_APPROVAL')
-             THEN 1 ELSE NULL END
+             THEN CASE WHEN case_type = 'ACCOUNT_APPEAL' THEN source_sanction_id ELSE 0 END
+             ELSE NULL END
     ) STORED,
     PRIMARY KEY (member_support_case_id),
     CONSTRAINT uk_member_support_cases_public_id UNIQUE (case_public_id),
     CONSTRAINT uk_member_support_cases_active
-        UNIQUE (case_type, account_type, account_id, active_case_marker),
+        UNIQUE (case_type, account_type, account_id, active_case_scope_id),
     CONSTRAINT fk_member_support_cases_identity_verification
         FOREIGN KEY (identity_verification_id)
         REFERENCES member_identity_verifications (member_identity_verification_id) ON DELETE RESTRICT,
@@ -105,6 +106,9 @@ CREATE TABLE member_support_cases (
         CHECK (case_type IN ('ACCOUNT_RECOVERY', 'ACCOUNT_SANCTION', 'ACCOUNT_APPEAL')),
     CONSTRAINT ck_member_support_cases_account_type
         CHECK (account_type IN ('CONSUMER', 'STORE_OPERATOR')),
+    CONSTRAINT ck_member_support_cases_appeal_source CHECK (
+        case_type <> 'ACCOUNT_APPEAL' OR source_sanction_id IS NOT NULL
+    ),
     CONSTRAINT ck_member_support_cases_status CHECK (status IN (
         'SUBMITTED', 'ASSIGNED', 'PENDING_ADDITIONAL_APPROVAL',
         'APPROVED', 'REJECTED', 'UPHELD', 'REDUCED', 'CANCELLED'

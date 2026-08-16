@@ -38,8 +38,8 @@ class MemberSanctionExpiryServiceTest {
         Clock expiryClock = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
         MemberSanctionRepository sanctions = mock(MemberSanctionRepository.class);
         when(sanctions.findExpiredForUpdate(LocalDateTime.now(expiryClock))).thenReturn(List.of(sanction));
-        when(sanctions.existsOtherActiveSuspension(
-                MemberAccountType.CONSUMER, 41, 5, LocalDateTime.now(expiryClock))).thenReturn(false);
+        when(sanctions.countOtherActiveSuspensions(
+                MemberAccountType.CONSUMER, 41, 5, LocalDateTime.now(expiryClock))).thenReturn(0L);
         MemberAccountSupportPort port = mock(MemberAccountSupportPort.class);
         when(port.accountType()).thenReturn(MemberAccountType.CONSUMER);
         when(port.findMinimal(41)).thenReturn(Optional.of(new MemberAccountSnapshot(

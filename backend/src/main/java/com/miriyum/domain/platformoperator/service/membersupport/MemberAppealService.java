@@ -104,7 +104,7 @@ public class MemberAppealService {
         sanctions.save(MemberSanction.reducedRevision(
                 appeal, original, reducedLevel, features, reasonCode, principal.accountId(), now));
         if (isSuspension(original.getLevel()) && !isSuspension(reducedLevel)) {
-            accounts.require(appeal.getAccountType()).clearSuspension(appeal.getAccountId(), expectedSupportVersion);
+            retireSuspension(appeal, original, expectedSupportVersion, now);
         } else {
             accounts.require(appeal.getAccountType()).advanceSupportVersion(
                     appeal.getAccountId(), expectedSupportVersion);
@@ -119,12 +119,24 @@ public class MemberAppealService {
         original.markCancelled();
         sanctions.save(MemberSanction.cancelledRevision(appeal, original, reasonCode, principal.accountId(), now));
         if (isSuspension(original.getLevel())) {
-            accounts.require(appeal.getAccountType()).clearSuspension(appeal.getAccountId(), expectedSupportVersion);
+            retireSuspension(appeal, original, expectedSupportVersion, now);
         } else {
             accounts.require(appeal.getAccountType()).advanceSupportVersion(
                     appeal.getAccountId(), expectedSupportVersion);
         }
         appeal.decide(MemberSupportCaseStatus.CANCELLED, reasonCode, now);
+    }
+
+    private void retireSuspension(
+            com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase appeal,
+            MemberSanction original, long expectedSupportVersion, LocalDateTime now) {
+        var account = accounts.require(appeal.getAccountType());
+        if (sanctions.countOtherActiveSuspensions(
+                appeal.getAccountType(), appeal.getAccountId(), original.getId(), now) > 0) {
+            account.advanceSupportVersion(appeal.getAccountId(), expectedSupportVersion);
+            return;
+        }
+        account.clearSuspension(appeal.getAccountId(), expectedSupportVersion);
     }
 
     private boolean isSuspension(MemberSanctionLevel level) {

@@ -5,19 +5,34 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 import com.jayway.jsonpath.JsonPath;
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.consumer.entity.ConsumerAccount;
 import com.miriyum.domain.consumer.repository.ConsumerAccountRepository;
+import com.miriyum.domain.consumer.enums.ConsumerAccountStatus;
+import com.miriyum.domain.platformoperator.dto.authorization.AdminAuditContext;
+import com.miriyum.domain.platformoperator.entity.membersupport.MemberAppealOutcome;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorAccount;
 import com.miriyum.domain.platformoperator.entity.PlatformOperatorRoleGrant;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorRole;
+import com.miriyum.domain.platformoperator.enums.AdminCaseType;
+import com.miriyum.domain.platformoperator.enums.AdminCommandPurpose;
+import com.miriyum.domain.platformoperator.enums.AdminTargetType;
+import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAccountRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorAuthEventRepository;
 import com.miriyum.domain.platformoperator.repository.PlatformOperatorRoleGrantRepository;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
+import com.miriyum.domain.platformoperator.service.AdminCaseAssignmentService;
+import com.miriyum.domain.platformoperator.service.HighRiskCommandGuard;
+import com.miriyum.domain.platformoperator.service.membersupport.MemberAppealService;
+import com.miriyum.domain.platformoperator.service.membersupport.MemberSupportAuditWriter;
+import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
@@ -34,9 +49,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -84,11 +101,23 @@ class PlatformOperatorMemberSupportHttpIT {
     @Autowired PasswordEncoder passwordEncoder;
     @Autowired MemberSanctionRepository sanctions;
     @Autowired MemberSupportCaseRepository supportCases;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired MemberAppealService appeals;
+    @MockitoBean HighRiskCommandGuard highRiskCommands;
+    @MockitoBean AdminCaseAssignmentService assignments;
+    @MockitoBean MemberSupportAuditWriter memberSupportAudits;
 
     @BeforeEach
     void clean() {
-        sanctions.deleteAll();
-        supportCases.deleteAll();
+        jdbc.update("""
+                DELETE FROM member_sanctions
+                 WHERE member_support_case_id IN (
+                     SELECT member_support_case_id FROM member_support_cases
+                      WHERE source_sanction_id IS NOT NULL)
+                """);
+        jdbc.update("DELETE FROM member_support_cases WHERE source_sanction_id IS NOT NULL");
+        jdbc.update("DELETE FROM member_sanctions");
+        jdbc.update("DELETE FROM member_support_cases");
         authEvents.deleteAll();
         roleGrants.deleteAll();
         operators.deleteAll();
@@ -175,6 +204,55 @@ class PlatformOperatorMemberSupportHttpIT {
                         .value("FEATURE_RESTRICTION"))
                 .andExpect(jsonPath("$.data.content[0].activeSanctions[0].restrictedFeatures[0]")
                         .value("RESERVATION"));
+    }
+
+    @Test
+    void cancellingOneSuspensionKeepsMysqlAccountSuspendedWhileAnotherRemainsActive() {
+        ConsumerAccount consumer = ConsumerAccount.createWithContact(
+                "overlap@example.com", "password-hash", "overlap", "+821044444444", "overlap-ref");
+        consumer.applySupportSuspension();
+        consumer = consumers.saveAndFlush(consumer);
+        PlatformOperatorAccount operator = createOperator();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        MemberSupportCase temporaryCase = terminalEnforcement(consumer.getId(), now, "TEMPORARY");
+        MemberSanction temporary = sanctions.saveAndFlush(MemberSanction.propose(
+                temporaryCase, MemberSanctionLevel.TEMPORARY_SUSPENSION, Set.of(),
+                "ABUSE", "v1", operator.getId(), now));
+        MemberSupportCase permanentCase = terminalEnforcement(consumer.getId(), now, "PERMANENT");
+        MemberSanction permanent = MemberSanction.propose(
+                permanentCase, MemberSanctionLevel.PERMANENT_SUSPENSION, Set.of(),
+                "ABUSE", "v1", operator.getId(), now);
+        permanent.approvePermanent(operator.getId(), now);
+        sanctions.saveAndFlush(permanent);
+        MemberSupportCase appeal = MemberSupportCase.appeal(
+                MemberAccountType.CONSUMER, consumer.getId(), temporary.getId(),
+                consumer.getSupportVersion(), now);
+        appeal.assign();
+        appeal = supportCases.saveAndFlush(appeal);
+        when(highRiskCommands.authorize(any())).thenReturn(new AdminAuditContext(
+                operator.getId(), Set.of(), Set.of(PlatformOperatorPermission.ACCOUNT_APPEAL_REVIEW), 1,
+                AdminCaseType.MEMBER_SUPPORT, appeal.getPublicId(), appeal.getRowVersion(),
+                AdminCommandPurpose.ACCOUNT_APPEAL_DECISION, AdminTargetType.CONSUMER_ACCOUNT,
+                Long.toString(consumer.getId()), "fingerprint", "overlap-correlation"));
+        PlatformOperatorPrincipal principal = new PlatformOperatorPrincipal(
+                operator.getId(), operator.getEmail(), "session", 1, 1, false);
+
+        appeals.decide(principal, appeal.getPublicId(), appeal.getRowVersion(), consumer.getSupportVersion(),
+                MemberAppealOutcome.CANCEL, null, Set.of(), "approval",
+                "overlap-correlation", "CANCELLED");
+
+        ConsumerAccount reloaded = consumers.findById(consumer.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(ConsumerAccountStatus.SUSPENDED);
+        assertThat(reloaded.getSupportVersion()).isEqualTo(2);
+    }
+
+    private MemberSupportCase terminalEnforcement(long accountId, LocalDateTime now, String decision) {
+        MemberSupportCase supportCase = MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, accountId, 0, "ABUSE", now);
+        supportCase.assign();
+        supportCase.decide(com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCaseStatus.APPROVED,
+                decision, now);
+        return supportCases.saveAndFlush(supportCase);
     }
 
     private PlatformOperatorAccount createOperator() {
