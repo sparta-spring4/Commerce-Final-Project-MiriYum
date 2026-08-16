@@ -74,6 +74,7 @@ class WaitingAutoOpenServiceIT {
     }
 
     @Autowired WaitingAutoOpenService service;
+    @Autowired WaitingAutoOpenPlanner planner;
     @Autowired WaitingAutoOpenJobRepository jobRepository;
     @Autowired WaitingReceptionWindowRepository windowRepository;
     @Autowired WaitingSettingRepository settingRepository;
@@ -168,7 +169,43 @@ class WaitingAutoOpenServiceIT {
         assertThat(windowRepository.count()).isEqualTo(1L);
     }
 
+    @Test
+    void repeatedPlanningKeepsDueJobClaimableWithoutRollbackOnlyFailure() {
+        PlanningFixture fixture = planningFixture();
+        Instant beforeDue = OPEN_AT.minusSeconds(1);
+
+        assertThat(planner.plan(beforeDue, Duration.ofHours(1), 10)).isEqualTo(1);
+        assertThat(planner.plan(OPEN_AT, Duration.ofHours(1), 10)).isZero();
+
+        assertThat(service.claimDue(
+                "worker-a", OPEN_AT, Duration.ofSeconds(30), 10))
+                .singleElement()
+                .satisfies(claim -> {
+                    assertThat(claim.storeId()).isEqualTo(fixture.storeId());
+                    assertThat(claim.businessIntervalKey())
+                            .isEqualTo(fixture.interval().businessIntervalKey());
+                });
+    }
+
     private Fixture fixture() {
+        PlanningFixture fixture = planningFixture();
+        WaitingOperatingInterval interval = fixture.interval();
+        WaitingAutoOpenJob job = jobRepository.saveAndFlush(WaitingAutoOpenJob.pending(
+                fixture.storeId(),
+                interval.businessIntervalKey(),
+                interval.businessDate(),
+                interval.startsAt(),
+                interval.endsAt(),
+                OPEN_AT,
+                1L,
+                60,
+                WaitingAutoOpenIdempotencyKey.from(
+                        fixture.storeId(), interval.businessIntervalKey(), 1L),
+                OPEN_AT.minusSeconds(60)));
+        return new Fixture(fixture.storeId(), job.getId(), interval);
+    }
+
+    private PlanningFixture planningFixture() {
         long operatorId = operatorRepository.saveAndFlush(StoreOperatorAccount.create(
                 "waiting-auto-open@example.com",
                 "hashed",
@@ -217,24 +254,18 @@ class WaitingAutoOpenServiceIT {
                         OPEN_AT,
                         OPEN_AT.plus(Duration.ofHours(12)))
                 .getFirst();
-        WaitingAutoOpenJob job = jobRepository.saveAndFlush(WaitingAutoOpenJob.pending(
-                store.getId(),
-                interval.businessIntervalKey(),
-                interval.businessDate(),
-                interval.startsAt(),
-                interval.endsAt(),
-                OPEN_AT,
-                1L,
-                60,
-                WaitingAutoOpenIdempotencyKey.from(
-                        store.getId(), interval.businessIntervalKey(), 1L),
-                OPEN_AT.minusSeconds(60)));
-        return new Fixture(store.getId(), job.getId(), interval);
+        return new PlanningFixture(store.getId(), interval);
     }
 
     private record Fixture(
             long storeId,
             long jobId,
+            WaitingOperatingInterval interval
+    ) {
+    }
+
+    private record PlanningFixture(
+            long storeId,
             WaitingOperatingInterval interval
     ) {
     }

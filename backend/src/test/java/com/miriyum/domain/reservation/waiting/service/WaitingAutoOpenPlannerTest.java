@@ -82,15 +82,14 @@ class WaitingAutoOpenPlannerTest {
                 eq(NOW.plus(Duration.ofMinutes(240)))))
                 .willReturn(List.of(interval));
         given(settingRepository.findByStoreId(7L)).willReturn(Optional.of(setting));
-        given(jobRepository.saveAndFlush(any(WaitingAutoOpenJob.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        given(jobRepository.insertPending(any(WaitingAutoOpenJob.class))).willReturn(1);
 
         int created = planner.plan(NOW, Duration.ofMinutes(60), 10);
 
         assertThat(created).isEqualTo(1);
         ArgumentCaptor<WaitingAutoOpenJob> saved =
                 ArgumentCaptor.forClass(WaitingAutoOpenJob.class);
-        then(jobRepository).should().saveAndFlush(saved.capture());
+        then(jobRepository).should().insertPending(saved.capture());
         assertThat(saved.getValue().getScheduledAt())
                 .isEqualTo(Instant.parse("2026-08-16T23:00:00Z"));
         assertThat(saved.getValue().getExpectedSettingsVersion()).isEqualTo(1L);
@@ -129,7 +128,7 @@ class WaitingAutoOpenPlannerTest {
         given(settingRepository.findByStoreId(7L)).willReturn(Optional.of(changed));
 
         assertThat(planner.plan(NOW, Duration.ofMinutes(60), 10)).isZero();
-        then(jobRepository).should(never()).saveAndFlush(any());
+        then(jobRepository).should(never()).insertPending(any());
     }
 
     @Test

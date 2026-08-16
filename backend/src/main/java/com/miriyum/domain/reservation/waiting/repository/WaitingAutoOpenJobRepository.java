@@ -14,6 +14,44 @@ import org.springframework.data.repository.query.Param;
 public interface WaitingAutoOpenJobRepository extends JpaRepository<WaitingAutoOpenJob, Long> {
     Optional<WaitingAutoOpenJob> findByIdempotencyKey(String idempotencyKey);
 
+    @Modifying
+    @Query(value = """
+            INSERT IGNORE INTO waiting_auto_open_jobs (
+                store_id,
+                business_interval_key,
+                business_date,
+                interval_starts_at,
+                interval_ends_at,
+                scheduled_at,
+                expected_settings_version,
+                expected_advance_open_minutes,
+                idempotency_key,
+                status,
+                attempt_count,
+                next_attempt_at,
+                fencing_token,
+                created_at,
+                updated_at
+            ) VALUES (
+                :#{#job.storeId},
+                :#{#job.businessIntervalKey},
+                :#{#job.businessDate},
+                :#{#job.intervalStartsAt},
+                :#{#job.intervalEndsAt},
+                :#{#job.scheduledAt},
+                :#{#job.expectedSettingsVersion},
+                :#{#job.expectedAdvanceOpenMinutes},
+                :#{#job.idempotencyKey},
+                'PENDING',
+                0,
+                :#{#job.nextAttemptAt},
+                0,
+                :#{#job.createdAt},
+                :#{#job.updatedAt}
+            )
+            """, nativeQuery = true)
+    int insertPending(@Param("job") WaitingAutoOpenJob job);
+
     @Query(value = """
             SELECT job.waiting_auto_open_job_id
             FROM waiting_auto_open_jobs job

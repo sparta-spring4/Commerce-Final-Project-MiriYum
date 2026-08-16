@@ -14,7 +14,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -25,11 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class WaitingAutoOpenPlanner {
 
     private static final Duration MAXIMUM_ADVANCE = Duration.ofMinutes(180);
-    private static final String INTERVAL_UNIQUE =
-            "uk_waiting_auto_open_interval_version";
-    private static final String IDEMPOTENCY_UNIQUE =
-            "uk_waiting_auto_open_idempotency";
-
     private final WaitingSettingRepository settingRepository;
     private final WaitingAutoOpenJobRepository jobRepository;
     private final WaitingOperatingIntervalPort intervalPort;
@@ -92,15 +86,7 @@ public class WaitingAutoOpenPlanner {
                             interval.businessIntervalKey(),
                             planned.getVersion()),
                     now);
-            try {
-                jobRepository.saveAndFlush(job);
-                created++;
-            } catch (DataIntegrityViolationException duplicate) {
-                if (!containsConstraint(duplicate, INTERVAL_UNIQUE)
-                        && !containsConstraint(duplicate, IDEMPOTENCY_UNIQUE)) {
-                    throw duplicate;
-                }
-            }
+            created += jobRepository.insertPending(job);
         }
         return created;
     }
@@ -111,16 +97,5 @@ public class WaitingAutoOpenPlanner {
                 && current.getReceptionMode() == WaitingReceptionMode.AUTO
                 && current.getVersion() == planned.getVersion()
                 && current.getAdvanceOpenMinutes() == planned.getAdvanceOpenMinutes();
-    }
-
-    private static boolean containsConstraint(Throwable failure, String constraint) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current.getMessage() != null && current.getMessage().contains(constraint)) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 }
