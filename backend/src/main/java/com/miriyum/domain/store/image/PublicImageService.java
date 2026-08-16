@@ -40,6 +40,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
@@ -93,6 +95,7 @@ public class PublicImageService {
             }
             FileStorageMetadata stored = store(image, new FileStorageOwner("STORE", storeId),
                     FileStoragePurpose.STORE_IMAGE, storeObjectKey(storeId, image));
+            registerRollbackCleanup(stored.fileId());
             PublicImageResponse response = PublicImageResponse.from(stored);
             return success(HttpStatus.CREATED, "STORE_IMAGE", stored.fileId().toString(), response);
         });
@@ -118,7 +121,8 @@ public class PublicImageService {
                     imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE);
             FileStorageMetadata stored = store(image, new FileStorageOwner("STORE", storeId),
                     FileStoragePurpose.STORE_IMAGE, storeObjectKey(storeId, image));
-            tryDeleteAfterReplacement(previous.fileId());
+            registerRollbackCleanup(stored.fileId());
+            registerCommittedReplacementCleanup(previous.fileId());
             PublicImageResponse response = PublicImageResponse.from(stored);
             return success(HttpStatus.OK, "STORE_IMAGE", stored.fileId().toString(), response);
         });
@@ -155,8 +159,23 @@ public class PublicImageService {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
         try {
-            return port.read(metadata.objectKey());
+            com.miriyum.global.storage.FileStorageObject storedObject = port.read(metadata.objectKey());
+            requireStoredObjectIntegrity(metadata, storedObject);
+            return storedObject;
         } catch (RuntimeException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private static void requireStoredObjectIntegrity(
+            FileStorageMetadata metadata,
+            com.miriyum.global.storage.FileStorageObject storedObject
+    ) {
+        byte[] bytes = storedObject.bytes();
+        if (!metadata.objectKey().equals(storedObject.objectKey())
+                || !metadata.contentType().equals(storedObject.contentType())
+                || metadata.sizeBytes() != bytes.length
+                || !metadata.checksum().equals(checksum(bytes))) {
             throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
         }
     }
@@ -248,14 +267,51 @@ public class PublicImageService {
     }
 
     /**
-     * 교체의 논리적 성공은 새 이미지가 CONFIRMED된 시점에 확정한다.
-     * 이전 객체 정리는 실패해도 DELETED 정본을 남겨 같은 멱등 재요청에서 다시 시도한다.
+     * 기존 이미지 정리는 새 결과와 멱등 기록이 커밋된 뒤에만 시작한다.
+     * 삭제 실패는 DELETED 정본을 남겨 같은 멱등 재요청에서 다시 시도한다.
      */
     private void tryDeleteAfterReplacement(UUID imageId) {
         try {
             deleteAfterReplacement(imageId);
         } catch (ServiceException exception) {
             log.warn("event=store_public_image_replacement_cleanup_failed image_id={}", imageId);
+        }
+    }
+
+    /**
+     * 파일 메타데이터는 외부 저장소 일관성을 위해 독립 트랜잭션으로 먼저 확정한다.
+     * 바깥 멱등 트랜잭션이 롤백되면 새 공개 파일을 즉시 삭제 상태로 보상한다.
+     */
+    private void registerRollbackCleanup(UUID imageId) {
+        requireTransactionSynchronization();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    try {
+                        deleteAfterReplacement(imageId);
+                    } catch (ServiceException exception) {
+                        log.warn("event=store_public_image_rollback_cleanup_failed image_id={}", imageId);
+                    }
+                }
+            }
+        });
+    }
+
+    /** 기존 이미지는 새 결과와 멱등 기록이 커밋된 뒤에만 외부 객체 정리를 시작한다. */
+    private void registerCommittedReplacementCleanup(UUID imageId) {
+        requireTransactionSynchronization();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                tryDeleteAfterReplacement(imageId);
+            }
+        });
+    }
+
+    private static void requireTransactionSynchronization() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("공개 이미지 변경은 활성 트랜잭션 안에서 실행해야 합니다.");
         }
     }
 

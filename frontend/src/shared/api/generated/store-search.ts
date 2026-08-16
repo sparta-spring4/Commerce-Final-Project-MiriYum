@@ -731,8 +731,14 @@ export interface components {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
     };
-    /** @description 매장 이미지 최대 개수 초과 또는 동시 교체 충돌 */
+    /** @description 매장 이미지 최대 개수 초과 또는 Idempotency-Key를 다른 요청에 재사용함 */
     StorePublicImageConflict: {
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description 매장 또는 교체 대상 공개 이미지를 찾을 수 없음 */
+    StoreImageTargetNotFound: {
       content: {
         "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
       };
@@ -1114,9 +1120,9 @@ export interface operations {
       /** @description 공개 이미지 바이트 */
       200: {
         content: {
-          "image/jpeg": unknown;
-          "image/png": unknown;
-          "image/webp": unknown;
+          "image/jpeg": string;
+          "image/png": string;
+          "image/webp": string;
         };
       };
       404: components["responses"]["PublicImageNotFound"];
@@ -1238,7 +1244,8 @@ export interface operations {
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
-      404: components["responses"]["PublicImageNotFound"];
+      404: components["responses"]["StoreImageTargetNotFound"];
+      409: components["responses"]["StorePublicImageConflict"];
       413: components["responses"]["ImageSizeExceeded"];
       415: components["responses"]["UnsupportedImageMediaType"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
@@ -1262,6 +1269,8 @@ export interface operations {
       };
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
+      404: components["responses"]["StoreNotFound"];
+      409: components["responses"]["StorePublicImageConflict"];
       503: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["ServiceUnavailable"];
     };
   };
