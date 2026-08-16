@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.contract;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
@@ -18,6 +19,7 @@ public final class ReservationMenuHoldContractFixture implements MenuHoldService
     private final List<MenuHoldCreateCommand> createCommands = new ArrayList<>();
     private final List<MenuHoldReleaseCommand> releaseCommands = new ArrayList<>();
     private final List<MenuHoldFulfillCommand> fulfillCommands = new ArrayList<>();
+    private final List<MenuHoldForfeitCommand> forfeitCommands = new ArrayList<>();
     private final List<Long> terminationLockReservationIds = new ArrayList<>();
 
     private ReservationMenuHoldContractFixture(
@@ -77,6 +79,13 @@ public final class ReservationMenuHoldContractFixture implements MenuHoldService
         return MenuHoldCommandResult.fulfilled(command.reservationId());
     }
 
+    @Override
+    public MenuHoldCommandResult forfeit(MenuHoldForfeitCommand command) {
+        forfeitCommands.add(command);
+        throwIfConfigured();
+        return MenuHoldCommandResult.forfeited(command.reservationId());
+    }
+
     public List<MenuHoldCreateCommand> createCommands() {
         return List.copyOf(createCommands);
     }
@@ -87,6 +96,10 @@ public final class ReservationMenuHoldContractFixture implements MenuHoldService
 
     public List<MenuHoldFulfillCommand> fulfillCommands() {
         return List.copyOf(fulfillCommands);
+    }
+
+    public List<MenuHoldForfeitCommand> forfeitCommands() {
+        return List.copyOf(forfeitCommands);
     }
 
     public List<Long> terminationLockReservationIds() {
