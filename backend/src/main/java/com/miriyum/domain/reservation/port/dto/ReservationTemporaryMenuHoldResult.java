@@ -18,7 +18,9 @@ public record ReservationTemporaryMenuHoldResult(
         } else if (state == null) {
             throw new IllegalArgumentException("HOLD_PRESENT requires state");
         }
-        if (state == State.CONFIRMED || state == State.FULFILLED) {
+        if (state == State.CONFIRMED
+                || state == State.FULFILLED
+                || state == State.FORFEITED) {
             if (finalReservationId == null || finalReservationId <= 0) {
                 throw new IllegalArgumentException(
                         state + " requires a positive finalReservationId");
@@ -47,6 +49,7 @@ public record ReservationTemporaryMenuHoldResult(
         CONFIRMED,
         RELEASED,
         EXPIRED,
-        FULFILLED
+        FULFILLED,
+        FORFEITED
     }
 }

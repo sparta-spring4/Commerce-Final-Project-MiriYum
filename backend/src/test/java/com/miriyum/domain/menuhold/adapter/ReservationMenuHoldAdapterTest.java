@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.then;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldItemResult;
 import com.miriyum.domain.menuhold.service.MenuHoldService;
 import com.miriyum.domain.menuhold.service.MenuHoldSnapshotQueryService;
@@ -75,6 +76,8 @@ class ReservationMenuHoldAdapterTest {
                 .willReturn(MenuHoldCommandResult.released(7L));
         given(menuHoldService.fulfill(org.mockito.ArgumentMatchers.any()))
                 .willReturn(MenuHoldCommandResult.fulfilled(7L));
+        given(menuHoldService.forfeit(org.mockito.ArgumentMatchers.any()))
+                .willReturn(MenuHoldCommandResult.forfeited(7L));
         given(snapshotQueryService.findByReservationId(7L)).willReturn(List.of(
                 new MenuHoldItemResult(31L, "Pasta", 12_000L, 2),
                 new MenuHoldItemResult(32L, "Salad", 8_000L, 1)));
@@ -85,6 +88,13 @@ class ReservationMenuHoldAdapterTest {
                 .isEqualTo(ReservationMenuHoldResult.Outcome.RELEASED);
         assertThat(adapter.fulfill(7L, "reservation-fulfill-7").outcome())
                 .isEqualTo(ReservationMenuHoldResult.Outcome.FULFILLED);
+        assertThat(adapter.forfeit(7L, "reservation-forfeit-7").outcome())
+                .isEqualTo(ReservationMenuHoldResult.Outcome.FORFEITED);
+        ArgumentCaptor<MenuHoldForfeitCommand> forfeitCaptor =
+                ArgumentCaptor.forClass(MenuHoldForfeitCommand.class);
+        then(menuHoldService).should().forfeit(forfeitCaptor.capture());
+        assertThat(forfeitCaptor.getValue()).isEqualTo(
+                new MenuHoldForfeitCommand(7L, "reservation-forfeit-7"));
         assertThat(adapter.findSnapshots(7L))
                 .extracting("menuId", "menuName", "unitPrice", "quantity")
                 .containsExactly(
