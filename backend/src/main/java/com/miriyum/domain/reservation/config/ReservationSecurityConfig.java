@@ -49,6 +49,11 @@ public class ReservationSecurityConfig {
             "/api/v1/store-operators/stores/*/waiting-closure-jobs";
     private static final String WAITING_CLOSE_JOB_FAMILY = WAITING_CLOSE_JOB_ROOT + "/**";
     private static final String WAITING_CLOSE_JOB_DETAIL = WAITING_CLOSE_JOB_ROOT + "/*";
+    private static final String WAITING_SETTING_ROOT =
+            "/api/v1/store-operators/stores/*/waiting-settings";
+    private static final String WAITING_SETTING_FAMILY = WAITING_SETTING_ROOT + "/**";
+    private static final String WAITING_SETTING_DEACTIVATION_IMPACT =
+            WAITING_SETTING_ROOT + "/deactivation-impact";
 
     @Bean
     @Order(-1)
@@ -64,7 +69,9 @@ public class ReservationSecurityConfig {
                         WAITING_TEAM_ROOT,
                         WAITING_TEAM_FAMILY,
                         WAITING_CLOSE_JOB_ROOT,
-                        WAITING_CLOSE_JOB_FAMILY)
+                        WAITING_CLOSE_JOB_FAMILY,
+                        WAITING_SETTING_ROOT,
+                        WAITING_SETTING_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -80,6 +87,9 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.POST, WAITING_TEAM_CHECK_IN).authenticated()
                         .requestMatchers(HttpMethod.POST, WAITING_TEAM_CANCEL).authenticated()
                         .requestMatchers(HttpMethod.GET, WAITING_CLOSE_JOB_DETAIL).authenticated()
+                        .requestMatchers(HttpMethod.GET, WAITING_SETTING_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.PUT, WAITING_SETTING_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET, WAITING_SETTING_DEACTIVATION_IMPACT).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))
