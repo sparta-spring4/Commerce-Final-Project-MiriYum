@@ -6,15 +6,19 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
+@ExtendWith(OutputCaptureExtension.class)
 class StagingRateLimitBypassTest {
 
     @ParameterizedTest
     @MethodSource("loginAndRefreshCategories")
-    @DisplayName("staging의 단일 공인 IP는 로그인과 토큰 갱신 요청만 예외로 허용한다")
+    @DisplayName("staging의 단일 공인 IPv4는 로그인과 토큰 갱신 요청만 예외로 허용한다")
     void allowsLoginAndRefreshOnlyForConfiguredStagingPublicIp(RateLimitCategory category) {
         StagingRateLimitBypass bypass = new StagingRateLimitBypass("staging", "8.8.8.8");
 
@@ -57,10 +61,23 @@ class StagingRateLimitBypassTest {
 
     @ParameterizedTest
     @MethodSource("nonPublicOrNonSingleIpValues")
-    @DisplayName("staging에서는 단일 공인 IP가 아닌 설정을 거부한다")
+    @DisplayName("staging에서는 단일 공인 IPv4가 아닌 설정을 거부한다")
     void rejectsNonPublicOrNonSingleStagingIp(String sourceIp) {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new StagingRateLimitBypass("staging", sourceIp));
+    }
+
+    @Test
+    @DisplayName("예외가 최초 적용될 때만 IP 없이 경고 로그를 남긴다")
+    void logsFirstBypassApplicationOnceWithoutIp(CapturedOutput output) {
+        StagingRateLimitBypass bypass = new StagingRateLimitBypass("staging", "8.8.8.8");
+
+        assertThat(bypass.allows(RateLimitCategory.LOGIN, "8.8.8.8")).isTrue();
+        assertThat(bypass.allows(RateLimitCategory.TOKEN_REFRESH, "8.8.8.8")).isTrue();
+        assertThat(output.getOut())
+                .containsOnlyOnce("event=staging_rate_limit_bypass_applied")
+                .contains("category=LOGIN")
+                .doesNotContain("8.8.8.8");
     }
 
     private static Stream<RateLimitCategory> loginAndRefreshCategories() {
@@ -81,6 +98,12 @@ class StagingRateLimitBypassTest {
                 Arguments.of("127.0.0.1"),
                 Arguments.of("169.254.10.20"),
                 Arguments.of("192.0.2.10"),
+                Arguments.of("2001:4860:4860::8888"),
+                Arguments.of("100::1"),
+                Arguments.of("64:ff9b:1::1"),
+                Arguments.of("2001:2::1"),
+                Arguments.of("3fff::1"),
+                Arguments.of("5f00::1"),
                 Arguments.of("224.0.0.1"),
                 Arguments.of("8.8.8.8/32"),
                 Arguments.of("8.8.8.8,1.1.1.1"),

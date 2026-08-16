@@ -1,30 +1,39 @@
 package com.miriyum.domain.auth.ratelimit;
 
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * staging 부하테스트 실행자의 단일 공인 IP에만 로그인·토큰 갱신 요청 제한 예외를 허용한다.
+ * staging 부하테스트 실행자의 단일 공인 IPv4에만 로그인·토큰 갱신 요청 제한 예외를 허용한다.
  * 환경 또는 IP가 비어 있으면 비활성화되며, staging 이외 환경에서는 IP 값이 있어도 적용하지 않는다.
- *
- * @param runtimeEnvironment 현재 backend 실행 환경
- * @param sourceIp staging 부하테스트 실행자의 단일 공인 IP
  */
 @ConfigurationProperties("miriyum.rate-limit.staging-bypass")
-public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp) {
+public final class StagingRateLimitBypass {
 
+    private static final Logger log = LoggerFactory.getLogger(StagingRateLimitBypass.class);
     private static final String STAGING = "staging";
 
-    public StagingRateLimitBypass {
-        runtimeEnvironment = trim(runtimeEnvironment);
-        sourceIp = normalizeIp(sourceIp);
-        if (STAGING.equals(runtimeEnvironment) && !sourceIp.isEmpty()) {
-            sourceIp = requirePublicAddress(sourceIp).getHostAddress();
+    private final String runtimeEnvironment;
+    private final String sourceIp;
+    private final AtomicBoolean appliedEventLogged = new AtomicBoolean();
+
+    /**
+     * @param runtimeEnvironment 현재 backend 실행 환경
+     * @param sourceIp staging 부하테스트 실행자의 단일 공인 IPv4
+     */
+    public StagingRateLimitBypass(String runtimeEnvironment, String sourceIp) {
+        this.runtimeEnvironment = trim(runtimeEnvironment);
+        String normalizedSourceIp = normalizeIp(sourceIp);
+        if (STAGING.equals(this.runtimeEnvironment) && !normalizedSourceIp.isEmpty()) {
+            normalizedSourceIp = requirePublicAddress(normalizedSourceIp).getHostAddress();
         }
+        this.sourceIp = normalizedSourceIp;
     }
 
     /**
@@ -40,7 +49,11 @@ public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp)
         }
 
         InetAddress address = parseLiteral(clientIp);
-        return address != null && sourceIp.equals(address.getHostAddress());
+        boolean allowed = address != null && sourceIp.equals(address.getHostAddress());
+        if (allowed && appliedEventLogged.compareAndSet(false, true)) {
+            log.warn("event=staging_rate_limit_bypass_applied category={}", category);
+        }
+        return allowed;
     }
 
     private static boolean isAuthenticationMeasurement(RateLimitCategory category) {
@@ -51,7 +64,7 @@ public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp)
         InetAddress address = parseLiteral(value);
         if (address == null || !isPublicAddress(address)) {
             throw new IllegalArgumentException(
-                    "staging load-test source IP must be one public IP literal");
+                    "staging load-test source IP must be one public IPv4 literal");
         }
         return address;
     }
@@ -59,10 +72,6 @@ public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp)
     private static InetAddress parseLiteral(String value) {
         String normalized = normalizeIp(value);
         try {
-            if (normalized.indexOf(':') >= 0 && normalized.matches("[0-9a-fA-F:.]+")) {
-                InetAddress address = InetAddress.getByName(normalized);
-                return address instanceof Inet6Address ? address : null;
-            }
             return parseIpv4Literal(normalized);
         } catch (UnknownHostException exception) {
             return null;
@@ -97,10 +106,7 @@ public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp)
                 || address.isMulticastAddress()) {
             return false;
         }
-        if (address instanceof Inet4Address) {
-            return isPublicIpv4(address.getAddress());
-        }
-        return isPublicIpv6(address.getAddress());
+        return address instanceof Inet4Address && isPublicIpv4(address.getAddress());
     }
 
     private static boolean isPublicIpv4(byte[] address) {
@@ -122,15 +128,6 @@ public record StagingRateLimitBypass(String runtimeEnvironment, String sourceIp)
                 && !(first == 198 && second == 51 && third == 100)
                 && !(first == 203 && second == 0 && third == 113)
                 && first < 224;
-    }
-
-    private static boolean isPublicIpv6(byte[] address) {
-        int first = Byte.toUnsignedInt(address[0]);
-        int second = Byte.toUnsignedInt(address[1]);
-        return (first & 0xfe) != 0xfc
-                && !(first == 0x20 && second == 0x01
-                && Byte.toUnsignedInt(address[2]) == 0x0d
-                && Byte.toUnsignedInt(address[3]) == 0xb8);
     }
 
     private static String trim(String value) {
