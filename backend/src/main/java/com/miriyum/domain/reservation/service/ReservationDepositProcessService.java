@@ -328,7 +328,33 @@ public class ReservationDepositProcessService {
                 process.getPaymentId(), String.valueOf(process.getConsumerAccountId()));
         requireSamePayment(process, payment);
         Instant now = clock.instant();
-        if (payment.status() != PaymentStatus.READY
+        if (payment.status() == PaymentStatus.PAID
+                && payment.paidAt() != null
+                && !now.isBefore(process.getExpiresAt())
+                && !process.isResourcesProtected()) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.EXPIRED,
+                            "reservation-hold-expire:" + process.getReservationHoldId(),
+                            "SYSTEM",
+                            null,
+                            process.getExpiresAt(),
+                            null));
+            requireCompensationRecords(
+                    process,
+                    payment,
+                    now,
+                    payment.paidAt().isBefore(process.getExpiresAt())
+                            ? "UNPROTECTED_LATE_PAID"
+                            : "PAYMENT_PAID_AT_OR_AFTER_EXPIRY");
+            process.requireCompensation(now);
+            processRepository.saveAndFlush(process);
+            return ReservationDepositCommandResult.pending(toResponse(process));
+        }
+        if ((payment.status() != PaymentStatus.READY
+                && payment.status() != PaymentStatus.CONFIRMING
+                && payment.status() != PaymentStatus.RECONCILIATION_REQUIRED)
                 || now.isBefore(process.getExpiresAt())
                 || process.isAbandonmentRequested()) {
             throw new IllegalStateException(

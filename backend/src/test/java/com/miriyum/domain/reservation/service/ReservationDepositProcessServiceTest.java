@@ -266,6 +266,145 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void linkedExpirationExpiresUnprotectedResourcesWhenPaymentIsConfirmingAtDeadline() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdForUpdate(PROCESS_ID))
+                .willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.CONFIRMING,
+                        PaymentAttemptStatus.PENDING,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result =
+                service.reconcileLinkedExpiration(PROCESS_ID);
+
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.EXPIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
+    void linkedExpirationExpiresUnprotectedResourcesWhenPaymentNeedsReconciliationAtDeadline() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdForUpdate(PROCESS_ID))
+                .willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.RECONCILIATION_REQUIRED,
+                        PaymentAttemptStatus.UNKNOWN,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result =
+                service.reconcileLinkedExpiration(PROCESS_ID);
+
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.EXPIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
+    void linkedExpirationCompensatesPaidAtDeadlineWithoutFinalizingResources() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdForUpdate(PROCESS_ID))
+                .willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(expiresAt));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt.plusSeconds(1), ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result =
+                service.reconcileLinkedExpiration(PROCESS_ID);
+
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        ArgumentCaptor<ReservationDepositCauseAudit> cause =
+                ArgumentCaptor.forClass(ReservationDepositCauseAudit.class);
+        verify(causeRepository).save(cause.capture());
+        assertThat(cause.getValue().getCauseCode())
+                .isEqualTo("PAYMENT_PAID_AT_OR_AFTER_EXPIRY");
+        verify(refundRepository).save(any(ReservationDepositRefundObligation.class));
+        verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
     void readyAbandonmentReleasesResourcesAndReturnsCompletedRequest() {
         ReservationDepositProcessRepository processRepository =
                 mock(ReservationDepositProcessRepository.class);
