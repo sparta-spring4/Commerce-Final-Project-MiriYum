@@ -104,7 +104,7 @@ public class ConsumerKakaoAuthService {
         if (accountId != null) {
             ConsumerAccount account = consumerAccountRepository.findById(accountId)
                     .orElseThrow(() -> new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID));
-            if (account.getStatus() != ConsumerAccountStatus.ACTIVE) {
+            if (account.getStatus() != ConsumerAccountStatus.ACTIVE || account.isPasswordResetRequired()) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
             return KakaoLoginResult.authenticated(issueTokenPair(account.getId()));
