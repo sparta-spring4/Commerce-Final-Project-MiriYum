@@ -1,0 +1,499 @@
+/* 예약 작성·상세 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.reservation-create,
+.reservation-detail {
+  padding-bottom: var(--space-8);
+}
+
+.reservation-create__header {
+  padding-bottom: var(--space-2);
+}
+
+.reservation-create__back a,
+.reservation-detail__breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-create__back a:hover,
+.reservation-detail__breadcrumb a:hover {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.reservation-create__back {
+  margin-bottom: var(--space-1);
+}
+
+.reservation-detail__breadcrumb {
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.reservation-detail__header {
+  padding-bottom: var(--space-3);
+}
+
+.reservation-detail__header h1 {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+.reservation-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-body-lg);
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-detail__meta .mi-icon {
+  color: var(--color-primary);
+}
+
+/* ── 단계 표시 ────────────────────────────────────────────────────────── */
+
+/*
+ * 시안 `_10`의 원형 번호와 연결 막대.
+ *
+ * 항목마다 앞선 연결선을 자기 안에 그린다. 별도 요소로 두면 보조기술이
+ * 빈 목록 항목을 사이사이 읽는다.
+ */
+.reservation-stepper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-1);
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-3) 0 var(--space-4);
+}
+
+.reservation-stepper__item {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  text-align: center;
+}
+
+/* 연결선은 앞 항목의 원 중심에서 이 항목의 원 중심으로 이어진다. */
+.reservation-stepper__line {
+  position: absolute;
+  top: 1.375rem;
+  right: 50%;
+  left: -50%;
+  height: 0.25rem;
+  margin: 0 1.75rem;
+  background-color: var(--color-surface-variant);
+  border-radius: var(--radius-full);
+}
+
+.reservation-stepper__item--done .reservation-stepper__line,
+.reservation-stepper__item--current .reservation-stepper__line {
+  background-color: var(--color-secondary-container);
+}
+
+.reservation-stepper__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  background-color: var(--color-surface-variant);
+  border-radius: var(--radius-full);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+}
+
+.reservation-stepper__item--done .reservation-stepper__index {
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-fixed);
+}
+
+.reservation-stepper__item--current .reservation-stepper__index {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-3);
+}
+
+.reservation-stepper__item--current .reservation-stepper__label {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+/* ── 작성 화면 2열 배치 ───────────────────────────────────────────────── */
+
+.reservation-create__layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 64rem) {
+  .reservation-create__layout {
+    grid-template-columns: minmax(0, 1fr) 22.5rem;
+    gap: var(--layout-gutter);
+    align-items: start;
+  }
+
+  .reservation-create__panel {
+    position: sticky;
+    top: 5rem;
+  }
+}
+
+.reservation-create__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── 요약 패널 ────────────────────────────────────────────────────────── */
+
+.reservation-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reservation-summary__title {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.reservation-summary__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+}
+
+.reservation-summary__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.reservation-summary__row .mi-icon {
+  color: var(--color-primary);
+}
+
+.reservation-summary__label {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-summary__value {
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ── 조건 입력 ────────────────────────────────────────────────────────── */
+
+.reservation-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.reservation-form__section h2 {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+
+.reservation-form__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.reservation-form__section-head h2 {
+  margin-bottom: 0;
+}
+
+.reservation-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 40rem) {
+  .reservation-form__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.reservation-form__party {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 시안은 인원 종류 사이를 가는 선으로만 나눈다. */
+.reservation-form__party-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.reservation-form__party-row + .reservation-form__party-row {
+  border-top: 1px solid var(--color-surface-variant);
+}
+
+.reservation-form__party-label {
+  font-size: var(--font-size-body-lg);
+  font-weight: 600;
+}
+
+.reservation-form__party-hint {
+  font-size: var(--font-size-label-sm);
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-form__total {
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.reservation-create__actions,
+.reservation-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.reservation-create__actions {
+  flex-direction: column;
+}
+
+/* ── 메뉴 선택 ────────────────────────────────────────────────────────── */
+
+.menu-selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.menu-selection__list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 40rem) {
+  .menu-selection__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 고른 메뉴는 코럴 테두리로 표시한다. 수량 숫자도 함께 보이므로 색만 쓰지 않는다. */
+.menu-selection__item--picked {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.menu-selection__item--muted {
+  opacity: 0.6;
+}
+
+.menu-selection__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.menu-selection__head h3 {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.menu-selection__price {
+  margin-top: 0.25rem;
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.menu-selection__stock {
+  margin-top: 0.375rem;
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.menu-selection__quantity {
+  margin-top: var(--space-2);
+}
+
+/* ── 확인·상세 ────────────────────────────────────────────────────────── */
+
+.reservation-confirm h2,
+.reservation-detail__section h2 {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  margin-bottom: var(--space-3);
+}
+
+/* 아이콘 + 레이블 + 값 묶음. 넓은 화면에서 두 칸으로 나뉜다. */
+.reservation-confirm__grid,
+.reservation-detail__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+@media (min-width: 40rem) {
+  .reservation-confirm__grid,
+  .reservation-detail__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.reservation-confirm__item,
+.reservation-detail__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.reservation-confirm__item > .mi-icon,
+.reservation-detail__item > .mi-icon {
+  margin-top: 0.125rem;
+  color: var(--color-primary);
+}
+
+.reservation-confirm__label,
+.reservation-detail__label {
+  margin-bottom: 0.125rem;
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-confirm__value,
+.reservation-detail__value {
+  font-size: var(--font-size-body-lg);
+  word-break: keep-all;
+}
+
+/* ── 선택 메뉴 목록 ───────────────────────────────────────────────────── */
+
+.reservation-confirm__menus,
+.reservation-detail__menus {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.reservation-confirm__menus-head,
+.reservation-detail__menus-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+}
+
+.reservation-confirm__menus-head .mi-icon,
+.reservation-detail__menus-head .mi-icon {
+  color: var(--color-primary);
+}
+
+.reservation-confirm__menu-list,
+.reservation-detail__menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: var(--space-3);
+}
+
+.reservation-confirm__menu-list li,
+.reservation-detail__menu-list li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+/* 머스터드 점 표식. 순수 장식이라 요소를 따로 만들지 않는다. */
+.reservation-confirm__menu-list li::before,
+.reservation-detail__menu-list li::before {
+  content: '';
+  position: absolute;
+  left: -1rem;
+  width: 0.375rem;
+  height: 0.375rem;
+  background-color: var(--color-secondary-container);
+  border-radius: var(--radius-full);
+}
+
+.reservation-confirm__quantity,
+.reservation-detail__amount {
+  flex-shrink: 0;
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-detail__section {
+  margin-top: var(--space-2);
+}
+
+.reservation-detail__list {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-surface-container-highest);
+}
+
+.reservation-detail__list dt {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.reservation-detail__list dd {
+  margin: 0;
+}
+
+.reservation-detail__reason {
+  min-height: 5rem;
+  padding: var(--space-1) var(--space-2);
+  resize: vertical;
+}
