@@ -12,6 +12,10 @@ import org.springframework.data.repository.query.Param;
 public interface ReservationDepositProcessRepository
         extends JpaRepository<ReservationDepositProcess, Long> {
 
+    Optional<ReservationDepositProcess> findByIdAndConsumerAccountId(
+            long processId,
+            long consumerAccountId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select process from ReservationDepositProcess process

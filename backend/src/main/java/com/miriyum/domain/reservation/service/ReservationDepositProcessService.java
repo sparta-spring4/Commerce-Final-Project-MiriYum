@@ -18,6 +18,7 @@ import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositCauseAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligationRepository;
+import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.BusinessResult;
 import com.miriyum.global.idempotency.IdempotencyCommand;
@@ -53,6 +54,7 @@ public class ReservationDepositProcessService {
     private final Clock clock;
     private IdempotencyExecutor idempotencyExecutor;
     private ObjectMapper objectMapper;
+    private ReservationRepository reservationRepository;
 
     @Autowired
     public ReservationDepositProcessService(
@@ -64,6 +66,7 @@ public class ReservationDepositProcessService {
             ReservationHoldTransitionPrimitive holdTransitionPrimitive,
             ReservationMenuHoldPort menuHoldPort,
             Clock clock,
+            ReservationRepository reservationRepository,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper
     ) {
@@ -78,6 +81,7 @@ public class ReservationDepositProcessService {
                 clock);
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
+        this.reservationRepository = reservationRepository;
     }
 
     ReservationDepositProcessService(
@@ -117,6 +121,32 @@ public class ReservationDepositProcessService {
                 holdTransitionPrimitive,
                 menuHoldPort,
                 clock);
+    }
+
+    @Transactional(readOnly = true)
+    public ReservationRequestResponse getOwnedRequest(
+            long processId,
+            long consumerAccountId
+    ) {
+        ReservationDepositProcess process = processRepository
+                .findByIdAndConsumerAccountId(processId, consumerAccountId)
+                .orElseThrow(() -> new ServiceException(
+                        ReservationErrorCode.RESERVATION_NOT_FOUND));
+        ReservationDetailResponse reservation = null;
+        if (process.getFinalReservationId() != null) {
+            if (reservationRepository == null) {
+                throw new IllegalStateException("reservation query dependency is required");
+            }
+            Reservation finalReservation = reservationRepository
+                    .findByIdAndConsumerAccountId(
+                            process.getFinalReservationId(), consumerAccountId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "completed deposit reservation is missing"));
+            reservation = ReservationDetailResponse.from(
+                    finalReservation,
+                    menuHoldPort.findSnapshots(finalReservation.getId()));
+        }
+        return toResponse(process, reservation);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -453,6 +483,13 @@ public class ReservationDepositProcessService {
     }
 
     private static ReservationRequestResponse toResponse(ReservationDepositProcess process) {
+        return toResponse(process, null);
+    }
+
+    private static ReservationRequestResponse toResponse(
+            ReservationDepositProcess process,
+            ReservationDetailResponse reservation
+    ) {
         return new ReservationRequestResponse(
                 String.valueOf(process.getId()),
                 process.getStatus(),
@@ -466,7 +503,7 @@ public class ReservationDepositProcessService {
                         process.getPaymentSourceExpiresAt().atOffset(ZoneOffset.UTC),
                         process.getPaymentPreparationStatus().name()),
                 process.isAbandonmentRequested(),
-                null);
+                reservation);
     }
 
     private static void requireSamePayment(

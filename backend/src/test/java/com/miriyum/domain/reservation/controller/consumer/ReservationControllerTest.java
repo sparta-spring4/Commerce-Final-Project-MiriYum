@@ -30,6 +30,9 @@ import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
+import com.miriyum.domain.reservation.service.ReservationDepositCommandResult;
+import com.miriyum.domain.reservation.service.ReservationDepositProcessCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationDepositProcessService;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
@@ -61,6 +64,8 @@ class ReservationControllerTest {
     private static final String ROOT_URL = "/api/v1/consumers/me/reservations";
     private static final String HISTORY_URL = "/api/v1/consumers/me/reservations";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
+    private static final String REQUEST_URL =
+            "/api/v1/consumers/me/reservation-requests/901";
 
     @Autowired
     private MockMvc mockMvc;
@@ -75,10 +80,68 @@ class ReservationControllerTest {
     private ReservationCancellationCommandFacade reservationCancellationCommandFacade;
 
     @MockitoBean
+    private ReservationDepositProcessCommandFacade reservationDepositProcessCommandFacade;
+
+    @MockitoBean
+    private ReservationDepositProcessService reservationDepositProcessService;
+
+    @MockitoBean
     private ConsumerAccountService consumerAccountService;
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    void returnsLatestOwnedDepositRequestWithoutIdempotencyKey() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationDepositProcessService.getOwnedRequest(901L, 11L))
+                .willReturn(requestResponse(
+                        ReservationDepositProcessStatus.AWAITING_PAYMENT, false));
+
+        mockMvc.perform(get(REQUEST_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reservationRequestId").value("901"))
+                .andExpect(jsonPath("$.data.status").value("AWAITING_PAYMENT"))
+                .andExpect(jsonPath("$.data.paymentPreparation.status").value("READY"));
+
+        then(reservationDepositProcessService).should().getOwnedRequest(901L, 11L);
+    }
+
+    @Test
+    void finalizesDepositRequestWithTypedAcceptedResponse() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationDepositProcessCommandFacade.finalizeRequest(
+                eq(11L), eq(901L), any(IdempotencyKey.class)))
+                .willReturn(ReservationDepositCommandResult.pending(requestResponse(
+                        ReservationDepositProcessStatus.AWAITING_PAYMENT, false)));
+
+        mockMvc.perform(post(REQUEST_URL + "/finalizations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.status").value("AWAITING_PAYMENT"));
+    }
+
+    @Test
+    void returnsOkOnlyWhenAbandonmentHasTerminated() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationDepositProcessCommandFacade.abandonRequest(
+                eq(11L), eq(901L), any(IdempotencyKey.class)))
+                .willReturn(ReservationDepositCommandResult.terminated(requestResponse(
+                        ReservationDepositProcessStatus.ABANDONED, true)));
+
+        mockMvc.perform(post(REQUEST_URL + "/abandonments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ABANDONED"))
+                .andExpect(jsonPath("$.data.abandonmentRequested").value(true));
+    }
 
     @Test
     void returnsAuthenticatedConsumersReservationHistory() throws Exception {
@@ -667,6 +730,26 @@ class ReservationControllerTest {
                 ),
                 OffsetDateTime.parse("2026-08-01T09:00:00Z")
         );
+    }
+
+    private ReservationRequestResponse requestResponse(
+            ReservationDepositProcessStatus status,
+            boolean abandonmentRequested
+    ) {
+        return new ReservationRequestResponse(
+                "901",
+                status,
+                OffsetDateTime.parse("2026-08-03T18:10:00+09:00"),
+                new ReservationRequestResponse.PaymentPreparationSnapshot(
+                        "9001",
+                        "portone-9001",
+                        "미리윰 식당 예약금",
+                        4_000L,
+                        "KRW",
+                        OffsetDateTime.parse("2026-08-03T18:10:00+09:00"),
+                        "READY"),
+                abandonmentRequested,
+                null);
     }
 
     private ReservationDetailResponse cancelledDetailResponse(String cancelledBy) {

@@ -7,11 +7,15 @@ import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCreationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationCancellationCommandResult;
 import com.miriyum.domain.reservation.service.ReservationService;
+import com.miriyum.domain.reservation.service.ReservationDepositCommandResult;
+import com.miriyum.domain.reservation.service.ReservationDepositProcessCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationDepositProcessService;
 import com.miriyum.global.idempotency.IdempotencyKey;
 import com.miriyum.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -36,7 +40,50 @@ public class ReservationController {
     private final ReservationService reservationService;
     private final ReservationCreationCommandFacade reservationCreationCommandFacade;
     private final ReservationCancellationCommandFacade reservationCancellationCommandFacade;
+    private final ReservationDepositProcessCommandFacade reservationDepositProcessCommandFacade;
+    private final ReservationDepositProcessService reservationDepositProcessService;
     private final ConsumerAccountService consumerAccountService;
+
+    @GetMapping("/reservation-requests/{reservationRequestId}")
+    public ApiResponse<ReservationRequestResponse> getReservationRequest(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long reservationRequestId
+    ) {
+        return ApiResponse.success(
+                "조회되었습니다.",
+                reservationDepositProcessService.getOwnedRequest(
+                        reservationRequestId, principal.accountId()));
+    }
+
+    @PostMapping("/reservation-requests/{reservationRequestId}/finalizations")
+    public ResponseEntity<ApiResponse<Object>> finalizeReservationRequest(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long reservationRequestId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+    ) {
+        ReservationDepositCommandResult result =
+                reservationDepositProcessCommandFacade.finalizeRequest(
+                        principal.accountId(),
+                        reservationRequestId,
+                        IdempotencyKey.parse(rawKey));
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("예약금 요청을 처리했습니다.", result.responseData()));
+    }
+
+    @PostMapping("/reservation-requests/{reservationRequestId}/abandonments")
+    public ResponseEntity<ApiResponse<Object>> abandonReservationRequest(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal,
+            @PathVariable long reservationRequestId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String rawKey
+    ) {
+        ReservationDepositCommandResult result =
+                reservationDepositProcessCommandFacade.abandonRequest(
+                        principal.accountId(),
+                        reservationRequestId,
+                        IdempotencyKey.parse(rawKey));
+        return ResponseEntity.status(result.httpStatus())
+                .body(ApiResponse.success("예약금 요청을 포기했습니다.", result.responseData()));
+    }
 
     /**
      * Authenticated consumer reservation creation is delegated unchanged to the command facade.
