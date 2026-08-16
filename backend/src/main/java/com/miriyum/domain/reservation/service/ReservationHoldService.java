@@ -74,6 +74,7 @@ public class ReservationHoldService {
     private final ReservationCancellationPolicySelector cancellationPolicySelector;
     private final Clock clock;
     private final Supplier<UUID> auditCommandIdSupplier;
+    private ReservationHoldCreationPrimitive creationPrimitive;
     private final ReservationCreationCapacityValidator capacityValidator =
             new ReservationCreationCapacityValidator();
 
@@ -90,7 +91,8 @@ public class ReservationHoldService {
             StoreTransactionEligibilityService storeEligibilityService,
             ReservationTimeResolutionService timeResolutionService,
             ReservationCancellationPolicySelector cancellationPolicySelector,
-            Clock clock
+            Clock clock,
+            ReservationHoldCreationPrimitive creationPrimitive
     ) {
         this(
                 holdRepository,
@@ -107,6 +109,7 @@ public class ReservationHoldService {
                 clock,
                 UUID::randomUUID
         );
+        this.creationPrimitive = creationPrimitive;
     }
 
     ReservationHoldService(
@@ -137,6 +140,18 @@ public class ReservationHoldService {
         this.cancellationPolicySelector = cancellationPolicySelector;
         this.clock = clock;
         this.auditCommandIdSupplier = auditCommandIdSupplier;
+        this.creationPrimitive = new ReservationHoldCreationPrimitive(
+                holdRepository,
+                reservationRepository,
+                allocationRepository,
+                auditRepository,
+                warningTaskRepository,
+                capacityBucketRepository,
+                temporaryMenuHoldPort,
+                timeResolutionService,
+                cancellationPolicySelector,
+                clock,
+                auditCommandIdSupplier);
     }
 
     /**
@@ -171,108 +186,17 @@ public class ReservationHoldService {
         StoreReservationTransactionEligibility store =
                 storeEligibilityService.requireReservationTransactionEligibility(
                         normalized.storeId());
-        ReservationHold concurrentReplay = holdRepository
-                .findByConsumerAccountIdAndCreationCommandId(
+        ReservationHold saved = creationPrimitive.create(
+                new ReservationHoldCreationPrimitive.Command(
                         normalized.consumerAccountId(),
-                        normalized.creationCommandId())
-                .orElse(null);
-        if (concurrentReplay != null) {
-            if (!sameUserControlledMeaning(concurrentReplay, normalized)) {
-                throw new ServiceException(CommonErrorCode.IDEMPOTENCY_KEY_REUSED);
-            }
-            verifyMenuCreationReplay(concurrentReplay, normalized.menuSelections());
-            return resultOf(concurrentReplay);
-        }
-        ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
-                normalized.storeId(),
-                new ReservationTimeRequest(
+                        store,
                         normalized.serviceDate(),
                         normalized.startTime(),
-                        normalized.startOffset()));
-
-        List<Reservation> confirmedReservations =
-                reservationRepository.findConfirmedOverlappingForUpdate(
-                normalized.consumerAccountId(),
-                normalized.storeId(),
-                timeSnapshot.getStartAt(),
-                timeSnapshot.getServiceEndAt());
-        List<ReservationHold> protectedHolds = holdRepository.findProtectedOverlappingForUpdate(
-                normalized.consumerAccountId(),
-                normalized.storeId(),
-                timeSnapshot.getStartAt(),
-                timeSnapshot.getServiceEndAt());
-        if (!confirmedReservations.isEmpty() || !protectedHolds.isEmpty()) {
-            throw new ServiceException(ReservationErrorCode.DUPLICATE_RESERVATION);
-        }
-
-        ZoneId timeZone = ZoneId.of(timeSnapshot.getTimeZoneId());
-        LocalTime occupancyEndTime = timeSnapshot.getOccupancyEndAt()
-                .atZone(timeZone)
-                .toLocalTime();
-        List<ReservationCapacityBucket> buckets =
-                capacityBucketRepository.findLatestPolicyBucketsOverlappingForUpdate(
-                        normalized.storeId(),
-                        normalized.serviceDate(),
-                        normalized.startTime(),
-                        occupancyEndTime);
-        long capacityPolicyVersion = capacityValidator.validate(
-                buckets,
-                normalized.storeId(),
-                normalized.serviceDate(),
-                normalized.startTime(),
-                occupancyEndTime,
-                normalized.party().totalCount(),
-                normalized.party().getInfantCount() > 0);
-        for (ReservationCapacityBucket bucket : buckets) {
-            bucket.occupy(normalized.party().totalCount());
-        }
-
-        Instant createdAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
-        ReservationCancellationPolicyVersion cancellationPolicy =
-                requireCancellationPolicy();
-        ReservationHold hold = ReservationHold.active(
-                normalized.consumerAccountId(),
-                normalized.storeId(),
-                store.storeName(),
-                timeSnapshot,
-                normalized.party(),
-                ReservationContactSnapshot.contactable(
-                        contact.notificationTargetReference()),
-                capacityPolicyVersion,
-                cancellationPolicy,
-                normalized.creationCommandId(),
-                createdAt);
-        ReservationHold saved = holdRepository.saveAndFlush(hold);
-        long holdId = requirePersistedId(saved);
-
-        List<ReservationHoldCapacityAllocation> allocations = buckets.stream()
-                .map(bucket -> ReservationHoldCapacityAllocation.allocate(
-                        holdId,
-                        requireBucketId(bucket),
-                        normalized.party().totalCount(),
-                        capacityPolicyVersion))
-                .toList();
-        allocationRepository.saveAll(allocations);
-
-        createTemporaryMenuHold(saved, normalized.menuSelections());
-
-        String auditCommandId = CREATION_AUDIT_COMMAND_PREFIX
-                + requireAuditCommandId();
-        auditRepository.save(ReservationHoldTransitionAudit.record(
-                holdId,
-                SYSTEM_ACTOR,
-                null,
-                createdAt,
-                createdAt,
-                null,
-                ReservationHoldStatus.ACTIVE,
-                timeSnapshot.getReservationTimePolicyVersion(),
-                capacityPolicyVersion,
-                auditCommandId));
-        warningTaskRepository.save(ReservationHoldWarningTask.schedule(
-                holdId,
-                saved.getCreatedAt(),
-                saved.getExpiresAt()));
+                        normalized.startOffset(),
+                        normalized.party(),
+                        contact.notificationTargetReference(),
+                        normalized.creationCommandId(),
+                        normalized.menuSelections()));
         return resultOf(saved);
     }
 

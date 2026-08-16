@@ -6,6 +6,8 @@ import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
+import com.miriyum.domain.reservation.service.ReservationHoldCreationPrimitive;
+import com.miriyum.domain.reservation.service.ReservationHoldService;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthority;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthorityPort;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
@@ -20,6 +22,8 @@ import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 class ReservationProductionDependencyTest {
 
@@ -30,6 +34,23 @@ class ReservationProductionDependencyTest {
             "import com.miriyum.domain.notification.dto.source.NotificationResourceType;",
             "import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;"
     );
+
+    @Test
+    void reservationHoldCreationUsesTheMandatorySharedPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationHoldCreationPrimitive.class
+                .getMethod(
+                        "create",
+                        ReservationHoldCreationPrimitive.Command.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+        assertThat(Stream.of(ReservationHoldService.class.getDeclaredFields())
+                .anyMatch(field -> field.getType()
+                        == ReservationHoldCreationPrimitive.class))
+                .isTrue();
+    }
 
     @Test
     void fulfillmentConsumesOnlyApprovedStoreAndReservationMenuHoldPortSignatures()
