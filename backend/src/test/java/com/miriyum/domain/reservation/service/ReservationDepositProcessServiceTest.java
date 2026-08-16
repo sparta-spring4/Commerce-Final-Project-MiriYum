@@ -15,6 +15,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersion;
@@ -41,6 +42,10 @@ import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligat
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotentOutcome;
+import com.miriyum.global.idempotency.RequestFingerprint;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,6 +65,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
 class ReservationDepositProcessServiceTest {
 
@@ -1269,6 +1275,102 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void idempotentFinalizationReplayReturnsStoredAcceptedPayloadWithoutRuntimeWork() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        IdempotencyExecutor idempotencyExecutor = mock(IdempotencyExecutor.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ReservationRequestResponse stored = requestResponse(
+                ReservationDepositProcessStatus.AWAITING_PAYMENT,
+                false);
+        IdempotencyCommand command = idempotencyCommand(
+                "RESERVATION_DEPOSIT_FINALIZE",
+                "123e4567-e89b-12d3-a456-426614174020");
+        given(idempotencyExecutor.execute(
+                org.mockito.ArgumentMatchers.eq(command),
+                any())).willReturn(new IdempotentOutcome(
+                        true,
+                        202,
+                        "SUCCESS",
+                        "RESERVATION_DEPOSIT_PROCESS",
+                        String.valueOf(PROCESS_ID),
+                        objectMapper.valueToTree(stored)));
+        ReservationDepositProcessService service = idempotentService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                idempotencyExecutor,
+                objectMapper);
+
+        ReservationDepositCommandResult result = service.finalizeOwnedIdempotent(
+                PROCESS_ID,
+                CONSUMER_ID,
+                command);
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest()).isEqualTo(stored);
+        verify(processRepository, never())
+                .findByIdAndConsumerAccountIdForUpdate(PROCESS_ID, CONSUMER_ID);
+        verify(paymentService, never()).getOwnedPayment(any(), any());
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+        verify(holdTransitionPrimitive, never()).transition(any());
+    }
+
+    @Test
+    void idempotentAbandonmentReplayReturnsStoredTerminatedPayloadWithoutRuntimeWork() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        IdempotencyExecutor idempotencyExecutor = mock(IdempotencyExecutor.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ReservationRequestResponse stored = requestResponse(
+                ReservationDepositProcessStatus.ABANDONED,
+                true);
+        IdempotencyCommand command = idempotencyCommand(
+                "RESERVATION_DEPOSIT_ABANDON",
+                "123e4567-e89b-12d3-a456-426614174021");
+        given(idempotencyExecutor.execute(
+                org.mockito.ArgumentMatchers.eq(command),
+                any())).willReturn(new IdempotentOutcome(
+                        true,
+                        200,
+                        "SUCCESS",
+                        "RESERVATION_DEPOSIT_PROCESS",
+                        String.valueOf(PROCESS_ID),
+                        objectMapper.valueToTree(stored)));
+        ReservationDepositProcessService service = idempotentService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                idempotencyExecutor,
+                objectMapper);
+
+        ReservationDepositCommandResult result = service.abandonOwnedIdempotent(
+                PROCESS_ID,
+                CONSUMER_ID,
+                command);
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(result.reservationRequest()).isEqualTo(stored);
+        verify(processRepository, never())
+                .findByIdAndConsumerAccountIdForUpdate(PROCESS_ID, CONSUMER_ID);
+        verify(paymentService, never()).getOwnedPayment(any(), any());
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+        verify(holdTransitionPrimitive, never()).transition(any());
+    }
+
+    @Test
     void finalizationCopiesHeldCapacityWithoutMutatingOccupiedTotals() {
         ReservationHoldRepository holdRepository = mock(ReservationHoldRepository.class);
         ReservationHoldCapacityAllocationRepository holdAllocationRepository =
@@ -1361,6 +1463,62 @@ class ReservationDepositProcessServiceTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(101L, 3, 1, 7L),
                         org.assertj.core.groups.Tuple.tuple(102L, 3, 1, 7L));
+    }
+
+    private static ReservationDepositProcessService idempotentService(
+            ReservationDepositProcessRepository processRepository,
+            PaymentService paymentService,
+            ReservationDepositFinalizationPrimitive finalizationPrimitive,
+            ReservationHoldTransitionPrimitive holdTransitionPrimitive,
+            IdempotencyExecutor idempotencyExecutor,
+            ObjectMapper objectMapper
+    ) {
+        return new ReservationDepositProcessService(
+                processRepository,
+                mock(ReservationDepositCauseAuditRepository.class),
+                mock(ReservationDepositRefundObligationRepository.class),
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(NOW, ZoneId.of("UTC")),
+                mock(ReservationRepository.class),
+                idempotencyExecutor,
+                objectMapper,
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(5));
+    }
+
+    private static IdempotencyCommand idempotencyCommand(
+            String commandType,
+            String idempotencyKey
+    ) {
+        return new IdempotencyCommand(
+                "consumer",
+                CONSUMER_ID,
+                commandType,
+                idempotencyKey,
+                RequestFingerprint.of("request=" + commandType));
+    }
+
+    private static ReservationRequestResponse requestResponse(
+            ReservationDepositProcessStatus status,
+            boolean abandonmentRequested
+    ) {
+        return new ReservationRequestResponse(
+                String.valueOf(PROCESS_ID),
+                status,
+                NOW.plusSeconds(300).atOffset(java.time.ZoneOffset.UTC),
+                new ReservationRequestResponse.PaymentPreparationSnapshot(
+                        "9001",
+                        "portone-9001",
+                        "미리윰 식당 예약금",
+                        4_000L,
+                        "KRW",
+                        NOW.plusSeconds(300).atOffset(java.time.ZoneOffset.UTC),
+                        "READY"),
+                abandonmentRequested,
+                null);
     }
 
     private static ReservationDepositProcess depositProcess() {
