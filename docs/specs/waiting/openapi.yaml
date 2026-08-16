@@ -16,8 +16,6 @@ tags:
     description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
 paths:
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
-    x-miriyum-runtime-status: runtime
-    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 운영 설정 조회
@@ -92,8 +90,6 @@ paths:
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact:
-    x-miriyum-runtime-status: runtime
-    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 기능 비활성화 영향 조회

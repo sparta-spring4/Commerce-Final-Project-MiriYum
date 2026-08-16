@@ -51,9 +51,7 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
-        assertThat(settingsPath).containsOnlyKeys(
-                "get", "put", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
-        assertThat(settingsPath).containsEntry("x-miriyum-runtime-status", "runtime");
+        assertThat(settingsPath).containsOnlyKeys("get", "put");
 
         Map<String, Object> settingsQuery = map(settingsPath.get("get"));
         assertThat(map(settingsQuery.get("responses")).keySet())
@@ -61,9 +59,7 @@ class WaitingOpenApiContractTest {
                         "200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> disableImpactPath = map(paths.get(DISABLE_IMPACT_PATH));
-        assertThat(disableImpactPath).containsOnlyKeys(
-                "get", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
-        assertThat(disableImpactPath).containsEntry("x-miriyum-runtime-status", "runtime");
+        assertThat(disableImpactPath).containsOnlyKeys("get");
         Map<String, Object> disableImpactQuery = map(disableImpactPath.get("get"));
         assertThat(map(disableImpactQuery.get("responses")).keySet())
                 .containsExactlyInAnyOrder(
