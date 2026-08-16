@@ -32,7 +32,9 @@ class WaitingCreationFailureClassifierTest {
         assertThat(WaitingCreationFailureClassifier.isRetryable(new DataIntegrityViolationException(
                 "foreign key fk_waiting_teams_store"))).isFalse();
         assertThat(WaitingCreationFailureClassifier.isMembershipConflict(new DataIntegrityViolationException(
-                "uk_waiting_active_memberships_store_consumer"))).isTrue();
+                "uk_waiting_active_memberships_store_consumer"))).isFalse();
+        assertThat(WaitingCreationFailureClassifier.isMembershipConflict(new DataIntegrityViolationException(
+                "uk_waiting_active_memberships_consumer_account"))).isTrue();
     }
 
     @Test

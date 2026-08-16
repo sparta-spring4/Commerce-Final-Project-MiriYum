@@ -229,6 +229,25 @@ class WaitingClosureServiceIT {
     }
 
     @Test
+    void closureSnapshotsAndClosesReservationConvertingTeamExactlyOnce() {
+        Fixture fixture = fixture();
+        jdbc.update("UPDATE waiting_teams SET status='RESERVATION_CONVERTING' WHERE store_id=?", fixture.storeId);
+
+        WaitingClosureCommandResult started = startClosure(
+                fixture.operatorId, fixture.storeId, KEY, 7L);
+
+        assertThat(started.data().totalTeamCount()).isOne();
+        assertThat(count("waiting_closure_job_items")).isOne();
+        service.processClaimedItem(claim("owner-a").getFirst());
+
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_teams", String.class))
+                .isEqualTo("CLOSED_BY_STORE");
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(count("waiting_transition_audits")).isOne();
+        assertThat(count("waiting_status_events")).isOne();
+    }
+
+    @Test
     void failedItemRollsBackThenRestartRecoveryRequeuesAndCompletes() {
         Fixture fixture = fixture();
         startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
