@@ -65,6 +65,8 @@ miriyum:
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   auth:
+    qr-epoch:
+      storage-generation: ${MIRIYUM_QR_STORAGE_GENERATION:}
     # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
     refresh-risk-event-delivery:
       enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}

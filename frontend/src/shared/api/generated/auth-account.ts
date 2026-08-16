@@ -22,7 +22,10 @@ export interface paths {
     get: operations["getConsumerCsrfToken"];
   };
   "/api/v1/consumers/auth/sessions/current": {
-    /** 일반 사용자 현재 shell 로그아웃 */
+    /**
+     * 일반 사용자 현재 shell 로그아웃
+     * @description 현재 ACTIVE Refresh가 로그아웃 mutation의 권한이다. 공개 auth chain에서 인증되지 않는 원문 Access bearer는 Auth service가 감사 목적으로만 선택 파싱하며, 파싱 ServiceException 또는 유효 subject 불일치가 Refresh 판정을 방해하지 않는다.
+     */
     delete: operations["deleteConsumerCurrentSession"];
   };
   "/api/v1/consumers/auth/kakao/authorizations": {
@@ -337,6 +340,16 @@ export interface components {
     };
   };
   responses: {
+    /** @description storage generation 또는 Valkey QR 세대·Refresh 원자 연산을 확정할 수 없음 */
+    ConsumerLogoutServiceUnavailable: {
+      headers: {
+        /** @description CSRF 검증 뒤이므로 Max-Age=0인 MIRIYUM_CONSUMER_REFRESH 쿠키를 유지한다. */
+        "Set-Cookie"?: string;
+      };
+      content: {
+        "application/json": external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["ErrorResponse"];
+      };
+    };
     /** @description 이메일 또는 비밀번호 불일치 */
     InvalidCredentials: {
       content: {
@@ -625,7 +638,10 @@ export interface operations {
       429: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["TooManyRequests"];
     };
   };
-  /** 일반 사용자 현재 shell 로그아웃 */
+  /**
+   * 일반 사용자 현재 shell 로그아웃
+   * @description 현재 ACTIVE Refresh가 로그아웃 mutation의 권한이다. 공개 auth chain에서 인증되지 않는 원문 Access bearer는 Auth service가 감사 목적으로만 선택 파싱하며, 파싱 ServiceException 또는 유효 subject 불일치가 Refresh 판정을 방해하지 않는다.
+   */
   deleteConsumerCurrentSession: {
     parameters: {
       header: {
@@ -633,7 +649,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description 클라이언트 토큰 제거와 Refresh 쿠키 만료 */
+      /** @description CSRF 검증 뒤 브라우저 Refresh 쿠키 만료. 현재 ACTIVE Refresh가 일치할 때만 서버 family 폐기와 계정 QR 세대 증가도 확정한다. */
       200: {
         headers: {
           /** @description Max-Age=0인 MIRIYUM_CONSUMER_REFRESH 쿠키 */
@@ -644,6 +660,7 @@ export interface operations {
         };
       };
       403: components["responses"]["CsrfRejected"];
+      503: components["responses"]["ConsumerLogoutServiceUnavailable"];
     };
   };
   /** 일반 사용자 카카오 인가 주소 발급 */
