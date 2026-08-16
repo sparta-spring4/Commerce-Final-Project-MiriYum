@@ -146,6 +146,24 @@ class ReservationControllerTest {
     }
 
     @Test
+    @DisplayName("소비자 예약 내역은 NO_SHOW 상태를 조회 조건으로 전달한다")
+    void acceptsNoShowReservationHistoryStatus() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationService.getConsumerReservationHistory(
+                11L, ReservationHistorySearchRequest.from("NO_SHOW", null, null, null)))
+                .willReturn(new ReservationHistoryPageResponse(
+                        List.of(), new PageMetadata(0, 20, 0, 0, false)));
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("status", "NO_SHOW"))
+                .andExpect(status().isOk());
+
+        then(reservationService).should().getConsumerReservationHistory(
+                11L, ReservationHistorySearchRequest.from("NO_SHOW", null, null, null));
+    }
+
+    @Test
     void accountStatePrecedesReservationHistoryQueryValidation() throws Exception {
         authenticateConsumer(11L);
         given(consumerAccountService.getMe(11L))
