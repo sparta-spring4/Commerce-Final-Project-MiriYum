@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
@@ -37,6 +38,7 @@ class MenuHoldServiceConsumerContractTest {
         assertMandatory("create", MenuHoldCreateCommand.class);
         assertMandatory("release", MenuHoldReleaseCommand.class);
         assertMandatory("fulfill", MenuHoldFulfillCommand.class);
+        assertMandatory("forfeit", MenuHoldForfeitCommand.class);
         Method terminationLock = MenuHoldService.class.getMethod(
                 "lockForTermination", long.class);
         Transactional transactional = terminationLock.getAnnotation(Transactional.class);
@@ -84,6 +86,12 @@ class MenuHoldServiceConsumerContractTest {
         assertThatThrownBy(() -> new MenuSelection(0L, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("menuId must be positive");
+        assertThatThrownBy(() -> new MenuHoldForfeitCommand(0L, "operation-forfeit-01"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("reservationId must be positive");
+        assertThatThrownBy(() -> new MenuHoldForfeitCommand(1L, " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("operationId must not be blank");
     }
 
     @Test
@@ -155,16 +163,20 @@ class MenuHoldServiceConsumerContractTest {
     }
 
     @Test
-    void releaseAndFulfillHideTheSourceAcquireOperationFromReservation() {
+    void terminalCommandsHideTheSourceAcquireOperationFromReservation() {
         MenuHoldReleaseCommand release =
                 new MenuHoldReleaseCommand(1L, "operation-release-01");
         MenuHoldFulfillCommand fulfill =
                 new MenuHoldFulfillCommand(1L, "operation-fulfill-01");
+        MenuHoldForfeitCommand forfeit =
+                new MenuHoldForfeitCommand(1L, "operation-forfeit-01");
 
         assertThat(release.reservationId()).isEqualTo(1L);
         assertThat(release.operationId()).isEqualTo("operation-release-01");
         assertThat(fulfill.reservationId()).isEqualTo(1L);
         assertThat(fulfill.operationId()).isEqualTo("operation-fulfill-01");
+        assertThat(forfeit.reservationId()).isEqualTo(1L);
+        assertThat(forfeit.operationId()).isEqualTo("operation-forfeit-01");
     }
 
     @Test
@@ -174,6 +186,8 @@ class MenuHoldServiceConsumerContractTest {
 
         assertThat(result.reservationId()).isEqualTo(1L);
         assertThat(result.outcome()).isEqualTo(MenuHoldCommandResult.Outcome.CONFIRMED);
+        assertThat(MenuHoldCommandResult.forfeited(1L).outcome())
+                .isEqualTo(MenuHoldCommandResult.Outcome.FORFEITED);
     }
 
     @Test
@@ -218,11 +232,13 @@ class MenuHoldServiceConsumerContractTest {
         consumer.create("create-key", 1L, List.of(selection()));
         consumer.release(1L);
         consumer.fulfill(2L);
+        consumer.forfeit(3L);
 
         assertThat(List.of(
                 fixture.createCommands().getFirst().operationId(),
                 fixture.releaseCommands().getFirst().operationId(),
-                fixture.fulfillCommands().getFirst().operationId()))
+                fixture.fulfillCommands().getFirst().operationId(),
+                fixture.forfeitCommands().getFirst().operationId()))
                 .doesNotHaveDuplicates();
     }
 
@@ -403,6 +419,11 @@ class MenuHoldServiceConsumerContractTest {
         private MenuHoldCommandResult fulfill(long reservationId) {
             return menuHoldService.fulfill(
                     new MenuHoldFulfillCommand(reservationId, nextOperationId()));
+        }
+
+        private MenuHoldCommandResult forfeit(long reservationId) {
+            return menuHoldService.forfeit(
+                    new MenuHoldForfeitCommand(reservationId, nextOperationId()));
         }
 
         private String nextOperationId() {

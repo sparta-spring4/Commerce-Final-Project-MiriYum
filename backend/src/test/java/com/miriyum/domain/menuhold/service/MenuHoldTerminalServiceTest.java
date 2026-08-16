@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
@@ -134,6 +135,36 @@ class MenuHoldTerminalServiceTest {
     }
 
     @Test
+    void forfeitsLockedConfirmedHoldWithoutRestoringInventory() {
+        MenuHold hold = confirmedHold();
+        given(holdRepository.findByReservationIdForUpdate(10L))
+                .willReturn(Optional.of(hold));
+
+        MenuHoldCommandResult result = service().forfeit(
+                new MenuHoldForfeitCommand(10L, "forfeit-operation"));
+
+        assertThat(result).isEqualTo(MenuHoldCommandResult.forfeited(10L));
+        assertThat(hold.getStatus()).isEqualTo(MenuHoldStatus.FORFEITED);
+        verify(inventoryService, never()).restoreInventory(
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void repeatedForfeitReturnsSuccessWithoutRestoringInventory() {
+        MenuHold hold = confirmedHold();
+        hold.forfeit();
+        given(holdRepository.findByReservationIdForUpdate(10L))
+                .willReturn(Optional.of(hold));
+
+        MenuHoldCommandResult result = service().forfeit(
+                new MenuHoldForfeitCommand(10L, "repeated-forfeit"));
+
+        assertThat(result).isEqualTo(MenuHoldCommandResult.forfeited(10L));
+        verify(inventoryService, never()).restoreInventory(
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void rejectsMissingHoldAndConflictingTerminalCommands() {
         given(holdRepository.findByReservationIdForUpdate(10L))
                 .willReturn(Optional.empty());
@@ -146,8 +177,12 @@ class MenuHoldTerminalServiceTest {
                 new MenuHoldReleaseCommand(10L, "missing-release")));
         assertStateConflict(() -> service().fulfill(
                 new MenuHoldFulfillCommand(10L, "missing-fulfill")));
+        assertStateConflict(() -> service().forfeit(
+                new MenuHoldForfeitCommand(10L, "missing-forfeit")));
         assertStateConflict(() -> service().release(
                 new MenuHoldReleaseCommand(11L, "conflicting-release")));
+        assertStateConflict(() -> service().forfeit(
+                new MenuHoldForfeitCommand(11L, "conflicting-forfeit")));
 
         MenuHold released = confirmedHold();
         released.release();
@@ -155,6 +190,17 @@ class MenuHoldTerminalServiceTest {
                 .willReturn(Optional.of(released));
         assertStateConflict(() -> service().fulfill(
                 new MenuHoldFulfillCommand(12L, "conflicting-fulfill")));
+        assertStateConflict(() -> service().forfeit(
+                new MenuHoldForfeitCommand(12L, "conflicting-forfeit")));
+
+        MenuHold forfeited = confirmedHold();
+        forfeited.forfeit();
+        given(holdRepository.findByReservationIdForUpdate(13L))
+                .willReturn(Optional.of(forfeited));
+        assertStateConflict(() -> service().release(
+                new MenuHoldReleaseCommand(13L, "conflicting-release")));
+        assertStateConflict(() -> service().fulfill(
+                new MenuHoldFulfillCommand(13L, "conflicting-fulfill")));
     }
 
     @ParameterizedTest(name = "{0}: {1} -> {2}")
@@ -291,6 +337,15 @@ class MenuHoldTerminalServiceTest {
                         TemporaryMenuHoldContracts.Target.EXPIRE,
                         false, MenuHoldStatus.EXPIRED, null),
                 rejected("expired cannot require reconciliation", MenuHoldStatus.EXPIRED,
+                        TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION),
+
+                rejected("forfeited cannot confirm", MenuHoldStatus.FORFEITED,
+                        TemporaryMenuHoldContracts.Target.CONFIRM),
+                rejected("forfeited cannot release", MenuHoldStatus.FORFEITED,
+                        TemporaryMenuHoldContracts.Target.RELEASE),
+                rejected("forfeited cannot expire", MenuHoldStatus.FORFEITED,
+                        TemporaryMenuHoldContracts.Target.EXPIRE),
+                rejected("forfeited cannot require reconciliation", MenuHoldStatus.FORFEITED,
                         TemporaryMenuHoldContracts.Target.REQUIRE_RECONCILIATION)
         );
     }
@@ -368,6 +423,10 @@ class MenuHoldTerminalServiceTest {
             case EXPIRED -> hold.expireTemporary();
             case FULFILLED -> throw new IllegalArgumentException(
                     "FULFILLED is not a temporary pre-terminal source state");
+            case FORFEITED -> {
+                hold.confirmTemporary(91L);
+                hold.forfeit();
+            }
         }
         return hold;
     }

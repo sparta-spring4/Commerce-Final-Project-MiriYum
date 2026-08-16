@@ -17,5 +17,7 @@ public interface ReservationMenuHoldPort {
 
     ReservationMenuHoldResult fulfill(long reservationId, String operationId);
 
+    ReservationMenuHoldResult forfeit(long reservationId, String operationId);
+
     List<ReservationMenuHoldItemSnapshot> findSnapshots(long reservationId);
 }

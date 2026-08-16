@@ -11,6 +11,8 @@ class MenuHoldMigrationContractTest {
 
     private static final Path V38 = Path.of(
             "src/main/resources/db/migration/V38__add_temporary_menu_holds.sql");
+    private static final Path V48 = Path.of(
+            "src/main/resources/db/migration/V48__add_menu_hold_forfeited_status.sql");
 
     @Test
     void migrationDefinesReservationHoldAndItemIntegrity() throws IOException {
@@ -106,6 +108,28 @@ class MenuHoldMigrationContractTest {
                         + "(reservation_hold_id IS NOT NULL AND expires_at IS NOT NULL "
                         + "AND reservation_id IS NOT NULL "
                         + "AND status IN ('CONFIRMED', 'RELEASED', 'FULFILLED')) )");
+    }
+
+    @Test
+    void v48AllowsForfeitedOnlyForFinalReservationLinkedHolds() throws IOException {
+        String sql = Files.readString(V48).replaceAll("\\s+", " ").trim();
+
+        assertThat(sql)
+                .containsOnlyOnce("ALTER TABLE menu_holds")
+                .contains("DROP CHECK ck_menu_holds_parent_and_status")
+                .contains("CONSTRAINT ck_menu_holds_parent_and_status CHECK ( "
+                        + "(reservation_hold_id IS NULL AND expires_at IS NULL "
+                        + "AND reservation_id IS NOT NULL AND status IN "
+                        + "('CONFIRMED', 'RELEASED', 'FULFILLED', 'FORFEITED')) OR "
+                        + "(reservation_hold_id IS NOT NULL AND expires_at IS NOT NULL "
+                        + "AND reservation_id IS NULL AND status IN "
+                        + "('ACTIVE', 'RECONCILIATION_REQUIRED', 'RELEASED', 'EXPIRED')) OR "
+                        + "(reservation_hold_id IS NOT NULL AND expires_at IS NOT NULL "
+                        + "AND reservation_id IS NOT NULL AND status IN "
+                        + "('CONFIRMED', 'RELEASED', 'FULFILLED', 'FORFEITED')) )")
+                .doesNotContain("reservation_id IS NULL AND status IN "
+                        + "('ACTIVE', 'RECONCILIATION_REQUIRED', 'RELEASED', 'EXPIRED', "
+                        + "'FORFEITED')");
     }
 
     private static String normalizedV38() throws IOException {
