@@ -220,3 +220,53 @@
   gap: var(--space-1);
   margin-left: auto;
 }
+
+/*
+ * 서버 폐기를 확인하지 못한 로그아웃 안내.
+ *
+ * 헤더 행의 형제로 들어와 `flex-basis: 100%`로 자기 줄을 차지한다. 헤더 안에
+ * 끼워 넣으면 좁은 화면에서 브랜드와 버튼을 밀어낸다. 지나칠 수 없어야 하는
+ * 안내라 접거나 숨기지 않는다.
+ */
+.app-header__notice {
+  flex-basis: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin-bottom: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-secondary-fixed);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-label-md);
+  line-height: 1.5;
+  color: var(--color-on-secondary-fixed-variant);
+  word-break: keep-all;
+}
+
+.app-header__notice .mi-icon {
+  margin-top: 0.1875rem;
+  flex-shrink: 0;
+}
+
+.app-header__notice span {
+  flex: 1;
+}
+
+.app-header__notice-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-header__notice-close:hover {
+  background-color: var(--color-secondary-fixed-dim);
+}

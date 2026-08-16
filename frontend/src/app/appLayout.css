@@ -38,8 +38,15 @@
   }
 }
 
+/*
+ * 헤더 한 줄.
+ *
+ * 계정 슬롯이 안내 배너를 형제로 함께 넣을 수 있어 wrap을 허용한다. 배너는
+ * `flex-basis: 100%`로 자기 줄을 차지하고, 평소에는 감싸일 것이 없어 한 줄이다.
+ */
 .app-header__inner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   min-height: 4rem;

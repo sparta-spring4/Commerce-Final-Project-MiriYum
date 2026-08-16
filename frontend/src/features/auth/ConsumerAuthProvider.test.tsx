@@ -26,11 +26,13 @@ import {
 const PROTECTED_PATH = '/api/v1/consumers/me'
 
 function Probe() {
-  const { status, apiClient, signIn, signOut } = useConsumerAuth()
+  const { status, apiClient, signIn, signOut, signOutNotice } =
+    useConsumerAuth()
 
   return (
     <div>
       <p data-testid="status">{status}</p>
+      <p data-testid="sign-out-notice">{signOutNotice ?? 'none'}</p>
       <button
         type="button"
         onClick={() => {
@@ -93,6 +95,10 @@ function cachedOwners(queryClient: QueryClient): unknown[] {
 
 function status() {
   return screen.getByTestId('status').textContent
+}
+
+function signOutNotice() {
+  return screen.getByTestId('sign-out-notice').textContent
 }
 
 afterEach(() => {
@@ -267,6 +273,153 @@ describe('일반 사용자 인증 shell', () => {
     screen.getByRole('button', { name: '로그아웃' }).click()
 
     await waitFor(() => expect(status()).toBe('unauthenticated'))
+  })
+
+  /*
+   * 서버 폐기 실패를 성공과 같은 화면으로 끝내지 않는다.
+   *
+   * 계약이 이 endpoint의 403을 CsrfRejected(AUTH_009)로 정의한다. 서버가
+   * 요청을 처리하지 않았다는 뜻이므로 세션은 그대로 살아 있다.
+   */
+  it('CSRF 거절은 로컬만 비우고 서버 폐기 미확인으로 남긴다', async () => {
+    document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-value', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      http.delete(CONSUMER_SESSION_CURRENT_PATH, () =>
+        errorResponse(
+          403,
+          AuthErrorCode.CSRF_TOKEN_INVALID,
+          'CSRF 검증에 실패했습니다.',
+        ),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    expect(signOutNotice()).toBe('unconfirmed')
+  })
+
+  it('서버 오류는 폐기 성공을 뜻하지 않으므로 미확인으로 남긴다', async () => {
+    document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-value', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      http.delete(CONSUMER_SESSION_CURRENT_PATH, () =>
+        errorResponse(503, 'COMMON_012', '서비스를 이용할 수 없습니다.'),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    expect(signOutNotice()).toBe('unconfirmed')
+  })
+
+  it('폐기할 세션이 없다는 응답은 미확인이 아니다', async () => {
+    document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-value', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      http.delete(CONSUMER_SESSION_CURRENT_PATH, () =>
+        errorResponse(
+          401,
+          AuthErrorCode.REFRESH_TOKEN_INVALID,
+          'Refresh Token이 올바르지 않습니다.',
+        ),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    // 폐기할 것이 없었을 뿐 세션이 남지는 않는다. 겁줄 이유가 없다.
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    expect(signOutNotice()).toBe('none')
+  })
+
+  /*
+   * 조용한 생략을 없앤다.
+   *
+   * 쿠키를 읽지 못한다고 요청을 건너뛰면 화면만 로그아웃되고 서버 Refresh
+   * family는 살아 있는데 아무 신호도 남지 않는다. 준비 응답의 token이 쿠키와
+   * 같은 값이므로 그 값으로 헤더를 채워 실제로 보낸다.
+   */
+  it('CSRF 쿠키를 읽지 못해도 로그아웃 요청을 건너뛰지 않는다', async () => {
+    // 쿠키를 심지 않는다. readCookie가 null을 돌려주는 상황이다.
+    let deleteCalls = 0
+    let sentCsrfHeader: string | null = null
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_CSRF_PATH, () =>
+        successResponse({
+          token: 'token-from-body',
+          headerName: 'X-CSRF-TOKEN',
+        }),
+      ),
+      http.delete(CONSUMER_SESSION_CURRENT_PATH, ({ request }) => {
+        deleteCalls += 1
+        sentCsrfHeader = request.headers.get('X-CSRF-TOKEN')
+        return successResponse(null)
+      }),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    expect(deleteCalls).toBe(1)
+    expect(sentCsrfHeader).toBe('token-from-body')
+    expect(signOutNotice()).toBe('none')
+  })
+
+  it('다시 로그인하면 지난 로그아웃 안내를 지운다', async () => {
+    document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_CSRF_PATH, () =>
+        successResponse({ token: 'csrf-value', headerName: 'X-CSRF-TOKEN' }),
+      ),
+      http.delete(CONSUMER_SESSION_CURRENT_PATH, () =>
+        errorResponse(503, 'COMMON_012', '서비스를 이용할 수 없습니다.'),
+      ),
+      http.post(CONSUMER_SESSIONS_PATH, () =>
+        successResponse(tokenData('next-token')),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(signOutNotice()).toBe('unconfirmed'))
+
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+
+    await waitFor(() => expect(status()).toBe('authenticated'))
+    expect(signOutNotice()).toBe('none')
   })
 
   it('로그아웃 뒤 보호 API에 이전 토큰을 보내지 않는다', async () => {

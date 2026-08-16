@@ -10,7 +10,7 @@ import {
 import type { ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createApiClient, type ApiClient } from '../../shared/api/client'
-import { isApiError } from '../../shared/api/apiError'
+import { isApiError, isNetworkError } from '../../shared/api/apiError'
 import { clearConsumerProtectedQueries } from '../../shared/api/consumerSession'
 import {
   prepareConsumerCsrfToken,
@@ -19,7 +19,7 @@ import {
   signOutConsumer,
   type LoginRequest,
 } from './api/consumerAuthApi'
-import { isRefreshableAuthError } from './model/authErrors'
+import { AuthErrorCode, isRefreshableAuthError } from './model/authErrors'
 import { CONSUMER_CSRF_COOKIE, readCookie } from './model/csrfCookie'
 
 /**
@@ -33,12 +33,69 @@ export type ConsumerAuthStatus =
   | 'authenticated'
   | 'unauthenticated'
 
+/**
+ * 로그아웃에서 서버 세션 폐기가 확인됐는지.
+ *
+ * 로컬 자격은 어느 쪽이든 무조건 비운다. 두 값의 차이는 사용자에게 무엇을
+ * 알리느냐다. `unconfirmed`는 이 기기에서는 나갔지만 서버 Refresh family가
+ * 살아 있을 수 있다는 뜻이라, 공용 PC에서는 사용자가 조치를 더 해야 한다.
+ */
+export type SignOutOutcome = 'revoked' | 'unconfirmed'
+
 export interface ConsumerAuthContextValue {
   status: ConsumerAuthStatus
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
   signIn: (credentials: LoginRequest) => Promise<void>
-  signOut: () => Promise<void>
+  signOut: () => Promise<SignOutOutcome>
+  /**
+   * 마지막 로그아웃에서 서버 폐기를 확인하지 못했을 때만 채워진다.
+   *
+   * provider가 들고 있는 이유는 로그아웃 직후 화면이 이동하기 때문이다.
+   * 버튼이 있던 컴포넌트에 두면 이동하면서 안내가 함께 사라진다.
+   */
+  signOutNotice: SignOutOutcome | null
+  dismissSignOutNotice: () => void
+}
+
+/**
+ * 서버에 폐기할 세션이 애초에 없다는 뜻의 코드다. 폐기 실패가 아니다.
+ *
+ * CSRF 거절(`AUTH_009`)과 Origin 거절(`AUTH_010`)은 여기 없다. 계약이 이
+ * endpoint의 403을 `CsrfRejected`로 정의하는데, 그건 서버가 요청을 처리하지
+ * 않았다는 뜻이라 세션이 그대로 살아 있다. status가 아니라 code로 갈라야
+ * 이 둘을 구분할 수 있다.
+ */
+const SESSION_ALREADY_GONE = new Set<string>([
+  AuthErrorCode.REFRESH_TOKEN_REQUIRED,
+  AuthErrorCode.REFRESH_TOKEN_INVALID,
+])
+
+/**
+ * 서버 세션을 폐기하고 결과만 판정한다. 로컬 정리는 호출자가 무조건 한다.
+ *
+ * CSRF 쿠키를 읽지 못해도 요청을 건너뛰지 않는다. 건너뛰면 화면만 로그아웃되고
+ * 서버 Refresh family는 살아 있는데 아무 신호도 남지 않는다. 준비 응답이 주는
+ * token은 쿠키에 담긴 것과 같은 값이므로 그 값으로 헤더를 채워 실제로 보낸다.
+ * 쿠키가 브라우저에서도 빠져 있었다면 서버가 `AUTH_009`로 거절하고, 그 거절은
+ * "조용한 생략"과 달리 미확인으로 집계된다.
+ */
+async function revokeConsumerServerSession(): Promise<SignOutOutcome> {
+  try {
+    const prepared = await prepareConsumerCsrfToken()
+    await signOutConsumer(readCookie(CONSUMER_CSRF_COOKIE) ?? prepared)
+    return 'revoked'
+  } catch (error) {
+    if (isApiError(error)) {
+      return SESSION_ALREADY_GONE.has(error.code) ? 'revoked' : 'unconfirmed'
+    }
+    // 서버에 닿지 못했으면 폐기됐는지 알 수 없다.
+    if (isNetworkError(error)) {
+      return 'unconfirmed'
+    }
+    // 우리 쪽 결함이다. 로그아웃 결과로 뭉뚱그리지 않는다.
+    throw error
+  }
 }
 
 const ConsumerAuthContext = createContext<ConsumerAuthContextValue | null>(null)
@@ -66,6 +123,9 @@ export function useConsumerAuth(): ConsumerAuthContextValue {
 export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   const accessTokenRef = useRef<string | null>(null)
   const [status, setStatus] = useState<ConsumerAuthStatus>('restoring')
+  const [signOutNotice, setSignOutNotice] = useState<SignOutOutcome | null>(
+    null,
+  )
 
   /**
    * 진행 중인 재발급을 공유한다.
@@ -148,32 +208,41 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       const token = await signInConsumer(credentials)
       accessTokenRef.current = token.accessToken
       setStatus('authenticated')
+      // 새 세션이 열렸으므로 지난 로그아웃 안내는 더 이상 보여 줄 것이 아니다.
+      setSignOutNotice(null)
     },
     [queryClient],
   )
 
-  const signOut = useCallback(async () => {
+  /**
+   * 로그아웃.
+   *
+   * 서버 폐기 성공 여부와 무관하게 로컬 자격은 반드시 비운다. 다만 폐기하지
+   * 못한 것을 성공과 같은 화면으로 끝내지 않는다. 서버가 "폐기하지 못했다"고
+   * 답했는데 화면이 로그아웃 완료로 보이면 공용 PC에서 세션이 살아남는다.
+   */
+  const signOut = useCallback(async (): Promise<SignOutOutcome> => {
     try {
-      // 서버가 쿠키를 내려주므로 값을 읽기 전에 준비를 먼저 요청한다.
-      await prepareConsumerCsrfToken()
-      const csrfToken = readCookie(CONSUMER_CSRF_COOKIE)
-      if (csrfToken !== null) {
-        await signOutConsumer(csrfToken)
-      }
-    } catch (error) {
-      // 서버 정리에 실패해도 클라이언트 메모리는 반드시 비운다.
-      // 401·403은 이미 세션이 없다는 뜻이므로 사용자에게 되묻지 않는다.
-      if (!isApiError(error)) {
-        throw error
-      }
+      const outcome = await revokeConsumerServerSession()
+      setSignOutNotice(outcome === 'unconfirmed' ? outcome : null)
+      return outcome
     } finally {
       clearSession()
     }
   }, [clearSession])
 
+  const dismissSignOutNotice = useCallback(() => setSignOutNotice(null), [])
+
   const value = useMemo(
-    () => ({ status, apiClient, signIn, signOut }),
-    [status, apiClient, signIn, signOut],
+    () => ({
+      status,
+      apiClient,
+      signIn,
+      signOut,
+      signOutNotice,
+      dismissSignOutNotice,
+    }),
+    [status, apiClient, signIn, signOut, signOutNotice, dismissSignOutNotice],
   )
 
   return (
