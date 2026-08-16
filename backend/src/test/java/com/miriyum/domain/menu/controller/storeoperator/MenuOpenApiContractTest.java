@@ -66,13 +66,57 @@ class MenuOpenApiContractTest {
                 .contains("EGG", "MILK", "SHELLFISH", "PINE_NUT");
     }
 
+    @Test
+    void menuImageSlotMatchesPublicImageUploadContract() throws IOException {
+        Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> imageSlot = map(
+                paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images"));
+        assertThat(imageSlot).containsEntry("x-miriyum-runtime-status", "contract-only");
+        assertThat(imageSlot).containsEntry("x-miriyum-owner-issue", 349);
+        assertThat(imageSlot).containsKeys("put", "delete");
+
+        Map<String, Object> put = map(imageSlot.get("put"));
+        assertThat(put).containsEntry("operationId", "putMenuImage");
+        assertThat(list(put.get("security"))).containsExactly(Map.of("bearerAuth", List.of()));
+        assertThat(list(put.get("parameters"))).contains(
+                Map.of("$ref", "#/components/parameters/StoreId"),
+                Map.of("$ref", "#/components/parameters/MenuId"),
+                Map.of("$ref", "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"));
+        assertThat(map(map(put.get("requestBody")).get("content")))
+                .containsKey("multipart/form-data");
+        assertThat(map(put.get("responses"))).containsEntry("200", Map.of(
+                "description", "저장 또는 교체를 완료한 메뉴 공개 이미지",
+                "content", Map.of("application/json", Map.of(
+                        "schema", Map.of("$ref", "#/components/schemas/MenuPublicImageSuccessResponse")))));
+
+        Map<String, Object> delete = map(imageSlot.get("delete"));
+        assertThat(delete).containsEntry("operationId", "deleteMenuImage");
+        assertThat(list(delete.get("parameters"))).contains(
+                Map.of("$ref", "#/components/parameters/StoreId"),
+                Map.of("$ref", "#/components/parameters/MenuId"),
+                Map.of("$ref", "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"));
+        assertThat(map(delete.get("responses"))).containsKeys("204", "400");
+
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> schemas = map(components.get("schemas"));
+        Map<String, Object> menuImage = map(schemas.get("MenuPublicImage"));
+        assertThat(list(menuImage.get("required"))).containsExactly("url");
+        assertThat(map(menuImage.get("properties"))).containsOnlyKeys("url");
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> map(Object value) {
         return (Map<String, Object>) value;
     }
 
     @SuppressWarnings("unchecked")
-    private static List<String> list(Object value) {
-        return (List<String>) value;
+    private static List<Object> list(Object value) {
+        return (List<Object>) value;
     }
 }
