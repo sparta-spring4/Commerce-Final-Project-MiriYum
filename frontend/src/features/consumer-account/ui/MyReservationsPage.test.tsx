@@ -110,10 +110,26 @@ describe('내 예약 내역', () => {
     await waitFor(() => expect(receivedSearch?.has('status')).toBe(false))
   })
 
+  it('노쇼 상태를 필터로 전달하고 negative 배지로 표시한다', async () => {
+    respondWith(reservationHistoryItem({ status: 'NO_SHOW' }))
+
+    renderList(`${ROUTES.myReservations}?status=NO_SHOW`)
+
+    await screen.findByRole('link', { name: '파스타 마스터즈' })
+    expect(receivedSearch?.get('status')).toBe('NO_SHOW')
+    expect(screen.getByRole('button', { name: '노쇼' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(within(screen.getByRole('listitem')).getByText('노쇼')).toHaveClass(
+      'mi-badge--negative',
+    )
+  })
+
   it('계약에 없는 상태값은 무시하고 전체로 조회한다', async () => {
     respondWith(reservationHistoryItem())
 
-    renderList(`${ROUTES.myReservations}?status=NO_SHOW`)
+    renderList(`${ROUTES.myReservations}?status=WAITING`)
 
     await screen.findByRole('link', { name: '파스타 마스터즈' })
     expect(receivedSearch?.has('status')).toBe(false)
@@ -171,13 +187,13 @@ describe('내 예약 내역', () => {
     ).toBeInTheDocument()
   })
 
-  it('결제·노쇼·체크인 항목을 만들지 않는다', async () => {
+  it('계약에 없는 결제·체크인·웨이팅 항목을 만들지 않는다', async () => {
     respondWith(reservationHistoryItem())
 
     renderList()
     await screen.findByRole('link', { name: '파스타 마스터즈' })
 
-    for (const label of ['결제', '노쇼', '체크인', '웨이팅']) {
+    for (const label of ['결제', '체크인', '웨이팅']) {
       expect(screen.queryByText(new RegExp(label))).not.toBeInTheDocument()
     }
   })

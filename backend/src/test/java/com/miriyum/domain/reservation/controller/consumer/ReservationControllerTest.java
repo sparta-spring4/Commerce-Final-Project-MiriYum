@@ -19,6 +19,7 @@ import com.miriyum.domain.reservation.dto.request.ConsumerCancellationRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
 import com.miriyum.domain.reservation.dto.response.CustomerReservationTimeStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationCheckInQrGrantResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryItemResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationMenuSelectionResponse;
@@ -33,6 +34,8 @@ import com.miriyum.domain.reservation.service.ReservationCancellationCommandResu
 import com.miriyum.domain.reservation.service.ReservationDepositCommandResult;
 import com.miriyum.domain.reservation.service.ReservationDepositProcessCommandFacade;
 import com.miriyum.domain.reservation.service.ReservationDepositProcessService;
+import com.miriyum.domain.reservation.service.ReservationCheckInQrGrantCommandFacade;
+import com.miriyum.domain.reservation.service.ReservationCheckInQrGrantResult;
 import com.miriyum.domain.reservation.service.ReservationService;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.exception.GlobalExceptionHandler;
@@ -63,6 +66,7 @@ class ReservationControllerTest {
     private static final String DETAIL_URL = "/api/v1/consumers/me/reservations/77";
     private static final String ROOT_URL = "/api/v1/consumers/me/reservations";
     private static final String HISTORY_URL = "/api/v1/consumers/me/reservations";
+    private static final String QR_GRANT_URL = DETAIL_URL + "/check-in-qr-grants";
     private static final String IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440000";
     private static final String REQUEST_URL =
             "/api/v1/consumers/me/reservation-requests/901";
@@ -84,6 +88,9 @@ class ReservationControllerTest {
 
     @MockitoBean
     private ReservationDepositProcessService reservationDepositProcessService;
+
+    @MockitoBean
+    private ReservationCheckInQrGrantCommandFacade qrGrantFacade;
 
     @MockitoBean
     private ConsumerAccountService consumerAccountService;
@@ -235,6 +242,30 @@ class ReservationControllerTest {
     }
 
     @Test
+    void issuesQrGrantWithoutBodyOrIdempotencyKey() throws Exception {
+        authenticateConsumer(11L);
+        OffsetDateTime issuedAt = OffsetDateTime.parse("2026-08-16T01:00:00Z");
+        given(qrGrantFacade.issue(11L, 77L)).willReturn(new ReservationCheckInQrGrantResult(
+                201,
+                new ReservationCheckInQrGrantResponse(
+                        "77",
+                        "rqg_v1_" + "A".repeat(43),
+                        3L,
+                        issuedAt,
+                        issuedAt.plusSeconds(30)
+                )
+        ));
+
+        mockMvc.perform(post(QR_GRANT_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.reservationId").value("77"))
+                .andExpect(jsonPath("$.data.tokenVersion").value(3));
+
+        then(qrGrantFacade).should().issue(11L, 77L);
+    }
+
+    @Test
     void returnsAuthenticatedConsumersReservationHistory() throws Exception {
         authenticateConsumer(11L);
         ReservationHistoryPageResponse page = new ReservationHistoryPageResponse(
@@ -268,6 +299,24 @@ class ReservationControllerTest {
                 11L,
                 ReservationHistorySearchRequest.from(
                         "CONFIRMED", 0, 20, "serviceDate,asc"));
+    }
+
+    @Test
+    @DisplayName("소비자 예약 내역은 NO_SHOW 상태를 조회 조건으로 전달한다")
+    void acceptsNoShowReservationHistoryStatus() throws Exception {
+        authenticateConsumer(11L);
+        given(reservationService.getConsumerReservationHistory(
+                11L, ReservationHistorySearchRequest.from("NO_SHOW", null, null, null)))
+                .willReturn(new ReservationHistoryPageResponse(
+                        List.of(), new PageMetadata(0, 20, 0, 0, false)));
+
+        mockMvc.perform(get(HISTORY_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer consumer-token")
+                        .queryParam("status", "NO_SHOW"))
+                .andExpect(status().isOk());
+
+        then(reservationService).should().getConsumerReservationHistory(
+                11L, ReservationHistorySearchRequest.from("NO_SHOW", null, null, null));
     }
 
     @Test

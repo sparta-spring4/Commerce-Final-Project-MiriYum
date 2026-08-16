@@ -7,11 +7,12 @@ export type ReservationHistoryStatus =
   components['schemas']['ReservationHistoryStatus']
 export type ReservationDetail = components['schemas']['ReservationDetail']
 
-/** 계약이 정한 예약 내역 상태. 결제·노쇼·체크인 상태를 섞지 않는다. */
+/** 계약이 정한 예약 내역 상태. 결제·체크인 같은 별도 상태를 섞지 않는다. */
 export const RESERVATION_STATUSES: readonly ReservationHistoryStatus[] = [
   'CONFIRMED',
   'CANCELLED',
   'FULFILLED',
+  'NO_SHOW',
 ]
 
 export const RESERVATION_STATUS_LABEL: Record<ReservationHistoryStatus, string> =
@@ -19,6 +20,7 @@ export const RESERVATION_STATUS_LABEL: Record<ReservationHistoryStatus, string> 
     CONFIRMED: '예약 확정',
     CANCELLED: '취소됨',
     FULFILLED: '방문 완료',
+    NO_SHOW: '노쇼',
   }
 
 export const RESERVATION_STATUS_TONE: Record<
@@ -28,6 +30,7 @@ export const RESERVATION_STATUS_TONE: Record<
   CONFIRMED: 'positive',
   CANCELLED: 'neutral',
   FULFILLED: 'attention',
+  NO_SHOW: 'negative',
 }
 
 /** 계약이 정한 정렬. 그 밖의 값은 서버가 400을 반환한다. */

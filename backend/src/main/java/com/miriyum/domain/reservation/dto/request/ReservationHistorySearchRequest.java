@@ -7,7 +7,7 @@ import java.util.Arrays;
 /**
  * 일반 사용자 예약 내역의 상태·페이지·정렬 조회 조건이다.
  *
- * @param status 선택한 1차 MVP 예약 상태, 전체 조회이면 {@code null}
+ * @param status 선택한 공개 예약 상태, 전체 조회이면 {@code null}
  * @param page 0부터 시작하는 페이지 번호
  * @param size 페이지 크기
  * @param order 승인된 단일 정렬
@@ -56,12 +56,13 @@ public record ReservationHistorySearchRequest(
     }
 
     /**
-     * 마이페이지에 공개하는 1차 MVP 예약 상태다.
+     * 마이페이지에 공개하는 예약 상태다.
      */
     public enum Status {
         CONFIRMED,
         CANCELLED,
-        FULFILLED;
+        FULFILLED,
+        NO_SHOW;
 
         private static Status fromNullable(String value) {
             if (value == null) {

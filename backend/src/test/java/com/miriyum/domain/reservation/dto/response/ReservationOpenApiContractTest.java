@@ -85,7 +85,7 @@ class ReservationOpenApiContractTest {
         );
 
         assertThat(paths.keySet())
-                .hasSize(14)
+                .hasSize(17)
                 .contains("/api/v1/consumers/me/reservations")
                 .contains(
                         "/api/v1/consumers/me/reservation-requests/{reservationRequestId}",
@@ -581,21 +581,13 @@ class ReservationOpenApiContractTest {
                 "ReservationHistoryPageData"
         );
         assertThat(list(map(reservationSchemas.get("ReservationHistoryStatus")).get("enum")))
-                .containsExactly("CONFIRMED", "CANCELLED", "FULFILLED");
+                .containsExactly("CONFIRMED", "CANCELLED", "FULFILLED", "NO_SHOW");
 
         Map<String, Object> item = map(reservationSchemas.get("ReservationHistoryItem"));
-        assertCustomerTimeShape(
-                item,
-                "#/components/schemas/ReservationTimeStatus"
-        );
+        assertCustomerTimeShape(item, "#/components/schemas/ReservationTimeStatus");
         assertThat(map(item.get("properties")))
                 .containsKeys(
-                        "reservationId",
-                        "storeId",
-                        "storeName",
-                        "partySize",
-                        "status",
-                        "createdAt"
+                        "reservationId", "storeId", "storeName", "partySize", "status", "createdAt"
                 )
                 .doesNotContainKeys("startTime", "endTime", "cancelledBy");
 
@@ -603,15 +595,14 @@ class ReservationOpenApiContractTest {
                 map(reservationSchemas.get("ReservationHistoryPageData")).get("properties")
         );
         assertThat(map(map(pageProperties.get("items")).get("items"))).containsEntry(
-                "$ref",
-                "#/components/schemas/ReservationHistoryItem"
+                "$ref", "#/components/schemas/ReservationHistoryItem"
         );
         Map<String, Object> successProperties = map(
-                map(reservationSchemas.get("ReservationHistoryPageSuccessResponse")).get("properties")
+                map(reservationSchemas.get("ReservationHistoryPageSuccessResponse"))
+                        .get("properties")
         );
         assertThat(map(successProperties.get("data"))).containsEntry(
-                "$ref",
-                "#/components/schemas/ReservationHistoryPageData"
+                "$ref", "#/components/schemas/ReservationHistoryPageData"
         );
 
         Map<String, Object> reservationPaths = map(reservation.get("paths"));
@@ -624,8 +615,7 @@ class ReservationOpenApiContractTest {
                 .findFirst()
                 .orElseThrow();
         assertThat(map(statusParameter.get("schema"))).containsEntry(
-                "$ref",
-                "#/components/schemas/ReservationHistoryStatus"
+                "$ref", "#/components/schemas/ReservationHistoryStatus"
         );
         Map<String, Object> sortParameter = list(operation.get("parameters")).stream()
                 .map(ReservationOpenApiContractTest::map)
@@ -634,13 +624,82 @@ class ReservationOpenApiContractTest {
                 .orElseThrow();
         assertThat(list(map(sortParameter.get("schema")).get("enum")))
                 .containsExactly(
-                        "createdAt,desc",
-                        "createdAt,asc",
-                        "serviceDate,desc",
-                        "serviceDate,asc",
-                        "startAt,desc",
-                        "startAt,asc"
+                        "createdAt,desc", "createdAt,asc",
+                        "serviceDate,desc", "serviceDate,asc",
+                        "startAt,desc", "startAt,asc"
                 );
+    }
+
+    @Test
+    void qrCheckInAndNoShowOperationsKeepStrictLaterStageContracts() throws IOException {
+        Map<String, Object> document = load(
+                Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
+        );
+        Map<String, Object> paths = map(document.get("paths"));
+        List<OperationContract> contracts = List.of(
+                new OperationContract(
+                        "/api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants",
+                        "post", "issueReservationCheckInQrGrant", null,
+                        Set.of("201", "400", "401", "403", "404", "409", "503")),
+                new OperationContract(
+                        "/api/v1/store-operators/stores/{storeId}/reservation-check-ins",
+                        "post", "checkInReservationByQr",
+                        "#/components/schemas/ReservationCheckInRequest",
+                        Set.of("200", "400", "401", "403", "404", "409", "503")),
+                new OperationContract(
+                        "/api/v1/store-operators/stores/{storeId}/reservations/"
+                                + "{reservationId}/no-shows",
+                        "post", "markReservationNoShow",
+                        "#/components/schemas/ReservationNoShowRequest",
+                        Set.of("200", "400", "401", "403", "404", "409"))
+        );
+
+        assertThat(contracts).allSatisfy(contract -> {
+            Map<String, Object> pathItem = map(paths.get(contract.path()));
+            assertThat(pathItem)
+                    .doesNotContainKeys("x-miriyum-runtime-status", "x-miriyum-owner-issue");
+            Map<String, Object> operation = map(pathItem.get(contract.method()));
+            assertThat(operation).containsEntry("operationId", contract.operationId());
+            assertThat(map(operation.get("responses")).keySet())
+                    .containsExactlyInAnyOrderElementsOf(contract.responseStatuses());
+            if (contract.requestSchemaRef() == null) {
+                assertThat(operation).doesNotContainKey("requestBody");
+                assertThat(list(operation.get("parameters"))).noneSatisfy(parameter ->
+                        assertThat(map(parameter)).containsEntry(
+                                "$ref",
+                                "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                        ));
+            } else {
+                Map<String, Object> json = map(map(
+                        map(operation.get("requestBody")).get("content")
+                ).get("application/json"));
+                assertThat(map(json.get("schema")))
+                        .containsEntry("$ref", contract.requestSchemaRef());
+                assertThat(list(operation.get("parameters"))).anySatisfy(parameter ->
+                        assertThat(map(parameter)).containsEntry(
+                                "$ref",
+                                "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"
+                        ));
+            }
+        });
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> qrRequest = map(schemas.get("ReservationCheckInRequest"));
+        assertThat(qrRequest).containsEntry("additionalProperties", false);
+        assertThat(list(qrRequest.get("required"))).containsExactly("qrToken");
+        assertThat(map(map(qrRequest.get("properties")).get("qrToken")))
+                .containsEntry("pattern", "^rqg_v1_[A-Za-z0-9_-]{43}$");
+        Map<String, Object> noShowRequest = map(schemas.get("ReservationNoShowRequest"));
+        assertThat(noShowRequest).containsEntry("additionalProperties", false);
+        assertThat(list(noShowRequest.get("required"))).containsExactly("reason");
+        assertThat(list(map(schemas.get("ReservationNoShowReason")).get("enum")))
+                .containsExactly(
+                        "USER_CAUSE_CANDIDATE",
+                        "STORE_CAUSE_CANDIDATE",
+                        "PLATFORM_EXTERNAL_CAUSE_CANDIDATE",
+                        "UNCLEAR"
+                );
+
     }
 
     @Test

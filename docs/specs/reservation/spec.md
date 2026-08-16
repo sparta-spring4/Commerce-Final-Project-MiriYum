@@ -1,12 +1,12 @@
 # 기능 명세: 일반 예약
 
-> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약·runtime 활성)
-> 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약
+> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약·runtime 활성, Issue #240 체크인·노쇼 활성)
+> 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약·회전형 QR 체크인·운영자 노쇼
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
-> 관련 정책 ID: RES-001~RES-015의 1차 범위, HOLD-004, HOLD-007, PAY-001~PAY-010, S-001~S-003, E-003, E-005, C-001~C-013
+> 관련 정책 ID: RES-001~RES-015의 1차 범위, CHECK-001·CHECK-003·CHECK-005~CHECK-007·CHECK-010, HOLD-004, HOLD-007, PAY-001~PAY-010, S-001~S-003, E-003, E-005, C-001~C-013
 > OpenAPI: `docs/specs/reservation/openapi.yaml`
-> 최종 승인일: 2026-08-14
+> 최종 승인일: 2026-08-16
 
 ## 범위
 
@@ -16,6 +16,8 @@
 - 선택 메뉴 홀드와 예약의 원자적 생성
 - 본인 예약 상세·취소
 - 매장 운영자의 매장별 예약 조회·취소·방문 완료
+- 일반 사용자의 예약별 30초 회전형 opaque QR grant 발급
+- 매장 운영자의 QR 스캔 방문 완료와 공통 5분 경계 뒤 필수 사유 노쇼 확정
 - 날짜·시간 구간별 예약 가능 인원·팀 수 설정
 - 매장별 예약 시간 정책 버전과 실제 서비스·점유 종료 계산
 - 중복 예약 방지와 동시 수용량 처리
@@ -26,7 +28,7 @@
 - 예약 변경·시간 이동·인원 변경
 - 매장 승인·거절 대기
 - frontend 결제 SDK·화면과 확정 Reservation의 금전 취소·노쇼 환불 정책
-- 체크인·노쇼
+- 일회 확인번호·일부 인원 체크인·매장별 체크인 창/지각 설정·6시간 후보·24시간 자동 노쇼·정식 이의/정정
 - 대리 예약·예약 양도·단체 별도 승인
 - 웨이팅 전환·자동 승계
 
@@ -40,15 +42,18 @@
 | 예약금 요청 포기 | `POST .../{reservationRequestId}/abandonments` | 결제 전 사용자 포기와 늦은 결제 보상을 범용 상태 변경 없이 처리 |
 | 본인 상세 | `GET /api/v1/consumers/me/reservations/{reservationId}` | 개인 자원 소유 조건 조회와 상세 계약 제공 |
 | 본인 취소 | `POST .../{reservationId}/cancellations` | 삭제가 아니라 취소 사건·사유·자원 복구를 기록 |
+| 본인 QR grant 발급 | `POST .../{reservationId}/check-in-qr-grants` | raw credential을 발급 성공 응답 한 번에만 반환하고 예약별 최신 version으로 회전 |
 | 운영자 목록·상세 | `/api/v1/store-operators/stores/{storeId}/reservations` | 대상 매장 관리 권한 검증 범위를 경로에 명시 |
 | 운영자 취소 | `POST .../{reservationId}/cancellations` | 사용자 취소와 경로·행위자는 분리하되 같은 예약 조정자 사용 |
-| 방문 완료 | `POST .../{reservationId}/fulfillments` | 범용 status PATCH를 막고 허용 명령만 공개 |
+| 기존 직접 방문 완료 | `POST .../{reservationId}/fulfillments` | QR·시간 판정과 독립된 보조 명령을 보존하고 범용 status PATCH를 차단 |
+| 운영자 QR 체크인 | `POST /api/v1/store-operators/stores/{storeId}/reservation-check-ins` | opaque QR digest로 잠금 대상을 찾고 현재 grant·epoch·시간·상태를 잠금 뒤 재검증 |
+| 운영자 노쇼 확정 | `POST .../{reservationId}/no-shows` | 정확히 `startAt + 5분`부터 필수 후보 사유로 `NO_SHOW` 종결 |
 | 수용량 게시 | `PUT .../reservation-capacities/{serviceDate}` | 날짜별 전체 버킷 설정을 새 버전으로 게시 |
 | 시간 정책 초안 | `PUT /api/v1/store-operators/stores/{storeId}/reservation-time-policies` | 매장별 불변 버전을 먼저 DRAFT로 저장 |
 | 시간 정책 게시 | `POST .../reservation-time-policies/{version}/publications` | 즉시·예약 게시를 명시적 상태 전이로 제한 |
 | 시간 정책 예약 철회 | `POST .../reservation-time-policies/{version}/publication-cancellations` | 효력 전 SCHEDULED만 DRAFT로 되돌림 |
 
-`PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이, 결제·노쇼 상태 선도입과 담당자별 중복 구현을 유발하므로 사용하지 않는다.
+`PATCH {status: ...}` 같은 범용 상태 변경 API는 허용되지 않은 전이와 담당자별 중복 구현을 유발하므로 사용하지 않는다. 각 취소·방문 완료·QR 체크인·노쇼 명령 리소스만 승인된 전이를 소유한다.
 
 ## 예약 생성
 
@@ -283,14 +288,46 @@
 - `CANCELLED`, `FULFILLED`에서 새로운 취소 명령을 실행할 수 없다.
 - 취소 주체는 `CONSUMER` 또는 `STORE_OPERATOR` 사건 필드로 기록하며 상태 enum을 늘리지 않는다.
 
-## 방문 완료
+## 방문 완료·회전형 QR·노쇼
 
-- 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 CONFIRMED인 예약의 방문 완료는 허용한다. Reservation과 연결 MenuHold, reservation_fulfillment_audits 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback하며 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
-- 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이할 수 있다.
-- 연결된 `MenuHold`가 있으면 같은 트랜잭션에서 `FULFILLED`로 전이한다.
-- 방문 완료는 메뉴 수량을 복구하지 않는다.
-- 체크인 또는 노쇼를 중간 상태로 만들지 않는다.
-- 이미 종결된 예약을 재활성화하거나 다른 종결 상태로 바꾸지 않는다.
+### 기존 직접 방문 완료 보존
+
+- 활성 매장 운영자의 현재 대표 소유권을 fresh와 replay에서 확인한다. CLOSED·휴점은 신규 거래만 차단하며 이미 `CONFIRMED`인 예약의 방문 완료는 허용한다.
+- `POST /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/fulfillments`는 QR·시간·노쇼와 독립된 기존 보조 명령으로 유지한다. Reservation과 연결 MenuHold, `reservation_fulfillment_audits` 성공 감사, 멱등 성공 결과는 한 트랜잭션에서 모두 commit하거나 rollback한다.
+- 유효한 매장 운영자만 대상 매장의 `CONFIRMED` 예약을 `FULFILLED`로 전이하며 연결 MenuHold도 `FULFILLED`로 종결한다.
+
+### QR grant 발급·회전
+
+- 일반 사용자는 `POST /api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants`로 본인 `CONFIRMED` 예약의 grant를 발급한다. request body와 `Idempotency-Key`는 없고 성공은 `201`이다.
+- 응답은 `reservationId`, raw `qrToken`, 1 이상의 `tokenVersion`, `issuedAt`, `expiresAt`을 포함한다. 이 credential-mint 응답만 raw token을 반환할 수 있다.
+- token은 JWT가 아닌 server-stored opaque credential이다. `SecureRandom` CSPRNG 32바이트를 base64url padding 없이 인코딩하고 `rqg_v1_` prefix를 붙인다. 서버에는 전체 raw token의 SHA-256 digest만 저장한다.
+- TTL은 정확히 30초이고 유효 구간은 `[issuedAt, expiresAt)`이다. 예약별 current grant 행 하나에서 `tokenVersion`을 1부터 단조 증가시키며 rotation overlap은 없다.
+- 병렬 발급은 `Reservation → current grant` 잠금 순서로 직렬화한다. 두 요청이 모두 성공할 수 있지만 잠금 뒤 가장 큰 version만 유효하며 클라이언트도 가장 큰 version만 사용한다.
+- 발급 facade는 transaction 밖에서 raw token/digest를 만들고 Auth `ConsumerQrEpochService.captureCurrent(consumerAccountId)`를 호출한다. transaction 안에서는 잠근 Reservation의 본인 소유·`CONFIRMED` 상태를 다시 확인하고 snapshot·digest만 저장한다. 생성·Valkey 실패는 `COMMON_012`이며 raw token을 반환하지 않는다.
+
+### 운영자 QR 스캔
+
+- 운영자는 `POST /api/v1/store-operators/stores/{storeId}/reservation-check-ins`에 `Idempotency-Key`와 strict body `{ "qrToken": "rqg_v1_<43-char-base64url>" }`을 보낸다. unknown field는 거부하고 request fingerprint에는 raw token 대신 SHA-256 digest만 포함한다.
+- scan window는 서버 `Clock` 기준 정확히 `[startAt, startAt + 5분)`이다. 시작은 포함하고 정확히 `+5분`부터 신규 QR 성공은 거부한다.
+- fresh 순서는 `현재 operator/store authority → idempotency claim → digest preliminary lookup → Reservation FOR UPDATE → current grant FOR UPDATE → digest/current version/expiry/미소비 재검증 → Auth requireCurrent → 시간/상태 재검증 → MenuHold termination lock → Reservation FULFILLED → MenuHold fulfill → 기존 fulfillment audit + QR audit → grant consumed → 멱등 결과 → commit`이다.
+- preliminary unlocked lookup은 잠글 Reservation ID를 찾기 위한 힌트일 뿐 권한·성공·변경 근거가 아니다. 두 잠금 뒤 digest·version·expiry·소비·계정·epoch·매장·시간·상태를 전부 다시 검증한다.
+- Auth 검증은 잠근 Reservation의 `consumerAccountId`와 저장 `ConsumerQrEpochSnapshot`을 `ConsumerQrEpochService.requireCurrent`에 전달한다. stale·account mismatch는 현재 epoch를 노출하지 않는 `AUTH_017`, Valkey 장애는 `COMMON_012`다. logout epoch increment 전 current 판정은 성공할 수 있고 increment 뒤 판정은 실패하는 #305 linearization을 유지하며 분산 transaction은 만들지 않는다.
+- 성공 replay는 현재 operator/store authority를 다시 확인한 뒤 저장 결과를 반환한다. raw QR·digest·expiry·epoch·시간·이미 바뀐 Reservation 상태는 다시 검증하지 않는다.
+- 성공은 기존 `ReservationFulfillmentAudit` 한 건과 QR 전용 audit를 함께 기록한다. QR audit는 방식·tokenVersion·행위자·시각·전이 상태·commandId만 보존하고 raw token·digest·opaque epoch를 복제하지 않는다.
+
+### 운영자 노쇼 확정
+
+- 운영자는 `POST /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows`에 `Idempotency-Key`와 strict body `{ "reason": "<ReservationNoShowReason>" }`을 보낸다.
+- reason은 `USER_CAUSE_CANDIDATE`, `STORE_CAUSE_CANDIDATE`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE`, `UNCLEAR` 중 하나이며 필수이고 기본값이 없다. 후보 분류는 금전 귀책을 확정하지 않는다.
+- fresh 순서는 `현재 operator/store authority → idempotency claim → Reservation FOR UPDATE → CONFIRMED·now >= startAt+5분·필수 reason → MenuHold termination lock → Reservation NO_SHOW → MenuHold FORFEITED → no-show audit → 멱등 결과 → commit`이다.
+- `FORFEITED`는 수량 무복구 종결이다. 수용량·allocation·메뉴 재고·수량·return ledger·transfer·Payment를 조회하거나 변경하지 않으며 Issue #240은 금전 명령을 실행·enqueue하지 않는다.
+- replay는 현재 operator/store authority만 다시 확인하고 저장된 성공 결과를 반환한다. 같은 키를 다른 reservation/store/reason에 사용하면 `COMMON_007`이다.
+
+### 단일 종결 승자
+
+- QR scan, no-show, 기존 직접 방문 완료, cancellation은 모두 Reservation 행을 먼저 잠그므로 하나의 종결 전이만 성공한다. QR/no-show는 이어서 #385의 같은 MenuHold termination lock을 사용한다.
+- `CANCELLED`, `FULFILLED`, `NO_SHOW`는 종결 상태다. 재활성화하거나 다른 종결 상태로 바꾸지 않으며 후속 감사·grant 소비·MenuHold 전이 중 하나라도 실패하면 멱등 기록을 포함해 전부 rollback한다.
+- `FULFILLED`와 `NO_SHOW`는 수용량·allocation·메뉴 재고·수량 원장을 조회하거나 복구하지 않는다.
 
 ## 오류 코드
 
@@ -306,12 +343,15 @@
 | `RESERVATION_008` | 409 | 수용량 설정이 시간대·현재 점유와 충돌 |
 | `RESERVATION_009` | 409 | 요청 인원이 매장 최소·최대 정책을 벗어남 |
 | `RESERVATION_010` | 409 | 대상 시간 정책 버전·상태·게시 유일성 때문에 lifecycle 명령 불가 |
+| `RESERVATION_011` | 409 | 잘 형성된 QR이 부재·교체·만료·소비됐거나 잠금 뒤 current grant와 일치하지 않음 |
+| `RESERVATION_012` | 409 | 현재 중앙 시각이 QR scan window 밖임 |
+| `RESERVATION_013` | 409 | 아직 `startAt + 5분` 경계 전이라 노쇼를 확정할 수 없음 |
 
-메뉴 자격·수량 부족은 `MENU_HOLD_###`, 매장 상태·소속은 `STORE_###` 오류를 그대로 사용한다. 다른 도메인 오류를 편의상 RESERVATION 코드로 변환하지 않는다.
+QR 패턴·필수값 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON·타입·enum·unknown field는 `COMMON_002`, Auth epoch stale/mismatch는 `AUTH_017`, Valkey·credential 생성 실패는 `COMMON_012`다. 메뉴 자격·수량 부족은 `MENU_HOLD_###`, 매장 상태·소속은 `STORE_###` 오류를 그대로 사용한다. 다른 도메인 오류를 편의상 RESERVATION 코드로 변환하지 않는다.
 
 ## 트랜잭션·동시성·재시도
 
-- 생성·취소·방문 완료·수용량 게시·시간 정책 lifecycle 명령은 모두 `Idempotency-Key`를 요구한다.
+- 생성·취소·기존 방문 완료·QR 스캔·노쇼·수용량 게시·시간 정책 lifecycle 명령은 `Idempotency-Key`를 요구한다. QR grant 발급은 예외로, key 없이 매 호출 새 version으로 회전한다.
 - 조정하는 `ReservationService`가 C-007의 5초 트랜잭션 경계와 `READ_COMMITTED`를 사용한다.
 - 메뉴 홀드 생성·해제는 예약 소유 `ReservationMenuHoldPort`와 MenuHold 소유 `ReservationMenuHoldAdapter`를 통하며, MenuHold의 예약 시간 조회는 좁은 `ReservationTimeResolutionService`를 사용한다.
 - 시간 정책 명령의 잠금 순서는 멱등 기록 → Store 행 → 대상 정책 → 현재 ACTIVE다.
@@ -320,6 +360,7 @@
 - 수용량·중복·상태·메뉴 재고 부족은 업무 결과이므로 자동 재시도하지 않는다.
 - 최종 충돌은 `COMMON_008`을 사용하고 성공이나 자원 부족을 추측하지 않는다.
 - H2·mock만으로 동시성 성공을 주장하지 않고 Testcontainers MySQL에서 마지막 수용량과 메뉴 수량 경합을 검증한다.
+- QR/no-show의 MySQL 업무 transaction도 `READ_COMMITTED`, timeout 5초를 사용한다. 교착·lock timeout·낙관 충돌만 transaction 밖에서 최초 실행 포함 최대 3회 재시도하고, QR·시간·상태·권한 같은 업무 거절은 재시도하지 않는다.
 
 ## Migration·호환성 요구
 
@@ -331,6 +372,10 @@
 - V15의 `serviceDate + startTime + endTime` 행은 offset을 추측해 소급 변환하지 않는다. 새 migration은 기존 값을 보존하고 Instant 스냅샷이 없는 과거 행을 신규 가용성 근거로 사용하지 않으며 고객 조회에는 `LEGACY_UNRESOLVED`를 명시한다.
 - 매장 폐점·메뉴 종료·계정 정지가 과거 예약 행을 연쇄 삭제하지 않는다.
 - 2차·고도화 상태를 추가할 때 기존 1차 enum 의미와 공개 코드를 재사용하지 않는다.
+- V49 `V49__add_reservation_check_in_no_show.sql`은 `reservations`에 `NO_SHOW`와 nullable `no_show_at`을 추가하고, `cancelled_at`·`fulfilled_at`·`no_show_at`의 상태 일치 CHECK를 갱신한다. 과거 행을 `NO_SHOW`로 추정 backfill하지 않는다.
+- V49는 reservation별 current QR grant 한 행, unique SHA-256 digest, 양수 version, Auth snapshot, 정확한 30초 issued/expires와 consumed 시각을 보존하는 `reservation_check_in_qr_grants`를 만든다.
+- V49는 append-only `reservation_check_in_audits`와 reservation별 성공 한 건의 `reservation_no_show_audits`를 만들고 actor·이벤트·reason·전이·정책·command 유일성/CHECK를 DB에서 방어한다. raw QR·digest·opaque epoch는 audit에 복제하지 않는다.
+- migration 순서는 #385 MenuHold `FORFEITED` V48 뒤 #240 V49이며, Draft #382는 V50 이상으로 조정한다.
 
 ## 인수 조건
 
@@ -340,8 +385,13 @@
 - 같은 멱등 키 재전송과 같은 사용자 중복 예약이 별도 예약·이중 차감을 만들지 않는다.
 - 일반 사용자 개인 자원의 부재와 다른 사용자 소유가 같은 404다.
 - 취소가 예약·수용량·메뉴 홀드·수량을 한 번만 종결·복구한다.
-- 방문 완료가 수량을 복구하거나 체크인·노쇼 상태를 만들지 않는다.
-- 범용 status PATCH, 결제·환불·NO_SHOW·CHANGE_PENDING API가 없다.
+- 기존 직접 방문 완료가 QR·시간 판정과 독립적으로 유지되고 수량을 복구하지 않는다.
+- QR 발급은 raw token을 성공 응답 한 번에만 반환하고 서버에는 digest만 저장하며 30초·latest version only·무중첩 rotation을 지킨다.
+- QR scan은 `[startAt, startAt + 5분)` 경계와 Auth epoch를 검증하고 성공 시 Reservation/MenuHold/기존 fulfillment audit/QR audit/grant 소비/멱등 결과를 한 번만 함께 commit한다.
+- 정확히 `startAt + 5분`부터 필수 후보 reason의 no-show가 Reservation `NO_SHOW`, MenuHold `FORFEITED`, audit와 멱등 결과를 함께 commit한다.
+- QR/no-show replay는 현재 매장 권한만 다시 확인하고 저장된 성공을 반환하며 raw QR·expiry·epoch·시간·과거 상태를 다시 검증하지 않는다.
+- QR scan, no-show, direct fulfillment, cancellation 경합은 하나의 종결 상태만 남기고 no-show는 수용량·allocation·inventory·return ledger·transfer·money를 조회·복구·생성하지 않는다.
+- 범용 status PATCH, 결제·환불·CHANGE_PENDING API가 없다.
 - 같은 시작 시각이라도 서로 다른 매장 시간 정책은 서로 다른 `occupancyEndAt`을 만들며 입력 순서와 중복을 보존한다.
 - 시간 계산에 성공한 후보만 `[startAt, serviceEndAt)`으로 Store batch 검증하며 turnover 구간을 보내지 않는다. Store의 `NOT_ACCEPTING`은 `UNAVAILABLE`이고 계약과 다른 batch 응답은 전체 실패 폐쇄된다.
 - 고객 응답에 `timeStatus`, `serviceEndAt`, `timeZoneId`가 있고 `occupancyEndAt` 또는 모호한 `endTime`이 없다. 과거 행은 `LEGACY_UNRESOLVED`와 null 시각 필드로 안전하게 구분된다.
@@ -366,3 +416,4 @@
 | 2026-07-28 | 날짜별 수용량 버킷 전체 게시 | 시간대 일부 병합 규칙 차이와 기존 예약 소급 수정 방지 |
 | 2026-07-28 | 1차 중간 선점은 생성 트랜잭션 내부로 제한 | 결제 없는 단계에 사용자용 10분 선점·만료 기술을 억지로 노출하지 않음 |
 | 2026-08-06 | 취소 정책 V1은 저장 버전과 서버 중앙 `requestedAt`으로 판정 | Issue #168; 권한·소유 및 `CONFIRMED` 조건을 통과한 `CONSUMER`·`STORE_OPERATOR`에 `startAt` 시간 cutoff를 두지 않고, 금전·환불·시간 구간·`PAY-*` 연결은 고도화로 유예 |
+| 2026-08-16 | 30초 server-stored opaque QR와 공통 5분 경계의 QR 방문 완료·운영자 필수 사유 노쇼를 Reservation 종결 명령으로 활성화 | Issue #240; Auth account-wide epoch와 MenuHold `FORFEITED` 선행 계약을 소비하고 money는 #241로 분리 |
