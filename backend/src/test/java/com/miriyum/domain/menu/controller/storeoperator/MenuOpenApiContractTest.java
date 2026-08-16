@@ -77,8 +77,8 @@ class MenuOpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> imageSlot = map(
                 paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images"));
-        assertThat(imageSlot).containsEntry("x-miriyum-runtime-status", "contract-only");
-        assertThat(imageSlot).containsEntry("x-miriyum-owner-issue", 349);
+        assertThat(imageSlot).doesNotContainKeys(
+                "x-miriyum-runtime-status", "x-miriyum-owner-issue");
         assertThat(imageSlot).containsKeys("put", "delete");
 
         Map<String, Object> put = map(imageSlot.get("put"));
