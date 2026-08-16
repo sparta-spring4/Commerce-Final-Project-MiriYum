@@ -1,4 +1,4 @@
-package com.miriyum.domain.store.image;
+package com.miriyum.global.storage.image;
 
 import java.util.Arrays;
 
