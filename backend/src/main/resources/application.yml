@@ -103,6 +103,11 @@ miriyum:
   waiting:
     closure:
       enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
+    compensation:
+      enabled: ${MIRIYUM_WAITING_COMPENSATION_ENABLED:true}
+      fixed-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS:5000}
+      initial-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:5000}
+      reconciliation-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:60000}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
