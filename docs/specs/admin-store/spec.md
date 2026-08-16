@@ -154,7 +154,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 ## 7. migration 선택 gate
 
-구현 직전과 리뷰 보완 시점에 최신 `origin/dev`와 열린 PR의 migration 파일을 다시 조회했다. V47·V48은 dev에 병합됐고 열린 PR `#394`가 V49, `#388`이 V50, `#389`가 V51을 사용하므로 겹치지 않는 V52를 선택했다. 이후 dev 동기화에서도 번호 충돌이 없음을 다시 확인한다.
+구현 직전과 각 dev 병합·리뷰 보완 시점에 최신 `origin/dev`와 열린 PR의 migration 파일을 다시 조회했다. V47·V48은 dev에 병합됐고 열린 PR `#394`가 V49, `#388`이 V50, `#389`가 V51, `#393`이 V52를 사용하므로 겹치지 않는 V53을 선택했다. 이후 dev 동기화에서도 번호 충돌이 없음을 다시 확인한다.
 
 ## 8. 정확한 변경 파일 allowlist
 
@@ -229,7 +229,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditAction.java`
 - `backend/src/main/java/com/miriyum/domain/platformoperator/enums/PlatformOperatorAuditReason.java` (구조화된 `STORE_ENFORCEMENT` 사유)
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/PlatformOperatorAuditWriter.java`
-- `backend/src/main/resources/db/migration/V52__create_store_sanctions.sql`
+- `backend/src/main/resources/db/migration/V53__create_store_sanctions.sql`
 
 ### 테스트
 

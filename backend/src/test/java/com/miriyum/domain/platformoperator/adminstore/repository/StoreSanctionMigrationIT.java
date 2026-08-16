@@ -12,10 +12,10 @@ import org.testcontainers.mysql.MySQLContainer;
 
 @Tag("integration") @Tag("integration-shard-a") @Testcontainers
 class StoreSanctionMigrationIT {
- @Test void v52CreatesComposableStoreSanctionAndAuditLedger() throws Exception {
+ @Test void v53CreatesComposableStoreSanctionAndAuditLedger() throws Exception {
   try(MySQLContainer mysql=new MySQLContainer("mysql:8.0.40").withCommand("--log-bin-trust-function-creators=1")){
    mysql.start(); Flyway flyway=Flyway.configure().dataSource(mysql.getJdbcUrl(),mysql.getUsername(),mysql.getPassword()).load();flyway.migrate();
-   assertThat(flyway.info().applied()).extracting(MigrationInfo::getScript).contains("V52__create_store_sanctions.sql");
+   assertThat(flyway.info().applied()).extracting(MigrationInfo::getScript).contains("V53__create_store_sanctions.sql");
    try(Connection c=mysql.createConnection("")){
     assertThat(tables(c)).contains("store_enforcement_states","store_sanction_cases","store_sanction_impact_previews","store_sanctions","store_sanction_approvals");
     assertThat(columns(c,"stores")).contains("platform_management_allowed");
