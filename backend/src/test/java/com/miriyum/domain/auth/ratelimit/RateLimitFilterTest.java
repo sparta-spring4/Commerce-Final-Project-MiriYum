@@ -50,7 +50,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
             "miriyum.rate-limit.token-refresh.max-requests=30",
             "miriyum.rate-limit.token-refresh.window-seconds=60",
             "miriyum.rate-limit.csrf-preparation.max-requests=2",
-            "miriyum.rate-limit.csrf-preparation.window-seconds=60"
+            "miriyum.rate-limit.csrf-preparation.window-seconds=60",
+            "miriyum.rate-limit.staging-bypass.runtime-environment=staging",
+            "miriyum.rate-limit.staging-bypass.source-ip=8.8.8.8"
         })
 @AutoConfigureMockMvc
 class RateLimitFilterTest {
@@ -71,7 +73,7 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("플랫폼 운영자 공개 인증 중 로그인·재발급·CSRF 준비만 요청 제한한다")
     void limitsOnlyApprovedPlatformOperatorPublicAuthRoutes() {
-        RateLimitFilter filter = new RateLimitFilter(null, null);
+        RateLimitFilter filter = new RateLimitFilter(null, null, new StagingRateLimitBypass("", ""));
 
         assertThatFilterApplies(filter, "POST", "/api/v1/platform-operators/auth/sessions");
         assertThatFilterApplies(filter, "POST", "/api/v1/platform-operators/auth/token-refreshes");
@@ -92,6 +94,22 @@ class RateLimitFilterTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("COMMON_010"))
                 .andExpect(header().exists("Retry-After"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("stagingBypassRoutes")
+    @DisplayName("staging 허용 IP는 로그인과 토큰 갱신 한도를 넘어도 429를 받지 않는다")
+    void bypassesLoginAndRefreshLimitsForConfiguredStagingIp(String path, int maxRequests) throws Exception {
+        RequestPostProcessor ip = withRemoteAddr("8.8.8.8");
+
+        for (int attempt = 0; attempt <= maxRequests; attempt++) {
+            mockMvc.perform(post(path).with(ip))
+                    .andExpect(result -> {
+                        if (result.getResponse().getStatus() == 429) {
+                            throw new AssertionError("staging 허용 IP가 " + path + "에서 429를 받았습니다.");
+                        }
+                    });
+        }
     }
 
     @Test
@@ -172,6 +190,13 @@ class RateLimitFilterTest {
                 Arguments.of("SIGN_UP", "/api/v1/store-operators/auth/kakao/accounts", "POST", 5, "12"),
                 Arguments.of("TOKEN_REFRESH", "/api/v1/store-operators/auth/token-refreshes", "POST", 30, "13"),
                 Arguments.of("CSRF_PREPARATION", "/api/v1/store-operators/auth/csrf-tokens/current", "GET", 2, "14")
+        );
+    }
+
+    private static Stream<Arguments> stagingBypassRoutes() {
+        return Stream.of(
+                Arguments.of("/api/v1/consumers/auth/sessions", 5),
+                Arguments.of("/api/v1/consumers/auth/token-refreshes", 30)
         );
     }
 
