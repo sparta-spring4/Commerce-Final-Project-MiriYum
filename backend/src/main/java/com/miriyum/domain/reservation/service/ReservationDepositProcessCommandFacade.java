@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntToLongFunction;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
@@ -40,6 +41,7 @@ public class ReservationDepositProcessCommandFacade {
         void sleep(long millis) throws InterruptedException;
     }
 
+    @Autowired
     public ReservationDepositProcessCommandFacade(
             ReservationDepositProcessService processService
     ) {
