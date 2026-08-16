@@ -324,6 +324,7 @@ public class StoreService {
         Store store = storeRepository.findById(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
@@ -339,6 +340,7 @@ public class StoreService {
         Store store = storeRepository.findByIdForUpdate(storeId)
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
         store.requireManagedBy(operatorAccountId);
+        store.requirePlatformManagementAllowed();
         return store;
     }
 
