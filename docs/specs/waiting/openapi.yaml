@@ -536,11 +536,12 @@ components:
         - NO_SHOW
         - CLOSED_BY_STORE
         - RESERVATION_CONVERTING
+        - RESERVATION_CONVERTED
       description: >-
         웨이팅 원장의 팀 상태. RESERVATION_CONVERTING은 비종결이며 예약 전환 결과가 확정될
         때까지 계정 활성 membership 유지 상태다. 전환 실패로 WAITING 복귀해도 같은 membership을
-        유지한다. RESERVATION_CONVERTING은 운영자 cancel만 허용하고, 실제 종결 상태는 새 운영자
-        전이를 받지 않는다.
+        유지한다. RESERVATION_CONVERTED는 결제 기반 예약 전환이 최종 Reservation scalar ID로
+        완료된 종결 상태다. RESERVATION_CONVERTING은 운영자 cancel만 허용한다.
     WaitingTeamTransitionRequest:
       type: object
       additionalProperties: false

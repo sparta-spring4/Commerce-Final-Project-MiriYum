@@ -20,9 +20,11 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
@@ -53,10 +55,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -82,15 +83,9 @@ import org.testcontainers.utility.DockerImageName;
 class PaymentPersistenceIT {
 
     @Container
+    @ServiceConnection
     static final MySQLContainer MYSQL =
             new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
-
-    @DynamicPropertySource
-    static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-    }
 
     @Autowired
     private PaymentService paymentService;
@@ -112,6 +107,7 @@ class PaymentPersistenceIT {
 
     @BeforeEach
     void resetDatabase() {
+        jdbcTemplate.execute("DELETE FROM waiting_conversion_compensations");
         jdbcTemplate.execute("DELETE FROM payment_webhook_receipts");
         jdbcTemplate.execute("DELETE FROM payment_ledger_entries");
         jdbcTemplate.execute("DELETE FROM payment_refunds");
@@ -201,6 +197,79 @@ class PaymentPersistenceIT {
                 .isInstanceOf(ServiceException.class)
                 .extracting(error -> ((ServiceException) error).getErrorCode())
                 .isEqualTo(PaymentErrorCode.ACTIVE_SOURCE_CONFLICT);
+    }
+
+    @Test
+    @DisplayName("대기열 예약금은 일반 예약금과 같은 source 참조를 공유해도 별도 source type으로 준비한다")
+    void preparesWaitingReservationDepositWithSameSourceReferenceAsReservationDeposit() {
+        PrepareReservationDepositCommand reservationCommand = prepareCommand("123", 30_000L);
+        PaymentPreparation reservation = paymentService.prepareReservationDeposit(reservationCommand);
+        PrepareWaitingReservationDepositCommand waitingCommand =
+                new PrepareWaitingReservationDepositCommand(
+                        reservationCommand.sourceReferenceId(),
+                        reservationCommand.consumerAccountId(),
+                        reservationCommand.amountMinor(),
+                        reservationCommand.currency(),
+                        reservationCommand.sourceExpiresAt(),
+                        reservationCommand.sourcePolicyVersion(),
+                        reservationCommand.idempotencyKey()
+                );
+
+        PaymentPreparation waiting = paymentService.prepareWaitingReservationDeposit(waitingCommand);
+        PaymentPreparation replay = paymentService.prepareWaitingReservationDeposit(waitingCommand);
+
+        assertThat(waiting).isEqualTo(replay);
+        assertThat(waiting.paymentId()).isNotEqualTo(reservation.paymentId());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM payments
+                WHERE source_reference_id = '123'
+                  AND source_type IN ('RESERVATION_DEPOSIT', 'WAITING_RESERVATION_DEPOSIT')
+                """, Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT source_type FROM payments
+                WHERE payment_id = ?
+                """, String.class, waiting.paymentId()))
+                .isEqualTo("WAITING_RESERVATION_DEPOSIT");
+    }
+
+    @Test
+    void verifiesPaidWaitingDepositSnapshotAndRejectsOrdinaryDepositWithSameReference() {
+        Instant expiresAt = Instant.now().plusSeconds(3_600);
+        PrepareWaitingReservationDepositCommand waitingCommand =
+                new PrepareWaitingReservationDepositCommand(
+                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        UUID.nameUUIDFromBytes("waiting:41".getBytes(StandardCharsets.UTF_8))
+                                .toString());
+        PaymentPreparation waiting = paymentService.prepareWaitingReservationDeposit(waitingCommand);
+        when(providerClient.getPayment(waiting.portOnePaymentId())).thenReturn(new ProviderPayment(
+                waiting.portOnePaymentId(), "waiting-transaction-41", ProviderStatus.PAID,
+                12_000L, "KRW"));
+        PaymentResult confirmed = paymentService.confirmPayment(new ConfirmPaymentCommand(
+                waiting.paymentId(), 11L, waiting.portOnePaymentId(),
+                UUID.nameUUIDFromBytes("waiting-confirm:41".getBytes(StandardCharsets.UTF_8))
+                        .toString()));
+
+        VerifiedWaitingReservationDeposit verified =
+                paymentService.getVerifiedWaitingReservationDeposit(waiting.paymentId(), 41L, 11L);
+
+        assertThat(confirmed.status()).isEqualTo(PaymentStatus.PAID);
+        assertThat(verified.paymentId()).isEqualTo(waiting.paymentId());
+        assertThat(verified.amountMinor()).isEqualTo(12_000L);
+        assertThat(verified.currency()).isEqualTo("KRW");
+        assertThat(verified.sourcePolicyVersion()).isEqualTo(3L);
+        assertThat(verified.status()).isEqualTo(PaymentStatus.PAID);
+        assertThat(verified.paidAt()).isNotNull();
+
+        PaymentPreparation ordinary = paymentService.prepareReservationDeposit(
+                new PrepareReservationDepositCommand(
+                        "41", 11L, 12_000L, "KRW", expiresAt, 3L,
+                        UUID.nameUUIDFromBytes("reservation:41".getBytes(StandardCharsets.UTF_8))
+                                .toString()));
+        assertThatThrownBy(() -> paymentService.getVerifiedWaitingReservationDeposit(
+                ordinary.paymentId(), 41L, 11L))
+                .isInstanceOf(ServiceException.class)
+                .extracting(error -> ((ServiceException) error).getErrorCode())
+                .isEqualTo(PaymentErrorCode.PAYMENT_NOT_FOUND);
     }
 
     @Test

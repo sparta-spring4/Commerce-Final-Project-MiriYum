@@ -58,6 +58,28 @@ public final class PaymentContracts {
         }
     }
 
+    public record PrepareWaitingReservationDepositCommand(
+            String sourceReferenceId,
+            long consumerAccountId,
+            long amountMinor,
+            String currency,
+            Instant sourceExpiresAt,
+            long sourcePolicyVersion,
+            String idempotencyKey
+    ) {
+        public PrepareWaitingReservationDepositCommand {
+            requirePublicId(sourceReferenceId, "sourceReferenceId");
+            requirePositive(consumerAccountId, "consumerAccountId");
+            requirePositive(amountMinor, "amountMinor");
+            requireCurrency(currency);
+            if (sourceExpiresAt == null) {
+                throw new IllegalArgumentException("sourceExpiresAt must not be null");
+            }
+            requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
+            requireIdempotencyKey(idempotencyKey);
+        }
+    }
+
     public record PaymentPreparation(
             String paymentId,
             String portOnePaymentId,
@@ -67,6 +89,31 @@ public final class PaymentContracts {
             Instant sourceExpiresAt,
             PaymentStatus status
     ) {
+    }
+
+    public record VerifiedWaitingReservationDeposit(
+            String paymentId,
+            long amountMinor,
+            String currency,
+            long sourcePolicyVersion,
+            PaymentStatus status,
+            Instant paidAt
+    ) {
+        public VerifiedWaitingReservationDeposit {
+            requirePublicId(paymentId, "paymentId");
+            requirePositive(amountMinor, "amountMinor");
+            requireCurrency(currency);
+            requirePositive(sourcePolicyVersion, "sourcePolicyVersion");
+            if (status != PaymentStatus.PAID
+                    && status != PaymentStatus.PARTIALLY_REFUNDED
+                    && status != PaymentStatus.REFUNDED
+                    && status != PaymentStatus.RECONCILIATION_REQUIRED) {
+                throw new IllegalArgumentException("status must describe a historically paid payment");
+            }
+            if (paidAt == null) {
+                throw new IllegalArgumentException("paidAt must not be null");
+            }
+        }
     }
 
     public record ConfirmPaymentCommand(

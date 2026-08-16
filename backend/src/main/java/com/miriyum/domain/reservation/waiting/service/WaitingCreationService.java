@@ -130,8 +130,7 @@ public class WaitingCreationService {
     ) {
         return transactionExecutor.execute(() -> {
             IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
-                    if (membershipRepository.findByStoreIdAndConsumerAccountId(
-                            storeId, consumerAccountId).isPresent()) {
+                    if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
                         throw membershipConflict();
                     }
                     WaitingQueueSequence sequence = lockSequence(storeId, businessDate);
@@ -215,6 +214,6 @@ public class WaitingCreationService {
     }
 
     private static ServiceException membershipConflict() {
-        return new ServiceException(ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT);
+        return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
     }
 }

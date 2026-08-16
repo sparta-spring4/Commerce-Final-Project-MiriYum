@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(18);
+        assertThat(ReservationErrorCode.values()).hasSize(19);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -78,6 +78,9 @@ class ReservationErrorCodeTest {
                 Arguments.of(ReservationErrorCode.WAITING_ACTIVE_MEMBERSHIP_CONFLICT,
                         HttpStatus.CONFLICT, "WAITING_008",
                         "활성 웨이팅 멤버십과 요청 전제가 충돌합니다."),
+                Arguments.of(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS,
+                        HttpStatus.CONFLICT, "WAITING_011",
+                        "계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요."),
                 Arguments.of(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_READY,
                         HttpStatus.CONFLICT, "WAITING_009",
                         "웨이팅 종결 작업이 아직 완료되지 않았거나 재확인이 필요합니다."),
