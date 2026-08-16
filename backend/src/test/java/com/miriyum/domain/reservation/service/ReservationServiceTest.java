@@ -3892,6 +3892,7 @@ class ReservationServiceTest {
             }
             case CANCELLED -> reservation.cancel(OCCURRED_AT);
             case FULFILLED -> reservation.fulfill(OCCURRED_AT);
+            case NO_SHOW -> reservation.markNoShow(OCCURRED_AT);
         }
         return reservation;
     }

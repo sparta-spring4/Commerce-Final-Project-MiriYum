@@ -8,14 +8,15 @@ import org.junit.jupiter.api.Test;
 class ReservationStatusTest {
 
     @Test
-    @DisplayName("1차 MVP 예약 상태는 확정·취소·방문 완료만 사용한다")
-    void containsOnlyApprovedMvpStatuses() {
+    @DisplayName("공개 예약 상태는 확정·취소·방문 완료·노쇼만 사용한다")
+    void containsOnlyApprovedStatuses() {
         // when & then
         assertThat(ReservationStatus.values())
                 .containsExactly(
                         ReservationStatus.CONFIRMED,
                         ReservationStatus.CANCELLED,
-                        ReservationStatus.FULFILLED
+                        ReservationStatus.FULFILLED,
+                        ReservationStatus.NO_SHOW
                 );
     }
 }
