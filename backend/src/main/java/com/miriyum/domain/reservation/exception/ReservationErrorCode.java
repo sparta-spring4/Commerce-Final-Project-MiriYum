@@ -54,6 +54,16 @@ public enum ReservationErrorCode implements ErrorCode {
             "RESERVATION_010",
             "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."
     ),
+    WAITING_SETTING_VERSION_CONFLICT(
+            HttpStatus.CONFLICT,
+            "WAITING_001",
+            "조회 후 웨이팅 설정 버전이 변경되었습니다."
+    ),
+    WAITING_DISABLE_ACTION_REQUIRED(
+            HttpStatus.CONFLICT,
+            "WAITING_002",
+            "활성 팀이 있으면 비활성화 처리 방법이 필요합니다."
+    ),
     WAITING_TEAM_NOT_FOUND(
             HttpStatus.NOT_FOUND,
             "WAITING_003",

@@ -109,10 +109,8 @@ HAVING COUNT(*) > 1;
 | `version` | `0` |
 
 비활성화 영향 조회도 설정 행이 없으면 `version=0`을 사용한다. `activeTeamCount`는 조회
-시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 종결 가능성
-판정은 Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공할 때
-일괄 종결 action과 함께 추가한다. 그 전에는 응답에 노출하지 않는다. 설정 행의 부재를 매장
-부재로 해석하지 않는다.
+시점의 `WAITING`, `CALLED`, `ARRIVED`, 비종결 `RESERVATION_CONVERTING` 팀 수다. 설정 행의
+부재를 매장 부재로 해석하지 않는다.
 
 ## 전체 교체와 버전
 
@@ -148,9 +146,9 @@ Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전�
 - `KEEP_ACTIVE`는 설정을 `enabled=false`, `receptionMode=PAUSED`로 교체해 신규 등록을 막되
   기존 활성 팀을 그대로 유지한다. 기존 팀의 조회·호출·정상 종결 경로는 계속 사용할 수
   있어야 한다.
-- 현재 공개 계약에서 `disableAction`은 `KEEP_ACTIVE`만 허용한다. 활성 팀 일괄 종결은
-  Issue #272가 `202 Accepted`, 작업 식별자와 상태 조회 계약/runtime을 `dev`에 제공한 뒤
-  이 요청 계약에 추가한다. 그 전에는 일괄 종결 action을 공개 입력으로 노출하지 않는다.
+- `CLOSE_ACTIVE_TEAMS`는 먼저 새 설정 버전으로 비활성화한 뒤 Issue #272의 공개 Service를
+  통해 그 버전에 결박된 비동기 일괄 종결 작업을 생성하고 작업 snapshot과 `202 Accepted`를
+  반환한다. 설정 저장과 작업 생성은 하나의 트랜잭션으로 확정한다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
 서버는 명령 시점의 활성 팀과 권한을 다시 확인한다. `RESERVATION_CONVERTING`도 활성 팀이므로
