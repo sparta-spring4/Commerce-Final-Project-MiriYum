@@ -10,6 +10,29 @@ import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
 class StoreClosureOpenApiContractTest {
+    @Test
+    void schedulePublicationConditionsDeclareEffectiveAtInEachLocalSchema()
+            throws Exception {
+        Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> request = map(schemas.get("SchedulePublicationRequest"));
+        List<Map<String, Object>> conditions = listOfMaps(request.get("allOf"));
+
+        Map<String, Object> scheduled = map(conditions.get(0).get("then"));
+        assertThat(map(scheduled.get("properties"))).containsKey("effectiveAt");
+        assertThat(list(scheduled.get("required"))).containsExactly("effectiveAt");
+
+        Map<String, Object> immediate = map(
+                map(conditions.get(1).get("then")).get("not"));
+        assertThat(map(immediate.get("properties"))).containsKey("effectiveAt");
+        assertThat(list(immediate.get("required"))).containsExactly("effectiveAt");
+    }
+
     @Test void documentsAllSixOperatorRoutesAndNoBatchHttpRoute() throws Exception {
         String yaml = Files.readString(Path.of("..", "docs", "specs", "store-search", "openapi.yaml"));
         assertThat(yaml).contains(
@@ -49,5 +72,10 @@ class StoreClosureOpenApiContractTest {
     @SuppressWarnings("unchecked")
     private static List<String> list(Object value) {
         return (List<String>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> listOfMaps(Object value) {
+        return (List<Map<String, Object>>) value;
     }
 }
