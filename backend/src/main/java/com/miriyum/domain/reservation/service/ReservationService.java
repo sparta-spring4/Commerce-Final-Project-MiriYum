@@ -5,6 +5,9 @@ import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
 import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -17,6 +20,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityResult
 import com.miriyum.domain.reservation.dto.response.ReservationAvailabilityStatus;
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationHistoryPageResponse;
+import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimePolicyResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionResult;
 import com.miriyum.domain.reservation.dto.response.ReservationTimeResolutionStatus;
@@ -32,6 +36,7 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentActorType;
 import com.miriyum.domain.reservation.entity.ReservationFulfillmentAudit;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyAudit;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyStatus;
@@ -45,10 +50,12 @@ import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldItemSnapshot;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldSelection;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
+import com.miriyum.domain.reservation.port.dto.ReservationTemporaryMenuHoldSelection;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationCancellationAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationFulfillmentAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
@@ -139,6 +146,9 @@ public class ReservationService {
     private StoreReservationDepositPolicyQueryService depositPolicyQueryService;
     private RepresentativeMenuQueryService representativeMenuQueryService;
     private ReservationDepositCalculator depositCalculator;
+    private ReservationHoldCreationPrimitive holdCreationPrimitive;
+    private PaymentService paymentService;
+    private ReservationDepositProcessRepository depositProcessRepository;
 
     ReservationService(
             StoreScheduleService storeScheduleService,
@@ -239,7 +249,10 @@ public class ReservationService {
             ReservationNotificationPublisher notificationPublisher,
             StoreReservationDepositPolicyQueryService depositPolicyQueryService,
             RepresentativeMenuQueryService representativeMenuQueryService,
-            ReservationDepositCalculator depositCalculator
+            ReservationDepositCalculator depositCalculator,
+            ReservationHoldCreationPrimitive holdCreationPrimitive,
+            PaymentService paymentService,
+            ReservationDepositProcessRepository depositProcessRepository
     ) {
         this(
                 storeScheduleService,
@@ -266,6 +279,9 @@ public class ReservationService {
         this.depositPolicyQueryService = depositPolicyQueryService;
         this.representativeMenuQueryService = representativeMenuQueryService;
         this.depositCalculator = depositCalculator;
+        this.holdCreationPrimitive = holdCreationPrimitive;
+        this.paymentService = paymentService;
+        this.depositProcessRepository = depositProcessRepository;
     }
 
     /**
@@ -304,9 +320,13 @@ public class ReservationService {
                     contact
             );
         });
+        if (outcome.httpStatus() == HttpStatus.ACCEPTED.value()) {
+            ReservationRequestResponse response = objectMapper.treeToValue(
+                    outcome.data(), ReservationRequestResponse.class);
+            return ReservationCreationCommandResult.depositRequested(response);
+        }
         ReservationDetailResponse response = reservationCreationResponse(outcome.data());
-        return new ReservationCreationCommandResult(
-                outcome.httpStatus(), response);
+        return new ReservationCreationCommandResult(outcome.httpStatus(), response);
     }
 
     private ReservationDetailResponse reservationCreationResponse(JsonNode payload) {
@@ -335,7 +355,7 @@ public class ReservationService {
                 : OffsetDateTime.parse(value.asString());
     }
 
-    private BusinessResult<ReservationDetailResponse> createReservationWork(
+    private BusinessResult<Object> createReservationWork(
             long consumerAccountId,
             IdempotencyKey key,
             NormalizedCreationRequest request,
@@ -344,7 +364,17 @@ public class ReservationService {
         StoreReservationTransactionEligibility store =
                 requireCreationDependencies().requireReservationTransactionEligibility(
                         request.storeId());
-        selectDepositCalculation(request.storeId(), request.partySize());
+        Optional<ReservationDepositCalculator.Calculation> depositCalculation =
+                selectDepositCalculation(request.storeId(), request.partySize());
+        if (depositCalculation.isPresent()) {
+            return createDepositReservationWork(
+                    consumerAccountId,
+                    key,
+                    request,
+                    contact,
+                    store,
+                    depositCalculation.orElseThrow());
+        }
         ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
                 request.storeId(),
                 new ReservationTimeRequest(
@@ -448,13 +478,90 @@ public class ReservationService {
                         : menuHoldPort.findSnapshots(saved.getId())
         );
         notificationPublisher.recordConfirmed(saved, saved.getCreatedAt(), key.value());
-        return new BusinessResult<>(
+        return new BusinessResult<Object>(
                 HttpStatus.CREATED.value(),
                 SUCCESS_RESPONSE_CODE,
                 "RESERVATION",
                 String.valueOf(saved.getId()),
                 response
         );
+    }
+
+    private BusinessResult<Object> createDepositReservationWork(
+            long consumerAccountId,
+            IdempotencyKey key,
+            NormalizedCreationRequest request,
+            ReservationContactResult contact,
+            StoreReservationTransactionEligibility store,
+            ReservationDepositCalculator.Calculation calculation
+    ) {
+        PartyComposition party = PartyComposition.of(
+                request.adultCount(), request.childCount(), request.infantCount());
+        List<ReservationTemporaryMenuHoldSelection> temporaryMenuSelections =
+                request.menuSelections().stream()
+                        .map(selection -> new ReservationTemporaryMenuHoldSelection(
+                                selection.menuId(), selection.quantity()))
+                        .toList();
+        var hold = holdCreationPrimitive.create(
+                new ReservationHoldCreationPrimitive.Command(
+                        consumerAccountId,
+                        store,
+                        request.serviceDate(),
+                        request.startTime(),
+                        request.startOffset(),
+                        party,
+                        contact.notificationTargetReference(),
+                        "reservation-deposit-create:" + key.value(),
+                        temporaryMenuSelections));
+        if (hold == null || hold.getId() == null || hold.getId() <= 0) {
+            throw new IllegalStateException("saved reservation hold id is required");
+        }
+        PaymentPreparation preparation = paymentService.prepareReservationDeposit(
+                new PrepareReservationDepositCommand(
+                        String.valueOf(hold.getId()),
+                        consumerAccountId,
+                        calculation.amountMinor(),
+                        calculation.currency(),
+                        hold.getExpiresAt(),
+                        calculation.algorithmVersion(),
+                        key.value()));
+        ReservationDepositProcess process = depositProcessRepository.saveAndFlush(
+                ReservationDepositProcess.awaitingPayment(
+                        hold.getId(),
+                        consumerAccountId,
+                        hold.getExpiresAt(),
+                        calculation,
+                        preparation,
+                        clock.instant()));
+        if (process == null || process.getId() == null || process.getId() <= 0) {
+            throw new IllegalStateException("saved reservation deposit process id is required");
+        }
+        ReservationRequestResponse response = reservationRequestResponse(process);
+        return new BusinessResult<Object>(
+                HttpStatus.ACCEPTED.value(),
+                SUCCESS_RESPONSE_CODE,
+                "RESERVATION_DEPOSIT_PROCESS",
+                String.valueOf(process.getId()),
+                response);
+    }
+
+    private static ReservationRequestResponse reservationRequestResponse(
+            ReservationDepositProcess process
+    ) {
+        return new ReservationRequestResponse(
+                String.valueOf(process.getId()),
+                process.getStatus(),
+                process.getExpiresAt().atOffset(ZoneOffset.UTC),
+                new ReservationRequestResponse.PaymentPreparationSnapshot(
+                        process.getPaymentId(),
+                        process.getPortOnePaymentId(),
+                        process.getPaymentOrderName(),
+                        process.getPaymentAmountMinor(),
+                        process.getPaymentCurrency(),
+                        process.getPaymentSourceExpiresAt().atOffset(ZoneOffset.UTC),
+                        process.getPaymentPreparationStatus().name()),
+                process.isAbandonmentRequested(),
+                null);
     }
 
     private StoreTransactionEligibilityService requireCreationDependencies() {
@@ -465,7 +572,10 @@ public class ReservationService {
                 || notificationPublisher == null
                 || depositPolicyQueryService == null
                 || representativeMenuQueryService == null
-                || depositCalculator == null) {
+                || depositCalculator == null
+                || holdCreationPrimitive == null
+                || paymentService == null
+                || depositProcessRepository == null) {
             throw new IllegalStateException("reservation creation dependencies are required");
         }
         return storeTransactionEligibilityService;

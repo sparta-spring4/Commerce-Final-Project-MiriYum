@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.service;
 
 import com.miriyum.domain.reservation.dto.response.ReservationDetailResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
+import java.util.Objects;
 
 /** Typed 201/202 success union returned by the reservation creation facade. */
 public final class ReservationCreationCommandResult {
@@ -52,6 +53,22 @@ public final class ReservationCreationCommandResult {
             case ConfirmedPayload confirmed -> confirmed.data();
             case DepositRequestPayload requested -> requested.data();
         };
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof ReservationCreationCommandResult that)) {
+            return false;
+        }
+        return httpStatus == that.httpStatus && payload.equals(that.payload);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(httpStatus, payload);
     }
 
     private sealed interface Payload permits ConfirmedPayload, DepositRequestPayload {
