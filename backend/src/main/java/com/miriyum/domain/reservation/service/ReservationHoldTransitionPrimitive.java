@@ -67,6 +67,28 @@ public class ReservationHoldTransitionPrimitive {
     public ReservationHoldContracts.Result transition(
             ReservationHoldContracts.TransitionCommand command
     ) {
+        return transition(command, false);
+    }
+
+    /** Confirms a final Reservation while omitting the linkage when no temporary MenuHold exists. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ReservationHoldContracts.Result transitionFinalizedReservation(
+            ReservationHoldContracts.TransitionCommand command
+    ) {
+        if (command == null
+                || command.targetStatus() != ReservationHoldStatus.CONFIRMED
+                || command.finalReservationId() == null
+                || command.finalReservationId() <= 0) {
+            throw new IllegalArgumentException(
+                    "finalized reservation transition requires a positive finalReservationId");
+        }
+        return transition(command, true);
+    }
+
+    private ReservationHoldContracts.Result transition(
+            ReservationHoldContracts.TransitionCommand command,
+            boolean finalizingReservation
+    ) {
         NormalizedTransitionCommand normalized = normalizeTransition(command);
         ReservationHoldTransitionAudit replay = auditRepository
                 .findByCommandId(normalized.operationId())
@@ -79,8 +101,10 @@ public class ReservationHoldTransitionPrimitive {
             ReservationTemporaryMenuHoldResult replayMenuHold =
                     temporaryMenuHoldPort.lockForTransition(
                             normalized.reservationHoldId());
+            NormalizedTransitionCommand replayEffective = effectiveFinalLinkageCommand(
+                    replayMenuHold, normalized, finalizingReservation);
             requireFinalLinkageMeaning(
-                    replayMenuHold, normalized, current.getStatus(), true);
+                    replayMenuHold, replayEffective, current.getStatus(), true);
             return resultOf(current);
         }
 
@@ -96,8 +120,10 @@ public class ReservationHoldTransitionPrimitive {
             ReservationTemporaryMenuHoldResult replayMenuHold =
                     temporaryMenuHoldPort.lockForTransition(
                             normalized.reservationHoldId());
+            NormalizedTransitionCommand replayEffective = effectiveFinalLinkageCommand(
+                    replayMenuHold, normalized, finalizingReservation);
             requireFinalLinkageMeaning(
-                    replayMenuHold, normalized, hold.getStatus(), true);
+                    replayMenuHold, replayEffective, hold.getStatus(), true);
             return resultOf(hold);
         }
         ReservationTemporaryMenuHoldResult menuHold =
@@ -108,6 +134,8 @@ public class ReservationHoldTransitionPrimitive {
         Instant occurredAt = clock.instant();
         NormalizedTransitionCommand effective = effectiveTransitionCommand(
                 hold, normalized, occurredAt);
+        effective = effectiveFinalLinkageCommand(
+                menuHold, effective, finalizingReservation);
         requireFinalLinkageMeaning(menuHold, effective, hold.getStatus(), false);
         ReservationHoldStatus beforeStatus = hold.getStatus();
         validateReservationHoldTransition(
@@ -178,6 +206,27 @@ public class ReservationHoldTransitionPrimitive {
                 SYSTEM_ACTOR,
                 null,
                 hold.getExpiresAt(),
+                null);
+    }
+
+    private static NormalizedTransitionCommand effectiveFinalLinkageCommand(
+            ReservationTemporaryMenuHoldResult menuHold,
+            NormalizedTransitionCommand requested,
+            boolean finalizingReservation
+    ) {
+        if (!finalizingReservation
+                || menuHold.presence()
+                != ReservationTemporaryMenuHoldResult.Presence.NO_HOLD
+                || requested.targetStatus() != ReservationHoldStatus.CONFIRMED) {
+            return requested;
+        }
+        return new NormalizedTransitionCommand(
+                requested.reservationHoldId(),
+                requested.targetStatus(),
+                requested.operationId(),
+                requested.actorType(),
+                requested.actorId(),
+                requested.requestedAt(),
                 null);
     }
 

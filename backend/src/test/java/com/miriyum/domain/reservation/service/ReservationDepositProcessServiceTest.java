@@ -1439,7 +1439,8 @@ class ReservationDepositProcessServiceTest {
         order.verify(holdAllocationRepository)
                 .findAllByReservationHoldIdOrderByCapacityBucketIdAsc(HOLD_ID);
         order.verify(reservationRepository).saveAndFlush(any(Reservation.class));
-        order.verify(transitionPrimitive).transition(transition.capture());
+        order.verify(transitionPrimitive)
+                .transitionFinalizedReservation(transition.capture());
         order.verify(bucketRepository).findAllByIdInForUpdate(List.of(101L, 102L));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ReservationCapacityAllocation>> allocations =

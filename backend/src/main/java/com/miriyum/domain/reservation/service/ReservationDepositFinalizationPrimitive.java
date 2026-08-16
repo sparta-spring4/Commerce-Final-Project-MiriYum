@@ -76,14 +76,15 @@ public class ReservationDepositFinalizationPrimitive {
         Reservation saved = reservationRepository.saveAndFlush(reservation);
         long reservationId = requirePersistedReservationId(saved);
 
-        transitionPrimitive.transition(new ReservationHoldContracts.TransitionCommand(
-                command.reservationHoldId(),
-                ReservationHoldStatus.CONFIRMED,
-                command.operationId(),
-                command.actorType(),
-                command.actorId(),
-                command.requestedAt(),
-                reservationId));
+        transitionPrimitive.transitionFinalizedReservation(
+                new ReservationHoldContracts.TransitionCommand(
+                        command.reservationHoldId(),
+                        ReservationHoldStatus.CONFIRMED,
+                        command.operationId(),
+                        command.actorType(),
+                        command.actorId(),
+                        command.requestedAt(),
+                        reservationId));
 
         List<Long> bucketIds = heldAllocations.stream()
                 .map(ReservationHoldCapacityAllocation::getCapacityBucketId)
@@ -129,7 +130,7 @@ public class ReservationDepositFinalizationPrimitive {
         for (ReservationHoldCapacityAllocation allocation : allocations) {
             if (allocation == null
                     || allocation.getReservationHoldId() == null
-                    || allocation.getReservationHoldId() != hold.getId()
+                    || !allocation.getReservationHoldId().equals(hold.getId())
                     || allocation.getCapacityBucketId() == null
                     || allocation.getCapacityBucketId() <= previousBucketId
                     || allocation.getOccupiedPeople() != hold.getParty().totalCount()

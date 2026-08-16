@@ -1,6 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus;
@@ -116,6 +117,7 @@ class ReservationDepositProcessRuntimeIT {
     @BeforeEach
     void resetDatabase() {
         clock.set(REQUESTED_AT);
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_deposit_finalization_allocation_failure");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_refund_obligations");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_cause_audits");
         jdbcTemplate.execute("DELETE FROM reservation_deposit_calculation_items");
@@ -358,6 +360,184 @@ class ReservationDepositProcessRuntimeIT {
                    AND reason_code = 'FULL_DEPOSIT_COMPENSATION'
                    AND status = 'REQUIRED'
                 """, Integer.class, processId)).isOne();
+    }
+
+    @Test
+    @DisplayName("paidAt이 expiresAt과 같으면 확정하지 않고 전액 환불 의무로 전이한다")
+    void paidAtExactExpiryRequiresCompensationInsteadOfFinalization() {
+        seedHoldOwnerAndStore();
+        seedCapacityForHold();
+        ReservationDepositProcess saved = seedAwaitingProcess();
+        stubPaidPayment(EXPIRES_AT, EXPIRES_AT);
+        clock.set(EXPIRES_AT);
+
+        ReservationDepositCommandResult result = processCommandFacade.finalizeRequest(
+                10_077L,
+                saved.getId(),
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440078"));
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservation_holds WHERE reservation_hold_id = 40077",
+                String.class)).isEqualTo("EXPIRED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservations", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT occupied_people, occupied_teams
+                  FROM reservation_capacity_buckets
+                 WHERE reservation_capacity_bucket_id = 50077
+                """))
+                .containsEntry("occupied_people", 0)
+                .containsEntry("occupied_teams", 0);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_deposit_cause_audits
+                 WHERE reservation_deposit_process_id = ?
+                   AND cause_code = 'PAYMENT_PAID_AT_OR_AFTER_EXPIRY'
+                   AND paid_at = '2026-08-20 09:10:00.000000'
+                """, Integer.class, saved.getId())).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM reservation_deposit_refund_obligations
+                 WHERE reservation_deposit_process_id = ?
+                   AND status = 'REQUIRED'
+                """, Integer.class, saved.getId())).isOne();
+    }
+
+    @Test
+    @DisplayName("최종 Reservation allocation 실패는 process·Hold·멱등 효과를 롤백하고 같은 키 재시도를 허용한다")
+    void finalizationAllocationFailureRollsBackAllEffectsAndAllowsSameKeyRetry() {
+        seedHoldOwnerAndStore();
+        seedCapacityForHold();
+        ReservationDepositProcess saved = seedAwaitingProcess();
+        stubPaidPayment(EXPIRES_AT.minusSeconds(1), EXPIRES_AT.minusSeconds(2));
+        clock.set(EXPIRES_AT.minusSeconds(2));
+        IdempotencyKey key = IdempotencyKey.parse(
+                "550e8400-e29b-41d4-a716-446655440079");
+
+        try {
+            jdbcTemplate.execute("""
+                    CREATE TRIGGER trg_deposit_finalization_allocation_failure
+                    BEFORE INSERT ON reservation_capacity_allocations
+                    FOR EACH ROW
+                    SIGNAL SQLSTATE '45000'
+                        SET MESSAGE_TEXT = 'reservation deposit allocation failure'
+                    """);
+
+            assertThatThrownBy(() -> processCommandFacade.finalizeRequest(
+                    10_077L,
+                    saved.getId(),
+                    key))
+                    .hasRootCauseInstanceOf(SQLException.class)
+                    .hasStackTraceContaining("reservation deposit allocation failure");
+        } finally {
+            jdbcTemplate.execute(
+                    "DROP TRIGGER IF EXISTS trg_deposit_finalization_allocation_failure");
+        }
+
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT status, final_reservation_id
+                  FROM reservation_deposit_processes
+                 WHERE reservation_deposit_process_id = ?
+                """, saved.getId()))
+                .containsEntry("status", "AWAITING_PAYMENT")
+                .containsEntry("final_reservation_id", null);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservation_holds WHERE reservation_hold_id = 40077",
+                String.class)).isEqualTo("ACTIVE");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservations", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_capacity_allocations",
+                Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_hold_transition_audits",
+                Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands",
+                Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT occupied_people, occupied_teams
+                  FROM reservation_capacity_buckets
+                 WHERE reservation_capacity_bucket_id = 50077
+                """))
+                .containsEntry("occupied_people", 2)
+                .containsEntry("occupied_teams", 1);
+
+        ReservationDepositCommandResult retry = processCommandFacade.finalizeRequest(
+                10_077L,
+                saved.getId(),
+                key);
+
+        assertThat(retry.httpStatus()).isEqualTo(200);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservation_deposit_processes "
+                        + "WHERE reservation_deposit_process_id = ?",
+                String.class,
+                saved.getId())).isEqualTo("COMPLETED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT final_reservation_id FROM reservation_deposit_processes "
+                        + "WHERE reservation_deposit_process_id = ?",
+                Long.class,
+                saved.getId())).isPositive();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM reservation_holds WHERE reservation_hold_id = 40077",
+                String.class)).isEqualTo("CONFIRMED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservations", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reservation_capacity_allocations",
+                Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM idempotency_commands "
+                        + "WHERE processing_status = 'SUCCEEDED'",
+                Integer.class)).isOne();
+    }
+
+    private ReservationDepositProcess seedAwaitingProcess() {
+        return processRepository.saveAndFlush(ReservationDepositProcess.awaitingPayment(
+                40_077L,
+                10_077L,
+                EXPIRES_AT,
+                new Calculation(
+                        91L,
+                        20,
+                        1L,
+                        2,
+                        4_000L,
+                        "KRW",
+                        13L,
+                        40_000L,
+                        1,
+                        List.of(new ItemSnapshot("101", 4, 40_000))),
+                new PaymentPreparation(
+                        "900000000000000077",
+                        "deposit-runtime-portone",
+                        "미리윰 식당 예약금",
+                        4_000L,
+                        "KRW",
+                        EXPIRES_AT,
+                        PaymentStatus.READY),
+                REQUESTED_AT));
+    }
+
+    private void stubPaidPayment(Instant paidAt, Instant observedAt) {
+        org.mockito.Mockito.when(paymentService.getOwnedPayment(
+                "900000000000000077", "10077")).thenReturn(new PaymentResult(
+                        "900000000000000077",
+                        "40077",
+                        4_000L,
+                        0L,
+                        4_000L,
+                        "KRW",
+                        PaymentStatus.PAID,
+                        PaymentAttemptStatus.PAID,
+                        REQUESTED_AT,
+                        paidAt,
+                        observedAt,
+                        List.of()));
     }
 
     private void seedHoldOwnerAndStore() {
