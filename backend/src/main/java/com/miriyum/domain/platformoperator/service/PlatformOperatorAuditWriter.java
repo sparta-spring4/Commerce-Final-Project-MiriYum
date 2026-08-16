@@ -64,6 +64,23 @@ public class PlatformOperatorAuditWriter {
                 context.caseVersion(), event.idempotencyKey(), context.correlationId(), clock.instant()));
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PlatformOperatorAuditEvent appendStore(StoreEvent event) {
+        return repository.append(PlatformOperatorAuditEvent.create(
+                event.operatorId(), event.authorityVersion(), event.roles(), event.permissions(),
+                event.action(), PlatformOperatorAuditOutcome.SUCCESS, PlatformOperatorAuditReason.STORE_ENFORCEMENT,
+                "STORE", event.storeId(), AdminCaseType.STORE_ENFORCEMENT, event.caseId(),
+                event.caseVersion(), event.idempotencyKey(), null, null, Set.of(), Set.of(),
+                Set.of(), Set.of(), event.correlationId(), clock.instant()));
+    }
+
+    public record StoreEvent(long operatorId, long authorityVersion, Set<PlatformOperatorRole> roles,
+                             Set<PlatformOperatorPermission> permissions,
+                             PlatformOperatorAuditAction action, String storeId, String caseId,
+                             long caseVersion, String idempotencyKey, String correlationId) {
+        public StoreEvent { roles=Set.copyOf(roles); permissions=Set.copyOf(permissions); }
+    }
+
     public record ManagementEvent(
             AdminAuditContext context,
             PlatformOperatorAuditAction action,

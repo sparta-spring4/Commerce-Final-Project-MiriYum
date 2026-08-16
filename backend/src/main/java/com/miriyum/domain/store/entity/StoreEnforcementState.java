@@ -2,6 +2,7 @@ package com.miriyum.domain.store.entity;
 
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.entity.BaseEntity;
@@ -91,6 +92,17 @@ public class StoreEnforcementState extends BaseEntity {
         if (!allowed) {
             throw new ServiceException(StoreErrorCode.STORE_FEATURE_RESTRICTED);
         }
+    }
+
+    public void release(ReleaseCommand command) {
+        if (!storeId.equals(command.storeId()) || enforcementVersion != command.expectedEnforcementVersion()
+                || lastSanctionId == null || lastSanctionId != command.sanctionId()) {
+            throw new ServiceException(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT);
+        }
+        enforcementVersion++;
+        lastSanctionId = null;
+        waitingAllowed = true;
+        storeManagementAllowed = true;
     }
 
 }

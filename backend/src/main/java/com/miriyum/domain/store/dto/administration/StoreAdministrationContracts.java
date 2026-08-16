@@ -2,6 +2,8 @@ package com.miriyum.domain.store.dto.administration;
 
 import com.miriyum.domain.store.enums.OperationStatus;
 import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.List;
 
 /** Store 도메인이 플랫폼 관리 유스케이스에 공개하는 Entity 비노출 계약이다. */
 public final class StoreAdministrationContracts {
@@ -52,5 +54,22 @@ public final class StoreAdministrationContracts {
         public EnforcementResult {
             restrictedFeatures = Set.copyOf(restrictedFeatures);
         }
+    }
+
+    public record ReleaseCommand(long storeId, long expectedEnforcementVersion, long sanctionId) {
+        public ReleaseCommand {
+            if (storeId <= 0 || expectedEnforcementVersion < 1 || sanctionId <= 0) {
+                throw new IllegalArgumentException("store enforcement release is invalid");
+            }
+        }
+    }
+
+    public record StoreSnapshot(long storeId, String name, long storeOperatorAccountId,
+                                OperationStatus operationStatus, boolean reservationEnabled,
+                                boolean menuHoldEnabled, boolean pickupEnabled,
+                                long enforcementVersion, LocalDateTime createdAt) {}
+    public record StoreSnapshotPage(List<StoreSnapshot> content, int page, int size,
+                                    long totalElements, int totalPages) {
+        public StoreSnapshotPage { content=List.copyOf(content); }
     }
 }
