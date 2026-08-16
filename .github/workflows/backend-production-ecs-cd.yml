@@ -86,9 +86,25 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: needs.verify-source.outputs.deployable == 'true'
+    # Environment 보호 규칙을 실제로 설정한 뒤에만 자동·수동 운영 배포를 연다.
+    if: >-
+      needs.verify-source.outputs.deployable == 'true' &&
+      vars.PRODUCTION_ECS_DEPLOYMENT_ENABLED == 'true'
 
     steps:
+      - name: Verify main is unchanged after production approval
+        if: github.event_name == 'workflow_run'
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current_main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+
+          if [ "$current_main_sha" != "$DEPLOY_SHA" ]; then
+            echo "::notice::Skipping stale CI revision $DEPLOY_SHA after production approval; current main is $current_main_sha."
+            exit 1
+          fi
+
       - name: Validate deployment configuration
         env:
           ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
