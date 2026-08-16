@@ -167,7 +167,8 @@ class StoreReservationDepositPolicyMigrationTest {
     @DisplayName("V41은 기존 매장에 정책 행을 backfill하지 않는다")
     void migratesExistingSchemaWithoutPolicyBackfill() throws Exception {
         try (MySQLContainer legacy = new MySQLContainer(
-                DockerImageName.parse("mysql:8.0.40"))) {
+                DockerImageName.parse("mysql:8.0.40"))
+                .withCommand("--log-bin-trust-function-creators=1")) {
             legacy.start();
             Flyway.configure()
                     .dataSource(

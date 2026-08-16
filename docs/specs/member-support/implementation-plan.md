@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work only in `feature/278-admin-member-support` and its isolated worktree; never modify the user's original tree or push directly to `dev`.
-- The only member-support schema file is `backend/src/main/resources/db/migration/V43__create_member_support.sql`; latest `dev` owns V42 and existing migrations are never edited.
+- The only member-support schema file is `backend/src/main/resources/db/migration/V44__create_member_support.sql`; latest `dev` owns V42 and V43, and existing migrations are never edited.
 - Controllers and services exist only when both `miriyum.platform-operator.enabled=true` and `miriyum.member-support.enabled=true`; the external paths are real MVC 404 when disabled.
 - The dev mock verifier is usable only when `miriyum.identity-verification.dev-stub-enabled=true`; otherwise verification fails closed.
 - Member-support configuration uses a distinct `proof-digest-secret` plus versioned AES-256-GCM `pii-encryption-active-key-version`/`pii-encryption-active-key` and optional matching previous pair. Ciphertext is `version || nonce || ciphertext`, new writes use only active, and reads accept active/previous during rotation.
@@ -23,7 +23,7 @@
 
 ---
 
-### Task 1: Contract enums, account guard columns, and V43 schema
+### Task 1: Contract enums, account guard columns, and V44 schema
 
 **Files:**
 - Modify: `backend/src/main/java/com/miriyum/domain/auth/exception/AuthErrorCode.java`
@@ -37,7 +37,7 @@
 - Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/exception/AdminAuthorizationErrorCode.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/consumer/entity/ConsumerAccount.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/storeoperator/entity/StoreOperatorAccount.java`
-- Create: `backend/src/main/resources/db/migration/V43__create_member_support.sql`
+- Create: `backend/src/main/resources/db/migration/V44__create_member_support.sql`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportMigrationIT.java`
 - Test: `backend/src/test/java/com/miriyum/domain/platformoperator/membersupport/MemberSupportCatalogTest.java`
 - Test: `backend/src/test/java/com/miriyum/domain/auth/membersupport/MemberAccountGuardTest.java`
@@ -48,7 +48,7 @@
 - Produces account fields `boolean passwordResetRequired` and `long supportVersion` plus methods `approveRecovery(String email)`, `replaceRecoveredPassword(String hash)`, `applySuspension()`, `clearSuspension()`, and `assertSupportVersion(long expected)`.
 - Produces error codes `AUTH_016 MEMBER_SUPPORT_NOT_FOUND`, `AUTH_017 MEMBER_SUPPORT_STATE_CONFLICT`, and `AUTH_018 PERMANENT_SANCTION_APPROVAL_CONFLICT`.
 
-- [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V43, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V43 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
+- [x] **Step 1: Write the failing migration and catalog tests.** The migration test starts MySQL 8.0.40, runs Flyway, verifies V44, the two new account guard columns, five append/state ledger tables, active-case constraints, recovery-audit retention timestamp, and that the V44 replacement permission check accepts `ACCOUNT_PERMANENT_SANCTION_APPROVE`.
 
 ```java
 assertThat(appliedVersions(dataSource)).contains("42");
@@ -64,9 +64,9 @@ Run: `backend\gradlew.bat test --tests "*PlatformOperatorRoleTest" --tests "*Pla
 
 Run: `backend\gradlew.bat integrationTest --tests "*MemberSupportMigrationIT"`
 
-Expected: compile/assertion failures for missing enum values, error codes, V43, and account columns.
+Expected: compile/assertion failures for missing enum values, error codes, V44, and account columns.
 
-- [x] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V43 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
+- [x] **Step 3: Implement the minimal catalogs, entity transitions, and migration.** V44 creates `member_identity_verifications`, `member_support_cases`, `member_sanctions`, `member_sanction_approvals`, `member_support_audits`, and the expiry/active-case guard indexes. It drops and recreates only the V40 permission check constraint to include the new permission.
 
 ```java
 public void assertSupportVersion(long expected) {
@@ -415,12 +415,12 @@ Expected: every path is in the active spec allowlist and no whitespace errors.
 
 - [ ] **Step 5: Use `superpowers:requesting-code-review`, fix every confirmed issue test-first, then use `superpowers:verification-before-completion` and `superpowers:finishing-a-development-branch`.**
 
-- [ ] **Step 6: Commit remaining verified changes, push only `feature/278-admin-member-support`, and create a Draft PR targeting `dev`.** Include test evidence, known pre-existing store aggregate lint debt, migration V43, security invariants, and no direct dev push.
+- [ ] **Step 6: Commit remaining verified changes, push only `feature/278-admin-member-support`, and create a Draft PR targeting `dev`.** Include test evidence, known pre-existing store aggregate lint debt, migration V44, security invariants, and no direct dev push.
 
 ### Task 11: Separate approval-gated password reset credential
 
 **Files:**
-- Modify: `backend/src/main/resources/db/migration/V43__create_member_support.sql`
+- Modify: `backend/src/main/resources/db/migration/V44__create_member_support.sql`
 - Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/MemberIdentityVerification.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/entity/membersupport/MemberSupportCase.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/platformoperator/repository/membersupport/MemberIdentityVerificationRepository.java`
@@ -450,7 +450,7 @@ assertThatThrownBy(() -> credentials.reset(CONSUMER, resetProof, "Changed3#"))
 
 Run: `backend\gradlew.bat test --tests "*MemberRecoveryPasswordResetTest"`
 
-- [ ] **Step 3: Implement the separate credential, V43 columns/checks, cookie paths and approval-gated exchange HTTP path.** Never persist or log the raw tracking/reset proof.
+- [ ] **Step 3: Implement the separate credential, V44 columns/checks, cookie paths and approval-gated exchange HTTP path.** Never persist or log the raw tracking/reset proof.
 
 - [ ] **Step 4: Run GREEN and the focused public HTTP/MySQL tests.**
 
@@ -530,7 +530,7 @@ Run: `backend\gradlew.bat test --tests "*MemberRecoveryPasswordResetTest"`
 - Modify audience OpenAPI refs only when route inventory requires them.
 
 - [ ] **Step 1: Add contract tests for the reset-credential exchange path and required `activeSanctions`.**
-- [ ] **Step 2: Update the active spec/OpenAPI and V43 only; do not add a later member-support migration.**
+- [ ] **Step 2: Update the active spec/OpenAPI and V44 only; do not add a later member-support migration.**
 - [ ] **Step 3: Run changed OpenAPI lint, architecture tests, full unit suite and integration shards A-D.**
 - [ ] **Step 4: Verify the exact allowlist and `git diff --check`, commit, push only the feature branch, reply in all six review threads with test evidence, and resolve only addressed threads.**
 

@@ -21,8 +21,9 @@ import org.testcontainers.mysql.MySQLContainer;
 class MemberSupportMigrationIT {
 
     @Test
-    void v42CreatesMemberSupportLedgersAndAccountGuards() throws Exception {
-        try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")) {
+    void v44CreatesMemberSupportLedgersAndPreservesAllReauthenticationPurposes() throws Exception {
+        try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")
+                .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
             Flyway flyway = Flyway.configure()
                     .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
@@ -30,7 +31,7 @@ class MemberSupportMigrationIT {
             flyway.migrate();
 
             assertThat(flyway.info().applied()).extracting(MigrationInfo::getScript)
-                    .contains("V43__create_member_support.sql");
+                    .contains("V44__create_member_support.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(columns(connection, "consumer_accounts"))
                         .contains("password_reset_required", "support_version");
@@ -60,7 +61,28 @@ class MemberSupportMigrationIT {
                     statement.setLong(1, operatorId);
                     assertThat(statement.executeUpdate()).isEqualTo(1);
                 }
+                assertReauthenticationPurposeAccepted(
+                        connection, operatorId, "ACCOUNT_APPEAL_DECISION", "a");
+                assertReauthenticationPurposeAccepted(
+                        connection, operatorId, "PERMANENT_ACCOUNT_SANCTION_APPROVAL", "b");
             }
+        }
+    }
+
+    private static void assertReauthenticationPurposeAccepted(
+            Connection connection, long operatorId, String purpose, String digestPrefix
+    ) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                INSERT INTO platform_operator_reauthentication_approvals
+                    (approval_digest, platform_operator_account_id, purpose, target_type, target_id,
+                     session_fingerprint, authority_version, issued_at, expires_at, consumed_at)
+                VALUES (?, ?, ?, 'CONSUMER_ACCOUNT', '1', REPEAT('f', 64), 1,
+                        NOW(6), DATE_ADD(NOW(6), INTERVAL 5 MINUTE), NULL)
+                """)) {
+            statement.setString(1, digestPrefix.repeat(64));
+            statement.setLong(2, operatorId);
+            statement.setString(3, purpose);
+            assertThat(statement.executeUpdate()).isEqualTo(1);
         }
     }
 

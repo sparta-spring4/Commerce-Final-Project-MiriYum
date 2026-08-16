@@ -12,7 +12,11 @@ V40의 역할·직접 권한 grant, 사건 배정과 재인증 승인 원장이 
 
 ## 회원지원 데이터·API 계약
 
-V43의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
+V44의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
+
+## 플랫폼 운영자 관리·감사 계약
+
+V43은 `SUPER_ADMIN` role grant의 singleton 제약과 수정·삭제를 trigger로 거부하는 `platform_operator_audit_events`를 추가한다. 관리 명령 멱등성은 V4 공통 원장을 재사용한다. 기존 인증 원장과 신규 관리 원장은 각각 `AUTH:*`, `ADMIN:*` event key의 안전 projection으로 통합 조회하고 원 사건은 연결 보정 사건으로만 바로잡는다. 공통 보존기간·TTL·cleanup은 ADMIN-009가 확정되기 전까지 구성하지 않는다. 상세 계약은 [운영자 관리·감사 명세](specs/platform-operator-management-audit/spec.md)를 따른다.
 
 ## OpenAPI 소유권과 진입점
 

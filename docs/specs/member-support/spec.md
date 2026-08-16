@@ -122,7 +122,7 @@
 
 ## migration
 
-신규 migration은 반드시 `backend/src/main/resources/db/migration/V43__create_member_support.sql` 하나다. 최신 `dev`의 파일 메타데이터 migration이 V42를 선점했으므로 다음 빈 버전 V43을 사용하며 기존 migration을 수정하지 않는다. 복구·제재·이의·추가 승인·감사·mock 확인 session·대상 guard 원장을 만들고 `consumer_accounts`, `store_operator_accounts`에 `password_reset_required`, `support_version`을 추가한다. 연락처·인증 비밀 원문은 신규 테이블에 저장하지 않는다.
+신규 migration은 반드시 `backend/src/main/resources/db/migration/V44__create_member_support.sql` 하나다. 최신 `dev`가 파일 메타데이터 V42와 운영자 관리·감사 V43을 소유하므로 다음 빈 버전 V44를 사용하며 기존 migration을 수정하지 않는다. 복구·제재·이의·추가 승인·감사·mock 확인 session·대상 guard 원장을 만들고 `consumer_accounts`, `store_operator_accounts`에 `password_reset_required`, `support_version`을 추가한다. 연락처·인증 비밀 원문은 신규 테이블에 저장하지 않는다.
 
 ## 변경 파일 allowlist
 
@@ -153,7 +153,7 @@
 - `backend/src/main/java/com/miriyum/domain/platformoperator/service/membersupport/**`
 - `backend/src/main/java/com/miriyum/global/security/SecurityConfig.java`
 - `backend/src/main/resources/application.yml`
-- `backend/src/main/resources/db/migration/V43__create_member_support.sql`
+- `backend/src/main/resources/db/migration/V44__create_member_support.sql`
 - `backend/src/test/java/com/miriyum/domain/auth/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/consumer/membersupport/**`
 - `backend/src/test/java/com/miriyum/domain/storeoperator/membersupport/**`
@@ -197,7 +197,7 @@
 
 ## 구현 계획
 
-1. 계약·정책 테스트에서 OpenAPI path, 오류, 권한 catalog와 migration V43을 먼저 실패시킨다.
+1. 계약·정책 테스트에서 OpenAPI path, 오류, 권한 catalog와 migration V44를 먼저 실패시킨다.
 2. mock 확인 증거와 계정 유형별 public 최소 조회·복구·제재 port를 테스트 주도로 만든다.
 3. MySQL migration과 복구·제재·이의 사건 원장, version CAS, 감사 writer를 구현한다.
 4. 운영자 최소 조회·사건 배정·결정·영구 정지 추가 승인 HTTP를 순서대로 red-green-refactor 한다.

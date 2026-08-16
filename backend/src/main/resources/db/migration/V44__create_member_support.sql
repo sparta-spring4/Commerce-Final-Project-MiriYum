@@ -8,6 +8,18 @@ ALTER TABLE store_operator_accounts
     ADD COLUMN support_version BIGINT NOT NULL DEFAULT 0,
     ADD CONSTRAINT ck_store_operator_accounts_support_version CHECK (support_version >= 0);
 
+ALTER TABLE platform_operator_reauthentication_approvals
+    DROP CHECK ck_platform_operator_reauth_approvals_purpose;
+
+ALTER TABLE platform_operator_reauthentication_approvals
+    ADD CONSTRAINT ck_platform_operator_reauth_approvals_purpose CHECK (purpose IN (
+        'ONBOARDING_DECISION', 'MEMBER_RECOVERY', 'ACCOUNT_SANCTION',
+        'ACCOUNT_APPEAL_DECISION', 'PERMANENT_ACCOUNT_SANCTION_APPROVAL',
+        'STORE_SANCTION', 'PAYMENT_RECOVERY', 'OPERATOR_CREATION',
+        'OPERATOR_AUTHORITY_CHANGE', 'OPERATOR_SUSPENSION',
+        'AUDIT_CORRECTION', 'INCIDENT_RESPONSE'
+    ));
+
 ALTER TABLE platform_operator_permission_grants
     DROP CHECK ck_platform_operator_permission_grants_permission;
 

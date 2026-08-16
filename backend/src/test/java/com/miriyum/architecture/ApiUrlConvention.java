@@ -12,7 +12,8 @@ final class ApiUrlConvention {
     private static final Set<String> SINGLETON_SEGMENTS = Set.of(
             "auth", "me", "current", "contact", "visibility", "selling-status",
             "end-at", "menu-hold-availability", "pickup-availability",
-            "deactivation-impact", "initial-password", "portone", "kakao");
+            "deactivation-impact", "initial-password", "portone", "kakao",
+            "authority", "suspension");
     private static final Set<String> LEGACY_COMMAND_SEGMENTS = Set.of(
             "publication", "publication-cancellation", "retirement", "cancellation",
             "call", "arrive", "check-in", "cancel");
