@@ -13,8 +13,11 @@ public final class ReservationDepositCommandResult {
         if ((httpStatus != 200 && httpStatus != 202) || payload == null) {
             throw new IllegalArgumentException("deposit command result must be 200 or 202");
         }
-        if (httpStatus == 200 && !(payload instanceof ReservationDetailResponse)
-                || httpStatus == 202 && !(payload instanceof ReservationRequestResponse)) {
+        if ((httpStatus == 200
+                && !(payload instanceof ReservationDetailResponse)
+                && !(payload instanceof ReservationRequestResponse))
+                || (httpStatus == 202
+                && !(payload instanceof ReservationRequestResponse))) {
             throw new IllegalArgumentException("payload must match deposit command status");
         }
         this.httpStatus = httpStatus;
@@ -31,6 +34,12 @@ public final class ReservationDepositCommandResult {
             ReservationRequestResponse request
     ) {
         return new ReservationDepositCommandResult(202, request);
+    }
+
+    public static ReservationDepositCommandResult terminated(
+            ReservationRequestResponse request
+    ) {
+        return new ReservationDepositCommandResult(200, request);
     }
 
     public int httpStatus() {

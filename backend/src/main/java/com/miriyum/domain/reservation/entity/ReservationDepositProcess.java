@@ -147,6 +147,16 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.EXPIRED;
     }
 
+    public void abandon(Instant abandonedAt) {
+        Instant occurredAt = requireTime(abandonedAt);
+        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT
+                || !abandonmentRequested) {
+            throw invalidTransition();
+        }
+        completedAt = occurredAt;
+        status = ReservationDepositProcessStatus.ABANDONED;
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");

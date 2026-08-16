@@ -120,6 +120,42 @@ public class ReservationDepositProcessService {
         return ReservationDepositCommandResult.pending(toResponse(process));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationDepositCommandResult abandonOwned(
+            long processId,
+            long consumerAccountId,
+            String idempotencyKey
+    ) {
+        requirePositive(processId, "processId");
+        requirePositive(consumerAccountId, "consumerAccountId");
+        requireIdempotencyKey(idempotencyKey);
+        ReservationDepositProcess process = processRepository
+                .findByIdAndConsumerAccountIdForUpdate(processId, consumerAccountId)
+                .orElseThrow(() -> new ServiceException(
+                        ReservationErrorCode.RESERVATION_NOT_FOUND));
+        Instant now = clock.instant();
+        process.requestAbandonment(now);
+        PaymentResult payment = paymentService.getOwnedPayment(
+                process.getPaymentId(), String.valueOf(consumerAccountId));
+        requireSamePayment(process, payment);
+        if (payment.status() == PaymentStatus.READY) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RELEASED,
+                            "reservation-deposit-abandon:" + processId + ":" + idempotencyKey,
+                            "CONSUMER",
+                            consumerAccountId,
+                            now,
+                            null));
+            process.abandon(now);
+            processRepository.saveAndFlush(process);
+            return ReservationDepositCommandResult.terminated(toResponse(process));
+        }
+        processRepository.saveAndFlush(process);
+        return ReservationDepositCommandResult.pending(toResponse(process));
+    }
+
     private static ReservationRequestResponse toResponse(ReservationDepositProcess process) {
         return new ReservationRequestResponse(
                 String.valueOf(process.getId()),
