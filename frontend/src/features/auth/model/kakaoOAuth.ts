@@ -12,8 +12,7 @@
  * 이 값은 카카오 개발자 콘솔과 서버 `MIRIYUM_KAKAO_REDIRECT_URIS` 허용 목록에
  * **글자 그대로 같게** 등록돼야 한다. 어느 한쪽이라도 다르면 서버가 503으로 막는다.
  *
- * 콜백 화면 자체는 후속 작업이라 `app/routes.ts`에 아직 등록하지 않는다.
- * 여기 있는 동안에는 route가 아니라 서버로 보내는 값일 뿐이다.
+ * 이 경로는 `app/routes.ts`의 일반 사용자 카카오 콜백 화면에도 등록한다.
  */
 export const KAKAO_CALLBACK_PATH = '/auth/kakao/callback'
 

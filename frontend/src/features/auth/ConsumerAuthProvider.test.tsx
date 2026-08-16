@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorResponse, successResponse } from '../../test/msw/envelope'
 import { server } from '../../test/msw/server'
 import { TestQueryProvider } from '../../test/TestQueryProvider'
@@ -26,7 +26,7 @@ import {
 const PROTECTED_PATH = '/api/v1/consumers/me'
 
 function Probe() {
-  const { status, apiClient, signIn, signOut, signOutNotice } =
+  const { status, apiClient, signIn, completeKakaoSignIn, signOut, signOutNotice } =
     useConsumerAuth()
 
   return (
@@ -43,6 +43,14 @@ function Probe() {
       </button>
       <button type="button" onClick={() => void signOut()}>
         로그아웃
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void completeKakaoSignIn('kakao-access-token')
+        }}
+      >
+        카카오 로그인 완료
       </button>
       <button
         type="button"
@@ -112,6 +120,7 @@ function deferred() {
 
 afterEach(() => {
   document.cookie = `${CONSUMER_CSRF_COOKIE}=; Max-Age=0; path=/`
+  vi.restoreAllMocks()
 })
 
 describe('일반 사용자 인증 shell', () => {
@@ -572,6 +581,27 @@ describe('일반 사용자 인증 shell', () => {
     fireEvent.click(screen.getByRole('button', { name: '로그인' }))
     await waitFor(() => expect(status()).toBe('authenticated'))
 
+    expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
+  })
+
+  it('카카오 로그인 완료도 인증 상태 전환 전에 이전 보호 캐시를 지운다', async () => {
+    server.use(unauthenticatedConsumer)
+
+    const { queryClient } = renderProvider()
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+
+    seedProtectedCache(queryClient, '이전 사용자')
+    const cacheClear = deferred()
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(() => cacheClear.promise)
+
+    fireEvent.click(screen.getByRole('button', { name: '카카오 로그인 완료' }))
+
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    expect(status()).toBe('unauthenticated')
+    expect(cachedOwners(queryClient)).not.toContain(undefined)
+
+    cacheClear.resolve()
+    await waitFor(() => expect(status()).toBe('authenticated'))
     expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
   })
 })

@@ -12,5 +12,7 @@ export {
 } from './ConsumerAuthProvider'
 export { RequireConsumerAuth } from './RequireConsumerAuth'
 export { ConsumerSignInPage } from './ui/ConsumerSignInPage'
+export { ConsumerKakaoCallbackPage } from './ui/ConsumerKakaoCallbackPage'
+export { ConsumerKakaoSignUpPage } from './ui/ConsumerKakaoSignUpPage'
 export { ConsumerSignUpPage } from './ui/ConsumerSignUpPage'
 export { ConsumerAccountMenu } from './ui/ConsumerAccountMenu'
