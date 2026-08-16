@@ -506,7 +506,6 @@ aws() {
   fi
   return 0
 }
-ps_calls=0
 docker() {
 
   if [[ "$1" == "login" ]]; then
@@ -514,16 +513,18 @@ docker() {
     return 0
   fi
   if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps -q mysql"* ]]; then
+      echo mysql-container
+      return 0
+    fi
     if [[ "$*" == *"sh -ec"* ]]; then
       return 1
     fi
-    if [[ "$*" == *" ps"* ]]; then
-      ps_calls=$((ps_calls + 1))
-      if [[ "$ps_calls" -eq 1 ]]; then
-        return 1
-      fi
-    fi
     printf '%s\\n' "$*" >> "$BACKFILL_TEST_COMPOSE"
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    echo healthy
+    return 0
   fi
   return 0
 }
