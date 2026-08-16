@@ -58,7 +58,7 @@ class WaitingSettingServiceTest {
         WaitingSettingSnapshot result = service.get(33L, 22L);
 
         assertThat(result).isEqualTo(new WaitingSettingSnapshot(
-                22L, false, WaitingReceptionMode.PAUSED, 60, 0L));
+                "22", false, WaitingReceptionMode.PAUSED, 60, 0L));
         then(authority).should().requireRead(33L, 22L);
         then(settings).should().findByStoreId(22L);
         then(settings).should(never()).saveAndFlush(any());
@@ -71,7 +71,7 @@ class WaitingSettingServiceTest {
                 .willReturn(new WaitingActiveTeamImpact(22L, 4L));
 
         assertThat(service.inspectDeactivation(33L, 22L))
-                .isEqualTo(new WaitingSettingDeactivationImpact(22L, 0L, 4L));
+                .isEqualTo(new WaitingSettingDeactivationImpact("22", 0L, 4L));
     }
 
     @Test
@@ -86,7 +86,7 @@ class WaitingSettingServiceTest {
 
         assertThat(result.httpStatus()).isEqualTo(200);
         assertThat(result.data()).isEqualTo(new WaitingSettingSnapshot(
-                22L, false, WaitingReceptionMode.PAUSED, 60, 1L));
+                "22", false, WaitingReceptionMode.PAUSED, 60, 1L));
         then(closures).should().inspectActiveTeams(33L, 22L);
         then(closures).shouldHaveNoMoreInteractions();
     }

@@ -37,10 +37,12 @@ class WaitingSettingStoreOperatorControllerTest {
     void getsSafeDefaults() throws Exception {
         authenticate();
         given(service.get(33L, 22L)).willReturn(new WaitingSettingSnapshot(
-                22L, false, WaitingReceptionMode.PAUSED, 60, 0L));
+                "22", false, WaitingReceptionMode.PAUSED, 60, 0L));
 
         mockMvc.perform(get(BASE).header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.storeId").isString())
+                .andExpect(jsonPath("$.data.storeId").value("22"))
                 .andExpect(jsonPath("$.data.enabled").value(false))
                 .andExpect(jsonPath("$.data.receptionMode").value("PAUSED"))
                 .andExpect(jsonPath("$.data.advanceOpenMinutes").value(60))
@@ -73,11 +75,13 @@ class WaitingSettingStoreOperatorControllerTest {
     void getsDeactivationImpact() throws Exception {
         authenticate();
         given(service.inspectDeactivation(33L, 22L))
-                .willReturn(new WaitingSettingDeactivationImpact(22L, 4L, 3L));
+                .willReturn(new WaitingSettingDeactivationImpact("22", 4L, 3L));
 
         mockMvc.perform(get(BASE + "/deactivation-impact")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer store-token"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.storeId").isString())
+                .andExpect(jsonPath("$.data.storeId").value("22"))
                 .andExpect(jsonPath("$.data.version").value(4))
                 .andExpect(jsonPath("$.data.activeTeamCount").value(3));
     }

@@ -58,7 +58,8 @@ public class WaitingSettingService {
         long version = settingRepository.findByStoreId(storeId)
                 .map(WaitingSetting::getVersion).orElse(0L);
         WaitingActiveTeamImpact impact = closureService.inspectActiveTeams(operatorId, storeId);
-        return new WaitingSettingDeactivationImpact(storeId, version, impact.activeTeamCount());
+        return new WaitingSettingDeactivationImpact(
+                Long.toString(storeId), version, impact.activeTeamCount());
     }
 
     public WaitingSettingCommandResult replace(long operatorId, long storeId,
