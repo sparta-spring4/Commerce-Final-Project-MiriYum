@@ -22,7 +22,7 @@ import org.testcontainers.mysql.MySQLContainer;
 class MemberSupportMigrationIT {
 
     @Test
-    void v44CreatesMemberSupportLedgersAndPreservesAllReauthenticationPurposes() throws Exception {
+    void v46CreatesMemberSupportLedgersAndPreservesAllReauthenticationPurposes() throws Exception {
         try (MySQLContainer mysql = new MySQLContainer("mysql:8.0.40")
                 .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
@@ -32,7 +32,7 @@ class MemberSupportMigrationIT {
             flyway.migrate();
 
             assertThat(flyway.info().applied()).extracting(MigrationInfo::getScript)
-                    .contains("V44__create_member_support.sql");
+                    .contains("V46__create_member_support.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(columns(connection, "consumer_accounts"))
                         .contains("password_reset_required", "support_version");
