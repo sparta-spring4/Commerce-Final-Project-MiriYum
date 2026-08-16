@@ -54,7 +54,7 @@ The staging Compose file forwards `MIRIYUM_STORE_GEOCODING_REST_API_KEY` only to
 
 Migrate without recording the value in Git, Actions logs, SSM parameters, or deployment artifacts:
 
-1. Add `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the server-local `/opt/miriyum/.env` before deploying the Compose revision that consumes it. Keep `MIRIYUM_KAKAO_LOCAL_REST_API_KEY` temporarily if an older backend revision still reads it directly.
+1. Add `MIRIYUM_STORE_GEOCODING_REST_API_KEY` to the server-local `/opt/miriyum/.env` before deploying the Compose revision that consumes it. Do not rely on `MIRIYUM_KAKAO_LOCAL_REST_API_KEY` as a staging fallback: staging Compose has never forwarded that legacy name to the backend, so retaining it in the host `.env` does not create a rollback window. The temporary legacy overlap documented for production ECS applies only to that environment.
 2. Deploy the compatibility revision whose application configuration prefers the canonical name and retains the legacy name only as a fallback.
 3. Create one synthetic staging store through the public API and verify successful geocoding without printing the key, request authorization header, provider response body, or precise fixture coordinates in logs or artifacts.
 4. After the same canonical-name evidence exists for production ECS, remove the legacy value from the environment. Remove the application fallback only in a later reviewed change after both environments no longer depend on it.
