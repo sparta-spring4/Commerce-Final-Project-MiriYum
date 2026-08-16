@@ -114,6 +114,8 @@ public class ReservationDepositProcessService {
         if (payment.status() == PaymentStatus.PAID
                 && payment.paidAt() != null
                 && payment.paidAt().isBefore(process.getExpiresAt())
+                && (now.isBefore(process.getExpiresAt())
+                || process.isResourcesProtected())
                 && !process.isAbandonmentRequested()) {
             process.beginFinalization(now);
             Reservation reservation = finalizationPrimitive.finalizeResources(
@@ -130,11 +132,42 @@ public class ReservationDepositProcessService {
                             reservation,
                             menuHoldPort.findSnapshots(reservation.getId())));
         }
+        if (payment.status() == PaymentStatus.PAID && payment.paidAt() != null) {
+            boolean protectedResources = process.isResourcesProtected();
+            holdTransitionPrimitive.transition(protectedResources
+                    ? new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RELEASED,
+                            "reservation-deposit-compensate:" + processId + ":" + idempotencyKey,
+                            "CONSUMER",
+                            consumerAccountId,
+                            now,
+                            null)
+                    : new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.EXPIRED,
+                            "reservation-hold-expire:" + process.getReservationHoldId(),
+                            "SYSTEM",
+                            null,
+                            process.getExpiresAt(),
+                            null));
+            requireCompensationRecords(
+                    process,
+                    payment,
+                    now,
+                    payment.paidAt().isBefore(process.getExpiresAt())
+                            ? "UNPROTECTED_LATE_PAID"
+                            : "PAYMENT_PAID_AT_OR_AFTER_EXPIRY");
+            process.requireCompensation(now);
+            processRepository.saveAndFlush(process);
+            return ReservationDepositCommandResult.pending(toResponse(process));
+        }
         if ((payment.status() == PaymentStatus.CONFIRMING
                 || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
                 && now.isBefore(process.getExpiresAt())
                 && !process.isAbandonmentRequested()) {
             protectResources(process, processId, consumerAccountId, idempotencyKey, now);
+            processRepository.saveAndFlush(process);
         }
         if (payment.status() == PaymentStatus.READY
                 && !now.isBefore(process.getExpiresAt())
@@ -204,7 +237,7 @@ public class ReservationDepositProcessService {
                             consumerAccountId,
                             now,
                             null));
-            requireCompensationRecords(process, payment, now);
+            requireCompensationRecords(process, payment, now, "ABANDONMENT_PAID");
             process.requireCompensation(now);
             processRepository.saveAndFlush(process);
             return ReservationDepositCommandResult.pending(toResponse(process));
@@ -221,10 +254,10 @@ public class ReservationDepositProcessService {
     private void requireCompensationRecords(
             ReservationDepositProcess process,
             PaymentResult payment,
-            Instant observedAt
+            Instant observedAt,
+            String causeCode
     ) {
         long processId = process.getId();
-        String causeCode = "ABANDONMENT_PAID";
         ReservationDepositCauseAudit existingCause = causeRepository
                 .findByReservationDepositProcessIdAndCauseCode(processId, causeCode)
                 .orElse(null);
@@ -315,6 +348,7 @@ public class ReservationDepositProcessService {
                         consumerAccountId,
                         requestedAt,
                         null));
+        process.protectResources(requestedAt);
     }
 
     private static ReservationRequestResponse toResponse(ReservationDepositProcess process) {

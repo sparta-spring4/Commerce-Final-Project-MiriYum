@@ -59,6 +59,10 @@ public class ReservationDepositProcess {
     private boolean abandonmentRequested;
     @Column(name = "abandonment_requested_at")
     private Instant abandonmentRequestedAt;
+    @Column(name = "resources_protected", nullable = false)
+    private boolean resourcesProtected;
+    @Column(name = "resources_protected_at")
+    private Instant resourcesProtectedAt;
     @Column(name = "final_reservation_id", unique = true)
     private Long finalReservationId;
     @Column(name = "requested_at", nullable = false, updatable = false)
@@ -125,6 +129,16 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.FINALIZING_RESOURCES;
     }
 
+    public void protectResources(Instant protectedAt) {
+        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT) {
+            throw invalidTransition();
+        }
+        if (!resourcesProtected) {
+            resourcesProtected = true;
+            resourcesProtectedAt = requireTime(protectedAt);
+        }
+    }
+
     public void complete(long reservationId, Instant completedAt) {
         if (reservationId <= 0
                 || status != ReservationDepositProcessStatus.FINALIZING_RESOURCES
@@ -159,8 +173,7 @@ public class ReservationDepositProcess {
 
     public void requireCompensation(Instant requiredAt) {
         requireTime(requiredAt);
-        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT
-                || !abandonmentRequested) {
+        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT) {
             throw invalidTransition();
         }
         status = ReservationDepositProcessStatus.COMPENSATION_REQUIRED;
@@ -222,6 +235,8 @@ public class ReservationDepositProcess {
     }
     public boolean isAbandonmentRequested() { return abandonmentRequested; }
     public Instant getAbandonmentRequestedAt() { return abandonmentRequestedAt; }
+    public boolean isResourcesProtected() { return resourcesProtected; }
+    public Instant getResourcesProtectedAt() { return resourcesProtectedAt; }
     public Long getFinalReservationId() { return finalReservationId; }
     public Instant getRequestedAt() { return requestedAt; }
     public Instant getCompletedAt() { return completedAt; }

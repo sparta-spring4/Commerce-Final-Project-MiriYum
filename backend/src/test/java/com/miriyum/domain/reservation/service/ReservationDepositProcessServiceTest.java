@@ -479,6 +479,147 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void paidAtExactExpiryNeverFinalizesAndRequiresFullRefund() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(expiresAt));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt.plusSeconds(1), ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174008");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        ArgumentCaptor<ReservationDepositCauseAudit> cause =
+                ArgumentCaptor.forClass(ReservationDepositCauseAudit.class);
+        verify(causeRepository).save(cause.capture());
+        assertThat(cause.getValue().getCauseCode())
+                .isEqualTo("PAYMENT_PAID_AT_OR_AFTER_EXPIRY");
+        verify(refundRepository).save(any(ReservationDepositRefundObligation.class));
+        verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
+    void unprotectedLatePaidBeforeExpiryDoesNotResurrectExpiredResources() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(expiresAt.minusNanos(1)));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt.plusSeconds(1), ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174009");
+
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.EXPIRED,
+                        "reservation-hold-expire:77",
+                        "SYSTEM",
+                        null,
+                        expiresAt,
+                        null));
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+        verify(refundRepository).save(any(ReservationDepositRefundObligation.class));
+    }
+
+    @Test
+    void protectedPaidBeforeExpiryCanFinalizeAfterWallClockExpiry() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationDepositProcess process = depositProcess();
+        Instant expiresAt = process.getExpiresAt();
+        process.protectResources(NOW);
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(expiresAt.minusNanos(1)));
+        given(finalizationPrimitive.finalizeResources(any()))
+                .willReturn(confirmedReservation());
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                mock(ReservationDepositCauseAuditRepository.class),
+                mock(ReservationDepositRefundObligationRepository.class),
+                paymentService,
+                finalizationPrimitive,
+                mock(ReservationHoldTransitionPrimitive.class),
+                mock(ReservationMenuHoldPort.class),
+                Clock.fixed(expiresAt.plusSeconds(1), ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174010");
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(process.getStatus()).isEqualTo(ReservationDepositProcessStatus.COMPLETED);
+        verify(finalizationPrimitive).finalizeResources(any());
+    }
+
+    @Test
     void finalizationCopiesHeldCapacityWithoutMutatingOccupiedTotals() {
         ReservationHoldRepository holdRepository = mock(ReservationHoldRepository.class);
         ReservationHoldCapacityAllocationRepository holdAllocationRepository =
