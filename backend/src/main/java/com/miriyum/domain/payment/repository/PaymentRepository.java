@@ -13,6 +13,18 @@ import org.springframework.data.repository.query.Param;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
+    @Query("""
+            select count(payment)
+            from Payment payment
+            where payment.sourceType = :sourceType
+              and payment.sourceReferenceId in :sourceReferenceIds
+              and payment.status <> :#{T(com.miriyum.domain.payment.entity.Payment.Status).REFUNDED}
+            """)
+    long countUnsettledBySourceReferences(
+            @Param("sourceType") String sourceType,
+            @Param("sourceReferenceIds") List<String> sourceReferenceIds
+    );
+
     Optional<Payment> findBySourceTypeAndSourceReferenceId(String sourceType, String sourceReferenceId);
 
     Optional<Payment> findBySourceTypeAndPreparationIdempotencyKey(
