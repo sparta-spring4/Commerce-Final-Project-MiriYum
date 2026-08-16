@@ -166,6 +166,15 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.COMPENSATION_REQUIRED;
     }
 
+    public void beginCompensation(Instant claimedAt) {
+        requireTime(claimedAt);
+        if (status != ReservationDepositProcessStatus.COMPENSATION_REQUIRED
+                && status != ReservationDepositProcessStatus.COMPENSATING) {
+            throw invalidTransition();
+        }
+        status = ReservationDepositProcessStatus.COMPENSATING;
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");

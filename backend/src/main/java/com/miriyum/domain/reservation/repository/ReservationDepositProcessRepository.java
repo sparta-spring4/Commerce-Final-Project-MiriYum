@@ -22,4 +22,9 @@ public interface ReservationDepositProcessRepository
             @Param("processId") long processId,
             @Param("consumerAccountId") long consumerAccountId
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select process from ReservationDepositProcess process where process.id = :processId")
+    Optional<ReservationDepositProcess> findByIdForUpdate(
+            @Param("processId") long processId);
 }
