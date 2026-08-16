@@ -65,6 +65,7 @@ import org.testcontainers.utility.DockerImageName;
         properties = {
             "spring.jpa.hibernate.ddl-auto=validate",
             "spring.task.scheduling.enabled=false",
+            "miriyum.reservation.deposit-worker.enabled=false",
             "miriyum.reservation.hold-expiration.enabled=false",
             "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
             "miriyum.payment.cursor-secret=test-history-cursor-secret-with-enough-entropy",

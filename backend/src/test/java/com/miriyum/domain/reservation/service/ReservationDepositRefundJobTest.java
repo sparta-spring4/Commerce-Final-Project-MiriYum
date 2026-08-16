@@ -5,21 +5,57 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
+import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 class ReservationDepositRefundJobTest {
 
     private static final Duration RETRY_DELAY = Duration.ofSeconds(30);
+
+    @Test
+    void scheduledPollUsesDedicatedSchedulerAndStableLeaseOwner() throws Exception {
+        ReservationDepositRefundService refundService =
+                mock(ReservationDepositRefundService.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        given(refundService.claimDue(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(100))).willReturn(List.of());
+        ReservationDepositRefundJob job = new ReservationDepositRefundJob(
+                refundService,
+                paymentService);
+        Method scheduledMethod = ReservationDepositRefundJob.class
+                .getMethod("runScheduled");
+        Scheduled scheduled = scheduledMethod.getAnnotation(Scheduled.class);
+
+        scheduledMethod.invoke(job);
+        scheduledMethod.invoke(job);
+
+        assertThat(scheduled).isNotNull();
+        assertThat(scheduled.scheduler()).isEqualTo("reservationDepositRefundScheduler");
+        assertThat(scheduled.fixedDelayString())
+                .isEqualTo("#{@reservationDepositRefundPollDelayMs}");
+        ArgumentCaptor<String> owners = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(refundService, times(2))
+                .claimDue(owners.capture(), org.mockito.ArgumentMatchers.eq(100));
+        String owner = owners.getAllValues().getFirst();
+        assertThat(owners.getAllValues()).hasSize(2).allMatch(owner::equals);
+        assertThat(owner).startsWith("reservation-deposit-refund-");
+        assertSchedulerBean("reservationDepositRefundScheduler");
+    }
 
     @Test
     void callsPaymentOutsideJobTransactionThenRecordsResultInNewTransaction()
@@ -221,5 +257,14 @@ class ReservationDepositRefundJobTest {
         assertThat(job.runOnce("worker-a", 10)).isZero();
 
         then(refundService).should().recordRetryableFailure(claim, RETRY_DELAY);
+    }
+
+    private static void assertSchedulerBean(String beanName) {
+        assertThat(ReservationDepositProcessConfig.class.getDeclaredMethods())
+                .anySatisfy(method -> {
+                    Bean bean = method.getAnnotation(Bean.class);
+                    assertThat(bean).isNotNull();
+                    assertThat(List.of(bean.name())).contains(beanName);
+                });
     }
 }

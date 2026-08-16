@@ -216,6 +216,9 @@ class ReservationDepositRefundServiceTest {
                 .isEqualTo(ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED);
         assertThat(process.getStatus())
                 .isEqualTo(ReservationDepositProcessStatus.RECOVERY_REQUIRED);
+        assertThat(process.getReconciliationNextAttemptAt()).isNull();
+        assertThat(process.getReconciliationLeaseOwner()).isNull();
+        assertThat(process.getReconciliationLeaseUntil()).isNull();
         var order = inOrder(refundRepository, processRepository);
         order.verify(refundRepository).findByIdForUpdate(501L);
         order.verify(processRepository).findByIdForUpdate(99L);

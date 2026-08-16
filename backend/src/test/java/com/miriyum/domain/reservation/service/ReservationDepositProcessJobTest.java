@@ -4,12 +4,49 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
+import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
+import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.Scheduled;
 
 class ReservationDepositProcessJobTest {
+
+    @Test
+    void scheduledPollUsesDedicatedSchedulerAndStableLeaseOwner() throws Exception {
+        ReservationDepositProcessService processService =
+                mock(ReservationDepositProcessService.class);
+        ReservationDepositProcessCommandFacade commandFacade =
+                mock(ReservationDepositProcessCommandFacade.class);
+        given(processService.claimDue(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(100))).willReturn(List.of());
+        ReservationDepositProcessJob job = new ReservationDepositProcessJob(
+                processService,
+                commandFacade);
+        Method scheduledMethod = ReservationDepositProcessJob.class
+                .getMethod("runScheduled");
+        Scheduled scheduled = scheduledMethod.getAnnotation(Scheduled.class);
+
+        scheduledMethod.invoke(job);
+        scheduledMethod.invoke(job);
+
+        assertThat(scheduled).isNotNull();
+        assertThat(scheduled.scheduler()).isEqualTo("reservationDepositProcessScheduler");
+        assertThat(scheduled.fixedDelayString())
+                .isEqualTo("#{@reservationDepositProcessPollDelayMs}");
+        ArgumentCaptor<String> owners = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(processService, times(2))
+                .claimDue(owners.capture(), org.mockito.ArgumentMatchers.eq(100));
+        String owner = owners.getAllValues().getFirst();
+        assertThat(owners.getAllValues()).hasSize(2).allMatch(owner::equals);
+        assertThat(owner).startsWith("reservation-deposit-process-");
+        assertSchedulerBean("reservationDepositProcessScheduler");
+    }
 
     @Test
     void claimsBeforeCommandsAndContinuesAfterAnIndividualFailure() {
@@ -37,5 +74,14 @@ class ReservationDepositProcessJobTest {
         order.verify(processService).claimDue("worker-a", 10);
         order.verify(commandFacade).reconcileClaimed(first);
         order.verify(commandFacade).reconcileClaimed(second);
+    }
+
+    private static void assertSchedulerBean(String beanName) {
+        assertThat(ReservationDepositProcessConfig.class.getDeclaredMethods())
+                .anySatisfy(method -> {
+                    Bean bean = method.getAnnotation(Bean.class);
+                    assertThat(bean).isNotNull();
+                    assertThat(List.of(bean.name())).contains(beanName);
+                });
     }
 }

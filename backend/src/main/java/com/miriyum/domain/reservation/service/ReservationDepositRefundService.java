@@ -179,6 +179,7 @@ public class ReservationDepositRefundService {
                         "refund obligation process is missing"));
         obligation.requireReconciliation(claim.owner(), claim.token(), now);
         process.requireRecovery(now);
+        process.suspendReconciliation();
         refundRepository.save(obligation);
         processRepository.saveAndFlush(process);
         return true;

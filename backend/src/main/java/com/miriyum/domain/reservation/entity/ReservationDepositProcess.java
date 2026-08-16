@@ -273,6 +273,15 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.RECOVERY_REQUIRED;
     }
 
+    /** Stops payment polling when recovery is owned by a terminal refund reconciliation. */
+    public void suspendReconciliation() {
+        if (status != ReservationDepositProcessStatus.RECOVERY_REQUIRED) {
+            throw invalidTransition();
+        }
+        reconciliationNextAttemptAt = null;
+        clearReconciliationLease();
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");
