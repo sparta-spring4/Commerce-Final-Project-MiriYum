@@ -76,7 +76,9 @@ class MenuOpenApiContractTest {
 
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> imageSlot = map(
-                paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}/image"));
+                paths.get("/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images"));
+        assertThat(imageSlot).containsEntry("x-miriyum-runtime-status", "contract-only");
+        assertThat(imageSlot).containsEntry("x-miriyum-owner-issue", 349);
         assertThat(imageSlot).containsKeys("put", "delete");
 
         Map<String, Object> put = map(imageSlot.get("put"));
@@ -91,7 +93,7 @@ class MenuOpenApiContractTest {
         assertThat(map(put.get("responses"))).containsEntry("200", Map.of(
                 "description", "저장 또는 교체를 완료한 메뉴 공개 이미지",
                 "content", Map.of("application/json", Map.of(
-                        "schema", Map.of("$ref", "#/components/schemas/PublicImageSuccessResponse")))));
+                        "schema", Map.of("$ref", "#/components/schemas/MenuPublicImageSuccessResponse")))));
 
         Map<String, Object> delete = map(imageSlot.get("delete"));
         assertThat(delete).containsEntry("operationId", "deleteMenuImage");
@@ -99,7 +101,13 @@ class MenuOpenApiContractTest {
                 Map.of("$ref", "#/components/parameters/StoreId"),
                 Map.of("$ref", "#/components/parameters/MenuId"),
                 Map.of("$ref", "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"));
-        assertThat(map(delete.get("responses"))).containsKey("204");
+        assertThat(map(delete.get("responses"))).containsKeys("204", "400");
+
+        Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> schemas = map(components.get("schemas"));
+        Map<String, Object> menuImage = map(schemas.get("MenuPublicImage"));
+        assertThat(list(menuImage.get("required"))).containsExactly("url");
+        assertThat(map(menuImage.get("properties"))).containsOnlyKeys("url");
     }
 
     @SuppressWarnings("unchecked")

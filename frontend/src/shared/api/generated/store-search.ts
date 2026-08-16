@@ -131,7 +131,7 @@ export interface paths {
     /** 메뉴 내용을 수정해 새 초안 등록 */
     put: operations["updateMenu"];
   };
-  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/image": {
+  "/api/v1/store-operators/stores/{storeId}/menus/{menuId}/images": {
     /**
      * 메뉴 공개 이미지 저장 또는 교체
      * @description 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
@@ -620,6 +620,14 @@ export interface components {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
       message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
       data: components["schemas"]["PublicImage"];
+    };
+    MenuPublicImage: {
+      url: string;
+    };
+    MenuPublicImageSuccessResponse: {
+      code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
+      message: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessMessage"];
+      data: components["schemas"]["MenuPublicImage"];
     };
     PublicImageListSuccessResponse: {
       code: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["SuccessCode"];
@@ -1818,7 +1826,7 @@ export interface operations {
       /** @description 저장 또는 교체를 완료한 메뉴 공개 이미지 */
       200: {
         content: {
-          "application/json": components["schemas"]["PublicImageSuccessResponse"];
+          "application/json": components["schemas"]["MenuPublicImageSuccessResponse"];
         };
       };
       400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
@@ -1847,6 +1855,7 @@ export interface operations {
       204: {
         content: never;
       };
+      400: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["BadRequest"];
       401: external["../mvp1-common/openapi.yaml"]["components"]["responses"]["Unauthorized"];
       403: components["responses"]["StoreAccessDenied"];
       404: components["responses"]["MenuNotFound"];
