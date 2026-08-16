@@ -7,6 +7,8 @@ import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
 import com.miriyum.domain.platformoperator.repository.membersupport.MemberSupportCaseRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.response.PageMetadata;
+import java.time.ZoneOffset;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -39,12 +41,13 @@ public class MemberSupportCaseQueryService {
         var result = cases.findAll(PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "submittedAt").and(Sort.by(Sort.Direction.DESC, "id"))));
         return new CasePageResponse(result.stream().map(this::response).toList(),
-                result.getTotalElements(), page, size);
+                new PageMetadata(result.getNumber(), result.getSize(), result.getTotalElements(),
+                        result.getTotalPages(), result.hasNext()));
     }
 
     private CaseResponse response(com.miriyum.domain.platformoperator.entity.membersupport.MemberSupportCase value) {
         return new CaseResponse(value.getPublicId(), value.getCaseType(), value.getStatus(),
-                value.getAccountType(), value.getAccountId(), value.getTargetSupportVersion(),
-                value.getRowVersion(), value.getSubmittedAt(), value.getDecisionCode());
+                value.getAccountType(), Long.toString(value.getAccountId()), value.getRowVersion(),
+                value.getSubmittedAt().atOffset(ZoneOffset.UTC));
     }
 }

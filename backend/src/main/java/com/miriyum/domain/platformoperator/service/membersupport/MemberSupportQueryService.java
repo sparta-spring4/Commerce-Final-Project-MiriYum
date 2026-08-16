@@ -4,20 +4,22 @@ import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.domain.auth.membersupport.MemberAccountSnapshot;
 import com.miriyum.domain.auth.membersupport.MemberAccountSupportRegistry;
 import com.miriyum.domain.auth.membersupport.MemberAccountType;
+import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
 import com.miriyum.domain.auth.membersupport.MemberSearchCriteria;
 import com.miriyum.domain.auth.membersupport.MemberStatus;
+import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.ActiveSanctionResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberPageResponse;
 import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.MemberResponse;
-import com.miriyum.domain.platformoperator.dto.membersupport.MemberSupportResponses.ActiveSanctionResponse;
 import com.miriyum.domain.platformoperator.entity.membersupport.MemberSanction;
-import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission;
+import com.miriyum.domain.platformoperator.repository.membersupport.MemberSanctionRepository;
 import com.miriyum.domain.platformoperator.session.PlatformOperatorPrincipal;
 import com.miriyum.global.exception.ServiceException;
-import java.util.List;
+import com.miriyum.global.response.PageMetadata;
 import java.time.Clock;
 import java.time.LocalDateTime;
-import com.miriyum.domain.auth.membersupport.MemberSanctionLevel;
+import java.time.ZoneOffset;
+import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,7 +65,10 @@ public class MemberSupportQueryService {
                         row.joinedAt(), row.supportVersion(),
                         sanctions.findActive(row.accountType(), row.accountId(), now)))
                 .toList();
-        return new MemberPageResponse(content, result.totalElements(), page, size);
+        int totalPages = result.totalElements() == 0 ? 0
+                : (int) ((result.totalElements() + size - 1) / size);
+        return new MemberPageResponse(content, new PageMetadata(
+                page, size, result.totalElements(), totalPages, page + 1 < totalPages));
     }
 
     private MemberResponse enrich(MemberAccountSnapshot snapshot) {
@@ -78,9 +83,10 @@ public class MemberSupportQueryService {
                                     List<MemberSanction> active) {
         List<ActiveSanctionResponse> summaries = active.stream()
                 .map(sanction -> new ActiveSanctionResponse(
-                        sanction.getLevel(), sanction.restrictedFeatures(), sanction.getEndsAt()))
+                        sanction.getLevel(), sanction.restrictedFeatures(),
+                        sanction.getEndsAt() == null ? null : sanction.getEndsAt().atOffset(ZoneOffset.UTC)))
                 .toList();
-        return new MemberResponse(accountType, accountId, status, joinedAt, supportVersion, summaries);
+        return new MemberResponse(accountType, Long.toString(accountId), status, joinedAt, supportVersion, summaries);
     }
 
     private MemberStatus status(MemberAccountSnapshot snapshot, List<MemberSanction> active) {

@@ -149,7 +149,13 @@ class PlatformOperatorMemberSupportHttpIT {
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].accountType").value("CONSUMER"))
-                .andExpect(jsonPath("$.data.content[0].accountId").value(consumer.getId()))
+                .andExpect(jsonPath("$.data.content[0].accountId").value(consumer.getId().toString()))
+                .andExpect(jsonPath("$.data.page.number").value(0))
+                .andExpect(jsonPath("$.data.page.size").value(20))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1))
+                .andExpect(jsonPath("$.data.page.totalPages").value(1))
+                .andExpect(jsonPath("$.data.page.hasNext").value(false))
+                .andExpect(jsonPath("$.data.totalElements").doesNotExist())
                 .andExpect(jsonPath("$.data.content[0].email").doesNotExist())
                 .andExpect(jsonPath("$.data.content[0].phone").doesNotExist())
                 .andExpect(jsonPath("$.data.content[0].password").doesNotExist());
@@ -173,9 +179,9 @@ class PlatformOperatorMemberSupportHttpIT {
                         .param("status", "TEMPORARILY_SUSPENDED")
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1))
                 .andExpect(jsonPath("$.data.content.length()").value(1))
-                .andExpect(jsonPath("$.data.content[0].accountId").value(suspended.getId()))
+                .andExpect(jsonPath("$.data.content[0].accountId").value(suspended.getId().toString()))
                 .andExpect(jsonPath("$.data.content[0].status").value("TEMPORARILY_SUSPENDED"));
     }
 
@@ -198,12 +204,41 @@ class PlatformOperatorMemberSupportHttpIT {
                         .param("status", "FEATURE_RESTRICTED")
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1))
                 .andExpect(jsonPath("$.data.content[0].status").value("FEATURE_RESTRICTED"))
                 .andExpect(jsonPath("$.data.content[0].activeSanctions[0].level")
                         .value("FEATURE_RESTRICTION"))
                 .andExpect(jsonPath("$.data.content[0].activeSanctions[0].restrictedFeatures[0]")
-                        .value("RESERVATION"));
+                        .value("RESERVATION"))
+                .andExpect(jsonPath("$.data.content[0].activeSanctions[0].endsAt")
+                        .value(org.hamcrest.Matchers.endsWith("Z")));
+    }
+
+    @Test
+    void supportCaseListMatchesThePublicOpenApiResponseContract() throws Exception {
+        ConsumerAccount consumer = consumers.saveAndFlush(ConsumerAccount.createWithContact(
+                "case@example.com", "password-hash", "case", "+821055555555", "case-ref"));
+        LocalDateTime submittedAt = LocalDateTime.of(2026, 8, 16, 4, 5, 6);
+        supportCases.saveAndFlush(MemberSupportCase.enforcement(
+                MemberAccountType.CONSUMER, consumer.getId(), consumer.getSupportVersion(), "ABUSE", submittedAt));
+        PlatformOperatorAccount operator = createOperator();
+        roleGrants.saveAndFlush(PlatformOperatorRoleGrant.create(
+                operator.getId(), PlatformOperatorRole.MEMBER_SUPPORT_OPERATOR, Instant.now()));
+        String accessToken = activateAndLogin(operator.getEmail());
+
+        mvc.perform(get("/api/v1/platform-operators/member-support-cases")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].accountId").value(consumer.getId().toString()))
+                .andExpect(jsonPath("$.data.content[0].submittedAt").value("2026-08-16T04:05:06Z"))
+                .andExpect(jsonPath("$.data.content[0].targetSupportVersion").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].decisionCode").doesNotExist())
+                .andExpect(jsonPath("$.data.page.number").value(0))
+                .andExpect(jsonPath("$.data.page.size").value(20))
+                .andExpect(jsonPath("$.data.page.totalElements").value(1))
+                .andExpect(jsonPath("$.data.page.totalPages").value(1))
+                .andExpect(jsonPath("$.data.page.hasNext").value(false))
+                .andExpect(jsonPath("$.data.totalElements").doesNotExist());
     }
 
     @Test

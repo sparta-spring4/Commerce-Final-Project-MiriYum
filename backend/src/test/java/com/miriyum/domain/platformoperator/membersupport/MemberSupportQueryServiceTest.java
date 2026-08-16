@@ -112,8 +112,8 @@ class MemberSupportQueryServiceTest {
         var result = service.list(PRINCIPAL, null, MemberStatus.TEMPORARILY_SUSPENDED,
                 criteria, 0, 20);
 
-        assertThat(result.totalElements()).isEqualTo(2);
-        assertThat(result.content()).extracting(response -> response.accountId()).containsExactly(3L, 2L);
+        assertThat(result.page().totalElements()).isEqualTo(2);
+        assertThat(result.content()).extracting(response -> response.accountId()).containsExactly("3", "2");
     }
 
     @Test
@@ -147,12 +147,14 @@ class MemberSupportQueryServiceTest {
         var result = service.list(PRINCIPAL, MemberAccountType.CONSUMER, MemberStatus.FEATURE_RESTRICTED,
                 criteria, 0, 20);
 
-        assertThat(result.totalElements()).isEqualTo(1);
+        assertThat(result.page().totalElements()).isEqualTo(1);
         assertThat(result.content().getFirst().status()).isEqualTo(MemberStatus.FEATURE_RESTRICTED);
         assertThat(result.content().getFirst().activeSanctions()).singleElement()
                 .satisfies(summary -> {
                     assertThat(summary.level()).isEqualTo(MemberSanctionLevel.FEATURE_RESTRICTION);
                     assertThat(summary.restrictedFeatures()).containsExactly(RestrictedFeature.RESERVATION);
+                    assertThat(summary.endsAt()).isEqualTo(
+                            Instant.parse("2026-08-21T00:00:00Z").atOffset(ZoneOffset.UTC));
                 });
 
         MemberAccountSnapshot permanentAccount = snapshot(
