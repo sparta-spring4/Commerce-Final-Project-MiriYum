@@ -3,7 +3,6 @@ package com.miriyum.domain.reservation.waiting.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.miriyum.MiriyumApplication;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -18,12 +17,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -32,14 +29,6 @@ import org.testcontainers.utility.DockerImageName;
 @Tag("integration")
 @Tag("integration-shard-b")
 @Testcontainers
-@SpringBootTest(
-        classes = MiriyumApplication.class,
-        properties = {
-            "spring.jpa.hibernate.ddl-auto=validate",
-            "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
-            "miriyum.store.schedule.activation-enabled=false",
-            "miriyum.reservation.time-policy.activation-enabled=false"
-        })
 class WaitingMigrationTest {
 
     private static final DockerImageName MYSQL_IMAGE =
@@ -52,18 +41,13 @@ class WaitingMigrationTest {
             "CANCELLED",
             "NO_SHOW",
             "CLOSED_BY_STORE",
-            "RESERVATION_CONVERTING"
+            "RESERVATION_CONVERTING",
+            "RESERVATION_CONVERTED"
     );
 
     @Container
-    static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE);
-
-    @DynamicPropertySource
-    static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-    }
+    static final MySQLContainer MYSQL = new MySQLContainer(MYSQL_IMAGE)
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @Test
     @DisplayName("Flyway V36이 웨이팅 원장 마이그레이션을 적용한다")
@@ -82,7 +66,23 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V36은 웨이팅 원장 소유 테이블 일곱 개만 생성한다")
+    @DisplayName("Flyway V45가 웨이팅 예약 전환 runtime 스키마를 적용한다")
+    void appliesWaitingReservationConversionRuntimeAsFlywayV45() {
+        Flyway flyway = Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .load();
+
+        flyway.migrate();
+
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "45".equals(String.valueOf(migration.getVersion()))
+                                && "V45__add_waiting_reservation_conversion_runtime.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("V47까지 적용하면 Waiting 소유 테이블 열 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
@@ -90,7 +90,10 @@ class WaitingMigrationTest {
                 "waiting_active_memberships",
                 "waiting_closure_job_items",
                 "waiting_closure_jobs",
+                "waiting_conversion_compensations",
                 "waiting_queue_sequences",
+                "waiting_setting_audits",
+                "waiting_settings",
                 "waiting_status_events",
                 "waiting_teams",
                 "waiting_transition_audits"
@@ -109,7 +112,10 @@ class WaitingMigrationTest {
                 "waiting_closure_job_items.waiting_closure_job_id->waiting_closure_jobs.waiting_closure_job_id",
                 "waiting_closure_job_items.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_closure_jobs.store_id->stores.store_id",
+                "waiting_conversion_compensations.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_queue_sequences.store_id->stores.store_id",
+                "waiting_setting_audits.store_id->stores.store_id",
+                "waiting_settings.store_id->stores.store_id",
                 "waiting_status_events.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_teams.consumer_account_id->consumer_accounts.consumer_account_id",
                 "waiting_teams.store_id->stores.store_id",
@@ -118,13 +124,39 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("활성 중복 순번 감사 명령과 종결 작업 항목의 중앙 유일 키를 만든다")
+    @DisplayName("V45는 Waiting 소유 예약 전환 scalar 열만 추가하고 Reservation FK를 만들지 않는다")
+    void addsWaitingOwnedReservationConversionScalarColumns() throws SQLException {
+        migrate();
+
+        assertThat(queryStrings("""
+                SELECT CONCAT(column_name, ':', is_nullable, ':', column_type)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'waiting_teams'
+                  AND column_name IN (
+                      'reservation_converting_at',
+                      'waiting_payment_id',
+                      'reservation_reference_id',
+                      'reservation_converted_at'
+                  )
+                ORDER BY column_name
+                """)).containsExactly(
+                "reservation_converted_at:YES:datetime(6)",
+                "reservation_converting_at:YES:datetime(6)",
+                "reservation_reference_id:YES:bigint",
+                "waiting_payment_id:YES:varchar(19)"
+        );
+        assertThat(foreignKeyTargets()).noneMatch(value -> value.contains("reservation"));
+    }
+
+    @Test
+    @DisplayName("계정 전체 활성 중복 순번 감사 명령과 종결 작업 항목의 중앙 유일 키를 만든다")
     void createsRequiredUniqueKeys() throws SQLException {
         migrate();
 
         assertThat(uniqueIndexColumns()).contains(
-                "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
-                        + "store_id,consumer_account_id",
+                "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                        + "consumer_account_id",
                 "waiting_active_memberships.uk_waiting_active_memberships_team=waiting_team_id",
                 "waiting_closure_job_items.uk_waiting_closure_job_items_job_team="
                         + "waiting_closure_job_id,waiting_team_id",
@@ -136,6 +168,114 @@ class WaitingMigrationTest {
                         + "waiting_team_id,event_sequence",
                 "waiting_transition_audits.uk_waiting_transition_audits_command=command_id"
         );
+        assertThat(uniqueIndexColumns()).doesNotContain(
+                "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                        + "store_id,consumer_account_id");
+    }
+
+    @Test
+    @DisplayName("V36 기준선 뒤 V44가 계정 전체 활성 membership 유일 키로 교체한다")
+    void replacesStoreScopedMembershipKeyAfterV36Baseline() throws SQLException {
+        try {
+            Flyway v36 = flywayForTarget("36");
+            v36.clean();
+            v36.migrate();
+            assertThat(v36.info().applied()).anyMatch(migration ->
+                    "36".equals(String.valueOf(migration.getVersion())));
+            try (Connection connection = connection()) {
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+            }
+
+            Flyway v44 = flywayForTarget(null);
+            v44.migrate();
+
+            assertThat(v44.info().applied()).anyMatch(migration ->
+                    "44".equals(String.valueOf(migration.getVersion()))
+                            && "V44__enforce_account_wide_active_waiting.sql"
+                            .equals(migration.getScript()));
+            try (Connection connection = connection()) {
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                                + "consumer_account_id");
+                assertThat(uniqueIndexColumns(connection)).doesNotContain(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+            }
+        } finally {
+            cleanDatabase();
+        }
+    }
+
+    @Test
+    @DisplayName("V44는 계정 중복 데이터가 있으면 원본 데이터와 V36 유일 키를 보존한 채 실패한다")
+    void preservesV36DataAndConstraintWhenAccountWideMigrationFindsDuplicates() throws SQLException {
+        try {
+            Flyway v36 = flywayForTarget("36");
+            v36.clean();
+            v36.migrate();
+            try (Connection connection = connection()) {
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+                connection.createStatement().executeUpdate("""
+                        INSERT INTO waiting_active_memberships (
+                            store_id, consumer_account_id, waiting_team_id, created_at
+                        ) VALUES
+                            (101, 200, 1001, UTC_TIMESTAMP(6)),
+                            (102, 200, 1002, UTC_TIMESTAMP(6))
+                        """);
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 1");
+            }
+
+            assertThatThrownBy(() -> flywayForTarget(null).migrate())
+                    .isInstanceOf(FlywayException.class)
+                    .hasMessageContaining("V44__enforce_account_wide_active_waiting.sql");
+
+            try (Connection connection = connection()) {
+                assertThat(membershipCount(connection)).isEqualTo(2);
+                assertThat(uniqueIndexColumns(connection)).contains(
+                        "waiting_active_memberships.uk_waiting_active_memberships_store_consumer="
+                                + "store_id,consumer_account_id");
+                assertThat(uniqueIndexColumns(connection)).doesNotContain(
+                        "waiting_active_memberships.uk_waiting_active_memberships_consumer_account="
+                                + "consumer_account_id");
+            }
+        } finally {
+            cleanDatabase();
+        }
+    }
+
+    @Test
+    @DisplayName("V45는 V44 예약 전환 중 행을 재작성 취소 삭제 없이 그대로 보존한다")
+    void preservesLegacyReservationConvertingRowWhenApplyingV45() throws SQLException {
+        try {
+            Flyway v44 = flywayForTarget("44");
+            v44.clean();
+            v44.migrate();
+            try (Connection connection = connection()) {
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+                insertLegacyReservationConvertingTeam(connection);
+                connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 1");
+            }
+
+            Flyway v45 = flywayForTarget(null);
+            v45.migrate();
+
+            assertThat(queryStrings("""
+                    SELECT CONCAT(
+                        status, ':', version, ':',
+                        reservation_converting_at IS NULL, ':',
+                        waiting_payment_id IS NULL, ':',
+                        reservation_reference_id IS NULL, ':',
+                        reservation_converted_at IS NULL
+                    )
+                    FROM waiting_teams
+                    WHERE store_id = 99001
+                      AND queue_sequence = 901
+                    """)).containsExactly("RESERVATION_CONVERTING:0:1:1:1:1");
+        } finally {
+            cleanDatabase();
+        }
     }
 
     @Test
@@ -165,6 +305,51 @@ class WaitingMigrationTest {
                 );
         assertThat(quotedValues(checkClause("ck_waiting_status_events_public_status")))
                 .containsExactlyInAnyOrderElementsOf(TEAM_STATUSES);
+    }
+
+    @Test
+    @DisplayName("V45는 예약 전환 상태별 scalar 필드 조합과 시간 순서를 강제한다")
+    void enforcesReservationConversionFieldInvariants() throws SQLException {
+        migrate();
+        Instant createdAt = Instant.parse("2026-08-12T03:00:00Z");
+        Instant convertingAt = createdAt.plusSeconds(10);
+        Instant completedAt = createdAt.plusSeconds(20);
+
+        try (Connection connection = connection()) {
+            connection.createStatement().execute("SET FOREIGN_KEY_CHECKS = 0");
+            connection.createStatement().execute(
+                    "DELETE FROM waiting_teams WHERE store_id = 99001"
+            );
+
+            insertConversionTeam(connection, 101L, "WAITING", createdAt,
+                    null, null, null, null, null, null);
+            insertConversionTeam(connection, 102L, "RESERVATION_CONVERTING", createdAt,
+                    convertingAt, "123456789", null, null, null, null);
+            insertConversionTeam(connection, 113L, "RESERVATION_CONVERTING", createdAt,
+                    null, null, null, null, null, null);
+            insertConversionTeam(connection, 103L, "RESERVATION_CONVERTED", createdAt,
+                    convertingAt, "123456789", 987L, completedAt, null, null);
+            insertConversionTeam(connection, 104L, "CANCELLED", createdAt,
+                    convertingAt, "123456789", null, null, completedAt, null);
+            insertConversionTeam(connection, 105L, "CLOSED_BY_STORE", createdAt,
+                    convertingAt, "123456789", null, null, null, completedAt);
+
+            assertConversionSnapshotRejected(connection, 106L, "WAITING", createdAt,
+                    convertingAt, "123456789", null, null, null, null);
+            assertConversionSnapshotRejected(connection, 107L, "RESERVATION_CONVERTING",
+                    createdAt, convertingAt, null, null, null, null, null);
+            assertConversionSnapshotRejected(connection, 108L, "RESERVATION_CONVERTING",
+                    createdAt, convertingAt, "0", null, null, null, null);
+            assertConversionSnapshotRejected(connection, 109L, "RESERVATION_CONVERTED",
+                    createdAt, convertingAt, "123456789", null, completedAt, null, null);
+            assertConversionSnapshotRejected(connection, 110L, "RESERVATION_CONVERTED",
+                    createdAt, convertingAt, "123456789", 0L, completedAt, null, null);
+            assertConversionSnapshotRejected(connection, 111L, "RESERVATION_CONVERTED",
+                    createdAt, convertingAt, "123456789", 987L,
+                    convertingAt.minusSeconds(1), null, null);
+            assertConversionSnapshotRejected(connection, 112L, "CANCELLED", createdAt,
+                    convertingAt, "123456789", 987L, completedAt, completedAt, null);
+        }
     }
 
     @Test
@@ -277,6 +462,7 @@ class WaitingMigrationTest {
         migrate();
 
         assertThat(nonUniqueIndexColumns()).contains(
+                "waiting_active_memberships.idx_waiting_active_memberships_store=store_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_claim="
                         + "waiting_closure_job_id,status,waiting_closure_job_item_id",
                 "waiting_closure_job_items.idx_waiting_closure_job_items_global_claim="
@@ -344,7 +530,13 @@ class WaitingMigrationTest {
     }
 
     private List<String> uniqueIndexColumns() throws SQLException {
-        return queryStrings("""
+        try (Connection connection = connection()) {
+            return uniqueIndexColumns(connection);
+        }
+    }
+
+    private List<String> uniqueIndexColumns(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT CONCAT(
                     table_name, '.', index_name, '=',
                     GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',')
@@ -357,6 +549,36 @@ class WaitingMigrationTest {
                 GROUP BY table_name, index_name
                 ORDER BY table_name, index_name
                 """);
+             ResultSet rows = statement.executeQuery()) {
+            List<String> values = new ArrayList<>();
+            while (rows.next()) {
+                values.add(rows.getString(1));
+            }
+            return values;
+        }
+    }
+
+    private Flyway flywayForTarget(String target) {
+        var configuration = Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .cleanDisabled(false);
+        if (target != null) {
+            configuration.target(target);
+        }
+        return configuration.load();
+    }
+
+    private void cleanDatabase() {
+        flywayForTarget(null).clean();
+    }
+
+    private long membershipCount(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) FROM waiting_active_memberships");
+             ResultSet rows = statement.executeQuery()) {
+            assertThat(rows.next()).isTrue();
+            return rows.getLong(1);
+        }
     }
 
     private List<String> nonUniqueIndexColumns() throws SQLException {
@@ -464,8 +686,9 @@ class WaitingMigrationTest {
                     store_id, consumer_account_id, business_date, party_size, source,
                     queue_sequence, status, version, created_at, called_at,
                     arrival_deadline, arrived_at, checked_in_at, cancelled_at,
-                    no_show_at, closed_by_store_at
-                ) VALUES (99001, 99002, ?, 2, 'REMOTE', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                    no_show_at, closed_by_store_at, reservation_converting_at,
+                    waiting_payment_id
+                ) VALUES (99001, 99002, ?, 2, 'REMOTE', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)) {
             statement.setObject(1, LocalDate.of(2026, 8, 12));
             statement.setLong(2, queueSequence);
@@ -478,6 +701,87 @@ class WaitingMigrationTest {
             setInstant(statement, 9, cancelledAt);
             setInstant(statement, 10, noShowAt);
             setInstant(statement, 11, closedByStoreAt);
+            boolean conversionInProgress = "RESERVATION_CONVERTING".equals(status);
+            setInstant(statement, 12, conversionInProgress ? createdAt : null);
+            statement.setString(13, conversionInProgress ? "123456789" : null);
+            statement.executeUpdate();
+        }
+    }
+
+    private void assertConversionSnapshotRejected(
+            Connection connection,
+            long queueSequence,
+            String status,
+            Instant createdAt,
+            Instant reservationConvertingAt,
+            String waitingPaymentId,
+            Long reservationReferenceId,
+            Instant reservationConvertedAt,
+            Instant cancelledAt,
+            Instant closedByStoreAt
+    ) {
+        assertThatThrownBy(() -> insertConversionTeam(
+                connection,
+                queueSequence,
+                status,
+                createdAt,
+                reservationConvertingAt,
+                waitingPaymentId,
+                reservationReferenceId,
+                reservationConvertedAt,
+                cancelledAt,
+                closedByStoreAt
+        )).isInstanceOf(SQLException.class)
+                .hasMessageContaining("ck_waiting_teams_reservation_conversion");
+    }
+
+    private void insertConversionTeam(
+            Connection connection,
+            long queueSequence,
+            String status,
+            Instant createdAt,
+            Instant reservationConvertingAt,
+            String waitingPaymentId,
+            Long reservationReferenceId,
+            Instant reservationConvertedAt,
+            Instant cancelledAt,
+            Instant closedByStoreAt
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO waiting_teams (
+                    store_id, consumer_account_id, business_date, party_size, source,
+                    queue_sequence, status, version, created_at, cancelled_at,
+                    closed_by_store_at, reservation_converting_at, waiting_payment_id,
+                    reservation_reference_id, reservation_converted_at
+                ) VALUES (99001, 99002, ?, 2, 'REMOTE', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+                """)) {
+            statement.setObject(1, LocalDate.of(2026, 8, 12));
+            statement.setLong(2, queueSequence);
+            statement.setString(3, status);
+            setInstant(statement, 4, createdAt);
+            setInstant(statement, 5, cancelledAt);
+            setInstant(statement, 6, closedByStoreAt);
+            setInstant(statement, 7, reservationConvertingAt);
+            statement.setString(8, waitingPaymentId);
+            if (reservationReferenceId == null) {
+                statement.setObject(9, null);
+            } else {
+                statement.setLong(9, reservationReferenceId);
+            }
+            setInstant(statement, 10, reservationConvertedAt);
+            statement.executeUpdate();
+        }
+    }
+
+    private void insertLegacyReservationConvertingTeam(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO waiting_teams (
+                    store_id, consumer_account_id, business_date, party_size, source,
+                    queue_sequence, status, version, created_at
+                ) VALUES (99001, 99002, ?, 2, 'REMOTE', 901, 'RESERVATION_CONVERTING', 0, ?)
+                """)) {
+            statement.setObject(1, LocalDate.of(2026, 8, 12));
+            setInstant(statement, 2, Instant.parse("2026-08-12T03:00:00Z"));
             statement.executeUpdate();
         }
     }

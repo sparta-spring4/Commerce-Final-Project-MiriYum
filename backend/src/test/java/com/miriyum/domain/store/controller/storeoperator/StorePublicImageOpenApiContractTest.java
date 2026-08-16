@@ -40,10 +40,24 @@ class StorePublicImageOpenApiContractTest {
 
         Map<String, Object> publicFileResponses = responses(paths, "/api/v1/public-files/{imageId}", "get");
         assertThat(publicFileResponses).containsKeys("200", "404", "503");
+        assertBinaryMediaTypes(publicFileResponses);
 
+        Map<String, Object> storeReplaceResponses = responses(
+                paths, "/api/v1/store-operators/stores/{storeId}/images/{imageId}", "put");
         Map<String, Object> storeDeleteResponses = responses(
                 paths, "/api/v1/store-operators/stores/{storeId}/images/{imageId}", "delete");
-        assertThat(storeDeleteResponses).containsKey("204").doesNotContainKey("404");
+        assertThat(storeReplaceResponses).containsKeys("404", "409");
+        assertThat(storeDeleteResponses).containsKeys("204", "404", "409");
+    }
+
+    private void assertBinaryMediaTypes(Map<String, Object> publicFileResponses) {
+        Map<String, Object> content = map(map(publicFileResponses.get("200")).get("content"));
+
+        for (String mediaType : List.of("image/jpeg", "image/png", "image/webp")) {
+            assertThat(map(map(content.get(mediaType)).get("schema")))
+                    .containsEntry("type", "string")
+                    .containsEntry("format", "binary");
+        }
     }
 
     private void assertMultipartUpload(Map<String, Object> paths, String path, String method) {

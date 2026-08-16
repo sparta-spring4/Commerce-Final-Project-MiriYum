@@ -40,7 +40,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-d")
 @Testcontainers
 @SpringBootTest(classes = MiriyumApplication.class, properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
@@ -54,7 +54,8 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.menu.schedule.enabled=false"
 })
 class HighRiskCommandGuardConcurrencyIT {
-    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40")
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);

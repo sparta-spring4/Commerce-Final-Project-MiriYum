@@ -10,6 +10,14 @@
 
 V40의 역할·직접 권한 grant, 사건 배정과 재인증 승인 원장이 중앙 정본이다. 고위험 명령은 현재 계정 행을 잠그고 권한 version, 세부 권한, 사건 배정과 목적·대상·세션에 결속된 미소비 5분 승인을 같은 명령 트랜잭션에서 확인한다. 상세 계약은 [플랫폼 운영자 권한·재인증 명세](specs/platform-operator-authorization/spec.md)를 따른다.
 
+## 회원지원 데이터·API 계약
+
+V44의 복구·제재·이의·추가 승인·감사·mock 확인 원장이 회원지원 사건의 정본이다. 소비자와 식당 운영자 계정의 `support_version` CAS가 복구와 제재의 동시 전이를 직렬화하며, 패자의 사건·일회 승인·감사는 같은 transaction에서 rollback한다. 연락처와 인증 비밀 원문은 신규 원장에 저장하지 않는다. 상세 계약은 [회원지원 기능 명세](specs/member-support/spec.md)와 [OpenAPI](specs/member-support/openapi.yaml)를 따른다.
+
+## 플랫폼 운영자 관리·감사 계약
+
+V43은 `SUPER_ADMIN` role grant의 singleton 제약과 수정·삭제를 trigger로 거부하는 `platform_operator_audit_events`를 추가한다. 관리 명령 멱등성은 V4 공통 원장을 재사용한다. 기존 인증 원장과 신규 관리 원장은 각각 `AUTH:*`, `ADMIN:*` event key의 안전 projection으로 통합 조회하고 원 사건은 연결 보정 사건으로만 바로잡는다. 공통 보존기간·TTL·cleanup은 ADMIN-009가 확정되기 전까지 구성하지 않는다. 상세 계약은 [운영자 관리·감사 명세](specs/platform-operator-management-audit/spec.md)를 따른다.
+
 ## OpenAPI 소유권과 진입점
 
 기능별 원본은 `docs/specs/<기능>/openapi.yaml`이 소유하며, `docs/specs/mvp1-common/openapi.yaml`은 path를 갖지 않는 공통 계약 전용이다. 클라이언트별 진입점은 `public-openapi.yaml`, `consumer-openapi.yaml`, `store-operator-openapi.yaml`, `platform-operator-openapi.yaml`이며, 서로 path가 중복되지 않는다. 기능별 원본의 path는 네 클라이언트 진입점 중 정확히 하나에 노출한다. `mvp1-openapi.yaml`은 1차 MVP 통합 진입점이므로 그 path 집합은 public·consumer·store-operator 진입점 path 합집합의 부분집합이어야 하며, 이후 단계인 platform-operator 경로를 포함하지 않는다. 진입점과 aggregate는 path item을 다시 정의하지 않고 단일 `$ref`로만 연결한다. TypeScript 계약은 기능별 원본에서 생성하며 수동 편집하지 않는다.

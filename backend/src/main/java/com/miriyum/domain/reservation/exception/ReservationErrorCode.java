@@ -54,6 +54,16 @@ public enum ReservationErrorCode implements ErrorCode {
             "RESERVATION_010",
             "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."
     ),
+    WAITING_SETTING_VERSION_CONFLICT(
+            HttpStatus.CONFLICT,
+            "WAITING_001",
+            "조회 후 웨이팅 설정 버전이 변경되었습니다."
+    ),
+    WAITING_DISABLE_ACTION_REQUIRED(
+            HttpStatus.CONFLICT,
+            "WAITING_002",
+            "활성 팀이 있으면 비활성화 처리 방법이 필요합니다."
+    ),
     WAITING_TEAM_NOT_FOUND(
             HttpStatus.NOT_FOUND,
             "WAITING_003",
@@ -84,6 +94,11 @@ public enum ReservationErrorCode implements ErrorCode {
             "WAITING_008",
             "활성 웨이팅 멤버십과 요청 전제가 충돌합니다."
     ),
+    ACCOUNT_ACTIVE_WAITING_EXISTS(
+            HttpStatus.CONFLICT,
+            "WAITING_011",
+            "계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요."
+    ),
     WAITING_CLOSE_JOB_NOT_READY(
             HttpStatus.CONFLICT,
             "WAITING_009",
@@ -93,6 +108,11 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "WAITING_010",
             "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다."
+    ),
+    WAITING_RECEPTION_CLOSED(
+            HttpStatus.CONFLICT,
+            "WAITING_012",
+            "현재 매장은 신규 웨이팅 접수를 받지 않습니다."
     );
 
     private final HttpStatus httpStatus;

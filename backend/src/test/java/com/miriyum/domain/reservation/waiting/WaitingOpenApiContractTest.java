@@ -51,8 +51,7 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
-        assertThat(settingsPath).containsOnlyKeys(
-                "get", "put", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
+        assertThat(settingsPath).containsOnlyKeys("get", "put");
 
         Map<String, Object> settingsQuery = map(settingsPath.get("get"));
         assertThat(map(settingsQuery.get("responses")).keySet())
@@ -60,8 +59,7 @@ class WaitingOpenApiContractTest {
                         "200", "400", "401", "403", "404", "409", "429");
 
         Map<String, Object> disableImpactPath = map(paths.get(DISABLE_IMPACT_PATH));
-        assertThat(disableImpactPath).containsOnlyKeys(
-                "get", "x-miriyum-runtime-status", "x-miriyum-owner-issue");
+        assertThat(disableImpactPath).containsOnlyKeys("get");
         Map<String, Object> disableImpactQuery = map(disableImpactPath.get("get"));
         assertThat(map(disableImpactQuery.get("responses")).keySet())
                 .containsExactlyInAnyOrder(
@@ -72,7 +70,12 @@ class WaitingOpenApiContractTest {
         assertThat(list(updateOperation.get("parameters"))).anySatisfy(parameter ->
                 assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
         assertThat(map(updateOperation.get("responses")).keySet())
-                .containsExactlyInAnyOrder("200", "400", "401", "403", "404", "409", "429");
+                .containsExactlyInAnyOrder("200", "202", "400", "401", "403", "404", "409", "429");
+        Map<String, Object> acceptedResponse =
+                map(map(map(map(updateOperation.get("responses")).get("202")).get("content"))
+                        .get("application/json"));
+        assertThat(map(acceptedResponse.get("schema")))
+                .containsEntry("$ref", "#/components/schemas/WaitingClosureJobSuccessResponse");
 
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
         Map<String, Object> waitingSettingProperties =
@@ -157,7 +160,7 @@ class WaitingOpenApiContractTest {
         assertThat(list(map(schemas.get("WaitingTeamStatus")).get("enum")))
                 .containsExactly(
                         "WAITING", "CALLED", "ARRIVED", "CHECKED_IN", "CANCELLED", "NO_SHOW",
-                        "CLOSED_BY_STORE", "RESERVATION_CONVERTING");
+                        "CLOSED_BY_STORE", "RESERVATION_CONVERTING", "RESERVATION_CONVERTED");
         assertThat(list(map(schemas.get("WaitingClosureJobStatus")).get("enum")))
                 .containsExactly("PENDING", "PROCESSING", "COMPLETED", "RECONCILIATION_REQUIRED");
 
@@ -248,7 +251,7 @@ class WaitingOpenApiContractTest {
         assertThat(list(map(schemas.get("WaitingReceptionMode")).get("enum")))
                 .containsExactly("AUTO", "MANUAL", "PAUSED");
         assertThat(list(map(schemas.get("WaitingDisableAction")).get("enum")))
-                .containsExactly("KEEP_ACTIVE");
+                .containsExactly("KEEP_ACTIVE", "CLOSE_ACTIVE_TEAMS");
 
         Map<String, Object> settingProperties =
                 map(map(schemas.get("WaitingSetting")).get("properties"));

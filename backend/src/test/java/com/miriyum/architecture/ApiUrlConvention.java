@@ -12,7 +12,8 @@ final class ApiUrlConvention {
     private static final Set<String> SINGLETON_SEGMENTS = Set.of(
             "auth", "me", "current", "contact", "visibility", "selling-status",
             "end-at", "menu-hold-availability", "pickup-availability",
-            "deactivation-impact", "initial-password", "portone", "kakao");
+            "deactivation-impact", "initial-password", "portone", "kakao",
+            "authority", "suspension");
     private static final Set<String> LEGACY_COMMAND_SEGMENTS = Set.of(
             "publication", "publication-cancellation", "retirement", "cancellation",
             "call", "arrive", "check-in", "cancel");
@@ -81,16 +82,22 @@ final class ApiUrlConvention {
             }
         }
         if (audience.equals("consumers")) {
-            if (segments.size() < 4 || !Set.of("me", "auth").contains(segments.get(3))) {
+            if (segments.size() < 4 || (!Set.of("me", "auth").contains(segments.get(3))
+                    && !isMemberSupportSegment(segments.get(3)))) {
                 return "consumer-owned routes require /consumers/me or /consumers/auth scope";
             }
         } else if (audience.equals("store-operators")) {
             if (segments.size() < 4
-                    || !Set.of("me", "auth", "stores").contains(segments.get(3))) {
+                    || (!Set.of("me", "auth", "stores").contains(segments.get(3))
+                    && !isMemberSupportSegment(segments.get(3)))) {
                 return "store-operator routes require /me, /auth, or /stores scope";
             }
         }
         return null;
+    }
+
+    private static boolean isMemberSupportSegment(String segment) {
+        return segment.startsWith("account-recovery-") || segment.equals("account-sanction-appeals");
     }
 
     private static List<String> segments(String path) {

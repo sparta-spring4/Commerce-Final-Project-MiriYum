@@ -69,7 +69,21 @@ miriyum:
     allowed-origin: ${MIRIYUM_ALLOWED_ORIGIN:http://localhost:5173}
   identity-verification:
     dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
+  member-support:
+    enabled: ${MIRIYUM_MEMBER_SUPPORT_ENABLED:false}
+    proof-digest-secret: ${MIRIYUM_MEMBER_SUPPORT_PROOF_DIGEST_SECRET:}
+    pii-encryption-active-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY_VERSION:0}
+    pii-encryption-active-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_ACTIVE_KEY:}
+    pii-encryption-previous-key-version: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY_VERSION:0}
+    pii-encryption-previous-key: ${MIRIYUM_MEMBER_SUPPORT_PII_ENCRYPTION_PREVIOUS_KEY:}
+    verification-ttl: ${MIRIYUM_MEMBER_SUPPORT_VERIFICATION_TTL:PT15M}
+    recovery-completion-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_COMPLETION_TTL:P30D}
+    recovery-tracking-ttl: ${MIRIYUM_MEMBER_SUPPORT_RECOVERY_TRACKING_TTL:P365D}
+    assignment-ttl: ${MIRIYUM_MEMBER_SUPPORT_ASSIGNMENT_TTL:PT30M}
+    dev-stub-enabled: ${MIRIYUM_IDENTITY_VERIFICATION_STUB_ENABLED:false}
   auth:
+    qr-epoch:
+      storage-generation: ${MIRIYUM_QR_STORAGE_GENERATION:}
     # Valkey와 위험 사건 저장소를 함께 구성한 환경에서만 전달 재시도를 실행한다.
     refresh-risk-event-delivery:
       enabled: ${MIRIYUM_REFRESH_RISK_EVENT_DELIVERY_ENABLED:false}
@@ -106,13 +120,18 @@ miriyum:
   waiting:
     closure:
       enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
+    compensation:
+      enabled: ${MIRIYUM_WAITING_COMPENSATION_ENABLED:true}
+      fixed-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_FIXED_DELAY_MS:5000}
+      initial-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_INITIAL_DELAY_MS:5000}
+      reconciliation-delay-ms: ${MIRIYUM_WAITING_COMPENSATION_RECONCILIATION_DELAY_MS:60000}
   store:
     schedule:
       activation-enabled: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_ENABLED:true}
       activation-delay-ms: ${MIRIYUM_STORE_SCHEDULE_ACTIVATION_DELAY_MS:1000}
     geocoding:
       base-url: ${MIRIYUM_STORE_GEOCODING_BASE_URL:https://dapi.kakao.com}
-      rest-api-key: ${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}
+      rest-api-key: ${MIRIYUM_STORE_GEOCODING_REST_API_KEY:${MIRIYUM_KAKAO_LOCAL_REST_API_KEY:}}
       connect-timeout-ms: ${MIRIYUM_STORE_GEOCODING_CONNECT_TIMEOUT_MS:1000}
       response-timeout-ms: ${MIRIYUM_STORE_GEOCODING_RESPONSE_TIMEOUT_MS:2000}
   store-search:

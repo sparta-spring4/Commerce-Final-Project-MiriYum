@@ -281,9 +281,18 @@ paths:
         "200":
           description: 공개 이미지 바이트
           content:
-            image/jpeg: {}
-            image/png: {}
-            image/webp: {}
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
         "404":
           $ref: "#/components/responses/PublicImageNotFound"
         "503":
@@ -425,7 +434,9 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/PublicImageNotFound"
+          $ref: "#/components/responses/StoreImageTargetNotFound"
+        "409":
+          $ref: "#/components/responses/StorePublicImageConflict"
         "413":
           $ref: "#/components/responses/ImageSizeExceeded"
         "415":
@@ -449,6 +460,10 @@ paths:
           $ref: "../mvp1-common/openapi.yaml#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
+        "404":
+          $ref: "#/components/responses/StoreNotFound"
+        "409":
+          $ref: "#/components/responses/StorePublicImageConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/stores/{storeId}:
@@ -2702,14 +2717,35 @@ components:
             code: STORE_011
             message: 이미지를 찾을 수 없습니다.
     StorePublicImageConflict:
-      description: 매장 이미지 최대 개수 초과 또는 동시 교체 충돌
+      description: 매장 이미지 최대 개수 초과 또는 Idempotency-Key를 다른 요청에 재사용함
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: STORE_012
-            message: 매장 이미지는 최대 10장까지 등록할 수 있습니다.
+          examples:
+            imageLimitExceeded:
+              value:
+                code: STORE_012
+                message: 매장 이미지는 최대 10장까지 등록할 수 있습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+    StoreImageTargetNotFound:
+      description: 매장 또는 교체 대상 공개 이미지를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            imageNotFound:
+              value:
+                code: STORE_011
+                message: 이미지를 찾을 수 없습니다.
     ImageSizeExceeded:
       description: 이미지 크기 제한 초과
       content:

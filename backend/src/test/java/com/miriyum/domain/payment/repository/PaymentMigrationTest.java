@@ -27,7 +27,8 @@ class PaymentMigrationTest {
     @Test
     @DisplayName("실제 MySQL V28 데이터를 보존하며 Payment V30과 분리 공개 ID 채번을 적용한다")
     void upgradesV28ToPaymentRuntimeV30() throws Exception {
-        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)) {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
             Flyway.configure()
                     .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())

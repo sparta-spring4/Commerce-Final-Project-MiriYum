@@ -3,6 +3,9 @@ info:
   title: MiriYum Platform Operator Authorization API
   version: 1.0.0
   description: 플랫폼 운영자 현재 비밀번호 재인증과 목적·대상·세션 결속 일회 승인 계약이다.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
 servers:
   - url: /
 security: []
@@ -65,10 +68,14 @@ components:
         - ONBOARDING_DECISION
         - MEMBER_RECOVERY
         - ACCOUNT_SANCTION
+        - ACCOUNT_APPEAL_DECISION
+        - PERMANENT_ACCOUNT_SANCTION_APPROVAL
         - STORE_SANCTION
         - PAYMENT_RECOVERY
+        - OPERATOR_CREATION
         - OPERATOR_AUTHORITY_CHANGE
         - OPERATOR_SUSPENSION
+        - AUDIT_CORRECTION
         - INCIDENT_RESPONSE
     AdminTargetType:
       type: string
@@ -79,6 +86,7 @@ components:
         - STORE
         - PAYMENT_RECOVERY_CASE
         - PLATFORM_OPERATOR_ACCOUNT
+        - AUDIT_EVENT
         - INCIDENT
     PublicId:
       type: string

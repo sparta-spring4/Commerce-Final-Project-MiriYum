@@ -12,6 +12,17 @@ public interface PlatformOperatorReauthenticationApprovalRepository
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             update platform_operator_reauthentication_approvals
+               set consumed_at = :revokedAt
+             where platform_operator_account_id = :operatorId
+               and consumed_at is null
+            """, nativeQuery = true)
+    int revokeUnconsumedByOperatorId(
+            @Param("operatorId") long operatorId,
+            @Param("revokedAt") Instant revokedAt);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            update platform_operator_reauthentication_approvals
                set consumed_at = :consumedAt
              where approval_digest = :digest
                and platform_operator_account_id = :operatorId

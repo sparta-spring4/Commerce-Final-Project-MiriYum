@@ -16,8 +16,6 @@ tags:
     description: Reservation 도메인이 소유하는 중앙 FIFO 웨이팅 원장 조회와 운영자 전이
 paths:
   /api/v1/store-operators/stores/{storeId}/waiting-settings:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 운영 설정 조회
@@ -73,6 +71,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitingSettingSuccessResponse"
+        "202":
+          description: 설정을 비활성화하고 활성 팀 비동기 일괄 종결 작업을 생성함
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitingClosureJobSuccessResponse"
         "400":
           $ref: "#/components/responses/WaitingBadRequest"
         "401":
@@ -86,8 +90,6 @@ paths:
         "429":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/TooManyRequests"
   /api/v1/store-operators/stores/{storeId}/waiting-settings/deactivation-impact:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 271
     get:
       tags: [Waiting Settings]
       summary: 웨이팅 기능 비활성화 영향 조회
@@ -400,9 +402,9 @@ components:
       description: 자동 접수, 수동 접수 또는 신규 접수 일시중지
     WaitingDisableAction:
       type: string
-      enum: [KEEP_ACTIVE]
+      enum: [KEEP_ACTIVE, CLOSE_ACTIVE_TEAMS]
       description: >-
-        비활성화 시 기존 활성 팀을 유지하도록 요청하는 명시적 intent.
+        비활성화 시 기존 활성 팀을 유지하거나 비동기 일괄 종결하도록 요청하는 명시적 intent.
         enabled=false인 요청에서만 허용하며 활성 팀이 있으면 필수다.
     WaitingSetting:
       type: object
@@ -536,11 +538,12 @@ components:
         - NO_SHOW
         - CLOSED_BY_STORE
         - RESERVATION_CONVERTING
+        - RESERVATION_CONVERTED
       description: >-
         웨이팅 원장의 팀 상태. RESERVATION_CONVERTING은 비종결이며 예약 전환 결과가 확정될
         때까지 계정 활성 membership 유지 상태다. 전환 실패로 WAITING 복귀해도 같은 membership을
-        유지한다. RESERVATION_CONVERTING은 운영자 cancel만 허용하고, 실제 종결 상태는 새 운영자
-        전이를 받지 않는다.
+        유지한다. RESERVATION_CONVERTED는 결제 기반 예약 전환이 최종 Reservation scalar ID로
+        완료된 종결 상태다. RESERVATION_CONVERTING은 운영자 cancel만 허용한다.
     WaitingTeamTransitionRequest:
       type: object
       additionalProperties: false

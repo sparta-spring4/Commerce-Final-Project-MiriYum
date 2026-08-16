@@ -93,6 +93,7 @@ class WaitingClosureServiceIT {
         for (String table : new String[]{"waiting_status_events", "waiting_transition_audits",
                 "waiting_closure_job_items", "waiting_closure_jobs", "waiting_active_memberships",
                 "waiting_teams", "waiting_queue_sequences", "idempotency_commands",
+                "waiting_setting_audits", "waiting_settings",
                 "store_tag_assignment", "stores", "store_operator_accounts", "consumer_accounts"}) {
             jdbc.execute("DELETE FROM " + table);
         }
@@ -226,6 +227,50 @@ class WaitingClosureServiceIT {
                 .isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("SELECT completed_team_count FROM waiting_closure_jobs", Long.class))
                 .isOne();
+    }
+
+    @Test
+    void reactivatedNewerSettingFencesClaimedClosureWithoutChangingTeam() {
+        Fixture fixture = fixture();
+        startClosure(fixture.operatorId, fixture.storeId, KEY, 7L);
+        WaitingClosureClaim claim = claim("owner-a").getFirst();
+        jdbc.update("""
+                UPDATE waiting_settings
+                   SET enabled=TRUE, reception_mode='MANUAL', version=8, updated_at=NOW(6)
+                 WHERE store_id=?
+                """, fixture.storeId);
+
+        assertThat(service.processClaimedItem(claim)).isTrue();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_teams", String.class))
+                .isEqualTo("WAITING");
+        assertThat(count("waiting_active_memberships")).isOne();
+        assertThat(count("waiting_transition_audits")).isZero();
+        assertThat(count("waiting_status_events")).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM waiting_closure_job_items", String.class))
+                .isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_closure_jobs", String.class))
+                .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void closureSnapshotsAndClosesReservationConvertingTeamExactlyOnce() {
+        Fixture fixture = fixture();
+        jdbc.update("UPDATE waiting_teams SET status='RESERVATION_CONVERTING' WHERE store_id=?", fixture.storeId);
+
+        WaitingClosureCommandResult started = startClosure(
+                fixture.operatorId, fixture.storeId, KEY, 7L);
+
+        assertThat(started.data().totalTeamCount()).isOne();
+        assertThat(count("waiting_closure_job_items")).isOne();
+        service.processClaimedItem(claim("owner-a").getFirst());
+
+        assertThat(jdbc.queryForObject("SELECT status FROM waiting_teams", String.class))
+                .isEqualTo("CLOSED_BY_STORE");
+        assertThat(count("waiting_active_memberships")).isZero();
+        assertThat(count("waiting_transition_audits")).isOne();
+        assertThat(count("waiting_status_events")).isOne();
     }
 
     @Test
@@ -430,6 +475,12 @@ class WaitingClosureServiceIT {
                 mutableClock.instant().minusSeconds(60)));
         memberships.saveAndFlush(WaitingActiveMembership.create(
                 storeId, consumerId, team.getId(), mutableClock.instant().minusSeconds(60)));
+        jdbc.update("""
+                INSERT INTO waiting_settings (
+                    store_id, enabled, reception_mode, advance_open_minutes, version,
+                    lock_version, created_at, updated_at
+                ) VALUES (?, FALSE, 'PAUSED', 60, 7, 0, NOW(6), NOW(6))
+                """, storeId);
         return new Fixture(operatorId, storeId);
     }
 

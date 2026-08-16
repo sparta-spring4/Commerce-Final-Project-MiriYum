@@ -3,10 +3,23 @@ info:
   title: MiriYum MVP1 Store Operator API
   version: 1.0.0
   description: Audience-specific entrypoint composed from feature-owned OpenAPI contracts.
+  license:
+    name: All rights reserved
+    identifier: LicenseRef-All-Rights-Reserved
 servers:
   - url: /
 security: []
 paths:
+  /api/v1/store-operators/account-recovery-verifications:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1store-operators~1account-recovery-verifications"
+  /api/v1/store-operators/account-recovery-cases:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1store-operators~1account-recovery-cases"
+  /api/v1/store-operators/account-recovery-password-reset-credentials:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1store-operators~1account-recovery-password-reset-credentials"
+  /api/v1/store-operators/account-recovery-password-resets:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1store-operators~1account-recovery-password-resets"
+  /api/v1/store-operators/account-sanction-appeals:
+    $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1store-operators~1account-sanction-appeals"
   /api/v1/store-operators/auth/accounts:
     $ref: "./auth-account/openapi.yaml#/paths/~1api~1v1~1store-operators~1auth~1accounts"
   /api/v1/store-operators/auth/sessions:
@@ -125,3 +138,12 @@ paths:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menu-inventory-buckets"
   /api/v1/store-operators/stores/{storeId}/menu-inventory-buckets/{inventoryBucketId}:
     $ref: "./menu-hold-pickup/openapi.yaml#/paths/~1api~1v1~1store-operators~1stores~1{storeId}~1menu-inventory-buckets~1{inventoryBucketId}"
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: "./mvp1-common/openapi.yaml#/components/securitySchemes/bearerAuth"
+    storeOperatorRefreshCookie:
+      type: apiKey
+      in: cookie
+      name: MIRIYUM_STORE_OPERATOR_REFRESH
+      description: 매장 운영자 Refresh JWT HttpOnly 쿠키

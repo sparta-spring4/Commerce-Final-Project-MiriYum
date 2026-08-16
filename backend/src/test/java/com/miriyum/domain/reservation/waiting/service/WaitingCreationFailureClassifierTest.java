@@ -32,7 +32,9 @@ class WaitingCreationFailureClassifierTest {
         assertThat(WaitingCreationFailureClassifier.isRetryable(new DataIntegrityViolationException(
                 "foreign key fk_waiting_teams_store"))).isFalse();
         assertThat(WaitingCreationFailureClassifier.isMembershipConflict(new DataIntegrityViolationException(
-                "uk_waiting_active_memberships_store_consumer"))).isTrue();
+                "uk_waiting_active_memberships_store_consumer"))).isFalse();
+        assertThat(WaitingCreationFailureClassifier.isMembershipConflict(new DataIntegrityViolationException(
+                "uk_waiting_active_memberships_consumer_account"))).isTrue();
     }
 
     @Test
@@ -51,7 +53,8 @@ class WaitingCreationFailureClassifierTest {
         WaitingCreationService service = new WaitingCreationService(
                 mock(WaitingQueueSequenceRepository.class), mock(WaitingTeamRepository.class),
                 mock(WaitingActiveMembershipRepository.class), mock(WaitingTransitionAuditRepository.class),
-                mock(WaitingStatusEventRepository.class), mock(IdempotencyExecutor.class), transactions,
+                mock(WaitingStatusEventRepository.class), mock(WaitingSettingRepository.class),
+                mock(IdempotencyExecutor.class), transactions,
                 new ObjectMapper(), Clock.fixed(Instant.parse("2026-08-12T00:00:00Z"), ZoneOffset.UTC),
                 attempt -> 0L, millis -> { throw new InterruptedException("stop"); });
 

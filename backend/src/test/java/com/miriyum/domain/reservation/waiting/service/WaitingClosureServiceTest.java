@@ -13,6 +13,8 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingClosureJobSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJob;
 import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJobItem;
 import com.miriyum.domain.reservation.waiting.entity.WaitingClosureJobStatus;
+import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
@@ -20,6 +22,7 @@ import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobItemRe
 import com.miriyum.domain.reservation.waiting.repository.WaitingClosureJobRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.global.exception.ServiceException;
@@ -55,6 +58,7 @@ class WaitingClosureServiceTest {
     @Mock WaitingTeamRepository teamRepository;
     @Mock WaitingClosureJobRepository jobRepository;
     @Mock WaitingClosureJobItemRepository itemRepository;
+    @Mock WaitingSettingRepository settingRepository;
     @Mock IdempotencyExecutor idempotencyExecutor;
     @Mock WaitingActiveMembershipRepository membershipRepository;
     @Mock WaitingTransitionAuditRepository auditRepository;
@@ -67,7 +71,7 @@ class WaitingClosureServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         service = new WaitingClosureService(authorityPort, teamRepository, jobRepository,
-                itemRepository, idempotencyExecutor, objectMapper,
+                itemRepository, settingRepository, idempotencyExecutor, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC), membershipRepository,
                 auditRepository, eventRepository);
     }
@@ -97,6 +101,9 @@ class WaitingClosureServiceTest {
         assertThat(items.getValue()).extracting(WaitingClosureJobItem::getExpectedVersion)
                 .containsExactly(0L, 0L);
         then(teamRepository).should().findActiveClosureTargets(22L);
+        then(teamRepository).should(org.mockito.Mockito.never()).findKeysetPage(
+                org.mockito.ArgumentMatchers.anyLong(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
@@ -144,13 +151,15 @@ class WaitingClosureServiceTest {
     @Test
     void closesOneActiveTeamAndAppendsOneAuditAndEvent() {
         WaitingTeam team = team(22L, 41L, 1L);
-        WaitingClosureJob job = WaitingClosureJob.create(22L, 7L, 1L, NOW.minusSeconds(10));
+        WaitingClosureJob job = WaitingClosureJob.create(22L, 1L, 1L, NOW.minusSeconds(10));
         setId(job, 91L);
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
         item.claim("owner", NOW.minusSeconds(5), NOW.plusSeconds(30));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));
+        given(settingRepository.findByStoreIdForUpdate(22L)).willReturn(java.util.Optional.of(
+                WaitingSetting.create(22L, false, WaitingReceptionMode.PAUSED, 60, NOW)));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
         given(membershipRepository.deleteByWaitingTeamId(41L)).willReturn(1L);
         given(itemRepository.countByWaitingClosureJobIdAndStatus(91L,
@@ -171,13 +180,15 @@ class WaitingClosureServiceTest {
     void terminalTeamIsCompletedAsSkipWithoutDuplicateSideEffects() {
         WaitingTeam team = team(22L, 41L, 1L);
         team.closeByStore(0L, NOW.minusSeconds(5));
-        WaitingClosureJob job = WaitingClosureJob.create(22L, 7L, 1L, NOW.minusSeconds(10));
+        WaitingClosureJob job = WaitingClosureJob.create(22L, 1L, 1L, NOW.minusSeconds(10));
         setId(job, 91L);
         WaitingClosureJobItem item = WaitingClosureJobItem.pending(91L, 41L, 0L, NOW.minusSeconds(10));
         setId(item, 101L);
         item.claim("owner", NOW.minusSeconds(5), NOW.plusSeconds(30));
         given(itemRepository.findByIdForUpdate(101L)).willReturn(java.util.Optional.of(item));
         given(jobRepository.findByIdForUpdate(91L)).willReturn(java.util.Optional.of(job));
+        given(settingRepository.findByStoreIdForUpdate(22L)).willReturn(java.util.Optional.of(
+                WaitingSetting.create(22L, false, WaitingReceptionMode.PAUSED, 60, NOW)));
         given(teamRepository.findByIdForUpdate(41L)).willReturn(java.util.Optional.of(team));
 
         service.processClaimedItem(new WaitingClosureClaim(101L, "owner", 1L));

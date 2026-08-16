@@ -26,7 +26,8 @@ class PlatformOperatorAuthorizationMigrationIT {
     @Test
     @DisplayName("V40은 권한·배정·승인 원장과 singleton guard를 제약과 함께 생성한다")
     void createsAuthorizationLedgersWithConstraints() throws Exception {
-        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)) {
+        try (MySQLContainer mysql = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
             mysql.start();
             Flyway flyway = Flyway.configure()
                     .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())

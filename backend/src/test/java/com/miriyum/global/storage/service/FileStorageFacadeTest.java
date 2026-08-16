@@ -47,6 +47,22 @@ class FileStorageFacadeTest {
     }
 
     @Test
+    @DisplayName("지연 공개 저장은 외부 객체를 저장해도 바깥 업무가 확정하기 전에는 대기 상태로 남긴다")
+    void keepsStoredObjectPendingUntilOwnerTransactionConfirmsIt() {
+        FileStorageMetadata metadata = pendingMetadata();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null);
+        RecordingFileStoragePort fileStoragePort = new RecordingFileStoragePort();
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        FileStorageMetadata stored = facade.storePending(metadata, request(metadata.objectKey()));
+
+        assertThat(stored.status()).isEqualTo(FileStorageStatus.PENDING);
+        assertThat(transactionExecutor.pendingFileIds()).containsExactly(metadata.fileId().toString());
+        assertThat(transactionExecutor.confirmationCalls()).isZero();
+        assertThat(fileStoragePort.savedObjectKeys()).containsExactly(metadata.objectKey());
+    }
+
+    @Test
     @DisplayName("파일 저장 실패 기록도 실패하면 원래 파일 저장 예외를 유지한다")
     void preservesStorageFailureWhenFailedStatusRecordingFails() {
         // given
@@ -196,6 +212,27 @@ class FileStorageFacadeTest {
     }
 
     @Test
+    @DisplayName("대기 파일 보상 삭제가 실패한 뒤 같은 파일 식별자로 다시 호출하면 공개 전 정리를 재시도한다")
+    void retriesPendingCompensationDeletionWithSameFileId() {
+        FileStorageMetadata pending = pendingMetadata();
+        List<String> events = new ArrayList<>();
+        RecordingTransactionExecutor transactionExecutor = new RecordingTransactionExecutor(null, null, events);
+        IllegalStateException deletionFailure = new IllegalStateException("저장소 삭제 실패");
+        FailingOnceDeleteFileStoragePort fileStoragePort = new FailingOnceDeleteFileStoragePort(events, deletionFailure);
+        FileStorageFacade facade = new FileStorageFacade(fileStoragePort, transactionExecutor);
+
+        assertThatThrownBy(() -> facade.discardPending(pending.fileId(), Instant.parse("2026-08-15T00:00:00Z")))
+                .isSameAs(deletionFailure);
+        assertThat(facade.discardPending(pending.fileId(), Instant.parse("2026-08-15T00:01:00Z")).status())
+                .isEqualTo(FileStorageStatus.DELETED);
+        assertThat(events).containsExactly(
+                "metadata-discard-pending:" + pending.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object",
+                "metadata-discard-pending:" + pending.fileId(),
+                "storage-delete:public/store/11/store-image/deleted-object");
+    }
+
+    @Test
     @DisplayName("저장소 삭제 실패 로그에는 파일 식별자만 남기고 객체 키를 남기지 않는다")
     void doesNotLogObjectKeyWhenStorageDeletionFails() {
         FileStorageMetadata confirmed = confirmedMetadata();
@@ -272,6 +309,7 @@ class FileStorageFacadeTest {
         private final List<String> pendingFileIds = new ArrayList<>();
         private final List<String> failedFileIds = new ArrayList<>();
         private final List<String> events;
+        private int confirmationCalls;
 
         private RecordingTransactionExecutor(
                 RuntimeException confirmationFailure, RuntimeException failedStatusFailure) {
@@ -297,6 +335,7 @@ class FileStorageFacadeTest {
 
         @Override
         public FileMetadata confirm(String fileId) {
+            confirmationCalls++;
             if (confirmationFailure != null) {
                 throw confirmationFailure;
             }
@@ -332,12 +371,35 @@ class FileStorageFacadeTest {
             return metadata;
         }
 
+        @Override
+        public FileMetadata discardPendingOrGetDeleted(String fileId, Instant deletedAt) {
+            events.add("metadata-discard-pending:" + fileId);
+            FileMetadata metadata = FileMetadata.createPending(
+                    fileId,
+                    "STORE",
+                    11L,
+                    FileStoragePurpose.STORE_IMAGE,
+                    "public/store/11/store-image/deleted-object",
+                    "image/jpeg",
+                    4L,
+                    FILE_CHECKSUM,
+                    FileStorageVisibility.PUBLIC,
+                    "STORE_IMAGE_DEFAULT",
+                    Instant.parse("2026-08-10T07:00:00Z"));
+            metadata.discardPending(deletedAt);
+            return metadata;
+        }
+
         private List<String> failedFileIds() {
             return failedFileIds;
         }
 
         private List<String> pendingFileIds() {
             return pendingFileIds;
+        }
+
+        private int confirmationCalls() {
+            return confirmationCalls;
         }
     }
 

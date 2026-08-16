@@ -5,11 +5,21 @@ on:
     branches: [dev, mvp2, main]
     paths:
       - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/.env.example'
+      - 'deploy/docker-compose.prod.yml'
+      - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
   push:
     branches: [dev, main]
     paths:
       - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/.env.example'
+      - 'deploy/docker-compose.prod.yml'
+      - 'deploy/.env.example'
       - '.github/workflows/k6-contract.yml'
 
 permissions:
@@ -27,6 +37,80 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify load-test Kakao geocoding secret wiring
+        shell: bash
+        env:
+          MIRIYUM_STORE_GEOCODING_REST_API_KEY: contract-test-kakao-key
+          MIRIYUM_NOTIFICATION_HISTORY_CURSOR_SECRET: contract-test-notification-cursor-secret-32bytes
+        run: |
+          set -euo pipefail
+          combined_config="$RUNNER_TEMP/loadtest-compose.json"
+          blank_config="$RUNNER_TEMP/loadtest-compose-blank-key.json"
+          default_config="$RUNNER_TEMP/default-compose.json"
+          staging_config="$RUNNER_TEMP/staging-compose.json"
+
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$combined_config"
+          env -u MIRIYUM_STORE_GEOCODING_REST_API_KEY \
+            -u MIRIYUM_KAKAO_LOCAL_REST_API_KEY \
+            docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$blank_config"
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            config --format json > "$default_config"
+          docker compose --env-file deploy/.env.example \
+            -f deploy/docker-compose.prod.yml \
+            config --format json > "$staging_config"
+
+          COMBINED_CONFIG="$combined_config" BLANK_CONFIG="$blank_config" \
+            DEFAULT_CONFIG="$default_config" STAGING_CONFIG="$staging_config" \
+            node --input-type=module -e '
+            import fs from "node:fs";
+            const key = "MIRIYUM_STORE_GEOCODING_REST_API_KEY";
+            const legacyKey = "MIRIYUM_KAKAO_LOCAL_REST_API_KEY";
+            const expected = process.env[key];
+            const combined = JSON.parse(fs.readFileSync(process.env.COMBINED_CONFIG, "utf8"));
+            const blank = JSON.parse(fs.readFileSync(process.env.BLANK_CONFIG, "utf8"));
+            const defaults = JSON.parse(fs.readFileSync(process.env.DEFAULT_CONFIG, "utf8"));
+            const staging = JSON.parse(fs.readFileSync(process.env.STAGING_CONFIG, "utf8"));
+            const exposedServices = (config, secretName) => Object.entries(config.services ?? {})
+              .filter(([, service]) => Object.hasOwn(service.environment ?? {}, secretName))
+              .map(([name]) => name)
+              .sort();
+            const assertBackendOnly = (config, label, value) => {
+              const backend = config.services?.backend?.environment ?? {};
+              if (backend[key] !== value) {
+                throw new Error(key + " was not forwarded to the " + label + " backend");
+              }
+              const exposure = exposedServices(config, key);
+              if (exposure.length !== 1 || exposure[0] !== "backend") {
+                throw new Error(key + " must be exposed only to the " + label + " backend");
+              }
+            };
+            assertBackendOnly(combined, "load-test", expected);
+            assertBackendOnly(staging, "staging", expected);
+            const blankBackend = blank.services?.backend?.environment ?? {};
+            if (blankBackend[key] !== "") {
+              throw new Error(key + " must remain optional when the local value is blank");
+            }
+            const blankExposure = exposedServices(blank, key);
+            if (blankExposure.length !== 1 || blankExposure[0] !== "backend") {
+              throw new Error(key + " blank mapping must remain backend-only");
+            }
+            if (exposedServices(defaults, key).length !== 0) {
+              throw new Error(key + " must not change the default local stack");
+            }
+            for (const [label, config] of Object.entries({combined, blank, defaults, staging})) {
+              if (exposedServices(config, legacyKey).length !== 0) {
+                throw new Error(legacyKey + " must remain application fallback only in " + label);
+              }
+            }
+          '
 
       - name: Run isolated k6 contracts
         shell: bash

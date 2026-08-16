@@ -97,7 +97,7 @@ public class StoreOperatorKakaoAuthService {
         if (accountId != null) {
             StoreOperatorAccount account = storeOperatorAccountRepository.findById(accountId)
                     .orElseThrow(() -> new ServiceException(AuthErrorCode.KAKAO_OAUTH_INVALID));
-            if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE || account.isPasswordResetRequired()) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
             return KakaoLoginResult.authenticated(issueTokenPair(account.getId()));

@@ -15,7 +15,7 @@
 
 #275의 독립 `platform-operator` principal과 중앙 세션 위에서 역할·세부 권한, 사건 배정과 현재 비밀번호 재인증을 고위험 명령의 공통 서버 계약으로 제공한다. #277~#282는 이 계약을 소비하고 인증 namespace, 권한 판정이나 승인 소비를 중복 구현하지 않는다.
 
-포함 범위는 고정 역할·권한 catalog, 계정별 grant와 `authority_version`, 중앙 사건 배정 검증, 목적·대상·세션·만료에 결속된 일회 승인, 고위험 명령 guard, 감사 context와 마지막 슈퍼관리자 보호 판정이다. WebAuthn, 실제 업무 명령, 운영자 관리 HTTP API, 통합 감사 조회 API와 frontend는 제외한다.
+포함 범위는 고정 역할·권한 catalog, 계정별 grant와 `authority_version`, 중앙 사건 배정 검증, 목적·대상·세션·만료에 결속된 일회 승인, 고위험 명령 guard, 감사 context와 마지막 슈퍼관리자 보호 판정이다. WebAuthn, 실제 업무 명령, 운영자 관리 HTTP API, 통합 감사 조회 API와 frontend는 제외한다. #282는 단일 슈퍼관리자 모델에 따라 `OPERATOR_CREATION`·`AUDIT_CORRECTION` 목적과 `AUDIT_EVENT` 대상을 이 공통 승인 계약에 추가한다.
 
 ## 역할과 세부 권한 catalog
 
@@ -23,7 +23,7 @@
 
 | 역할 | 기본 권한 |
 | --- | --- |
-| `SUPER_ADMIN` | `OPERATOR_CREATE`, `OPERATOR_AUTHORITY_MANAGE`, `OPERATOR_SUSPEND`, `PAYMENT_RECOVERY_HIGH_VALUE_APPROVE`, `BREAK_GLASS_APPROVE` |
+| `SUPER_ADMIN` | `OPERATOR_CREATE`, `OPERATOR_AUTHORITY_MANAGE`, `OPERATOR_SUSPEND`, `ACCOUNT_PERMANENT_SANCTION_APPROVE`, `PAYMENT_RECOVERY_HIGH_VALUE_APPROVE`, `BREAK_GLASS_APPROVE` |
 | `ONBOARDING_REVIEWER` | `ONBOARDING_REVIEW`, `ONBOARDING_EVIDENCE_READ` |
 | `MEMBER_SUPPORT_OPERATOR` | `MEMBER_READ_MINIMAL`, `MEMBER_RECOVERY`, `ACCOUNT_APPEAL_REVIEW` |
 | `ENFORCEMENT_OPERATOR` | `ACCOUNT_SANCTION`, `STORE_READ_MINIMAL`, `STORE_SANCTION` |
@@ -33,6 +33,8 @@
 | `INCIDENT_RESPONDER` | `INCIDENT_RESPOND` |
 
 `SUPER_ADMIN`도 업무상 필요가 없는 회원·입점 증빙·감사 원문 조회 권한을 자동으로 얻지 않는다. 개인정보 대량 조회·내보내기, 결제수단·비밀과 광범위 민감정보 권한은 catalog에 없다.
+
+#282부터 `SUPER_ADMIN`은 교체되지 않는 단일 bootstrap 계정으로 운용한다. 후속 운영 API는 이를 생성·추가·중지·강등하거나 핵심 권한을 변경하지 않으며 하위 운영자에게 `SUPER_ADMIN` 역할이나 위 핵심 권한을 직접 grant하지 않는다.
 
 ## 중앙 권한과 권한 회수
 
@@ -157,3 +159,5 @@
 - #282: 운영자 관리 권한, 권한 version 변경, 마지막 슈퍼관리자 판정과 감사 context
 
 각 후속 기능은 명령별 목적·대상·사건 유형, 도메인 상태 전이, 멱등성, 승인자 분리와 감사 writer를 자신의 spec/OpenAPI에서 확정한다.
+
+#278 회원지원은 복구 결정에 `MEMBER_RECOVERY`, 제재 적용에 `ACCOUNT_SANCTION`, 이의 결정에 `ACCOUNT_APPEAL_DECISION`, 영구 정지 추가 승인에 `PERMANENT_ACCOUNT_SANCTION_APPROVAL` 목적을 사용한다. 영구 정지 추가 승인 권한 `ACCOUNT_PERMANENT_SANCTION_APPROVE`는 `SUPER_ADMIN` 기본 권한이며 제안자와 다른 계정만 사용할 수 있다.
