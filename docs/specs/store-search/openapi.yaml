@@ -1818,6 +1818,7 @@ components:
         - menuId
         - name
         - description
+        - imageUrl
         - price
         - representative
         - primaryCategoryCode
@@ -1836,6 +1837,9 @@ components:
         description:
           type: string
           maxLength: 1000
+        imageUrl:
+          type: [string, "null"]
+          description: 완료된 공개 메뉴 대표 이미지가 없으면 null인 공개 조회 URL
         price:
           type: integer
           format: int64

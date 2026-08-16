@@ -362,6 +362,8 @@ export interface components {
       menuId: external["../mvp1-common/openapi.yaml"]["components"]["schemas"]["PublicId"];
       name: string;
       description: string;
+      /** @description 완료된 공개 메뉴 대표 이미지가 없으면 null인 공개 조회 URL */
+      imageUrl: string | null;
       /** Format: int64 */
       price: number;
       representative: boolean;

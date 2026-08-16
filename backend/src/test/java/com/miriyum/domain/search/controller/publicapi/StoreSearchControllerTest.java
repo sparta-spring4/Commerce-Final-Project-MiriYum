@@ -201,6 +201,7 @@ class StoreSearchControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.items[0].menuId").value("11"))
+                .andExpect(jsonPath("$.data.items[0].imageUrl").isEmpty())
                 .andExpect(jsonPath("$.data.items[0].saleStatus").value("SELLING"));
     }
 
