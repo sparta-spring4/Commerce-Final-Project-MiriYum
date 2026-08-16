@@ -99,7 +99,9 @@ public final class TemporaryMenuHoldContracts {
             } else if (state == null) {
                 throw new IllegalArgumentException("HOLD_PRESENT requires state");
             }
-            if (state == State.CONFIRMED || state == State.FULFILLED) {
+            if (state == State.CONFIRMED
+                    || state == State.FULFILLED
+                    || state == State.FORFEITED) {
                 if (finalReservationId == null || finalReservationId <= 0) {
                     throw new IllegalArgumentException(
                             state + " requires a positive finalReservationId");
@@ -129,7 +131,8 @@ public final class TemporaryMenuHoldContracts {
         CONFIRMED,
         RELEASED,
         EXPIRED,
-        FULFILLED
+        FULFILLED,
+        FORFEITED
     }
 
     /** 임시 MenuHold에 적용 가능한 명시적 종결 목표다. */

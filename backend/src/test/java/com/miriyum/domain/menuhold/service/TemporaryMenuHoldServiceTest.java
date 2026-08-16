@@ -148,6 +148,21 @@ class TemporaryMenuHoldServiceTest {
     }
 
     @Test
+    void replayReturnsFinalLinkageAfterConfirmedTemporaryHoldIsForfeited() {
+        MenuHold hold = temporaryHold(List.of(snapshot(9L, 90L, 4)));
+        hold.confirmTemporary(91L);
+        hold.forfeit();
+        given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
+
+        TemporaryMenuHoldContracts.Result result = service().verifyCreationReplay(
+                new TemporaryMenuHoldContracts.Replay(11L, List.of(
+                        new TemporaryMenuHoldContracts.Selection(9L, 4))));
+
+        assertThat(result.state()).isEqualTo(TemporaryMenuHoldContracts.State.FORFEITED);
+        assertThat(result.finalReservationId()).isEqualTo(91L);
+    }
+
+    @Test
     void replayMismatchFailsWithCommon007BeforeAnyMutation() {
         MenuHold hold = temporaryHold(List.of(snapshot(9L, 90L, 4)));
         given(holdRepository.findByReservationHoldId(11L)).willReturn(Optional.of(hold));
