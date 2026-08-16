@@ -21,7 +21,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 /** 파일 메타데이터 JPA 모델과 MySQL 테이블 매핑을 검증한다. */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
