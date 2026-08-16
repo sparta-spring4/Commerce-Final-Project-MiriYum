@@ -14,6 +14,8 @@ export const ROUTES = {
   storeDetail: '/stores/:storeId',
   consumerSignIn: '/sign-in',
   consumerSignUp: '/sign-up',
+  consumerKakaoCallback: '/auth/kakao/callback',
+  consumerKakaoSignUp: '/auth/kakao/sign-up',
   myPage: '/mypage',
   myReservations: '/mypage/reservations',
   reservationCreate: '/stores/:storeId/reserve',

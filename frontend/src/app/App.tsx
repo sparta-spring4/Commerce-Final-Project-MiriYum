@@ -4,6 +4,8 @@ import { createQueryClient } from '../shared/api/queryClient'
 import {
   ConsumerAccountMenu,
   ConsumerAuthProvider,
+  ConsumerKakaoCallbackPage,
+  ConsumerKakaoSignUpPage,
   ConsumerSignInPage,
   ConsumerSignUpPage,
   RequireConsumerAuth,
@@ -64,6 +66,14 @@ export default function App() {
                 <Route
                   path={ROUTES.consumerSignUp}
                   element={<ConsumerSignUpPage />}
+                />
+                <Route
+                  path={ROUTES.consumerKakaoCallback}
+                  element={<ConsumerKakaoCallbackPage />}
+                />
+                <Route
+                  path={ROUTES.consumerKakaoSignUp}
+                  element={<ConsumerKakaoSignUpPage />}
                 />
                 <Route path={ROUTES.forbidden} element={<ForbiddenPage />} />
                 <Route path="*" element={<NotFoundPage />} />

@@ -17,6 +17,11 @@ export type TokenData = components['schemas']['TokenData']
 export type ConsumerAccount = components['schemas']['ConsumerAccount']
 export type KakaoAuthorizationRequest =
   components['schemas']['KakaoAuthorizationRequest']
+export type KakaoAuthenticationRequest =
+  components['schemas']['KakaoAuthenticationRequest']
+export type KakaoLoginData = components['schemas']['KakaoLoginData']
+export type ConsumerKakaoSignUpRequest =
+  components['schemas']['ConsumerKakaoSignUpRequest']
 
 export async function signUpConsumer(
   body: ConsumerSignUpRequest,
@@ -50,6 +55,28 @@ export async function createConsumerKakaoAuthorization(
     { method: 'post', body },
   )
   return response.data.authorizationUrl
+}
+
+/** 카카오가 돌려준 code·state를 같은 redirect URI와 함께 서버에 교환한다. */
+export async function createConsumerKakaoSession(
+  body: KakaoAuthenticationRequest,
+): Promise<KakaoLoginData> {
+  const response = await authClient('/api/v1/consumers/auth/kakao/sessions', {
+    method: 'post',
+    body,
+  })
+  return response.data
+}
+
+/** 첫 카카오 로그인에서 받은 가입 티켓으로 일반 사용자 가입을 마친다. */
+export async function createConsumerKakaoAccount(
+  body: ConsumerKakaoSignUpRequest,
+): Promise<KakaoLoginData> {
+  const response = await authClient('/api/v1/consumers/auth/kakao/accounts', {
+    method: 'post',
+    body,
+  })
+  return response.data
 }
 
 /**
