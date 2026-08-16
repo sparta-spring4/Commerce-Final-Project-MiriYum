@@ -61,6 +61,21 @@ Migrate without recording the value in Git, Actions logs, SSM parameters, or dep
 
 This migration configures the deployment boundary; it does not by itself prove the staging smoke or baseline in #357.
 
+### Temporary staging load-test rate-limit exception
+
+The staging Compose file fixes `MIRIYUM_RUNTIME_ENVIRONMENT=staging`; operators cannot change that marker through the server-local `.env`. `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP` is empty by default, and the backend permits an exception only for one valid public IPv4 address and only for login and token-refresh rate-limit categories. Production does not receive the staging runtime marker, so setting only the source-IP variable there does not enable the exception. IPv6, CIDR, multiple values, hostnames, and non-public addresses are rejected when staging starts. The first request that actually receives the exception emits one process-local `event=staging_rate_limit_bypass_applied` warning with its category and without the source IP; repeated matching requests do not emit per-request warnings.
+
+Use the exception only during the approved #357 window:
+
+1. Confirm the approved full deployment SHA, execution time, load caps, synthetic fixture, and the runner's current public IPv4 address. Do not put the IP in an Issue, PR, chat transcript, shell command, or retained artifact.
+2. Open `/opt/miriyum/.env` with an interactive privileged editor and set exactly one `MIRIYUM_STAGING_LOAD_TEST_SOURCE_IP` value. Keep file mode `600`; do not print or copy the file into Actions or SSM output.
+3. Manually dispatch `Backend CD (Staging)` from `dev` with the same approved full SHA. Record only the deployment run URL, image digest, SSM command ID, and loopback health result.
+4. Run the approved smoke before the baseline. Confirm the IP-free `event=staging_rate_limit_bypass_applied` warning appears once for the backend process without copying surrounding request data. Store only execution time, success/429/5xx counts, p50/p95/p99, scenario inputs, and the deployed full SHA. Never retain the source IP, tokens, cookies, authorization headers, or raw HTTP output.
+5. Immediately after the run, clear the value with the interactive editor and manually redeploy the same approved SHA. Do this after success, failure, or an interrupted k6 run.
+6. Confirm the backend container has an empty source-IP value without printing environment contents, then issue the normal login limit plus one request from the runner and confirm the final request returns `429`. Record only the recovery deployment and the `429` result.
+
+If injection, deployment, smoke, cleanup, or recovery verification fails, stop #357. Do not continue a baseline while the exception state is unknown, and do not broaden the IP or rate-limit scope as a workaround.
+
 Before logging in to ECR or restarting containers, `deploy.sh` runs `docker compose config --quiet` with the server-local `.env`. A missing required key therefore stops the deployment before image pull and container replacement. Compose prints only the missing key name; the workflow and deployment script never print secret values or create the `.env` file.
 
 The #141 infrastructure stage starts and health-checks the password-protected Valkey service. Validation includes staging `healthy`, unauthenticated `NOAUTH`, authenticated `PONG`, and no host port exposure. Valkey joins only the internal `backend-valkey` Docker network shared with the backend container; MySQL and Nginx cannot connect to it.
