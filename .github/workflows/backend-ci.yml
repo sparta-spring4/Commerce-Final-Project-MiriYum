@@ -84,10 +84,9 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # #288 2단계에서 샤드를 4개로 늘렸고, #272의 최신 migration/runtime 검증을 합친
-    # shard A가 동일 SHA에서 두 차례 기존 20분 job 경계에 도달했다. 4-shard 구조는
-    # 유지하되 러너 편차를 흡수하고 실제로 멈춘 job은 25분 안에 중단한다.
-    timeout-minutes: 25
+    # 4-shard 구조는 유지한다. 최근 A shard가 24분 30초까지 소요되어 runner 편차만으로
+    # 25분 상한에 취소될 수 있으므로, 재분배 전까지 30분으로 여유를 둔다.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -168,7 +167,9 @@ jobs:
     needs: [unit-test, integration-test]
     if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # 집계 단계에서도 Docker Compose 기반 CloudWatch 계약 검증을 실행한다.
+    # 테스트 결과만 확인하는 job이 아니므로 5분 제한으로 중간 취소되지 않게 여유를 둔다.
+    timeout-minutes: 15
     steps:
       - name: Require every test job to succeed
         env:
