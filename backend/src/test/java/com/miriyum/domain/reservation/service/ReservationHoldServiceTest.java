@@ -1769,7 +1769,8 @@ class ReservationHoldServiceTest {
             finalLinkedTerminalMenuStates() {
         return Stream.of(
                 ReservationTemporaryMenuHoldResult.State.RELEASED,
-                ReservationTemporaryMenuHoldResult.State.FULFILLED);
+                ReservationTemporaryMenuHoldResult.State.FULFILLED,
+                ReservationTemporaryMenuHoldResult.State.FORFEITED);
     }
 
     @Test
