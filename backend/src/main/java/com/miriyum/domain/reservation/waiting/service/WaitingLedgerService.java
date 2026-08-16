@@ -36,7 +36,8 @@ public class WaitingLedgerService {
     private static final Collection<WaitingTeamStatus> ACTIVE_STATUSES = java.util.List.of(
             WaitingTeamStatus.WAITING,
             WaitingTeamStatus.CALLED,
-            WaitingTeamStatus.ARRIVED
+            WaitingTeamStatus.ARRIVED,
+            WaitingTeamStatus.RESERVATION_CONVERTING
     );
     private static final String RESOURCE_TYPE = "WAITING_TEAM";
     private static final String SUCCESS = "SUCCESS";
@@ -84,7 +85,7 @@ public class WaitingLedgerService {
         return WaitingTeamSnapshot.from(loadTeamInStore(waitingTeamId, storeId, false));
     }
 
-    /** 권한 확인 뒤 WAITING/CALLED/ARRIVED 팀 수만 반환한다. */
+    /** 권한 확인 뒤 활성 WAITING/CALLED/ARRIVED/RESERVATION_CONVERTING 팀 수를 반환한다. */
     @Transactional(readOnly = true)
     public WaitingActiveTeamImpact inspectActiveTeams(long operatorAccountId, long storeId) {
         authorityPort.requireRead(operatorAccountId, storeId);
@@ -152,7 +153,7 @@ public class WaitingLedgerService {
         );
     }
 
-    /** WAITING/CALLED/ARRIVED 팀을 CANCELLED로 종결한다. */
+    /** WAITING/CALLED/ARRIVED/RESERVATION_CONVERTING 팀을 CANCELLED로 종결한다. */
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public WaitingCommandResult cancel(
             long operatorAccountId,

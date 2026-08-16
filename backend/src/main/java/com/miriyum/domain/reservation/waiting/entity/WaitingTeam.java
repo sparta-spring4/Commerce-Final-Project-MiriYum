@@ -14,6 +14,7 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.regex.Pattern;
 
 /** 매장과 KST 영업일에 귀속된 중앙 FIFO 웨이팅 팀 상태를 소유한다. */
 @Entity
@@ -26,6 +27,7 @@ import java.time.LocalDate;
 public class WaitingTeam {
 
     private static final Duration ARRIVAL_WINDOW = Duration.ofMinutes(10);
+    private static final Pattern PUBLIC_ID = Pattern.compile("^[1-9][0-9]{0,18}$");
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -81,6 +83,18 @@ public class WaitingTeam {
 
     @Column(name = "closed_by_store_at")
     private Instant closedByStoreAt;
+
+    @Column(name = "reservation_converting_at")
+    private Instant reservationConvertingAt;
+
+    @Column(name = "waiting_payment_id", length = 19)
+    private String waitingPaymentId;
+
+    @Column(name = "reservation_reference_id")
+    private Long reservationReferenceId;
+
+    @Column(name = "reservation_converted_at")
+    private Instant reservationConvertedAt;
 
     protected WaitingTeam() {
     }
@@ -158,12 +172,65 @@ public class WaitingTeam {
         version++;
     }
 
-    /** 대기·호출·도착 상태의 사용자 취소를 종결 기록한다. */
+    /** 대기 팀의 결제 기반 예약 전환 시도를 시작하고 활성 membership은 유지한다. */
+    public void beginReservationConversion(
+            long expectedVersion,
+            String paymentId,
+            Instant occurredAt
+    ) {
+        requireVersion(expectedVersion);
+        requireStatus(WaitingTeamStatus.WAITING);
+        String validPaymentId = requirePublicId(paymentId, "paymentId");
+        Instant transitionAt = requireNotBefore(occurredAt, createdAt);
+        status = WaitingTeamStatus.RESERVATION_CONVERTING;
+        reservationConvertingAt = transitionAt;
+        waitingPaymentId = validPaymentId;
+        reservationReferenceId = null;
+        reservationConvertedAt = null;
+        version++;
+    }
+
+    /** 일치하는 예약 전환 시도를 실패 처리하고 같은 팀을 대기 상태로 되돌린다. */
+    public void failReservationConversion(
+            long expectedVersion,
+            String paymentId,
+            Instant occurredAt
+    ) {
+        requireVersion(expectedVersion);
+        requireMatchingReservationConversion(paymentId);
+        requireNotBefore(occurredAt, reservationConvertingAt);
+        status = WaitingTeamStatus.WAITING;
+        reservationConvertingAt = null;
+        waitingPaymentId = null;
+        reservationReferenceId = null;
+        reservationConvertedAt = null;
+        version++;
+    }
+
+    /** 일치하는 예약 전환을 최종 Reservation scalar 참조와 함께 종결한다. */
+    public void completeReservationConversion(
+            long expectedVersion,
+            String paymentId,
+            long finalReservationId,
+            Instant occurredAt
+    ) {
+        requireVersion(expectedVersion);
+        requireMatchingReservationConversion(paymentId);
+        long validReservationId = requirePositive(finalReservationId, "finalReservationId");
+        Instant transitionAt = requireNotBefore(occurredAt, reservationConvertingAt);
+        status = WaitingTeamStatus.RESERVATION_CONVERTED;
+        reservationReferenceId = validReservationId;
+        reservationConvertedAt = transitionAt;
+        version++;
+    }
+
+    /** 대기·호출·도착·예약 전환 중 상태의 사용자 취소를 종결 기록한다. */
     public void cancel(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);
         if (status != WaitingTeamStatus.WAITING
                 && status != WaitingTeamStatus.CALLED
-                && status != WaitingTeamStatus.ARRIVED) {
+                && status != WaitingTeamStatus.ARRIVED
+                && status != WaitingTeamStatus.RESERVATION_CONVERTING) {
             throw invalidTransition();
         }
         cancelledAt = requireNotBefore(occurredAt, latestStateTimestamp());
@@ -184,12 +251,13 @@ public class WaitingTeam {
         version++;
     }
 
-    /** 대기·호출·도착 상태의 팀을 사용자 취소와 구분해 매장 종료한다. */
+    /** 대기·호출·도착·예약 전환 중 상태의 팀을 사용자 취소와 구분해 매장 종료한다. */
     public void closeByStore(long expectedVersion, Instant occurredAt) {
         requireVersion(expectedVersion);
         if (status != WaitingTeamStatus.WAITING
                 && status != WaitingTeamStatus.CALLED
-                && status != WaitingTeamStatus.ARRIVED) {
+                && status != WaitingTeamStatus.ARRIVED
+                && status != WaitingTeamStatus.RESERVATION_CONVERTING) {
             throw invalidTransition();
         }
         closedByStoreAt = requireNotBefore(occurredAt, latestStateTimestamp());
@@ -209,11 +277,22 @@ public class WaitingTeam {
         }
     }
 
+    private void requireMatchingReservationConversion(String paymentId) {
+        requireStatus(WaitingTeamStatus.RESERVATION_CONVERTING);
+        String validPaymentId = requirePublicId(paymentId, "paymentId");
+        if (!validPaymentId.equals(waitingPaymentId)) {
+            throw invalidTransition();
+        }
+    }
+
     private ServiceException invalidTransition() {
         return new ServiceException(ReservationErrorCode.WAITING_INVALID_TRANSITION);
     }
 
     private Instant latestStateTimestamp() {
+        if (reservationConvertingAt != null) {
+            return reservationConvertingAt;
+        }
         if (arrivedAt != null) {
             return arrivedAt;
         }
@@ -234,6 +313,13 @@ public class WaitingTeam {
     private static long requirePositive(long value, String fieldName) {
         if (value <= 0) {
             throw new IllegalArgumentException(fieldName + " must be positive");
+        }
+        return value;
+    }
+
+    private static String requirePublicId(String value, String fieldName) {
+        if (value == null || !PUBLIC_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException(fieldName + " must be a positive public ID");
         }
         return value;
     }
@@ -318,5 +404,21 @@ public class WaitingTeam {
 
     public Instant getClosedByStoreAt() {
         return closedByStoreAt;
+    }
+
+    public Instant getReservationConvertingAt() {
+        return reservationConvertingAt;
+    }
+
+    public String getWaitingPaymentId() {
+        return waitingPaymentId;
+    }
+
+    public Long getReservationReferenceId() {
+        return reservationReferenceId;
+    }
+
+    public Instant getReservationConvertedAt() {
+        return reservationConvertedAt;
     }
 }

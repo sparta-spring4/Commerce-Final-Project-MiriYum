@@ -45,6 +45,7 @@ PortOne  → Payment Webhook HTTP
 
 - Reservation은 임시 선점과 서버가 확정한 예약금 스냅샷을 만든 뒤 `PaymentService.prepareReservationDeposit(...)`를 호출한다. 이 snapshot은 Store 설정 revision인 `policyVersion`과 `PAY-002` 계산 알고리즘 version을 서로 다른 값으로 보존하며 Store의 기술적 `lockVersion`은 포함하지 않는다.
 - Payment는 Reservation을 역조회하거나 Reservation Entity·Repository를 참조하지 않는다. 준비 명령에 포함된 소유자·금액·통화·만료·정책 버전 스냅샷을 원장에 보존한다.
+- 내부 source boundary에서 일반 예약금은 `RESERVATION_DEPOSIT`, 대기열 예약금은 `WAITING_RESERVATION_DEPOSIT`를 사용한다. 두 source type은 같은 `sourceReferenceId`와 준비 멱등 키를 독립적으로 보유하며, 이 구분은 Payment 내부 원장·공개 Service 경계에만 적용되고 Payment HTTP/OpenAPI를 변경하지 않는다.
 - 별도의 브라우저용 결제 준비 HTTP API는 만들지 않는다. 예약 조정 응답이 Payment 준비 DTO를 포함하는 계약은 #238의 Reservation OpenAPI가 소유한다.
 - Payment는 결제 확정·본인 조회·PortOne Webhook HTTP를 소유한다.
 - Payment는 검증된 결제 결과 DTO만 반환한다. Reservation의 최종 확정 또는 보상 전이는 Reservation이 소유한다.
@@ -219,3 +220,25 @@ PortOne 조회 장애나 결과 불명확은 거짓 4xx·최종 실패로 변환
 - [PortOne V2 인증 결제 연동](https://developers.portone.io/opi/ko/integration/start/v2/checkout?v=v2)
 - [PortOne V2 Webhook 연동](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2)
 - [PortOne V2 결제 취소](https://developers.portone.io/opi/ko/integration/cancel/v2/readme)
+
+## Internal Waiting reservation deposit verification
+
+Waiting conversion uses the distinct source type `WAITING_RESERVATION_DEPOSIT`. The internal
+`getVerifiedWaitingReservationDeposit(paymentId, waitingTeamId, consumerAccountId)` query validates
+all Payment-owned identity: public payment ID, consumer owner, exact source type, and the decimal
+Waiting team source reference. A normal `RESERVATION_DEPOSIT` with the same numeric source reference
+is not interchangeable and is returned as not found.
+
+The query returns an immutable `VerifiedWaitingReservationDeposit` snapshot containing payment ID,
+amount, currency, source policy version, current status, and `paidAt`. Both completion verifiers lock
+the Payment row after the caller has locked the Waiting row. The completable verifier additionally
+requires current `PAID` status and an empty refund ledger, including no `PROCESSING` refund. The
+historical verifier requires `paidAt` and accepts PAID or the historically paid
+refund/reconciliation states needed only for terminal compensation callback replay. Thus an
+in-flight refund cannot race a stale PAID snapshot into a new conversion, while a cancellation or
+closure winner can still converge on deterministic compensation after refund state changes.
+
+Payment preparation is invoked with any ambient caller transaction suspended, allowing its internal
+required transaction to commit independently before Waiting records `RESERVATION_CONVERTING`.
+Payment provider calls remain outside Waiting/Payment row-lock transactions, and Payment does not
+access Waiting or Reservation entities/repositories.
