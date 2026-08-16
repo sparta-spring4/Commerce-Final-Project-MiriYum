@@ -4,6 +4,7 @@ import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -30,6 +31,27 @@ public interface ReservationDepositProcessRepository
     List<Long> findLinkedHoldIdsForFinalReservations(
             @Param("finalReservationIds") List<Long> finalReservationIds,
             @Param("reservationHoldIds") List<Long> reservationHoldIds);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select process from ReservationDepositProcess process
+            where process.status in (
+                com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus.AWAITING_PAYMENT,
+                com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus.RECOVERY_REQUIRED
+            )
+              and (
+                (process.reconciliationNextAttemptAt is not null
+                  and process.reconciliationNextAttemptAt <= :now
+                  and (process.reconciliationLeaseUntil is null
+                       or process.reconciliationLeaseUntil <= :now))
+                or (process.reconciliationLeaseUntil is not null
+                    and process.reconciliationLeaseUntil <= :now)
+              )
+            order by process.id asc
+            """)
+    List<ReservationDepositProcess> findReconciliationClaimableForUpdate(
+            @Param("now") java.time.Instant now,
+            Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

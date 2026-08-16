@@ -12,4 +12,14 @@ public class ReservationDepositProcessConfig {
     public Duration reservationDepositRefundLeaseDuration() {
         return Duration.ofSeconds(30);
     }
+
+    @Bean("reservationDepositProcessLeaseDuration")
+    public Duration reservationDepositProcessLeaseDuration() {
+        return Duration.ofSeconds(30);
+    }
+
+    @Bean("reservationDepositProcessPollDelay")
+    public Duration reservationDepositProcessPollDelay() {
+        return Duration.ofSeconds(5);
+    }
 }

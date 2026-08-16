@@ -95,6 +95,10 @@ public class ReservationDepositProcessCommandFacade {
         return executeWithRetry(() -> processService.reconcileLinkedExpiration(processId));
     }
 
+    public boolean reconcileClaimed(ReservationDepositProcessService.Claim claim) {
+        return executeWithRetry(() -> processService.reconcileClaimed(claim));
+    }
+
     private <T> T executeWithRetry(Supplier<T> work) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {

@@ -10,6 +10,7 @@ import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse.PaymentPreparationSnapshot;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
 import com.miriyum.domain.reservation.entity.ReservationDepositCauseAudit;
 import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
@@ -25,15 +26,20 @@ import com.miriyum.global.idempotency.IdempotencyCommand;
 import com.miriyum.global.idempotency.IdempotencyExecutor;
 import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -52,6 +58,8 @@ public class ReservationDepositProcessService {
     private final ReservationHoldTransitionPrimitive holdTransitionPrimitive;
     private final ReservationMenuHoldPort menuHoldPort;
     private final Clock clock;
+    private final Duration reconciliationLeaseDuration;
+    private final Duration reconciliationPollDelay;
     private IdempotencyExecutor idempotencyExecutor;
     private ObjectMapper objectMapper;
     private ReservationRepository reservationRepository;
@@ -68,7 +76,11 @@ public class ReservationDepositProcessService {
             Clock clock,
             ReservationRepository reservationRepository,
             IdempotencyExecutor idempotencyExecutor,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Qualifier("reservationDepositProcessLeaseDuration")
+            Duration reconciliationLeaseDuration,
+            @Qualifier("reservationDepositProcessPollDelay")
+            Duration reconciliationPollDelay
     ) {
         this(
                 processRepository,
@@ -78,7 +90,9 @@ public class ReservationDepositProcessService {
                 finalizationPrimitive,
                 holdTransitionPrimitive,
                 menuHoldPort,
-                clock);
+                clock,
+                reconciliationLeaseDuration,
+                reconciliationPollDelay);
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
         this.reservationRepository = reservationRepository;
@@ -94,6 +108,40 @@ public class ReservationDepositProcessService {
             ReservationMenuHoldPort menuHoldPort,
             Clock clock
     ) {
+        this(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                clock,
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(5));
+    }
+
+    ReservationDepositProcessService(
+            ReservationDepositProcessRepository processRepository,
+            ReservationDepositCauseAuditRepository causeRepository,
+            ReservationDepositRefundObligationRepository refundRepository,
+            PaymentService paymentService,
+            ReservationDepositFinalizationPrimitive finalizationPrimitive,
+            ReservationHoldTransitionPrimitive holdTransitionPrimitive,
+            ReservationMenuHoldPort menuHoldPort,
+            Clock clock,
+            Duration reconciliationLeaseDuration,
+            Duration reconciliationPollDelay
+    ) {
+        if (reconciliationLeaseDuration == null
+                || reconciliationLeaseDuration.isZero()
+                || reconciliationLeaseDuration.isNegative()
+                || reconciliationPollDelay == null
+                || reconciliationPollDelay.isZero()
+                || reconciliationPollDelay.isNegative()) {
+            throw new IllegalArgumentException(
+                    "reconciliation lease and poll delay must be positive");
+        }
         this.processRepository = processRepository;
         this.causeRepository = causeRepository;
         this.refundRepository = refundRepository;
@@ -102,6 +150,8 @@ public class ReservationDepositProcessService {
         this.holdTransitionPrimitive = holdTransitionPrimitive;
         this.menuHoldPort = menuHoldPort;
         this.clock = clock;
+        this.reconciliationLeaseDuration = reconciliationLeaseDuration;
+        this.reconciliationPollDelay = reconciliationPollDelay;
     }
 
     ReservationDepositProcessService(
@@ -121,6 +171,218 @@ public class ReservationDepositProcessService {
                 holdTransitionPrimitive,
                 menuHoldPort,
                 clock);
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public List<Claim> claimDue(String owner, int limit) {
+        if (owner == null || owner.isBlank() || owner.length() > 64) {
+            throw new IllegalArgumentException("owner must be 1 to 64 characters");
+        }
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("limit must be between 1 and 100");
+        }
+        Instant now = clock.instant();
+        List<ReservationDepositProcess> processes = processRepository
+                .findReconciliationClaimableForUpdate(
+                        now,
+                        PageRequest.of(0, limit));
+        if (processes == null) {
+            throw new IllegalStateException("claimable deposit processes are required");
+        }
+        List<Claim> claims = processes.stream()
+                .map(process -> new Claim(
+                        requireProcessId(process),
+                        owner,
+                        process.claimReconciliation(
+                                owner,
+                                now,
+                                now.plus(reconciliationLeaseDuration))))
+                .toList();
+        processRepository.saveAllAndFlush(processes);
+        return claims;
+    }
+
+    public record Claim(long processId, String owner, long token) {
+
+        public Claim {
+            if (processId <= 0
+                    || owner == null
+                    || owner.isBlank()
+                    || owner.length() > 64
+                    || token <= 0) {
+                throw new IllegalArgumentException("deposit process claim is invalid");
+            }
+        }
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public boolean reconcileClaimed(Claim claim) {
+        if (claim == null) {
+            throw new IllegalArgumentException("deposit process claim is required");
+        }
+        ReservationDepositProcess process = processRepository
+                .findByIdForUpdate(claim.processId())
+                .orElse(null);
+        Instant now = clock.instant();
+        if (process == null
+                || !process.isReconciliationClaimOwnedBy(
+                        claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        if (process.getStatus() != ReservationDepositProcessStatus.AWAITING_PAYMENT
+                && process.getStatus() != ReservationDepositProcessStatus.RECOVERY_REQUIRED) {
+            process.completeReconciliationClaim(
+                    claim.owner(), claim.token(), now);
+            processRepository.saveAndFlush(process);
+            return false;
+        }
+        PaymentResult payment;
+        try {
+            payment = paymentService.getOwnedPayment(
+                    process.getPaymentId(),
+                    String.valueOf(process.getConsumerAccountId()));
+        } catch (ServiceException exception) {
+            if (exception.getErrorCode() != PaymentErrorCode.PAYMENT_NOT_FOUND) {
+                throw exception;
+            }
+            markPaymentRecovery(process, now);
+            process.requeueReconciliation(
+                    claim.owner(),
+                    claim.token(),
+                    now,
+                    reconciliationPollDelay);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        requireSamePayment(process, payment);
+        if (payment.status() == PaymentStatus.PAID
+                && payment.paidAt() != null
+                && payment.paidAt().isBefore(process.getExpiresAt())
+                && (now.isBefore(process.getExpiresAt())
+                || process.isResourcesProtected())
+                && !process.isAbandonmentRequested()) {
+            process.beginFinalization(now);
+            Reservation reservation = finalizationPrimitive.finalizeResources(
+                    new ReservationDepositFinalizationPrimitive.Command(
+                            process.getReservationHoldId(),
+                            "reservation-deposit-worker-finalize:" + process.getId(),
+                            "SYSTEM",
+                            null,
+                            now));
+            process.complete(requireReservationId(reservation), now);
+            process.completeReconciliationClaim(
+                    claim.owner(), claim.token(), now);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        if (payment.status() == PaymentStatus.PAID && payment.paidAt() != null) {
+            boolean expireUnprotected = !process.isResourcesProtected()
+                    && !now.isBefore(process.getExpiresAt());
+            holdTransitionPrimitive.transition(expireUnprotected
+                    ? new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.EXPIRED,
+                            "reservation-hold-expire:" + process.getReservationHoldId(),
+                            "SYSTEM",
+                            null,
+                            process.getExpiresAt(),
+                            null)
+                    : new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RELEASED,
+                            "reservation-deposit-worker-compensate:" + process.getId(),
+                            "SYSTEM",
+                            null,
+                            now,
+                            null));
+            String causeCode = process.isAbandonmentRequested()
+                    ? "ABANDONMENT_PAID"
+                    : payment.paidAt().isBefore(process.getExpiresAt())
+                            ? "UNPROTECTED_LATE_PAID"
+                            : "PAYMENT_PAID_AT_OR_AFTER_EXPIRY";
+            requireCompensationRecords(process, payment, now, causeCode);
+            process.requireCompensation(now);
+            process.completeReconciliationClaim(
+                    claim.owner(), claim.token(), now);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        if ((payment.status() == PaymentStatus.CONFIRMING
+                || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
+                && ((now.isBefore(process.getExpiresAt())
+                && !process.isAbandonmentRequested())
+                || process.isResourcesProtected())) {
+            if (!process.isResourcesProtected()) {
+                holdTransitionPrimitive.transition(
+                        new ReservationHoldContracts.TransitionCommand(
+                                process.getReservationHoldId(),
+                                ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                                "reservation-deposit-protect:"
+                                        + process.getId() + ":system",
+                                "SYSTEM",
+                                null,
+                                now,
+                                null));
+                process.protectResources(now);
+            }
+            if (now.isBefore(process.getExpiresAt())) {
+                requeueClaimBeforeExpiry(process, claim, now);
+            } else {
+                process.requeueReconciliation(
+                        claim.owner(),
+                        claim.token(),
+                        now,
+                        reconciliationPollDelay);
+            }
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        if ((payment.status() == PaymentStatus.READY
+                || payment.status() == PaymentStatus.CONFIRMING
+                || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
+                && !now.isBefore(process.getExpiresAt())
+                && !process.isResourcesProtected()
+                && !process.isAbandonmentRequested()) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.EXPIRED,
+                            "reservation-hold-expire:" + process.getReservationHoldId(),
+                            "SYSTEM",
+                            null,
+                            process.getExpiresAt(),
+                            null));
+            process.expire(now);
+            process.completeReconciliationClaim(
+                    claim.owner(), claim.token(), now);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        if (payment.status() == PaymentStatus.READY
+                && now.isBefore(process.getExpiresAt())
+                && !process.isAbandonmentRequested()) {
+            requeueClaimBeforeExpiry(process, claim, now);
+            processRepository.saveAndFlush(process);
+            return true;
+        }
+        throw new IllegalStateException(
+                "claimed deposit process requires payment reconciliation");
+    }
+
+    private void requeueClaimBeforeExpiry(
+            ReservationDepositProcess process,
+            Claim claim,
+            Instant now
+    ) {
+        Duration untilExpiry = Duration.between(now, process.getExpiresAt());
+        Duration delay = untilExpiry.compareTo(reconciliationPollDelay) < 0
+                ? untilExpiry
+                : reconciliationPollDelay;
+        process.requeueReconciliation(
+                claim.owner(), claim.token(), now, delay);
     }
 
     @Transactional(readOnly = true)
@@ -498,6 +760,15 @@ public class ReservationDepositProcessService {
             ReservationDepositProcess process,
             Instant observedAt
     ) {
+        markPaymentRecovery(process, observedAt);
+        processRepository.saveAndFlush(process);
+        return ReservationDepositCommandResult.pending(toResponse(process));
+    }
+
+    private void markPaymentRecovery(
+            ReservationDepositProcess process,
+            Instant observedAt
+    ) {
         String causeCode = "PAYMENT_NOT_FOUND";
         ReservationDepositCauseAudit existing = causeRepository
                 .findByReservationDepositProcessIdAndCauseCode(
@@ -515,8 +786,6 @@ public class ReservationDepositProcessService {
             throw new IllegalStateException("payment recovery cause meaning changed");
         }
         process.requireRecovery(observedAt);
-        processRepository.saveAndFlush(process);
-        return ReservationDepositCommandResult.pending(toResponse(process));
     }
 
     private void protectResources(
@@ -579,6 +848,13 @@ public class ReservationDepositProcessService {
             throw new IllegalStateException("final reservation id is required");
         }
         return reservation.getId();
+    }
+
+    private static long requireProcessId(ReservationDepositProcess process) {
+        if (process == null || process.getId() == null || process.getId() <= 0) {
+            throw new IllegalStateException("deposit process id is required");
+        }
+        return process.getId();
     }
 
     private static void requirePositive(long value, String fieldName) {

@@ -15,6 +15,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.time.Duration;
 import java.time.Instant;
 
 /** Reservation-owned source of truth for deposit orchestration and unfinished obligations. */
@@ -69,6 +70,16 @@ public class ReservationDepositProcess {
     private Instant requestedAt;
     @Column(name = "completed_at")
     private Instant completedAt;
+    @Column(name = "reconciliation_next_attempt_at")
+    private Instant reconciliationNextAttemptAt;
+    @Column(name = "reconciliation_lease_owner", length = 64)
+    private String reconciliationLeaseOwner;
+    @Column(name = "reconciliation_lease_until")
+    private Instant reconciliationLeaseUntil;
+    @Column(name = "reconciliation_claim_token", nullable = false)
+    private long reconciliationClaimToken;
+    @Column(name = "reconciliation_last_attempted_at")
+    private Instant reconciliationLastAttemptedAt;
 
     protected ReservationDepositProcess() {
     }
@@ -107,7 +118,63 @@ public class ReservationDepositProcess {
         process.paymentPreparationStatus = payment.status();
         process.calculationSnapshot = ReservationDepositCalculationSnapshot.copyOf(calculation);
         process.requestedAt = requestedAt;
+        process.reconciliationNextAttemptAt = requestedAt;
         return process;
+    }
+
+    public long claimReconciliation(String owner, Instant now, Instant until) {
+        requireLease(owner, now, until);
+        if (status != ReservationDepositProcessStatus.AWAITING_PAYMENT
+                && status != ReservationDepositProcessStatus.RECOVERY_REQUIRED) {
+            throw invalidTransition();
+        }
+        boolean due = reconciliationNextAttemptAt != null
+                && !reconciliationNextAttemptAt.isAfter(now);
+        boolean reclaimable = reconciliationLeaseUntil != null
+                && !reconciliationLeaseUntil.isAfter(now);
+        boolean leaseAvailable = reconciliationLeaseUntil == null || reclaimable;
+        if (!leaseAvailable || (!due && !reclaimable)) {
+            throw new IllegalStateException("deposit process is not claimable");
+        }
+        reconciliationClaimToken = Math.addExact(reconciliationClaimToken, 1L);
+        reconciliationLeaseOwner = owner;
+        reconciliationLeaseUntil = until;
+        reconciliationLastAttemptedAt = now;
+        reconciliationNextAttemptAt = null;
+        return reconciliationClaimToken;
+    }
+
+    public boolean isReconciliationClaimOwnedBy(
+            String owner,
+            long token,
+            Instant now
+    ) {
+        return owner != null
+                && now != null
+                && token == reconciliationClaimToken
+                && owner.equals(reconciliationLeaseOwner)
+                && reconciliationLeaseUntil != null
+                && reconciliationLeaseUntil.isAfter(now);
+    }
+
+    public void requeueReconciliation(
+            String owner,
+            long token,
+            Instant now,
+            Duration delay
+    ) {
+        requireReconciliationFence(owner, token, now);
+        if (delay == null || delay.isNegative()) {
+            throw new IllegalArgumentException("delay must not be negative");
+        }
+        reconciliationNextAttemptAt = now.plus(delay);
+        clearReconciliationLease();
+    }
+
+    public void completeReconciliationClaim(String owner, long token, Instant now) {
+        requireReconciliationFence(owner, token, now);
+        reconciliationNextAttemptAt = null;
+        clearReconciliationLease();
     }
 
     public void requestAbandonment(Instant requestedAt) {
@@ -213,6 +280,24 @@ public class ReservationDepositProcess {
         return value;
     }
 
+    private static void requireLease(String owner, Instant now, Instant until) {
+        if (owner == null || owner.isBlank() || owner.length() > 64
+                || now == null || until == null || !until.isAfter(now)) {
+            throw new IllegalArgumentException("reconciliation lease fields must be valid");
+        }
+    }
+
+    private void requireReconciliationFence(String owner, long token, Instant now) {
+        if (!isReconciliationClaimOwnedBy(owner, token, now)) {
+            throw new IllegalStateException("stale deposit process reconciliation claim");
+        }
+    }
+
+    private void clearReconciliationLease() {
+        reconciliationLeaseOwner = null;
+        reconciliationLeaseUntil = null;
+    }
+
     private static ServiceException invalidTransition() {
         return new ServiceException(ReservationErrorCode.INVALID_STATE_TRANSITION);
     }
@@ -240,4 +325,11 @@ public class ReservationDepositProcess {
     public Long getFinalReservationId() { return finalReservationId; }
     public Instant getRequestedAt() { return requestedAt; }
     public Instant getCompletedAt() { return completedAt; }
+    public Instant getReconciliationNextAttemptAt() { return reconciliationNextAttemptAt; }
+    public String getReconciliationLeaseOwner() { return reconciliationLeaseOwner; }
+    public Instant getReconciliationLeaseUntil() { return reconciliationLeaseUntil; }
+    public long getReconciliationClaimToken() { return reconciliationClaimToken; }
+    public Instant getReconciliationLastAttemptedAt() {
+        return reconciliationLastAttemptedAt;
+    }
 }

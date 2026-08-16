@@ -10,6 +10,7 @@ import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calcu
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +73,45 @@ class ReservationDepositProcessTest {
                 .isInstanceOfSatisfying(ServiceException.class,
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ReservationErrorCode.INVALID_STATE_TRANSITION));
+    }
+
+    @Test
+    void reconciliationLeaseReclaimsAtExactExpiryAndFencesTheOlderWorker() {
+        ReservationDepositProcess process = newProcess();
+        Instant firstLeaseUntil = CREATED_AT.plusSeconds(30);
+
+        assertThat(process.getReconciliationNextAttemptAt()).isEqualTo(CREATED_AT);
+        long firstToken = process.claimReconciliation(
+                "worker-a",
+                CREATED_AT,
+                firstLeaseUntil);
+
+        assertThat(firstToken).isEqualTo(1L);
+        assertThat(process.isReconciliationClaimOwnedBy(
+                "worker-a", firstToken, CREATED_AT.plusSeconds(29))).isTrue();
+        assertThat(process.getReconciliationNextAttemptAt()).isNull();
+
+        long secondToken = process.claimReconciliation(
+                "worker-b",
+                firstLeaseUntil,
+                firstLeaseUntil.plusSeconds(30));
+
+        assertThat(secondToken).isEqualTo(2L);
+        assertThat(process.isReconciliationClaimOwnedBy(
+                "worker-a", firstToken, firstLeaseUntil)).isFalse();
+        assertThat(process.isReconciliationClaimOwnedBy(
+                "worker-b", secondToken, firstLeaseUntil)).isTrue();
+
+        process.requeueReconciliation(
+                "worker-b",
+                secondToken,
+                firstLeaseUntil,
+                Duration.ofSeconds(5));
+
+        assertThat(process.getReconciliationNextAttemptAt())
+                .isEqualTo(firstLeaseUntil.plusSeconds(5));
+        assertThat(process.getReconciliationLeaseOwner()).isNull();
+        assertThat(process.getReconciliationLeaseUntil()).isNull();
     }
 
     private static ReservationDepositProcess newProcess() {

@@ -109,6 +109,31 @@ class ReservationDepositProcessCommandFacadeTest {
         assertThat(delays).containsExactly(10L, 20L);
     }
 
+    @Test
+    void claimedWorkerReconciliationUsesTheSameMysqlLockRetryBoundary() {
+        ReservationDepositProcessService processService =
+                mock(ReservationDepositProcessService.class);
+        ReservationDepositProcessService.Claim claim =
+                new ReservationDepositProcessService.Claim(
+                        PROCESS_ID,
+                        "worker-a",
+                        1L);
+        given(processService.reconcileClaimed(claim))
+                .willThrow(deadlock())
+                .willReturn(true);
+        List<Long> delays = new ArrayList<>();
+        ReservationDepositProcessCommandFacade facade =
+                new ReservationDepositProcessCommandFacade(
+                        processService,
+                        attempt -> (long) attempt * 10,
+                        delays::add);
+
+        assertThat(facade.reconcileClaimed(claim)).isTrue();
+
+        then(processService).should(times(2)).reconcileClaimed(claim);
+        assertThat(delays).containsExactly(10L);
+    }
+
     private static CannotAcquireLockException deadlock() {
         return new CannotAcquireLockException(
                 "deadlock",
