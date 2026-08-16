@@ -10,7 +10,9 @@ import com.miriyum.global.storage.FileStorageVisibility;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -83,6 +85,33 @@ public class FileMetadataTransactionExecutor {
                 .stream()
                 .map(FileMetadata::toPublicMetadata)
                 .toList();
+    }
+
+    /** 여러 공개 소유자의 현재 대표 URL을 한 번에 조회한다. */
+    @Transactional(readOnly = true)
+    public Map<FileStorageOwner, String> findConfirmedPublicUrls(
+            Collection<FileStorageOwner> owners,
+            FileStoragePurpose purpose
+    ) {
+        if (owners == null || owners.isEmpty() || purpose == null) {
+            throw new IllegalArgumentException("파일 소유자와 목적은 필수입니다.");
+        }
+        String ownerType = owners.iterator().next().type();
+        if (owners.stream().anyMatch(owner -> !ownerType.equals(owner.type()))) {
+            throw new IllegalArgumentException("한 번의 공개 URL 조회에는 같은 소유자 종류만 사용할 수 있습니다.");
+        }
+        Map<FileStorageOwner, String> urls = new LinkedHashMap<>();
+        fileMetadataRepository
+                .findAllByOwnerTypeAndOwnerIdInAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
+                        ownerType,
+                        owners.stream().map(FileStorageOwner::id).distinct().toList(),
+                        purpose,
+                        FileStorageVisibility.PUBLIC,
+                        FileStorageStatus.CONFIRMED)
+                .forEach(metadata -> urls.putIfAbsent(
+                        new FileStorageOwner(metadata.getOwnerType(), metadata.getOwnerId()),
+                        "/api/v1/public-files/" + metadata.getFileId()));
+        return Map.copyOf(urls);
     }
 
     /** 파일 저장 실패 후 대기 상태의 메타데이터를 실패 상태로 확정한다. */
