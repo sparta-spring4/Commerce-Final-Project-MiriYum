@@ -513,6 +513,7 @@ main
         main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
         backend_stop = main_body.index('stop backend')
         valkey_start = main_body.index('up -d mysql valkey')
+        mysql_wait = main_body.index('wait_for_mysql_health')
         pending_index_backfill = main_body.index('backfill_pending_risk_event_index')
         occurrence_counter_backfill = main_body.index(
             'backfill_risk_event_occurrence_counters'
@@ -521,6 +522,8 @@ main
 
         self.assertLess(backend_stop, valkey_start)
         self.assertLess(valkey_start, pending_index_backfill)
+        self.assertLess(valkey_start, mysql_wait)
+        self.assertLess(mysql_wait, pending_index_backfill)
         self.assertLess(pending_index_backfill, occurrence_counter_backfill)
         self.assertLess(occurrence_counter_backfill, backend_start)
 
@@ -882,6 +885,39 @@ wait_for_valkey_health
                 {
                     "VALKEY_HEALTH_TIMEOUT_SECONDS": "5",
                     "VALKEY_TEST_STATE": self.to_bash_path(state_path),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("2", state_path.read_text(encoding="utf-8").strip())
+
+    def test_mysql_health_wait_accepts_starting_then_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            state_path = temporary_path / "inspect-count"
+            result = self.run_deploy_script(
+                """
+docker() {
+  if [[ "$1" == "compose" ]]; then
+    echo mysql-container
+    return 0
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    local count=0
+    [[ -f "$MYSQL_TEST_STATE" ]] && count=$(cat "$MYSQL_TEST_STATE")
+    count=$((count + 1))
+    echo "$count" > "$MYSQL_TEST_STATE"
+    [[ "$count" -eq 1 ]] && echo starting || echo healthy
+    return 0
+  fi
+  return 1
+}
+sleep() { :; }
+wait_for_mysql_health
+""",
+                {
+                    "MYSQL_HEALTH_TIMEOUT_SECONDS": "5",
+                    "MYSQL_TEST_STATE": self.to_bash_path(state_path),
                 },
             )
 

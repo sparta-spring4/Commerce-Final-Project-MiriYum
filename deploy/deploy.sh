@@ -7,6 +7,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-${APP_DIR}/docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/actuator/health}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
+MYSQL_HEALTH_TIMEOUT_SECONDS="${MYSQL_HEALTH_TIMEOUT_SECONDS:-90}"
 VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-60}"
 RISK_EVENT_BACKFILL_MAX_SCAN_PAGES="${RISK_EVENT_BACKFILL_MAX_SCAN_PAGES:-10000}"
 CLOUDWATCH_NAMESPACE="${MIRIYUM_CLOUDWATCH_NAMESPACE:-MiriYum/Staging}"
@@ -27,6 +28,30 @@ validate_runtime_environment() {
     echo "Runtime environment validation failed. Check required keys in ${ENV_FILE}; values are not printed." >&2
     return 1
   fi
+}
+
+wait_for_mysql_health() {
+  local compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+  local deadline container_id health
+
+  deadline=$((SECONDS + MYSQL_HEALTH_TIMEOUT_SECONDS))
+  while :; do
+    container_id="$("${compose[@]}" ps -q mysql)"
+    if [[ -n "${container_id}" ]]; then
+      health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${container_id}" 2>/dev/null || echo missing)"
+      if [[ "${health}" == "healthy" ]]; then
+        return 0
+      fi
+    else
+      health="not-running"
+    fi
+
+    if (( SECONDS >= deadline )); then
+      echo "MySQL health check timed out after ${MYSQL_HEALTH_TIMEOUT_SECONDS}s (last status: ${health})." >&2
+      return 1
+    fi
+    sleep 2
+  done
 }
 
 wait_for_valkey_health() {
@@ -235,6 +260,13 @@ main() {
   fi
   # 새 backend가 pending Set만 읽기 시작하기 전에 Valkey와 기존 marker 인덱스를 준비한다.
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d mysql valkey
+
+  if ! wait_for_mysql_health; then
+    publish_deployment_health 0
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps || true
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" logs --tail 100 mysql || true
+    return 1
+  fi
 
   if ! verify_valkey; then
     publish_deployment_health 0
