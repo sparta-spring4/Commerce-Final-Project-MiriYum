@@ -101,7 +101,8 @@ class ReservationMigrationTest {
 
     @Container
     static final MySQLContainer MYSQL =
-            new MySQLContainer(MYSQL_IMAGE);
+            new MySQLContainer(MYSQL_IMAGE)
+                    .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
@@ -307,7 +308,8 @@ class ReservationMigrationTest {
     @Test
     void upgradeFromImmediatelyPreviousVersionPreservesReservationWithoutAuditBackfill()
             throws Exception {
-        try (MySQLContainer legacy = new MySQLContainer(MYSQL_IMAGE)) {
+        try (MySQLContainer legacy = new MySQLContainer(MYSQL_IMAGE)
+                .withCommand("--log-bin-trust-function-creators=1")) {
             legacy.start();
             Flyway.configure()
                     .dataSource(legacy.getJdbcUrl(), legacy.getUsername(), legacy.getPassword())
@@ -1264,7 +1266,8 @@ class ReservationMigrationTest {
     @DisplayName("V22 예약은 최신 업그레이드 뒤 변경이나 정책 버전 backfill 없이 보존된다")
     void preservesLegacyReservationWhenUpgradingFromV22ToLatest() throws Exception {
         try (MySQLContainer legacyMysql =
-                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))) {
+                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))
+                             .withCommand("--log-bin-trust-function-creators=1")) {
             legacyMysql.start();
             Flyway.configure()
                     .dataSource(
@@ -1316,7 +1319,8 @@ class ReservationMigrationTest {
     @DisplayName("V25 취소 예약은 V26 업그레이드 뒤 변경이나 감사 backfill 없이 보존된다")
     void preservesCancelledV25ReservationWithoutInventingAuditWhenUpgradingToLatest() throws Exception {
         try (MySQLContainer legacyMysql =
-                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))) {
+                     new MySQLContainer(DockerImageName.parse("mysql:8.0.40"))
+                             .withCommand("--log-bin-trust-function-creators=1")) {
             legacyMysql.start();
             Flyway.configure().dataSource(
                     legacyMysql.getJdbcUrl(),

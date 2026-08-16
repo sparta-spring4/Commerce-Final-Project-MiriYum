@@ -9,6 +9,8 @@ apis:
     root: docs/specs/platform-operator-openapi.yaml
   platform-operator-authorization:
     root: docs/specs/platform-operator-authorization/openapi.yaml
+  platform-operator-management-audit:
+    root: docs/specs/platform-operator-management-audit/openapi.yaml
 extends:
   - recommended-strict
 telemetry: off

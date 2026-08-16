@@ -30,6 +30,23 @@ class HttpApiNamespaceContractTest {
     }
 
     @Test
+    void platformOperatorManagementAndAuditControllersExposeTheApprovedRoutes() {
+        Set<ApiRoute> routes = SpringMvcRouteInventory.routes().stream()
+                .filter(HttpApiNamespaceContractTest::isPlatformOperator)
+                .map(ControllerRoute::route)
+                .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(routes).contains(
+                new ApiRoute(RequestMethod.POST, "/api/v1/platform-operators/accounts"),
+                new ApiRoute(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/authority"),
+                new ApiRoute(RequestMethod.PUT, "/api/v1/platform-operators/accounts/{operatorId}/suspension"),
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/audit-events"),
+                new ApiRoute(RequestMethod.GET, "/api/v1/platform-operators/audit-events/{eventKey}"),
+                new ApiRoute(RequestMethod.POST,
+                        "/api/v1/platform-operators/audit-events/{eventKey}/corrections"));
+    }
+
+    @Test
     @DisplayName("consumer namespace는 consumer audience 패키지만 선언할 수 있다")
     void consumerNamespaceIsOwnedByConsumerAudiencePackage() {
         Set<ControllerRoute> routes = Set.of(new ControllerRoute(

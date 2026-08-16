@@ -259,6 +259,16 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
                     validate(contract, task_definition),
             )
 
+    def test_production_task_definition_enables_valkey_tls(self):
+        task_definition = json.loads(
+                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
+        environment = {
+                item["name"]: item["value"]
+                for item in task_definition["containerDefinitions"][0]["environment"]
+        }
+
+        self.assertEqual("true", environment["MIRIYUM_VALKEY_SSL_ENABLED"])
+
 
 if __name__ == "__main__":
     unittest.main()

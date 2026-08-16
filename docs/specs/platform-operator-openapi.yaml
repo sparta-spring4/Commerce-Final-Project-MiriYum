@@ -22,6 +22,18 @@ paths:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
   /api/v1/platform-operators/reauthentication-approvals:
     $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
+  /api/v1/platform-operators/accounts:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts"
+  /api/v1/platform-operators/accounts/{operatorId}/authority:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}~1authority"
+  /api/v1/platform-operators/accounts/{operatorId}/suspension:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}~1suspension"
+  /api/v1/platform-operators/audit-events:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events"
+  /api/v1/platform-operators/audit-events/{eventKey}:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events~1{eventKey}"
+  /api/v1/platform-operators/audit-events/{eventKey}/corrections:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1audit-events~1{eventKey}~1corrections"
 components:
   securitySchemes:
     platformOperatorBearerAuth:

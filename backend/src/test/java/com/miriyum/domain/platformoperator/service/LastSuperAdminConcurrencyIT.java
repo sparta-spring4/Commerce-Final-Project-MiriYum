@@ -44,7 +44,8 @@ import org.testcontainers.mysql.MySQLContainer;
         "miriyum.menu.schedule.enabled=false"
 })
 class LastSuperAdminConcurrencyIT {
-    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40");
+    @Container static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.40")
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
@@ -61,53 +62,53 @@ class LastSuperAdminConcurrencyIT {
     @Autowired PasswordEncoder encoder;
 
     @Test
-    void concurrentRemovalsCannotLeaveZeroActiveSuperAdministrators() throws Exception {
+    void concurrentMutationAttemptsCannotRemoveTheSingletonSuperAdministrator() throws Exception {
         permissions.deleteAll();
         roles.deleteAll();
         authEvents.deleteAll();
         accounts.deleteAll();
         PlatformOperatorAccount first = account("super-one@example.com");
-        PlatformOperatorAccount second = account("super-two@example.com");
-        roles.saveAndFlush(PlatformOperatorRoleGrant.create(first.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
-        roles.saveAndFlush(PlatformOperatorRoleGrant.create(second.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+        roles.saveAndFlush(PlatformOperatorRoleGrant.create(
+                first.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
 
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         List<Boolean> results;
         try (var executor = Executors.newFixedThreadPool(2)) {
             var a = executor.submit(() -> remove(first.getId(), ready, start));
-            var b = executor.submit(() -> remove(second.getId(), ready, start));
+            var b = executor.submit(() -> remove(first.getId(), ready, start));
             ready.await();
             start.countDown();
             results = List.of(a.get(), b.get());
         }
 
-        assertThat(results).containsExactlyInAnyOrder(true, false);
+        assertThat(results).containsExactly(false, false);
         assertThat(roles.countActiveSuperAdministrators()).isEqualTo(1L);
     }
 
     @Test
-    void suspendedOperatorSuperAdminGrantCanBeRemovedWhileOneActiveSuperAdminRemains() {
+    void suspendedOrdinaryOperatorGrantCanBeRemovedWithoutAffectingSingleton() {
         permissions.deleteAll();
         roles.deleteAll();
         authEvents.deleteAll();
         accounts.deleteAll();
         PlatformOperatorAccount active = account("active-super@example.com");
-        PlatformOperatorAccount suspended = account("suspended-super@example.com");
+        PlatformOperatorAccount suspended = account("suspended-operator@example.com");
         roles.saveAndFlush(PlatformOperatorRoleGrant.create(
                 active.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
         roles.saveAndFlush(PlatformOperatorRoleGrant.create(
-                suspended.getId(), PlatformOperatorRole.SUPER_ADMIN, Instant.now()));
+                suspended.getId(), PlatformOperatorRole.ONBOARDING_REVIEWER, Instant.now()));
         suspended.suspend();
         accounts.saveAndFlush(suspended);
 
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
             policy.assertRemovable(suspended.getId());
-            roles.deleteByPlatformOperatorAccountIdAndRole(suspended.getId(), PlatformOperatorRole.SUPER_ADMIN);
+            roles.deleteByPlatformOperatorAccountIdAndRole(
+                    suspended.getId(), PlatformOperatorRole.ONBOARDING_REVIEWER);
         });
 
         assertThat(roles.existsByPlatformOperatorAccountIdAndRole(
-                suspended.getId(), PlatformOperatorRole.SUPER_ADMIN)).isFalse();
+                suspended.getId(), PlatformOperatorRole.ONBOARDING_REVIEWER)).isFalse();
         assertThat(roles.countActiveSuperAdministrators()).isEqualTo(1L);
     }
 

@@ -1,0 +1,17 @@
+package com.miriyum.domain.platformoperator.enums;
+
+/** 플랫폼 운영자의 인증·관리·감사 조회 행위를 구분하는 감사 사건 유형이다. */
+public enum PlatformOperatorAuditAction {
+    LOGIN,
+    REAUTHENTICATION,
+    LOGOUT,
+    REFRESH,
+    INITIAL_PASSWORD_CHANGED,
+    SESSION_REVOKED,
+    ACCOUNT_CREATED,
+    AUTHORITY_REPLACED,
+    ACCOUNT_SUSPENDED,
+    AUDIT_SEARCH,
+    AUDIT_DETAIL_READ,
+    AUDIT_CORRECTION
+}

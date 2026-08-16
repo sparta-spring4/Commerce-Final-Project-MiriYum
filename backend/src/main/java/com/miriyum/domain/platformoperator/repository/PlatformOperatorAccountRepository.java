@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 public interface PlatformOperatorAccountRepository extends JpaRepository<PlatformOperatorAccount, Long> {
     Optional<PlatformOperatorAccount> findByEmail(String email);
 
+    boolean existsByEmail(String email);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select account from PlatformOperatorAccount account where account.id = :id")
     Optional<PlatformOperatorAccount> findByIdForUpdate(@Param("id") Long id);
