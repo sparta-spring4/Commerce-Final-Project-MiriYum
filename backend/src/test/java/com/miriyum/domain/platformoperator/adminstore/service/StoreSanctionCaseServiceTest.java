@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.miriyum.domain.platformoperator.adminstore.dto.AdminStoreRequests.CaseCreate;
 import com.miriyum.domain.platformoperator.adminstore.entity.StoreSanctionCase;
@@ -61,5 +62,19 @@ class StoreSanctionCaseServiceTest {
         assertThat(command.getValue().caseId()).isEqualTo(created.caseId());
         assertThat(command.getValue().caseVersion()).isEqualTo(2L);
         then(stores).should().requireStoreExists(101L);
+    }
+
+    @Test
+    void rejectsCaseCreationWithoutStoreSanctionPermission() {
+        OperatorAuthorityReader authorities=mock(OperatorAuthorityReader.class);
+        given(authorities.requireCurrentAuthority(17L,3L)).willReturn(
+                new OperatorAuthority(17L,3L,Set.of(),Set.of(PlatformOperatorPermission.STORE_READ_MINIMAL)));
+        StoreSanctionCaseService service=new StoreSanctionCaseService(mock(StoreSanctionCaseRepository.class),
+                mock(StoreAdministrationService.class),mock(AdminCaseAssignmentManager.class),
+                mock(com.miriyum.domain.platformoperator.service.AdminCaseAssignmentVerifier.class),authorities,CLOCK);
+        assertThatThrownBy(()->service.create(PRINCIPAL,101L,new CaseCreate("FRAUD",Set.of("evidence://101"),"ADMIN-007-v1")))
+                .isInstanceOf(com.miriyum.global.exception.ServiceException.class)
+                .extracting(e->((com.miriyum.global.exception.ServiceException)e).getErrorCode())
+                .isEqualTo(com.miriyum.domain.platformoperator.exception.AdminAuthorizationErrorCode.AUTHORIZATION_DENIED);
     }
 }

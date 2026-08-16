@@ -42,11 +42,22 @@ class PlatformOperatorOpenApiContractTest {
             "/api/v1/platform-operators/audit-events",
             "/api/v1/platform-operators/audit-events/{eventKey}",
             "/api/v1/platform-operators/audit-events/{eventKey}/corrections");
+    private static final Set<String> ADMIN_STORE_PATHS = Set.of(
+            "/api/v1/platform-operators/stores",
+            "/api/v1/platform-operators/stores/{storeId}",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/assignments",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/impact-previews",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/approvals",
+            "/api/v1/platform-operators/stores/{storeId}/sanction-cases/{caseId}/sanctions/{sanctionId}/releases");
     private static final Set<String> EXPECTED_AUDIENCE_PATHS = java.util.stream.Stream
             .concat(java.util.stream.Stream.concat(
                             AUTH_PATHS.stream(), java.util.stream.Stream.of(REAUTHENTICATION_PATH)),
                     java.util.stream.Stream.concat(
-                            MEMBER_SUPPORT_PATHS.stream(), MANAGEMENT_AUDIT_PATHS.stream()))
+                            MEMBER_SUPPORT_PATHS.stream(), java.util.stream.Stream.concat(
+                                    MANAGEMENT_AUDIT_PATHS.stream(), ADMIN_STORE_PATHS.stream())))
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     @Test
@@ -82,6 +93,8 @@ class PlatformOperatorOpenApiContractTest {
                 feature = "member-support";
             } else if (MANAGEMENT_AUDIT_PATHS.contains(entry.getKey())) {
                 feature = "platform-operator-management-audit";
+            } else if (ADMIN_STORE_PATHS.contains(entry.getKey())) {
+                feature = "admin-store";
             } else {
                 feature = "platform-operator-auth";
             }

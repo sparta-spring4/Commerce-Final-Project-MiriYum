@@ -14,8 +14,9 @@ import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
-@Service public class AdminStoreQueryService {
+@Service @ConditionalOnProperty(prefix="miriyum.platform-operator",name="enabled",havingValue="true") public class AdminStoreQueryService {
  private final StoreAdministrationService stores; private final StoreSanctionRepository sanctions;
  private final StoreSanctionCaseRepository cases; private final StoreSanctionCaseService caseAccess;
  private final OperatorAuthorityReader authorities;

@@ -16,8 +16,10 @@ import java.time.Clock;
 import java.time.Duration;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @Service
+@ConditionalOnProperty(prefix="miriyum.platform-operator",name="enabled",havingValue="true")
 public class StoreSanctionImpactService {
     private final StoreSanctionCaseService cases; private final StoreAdministrationService stores;
     private final StoreReservationImpactQueryService reservations; private final StoreWaitingImpactQueryService waiting;

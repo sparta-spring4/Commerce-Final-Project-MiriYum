@@ -18,8 +18,10 @@ import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @Service
+@ConditionalOnProperty(prefix="miriyum.platform-operator",name="enabled",havingValue="true")
 public class StoreSanctionCommandService {
  private final StoreSanctionCaseService cases; private final StoreSanctionRepository sanctions;
  private final StoreSanctionApprovalRepository approvals; private final StoreSanctionImpactService impacts;
