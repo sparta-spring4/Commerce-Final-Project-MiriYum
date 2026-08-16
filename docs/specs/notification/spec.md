@@ -128,7 +128,7 @@ Pickup은 자신의 픽업 예약 확정·취소 사건을 같은 업무 트랜�
 
 Reservation·Pickup producer 연동에서 `resourceVersion`은 상태 enum ordinal이 아니라 확정 알림 원 사건 revision이다. 확정 사건은 `1`, 취소 사건은 `2`이며 새 원 사건을 만들지 않는 Reservation `FULFILLED`와 Pickup `PICKED_UP`은 최신 revision `2`를 유지한다. 조회 소비자는 version 값만으로 상태를 추론하지 않고 `sourceState`와 `result=SUPERSEDED`를 함께 사용한다. 두 자원의 소유 일반 사용자 계정 관계는 현재 변경 불가능하므로 `recipientRelationVersion=1`로 고정하며, 이 값은 연락처나 채널 주소의 version이 아니다.
 
-Waiting의 `resourceVersion`은 양수 계약을 유지하기 위해 `WaitingTeam.version + 1`과 같은 `eventSequence`를 사용한다. 생성 상태의 team version `0`은 event sequence `1`이며 이후 상태 전이도 같은 오프셋을 유지한다. `WAITING_ENTRY_IMMINENT`는 최초 적격 판정 시의 event sequence를 별도 원장에 고정한다. Waiting 조회 구현은 현재 team version에 같은 오프셋을 적용해 최신·대체 여부를 판정하고 수신자 관계는 해당 팀의 불변 `consumerAccountId`에 결속한다.
+Waiting의 `resourceVersion`은 양수 계약을 유지하기 위해 원 사건의 `eventSequence`를 사용한다. 상태 사건의 `eventSequence`는 `WaitingTeam.version + 1`이며 생성 상태의 team version `0`은 event sequence `1`이다. `WAITING_ENTRY_IMMINENT`는 최초 적격 판정 시의 event sequence를 별도 원장에 고정한다. 이 값은 원 사건의 멱등 식별이며 이후 모든 team version과의 일치를 요구하는 대체 판정값이 아니다. Waiting 조회 구현은 요청된 원 사건과 목적별 현재 상태를 함께 검증하고, 사건이 여전히 유효하면 요청된 event sequence를 context의 `resourceVersion`으로 반환한다. 수신자 관계는 해당 팀의 불변 `consumerAccountId`에 결속한다.
 
 `NotificationSourceContextV1`은 다음 안전 필드만 반환한다.
 
@@ -151,7 +151,7 @@ Waiting의 `resourceVersion`은 양수 계약을 유지하기 위해 `WaitingTea
 
 원 자원이 보이지 않는 경우와 수신자 불일치는 외부에 자원 존재 여부를 공개하지 않는다. Reservation·MenuHold·Pickup 구현 PR은 정상·최신 버전 대체·수신자 불일치·일시 장애 계약 테스트를 각각 제공한다.
 
-Waiting 구현도 같은 네 결과를 사용한다. 현재 상태가 사건 목적과 일치하지 않거나 더 최신 종결 상태가 있으면 `SUPERSEDED`, 팀의 수신자와 요청 수신자가 다르면 `NOT_ELIGIBLE`, 원장 조회의 일시 장애는 `TEMPORARILY_UNAVAILABLE`다. `WAITING_CALLED`의 context는 중앙 `calledAt`을 `scheduledAt`, 정확히 10분 뒤의 `arrivalDeadline`을 `expiresAt`으로 반환한다.
+Waiting 구현도 같은 네 결과를 사용한다. `WAITING_ENTRY_IMMINENT`는 현재 상태가 `WAITING`이면 최초 event sequence로 `FOUND`다. 현재 상태가 `RESERVATION_CONVERTING`이면 성공·실패가 확정될 때까지 작업을 취소하거나 최종 실패로 보내지 않는 Waiting 전용 `TEMPORARILY_UNAVAILABLE` 보류다. 이 context는 요청된 event sequence와 `sourceState=RESERVATION_CONVERTING`을 반환해 원장 조회 장애와 구분한다. 이 보류는 일반 일시 장애의 bounded retry 횟수를 소비하지 않고 전환 결과 상태 사건이 다시 판정을 깨운다. 전환 실패로 같은 활성 membership의 `WAITING`에 복귀하면 최초 사건은 다시 `FOUND`다. 실제 호출 `CALLED`, 도착 `ARRIVED`, 예약 전환 완료 또는 다른 종결 상태가 확인되면 오래된 입장 임박 사건은 `SUPERSEDED`다. 상태 사건 목적은 현재 상태가 해당 목적과 일치할 때만 `FOUND`이고 더 최신 상태가 있으면 `SUPERSEDED`다. 팀의 수신자와 요청 수신자가 다르면 `NOT_ELIGIBLE`, 원장 조회의 일시 장애는 bounded retry를 사용하는 `TEMPORARILY_UNAVAILABLE`다. `WAITING_CALLED`의 context는 중앙 `calledAt`을 `scheduledAt`, 정확히 10분 뒤의 `arrivalDeadline`을 `expiresAt`으로 반환한다.
 
 ## 상태 대체·만료 계약
 
@@ -161,7 +161,7 @@ Waiting 구현도 같은 네 결과를 사용한다. 현재 상태가 사건 목
 - 메뉴 이행 위험 사건은 원래 이행 확정, 대체 제안, 거래 취소 중 최신 결과가 도착하면 이전 미발송 작업을 대체한다.
 - 대체 제안은 수락·거절·만료·거래 취소 중 하나가 확정되면 이전 행동을 `SUPERSEDED` 또는 `EXPIRED`로 반환한다. 전달 지연과 열람은 `expiresAt`을 연장하지 않는다.
 - 이미 전달된 알림의 내용이 중요하게 바뀌면 기존 이력을 수정해 다른 의미로 만들지 않고 새 상태 버전의 논리 알림을 생성한다.
-- Waiting의 `CANCELLED`, `NO_SHOW`, `CHECKED_IN`, `CLOSED_BY_STORE`는 더 오래된 `WAITING_ENTRY_IMMINENT`와 `WAITING_CALLED` 미발송 작업을 대체한다. `ARRIVED`는 호출 도착 제한이 충족된 최신 상태이므로 오래된 호출 미발송 작업을 대체하지만 이번 단계에서 별도 알림 목적은 만들지 않는다.
+- Waiting의 `CALLED`, `ARRIVED`, `RESERVATION_CONVERTED`, `CANCELLED`, `NO_SHOW`, `CHECKED_IN`, `CLOSED_BY_STORE`는 더 오래된 `WAITING_ENTRY_IMMINENT` 미발송 작업을 대체한다. `ARRIVED`와 종결 상태는 오래된 `WAITING_CALLED` 미발송 작업도 대체한다. `ARRIVED`와 `RESERVATION_CONVERTED`는 이번 단계에서 별도 알림 목적을 만들지 않는다. `RESERVATION_CONVERTING`은 성공 시 대체 여부와 실패 시 복귀 여부가 아직 확정되지 않은 일시 상태이므로 그 자체로 입장 임박 작업을 영구 대체하지 않는다.
 
 ## 소비자 알림 이력 HTTP 계약
 
@@ -230,6 +230,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 ## Migration·호환성 요구
 
 - 기본 Notification 원장·worker·조회 Runtime은 `#248`이 소유한다. `#250` contract-first PR은 Waiting 목적·자원·조회 경계만 확정하며 production Java, migration과 worker 설정을 만들지 않는다. `#250` Runtime은 이 계약 PR이 `dev`에 병합된 뒤 최신 migration 번호와 exact allowlist를 Issue에 추가하고 별도 PR로 구현한다.
+- `#250` Runtime은 `RESERVATION_CONVERTING`인 입장 임박 작업을 bounded retry 소진 없이 보류하고 전환 결과 사건으로 다시 깨우는 경계를 구현해야 한다. 기존 일반 일시 장애의 재시도·최종 실패 의미를 Waiting 보류에 재사용하지 않는다.
 - 목적·source event·cursor는 버전 필드를 가져야 한다. 새 목적과 nullable 필드는 하위 호환 추가만 허용하고 기존 enum 의미를 재사용하지 않는다.
 - `NOTI-009` 확정 전에도 보관 만료를 적용할 수 있는 구조를 갖추되 영구 보존이나 임의 삭제 기간을 기본값으로 넣지 않는다.
 - 외부 채널 추가는 논리 알림과 `IN_APP` 이력이 공유하는 `notificationId`를 바꾸지 않고 같은 논리 알림 아래 내부 채널 시도만 추가한다.
@@ -244,7 +245,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - 원 상태 변경·취소·만료와 역순 사건 뒤 최신 유효 작업만 전달 가능하다.
 - Pickup 확정·취소 사건은 Pickup이 직접 기록하고 Notification은 `PickupNotificationSource`로 최신 상태·수신자 관계를 검증하며 MenuHold → Pickup 역방향 조회를 만들지 않는다.
 - Waiting 목적은 `WAITING_TEAM`과 불변 수신자 관계에 결속되고, 입장 임박은 팀별 1회 비상태 사건이며 호출·취소·미응답·입장 완료·매장 종료는 각각 다른 목적과 상태 사건을 사용한다.
-- 실제 호출 목적은 중앙 `calledAt`과 정확히 10분 뒤 `arrivalDeadline`을 사용하고, 더 최신 `ARRIVED` 또는 종결 상태 뒤 오래된 호출·입장 임박 작업은 전달되지 않는다.
+- 실제 호출 목적은 중앙 `calledAt`과 정확히 10분 뒤 `arrivalDeadline`을 사용한다. 예약 전환 중인 입장 임박 작업은 retry budget 소진 없이 보류하고, 실패로 같은 `WAITING`에 복귀한 팀의 최초 작업은 유지한다. 더 최신 실제 호출·`ARRIVED`·예약 전환 완료 또는 다른 종결 상태 뒤 오래된 호출·입장 임박 작업은 전달하지 않는다.
 - 본인 알림 이력은 `IN_APP` 전달 성공 항목만 고정 정렬·20/50 cursor 계약으로 조회되고 타인 이력, 내부 작업 상태와 금지 필드가 노출되지 않는다.
 - 알림 실패·열람·침묵이 예약 변경이나 메뉴 대체 동의로 해석되지 않는다.
 - OpenAPI 단독 파싱, 참조 해석과 consumer entrypoint 조합이 성공한다.
@@ -254,7 +255,7 @@ Notification 내부 작업은 `PENDING`, `DELIVERED`, `FAILED`, `CANCELLED`를 �
 - Reservation 소유자는 목적별 원 상태, `ReservationNotificationSource`의 버전·수신자 결속과 취소·변경·방문 완료 대체 규칙을 검토한다.
 - MenuHold 소유자는 메뉴 이행 위험·대체 제안과 결과 사건, `MenuHoldNotificationSource`의 허용 자원 경계를 검토한다.
 - Pickup 소유자는 픽업 확정·취소 사건, `PickupNotificationSource`의 버전·수신자 결속과 MenuHold 역방향 의존 금지를 검토한다.
-- Waiting 소유자는 `eventSequence = version + 1`, 팀별 입장 임박 유일성, `WaitingNotificationSource`의 수신자·상태 재검증과 호출 제한 시각을 검토한다.
+- Waiting 소유자는 상태 사건의 `eventSequence = version + 1`, 팀별 입장 임박 유일성, 예약 전환 실패 복귀 시 최초 사건 유지, `WaitingNotificationSource`의 수신자·목적별 상태 재검증과 호출 제한 시각을 검토한다.
 - Consumer/API 검토자는 `/api/v1/consumers/me/notifications`, 공통 인증·오류 envelope와 cursor 실패 의미를 검토한다.
 - Frontend 검토자는 목적·필수 `deliveredAt`·nullable action과 `availability`만으로 전달 성공 이력을 표시하고 오래된 행동을 안전하게 비활성화할 수 있는지 검토한다.
 - 리뷰는 Notification 목적과 MenuHold·Waiting 정책을 다시 소유하지 않는다. 각 소비·제공 경계의 구현 가능성과 기존 계약 충돌만 확인한다.

@@ -353,13 +353,25 @@ IN_APP dispatcher는 상태 사건 ID 순서로 한 행씩 잠그고 `CALLED`, `
 앞선 활성 팀이 최초로 2팀 이하가 된 순간의 team ID·event sequence·발생 시각을 저장하고
 team ID 유일성 제약으로 팀별 한 건만 허용한다. 등록 시 이미 2팀 이하인 팀과 순번에 영향을
 주는 종결 사건 뒤 새로 적격이 된 팀을 같은 기준으로 판정한다. 임박 사건의 생성·재처리·알림
-실패는 team 상태, queue sequence와 실제 호출 횟수를 변경하지 않는다.
+실패는 team 상태, queue sequence와 실제 호출 횟수를 변경하지 않는다. 고정한 event sequence는
+최초 원 사건의 멱등 식별이며 이후 모든 `WaitingTeam.version + 1`과 일치해야 하는 발송 조건이
+아니다.
 
 Notification은 `WaitingNotificationSource`로 현재 team 상태, `consumerAccountId`,
-`eventSequence = version + 1`, 매장 표시명과 호출 제한 시각을 재검증한다. `CALLED` 목적은
-중앙 `calledAt`과 정확히 10분 뒤 `arrivalDeadline`을 사용한다. 더 최신 `ARRIVED` 또는 종결
-상태가 확인되면 오래된 호출·입장 임박 작업을 `SUPERSEDED`로 처리하며 알림의 지연·실패가
-도착·체크인·취소·미응답·매장 종료를 바꾸지 않는다.
+요청된 원 사건과 목적별 현재 상태, 매장 표시명과 호출 제한 시각을 재검증한다. 상태 사건은
+`eventSequence = version + 1`을 사용하고, 사건이 현재 상태에서 유효하면 요청된 event sequence를
+context의 `resourceVersion`으로 반환한다. `CALLED` 목적은 중앙 `calledAt`과 정확히 10분 뒤
+`arrivalDeadline`을 사용한다.
+
+`WAITING_ENTRY_IMMINENT`는 현재 상태가 `WAITING`이면 최초 사건을 `FOUND`로 유지한다. 현재 상태가
+`RESERVATION_CONVERTING`이면 전환 결과가 확정될 때까지 작업을 취소하거나 최종 실패로 보내지 않는
+Waiting 전용 `TEMPORARILY_UNAVAILABLE` 보류다. 이 context는 요청된 event sequence와
+`sourceState=RESERVATION_CONVERTING`을 반환해 원장 조회 장애와 구분한다. 보류는 일반 일시 장애의
+bounded retry 횟수를 소비하지 않으며 전환 결과 상태 사건이 다시 판정을 깨운다. 전환 실패로 같은
+활성 membership의 `WAITING`에 복귀하면 최초 사건은 다시 `FOUND`다. 실제 호출 `CALLED`, 도착
+`ARRIVED`, 예약 전환 완료 또는 다른 종결 상태가 확정되면 오래된 입장 임박 작업을 `SUPERSEDED`로
+처리한다. 상태 사건 목적도 현재 상태가 해당 목적과 일치할 때만 `FOUND`이며 더 최신 상태가 있으면
+`SUPERSEDED`다. 알림의 지연·실패는 도착·체크인·취소·미응답·매장 종료를 바꾸지 않는다.
 
 이번 단계의 `PENDING`/`PUBLISHED`는 IN_APP dispatcher 진행 상태만 나타낸다. SSE endpoint,
 재연결 cursor와 실시간 fan-out은 후속 계약에서 immutable 사건 ID를 독립적으로 소비하며 이
