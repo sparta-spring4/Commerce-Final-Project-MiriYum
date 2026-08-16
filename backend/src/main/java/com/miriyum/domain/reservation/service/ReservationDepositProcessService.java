@@ -19,16 +19,22 @@ import com.miriyum.domain.reservation.repository.ReservationDepositProcessReposi
 import com.miriyum.domain.reservation.repository.ReservationDepositCauseAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligationRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.idempotency.BusinessResult;
+import com.miriyum.global.idempotency.IdempotencyCommand;
+import com.miriyum.global.idempotency.IdempotencyExecutor;
+import com.miriyum.global.idempotency.IdempotentOutcome;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 /** Process-first coordinator for deposit finalization, abandonment, and recovery. */
 @Service
@@ -45,9 +51,36 @@ public class ReservationDepositProcessService {
     private final ReservationHoldTransitionPrimitive holdTransitionPrimitive;
     private final ReservationMenuHoldPort menuHoldPort;
     private final Clock clock;
+    private IdempotencyExecutor idempotencyExecutor;
+    private ObjectMapper objectMapper;
 
     @Autowired
     public ReservationDepositProcessService(
+            ReservationDepositProcessRepository processRepository,
+            ReservationDepositCauseAuditRepository causeRepository,
+            ReservationDepositRefundObligationRepository refundRepository,
+            PaymentService paymentService,
+            ReservationDepositFinalizationPrimitive finalizationPrimitive,
+            ReservationHoldTransitionPrimitive holdTransitionPrimitive,
+            ReservationMenuHoldPort menuHoldPort,
+            Clock clock,
+            IdempotencyExecutor idempotencyExecutor,
+            ObjectMapper objectMapper
+    ) {
+        this(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                clock);
+        this.idempotencyExecutor = idempotencyExecutor;
+        this.objectMapper = objectMapper;
+    }
+
+    ReservationDepositProcessService(
             ReservationDepositProcessRepository processRepository,
             ReservationDepositCauseAuditRepository causeRepository,
             ReservationDepositRefundObligationRepository refundRepository,
@@ -84,6 +117,74 @@ public class ReservationDepositProcessService {
                 holdTransitionPrimitive,
                 menuHoldPort,
                 clock);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationDepositCommandResult finalizeOwnedIdempotent(
+            long processId,
+            long consumerAccountId,
+            IdempotencyCommand command
+    ) {
+        requireCommand(command, consumerAccountId, "RESERVATION_DEPOSIT_FINALIZE");
+        return executeIdempotent(
+                processId,
+                command,
+                () -> finalizeOwned(processId, consumerAccountId, command.idempotencyKey()));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public ReservationDepositCommandResult abandonOwnedIdempotent(
+            long processId,
+            long consumerAccountId,
+            IdempotencyCommand command
+    ) {
+        requireCommand(command, consumerAccountId, "RESERVATION_DEPOSIT_ABANDON");
+        return executeIdempotent(
+                processId,
+                command,
+                () -> abandonOwned(processId, consumerAccountId, command.idempotencyKey()));
+    }
+
+    private ReservationDepositCommandResult executeIdempotent(
+            long processId,
+            IdempotencyCommand command,
+            Supplier<ReservationDepositCommandResult> work
+    ) {
+        if (idempotencyExecutor == null || objectMapper == null) {
+            throw new IllegalStateException("deposit idempotency dependencies are required");
+        }
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            ReservationDepositCommandResult result = work.get();
+            Object payload = result.responseData();
+            String resourceType = payload instanceof ReservationDetailResponse
+                    ? "RESERVATION"
+                    : "RESERVATION_DEPOSIT_PROCESS";
+            String resourceId = payload instanceof ReservationDetailResponse reservation
+                    ? reservation.reservationId()
+                    : String.valueOf(processId);
+            return new BusinessResult<>(
+                    result.httpStatus(),
+                    "SUCCESS",
+                    resourceType,
+                    resourceId,
+                    payload);
+        });
+        if (outcome == null || outcome.data() == null) {
+            throw new IllegalStateException("deposit idempotent outcome is required");
+        }
+        if ("RESERVATION".equals(outcome.resourceType())) {
+            return ReservationDepositCommandResult.completed(objectMapper.treeToValue(
+                    outcome.data(), ReservationDetailResponse.class));
+        }
+        if (!"RESERVATION_DEPOSIT_PROCESS".equals(outcome.resourceType())
+                || !String.valueOf(processId).equals(outcome.resourceId())) {
+            throw new IllegalStateException("deposit idempotent resource is inconsistent");
+        }
+        ReservationRequestResponse response = objectMapper.treeToValue(
+                outcome.data(), ReservationRequestResponse.class);
+        return outcome.httpStatus() == 200
+                ? ReservationDepositCommandResult.terminated(response)
+                : ReservationDepositCommandResult.pending(response);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -396,6 +497,19 @@ public class ReservationDepositProcessService {
     private static void requireIdempotencyKey(String value) {
         if (value == null || !IDEMPOTENCY_KEY.matcher(value).matches()) {
             throw new IllegalArgumentException("idempotencyKey must be a normalized UUID");
+        }
+    }
+
+    private static void requireCommand(
+            IdempotencyCommand command,
+            long consumerAccountId,
+            String commandType
+    ) {
+        if (command == null
+                || !"consumer".equals(command.principalNamespace())
+                || command.principalId() != consumerAccountId
+                || !commandType.equals(command.commandType())) {
+            throw new IllegalArgumentException("deposit idempotency command is inconsistent");
         }
     }
 }
