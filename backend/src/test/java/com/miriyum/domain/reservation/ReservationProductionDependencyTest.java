@@ -3,6 +3,7 @@ package com.miriyum.domain.reservation;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
+import com.miriyum.domain.reservation.config.ReservationDepositProcessConfig;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
@@ -23,6 +24,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.transaction.annotation.Propagation;
@@ -83,6 +85,14 @@ class ReservationProductionDependencyTest {
 
         assertThat(transaction).isNotNull();
         assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+    }
+
+    @Test
+    void reservationDepositRefundLeaseUsesOwnedConfiguration() {
+        Duration lease = new ReservationDepositProcessConfig()
+                .reservationDepositRefundLeaseDuration();
+
+        assertThat(lease).isEqualTo(Duration.ofSeconds(30));
     }
 
     @Test

@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
@@ -29,6 +30,7 @@ public class ReservationDepositRefundService {
             ReservationDepositRefundObligationRepository refundRepository,
             ReservationDepositProcessRepository processRepository,
             Clock clock,
+            @Qualifier("reservationDepositRefundLeaseDuration")
             Duration leaseDuration
     ) {
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
