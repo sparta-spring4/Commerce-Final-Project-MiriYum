@@ -26,6 +26,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -63,6 +65,9 @@ class FileStorageFacadeIntegrationTest {
     @Autowired
     private FileMetadataRepository fileMetadataRepository;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Test
     @DisplayName("파일 저장에 성공하면 메타데이터를 저장 완료 상태로 확정한다")
     void confirmsMetadataWhenFileStorageSucceeds() {
@@ -89,6 +94,33 @@ class FileStorageFacadeIntegrationTest {
                 .get()
                 .extracting(FileMetadata::getStorageStatus)
                 .isEqualTo(FileStorageStatus.CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("바깥 업무 트랜잭션이 롤백되면 지연 공개 확정도 함께 롤백되어 파일이 PENDING으로 남는다")
+    void keepsPendingWhenOwnerTransactionRollsBackAfterDeferredConfirmation() {
+        String fileId = UUID.randomUUID().toString();
+        String objectKey = "public/store/11/store-image/object-deferred-confirmation";
+        FileStorageMetadata metadata = pendingMetadata(fileId, objectKey, FILE_CHECKSUM,
+                Instant.parse("2026-08-10T06:15:00Z"));
+        FileStorageFacade facade = new FileStorageFacade(new RecordingFileStoragePort(), transactionExecutor);
+
+        facade.storePending(metadata, new FileStorageRequest(
+                objectKey,
+                "image/jpeg",
+                4L,
+                new ByteArrayInputStream("file".getBytes(StandardCharsets.UTF_8))));
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            facade.confirmWithinCurrentTransaction(UUID.fromString(fileId));
+            status.setRollbackOnly();
+        });
+
+        assertThat(fileMetadataRepository.findById(fileId))
+                .isPresent()
+                .get()
+                .extracting(FileMetadata::getStorageStatus)
+                .isEqualTo(FileStorageStatus.PENDING);
     }
 
     @Test
