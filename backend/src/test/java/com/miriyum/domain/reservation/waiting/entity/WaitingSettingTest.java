@@ -44,14 +44,4 @@ class WaitingSettingTest {
         assertThat(setting.getVersion()).isEqualTo(1L);
     }
 
-    @Test
-    void staleAutomaticOpenCannotRevertANewerVersion() {
-        WaitingSetting setting = WaitingSetting.create(
-                7L, true, WaitingReceptionMode.AUTO, 60, NOW);
-        setting.replace(1L, false, WaitingReceptionMode.PAUSED, 60, NOW.plusSeconds(1));
-
-        assertThat(setting.canOpenAutomatically(1L)).isFalse();
-        assertThat(setting.isEnabled()).isFalse();
-        assertThat(setting.getVersion()).isEqualTo(2L);
-    }
 }

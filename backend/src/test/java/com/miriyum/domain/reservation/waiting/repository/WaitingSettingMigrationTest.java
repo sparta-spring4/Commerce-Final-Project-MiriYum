@@ -20,15 +20,15 @@ class WaitingSettingMigrationTest {
             new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
 
     @Test
-    void appliesV46AndEnforcesTheSettingChecks() throws Exception {
+    void appliesV47AndEnforcesTheSettingChecks() throws Exception {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load();
         flyway.migrate();
 
         assertThat(flyway.info().applied()).anyMatch(migration ->
-                "46".equals(String.valueOf(migration.getVersion()))
-                        && "V46__create_waiting_settings.sql".equals(migration.getScript()));
+                "47".equals(String.valueOf(migration.getVersion()))
+                        && "V47__create_waiting_settings.sql".equals(migration.getScript()));
 
         try (Connection connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {

@@ -2,9 +2,21 @@ package com.miriyum.domain.reservation.waiting.entity;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.global.exception.ServiceException;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 import java.time.Instant;
 
+/**
+ * 매장별 현재 웨이팅 운영 설정과 단조 증가하는 공개 설정 version을 소유한다.
+ */
 @Entity
 @Table(name = "waiting_settings", uniqueConstraints =
         @UniqueConstraint(name = "uk_waiting_settings_store", columnNames = "store_id"))
@@ -43,6 +55,16 @@ public class WaitingSetting {
 
     protected WaitingSetting() {}
 
+    /**
+     * 저장된 설정이 없는 매장의 첫 version 설정을 만든다.
+     *
+     * @param storeId 매장 ID
+     * @param enabled 신규 웨이팅 접수 기능 사용 여부
+     * @param receptionMode 접수 방식
+     * @param advanceOpenMinutes AUTO 사전 오픈 분
+     * @param now 생성 시각
+     * @return version 1의 설정
+     */
     public static WaitingSetting create(long storeId, boolean enabled,
             WaitingReceptionMode receptionMode, int advanceOpenMinutes, Instant now) {
         validate(storeId, enabled, receptionMode, advanceOpenMinutes, now);
@@ -57,6 +79,15 @@ public class WaitingSetting {
         return setting;
     }
 
+    /**
+     * 현재 version이 기대값과 같을 때 설정 전체를 교체하고 version을 1 증가시킨다.
+     *
+     * @param expectedVersion 요청자가 확인한 현재 version
+     * @param enabled 신규 웨이팅 접수 기능 사용 여부
+     * @param receptionMode 접수 방식
+     * @param advanceOpenMinutes AUTO 사전 오픈 분
+     * @param now 변경 시각
+     */
     public void replace(long expectedVersion, boolean enabled,
             WaitingReceptionMode receptionMode, int advanceOpenMinutes, Instant now) {
         if (version != expectedVersion) {
@@ -68,10 +99,6 @@ public class WaitingSetting {
         this.advanceOpenMinutes = advanceOpenMinutes;
         this.version++;
         this.updatedAt = now;
-    }
-
-    public boolean canOpenAutomatically(long expectedVersion) {
-        return version == expectedVersion && enabled && receptionMode == WaitingReceptionMode.AUTO;
     }
 
     private static void validate(long storeId, boolean enabled,

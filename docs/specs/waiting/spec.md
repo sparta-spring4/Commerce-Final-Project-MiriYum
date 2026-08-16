@@ -37,6 +37,13 @@ Waiting은 Reservation이 소유하는 capability다. 새 최상위 Java 도메�
 aggregate에는 넣지 않는다. production Java, migration, frontend 또는 생성 클라이언트는
 추가하지 않는다.
 
+Issue #271 설정 Runtime은 설정 저장·조회·version 조건부 전체 교체, 신규 접수 gate와
+비활성화 closure 연계까지만 소유한다. 영업 구간을 기준으로 AUTO 접수를 실제로 여는 worker,
+작업 원장과 재시도는 Issue #380이 소유한다. 자동 작업은 조회 predicate의 boolean 결과로
+접수를 열 수 없으며, 실제 접수 상태 변경과 현재 `expectedSettingsVersion` CAS를 같은
+트랜잭션에 결박해야 한다. 따라서 #380 병합 전에는 “오래된 자동 오픈 작업이 최신 설정을
+되돌리지 못한다”는 실행 Runtime 인수 조건을 완료로 표시하지 않는다.
+
 ## 계정당 활성 웨이팅 1개
 
 Issue #307은 `WAIT-008`을 버전 설정형 다중 한도에서 일반 사용자 계정당 고정 1건으로

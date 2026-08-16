@@ -139,18 +139,6 @@ class WaitingSettingServiceTest {
         then(closures).shouldHaveNoInteractions();
     }
 
-    @Test
-    void staleAutomaticJobCannotActOnANewerSettingVersion() {
-        WaitingSetting current = WaitingSetting.create(
-                22L, true, WaitingReceptionMode.AUTO, 60, NOW.minusSeconds(2));
-        current.replace(1L, false, WaitingReceptionMode.PAUSED, 60, NOW.minusSeconds(1));
-        given(settings.findByStoreId(22L)).willReturn(Optional.of(current));
-
-        assertThat(service.openAutomatically(22L, 1L)).isFalse();
-        assertThat(current.getVersion()).isEqualTo(2L);
-        assertThat(current.isEnabled()).isFalse();
-    }
-
     private static WaitingSettingUpdateRequest request(long version, boolean enabled,
             WaitingReceptionMode mode, int minutes, WaitingDisableAction action) {
         return new WaitingSettingUpdateRequest(version, enabled, mode, minutes, action);

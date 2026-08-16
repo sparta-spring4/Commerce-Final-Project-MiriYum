@@ -1,9 +1,20 @@
 package com.miriyum.domain.reservation.waiting.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.Objects;
 
+/**
+ * 설정 교체 시점의 actor와 전체 설정 snapshot을 version별로 보존한다.
+ */
 @Entity
 @Table(name = "waiting_setting_audits", uniqueConstraints =
         @UniqueConstraint(name = "uk_waiting_setting_audits_store_version",
@@ -26,6 +37,14 @@ public class WaitingSettingAudit {
 
     protected WaitingSettingAudit() {}
 
+    /**
+     * 확정된 설정 version의 불변 감사 snapshot을 기록한다.
+     *
+     * @param setting 저장이 확정된 현재 설정
+     * @param operatorAccountId 변경을 수행한 운영자 계정 ID
+     * @param now 감사 기록 시각
+     * @return 설정과 동일 version을 가진 감사 snapshot
+     */
     public static WaitingSettingAudit record(WaitingSetting setting, long operatorAccountId, Instant now) {
         Objects.requireNonNull(setting);
         if (operatorAccountId <= 0 || now == null) throw new IllegalArgumentException("invalid audit actor");

@@ -8,6 +8,15 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 
+/**
+ * 현재 version을 기준으로 매장 웨이팅 설정 전체를 교체하는 요청이다.
+ *
+ * @param expectedVersion 요청자가 확인한 현재 version
+ * @param enabled 신규 웨이팅 접수 기능 사용 여부
+ * @param receptionMode 접수 방식
+ * @param advanceOpenMinutes AUTO 사전 오픈 분
+ * @param disableAction 기능 비활성화 시 활성 팀 처리 방식
+ */
 public record WaitingSettingUpdateRequest(
         @NotNull @PositiveOrZero Long expectedVersion,
         @NotNull Boolean enabled,

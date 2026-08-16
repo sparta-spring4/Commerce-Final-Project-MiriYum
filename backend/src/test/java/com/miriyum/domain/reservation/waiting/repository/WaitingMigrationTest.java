@@ -82,7 +82,7 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V46까지 적용하면 Waiting 소유 테이블 열 개만 존재한다")
+    @DisplayName("V47까지 적용하면 Waiting 소유 테이블 열 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 

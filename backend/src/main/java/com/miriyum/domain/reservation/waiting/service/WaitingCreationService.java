@@ -100,6 +100,20 @@ public class WaitingCreationService {
         this.retrySleeper = Objects.requireNonNull(retrySleeper);
     }
 
+    /**
+     * 현재 매장 설정이 활성이고 PAUSED가 아닐 때 중앙 FIFO 팀을 멱등 생성한다.
+     *
+     * <p>설정 행을 팀·membership·순번 생성과 같은 트랜잭션에서 잠그므로, 설정 비활성화와
+     * 경합하면 먼저 확정된 명령만 효력을 갖는다.
+     *
+     * @param storeId 접수할 매장 ID
+     * @param consumerAccountId 접수하는 소비자 계정 ID
+     * @param businessDate 순번이 귀속되는 영업일
+     * @param partySize 방문 인원
+     * @param source 접수 출처
+     * @param key 소비자 생성 명령 멱등 키
+     * @return 생성되거나 replay된 웨이팅 팀
+     */
     public WaitingCommandResult create(
             long storeId,
             long consumerAccountId,
