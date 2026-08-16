@@ -16,11 +16,11 @@ import { OperatingHoursPage } from './OperatingHoursPage'
 const DRAFT_PATH = operatorStorePath('/operating-hours')
 
 function publicationPath(version: number) {
-  return `${DRAFT_PATH}/${version}/publication`
+  return `${DRAFT_PATH}/${version}/publications`
 }
 
 function cancellationPath(version: number) {
-  return `${DRAFT_PATH}/${version}/publication-cancellation`
+  return `${DRAFT_PATH}/${version}/publication-cancellations`
 }
 
 function operatingHoursData(overrides: Record<string, unknown> = {}) {

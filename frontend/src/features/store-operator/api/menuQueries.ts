@@ -128,7 +128,7 @@ export function usePublishMenu(storeId: string, menuId: string) {
       idempotencyKey: string
     }): Promise<ManagedMenu> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication',
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications',
         {
           method: 'post',
           pathParams: { storeId, menuId },
@@ -152,7 +152,7 @@ export function useCancelMenuPublication(storeId: string, menuId: string) {
       idempotencyKey: string
     }): Promise<ManagedMenu> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellation',
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/publication-cancellations',
         {
           method: 'post',
           pathParams: { storeId, menuId },
@@ -176,7 +176,7 @@ export function useRetireMenu(storeId: string, menuId: string) {
       idempotencyKey: string
     }): Promise<ManagedMenu> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirement',
+        '/api/v1/store-operators/stores/{storeId}/menus/{menuId}/retirements',
         {
           method: 'post',
           pathParams: { storeId, menuId },

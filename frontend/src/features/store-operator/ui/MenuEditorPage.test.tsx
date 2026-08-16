@@ -266,7 +266,7 @@ describe('메뉴 편집 화면', () => {
       managedStoreHandler,
       ...catalogHandlers(),
       http.get(MENU_PATH, () => successResponse(managedMenu())),
-      http.post(`${MENU_PATH}/publication`, async ({ request }) => {
+      http.post(`${MENU_PATH}/publications`, async ({ request }) => {
         body = (await request.json()) as Record<string, unknown>
         return successResponse(
           managedMenu({
@@ -317,7 +317,7 @@ describe('메뉴 편집 화면', () => {
       managedStoreHandler,
       ...catalogHandlers(),
       http.get(MENU_PATH, () => successResponse(managedMenu())),
-      http.post(`${MENU_PATH}/publication`, () =>
+      http.post(`${MENU_PATH}/publications`, () =>
         errorResponse(409, 'STORE_010', '현재 상태에서 전이할 수 없습니다.'),
       ),
     )

@@ -216,7 +216,7 @@ describe('휴무·휴점 화면', () => {
       authenticatedOperator(),
       managedStoreHandler,
       http.post(TEMPORARY_PATH, () => successResponse(temporaryClosureData())),
-      http.post(`${TEMPORARY_PATH}/42/cancellation`, () =>
+      http.post(`${TEMPORARY_PATH}/42/cancellations`, () =>
         successResponse(temporaryClosureData({ status: 'CANCELLED' })),
       ),
     )
@@ -247,7 +247,7 @@ describe('휴무·휴점 화면', () => {
       authenticatedOperator(),
       managedStoreHandler,
       http.post(TEMPORARY_PATH, () => successResponse(temporaryClosureData())),
-      http.post(`${TEMPORARY_PATH}/42/cancellation`, () => {
+      http.post(`${TEMPORARY_PATH}/42/cancellations`, () => {
         called = true
         return successResponse(temporaryClosureData({ status: 'CANCELLED' }))
       }),

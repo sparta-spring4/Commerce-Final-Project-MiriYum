@@ -240,7 +240,7 @@ export function usePublishTimePolicy(storeId: string) {
       idempotencyKey: string
     }): Promise<ReservationTimePolicyResponse> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication',
+        '/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publications',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -266,7 +266,7 @@ export function useCancelTimePolicyPublication(storeId: string) {
       idempotencyKey: string
     }): Promise<ReservationTimePolicyResponse> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellation',
+        '/api/v1/store-operators/stores/{storeId}/reservation-time-policies/{version}/publication-cancellations',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },

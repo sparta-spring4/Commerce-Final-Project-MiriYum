@@ -146,7 +146,7 @@ describe('예약 시간 정책 화면', () => {
       authenticatedOperator(),
       managedStoreHandler,
       http.put(POLICY_PATH, () => successResponse(policyResponse())),
-      http.post(`${POLICY_PATH}/5/publication`, () =>
+      http.post(`${POLICY_PATH}/5/publications`, () =>
         successResponse(
           policyResponse({
             status: 'SCHEDULED',

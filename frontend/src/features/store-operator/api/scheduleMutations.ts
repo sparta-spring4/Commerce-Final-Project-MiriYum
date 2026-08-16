@@ -76,7 +76,7 @@ export function usePublishOperatingHours(storeId: string) {
       variables: VersionVariables<SchedulePublicationRequest>,
     ): Promise<OperatingHoursData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication',
+        '/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publications',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -99,7 +99,7 @@ export function useCancelOperatingHoursPublication(storeId: string) {
       variables: VersionVariables<{ changeReason: string }>,
     ): Promise<OperatingHoursData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellation',
+        '/api/v1/store-operators/stores/{storeId}/operating-hours/{version}/publication-cancellations',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -143,7 +143,7 @@ export function usePublishReservationTimeSlots(storeId: string) {
       variables: VersionVariables<SchedulePublicationRequest>,
     ): Promise<ReservationTimeSlotsData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication',
+        '/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publications',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -166,7 +166,7 @@ export function useCancelReservationTimeSlotsPublication(storeId: string) {
       variables: VersionVariables<{ changeReason: string }>,
     ): Promise<ReservationTimeSlotsData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellation',
+        '/api/v1/store-operators/stores/{storeId}/reservation-time-slots/{version}/publication-cancellations',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -210,7 +210,7 @@ export function usePublishRegularClosure(storeId: string) {
       variables: VersionVariables<SchedulePublicationRequest>,
     ): Promise<RegularClosureData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication',
+        '/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publications',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -233,7 +233,7 @@ export function useCancelRegularClosurePublication(storeId: string) {
       variables: VersionVariables<{ changeReason: string }>,
     ): Promise<RegularClosureData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellation',
+        '/api/v1/store-operators/stores/{storeId}/regular-closures/{version}/publication-cancellations',
         {
           method: 'post',
           pathParams: { storeId, version: variables.version },
@@ -313,7 +313,7 @@ export function useCancelTemporaryClosure(storeId: string) {
       idempotencyKey: string
     }): Promise<TemporaryClosureData> => {
       const response = await apiClient(
-        '/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellation',
+        '/api/v1/store-operators/stores/{storeId}/temporary-closures/{closureId}/cancellations',
         {
           method: 'post',
           pathParams: { storeId, closureId: variables.closureId },

@@ -92,6 +92,8 @@ describe('결과 불명 판정', () => {
     expect(
       isOutcomeUnknown(apiError(429, CommonErrorCode.TOO_MANY_REQUESTS)),
     ).toBe(false)
+  })
+})
 
 describe('내용 기반 멱등 키 캐시', () => {
   test('같은 내용을 다시 보내면 같은 키를 준다', () => {
