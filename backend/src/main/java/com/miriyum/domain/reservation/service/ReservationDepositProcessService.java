@@ -9,15 +9,22 @@ import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse;
 import com.miriyum.domain.reservation.dto.response.ReservationRequestResponse.PaymentPreparationSnapshot;
 import com.miriyum.domain.reservation.entity.Reservation;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositCauseAudit;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositCauseAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligationRepository;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,14 +37,19 @@ public class ReservationDepositProcessService {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
     private final ReservationDepositProcessRepository processRepository;
+    private final ReservationDepositCauseAuditRepository causeRepository;
+    private final ReservationDepositRefundObligationRepository refundRepository;
     private final PaymentService paymentService;
     private final ReservationDepositFinalizationPrimitive finalizationPrimitive;
     private final ReservationHoldTransitionPrimitive holdTransitionPrimitive;
     private final ReservationMenuHoldPort menuHoldPort;
     private final Clock clock;
 
+    @Autowired
     public ReservationDepositProcessService(
             ReservationDepositProcessRepository processRepository,
+            ReservationDepositCauseAuditRepository causeRepository,
+            ReservationDepositRefundObligationRepository refundRepository,
             PaymentService paymentService,
             ReservationDepositFinalizationPrimitive finalizationPrimitive,
             ReservationHoldTransitionPrimitive holdTransitionPrimitive,
@@ -45,11 +57,32 @@ public class ReservationDepositProcessService {
             Clock clock
     ) {
         this.processRepository = processRepository;
+        this.causeRepository = causeRepository;
+        this.refundRepository = refundRepository;
         this.paymentService = paymentService;
         this.finalizationPrimitive = finalizationPrimitive;
         this.holdTransitionPrimitive = holdTransitionPrimitive;
         this.menuHoldPort = menuHoldPort;
         this.clock = clock;
+    }
+
+    ReservationDepositProcessService(
+            ReservationDepositProcessRepository processRepository,
+            PaymentService paymentService,
+            ReservationDepositFinalizationPrimitive finalizationPrimitive,
+            ReservationHoldTransitionPrimitive holdTransitionPrimitive,
+            ReservationMenuHoldPort menuHoldPort,
+            Clock clock
+    ) {
+        this(
+                processRepository,
+                null,
+                null,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                clock);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
@@ -144,6 +177,21 @@ public class ReservationDepositProcessService {
             processRepository.saveAndFlush(process);
             return ReservationDepositCommandResult.terminated(toResponse(process));
         }
+        if (payment.status() == PaymentStatus.PAID) {
+            holdTransitionPrimitive.transition(
+                    new ReservationHoldContracts.TransitionCommand(
+                            process.getReservationHoldId(),
+                            ReservationHoldStatus.RELEASED,
+                            "reservation-deposit-compensate:" + processId + ":" + idempotencyKey,
+                            "CONSUMER",
+                            consumerAccountId,
+                            now,
+                            null));
+            requireCompensationRecords(process, payment, now);
+            process.requireCompensation(now);
+            processRepository.saveAndFlush(process);
+            return ReservationDepositCommandResult.pending(toResponse(process));
+        }
         if ((payment.status() == PaymentStatus.CONFIRMING
                 || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
                 && now.isBefore(process.getExpiresAt())) {
@@ -151,6 +199,62 @@ public class ReservationDepositProcessService {
         }
         processRepository.saveAndFlush(process);
         return ReservationDepositCommandResult.pending(toResponse(process));
+    }
+
+    private void requireCompensationRecords(
+            ReservationDepositProcess process,
+            PaymentResult payment,
+            Instant observedAt
+    ) {
+        long processId = process.getId();
+        String causeCode = "ABANDONMENT_PAID";
+        ReservationDepositCauseAudit existingCause = causeRepository
+                .findByReservationDepositProcessIdAndCauseCode(processId, causeCode)
+                .orElse(null);
+        if (existingCause == null) {
+            causeRepository.save(ReservationDepositCauseAudit.record(
+                    processId,
+                    causeCode,
+                    payment.paymentId(),
+                    payment.status().name(),
+                    payment.paidAt(),
+                    observedAt));
+        } else if (!existingCause.matches(
+                payment.paymentId(), payment.status().name(), payment.paidAt())) {
+            throw new IllegalStateException("deposit compensation cause meaning changed");
+        }
+
+        String reasonCode = "FULL_DEPOSIT_COMPENSATION";
+        String sourceEventId = "reservation-deposit-compensation:" + processId;
+        String stableKey = UUID.nameUUIDFromBytes(
+                ("reservation-deposit-refund:" + processId + ":" + payment.paymentId())
+                        .getBytes(StandardCharsets.UTF_8)).toString();
+        ReservationDepositRefundObligation existingRefund = refundRepository
+                .findByReservationDepositProcessIdAndPaymentIdAndReasonCode(
+                        processId, payment.paymentId(), reasonCode)
+                .orElse(null);
+        if (existingRefund == null) {
+            refundRepository.save(ReservationDepositRefundObligation.required(
+                    processId,
+                    payment.paymentId(),
+                    process.getPaymentAmountMinor(),
+                    process.getPaymentCurrency(),
+                    1L,
+                    sourceEventId,
+                    stableKey,
+                    reasonCode,
+                    observedAt));
+        } else if (!existingRefund.matchesRequired(
+                processId,
+                payment.paymentId(),
+                process.getPaymentAmountMinor(),
+                process.getPaymentCurrency(),
+                1L,
+                sourceEventId,
+                stableKey,
+                reasonCode)) {
+            throw new IllegalStateException("deposit refund obligation meaning changed");
+        }
     }
 
     private void protectResources(

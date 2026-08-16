@@ -22,6 +22,8 @@ import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
+import com.miriyum.domain.reservation.entity.ReservationDepositCauseAudit;
+import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
@@ -33,6 +35,8 @@ import com.miriyum.domain.reservation.repository.ReservationCapacityBucketReposi
 import com.miriyum.domain.reservation.repository.ReservationHoldCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositCauseAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligationRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
@@ -44,6 +48,8 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -305,6 +311,85 @@ class ReservationDepositProcessServiceTest {
                         NOW,
                         null));
         verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
+    void paidAbandonmentReleasesResourcesAndPersistsRefundObligation() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositCauseAuditRepository causeRepository =
+                mock(ReservationDepositCauseAuditRepository.class);
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(NOW.minusSeconds(1)));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                causeRepository,
+                refundRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.abandonOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174005");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().status())
+                .isEqualTo(ReservationDepositProcessStatus.COMPENSATION_REQUIRED);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.RELEASED,
+                        "reservation-deposit-compensate:99:123e4567-e89b-12d3-a456-426614174005",
+                        "CONSUMER",
+                        CONSUMER_ID,
+                        NOW,
+                        null));
+        ArgumentCaptor<ReservationDepositCauseAudit> cause =
+                ArgumentCaptor.forClass(ReservationDepositCauseAudit.class);
+        ArgumentCaptor<ReservationDepositRefundObligation> refund =
+                ArgumentCaptor.forClass(ReservationDepositRefundObligation.class);
+        InOrder order = inOrder(
+                processRepository,
+                paymentService,
+                holdTransitionPrimitive,
+                causeRepository,
+                refundRepository);
+        order.verify(processRepository).findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID);
+        order.verify(paymentService).getOwnedPayment("9001", String.valueOf(CONSUMER_ID));
+        order.verify(holdTransitionPrimitive).transition(any());
+        order.verify(causeRepository).save(cause.capture());
+        order.verify(refundRepository).save(refund.capture());
+        order.verify(processRepository).saveAndFlush(process);
+        assertThat(cause.getValue().getCauseCode()).isEqualTo("ABANDONMENT_PAID");
+        String stableKey = UUID.nameUUIDFromBytes(
+                "reservation-deposit-refund:99:9001"
+                        .getBytes(StandardCharsets.UTF_8)).toString();
+        assertThat(refund.getValue().matchesRequired(
+                PROCESS_ID,
+                "9001",
+                4_000L,
+                "KRW",
+                1L,
+                "reservation-deposit-compensation:99",
+                stableKey,
+                "FULL_DEPOSIT_COMPENSATION")).isTrue();
         verify(finalizationPrimitive, never()).finalizeResources(any());
     }
 
