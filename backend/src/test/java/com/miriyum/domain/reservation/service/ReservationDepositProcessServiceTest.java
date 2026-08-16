@@ -6,6 +6,11 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentAttemptStatus;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
+import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.entity.PartyComposition;
 import com.miriyum.domain.reservation.entity.Reservation;
@@ -13,16 +18,23 @@ import com.miriyum.domain.reservation.entity.ReservationCancellationPolicyVersio
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationCapacityBucket;
 import com.miriyum.domain.reservation.entity.ReservationContactSnapshot;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
+import com.miriyum.domain.reservation.entity.ReservationDepositProcessStatus;
 import com.miriyum.domain.reservation.entity.ReservationHold;
 import com.miriyum.domain.reservation.entity.ReservationHoldCapacityAllocation;
 import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
+import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.repository.ReservationCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldCapacityAllocationRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
+import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
+import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -42,8 +54,64 @@ class ReservationDepositProcessServiceTest {
     private static final long CONSUMER_ID = 11L;
     private static final long STORE_ID = 22L;
     private static final long CAPACITY_POLICY_VERSION = 7L;
+    private static final long PROCESS_ID = 99L;
     private static final LocalDate SERVICE_DATE = LocalDate.of(2026, 8, 20);
     private static final Instant NOW = Instant.parse("2026-08-16T12:00:00Z");
+
+    @Test
+    void paidBeforeExpiryFinalizesProcessAndReturnsReservation() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        Reservation reservation = confirmedReservation();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paidResult(NOW));
+        given(finalizationPrimitive.finalizeResources(any()))
+                .willAnswer(invocation -> {
+                    assertThat(process.getStatus())
+                            .isEqualTo(ReservationDepositProcessStatus.FINALIZING_RESOURCES);
+                    return reservation;
+                });
+        given(menuHoldPort.findSnapshots(RESERVATION_ID)).willReturn(List.of());
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                menuHoldPort,
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.finalizeOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174000");
+
+        assertThat(result.httpStatus()).isEqualTo(200);
+        assertThat(result.reservation().reservationId())
+                .isEqualTo(String.valueOf(RESERVATION_ID));
+        assertThat(process.getStatus()).isEqualTo(ReservationDepositProcessStatus.COMPLETED);
+        assertThat(process.getFinalReservationId()).isEqualTo(RESERVATION_ID);
+        ArgumentCaptor<ReservationDepositFinalizationPrimitive.Command> command =
+                ArgumentCaptor.forClass(ReservationDepositFinalizationPrimitive.Command.class);
+        InOrder order = inOrder(processRepository, paymentService, finalizationPrimitive);
+        order.verify(processRepository).findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID);
+        order.verify(paymentService).getOwnedPayment("9001", String.valueOf(CONSUMER_ID));
+        order.verify(finalizationPrimitive).finalizeResources(command.capture());
+        order.verify(processRepository).saveAndFlush(process);
+        assertThat(command.getValue()).isEqualTo(
+                new ReservationDepositFinalizationPrimitive.Command(
+                        HOLD_ID,
+                        "reservation-deposit-finalize:99:123e4567-e89b-12d3-a456-426614174000",
+                        "CONSUMER",
+                        CONSUMER_ID,
+                        NOW));
+    }
 
     @Test
     void finalizationCopiesHeldCapacityWithoutMutatingOccupiedTotals() {
@@ -138,6 +206,70 @@ class ReservationDepositProcessServiceTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(101L, 3, 1, 7L),
                         org.assertj.core.groups.Tuple.tuple(102L, 3, 1, 7L));
+    }
+
+    private static ReservationDepositProcess depositProcess() {
+        Instant expiresAt = NOW.plusSeconds(300);
+        Calculation calculation = new Calculation(
+                91L,
+                20,
+                1L,
+                2,
+                4_000L,
+                "KRW",
+                13L,
+                40_000L,
+                3,
+                List.of(new ItemSnapshot("101", 4, 40_000)));
+        ReservationDepositProcess process = ReservationDepositProcess.awaitingPayment(
+                HOLD_ID,
+                CONSUMER_ID,
+                expiresAt,
+                calculation,
+                new PaymentPreparation(
+                        "9001",
+                        "portone-9001",
+                        "미리윰 식당 예약금",
+                        4_000L,
+                        "KRW",
+                        expiresAt,
+                        PaymentStatus.READY),
+                NOW.minusSeconds(60));
+        ReflectionTestUtils.setField(process, "id", PROCESS_ID);
+        return process;
+    }
+
+    private static PaymentResult paidResult(Instant paidAt) {
+        return new PaymentResult(
+                "9001",
+                String.valueOf(HOLD_ID),
+                4_000L,
+                0L,
+                4_000L,
+                "KRW",
+                PaymentStatus.PAID,
+                PaymentAttemptStatus.PAID,
+                NOW.minusSeconds(60),
+                paidAt,
+                NOW,
+                List.of());
+    }
+
+    private static Reservation confirmedReservation() {
+        ReservationHold hold = activeHold();
+        Reservation reservation = Reservation.confirm(
+                hold.getConsumerAccountId(),
+                hold.getStoreId(),
+                hold.getStoreNameSnapshot(),
+                hold.getTimeSnapshot(),
+                hold.getParty(),
+                hold.getContactSnapshot(),
+                hold.getCapacityPolicyVersion(),
+                new ReservationCancellationPolicyVersion(
+                        hold.getCancellationPolicyVersion()),
+                NOW);
+        ReflectionTestUtils.setField(reservation, "id", RESERVATION_ID);
+        return reservation;
     }
 
     private static ReservationHold activeHold() {
