@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 
@@ -60,9 +61,13 @@ class WaitingSettingConcurrencyIT {
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean WaitingStoreAuthorityPort authority;
     @MockitoBean WaitingClosureService closures;
+    @MockitoBean WaitingOperatingIntervalPort intervalPort;
 
     @BeforeEach
     void fixture() {
+        given(intervalPort.lockCurrent(anyLong(), any(LocalDate.class)))
+                .willAnswer(invocation -> List.of(openInterval(
+                        invocation.getArgument(0), invocation.getArgument(1))));
         jdbc.execute("DELETE FROM waiting_status_events");
         jdbc.execute("DELETE FROM waiting_transition_audits");
         jdbc.execute("DELETE FROM waiting_active_memberships");
@@ -184,6 +189,17 @@ class WaitingSettingConcurrencyIT {
 
     private static IdempotencyKey key(int suffix) {
         return IdempotencyKey.parse(String.format("550e8400-e29b-41d4-a716-%012d", suffix));
+    }
+
+    private WaitingOperatingInterval openInterval(long storeId, LocalDate businessDate) {
+        return new WaitingOperatingInterval(
+                storeId,
+                "setting-concurrency-" + storeId,
+                1L,
+                businessDate,
+                businessDate.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant(),
+                Instant.now().plus(Duration.ofHours(1)),
+                "Asia/Seoul");
     }
 
     private void insertStoreFixture() {
