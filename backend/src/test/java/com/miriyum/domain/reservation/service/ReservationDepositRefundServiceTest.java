@@ -127,6 +127,102 @@ class ReservationDepositRefundServiceTest {
         verify(processRepository, never()).findByIdForUpdate(99L);
     }
 
+    @Test
+    void retryableFailureRequeuesCurrentFencedClaimWithoutCompletingProcess() {
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositRefundObligation obligation = obligation(NOW.minusSeconds(60));
+        obligation.claim("worker-a", NOW.minusSeconds(10), NOW.plusSeconds(20));
+        ReservationDepositRefundService.Claim claim =
+                new ReservationDepositRefundService.Claim(
+                        501L,
+                        99L,
+                        "9001",
+                        4_000L,
+                        "KRW",
+                        1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION",
+                        "worker-a",
+                        obligation.getClaimToken());
+        given(refundRepository.findByIdForUpdate(501L))
+                .willReturn(Optional.of(obligation));
+        ReservationDepositRefundService service = new ReservationDepositRefundService(
+                refundRepository,
+                processRepository,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofSeconds(30));
+
+        assertThat(service.recordRetryableFailure(claim, Duration.ofSeconds(45))).isTrue();
+
+        assertThat(obligation.getStatus())
+                .isEqualTo(ReservationDepositRefundObligation.Status.REQUIRED);
+        assertThat(obligation.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(45));
+        assertThat(obligation.getLeaseOwner()).isNull();
+        assertThat(obligation.getLeaseUntil()).isNull();
+        verify(refundRepository).save(obligation);
+        verify(processRepository, never()).findByIdForUpdate(99L);
+    }
+
+    @Test
+    void unknownRefundResultRequiresReconciliationForObligationAndProcess() {
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositRefundObligation obligation = obligation(NOW.minusSeconds(60));
+        obligation.claim("worker-a", NOW.minusSeconds(10), NOW.plusSeconds(20));
+        ReservationDepositProcess process = compensationRequiredProcess();
+        process.beginCompensation(NOW.minusSeconds(10));
+        ReservationDepositRefundService.Claim claim =
+                new ReservationDepositRefundService.Claim(
+                        501L,
+                        99L,
+                        "9001",
+                        4_000L,
+                        "KRW",
+                        1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION",
+                        "worker-a",
+                        obligation.getClaimToken());
+        RefundResult unknown = new RefundResult(
+                "7001",
+                "9001",
+                4_000L,
+                0L,
+                0L,
+                4_000L,
+                "KRW",
+                RefundStatus.RECONCILIATION_REQUIRED,
+                NOW.minusSeconds(1),
+                null);
+        given(refundRepository.findByIdForUpdate(501L))
+                .willReturn(Optional.of(obligation));
+        given(processRepository.findByIdForUpdate(99L)).willReturn(Optional.of(process));
+        ReservationDepositRefundService service = new ReservationDepositRefundService(
+                refundRepository,
+                processRepository,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofSeconds(30));
+
+        assertThat(service.recordReconciliationRequired(claim, unknown)).isTrue();
+
+        assertThat(obligation.getStatus())
+                .isEqualTo(ReservationDepositRefundObligation.Status.RECONCILIATION_REQUIRED);
+        assertThat(process.getStatus())
+                .isEqualTo(ReservationDepositProcessStatus.RECOVERY_REQUIRED);
+        var order = inOrder(refundRepository, processRepository);
+        order.verify(refundRepository).findByIdForUpdate(501L);
+        order.verify(processRepository).findByIdForUpdate(99L);
+        order.verify(refundRepository).save(obligation);
+        order.verify(processRepository).saveAndFlush(process);
+    }
+
     private static ReservationDepositRefundObligation obligation() {
         return obligation(NOW);
     }

@@ -112,6 +112,78 @@ public class ReservationDepositRefundService {
         return true;
     }
 
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public boolean recordRetryableFailure(Claim claim, Duration delay) {
+        if (claim == null || delay == null || delay.isNegative()) {
+            throw new IllegalArgumentException("claim and non-negative delay are required");
+        }
+        Instant now = clock.instant();
+        ReservationDepositRefundObligation obligation = refundRepository
+                .findByIdForUpdate(claim.obligationId())
+                .orElse(null);
+        if (obligation == null
+                || !obligation.matchesRequired(
+                        claim.processId(),
+                        claim.paymentId(),
+                        claim.refundAmountMinor(),
+                        claim.currency(),
+                        claim.refundPolicyVersion(),
+                        claim.sourceEventId(),
+                        claim.idempotencyKey(),
+                        claim.reasonCode())
+                || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        obligation.requeue(claim.owner(), claim.token(), now, delay);
+        refundRepository.save(obligation);
+        return true;
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public boolean recordReconciliationRequired(Claim claim, RefundResult refund) {
+        if (claim == null || refund == null) {
+            throw new IllegalArgumentException("claim and refund are required");
+        }
+        if (refund.status() != RefundStatus.RECONCILIATION_REQUIRED
+                || !claim.paymentId().equals(refund.paymentId())
+                || claim.refundAmountMinor() != refund.requestedAmountMinor()
+                || !claim.currency().equals(refund.currency())) {
+            throw new IllegalStateException("unknown refund does not match obligation");
+        }
+        Instant now = clock.instant();
+        ReservationDepositRefundObligation obligation = refundRepository
+                .findByIdForUpdate(claim.obligationId())
+                .orElse(null);
+        if (obligation == null
+                || !obligation.matchesRequired(
+                        claim.processId(),
+                        claim.paymentId(),
+                        claim.refundAmountMinor(),
+                        claim.currency(),
+                        claim.refundPolicyVersion(),
+                        claim.sourceEventId(),
+                        claim.idempotencyKey(),
+                        claim.reasonCode())
+                || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        ReservationDepositProcess process = processRepository
+                .findByIdForUpdate(claim.processId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "refund obligation process is missing"));
+        obligation.requireReconciliation(claim.owner(), claim.token(), now);
+        process.requireRecovery(now);
+        refundRepository.save(obligation);
+        processRepository.saveAndFlush(process);
+        return true;
+    }
+
     public record Claim(
             long obligationId,
             long processId,
