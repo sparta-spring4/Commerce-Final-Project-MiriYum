@@ -17,6 +17,12 @@ const PURPOSE_LABELS = {
   MENU_SUBSTITUTION_ACCEPTED: '대체 메뉴 수락',
   MENU_SUBSTITUTION_REJECTED: '대체 메뉴 거절',
   MENU_SUBSTITUTION_EXPIRED: '대체 메뉴 제안 만료',
+  WAITING_ENTRY_IMMINENT: '입장 임박',
+  WAITING_CALLED: '입장 호출',
+  WAITING_CANCELLED: '웨이팅 취소',
+  WAITING_NO_SHOW: '미응답 종료',
+  WAITING_CHECKED_IN: '입장 완료',
+  WAITING_CLOSED_BY_STORE: '매장 마감 종료',
 } satisfies Record<NotificationPurpose, string>
 
 export function getNotificationPurposeLabel(purpose: string): string {
