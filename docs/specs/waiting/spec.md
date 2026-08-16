@@ -75,10 +75,10 @@ OpenAPI의 store-operator path와 공용 `WaitingLedgerConflict`에는 `WAITING_
 
 현재 `dev`의 V36은 `waiting_active_memberships`에
 `uk_waiting_active_memberships_store_consumer UNIQUE (store_id, consumer_account_id)`를 두므로
-계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V39 forward migration에서 이
+계정 전체 1건 계약과 다르다. #272는 기존 V36을 수정하지 않고 V44 forward migration에서 이
 제약을 제거한 뒤 `UNIQUE (consumer_account_id)`로 교체한다.
 
-V39의 제약 변경 전에 다음 사전 대사를 수행한다.
+V44의 제약 변경 전에 다음 사전 대사를 수행한다.
 
 ```sql
 SELECT consumer_account_id, COUNT(*) AS active_membership_count
@@ -277,10 +277,16 @@ cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 
 ### 상태와 전이
 
 원장 상태 enum은 `WAITING`, `CALLED`, `ARRIVED`, `CHECKED_IN`, `CANCELLED`, `NO_SHOW`,
-`CLOSED_BY_STORE`, `RESERVATION_CONVERTING`으로 고정한다. `CHECKED_IN`, `CANCELLED`,
-`NO_SHOW`, `CLOSED_BY_STORE`는 종결 상태다. `RESERVATION_CONVERTING`은 예약 선점·결제 결과를
-기다리는 비종결 상태이며 계정 활성 membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도
-같은 활성 membership을 유지한다.
+`CLOSED_BY_STORE`, `RESERVATION_CONVERTING`, `RESERVATION_CONVERTED`로 고정한다. `CHECKED_IN`,
+`CANCELLED`, `NO_SHOW`, `CLOSED_BY_STORE`, `RESERVATION_CONVERTED`는 종결 상태다.
+`RESERVATION_CONVERTING`은 예약 선점·결제 결과를 기다리는 비종결 상태이며 계정 활성
+membership을 유지한다. 전환 실패로 `WAITING`에 복귀해도 같은 활성 membership을 유지한다.
+
+Waiting 원장은 전환 시작 시각 `reservationConvertingAt`, Payment 공개 ID 문자열
+`waitingPaymentId`, 최종 Reservation 양의 scalar ID `reservationReferenceId`, 완료 시각
+`reservationConvertedAt`만 소유한다. Reservation Entity·Repository·JPA 연관관계·외래 키를
+참조하지 않는다. 완료 시 활성 membership 삭제는 application service가 원자적으로 조정하며
+entity 전이 자체의 부작용이 아니다.
 
 | 현재 상태 | 허용 운영자 명령 | 다음 상태 | 조건 |
 |---|---|---|---|
@@ -290,10 +296,16 @@ cursor는 이 복합 키를 담은 opaque 값이며, 다음 페이지는 직전 
 | `CALLED` | cancel | `CANCELLED` | 현재 version 일치 |
 | `ARRIVED` | check-in | `CHECKED_IN` | 현재 version 일치 |
 | `ARRIVED` | cancel | `CANCELLED` | 현재 version 일치 |
+| `WAITING` | 예약 전환 시작 | `RESERVATION_CONVERTING` | 현재 version, Payment 공개 ID, 발생 시각 일치; 활성 membership 유지 |
+| `RESERVATION_CONVERTING` | 예약 전환 실패 | `WAITING` | 현재 version과 같은 Payment 공개 ID 일치; 시도 필드를 지우고 활성 membership 유지 |
+| `RESERVATION_CONVERTING` | 예약 전환 완료 | `RESERVATION_CONVERTED` | 현재 version과 같은 Payment 공개 ID 일치; 양의 최종 Reservation scalar ID와 완료 시각 기록 |
 | `RESERVATION_CONVERTING` | cancel | `CANCELLED` | 현재 version 일치, 예약 선점·결제 성공·매장 종료와 경합 시 먼저 확정된 결과 하나만 유지하고 필요한 보상 후속 작업 기록 |
 | 종결 상태 | 없음 | 없음 | 새 전이는 거부 |
 
 `RESERVATION_CONVERTING`에서는 cancel 외 call·arrive·check-in을 `409 WAITING_006`으로 거부한다.
+전환 중 cancel 또는 매장 종료가 먼저 확정되면 `waitingPaymentId`와
+`reservationConvertingAt`을 보존하고 최종 Reservation 참조는 설정하지 않아, 검증된 paid
+callback이 후속 보상을 식별할 수 있게 한다.
 명령은 다른 매장의 팀을 읽거나 전이할 수 없고, stale version·비선두 call·이미 종결된 팀은
 성공으로 추측하지 않는다. 구현은 한 유효 전이만 상태·감사·공개 상태 사건을 만들고, 전환 중
 취소가 먼저 확정되면 예약 선점 해제 또는 뒤늦은 결제 승인 취소·환불 후속 작업을 기록하도록
@@ -339,3 +351,75 @@ Issue #271은 설정 `PUT`, 비활성화 intent 및 해당 명령의 `202 Accept
 `STORE_005`, `STORE_007`, `COMMON_007`, `COMMON_008`, `COMMON_010`의 의미는 변경하지
 않는다. 각 ledger operation의 response status 집합은 `200`, `400`, `401`, `403`, `404`,
 `409`, `429`로 고정한다.
+
+### Reservation conversion compensation runtime
+
+When a paid waiting conversion loses to cancellation or store closure, Waiting records one durable
+compensation item for the `(waitingTeamId, paymentId)` pair. The item preserves the refund amount,
+currency, policy version, deterministic source event, normalized UUID idempotency key, and reason;
+an exact retry replays the existing item, while conflicting immutable input is rejected.
+
+Workers claim due items with `FOR UPDATE SKIP LOCKED`. Each claim has a lease owner, expiry, and a
+monotonically increasing fencing token. An expired lease may be reclaimed, and a stale owner/token
+cannot complete, requeue, or reconcile the reclaimed item. Failed results use a bounded three-attempt
+policy; exhausted or ambiguous work is terminally marked `RECONCILIATION_REQUIRED`.
+
+The callback is a fast path, not the sole durable trigger. On the reconciliation schedule, the
+compensation runner scans at most 100 Waiting ledger IDs per poll in descending primary-key order.
+Each traversal fixes the current maximum Waiting-team ID as an upper watermark and reads only
+`id <= watermark AND id < cursor ORDER BY id DESC LIMIT 100`; terminal status, preserved payment,
+and compensation absence are evaluated after that bounded ledger page is read. An empty page starts
+a new traversal from the newest ID. Thus a sparse candidate cannot make one poll examine an
+unbounded historic range, continuously arriving higher IDs cannot displace the current traversal,
+and an older row that becomes eligible after its cursor was passed is retried on the next traversal.
+For each candidate it verifies the Payment-owned source identity and historical-paid snapshot through
+`PaymentService`, re-locks the terminal Waiting team, and records the same deterministic compensation
+payload as the callback. A not-yet-paid source remains eligible for a later scan without creating a
+false compensation. Callback/reconciliation races converge on the existing unique keys, so process
+restart or callback loss cannot strand a paid terminal conversion without a durable refund handoff.
+The runner emits the identifier-free
+`waiting_conversion_compensation_handoff_recovered` aggregate only after Payment verification and
+successful durable handoff creation. Raw terminal candidates are not reported as missing because an
+unpaid or invalid source is a normal negative candidate rather than a compensation incident.
+
+The provider call is made outside the Waiting database transaction and only through
+`PaymentService.requestRefund(RequestRefundCommand)`. Only `RefundStatus.COMPLETED` completes the
+compensation. Payment reconciliation or an unknown provider outcome maps to compensation
+reconciliation. `SERVICE_UNAVAILABLE` and `CONCURRENT_MODIFICATION` failures consume the bounded
+retry budget; other service errors reconcile immediately. Every processing failure emits the
+structured `waiting_conversion_compensation_failed` event, and a positive reconciliation backlog
+emits the identifier-free `waiting_conversion_compensation_reconciliation_required` aggregate
+event every 60000 ms.
+
+The compensation runner is enabled when its property is absent and can be disabled with
+`MIRIYUM_WAITING_COMPENSATION_ENABLED=false`. `application.yml`, the production environment
+example, and production Compose expose the enable switch, the 5000 ms initial/fixed delays, and the
+60000 ms reconciliation observation delay. Both jobs run on a dedicated single-thread scheduler
+that is not a default candidate and interrupts work on application shutdown.
+
+### Internal reservation conversion orchestration
+
+`WaitingReservationConversionService` is an internal boundary; it does not add a Waiting HTTP API.
+`begin` performs a short team/consumer preflight transaction, suspends any ambient caller
+transaction while `PaymentService.prepareWaitingReservationDeposit` independently commits the
+Payment source, and then uses another short transaction to lock the team for
+`WAITING -> RESERVATION_CONVERTING`. Consequently an outer caller rollback cannot leave a committed
+converting team without its matching Payment row. A matching `fail` locks the team and returns only
+`RESERVATION_CONVERTING -> WAITING`; it retains the active membership. Both transitions append one
+SYSTEM audit and public status event.
+
+`completeVerified` first locks the Waiting team and, in that same transaction, locks and verifies the
+Payment row. The global lock order is Waiting then Payment. A matching conversion may become
+`RESERVATION_CONVERTED` only while Payment is currently `PAID` and its refund ledger is empty,
+including no in-flight `PROCESSING` refund; it then removes exactly one active membership and records
+only the caller-supplied positive Reservation scalar ID. Exact replay of the same payment/final
+scalar returns before Payment access and has no further membership, audit, or event effect. Waiting
+never imports or accesses a Reservation Entity, Repository, aggregate, or migration.
+
+Operator cancellation and claimed store closure serialize with completion on the same Waiting team
+row. The first terminal transition wins. If cancellation or closure wins, the preserved payment
+identity and verified historical-paid snapshot produce one deterministic compensation item with
+reason `WAITING_CANCELLED` or `WAITING_CLOSED_BY_STORE`; callback replay converges on that same item
+without changing the terminal version or final Reservation reference. Terminal compensation uses
+the locked historical-paid verifier, so a paid payment that has since been partially or fully
+refunded can still converge without weakening the stricter new-conversion rule.
