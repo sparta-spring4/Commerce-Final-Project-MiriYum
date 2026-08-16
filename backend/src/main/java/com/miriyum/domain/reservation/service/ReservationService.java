@@ -3,6 +3,8 @@ package com.miriyum.domain.reservation.service;
 import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.reservation.dto.request.ReservationAvailabilityCondition;
 import com.miriyum.domain.reservation.dto.request.ReservationCreateRequest;
 import com.miriyum.domain.reservation.dto.request.ReservationHistorySearchRequest;
@@ -51,6 +53,8 @@ import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
+import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy;
+import com.miriyum.domain.store.service.StoreReservationDepositPolicyQueryService;
 import com.miriyum.domain.store.service.StoreScheduledActivationDecision;
 import com.miriyum.domain.store.service.StoreService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
@@ -132,6 +136,9 @@ public class ReservationService {
     private ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator;
     private ReservationFulfillmentAuditRepository fulfillmentAuditRepository;
     private ReservationNotificationPublisher notificationPublisher;
+    private StoreReservationDepositPolicyQueryService depositPolicyQueryService;
+    private RepresentativeMenuQueryService representativeMenuQueryService;
+    private ReservationDepositCalculator depositCalculator;
 
     ReservationService(
             StoreScheduleService storeScheduleService,
@@ -229,7 +236,10 @@ public class ReservationService {
             ReservationCancellationAuditRepository cancellationAuditRepository,
             ReservationCancellationPolicyEvaluator cancellationPolicyEvaluator,
             ReservationFulfillmentAuditRepository fulfillmentAuditRepository,
-            ReservationNotificationPublisher notificationPublisher
+            ReservationNotificationPublisher notificationPublisher,
+            StoreReservationDepositPolicyQueryService depositPolicyQueryService,
+            RepresentativeMenuQueryService representativeMenuQueryService,
+            ReservationDepositCalculator depositCalculator
     ) {
         this(
                 storeScheduleService,
@@ -253,6 +263,9 @@ public class ReservationService {
                 fulfillmentAuditRepository
         );
         this.notificationPublisher = notificationPublisher;
+        this.depositPolicyQueryService = depositPolicyQueryService;
+        this.representativeMenuQueryService = representativeMenuQueryService;
+        this.depositCalculator = depositCalculator;
     }
 
     /**
@@ -331,6 +344,7 @@ public class ReservationService {
         StoreReservationTransactionEligibility store =
                 requireCreationDependencies().requireReservationTransactionEligibility(
                         request.storeId());
+        selectDepositCalculation(request.storeId(), request.partySize());
         ReservationTimeSnapshot timeSnapshot = timeResolutionService.resolveCreationTime(
                 request.storeId(),
                 new ReservationTimeRequest(
@@ -448,10 +462,30 @@ public class ReservationService {
                 || capacityAllocationRepository == null
                 || cancellationPolicySelector == null
                 || menuHoldPort == null
-                || notificationPublisher == null) {
+                || notificationPublisher == null
+                || depositPolicyQueryService == null
+                || representativeMenuQueryService == null
+                || depositCalculator == null) {
             throw new IllegalStateException("reservation creation dependencies are required");
         }
         return storeTransactionEligibilityService;
+    }
+
+    private Optional<ReservationDepositCalculator.Calculation> selectDepositCalculation(
+            long storeId,
+            int partySize
+    ) {
+        StoreReservationDepositPolicy policy = depositPolicyQueryService.getCurrent(storeId);
+        if (policy == null) {
+            throw new IllegalStateException("store reservation deposit policy is required");
+        }
+        if (policy.status() != StoreReservationDepositPolicy.Status.ENABLED) {
+            return Optional.empty();
+        }
+        RepresentativeMenuSnapshot representativeMenus =
+                representativeMenuQueryService.getCurrent(storeId);
+        return Optional.of(depositCalculator.calculate(
+                policy, representativeMenus, partySize));
     }
 
     private ReservationCancellationPolicyVersion requireCancellationPolicy() {

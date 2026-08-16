@@ -23,6 +23,8 @@ import com.miriyum.domain.auth.exception.AccountErrorCode;
 import com.miriyum.domain.consumer.dto.contract.ReservationContactResult;
 import com.miriyum.domain.consumer.service.ConsumerAccountService;
 import com.miriyum.domain.menuhold.error.MenuHoldErrorCode;
+import com.miriyum.domain.menu.dto.contract.RepresentativeMenuSnapshot;
+import com.miriyum.domain.menu.service.RepresentativeMenuQueryService;
 import com.miriyum.domain.notification.dto.source.NotificationSourceEventV1;
 import com.miriyum.domain.notification.dto.source.NotificationTaskReceipt;
 import com.miriyum.domain.notification.dto.source.NotificationPurpose;
@@ -69,7 +71,10 @@ import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyAuditRepository;
 import com.miriyum.domain.reservation.repository.ReservationTimePolicyVersionRepository;
 import com.miriyum.domain.store.service.StoreService;
+import com.miriyum.domain.store.service.StoreReservationDepositPolicyQueryService;
 import com.miriyum.domain.store.service.StoreTransactionEligibilityService;
+import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy;
+import com.miriyum.domain.store.dto.contract.StoreReservationDepositPolicy.Status;
 import com.miriyum.domain.store.dto.contract.StoreReservationTransactionEligibility;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.domain.schedule.dto.contract.StoreReservationWindowResult;
@@ -99,6 +104,8 @@ import java.util.Collection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -189,6 +196,12 @@ class ReservationServiceTest {
     private StoreTransactionEligibilityService storeTransactionEligibilityService;
 
     @Mock
+    private StoreReservationDepositPolicyQueryService depositPolicyQueryService;
+
+    @Mock
+    private RepresentativeMenuQueryService representativeMenuQueryService;
+
+    @Mock
     private ReservationCapacityAllocationRepository capacityAllocationRepository;
 
     @Mock
@@ -213,6 +226,12 @@ class ReservationServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(clock.instant()).thenReturn(NOW);
+        lenient().when(depositPolicyQueryService.getCurrent(STORE_ID))
+                .thenReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.UNCONFIGURED,
+                        OptionalInt.empty(),
+                        OptionalLong.empty()));
         timeResolutionService = new ReservationTimeResolutionService(
                 storeScheduleService,
                 storeServiceIntervalValidationService,
@@ -249,7 +268,10 @@ class ReservationServiceTest {
                 cancellationAuditRepository,
                 cancellationPolicyEvaluator,
                 fulfillmentAuditRepository,
-                notificationPublisher
+                notificationPublisher,
+                depositPolicyQueryService,
+                representativeMenuQueryService,
+                new ReservationDepositCalculator()
         );
     }
 
@@ -415,6 +437,77 @@ class ReservationServiceTest {
             assertThat(event.correlationId())
                     .isEqualTo("550e8400-e29b-41d4-a716-446655440000");
         });
+    }
+
+    @Test
+    @DisplayName("예약금 정책이 DISABLED면 대표 메뉴를 조회하지 않고 기존 201을 유지한다")
+    void keepsImmediateCreationWithoutRepresentativeMenuQueryWhenDepositIsDisabled() {
+        ReservationCapacityBucket bucket = ReservationCapacityBucket.create(
+                STORE_ID, SERVICE_DATE, START_TIME, LocalTime.of(19, 0),
+                10, 3, 0, 0, 1, 6, true, 7L);
+        ReflectionTestUtils.setField(bucket, "id", 301L);
+        stubSuccessfulCreation(bucket, activePolicy(STORE_ID, 30, 60, 0));
+        given(depositPolicyQueryService.getCurrent(STORE_ID))
+                .willReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.DISABLED,
+                        OptionalInt.of(20),
+                        OptionalLong.of(91L)));
+
+        ReservationCreationCommandResult result = reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0));
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        then(depositPolicyQueryService).should().getCurrent(STORE_ID);
+        then(representativeMenuQueryService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("예약금 ENABLED의 비구성 대표 메뉴는 첫 자원 접근 전에 STORE_010이다")
+    void rejectsUnconfiguredRepresentativeMenusBeforeResourceAccessWhenDepositIsEnabled() {
+        given(consumerAccountService.getReservationContact(11L))
+                .willReturn(new ReservationContactResult(
+                        "consumer:11:channel:primary", true));
+        given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
+            Supplier<BusinessResult<?>> work = invocation.getArgument(1);
+            return work.get();
+        });
+        given(storeTransactionEligibilityService
+                .requireReservationTransactionEligibility(STORE_ID))
+                .willReturn(new StoreReservationTransactionEligibility(
+                        STORE_ID, "미리윰 식당"));
+        given(depositPolicyQueryService.getCurrent(STORE_ID))
+                .willReturn(new StoreReservationDepositPolicy(
+                        STORE_ID,
+                        Status.ENABLED,
+                        OptionalInt.of(20),
+                        OptionalLong.of(91L)));
+        given(representativeMenuQueryService.getCurrent(STORE_ID))
+                .willReturn(RepresentativeMenuSnapshot.unconfigured(STORE_ID));
+
+        assertThatThrownBy(() -> reservationService.createReservation(
+                11L,
+                IdempotencyKey.parse("550e8400-e29b-41d4-a716-446655440000"),
+                creationRequest(2, 0, 0)))
+                .isInstanceOfSatisfying(ServiceException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(StoreErrorCode.MENU_STATE_CONFLICT));
+
+        InOrder order = inOrder(
+                storeTransactionEligibilityService,
+                depositPolicyQueryService,
+                representativeMenuQueryService);
+        order.verify(storeTransactionEligibilityService)
+                .requireReservationTransactionEligibility(STORE_ID);
+        order.verify(depositPolicyQueryService).getCurrent(STORE_ID);
+        order.verify(representativeMenuQueryService).getCurrent(STORE_ID);
+        then(storeScheduleService).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+        then(capacityBucketRepository).shouldHaveNoInteractions();
+        then(capacityAllocationRepository).shouldHaveNoInteractions();
+        then(menuHoldPort).shouldHaveNoInteractions();
     }
 
     @Test
