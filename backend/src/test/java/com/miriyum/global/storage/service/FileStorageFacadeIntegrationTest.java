@@ -36,7 +36,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 /** 파일 저장 파사드가 파일 저장 결과와 메타데이터 상태를 맞추는지 검증한다. */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
