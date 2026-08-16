@@ -2308,6 +2308,8 @@ components:
               publicationMode:
                 const: SCHEDULED
           then:
+            properties:
+              effectiveAt: {}
             required: [effectiveAt]
         - if:
             properties:
@@ -2315,6 +2317,8 @@ components:
                 const: IMMEDIATE
           then:
             not:
+              properties:
+                effectiveAt: {}
               required: [effectiveAt]
     SchedulePublicationCancellationRequest:
       type: object
@@ -2564,6 +2568,8 @@ components:
               mode:
                 const: SCHEDULED
           then:
+            properties:
+              effectiveAt: {}
             required: [effectiveAt]
         - if:
             properties:
@@ -2571,6 +2577,8 @@ components:
                 const: IMMEDIATE
           then:
             not:
+              properties:
+                effectiveAt: {}
               required: [effectiveAt]
     MenuChangeReasonRequest:
       type: object
