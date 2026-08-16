@@ -10,7 +10,8 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    # Binary logging 환경에서도 Flyway가 audit trigger를 생성할 수 있게 한다.
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci --log-bin-trust-function-creators=1
     logging:
       driver: awslogs
       options:

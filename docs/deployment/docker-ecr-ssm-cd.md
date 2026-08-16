@@ -79,6 +79,26 @@ sudo docker compose --env-file .env -f docker-compose.prod.yml port valkey 6379
 
 The expected result is `healthy`, unauthenticated `NOAUTH Authentication required.`, then authenticated `PONG`; the final command must not print a host port. Record the deployment run and these results before manually closing #141.
 
+## MySQL trigger migration recovery
+
+The MySQL Compose command includes `--log-bin-trust-function-creators=1`, which configures MySQL's `log_bin_trust_function_creators` setting. When binary logging is enabled, this lets Flyway create audit triggers without requiring a privileged database account. The option is part of the Compose-managed MySQL startup command, so it is applied again whenever the staging MySQL container is recreated. Do not remove the option simply because a later migration succeeds.
+
+If a Flyway migration that creates a trigger fails, first preserve the failure evidence and inspect the current state. Never automatically delete objects or modify Flyway history.
+
+```bash
+cd /opt/miriyum
+sudo docker compose --env-file .env -f docker-compose.prod.yml ps mysql backend
+sudo docker compose --env-file .env -f docker-compose.prod.yml logs --tail=200 backend
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T mysql sh -ec \
+  'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SELECT installed_rank, version, description, type, script, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 20;"'
+sudo docker compose --env-file .env -f docker-compose.prod.yml exec -T mysql sh -ec \
+  'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SHOW TRIGGERS;"'
+```
+
+Use the failed migration script and backend log to identify the expected trigger, then compare its name and definition with the `SHOW TRIGGERS` result. Deleting a partial trigger or changing a failed `flyway_schema_history` row is a manual recovery decision: the Deploy/Platform owner must first confirm the staging backup, the expected migration source, and the existing object state. This runbook deliberately provides no automatic cleanup or Flyway repair command.
+
+After that manual decision is complete, rerun the selected immutable SHA deployment. Re-run the four commands above, confirm the migration row is successful, confirm the intended trigger exists, and then verify `http://127.0.0.1:8080/actuator/health` is `UP` before recording the recovery as complete.
+
 ## Release and rollback
 
 An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. The CD job additionally requires the triggering CI event to be a `push` from this repository, so a successful pull request CI result, including a fork PR, never receives OIDC or SSM deployment authority. Before automatic build and deployment, the workflow compares the completed CI SHA with the current remote `dev` HEAD and skips stale runs. A manual `Backend CD (Staging)` dispatch is allowed only from `dev` and accepts a full 40-character SHA tag; this is the only path that intentionally deploys a previous ECR image for staging rollback. The manual path checks out the same SHA before sending deployment files, so the Compose, Nginx, and deploy script revisions match the selected backend image.
