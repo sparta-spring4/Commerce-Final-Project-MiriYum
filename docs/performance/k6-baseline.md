@@ -103,7 +103,7 @@ staging의 `NOT CONFIGURED`는 성공이 아니다. local 결과는 위 비식�
 ### k6 계약 테스트
 
 ```powershell
-$tests = @('config-contract.js', 'contracts-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
+$tests = @('config-contract.js', 'contracts-contract.js', 'runtime-options-contract.js', 'scenario-contract.js', 'smoke-proof-contract.js', 'summary-contract.js')
 foreach ($test in $tests) {
   docker run --rm -v "${PWD}/performance/k6:/scripts:ro" grafana/k6:2.1.0 run --quiet "/scripts/tests/$test"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -112,9 +112,10 @@ foreach ($test in $tests) {
 
 관찰 결과:
 
-- `config-contract.js`: 21/21 checks 성공
+- `config-contract.js`: 23/23 checks 성공
 - `contracts-contract.js`: 27/27 checks 성공
-- `scenario-contract.js`: 27/27 checks 성공
+- `runtime-options-contract.js`: 2/2 checks 성공
+- `scenario-contract.js`: 34/34 checks 성공
 - `smoke-proof-contract.js`: 8/8 checks 성공
 - `summary-contract.js`: 6/6 checks 성공
 - 계약 테스트의 의도적 예약 conflict와 인증 rate-limit은 합계 `expected_4xx=2`, 공개 계약에 없는 `RESERVATION_004`와 notification invariant conflict는 `unexpected_4xx=2`로 분리됐다. 이는 실제 환경 오류율이 아니다.
