@@ -19,6 +19,7 @@ public class StoreSanctionPolicyCatalog {
             RestrictedFeature.MENU_HOLD, RestrictedFeature.PICKUP);
 
     public void validate(SanctionShape shape, Instant now) {
+        if (shape.startsAt()!=null && shape.startsAt().isAfter(now)) reject();
         if (shape.type()==SanctionType.WARNING && !shape.restrictedFeatures().isEmpty()) reject();
         if (shape.type()==SanctionType.FEATURE_RESTRICTION && shape.restrictedFeatures().isEmpty()) reject();
         if (shape.type()==SanctionType.TEMPORARY_SUSPENSION) {
@@ -29,7 +30,9 @@ public class StoreSanctionPolicyCatalog {
     }
     public boolean requiresImpact(SanctionShape shape) { return shape.type()!=SanctionType.WARNING; }
     public boolean requiresApproval(SanctionShape shape) {
-        return shape.type()==SanctionType.TEMPORARY_SUSPENSION || shape.type()==SanctionType.PERMANENT_EXIT;
+        return shape.type()==SanctionType.TEMPORARY_SUSPENSION || shape.type()==SanctionType.PERMANENT_EXIT
+                || shape.type()==SanctionType.FEATURE_RESTRICTION
+                && shape.restrictedFeatures().containsAll(EnumSet.allOf(RestrictedFeature.class));
     }
     public EnforcementCommand command(long storeId, long version, long sanctionId,
                                       EnforcementResult current, SanctionShape shape) {
