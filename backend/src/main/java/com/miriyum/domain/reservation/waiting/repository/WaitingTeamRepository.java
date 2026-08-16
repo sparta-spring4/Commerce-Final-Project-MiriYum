@@ -4,6 +4,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.List;
@@ -147,5 +148,22 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
     default long findTerminalCompensationScanUpperBoundId() {
         Long upperBound = findMaxWaitingTeamId();
         return upperBound == null ? 0L : upperBound;
+    }
+
+    @Query(value = """
+            SELECT COALESCE(MAX(t.waiting_team_id), 0) AS maxTeamId
+            FROM waiting_teams t
+            WHERE t.store_id = :storeId
+              AND t.business_date = :businessDate
+              AND t.created_at <= :asOf
+            """, nativeQuery = true)
+    WaitingDashboardCheckpoint dashboardCheckpoint(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") Instant asOf
+    );
+
+    interface WaitingDashboardCheckpoint {
+        Long getMaxTeamId();
     }
 }

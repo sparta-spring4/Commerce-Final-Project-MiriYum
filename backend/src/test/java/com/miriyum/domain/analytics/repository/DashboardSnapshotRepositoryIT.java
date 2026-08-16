@@ -1,0 +1,144 @@
+package com.miriyum.domain.analytics.repository;
+
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.COMPLETE;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.PARTIAL;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.UNAVAILABLE;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricReasonCode.SOURCE_CONTRACT_MISSING;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.CountMetricResponse;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardMetricDraft;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotDraft;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.DashboardSnapshotResponse;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricMetadata;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.NoShowValue;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.RateValue;
+import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.WaitingValue;
+import com.miriyum.domain.analytics.service.DashboardSnapshotTransactionExecutor;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
+
+@Testcontainers
+@Tag("integration")
+@Tag("integration-shard-b")
+@SpringBootTest(classes = MiriyumApplication.class, properties = {
+        "spring.jpa.hibernate.ddl-auto=validate",
+        "miriyum.jwt.secret=test-only-secret-key-must-be-at-least-32-bytes",
+        "miriyum.store.schedule.activation-delay-ms=600000",
+        "miriyum.reservation.time-policy.activation-enabled=false",
+        "miriyum.reservation.hold-expiration.enabled=false",
+        "miriyum.waiting.closure.initial-delay-ms=600000"
+})
+class DashboardSnapshotRepositoryIT {
+
+    private static final Instant AS_OF = Instant.parse("2026-08-16T09:00:00Z");
+
+    @Container
+    static final MySQLContainer MYSQL =
+            new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
+
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    @Autowired DashboardSnapshotTransactionExecutor executor;
+    @Autowired DashboardSnapshotRepository snapshotRepository;
+    @Autowired DashboardMetricSnapshotRepository metricRepository;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper objectMapper;
+
+    @BeforeEach
+    void fixture() {
+        jdbc.execute("DELETE FROM dashboard_analytics_metric_snapshots");
+        jdbc.execute("DELETE FROM dashboard_analytics_snapshots");
+        jdbc.execute("DELETE FROM stores");
+        jdbc.execute("DELETE FROM store_operator_accounts");
+        jdbc.update("""
+                INSERT INTO store_operator_accounts (
+                    store_operator_account_id, email, password_hash, display_name, status,
+                    created_at, updated_at
+                ) VALUES (31, 'snapshot-owner@example.com', 'hash', '스냅샷 운영자',
+                    'ACTIVE', NOW(6), NOW(6))
+                """);
+        jdbc.update("""
+                INSERT INTO stores (
+                    store_id, store_operator_account_id, business_registration_number,
+                    business_type, name, description, region, address, time_zone_id,
+                    applicant_self_attested_at, required_terms_agreed_at,
+                    required_terms_version, store_category_code, verification_status,
+                    operation_status, reservation_enabled, menu_hold_enabled, pickup_enabled,
+                    created_at, updated_at
+                ) VALUES (17, 31, '2700000019', 'CAFE', '스냅샷 매장', '', 'SEOUL',
+                    '서울시 중구', 'Asia/Seoul', NOW(6), NOW(6),
+                    'STORE_ONBOARDING_REQUIRED_TERMS_V1', 'CAFE_BAKERY', 'APPROVED',
+                    'OPEN', TRUE, TRUE, TRUE, NOW(6), NOW(6))
+                """);
+    }
+
+    @Test
+    void duplicatePublishReplaysOneHeaderAndExactlySixMetricCells() {
+        DashboardSnapshotDraft draft = draftWithSixCells();
+
+        DashboardSnapshotResponse first = executor.publish(draft);
+        DashboardSnapshotResponse replay = executor.publish(draft);
+
+        long databaseId = snapshotRepository.findAll().getFirst().getId();
+        assertThat(replay.snapshotId()).isEqualTo(first.snapshotId());
+        assertThat(snapshotRepository.count()).isEqualTo(1);
+        assertThat(metricRepository.countByDashboardSnapshotId(databaseId)).isEqualTo(6);
+    }
+
+    private DashboardSnapshotDraft draftWithSixCells() {
+        MetricMetadata complete = new MetricMetadata(
+                "ANALYTICS-v1", 3L, AS_OF, AS_OF.minusSeconds(1),
+                "checkpoint", COMPLETE, false, null);
+        MetricMetadata partial = new MetricMetadata(
+                "ANALYTICS-004-v1", 3L, AS_OF, AS_OF.minusSeconds(1),
+                "checkpoint", PARTIAL, false, SOURCE_CONTRACT_MISSING);
+        MetricMetadata unavailable = new MetricMetadata(
+                "ANALYTICS-004-v1", 1L, AS_OF, null, null,
+                UNAVAILABLE, false, SOURCE_CONTRACT_MISSING);
+        NoShowValue noShow = new NoShowValue(
+                new CountMetricResponse(null, unavailable),
+                new CountMetricResponse(null, unavailable),
+                new CountMetricResponse(2L, complete));
+        return new DashboardSnapshotDraft(
+                17L, LocalDate.of(2026, 8, 16), "Asia/Seoul", AS_OF,
+                AS_OF.plusSeconds(1), 1L, List.of(
+                new DashboardMetricDraft("TODAY_RESERVATION_TEAMS",
+                        objectMapper.valueToTree(4L), complete),
+                new DashboardMetricDraft("RESERVATION_RATE",
+                        objectMapper.valueToTree(new RateValue(6, 10, new BigDecimal("0.6"))),
+                        complete),
+                new DashboardMetricDraft("TEAM_CAPACITY_UTILIZATION",
+                        objectMapper.valueToTree(new RateValue(3, 5, new BigDecimal("0.6"))),
+                        complete),
+                new DashboardMetricDraft("CANCELLATION_RATE",
+                        objectMapper.valueToTree(new RateValue(1, 4, new BigDecimal("0.25"))),
+                        complete),
+                new DashboardMetricDraft("WAITING_STATUS",
+                        objectMapper.valueToTree(new WaitingValue(1, 0, 3, 0, 1800L)),
+                        complete),
+                new DashboardMetricDraft("NO_SHOW_STATUS",
+                        objectMapper.valueToTree(noShow), partial)));
+    }
+}

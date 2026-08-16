@@ -103,6 +103,9 @@ public class Store extends BaseEntity {
     @Column(name = "time_zone_id", nullable = false, length = 64)
     private String timeZoneId;
 
+    @Column(name = "dashboard_authority_version", nullable = false)
+    private long dashboardAuthorityVersion;
+
     @Column(name = "store_category_code", nullable = false, length = 50)
     private String storeCategoryCode;
 
@@ -171,6 +174,7 @@ public class Store extends BaseEntity {
         this.menuHoldEnabled = menuHoldEnabled;
         this.pickupEnabled = pickupEnabled;
         this.timeZoneId = timeZoneId;
+        this.dashboardAuthorityVersion = 1L;
         this.applicantSelfAttestedAt = onboardingAcceptedAt;
         this.requiredTermsAgreedAt = onboardingAcceptedAt;
         this.requiredTermsVersion = requiredTermsVersion;

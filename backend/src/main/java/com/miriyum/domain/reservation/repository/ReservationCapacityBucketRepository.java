@@ -191,4 +191,32 @@ public interface ReservationCapacityBucketRepository
             @Param("startTime") LocalTime startTime,
             @Param("queryEndTime") LocalTime queryEndTime
     );
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(b.max_people), 0) AS offeredPeopleUnits,
+                COALESCE(SUM(b.max_teams), 0) AS offeredTeamUnits,
+                COALESCE(MAX(b.policy_version), 0) AS policyVersion,
+                COALESCE(MAX(b.reservation_capacity_bucket_id), 0) AS maxBucketId
+            FROM reservation_capacity_buckets b
+            WHERE b.store_id = :storeId
+              AND b.service_date = :businessDate
+              AND b.policy_version = (
+                  SELECT MAX(latest.policy_version)
+                  FROM reservation_capacity_buckets latest
+                  WHERE latest.store_id = :storeId
+                    AND latest.service_date = :businessDate
+              )
+            """, nativeQuery = true)
+    ReservationCapacityOfferAnalytics aggregateDashboardOffers(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate
+    );
+
+    interface ReservationCapacityOfferAnalytics {
+        Long getOfferedPeopleUnits();
+        Long getOfferedTeamUnits();
+        Long getPolicyVersion();
+        Long getMaxBucketId();
+    }
 }

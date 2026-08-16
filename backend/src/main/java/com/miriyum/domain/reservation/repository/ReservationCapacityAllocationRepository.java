@@ -1,8 +1,12 @@
 package com.miriyum.domain.reservation.repository;
 
 import com.miriyum.domain.reservation.entity.ReservationCapacityAllocation;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * 예약 수용량 배정 이력의 기본 영속성 경계다.
@@ -19,4 +23,28 @@ public interface ReservationCapacityAllocationRepository
     List<ReservationCapacityAllocation> findAllByReservationIdOrderByCapacityBucketIdAsc(
             Long reservationId
     );
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(a.occupied_people), 0) AS reservedPeopleUnits,
+                COALESCE(SUM(a.occupied_teams), 0) AS reservedTeamUnits,
+                COALESCE(MAX(a.reservation_capacity_allocation_id), 0) AS maxAllocationId
+            FROM reservation_capacity_allocations a
+            JOIN reservations r ON r.reservation_id = a.reservation_id
+            WHERE r.store_id = :storeId
+              AND r.service_date = :businessDate
+              AND r.created_at <= :asOf
+              AND (r.cancelled_at IS NULL OR r.cancelled_at > :asOf)
+            """, nativeQuery = true)
+    ReservationCapacityUsageAnalytics aggregateDashboardUsage(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") Instant asOf
+    );
+
+    interface ReservationCapacityUsageAnalytics {
+        Long getReservedPeopleUnits();
+        Long getReservedTeamUnits();
+        Long getMaxAllocationId();
+    }
 }
