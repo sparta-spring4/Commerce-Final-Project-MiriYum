@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ROUTES } from '../../../app/routes'
 import { successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
@@ -60,6 +60,18 @@ function protectedCache(queryClient: QueryClient) {
     queryClient.getQueryData(pickupKeys.detail('p-1')),
   ]
 }
+
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('일반 사용자 카카오 콜백', () => {
   it('연결된 카카오 계정이면 code·state를 세션 API에 교환하고 메모리 로그인 상태로 이동한다', async () => {
@@ -123,10 +135,19 @@ describe('일반 사용자 카카오 콜백', () => {
     const { queryClient } = renderCallback('/auth/kakao/callback?code=authorization-code&state=signed-state')
     await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated'))
     seedProtectedCache(queryClient)
+    const cacheClear = deferred()
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(() => cacheClear.promise)
 
     resolveSession?.()
 
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
+    expect(screen.getByText('로그인 정보를 확인하고 있습니다.')).toBeInTheDocument()
+    expect(protectedCache(queryClient)).not.toContain(undefined)
+
+    cacheClear.resolve()
     await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'))
+    await waitFor(() => expect(screen.getByText('홈')).toBeInTheDocument())
     expect(protectedCache(queryClient)).toEqual([undefined, undefined, undefined])
   })
 

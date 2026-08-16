@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ROUTES } from '../../../app/routes'
 import { successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
@@ -66,6 +66,18 @@ function protectedCache(queryClient: QueryClient) {
   ]
 }
 
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('일반 사용자 카카오 가입 완료', () => {
   it('가입 티켓과 서비스 필수정보만 보내고 Access Token을 메모리 로그인 상태로 전환한다', async () => {
     let requestBody: unknown = null
@@ -85,6 +97,8 @@ describe('일반 사용자 카카오 가입 완료', () => {
     const { queryClient } = renderSignUp()
     await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated'))
     seedProtectedCache(queryClient)
+    const cacheClear = deferred()
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(() => cacheClear.promise)
 
     fireEvent.change(screen.getByLabelText('이메일'), { target: { value: 'kakao@example.com' } })
     fireEvent.change(screen.getByLabelText('휴대전화 번호'), { target: { value: '010-1234-5678' } })
@@ -92,7 +106,14 @@ describe('일반 사용자 카카오 가입 완료', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '(필수) 만 14세 이상입니다.' }))
     fireEvent.click(screen.getByRole('button', { name: '가입 완료' }))
 
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
+    expect(screen.getByRole('heading', { name: '카카오로 가입하기' })).toBeInTheDocument()
+    expect(protectedCache(queryClient)).not.toContain(undefined)
+
+    cacheClear.resolve()
     expect(await screen.findByTestId('auth-status')).toHaveTextContent('authenticated')
+    await waitFor(() => expect(screen.getByText('홈')).toBeInTheDocument())
     expect(requestBody).toEqual({
       signUpTicket: 'temporary-ticket',
       email: 'kakao@example.com',

@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorResponse, successResponse } from '../../test/msw/envelope'
 import { server } from '../../test/msw/server'
 import { TestQueryProvider } from '../../test/TestQueryProvider'
@@ -120,6 +120,7 @@ function deferred() {
 
 afterEach(() => {
   document.cookie = `${CONSUMER_CSRF_COOKIE}=; Max-Age=0; path=/`
+  vi.restoreAllMocks()
 })
 
 describe('일반 사용자 인증 shell', () => {
@@ -590,8 +591,16 @@ describe('일반 사용자 인증 shell', () => {
     await waitFor(() => expect(status()).toBe('unauthenticated'))
 
     seedProtectedCache(queryClient, '이전 사용자')
+    const cacheClear = deferred()
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(() => cacheClear.promise)
+
     fireEvent.click(screen.getByRole('button', { name: '카카오 로그인 완료' }))
 
+    await waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledTimes(3))
+    expect(status()).toBe('unauthenticated')
+    expect(cachedOwners(queryClient)).not.toContain(undefined)
+
+    cacheClear.resolve()
     await waitFor(() => expect(status()).toBe('authenticated'))
     expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
   })
