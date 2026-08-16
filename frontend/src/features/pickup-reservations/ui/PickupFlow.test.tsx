@@ -187,6 +187,44 @@ describe('픽업 예약 작성', () => {
     expect(new Set(keys).size).toBe(1)
   })
 
+  /*
+   * 결과 불명 뒤 조건을 바꿔 다시 보내면 지문도 키도 달라져 두 번째 픽업이
+   * 생긴다. 첫 요청이 이미 커밋된 채 응답만 유실됐을 수 있으므로, 결과를
+   * 확정하기 전에는 조건을 바꾼 전송을 내보내지 않는다.
+   */
+  it('결과 불명 뒤 조건을 바꿔 제출해도 두 번째 요청이 나가지 않는다', async () => {
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(AVAILABILITY_PATH, () => successResponse(availability())),
+      http.post(CREATE_PATH, () => {
+        attempt += 1
+        return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+      }),
+    )
+
+    renderFlow(`/stores/${STORE_ID}/pickup?pickupDate=2026-09-01`)
+
+    fireEvent.click(await screen.findByRole('button', { name: '18:30' }))
+    const increase = await screen.findByRole('button', {
+      name: '트러플 크림 파파델레 수량 늘리기',
+    })
+    fireEvent.click(increase)
+    fireEvent.click(screen.getByRole('button', { name: '픽업 예약하기' }))
+
+    await waitFor(() => expect(attempt).toBe(1))
+
+    // 결과가 확정되기 전에는 조건을 바꿀 수 없다.
+    await waitFor(() => expect(increase).toBeDisabled())
+    expect(screen.getByRole('button', { name: '픽업 예약하기' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '18:30' })).toBeDisabled()
+
+    // 뒤로가기 등으로 URL이 바뀌어 조건이 달라져도 전송을 막는다.
+    fireEvent.click(screen.getByRole('button', { name: '예약 결과 확인' }))
+    await waitFor(() => expect(attempt).toBe(2))
+  })
+
   it('메뉴를 고르지 않으면 제출하지 않는다', async () => {
     server.use(
       authenticatedConsumer(),

@@ -512,6 +512,67 @@ describe('일반 사용자 인증 shell', () => {
     await waitFor(() => expect(status()).toBe('authenticated'))
   })
 
+  /*
+   * 늦게 끝난 이전 재발급이 현재 재발급의 자리를 지우지 않는다.
+   *
+   * `finally`가 무조건 비우면 R1이 늦게 끝나면서 R2의 참조까지 지운다. 그러면
+   * 다음 401이 R3를 R2와 나란히 띄우고, Refresh 토큰 회전 구성에서는 둘 중
+   * 하나가 토큰을 먼저 써 버려 나머지가 실패하며 살아 있는 세션이 끊긴다.
+   */
+  it('늦게 끝난 이전 재발급이 현재 재발급을 지우지 않는다', async () => {
+    const first = deferred()
+    const second = deferred()
+    let refreshCalls = 0
+
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, async () => {
+        refreshCalls += 1
+        if (refreshCalls === 1) {
+          await first.promise
+          return successResponse(tokenData('session-a'))
+        }
+        // R2는 테스트가 풀 때까지 떠 있는다.
+        await second.promise
+        return successResponse(tokenData('session-b'))
+      }),
+      ...signOutHandlers(),
+      http.post(CONSUMER_SESSIONS_PATH, () =>
+        successResponse(tokenData('b-token')),
+      ),
+      http.get(PROTECTED_PATH, () =>
+        errorResponse(
+          401,
+          AuthErrorCode.ACCESS_TOKEN_EXPIRED,
+          'Access Token이 만료됐습니다.',
+        ),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(refreshCalls).toBe(1))
+
+    // 세션 전환. R1은 아직 떠 있다.
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    // B의 401이 R2를 띄운다.
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }))
+    await waitFor(() => expect(refreshCalls).toBe(2))
+
+    // R1이 뒤늦게 끝난다. R2의 자리를 지우면 안 된다.
+    first.resolve()
+    await waitFor(() => expect(refreshCalls).toBe(2))
+
+    // 세 번째 401은 R2를 공유해야 한다. R3가 병렬로 뜨면 토큰 회전이 깨진다.
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(refreshCalls).toBe(2)
+
+    second.resolve()
+  })
+
   it('다시 로그인하면 지난 로그아웃 안내를 지운다', async () => {
     document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
 

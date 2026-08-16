@@ -15,6 +15,13 @@ import { createIdempotencyKey, isOutcomeUnknown } from './idempotencyKey'
  *   이때는 사용자를 최신 상태 확인으로 보낸다.
  */
 export interface IdempotentAttempt {
+  /**
+   * 마지막 전송의 서버 반영 여부를 모르는 상태.
+   *
+   * 화면은 이 값으로 "같은 키 재전송(결과 확인)"을 안내하고, 지문이 바뀌지
+   * 않도록 입력을 잠글 수 있다.
+   */
+  readonly outcomeUnknown: boolean
   /** 결과 불명 뒤 지문이 바뀌어 더 보낼 수 없는 상태. */
   readonly blocked: boolean
   /**
@@ -37,6 +44,7 @@ export function useIdempotentAttempt(fingerprint: string): IdempotentAttempt {
   const blocked = attempt.outcomeUnknown && fingerprintChanged
 
   return {
+    outcomeUnknown: attempt.outcomeUnknown,
     blocked,
     begin() {
       if (blocked) {

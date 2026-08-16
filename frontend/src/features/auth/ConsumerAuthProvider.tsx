@@ -196,10 +196,26 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession])
 
   const refreshOnce = useCallback((): Promise<boolean> => {
-    refreshInFlight.current ??= runRefresh().finally(() => {
-      refreshInFlight.current = null
+    if (refreshInFlight.current !== null) {
+      return refreshInFlight.current
+    }
+
+    /*
+     * 정리는 자기 것만 한다.
+     *
+     * `finally`가 무조건 비우면, 세션이 바뀌어 새 재발급(R2)이 자리에 앉은 뒤
+     * 늦게 끝난 이전 재발급(R1)이 R2의 참조까지 지운다. 그러면 다음 401이 R3를
+     * R2와 나란히 띄우고, Refresh 토큰을 회전시키는 구성에서는 둘 중 하나가
+     * 토큰을 먼저 써 버려 나머지가 실패하면서 살아 있는 세션이 끊긴다.
+     */
+    const attempt: Promise<boolean> = runRefresh().finally(() => {
+      if (refreshInFlight.current === attempt) {
+        refreshInFlight.current = null
+      }
     })
-    return refreshInFlight.current
+
+    refreshInFlight.current = attempt
+    return attempt
   }, [runRefresh])
 
   const apiClient = useMemo(

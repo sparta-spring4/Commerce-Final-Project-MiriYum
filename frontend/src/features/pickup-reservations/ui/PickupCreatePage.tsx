@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import {
-  createIdempotencyKey,
-  isOutcomeUnknown,
-} from '../../../shared/api/idempotencyKey'
+import { useIdempotentAttempt } from '../../../shared/api/useIdempotentAttempt'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
@@ -37,16 +34,19 @@ export function PickupCreatePage() {
   const draft = readPickupDraft(searchParams)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
-  const [attemptKey, setAttemptKey] = useState(createIdempotencyKey)
+
   /*
-   * 서버 반영 여부를 모르는 실패를 겪었는지.
+   * 멱등 키를 요청 지문과 함께 관리한다.
    *
-   * 이때는 "내 예약에서 확인"이 통하지 않는다. 1차 MVP에 픽업 목록 화면이
-   * 없고, 응답이 유실됐으면 `pickupReservationId`도 모른다. 대신 같은 키로
-   * 한 번 더 보내면 계약이 저장된 최초 결과를 재생하므로, 그 재전송을
-   * "결과 확인"이라는 이름으로 사용자에게 준다.
+   * 지문은 draft를 그대로 직렬화한 값이다. 날짜·시간대·메뉴 수량이 바뀌면
+   * 다른 명령이므로 새 키를 쓰고, 그대로면 같은 키로 재시도한다.
+   *
+   * 결과 불명 뒤에는 지문이 바뀐 전송을 막는다. 첫 요청이 이미 커밋된 채
+   * 응답만 유실됐다면, 조건을 바꿔 새 키로 보내는 순간 픽업이 두 건이 된다.
+   * 그때는 같은 키 재전송(결과 확인)으로 먼저 결과를 확정해야 한다.
    */
-  const [outcomeUnknown, setOutcomeUnknown] = useState(false)
+  const fingerprint = writePickupDraft(draft).toString()
+  const attempt = useIdempotentAttempt(fingerprint)
 
   const availability = usePickupAvailability(
     storeId,
@@ -57,9 +57,6 @@ export function PickupCreatePage() {
 
   function updateDraft(next: PickupDraft) {
     setFormError(null)
-    setOutcomeUnknown(false)
-    // 입력이 바뀌면 이전 시도의 멱등 키를 버린다.
-    setAttemptKey(createIdempotencyKey())
     setSearchParams(writePickupDraft(next), { replace: true })
   }
 
@@ -71,11 +68,19 @@ export function PickupCreatePage() {
       return
     }
 
+    const idempotencyKey = attempt.begin()
+    if (idempotencyKey === null) {
+      setFormError(
+        '앞선 요청의 처리 여부를 확인하지 못했습니다. 조건을 바꿔 다시 보내면 픽업이 두 건 잡힐 수 있습니다. 조건을 되돌려 "예약 결과 확인"을 먼저 눌러 주세요.',
+      )
+      return
+    }
+
     mutation.mutate(
-      { body: toPickupCreateRequest(storeId, draft), idempotencyKey: attemptKey },
+      { body: toPickupCreateRequest(storeId, draft), idempotencyKey },
       {
         onSuccess: (reservation) => {
-          setOutcomeUnknown(false)
+          attempt.settle(null)
           if (reservation.status !== 'CONFIRMED') {
             setFormError(
               '픽업 예약 결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.',
@@ -87,18 +92,22 @@ export function PickupCreatePage() {
             { replace: true },
           )
         },
-        /*
-         * 실패해도 멱등 키를 바꾸지 않는다. 응답만 유실된 경우 첫 요청이
-         * 이미 커밋됐을 수 있고, 새 키로 다시 보내면 픽업이 두 건 잡힌다.
-         * 키는 사용자가 입력을 바꿀 때만 새로 만든다(updateDraft).
-         */
         onError: (error) => {
-          setOutcomeUnknown(isOutcomeUnknown(error))
+          attempt.settle(error)
           setFormError(toPickupCreateMessage(error))
         },
       },
     )
   }
+
+  /*
+   * 결과가 불명인 동안에는 조건을 잠근다.
+   *
+   * 잠그지 않으면 사용자가 조건을 바꾸는 순간 지문이 달라져 결과 확인 경로가
+   * 막히고, 화면에는 되돌릴 방법이 남지 않는다. draft가 URL에 있어 뒤로가기로도
+   * 바뀔 수 있으므로 `attempt.begin()`의 차단이 마지막 방어선으로 함께 남는다.
+   */
+  const locked = attempt.outcomeUnknown
 
   const selectedSlot = availability.data?.slots.find(
     (slot) => slot.pickupTime === draft.pickupTime,
@@ -124,7 +133,7 @@ export function PickupCreatePage() {
           tone="error"
           title={formError}
           actions={
-            outcomeUnknown ? (
+            locked ? (
               /*
                 같은 키로 같은 요청을 다시 보낸다. 계약이 "같은 키와 전체 요청
                 지문의 재시도는 저장된 최초 결과를 재생한다"고 정하므로, 앞선
@@ -162,6 +171,7 @@ export function PickupCreatePage() {
               type="date"
               name="pickupDate"
               required
+              disabled={locked}
               value={draft.pickupDate}
               error={errors.pickupDate ?? null}
               leadingIcon={<Icon name="calendar" />}
@@ -181,6 +191,7 @@ export function PickupCreatePage() {
           <SlotPicker
             availability={availability}
             draft={draft}
+            locked={locked}
             error={errors.pickupTime ?? null}
             onSelect={(pickupTime) =>
               updateDraft(withPickupSlot(draft, pickupTime))
@@ -192,6 +203,7 @@ export function PickupCreatePage() {
           <SlotMenus
             slot={selectedSlot}
             draft={draft}
+            locked={locked}
             error={errors.menuSelections ?? null}
             onChange={updateDraft}
           />
@@ -203,6 +215,7 @@ export function PickupCreatePage() {
           size="lg"
           block
           loading={mutation.isPending}
+          disabled={locked}
         >
           픽업 예약하기
         </Button>
@@ -214,11 +227,14 @@ export function PickupCreatePage() {
 function SlotPicker({
   availability,
   draft,
+  locked,
   error,
   onSelect,
 }: {
   availability: ReturnType<typeof usePickupAvailability>
   draft: PickupDraft
+  /** 결과 불명 동안에는 조건을 바꿀 수 없다. */
+  locked: boolean
   error: string | null
   onSelect: (pickupTime: string) => void
 }) {
@@ -255,6 +271,7 @@ function SlotPicker({
             type="button"
             className="pickup-form__slot"
             aria-pressed={draft.pickupTime === slot.pickupTime}
+            disabled={locked}
             onClick={() => onSelect(slot.pickupTime)}
           >
             {slot.pickupTime}
@@ -269,11 +286,14 @@ function SlotPicker({
 function SlotMenus({
   slot,
   draft,
+  locked,
   error,
   onChange,
 }: {
   slot: PickupSlotAvailability
   draft: PickupDraft
+  /** 결과 불명 동안에는 수량을 바꿀 수 없다. */
+  locked: boolean
   error: string | null
   onChange: (next: PickupDraft) => void
 }) {
@@ -332,7 +352,7 @@ function SlotMenus({
                     type="button"
                     className="mi-counter__button"
                     aria-label={`${menu.menuName} 수량 줄이기`}
-                    disabled={selected <= 0}
+                    disabled={locked || selected <= 0}
                     onClick={() =>
                       onChange(
                         withPickupQuantity(draft, menu.menuId, selected - 1),
@@ -351,7 +371,7 @@ function SlotMenus({
                     type="button"
                     className="mi-counter__button"
                     aria-label={`${menu.menuName} 수량 늘리기`}
-                    disabled={selected >= max}
+                    disabled={locked || selected >= max}
                     onClick={() =>
                       onChange(
                         withPickupQuantity(draft, menu.menuId, selected + 1),
