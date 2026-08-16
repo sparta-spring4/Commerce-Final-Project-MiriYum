@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { isApiError } from '../../../shared/api/apiError'
-import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
+import { useIdempotentAttempt } from '../../../shared/api/useIdempotentAttempt'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert } from '../../../shared/ui/Feedback'
@@ -66,11 +66,12 @@ function NicknameEditor({ account }: { account: ConsumerAccount }) {
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
 
-  /**
-   * 멱등 키는 편집 시작 시점에 한 번 만든다. 같은 값을 재시도하는 동안 유지하고,
-   * 사용자가 값을 고쳐 새로 제출하면 새 시도이므로 새 키를 만든다.
+  /*
+   * 닉네임은 요청 본문이라 요청 지문의 일부다. 값을 고쳐 다시 제출하면 다른
+   * 명령이므로 같은 키를 쓸 수 없고(`COMMON_007`), 결과 불명 뒤에 새 키를
+   * 발급하면 변경이 두 번 나갈 수 있다. attempt가 두 규칙을 함께 지킨다.
    */
-  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey)
+  const attempt = useIdempotentAttempt(nickname)
 
   const mutation = useUpdateNickname()
 
@@ -78,7 +79,6 @@ function NicknameEditor({ account }: { account: ConsumerAccount }) {
     setNickname(account.nickname)
     setFieldError(null)
     setFormError(null)
-    setIdempotencyKey(createIdempotencyKey())
     setEditing(true)
   }
 
@@ -96,11 +96,25 @@ function NicknameEditor({ account }: { account: ConsumerAccount }) {
       return
     }
 
+    const idempotencyKey = attempt.begin()
+    if (idempotencyKey === null) {
+      setFormError(
+        '앞선 변경 요청의 처리 여부를 확인하지 못했습니다. 닉네임을 바꿔 다시 보내면 두 번 변경될 수 있습니다. 잠시 후 마이페이지를 새로 고쳐 확인해 주세요.',
+      )
+      return
+    }
+
     mutation.mutate(
       { nickname, idempotencyKey },
       {
-        onSuccess: () => setEditing(false),
-        onError: (error) => setFormError(nicknameErrorMessage(error)),
+        onSuccess: () => {
+          attempt.settle(null)
+          setEditing(false)
+        },
+        onError: (error) => {
+          attempt.settle(error)
+          setFormError(nicknameErrorMessage(error))
+        },
       },
     )
   }
@@ -169,19 +183,18 @@ function ContactRegistration() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
-  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey)
+  /*
+   * 번호가 요청 지문이다. 닉네임 변경과 같은 규칙을 쓴다.
+   * 번호가 바뀌면 새 키, 결과 불명 뒤 번호 변경은 차단이다.
+   */
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber)
+  const attempt = useIdempotentAttempt(normalizedPhoneNumber)
 
   const mutation = useRegisterContact()
 
-  /**
-   * 번호가 바뀌면 새 시도다.
-   *
-   * 키가 새로 만들어지는 유일한 지점이다. 실패했다는 이유로 바꾸지 않는다.
-   */
   function updatePhoneNumber(next: string) {
     setPhoneNumber(next)
     setFormError(null)
-    setIdempotencyKey(createIdempotencyKey())
   }
 
   function handleSubmit(event: React.FormEvent) {
@@ -194,16 +207,22 @@ function ContactRegistration() {
       return
     }
 
+    const idempotencyKey = attempt.begin()
+    if (idempotencyKey === null) {
+      setFormError(
+        '앞선 등록 요청의 처리 여부를 확인하지 못했습니다. 번호를 바꿔 다시 보내면 등록이 두 번 처리될 수 있습니다. 잠시 후 마이페이지를 새로 고쳐 확인해 주세요.',
+      )
+      return
+    }
+
     mutation.mutate(
-      { phoneNumber: normalizePhoneNumber(phoneNumber), idempotencyKey },
+      { phoneNumber: normalizedPhoneNumber, idempotencyKey },
       {
-        /*
-         * 실패해도 멱등 키를 유지한다. 응답이 유실됐을 뿐 서버가 이미 번호를
-         * 등록했을 수 있고, 연락처는 최초 1회만 등록할 수 있어 새 키로 다시
-         * 보내면 두 번째 요청이 `ACCOUNT_007`로 막힌다. 같은 키를 유지하면
-         * 서버가 앞선 결과를 그대로 돌려준다.
-         */
-        onError: (error) => setFormError(contactErrorMessage(error)),
+        onSuccess: () => attempt.settle(null),
+        onError: (error) => {
+          attempt.settle(error)
+          setFormError(contactErrorMessage(error))
+        },
       },
     )
   }

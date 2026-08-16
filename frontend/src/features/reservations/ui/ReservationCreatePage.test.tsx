@@ -21,10 +21,12 @@ import {
   MENU_ID,
   RESERVATIONS_PATH,
   STORE_ID,
+  STORE_DETAIL_PATH,
   menuHoldAvailability,
   reservationDetail,
   storeWithMenuHold,
 } from '../test/fixtures'
+import { storeDetail } from '../../store-search/test/fixtures'
 import { ReservationCreatePage } from './ReservationCreatePage'
 
 function LocationProbe() {
@@ -410,6 +412,54 @@ describe('예약 생성 화면', () => {
       await screen.findByRole('button', { name: '예약하기' }),
     ).toBeInTheDocument()
     expect(availabilityCalls).toBe(0)
+  })
+
+  /*
+   * 매장 정책을 못 읽으면 다음 단계를 정할 수 없어 버튼이 잠긴다. 이유를
+   * 밝히지 않으면 사용자는 왜 막혔는지 모른 채 화면 앞에 갇힌다.
+   */
+  it('매장 조회가 실패하면 이유를 알리고 다시 시도할 수 있게 한다', async () => {
+    let storeCalls = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(STORE_DETAIL_PATH, () => {
+        storeCalls += 1
+        if (storeCalls === 1) {
+          return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+        }
+        return successResponse(
+          storeDetail({
+            storeId: STORE_ID,
+            modes: {
+              reservationEnabled: true,
+              menuHoldEnabled: true,
+              pickupEnabled: false,
+            },
+          }),
+        )
+      }),
+      http.get(MENU_HOLD_AVAILABILITY_PATH, () =>
+        successResponse(menuHoldAvailability()),
+      ),
+    )
+
+    renderCreate()
+
+    // 잠긴 이유가 화면에 나온다.
+    expect(
+      await screen.findByText(
+        '매장 정보를 불러오지 못해 예약을 이어갈 수 없습니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '메뉴 선택으로' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
+
+    // 다시 조회에 성공하면 진행할 수 있다.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '메뉴 선택으로' })).toBeEnabled(),
+    )
   })
 
   it('영유아 동반 검색에서 넘어오면 인원 구성을 다시 정하게 한다', async () => {

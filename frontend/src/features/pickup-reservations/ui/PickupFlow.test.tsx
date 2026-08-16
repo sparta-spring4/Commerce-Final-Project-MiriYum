@@ -137,6 +137,56 @@ describe('픽업 예약 작성', () => {
     expect(createBody?.menuSelections).toEqual([{ menuId: MENU_ID, quantity: 1 }])
   })
 
+  /*
+   * 결과 불명 픽업을 확인할 경로.
+   *
+   * 1차 MVP에 픽업 목록 화면이 없고 응답이 유실되면 `pickupReservationId`도
+   * 모른다. "내 예약에서 확인"은 통하지 않는다. 대신 같은 키로 한 번 더 보내면
+   * 계약이 저장된 최초 결과를 재생하므로, 그 재전송을 사용자에게 준다.
+   */
+  it('결과를 알 수 없으면 같은 키로 결과를 확인하는 경로를 준다', async () => {
+    const keys: string[] = []
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(AVAILABILITY_PATH, () => successResponse(availability())),
+      http.post(CREATE_PATH, ({ request }) => {
+        attempt += 1
+        const key = request.headers.get('Idempotency-Key')
+        if (key !== null) {
+          keys.push(key)
+        }
+        if (attempt === 1) {
+          return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+        }
+        // 계약상 같은 키·같은 지문의 재전송은 저장된 최초 결과를 재생한다.
+        return successResponse(pickupReservation())
+      }),
+    )
+
+    renderFlow(`/stores/${STORE_ID}/pickup?pickupDate=2026-09-01`)
+
+    fireEvent.click(await screen.findByRole('button', { name: '18:30' }))
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '트러플 크림 파파델레 수량 늘리기',
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '픽업 예약하기' }))
+
+    // 재시도가 아니라 결과 확인으로 안내한다.
+    expect(
+      await screen.findByText(/예약이 두 건 잡히지 않습니다/),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '예약 결과 확인' }))
+
+    await waitFor(() => expect(attempt).toBe(2))
+    // 같은 키여야 서버가 저장된 결과를 재생한다.
+    expect(new Set(keys).size).toBe(1)
+  })
+
   it('메뉴를 고르지 않으면 제출하지 않는다', async () => {
     server.use(
       authenticatedConsumer(),

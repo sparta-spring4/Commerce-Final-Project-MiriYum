@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '../../../shared/api/client'
-import { CONSUMER_PROTECTED_QUERY_ROOTS } from '../../../shared/api/consumerSession'
+import {
+  CONSUMER_PROTECTED_QUERY_ROOTS,
+  keepsSameListConditions,
+} from '../../../shared/api/consumerSession'
 import type { components } from '../../../shared/api/generated/auth-account'
 import { useConsumerAuth } from '../../auth'
 import type {
@@ -56,7 +59,16 @@ export function useMyReservations(query: ReservationHistoryQuery) {
       })
       return response.data
     },
-    placeholderData: (previous) => previous,
+    /*
+     * 페이지를 넘길 때만 이전 목록을 유지한다.
+     *
+     * 상태 필터가 바뀔 때도 유지하면 "방문 완료"를 눌러 놓고 이전 필터의
+     * 예약이 계속 보이고, 그 카드로 상세까지 들어갈 수 있다.
+     */
+    placeholderData: (previous, previousQuery) =>
+      keepsSameListConditions(previousQuery?.queryKey, query)
+        ? previous
+        : undefined,
   })
 }
 

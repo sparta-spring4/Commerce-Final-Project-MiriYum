@@ -269,6 +269,43 @@ describe('매장 찾기 결과 화면', () => {
     ).toBeInTheDocument()
   })
 
+  /*
+   * 예약 버튼은 서버가 받아 줄 매장에만 둔다.
+   *
+   * `reservationEnabled`만 보면 임시 휴무 매장에도 버튼이 떠서, 서버가 거절할
+   * 쓰기 화면으로 사용자를 보낸다. 매장 상세의 `StoreTransactionActions`와
+   * 같은 기준(영업 중 + 예약 활성)을 쓴다.
+   */
+  it('임시 휴무 매장에는 예약 버튼 대신 상세 보기를 둔다', async () => {
+    respondWithStores(
+      storeSummary({
+        name: '임시 휴무 매장',
+        operationStatus: 'TEMPORARILY_CLOSED',
+      }),
+    )
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    await screen.findByRole('link', { name: '임시 휴무 매장' })
+
+    expect(
+      screen.queryByRole('link', { name: '예약하기' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: '매장 자세히 보기' }),
+    ).toBeInTheDocument()
+  })
+
+  it('영업 중이고 예약을 받는 매장에만 예약 버튼을 둔다', async () => {
+    respondWithStores(storeSummary({ operationStatus: 'OPEN' }))
+
+    renderWithProviders(<StoreSearchPage />, { route: '/stores' })
+
+    expect(
+      await screen.findByRole('link', { name: '예약하기' }),
+    ).toBeInTheDocument()
+  })
+
   it('같은 지역 칩을 다시 누르면 조건에서 뺀다', async () => {
     respondWithStores(storeSummary())
 

@@ -164,6 +164,10 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback(() => {
     // 세대를 먼저 올린다. 지금 떠 있는 재발급의 결과는 이 세션의 것이 아니다.
     sessionGeneration.current += 1
+    // 진행 중인 재발급도 이 세션의 것이다. 새 세션이 물려받으면, 세대 확인에
+    // 걸려 버려질 promise를 기다리다가 새 세션의 401이 재발급을 시도해 보지도
+    // 못하고 실패한다.
+    refreshInFlight.current = null
     accessTokenRef.current = null
     setStatus('unauthenticated')
     void clearConsumerProtectedQueries(queryClient)
@@ -231,6 +235,8 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
       // 새 세션의 시작이다. 이전 세션에서 떠난 재발급 결과가 이 세션의 토큰을
       // 덮어쓰지 못하게 세대를 먼저 올린다.
       sessionGeneration.current += 1
+      // 세션 종료와 같은 이유로 진행 중인 재발급도 넘겨받지 않는다.
+      refreshInFlight.current = null
       const generation = sessionGeneration.current
 
       await clearConsumerProtectedQueries(queryClient)

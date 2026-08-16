@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
+import {
+  createIdempotencyKey,
+  isOutcomeUnknown,
+} from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
 import { Alert, EmptyState, ErrorState, Loading } from '../../../shared/ui/Feedback'
@@ -35,6 +38,15 @@ export function PickupCreatePage() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [attemptKey, setAttemptKey] = useState(createIdempotencyKey)
+  /*
+   * 서버 반영 여부를 모르는 실패를 겪었는지.
+   *
+   * 이때는 "내 예약에서 확인"이 통하지 않는다. 1차 MVP에 픽업 목록 화면이
+   * 없고, 응답이 유실됐으면 `pickupReservationId`도 모른다. 대신 같은 키로
+   * 한 번 더 보내면 계약이 저장된 최초 결과를 재생하므로, 그 재전송을
+   * "결과 확인"이라는 이름으로 사용자에게 준다.
+   */
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false)
 
   const availability = usePickupAvailability(
     storeId,
@@ -45,6 +57,7 @@ export function PickupCreatePage() {
 
   function updateDraft(next: PickupDraft) {
     setFormError(null)
+    setOutcomeUnknown(false)
     // 입력이 바뀌면 이전 시도의 멱등 키를 버린다.
     setAttemptKey(createIdempotencyKey())
     setSearchParams(writePickupDraft(next), { replace: true })
@@ -62,6 +75,7 @@ export function PickupCreatePage() {
       { body: toPickupCreateRequest(storeId, draft), idempotencyKey: attemptKey },
       {
         onSuccess: (reservation) => {
+          setOutcomeUnknown(false)
           if (reservation.status !== 'CONFIRMED') {
             setFormError(
               '픽업 예약 결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.',
@@ -78,7 +92,10 @@ export function PickupCreatePage() {
          * 이미 커밋됐을 수 있고, 새 키로 다시 보내면 픽업이 두 건 잡힌다.
          * 키는 사용자가 입력을 바꿀 때만 새로 만든다(updateDraft).
          */
-        onError: (error) => setFormError(toPickupCreateMessage(error)),
+        onError: (error) => {
+          setOutcomeUnknown(isOutcomeUnknown(error))
+          setFormError(toPickupCreateMessage(error))
+        },
       },
     )
   }
@@ -102,7 +119,30 @@ export function PickupCreatePage() {
         </p>
       </header>
 
-      {formError !== null && <Alert tone="error" title={formError} />}
+      {formError !== null && (
+        <Alert
+          tone="error"
+          title={formError}
+          actions={
+            outcomeUnknown ? (
+              /*
+                같은 키로 같은 요청을 다시 보낸다. 계약이 "같은 키와 전체 요청
+                지문의 재시도는 저장된 최초 결과를 재생한다"고 정하므로, 앞선
+                요청이 커밋됐다면 그 결과가 그대로 와서 완료 화면으로 이어지고,
+                커밋되지 않았다면 이번에 처리된다. 어느 쪽이든 두 건이 되지 않는다.
+              */
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={mutation.isPending}
+                onClick={submit}
+              >
+                예약 결과 확인
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
 
       <form
         className="pickup-form"

@@ -17,6 +17,15 @@ import { MyReservationsPage } from './MyReservationsPage'
 
 let receivedSearch: URLSearchParams | null = null
 
+/** 응답을 테스트가 원하는 순간까지 붙잡아 전환 구간을 관찰한다. */
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve: () => resolve() }
+}
+
 function respondWith(
   ...items: ReturnType<typeof reservationHistoryItem>[]
 ) {
@@ -171,6 +180,51 @@ describe('내 예약 내역', () => {
     for (const label of ['결제', '노쇼', '체크인', '웨이팅']) {
       expect(screen.queryByText(new RegExp(label))).not.toBeInTheDocument()
     }
+  })
+
+  /*
+   * 상태 필터를 바꾸는 동안 이전 필터의 예약이 남아 있으면, 새 탭이 눌린
+   * 상태로 이전 결과가 보이고 그 카드로 상세까지 들어갈 수 있다.
+   */
+  it('상태 필터를 바꾸면 이전 필터의 예약을 계속 보여 주지 않는다', async () => {
+    const second = deferred()
+    let call = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_RESERVATIONS_PATH, async () => {
+        call += 1
+        if (call === 1) {
+          return successResponse(
+            reservationHistoryPage([
+              reservationHistoryItem({ storeName: '이전 필터 예약' }),
+            ]),
+          )
+        }
+        await second.promise
+        return successResponse(
+          reservationHistoryPage([
+            reservationHistoryItem({ storeName: '새 필터 예약' }),
+          ]),
+        )
+      }),
+    )
+
+    renderList()
+    await screen.findByRole('link', { name: '이전 필터 예약' })
+
+    fireEvent.click(screen.getByRole('button', { name: '방문 완료' }))
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('link', { name: '이전 필터 예약' }),
+      ).not.toBeInTheDocument(),
+    )
+
+    second.resolve()
+    expect(
+      await screen.findByRole('link', { name: '새 필터 예약' }),
+    ).toBeInTheDocument()
   })
 
   it('조회 실패는 오류 상태로 표시한다', async () => {

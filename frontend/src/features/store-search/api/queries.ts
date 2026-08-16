@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ApiContractError } from '../../../shared/api/apiError'
+import { keepsSameListConditions } from '../../../shared/api/consumerSession'
 import { publicApiClient } from '../../../shared/api/publicApiClient'
 import type { components } from '../../../shared/api/generated/store-search'
 import type {
@@ -106,38 +107,10 @@ export function useStoreSearch(query: StoreSearchQuery, enabled = true) {
      * 조건을 붙여 예약 화면으로 넘어간다.
      */
     placeholderData: (previous, previousQuery) =>
-      keepsSameConditions(previousQuery?.queryKey, query) ? previous : undefined,
+      keepsSameListConditions(previousQuery?.queryKey, query)
+        ? previous
+        : undefined,
   })
-}
-
-/**
- * 두 검색 query가 페이지 번호만 다른지 판정한다.
- *
- * query key의 마지막 칸이 `toSearchQuery`가 만든 조건 객체다. 필드를 손으로
- * 나열하지 않고 통째로 비교해, 계약에 조건이 추가돼도 판정이 함께 따라간다.
- */
-function keepsSameConditions(
-  previousKey: unknown,
-  next: StoreSearchQuery,
-): boolean {
-  if (!Array.isArray(previousKey)) {
-    return false
-  }
-  const previous: unknown = previousKey[previousKey.length - 1]
-  if (typeof previous !== 'object' || previous === null) {
-    return false
-  }
-  return (
-    conditionSignature(previous as StoreSearchQuery) === conditionSignature(next)
-  )
-}
-
-function conditionSignature(query: StoreSearchQuery): string {
-  return JSON.stringify(
-    Object.entries(query)
-      .filter(([field]) => field !== 'page')
-      .sort(([a], [b]) => a.localeCompare(b)),
-  )
 }
 
 export function useStoreDetail(storeId: string, query: StoreSearchQuery) {

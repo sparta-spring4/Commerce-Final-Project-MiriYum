@@ -6,7 +6,7 @@ import { withReturnTo } from '../../../app/returnTo'
 import { createIdempotencyKey } from '../../../shared/api/idempotencyKey'
 import { Button } from '../../../shared/ui/Button'
 import { TextField } from '../../../shared/ui/Field'
-import { Alert } from '../../../shared/ui/Feedback'
+import { Alert, ErrorState } from '../../../shared/ui/Feedback'
 import { Icon, type IconName } from '../../../shared/ui/Icon'
 import { useCreateReservation, useMenuHoldAvailability } from '../api/queries'
 import { useStoreDetail } from '../../store-search/api/queries'
@@ -158,6 +158,19 @@ export function ReservationCreatePage() {
       </header>
 
       <ReservationStepper current={step} steps={steps} />
+
+      {/*
+        매장 정책을 못 읽으면 다음 단계를 정할 수 없어 버튼이 잠긴다. 이유를
+        밝히지 않으면 사용자는 왜 진행이 막혔는지 알 수 없다. 조회 실패와
+        조회 중을 구분해 실패에만 다시 시도를 준다.
+      */}
+      {store.isError && (
+        <ErrorState
+          error={store.error}
+          message="매장 정보를 불러오지 못해 예약을 이어갈 수 없습니다."
+          onRetry={() => void store.refetch()}
+        />
+      )}
 
       {recovery !== null && (
         <RecoveryAlert

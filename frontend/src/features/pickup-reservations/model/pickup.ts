@@ -185,9 +185,16 @@ export function pickupTotalPrice(
 
 /** 생성 실패 문구. 서버 code로만 분기한다. */
 export function toPickupCreateMessage(error: unknown): string {
-  // 서버 반영 여부를 모르면 재시도가 중복 주문이 된다. 확인을 안내한다.
+  /*
+   * 서버 반영 여부를 모르는 실패.
+   *
+   * "내 예약에서 확인"으로 안내할 수 없다. 1차 MVP에 픽업 목록 화면이 없고,
+   * 응답이 유실됐으면 `pickupReservationId`도 모른다. 대신 같은 키로 한 번 더
+   * 보내면 계약이 저장된 최초 결과를 재생하므로 그 행동을 안내한다.
+   * 새 예약이 생기지 않는다는 점을 함께 밝힌다.
+   */
   if (isOutcomeUnknown(error)) {
-    return '픽업 예약 처리 여부를 확인하지 못했습니다. 다시 시도하지 말고 내 예약에서 상태를 확인해 주세요.'
+    return '픽업 예약 처리 여부를 확인하지 못했습니다. "예약 결과 확인"을 누르면 같은 요청으로 결과만 조회하며, 예약이 두 건 잡히지 않습니다.'
   }
   if (!isApiError(error)) {
     return '픽업 예약을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.'

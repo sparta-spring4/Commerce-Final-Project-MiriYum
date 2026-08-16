@@ -84,6 +84,84 @@ describe('마이페이지', () => {
     expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
   })
 
+  /*
+   * 닉네임은 요청 본문이라 요청 지문의 일부다. 값을 고쳐 다시 보내면서 같은
+   * 키를 쓰면 서버가 `COMMON_007`로 거절한다.
+   */
+  it('확정 실패 뒤 닉네임을 고치면 새 멱등 키로 보낸다', async () => {
+    const keys: string[] = []
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
+      http.patch(CONSUMER_ME_PATH, ({ request }) => {
+        attempt += 1
+        const key = request.headers.get('Idempotency-Key')
+        if (key !== null) {
+          keys.push(key)
+        }
+        if (attempt === 1) {
+          return errorResponse(
+            409,
+            AccountErrorCode.NICKNAME_CHANGE_TOO_SOON,
+            '아직 변경할 수 없습니다.',
+          )
+        }
+        return successResponse(consumerAccount({ nickname: '둘째이름' }))
+      }),
+    )
+
+    renderMyPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '닉네임 변경' }))
+    fireEvent.change(screen.getByLabelText('새 닉네임'), {
+      target: { value: '첫이름' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+    await waitFor(() => expect(attempt).toBe(1))
+
+    fireEvent.change(screen.getByLabelText('새 닉네임'), {
+      target: { value: '둘째이름' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+
+    await waitFor(() => expect(attempt).toBe(2))
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  it('결과 불명 뒤 닉네임을 고친 재전송은 보내지 않는다', async () => {
+    let attempt = 0
+
+    server.use(
+      authenticatedConsumer(),
+      http.get(CONSUMER_ME_PATH, () => successResponse(consumerAccount())),
+      http.patch(CONSUMER_ME_PATH, () => {
+        attempt += 1
+        return errorResponse(500, 'COMMON_011', '서버 오류입니다.')
+      }),
+    )
+
+    renderMyPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '닉네임 변경' }))
+    fireEvent.change(screen.getByLabelText('새 닉네임'), {
+      target: { value: '첫이름' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+    await waitFor(() => expect(attempt).toBe(1))
+
+    fireEvent.change(screen.getByLabelText('새 닉네임'), {
+      target: { value: '둘째이름' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+
+    expect(
+      await screen.findByText(/닉네임을 바꿔 다시 보내면 두 번 변경될 수 있습니다/),
+    ).toBeInTheDocument()
+    expect(attempt).toBe(1)
+  })
+
   it('ACCOUNT_005는 서버 메시지를 그대로 안내한다', async () => {
     server.use(
       authenticatedConsumer(),

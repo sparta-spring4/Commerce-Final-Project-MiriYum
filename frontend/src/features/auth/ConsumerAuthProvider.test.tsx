@@ -453,6 +453,65 @@ describe('일반 사용자 인증 shell', () => {
     await waitFor(() => expect(authorization).toBeNull())
   })
 
+  /*
+   * 이전 세션의 재발급을 새 세션이 물려받지 않는다.
+   *
+   * `refreshInFlight`를 비우지 않으면 세션 B의 401이 아직 끝나지 않은 세션 A의
+   * 재발급 promise를 그대로 받는다. 그 결과는 세대 확인에 걸려 버려지므로
+   * B의 요청은 재발급을 시도해 보지도 못하고 실패한다.
+   */
+  it('로그아웃하면 진행 중이던 재발급을 새 세션이 물려받지 않는다', async () => {
+    const first = deferred()
+    let refreshCalls = 0
+
+    server.use(
+      http.post(CONSUMER_REFRESH_PATH, async () => {
+        refreshCalls += 1
+        // 첫 재발급(세션 A 복구)만 붙잡아 둔다.
+        if (refreshCalls === 1) {
+          await first.promise
+          return successResponse(tokenData('session-a'))
+        }
+        return successResponse(tokenData(`session-b-${refreshCalls}`))
+      }),
+      ...signOutHandlers(),
+      http.post(CONSUMER_SESSIONS_PATH, () =>
+        successResponse(tokenData('b-token')),
+      ),
+    )
+
+    server.use(
+      http.get(PROTECTED_PATH, () =>
+        errorResponse(
+          401,
+          AuthErrorCode.ACCESS_TOKEN_EXPIRED,
+          'Access Token이 만료됐습니다.',
+        ),
+      ),
+    )
+
+    renderProvider()
+    await waitFor(() => expect(refreshCalls).toBe(1))
+
+    // A의 재발급(R1)이 아직 떠 있는 상태로 로그아웃하고 B로 다시 로그인한다.
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+    await waitFor(() => expect(status()).toBe('authenticated'))
+
+    /*
+     * R1을 아직 풀지 않은 채로 B의 보호 API가 401을 받는다.
+     *
+     * `refreshInFlight`를 비우지 않았다면 여기서 R1을 그대로 물려받아 기다리므로
+     * 두 번째 재발급이 아예 시작되지 않는다. 비웠다면 곧바로 새 재발급이 뜬다.
+     */
+    fireEvent.click(screen.getByRole('button', { name: '보호 API 호출' }))
+    await waitFor(() => expect(refreshCalls).toBe(2))
+
+    first.resolve()
+    await waitFor(() => expect(status()).toBe('authenticated'))
+  })
+
   it('다시 로그인하면 지난 로그아웃 안내를 지운다', async () => {
     document.cookie = `${CONSUMER_CSRF_COOKIE}=csrf-value; path=/`
 

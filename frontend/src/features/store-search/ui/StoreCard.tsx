@@ -107,12 +107,16 @@ export function StoreCard({ store, categoryNames, detailSearch }: Props) {
           시안은 카드마다 "예약하기" 버튼을 둔다. 예약을 받지 않는 매장까지
           같은 버튼을 두면 누른 뒤에야 막히므로, 그런 매장은 상세로 보낸다.
 
+          `reservationEnabled`만 보면 임시 휴무·폐점 매장에도 버튼이 뜬다.
+          서버가 거절할 쓰기 화면으로 보내는 셈이라 영업 상태도 함께 본다.
+          매장 상세의 `StoreTransactionActions`와 같은 기준이다.
+
           검색 조건을 그대로 넘긴다. 예약 작성 화면의 draft가 serviceDate·
           startTime을 읽고 partySize를 adultCount로 받으므로, 방금 검색한
           조건이 그대로 이어진다. 매장 상세의 예약 버튼과 같은 방식이다.
         */}
         <div className="store-card__foot">
-          {store.modes.reservationEnabled ? (
+          {store.operationStatus === 'OPEN' && store.modes.reservationEnabled ? (
             <Link
               className="mi-button mi-button--primary mi-button--block"
               to={{
