@@ -2,6 +2,7 @@ package com.miriyum.domain.menuhold.service;
 
 import com.miriyum.domain.menuhold.dto.MenuHoldCommandResult;
 import com.miriyum.domain.menuhold.dto.MenuHoldCreateCommand;
+import com.miriyum.domain.menuhold.dto.MenuHoldForfeitCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldFulfillCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldReleaseCommand;
 import com.miriyum.domain.menuhold.dto.MenuHoldTerminationPresence;
@@ -33,7 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 일반 예약의 메뉴 홀드 생성·종결 선잠금·해제·이행 완료 런타임이다. */
+/** 일반 예약의 메뉴 홀드 생성·종결 선잠금·해제·이행 완료·몰수 런타임이다. */
 @Service
 @RequiredArgsConstructor
 public class MenuHoldServiceRuntime implements MenuHoldService {
@@ -174,6 +175,18 @@ public class MenuHoldServiceRuntime implements MenuHoldService {
             throw stateConflict(exception);
         }
         return MenuHoldCommandResult.fulfilled(command.reservationId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MenuHoldCommandResult forfeit(MenuHoldForfeitCommand command) {
+        MenuHold hold = findLockedHold(command.reservationId());
+        try {
+            hold.forfeit();
+        } catch (IllegalStateException exception) {
+            throw stateConflict(exception);
+        }
+        return MenuHoldCommandResult.forfeited(command.reservationId());
     }
 
     private MenuHold findLockedHold(long reservationId) {

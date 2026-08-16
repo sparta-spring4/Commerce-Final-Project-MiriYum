@@ -156,6 +156,10 @@ class ReservationTemporaryMenuHoldPortContractTest {
                 ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
                 ReservationTemporaryMenuHoldResult.State.FULFILLED, 99L)
                 .finalReservationId()).isEqualTo(99L);
+        assertThat(new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.FORFEITED, 99L)
+                .finalReservationId()).isEqualTo(99L);
         assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("presence must not be null");
@@ -183,6 +187,11 @@ class ReservationTemporaryMenuHoldPortContractTest {
                 ReservationTemporaryMenuHoldResult.State.FULFILLED, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("FULFILLED requires a positive finalReservationId");
+        assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(
+                ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
+                ReservationTemporaryMenuHoldResult.State.FORFEITED, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("FORFEITED requires a positive finalReservationId");
         assertThatThrownBy(() -> new ReservationTemporaryMenuHoldResult(
                 ReservationTemporaryMenuHoldResult.Presence.HOLD_PRESENT,
                 ReservationTemporaryMenuHoldResult.State.RELEASED, 0L))
