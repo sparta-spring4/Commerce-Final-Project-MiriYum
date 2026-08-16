@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -79,6 +80,39 @@ class CloudWatchObservabilityConfigTest(unittest.TestCase):
             TEST_NOTIFICATION_HISTORY_CURSOR_SECRET
         )
         return environment
+
+    @staticmethod
+    def duration_seconds(value):
+        match = re.fullmatch(r"(\d+)(ms|s|m|h)", value)
+        if match is None:
+            raise ValueError(f"Unsupported Compose duration: {value}")
+
+        amount = int(match.group(1))
+        unit = match.group(2)
+        return {
+            "ms": amount / 1000,
+            "s": amount,
+            "m": amount * 60,
+            "h": amount * 60 * 60,
+        }[unit]
+
+    def assert_health_wait_covers_compose_budget(self, service, timeout_variable):
+        healthcheck = self.compose_config["services"][service]["healthcheck"]
+        healthcheck_budget = (
+            self.duration_seconds(healthcheck["start_period"])
+            + healthcheck["retries"]
+            * (
+                self.duration_seconds(healthcheck["interval"])
+                + self.duration_seconds(healthcheck["timeout"])
+            )
+        )
+        timeout_match = re.search(
+            rf'{timeout_variable}="\$\{{{timeout_variable}:-(\d+)\}}"',
+            self.deploy_script,
+        )
+
+        self.assertIsNotNone(timeout_match)
+        self.assertGreaterEqual(int(timeout_match.group(1)), healthcheck_budget)
 
     def test_disk_metric_has_instance_only_aggregation(self):
         metrics = self.config["metrics"]
@@ -374,15 +408,19 @@ esac
         )
 
     def test_deployment_waits_for_valkey_startup_before_runtime_verification(self):
-        self.assertIn(
-            'VALKEY_HEALTH_TIMEOUT_SECONDS="${VALKEY_HEALTH_TIMEOUT_SECONDS:-60}"',
-            self.deploy_script,
-        )
         self.assertIn("wait_for_valkey_health()", self.deploy_script)
         self.assertIn('ps -q valkey', self.deploy_script)
         self.assertIn('"${health}" == "healthy"', self.deploy_script)
         self.assertIn("while :; do", self.deploy_script)
         self.assertIn("sleep 2", self.deploy_script)
+
+    def test_service_health_waits_cover_their_compose_healthcheck_budgets(self):
+        self.assert_health_wait_covers_compose_budget(
+            "mysql", "MYSQL_HEALTH_TIMEOUT_SECONDS"
+        )
+        self.assert_health_wait_covers_compose_budget(
+            "valkey", "VALKEY_HEALTH_TIMEOUT_SECONDS"
+        )
 
     def test_deployment_fails_when_valkey_health_wait_times_out(self):
         self.assertIn("verify_valkey()", self.deploy_script)
@@ -468,7 +506,6 @@ aws() {
   fi
   return 0
 }
-ps_calls=0
 docker() {
 
   if [[ "$1" == "login" ]]; then
@@ -476,16 +513,18 @@ docker() {
     return 0
   fi
   if [[ "$1" == "compose" ]]; then
+    if [[ "$*" == *"ps -q mysql"* ]]; then
+      echo mysql-container
+      return 0
+    fi
     if [[ "$*" == *"sh -ec"* ]]; then
       return 1
     fi
-    if [[ "$*" == *" ps"* ]]; then
-      ps_calls=$((ps_calls + 1))
-      if [[ "$ps_calls" -eq 1 ]]; then
-        return 1
-      fi
-    fi
     printf '%s\\n' "$*" >> "$BACKFILL_TEST_COMPOSE"
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    echo healthy
+    return 0
   fi
   return 0
 }
@@ -513,6 +552,7 @@ main
         main_body = self.deploy_script[self.deploy_script.index("\nmain() {") :]
         backend_stop = main_body.index('stop backend')
         valkey_start = main_body.index('up -d mysql valkey')
+        mysql_wait = main_body.index('wait_for_mysql_health')
         pending_index_backfill = main_body.index('backfill_pending_risk_event_index')
         occurrence_counter_backfill = main_body.index(
             'backfill_risk_event_occurrence_counters'
@@ -521,6 +561,8 @@ main
 
         self.assertLess(backend_stop, valkey_start)
         self.assertLess(valkey_start, pending_index_backfill)
+        self.assertLess(valkey_start, mysql_wait)
+        self.assertLess(mysql_wait, pending_index_backfill)
         self.assertLess(pending_index_backfill, occurrence_counter_backfill)
         self.assertLess(occurrence_counter_backfill, backend_start)
 
@@ -888,6 +930,39 @@ wait_for_valkey_health
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual("2", state_path.read_text(encoding="utf-8").strip())
 
+    def test_mysql_health_wait_accepts_starting_then_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            state_path = temporary_path / "inspect-count"
+            result = self.run_deploy_script(
+                """
+docker() {
+  if [[ "$1" == "compose" ]]; then
+    echo mysql-container
+    return 0
+  fi
+  if [[ "$1" == "inspect" ]]; then
+    local count=0
+    [[ -f "$MYSQL_TEST_STATE" ]] && count=$(cat "$MYSQL_TEST_STATE")
+    count=$((count + 1))
+    echo "$count" > "$MYSQL_TEST_STATE"
+    [[ "$count" -eq 1 ]] && echo starting || echo healthy
+    return 0
+  fi
+  return 1
+}
+sleep() { :; }
+wait_for_mysql_health
+""",
+                {
+                    "MYSQL_HEALTH_TIMEOUT_SECONDS": "5",
+                    "MYSQL_TEST_STATE": self.to_bash_path(state_path),
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("2", state_path.read_text(encoding="utf-8").strip())
+
     def test_valkey_verification_fails_when_authenticated_ping_does_not_return_pong(self):
         result = self.run_deploy_script(
             """
@@ -959,6 +1034,56 @@ main
 
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+
+    def test_main_publishes_failed_health_when_mysql_never_becomes_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory)
+            metric_path = temporary_path / "metric-arguments"
+            compose_path = temporary_path / "compose-arguments"
+            environment_file = temporary_path / ".env"
+            environment_file.write_text("placeholder=true\n", encoding="utf-8")
+            result = self.run_deploy_script(
+                """
+aws() {
+  if [[ "$1 $2" == "sts get-caller-identity" ]]; then
+    echo 123456789012
+  elif [[ "$1 $2" == "ecr get-login-password" ]]; then
+    echo token
+  elif [[ "$1 $2" == "cloudwatch put-metric-data" ]]; then
+    printf '%s\\n' "$@" > "$MYSQL_TEST_METRIC"
+  fi
+  return 0
+}
+docker() {
+  if [[ "$1" == "login" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  if [[ "$1" == "compose" && "$*" == *"logs --tail 100 mysql"* ]]; then
+    printf '%s\\n' "$*" > "$MYSQL_TEST_COMPOSE"
+  fi
+  return 0
+}
+curl() { return 1; }
+sleep() { :; }
+main
+""",
+                {
+                    "AWS_REGION": "ap-northeast-2",
+                    "BACKEND_IMAGE": "example.invalid/backend:sha",
+                    "ENV_FILE": self.to_bash_path(environment_file),
+                    "COMPOSE_FILE": self.to_bash_path(temporary_path / "docker-compose.yml"),
+                    "MYSQL_HEALTH_TIMEOUT_SECONDS": "0",
+                    "MYSQL_TEST_METRIC": self.to_bash_path(metric_path),
+                    "MYSQL_TEST_COMPOSE": self.to_bash_path(compose_path),
+                },
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Value=0", metric_path.read_text(encoding="utf-8"))
+            self.assertIn(
+                "logs --tail 100 mysql", compose_path.read_text(encoding="utf-8")
+            )
 
     @staticmethod
     def run_deploy_script(script, extra_environment):
