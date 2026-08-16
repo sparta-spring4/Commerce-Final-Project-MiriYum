@@ -97,6 +97,9 @@ class WaitingClosureServiceTest {
         assertThat(items.getValue()).extracting(WaitingClosureJobItem::getExpectedVersion)
                 .containsExactly(0L, 0L);
         then(teamRepository).should().findActiveClosureTargets(22L);
+        then(teamRepository).should(org.mockito.Mockito.never()).findKeysetPage(
+                org.mockito.ArgumentMatchers.anyLong(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
