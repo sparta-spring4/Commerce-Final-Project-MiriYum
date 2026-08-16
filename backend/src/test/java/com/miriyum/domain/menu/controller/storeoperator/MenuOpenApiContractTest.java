@@ -14,6 +14,29 @@ import org.yaml.snakeyaml.Yaml;
 class MenuOpenApiContractTest {
 
     @Test
+    void menuPublicationConditionsDeclareEffectiveAtInEachLocalSchema()
+            throws IOException {
+        Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
+        Map<String, Object> document;
+        try (InputStream input = Files.newInputStream(contract)) {
+            document = new Yaml().load(input);
+        }
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> request = map(schemas.get("MenuPublicationRequest"));
+        List<Object> conditions = list(request.get("allOf"));
+
+        Map<String, Object> scheduled = map(map(conditions.get(0)).get("then"));
+        assertThat(map(scheduled.get("properties"))).containsKey("effectiveAt");
+        assertThat(list(scheduled.get("required"))).containsExactly("effectiveAt");
+
+        Map<String, Object> immediate = map(
+                map(map(conditions.get(1)).get("then")).get("not"));
+        assertThat(map(immediate.get("properties"))).containsKey("effectiveAt");
+        assertThat(list(immediate.get("required"))).containsExactly("effectiveAt");
+    }
+
+    @Test
     void managementLifecycleAndStructuredDisclosureMatchControllerContract()
             throws IOException {
         Path contract = Path.of("..", "docs", "specs", "store-search", "openapi.yaml");
