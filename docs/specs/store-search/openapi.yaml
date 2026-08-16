@@ -970,7 +970,9 @@ paths:
     put:
       tags: [Menu Public Image]
       summary: 메뉴 공개 이미지 저장 또는 교체
-      description: 메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+      description: >-
+        메뉴당 공개 이미지 한 장을 유지한다. 새 파일의 저장·검증이 끝나기 전까지 기존 공개 이미지를 유지한다.
+        S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는 저장소가 비활성화되어 503으로 실패 폐쇄한다.
       operationId: putMenuImage
       security:
         - bearerAuth: []
@@ -1004,9 +1006,9 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/MenuNotFound"
+          $ref: "#/components/responses/MenuImageTargetNotFound"
         "409":
-          $ref: "#/components/responses/MenuImageConflict"
+          $ref: "#/components/responses/MenuImageStateConflict"
         "413":
           $ref: "#/components/responses/ImageSizeExceeded"
         "415":
@@ -1016,6 +1018,9 @@ paths:
     delete:
       tags: [Menu Public Image]
       summary: 메뉴 공개 이미지 삭제
+      description: >-
+        메뉴의 공개 이미지를 삭제한다. S3 버킷·IAM·환경 변수 구성과 staging smoke 검증(#223) 전에는
+        저장소가 비활성화되어 503으로 실패 폐쇄한다.
       operationId: deleteMenuImage
       security:
         - bearerAuth: []
@@ -1033,9 +1038,9 @@ paths:
         "403":
           $ref: "#/components/responses/StoreAccessDenied"
         "404":
-          $ref: "#/components/responses/MenuNotFound"
+          $ref: "#/components/responses/MenuImageTargetNotFound"
         "409":
-          $ref: "#/components/responses/MenuImageConflict"
+          $ref: "#/components/responses/MenuImageStateConflict"
         "503":
           $ref: "../mvp1-common/openapi.yaml#/components/responses/ServiceUnavailable"
   /api/v1/store-operators/stores/{storeId}/menus/{menuId}/publications:
@@ -2822,15 +2827,40 @@ components:
               value:
                 code: COMMON_007
                 message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
-    MenuImageConflict:
-      description: Idempotency-Key를 다른 메뉴 이미지 요청에 재사용함
+    MenuImageTargetNotFound:
+      description: 요청한 매장 또는 메뉴를 찾을 수 없음
       content:
         application/json:
           schema:
             $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
-          example:
-            code: COMMON_007
-            message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
+          examples:
+            storeNotFound:
+              value:
+                code: STORE_001
+                message: 매장을 찾을 수 없습니다.
+            menuNotFound:
+              value:
+                code: STORE_009
+                message: 메뉴를 찾을 수 없습니다.
+    MenuImageStateConflict:
+      description: 현재 매장 상태 또는 Idempotency-Key 충돌로 메뉴 이미지를 변경할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "../mvp1-common/openapi.yaml#/components/schemas/ErrorResponse"
+          examples:
+            storeStateConflict:
+              value:
+                code: STORE_005
+                message: 현재 매장 상태에서 요청한 작업을 수행할 수 없습니다.
+            verificationStateConflict:
+              value:
+                code: STORE_007
+                message: 현재 입점 검증 상태에서 운영할 수 없습니다.
+            idempotencyKeyReused:
+              value:
+                code: COMMON_007
+                message: 동일한 Idempotency-Key를 다른 요청에 사용할 수 없습니다.
     StoreImageTargetNotFound:
       description: 매장 또는 교체 대상 공개 이미지를 찾을 수 없음
       content:

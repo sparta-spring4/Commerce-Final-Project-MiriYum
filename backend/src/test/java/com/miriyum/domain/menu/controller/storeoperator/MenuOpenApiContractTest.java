@@ -90,10 +90,15 @@ class MenuOpenApiContractTest {
                 Map.of("$ref", "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"));
         assertThat(map(map(put.get("requestBody")).get("content")))
                 .containsKey("multipart/form-data");
-        assertThat(map(put.get("responses"))).containsEntry("200", Map.of(
+        Map<String, Object> putResponses = map(put.get("responses"));
+        assertThat(putResponses).containsEntry("200", Map.of(
                 "description", "저장 또는 교체를 완료한 메뉴 공개 이미지",
                 "content", Map.of("application/json", Map.of(
                         "schema", Map.of("$ref", "#/components/schemas/MenuPublicImageSuccessResponse")))));
+        assertThat(putResponses).containsEntry("404", Map.of(
+                "$ref", "#/components/responses/MenuImageTargetNotFound"));
+        assertThat(putResponses).containsEntry("409", Map.of(
+                "$ref", "#/components/responses/MenuImageStateConflict"));
 
         Map<String, Object> delete = map(imageSlot.get("delete"));
         assertThat(delete).containsEntry("operationId", "deleteMenuImage");
@@ -101,9 +106,17 @@ class MenuOpenApiContractTest {
                 Map.of("$ref", "#/components/parameters/StoreId"),
                 Map.of("$ref", "#/components/parameters/MenuId"),
                 Map.of("$ref", "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey"));
-        assertThat(map(delete.get("responses"))).containsKeys("204", "400");
+        Map<String, Object> deleteResponses = map(delete.get("responses"));
+        assertThat(deleteResponses).containsKeys("204", "400");
+        assertThat(deleteResponses).containsEntry("404", Map.of(
+                "$ref", "#/components/responses/MenuImageTargetNotFound"));
+        assertThat(deleteResponses).containsEntry("409", Map.of(
+                "$ref", "#/components/responses/MenuImageStateConflict"));
 
         Map<String, Object> components = map(document.get("components"));
+        Map<String, Object> responses = map(components.get("responses"));
+        assertThat(map(responses.get("MenuImageTargetNotFound"))).containsKey("content");
+        assertThat(map(responses.get("MenuImageStateConflict"))).containsKey("content");
         Map<String, Object> schemas = map(components.get("schemas"));
         Map<String, Object> menuImage = map(schemas.get("MenuPublicImage"));
         assertThat(list(menuImage.get("required"))).containsExactly("url");
