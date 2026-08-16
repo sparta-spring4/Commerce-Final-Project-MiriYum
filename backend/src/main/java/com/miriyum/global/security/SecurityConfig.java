@@ -10,9 +10,11 @@ import com.miriyum.domain.auth.jwt.TokenNamespace;
 import com.miriyum.domain.auth.password.Sha256BCryptPasswordEncoder;
 import com.miriyum.domain.auth.ratelimit.RateLimitFilter;
 import com.miriyum.domain.auth.ratelimit.RateLimiter;
+import com.miriyum.domain.platformoperator.config.membersupport.MemberRestrictionFilter;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.Order;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -78,7 +80,8 @@ public class SecurityConfig {
     public SecurityFilterChain consumerAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ObjectProvider<MemberRestrictionFilter> restrictionFilter
     ) {
         http
                 .securityMatcher("/api/v1/consumers/**")
@@ -91,6 +94,8 @@ public class SecurityConfig {
                 .addFilterBefore(
                         new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.CONSUMER),
                         UsernamePasswordAuthenticationFilter.class);
+        MemberRestrictionFilter restriction = restrictionFilter.getIfAvailable();
+        if (restriction != null) http.addFilterAfter(restriction, JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -99,7 +104,8 @@ public class SecurityConfig {
     public SecurityFilterChain storeOperatorAccountFilterChain(
             HttpSecurity http,
             JwtTokenProvider jwtTokenProvider,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ObjectProvider<MemberRestrictionFilter> restrictionFilter
     ) {
         http
                 .securityMatcher("/api/v1/store-operators/**")
@@ -112,6 +118,8 @@ public class SecurityConfig {
                 .addFilterBefore(
                         new JwtAuthenticationFilter(jwtTokenProvider, TokenNamespace.STORE_OPERATOR),
                         UsernamePasswordAuthenticationFilter.class);
+        MemberRestrictionFilter restriction = restrictionFilter.getIfAvailable();
+        if (restriction != null) http.addFilterAfter(restriction, JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -123,7 +131,12 @@ public class SecurityConfig {
             ObjectMapper objectMapper
     ) {
         http
-                .securityMatcher("/api/v1/consumers/auth/**", "/api/v1/store-operators/auth/**")
+                .securityMatcher(
+                        "/api/v1/consumers/auth/**", "/api/v1/store-operators/auth/**",
+                        "/api/v1/consumers/account-recovery-*/**",
+                        "/api/v1/store-operators/account-recovery-*/**",
+                        "/api/v1/consumers/account-sanction-appeals",
+                        "/api/v1/store-operators/account-sanction-appeals")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
