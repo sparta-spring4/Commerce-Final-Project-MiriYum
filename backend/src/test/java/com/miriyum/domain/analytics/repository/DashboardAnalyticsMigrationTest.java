@@ -41,6 +41,11 @@ class DashboardAnalyticsMigrationTest {
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {
             assertThat(columnType(connection, "stores", "dashboard_authority_version"))
                     .isEqualTo("bigint");
+            assertThat(columnType(
+                    connection,
+                    "reservation_capacity_buckets",
+                    "policy_published_at"))
+                    .isEqualTo("datetime");
             assertThat(uniqueColumns(
                     connection,
                     "dashboard_analytics_snapshots",
@@ -60,6 +65,8 @@ class DashboardAnalyticsMigrationTest {
                             "consumer_account_id",
                             "reservation_id",
                             "waiting_team_id");
+            assertThat(columnNames(connection, "dashboard_analytics_snapshots"))
+                    .doesNotContain("replaces_dashboard_snapshot_id");
         }
     }
 

@@ -95,7 +95,7 @@ class ReservationAnalyticsQueryServiceIT {
     }
 
     @Test
-    void actualMySqlAggregatesTheEarlierAsOfWithoutHoldOccupancy() {
+    void actualMySqlAggregatesTheEarlierAsOfWithoutLaterCapacityPolicy() {
         ReservationAnalyticsSnapshot snapshot = service.getDashboardSnapshot(
                 STORE_ID, BUSINESS_DATE, AS_OF);
 
@@ -104,9 +104,20 @@ class ReservationAnalyticsQueryServiceIT {
         assertThat(snapshot.everConfirmedTeams()).isEqualTo(4L);
         assertThat(snapshot.reservedPeopleUnits()).isEqualTo(6L);
         assertThat(snapshot.reservedTeamUnits()).isEqualTo(3L);
+        assertThat(snapshot.offeredPeopleUnits()).isEqualTo(8L);
+        assertThat(snapshot.offeredTeamUnits()).isEqualTo(4L);
+        assertThat(snapshot.dataThrough()).isEqualTo(Instant.parse("2026-08-16T08:50:00Z"));
+    }
+
+    @Test
+    void laterAsOfSelectsThePolicyPublishedAfterTheEarlierBoundary() {
+        ReservationAnalyticsSnapshot snapshot = service.getDashboardSnapshot(
+                STORE_ID,
+                BUSINESS_DATE,
+                Instant.parse("2026-08-16T10:30:00Z"));
+
         assertThat(snapshot.offeredPeopleUnits()).isEqualTo(10L);
         assertThat(snapshot.offeredTeamUnits()).isEqualTo(5L);
-        assertThat(snapshot.dataThrough()).isEqualTo(Instant.parse("2026-08-16T08:50:00Z"));
     }
 
     @Test
@@ -159,18 +170,18 @@ class ReservationAnalyticsQueryServiceIT {
                     reservation_capacity_bucket_id, store_id, service_date,
                     start_time, end_time, max_people, max_teams, occupied_people,
                     occupied_teams, min_party_size, max_party_size, infants_allowed,
-                    policy_version
+                    policy_version, policy_published_at
                 ) VALUES (101, 17, '2026-08-16', '18:00:00', '19:00:00',
-                    8, 4, 0, 0, 1, 8, TRUE, 1)
+                    8, 4, 0, 0, 1, 8, TRUE, 1, '2026-08-16 08:00:00')
                 """);
         jdbc.update("""
                 INSERT INTO reservation_capacity_buckets (
                     reservation_capacity_bucket_id, store_id, service_date,
                     start_time, end_time, max_people, max_teams, occupied_people,
                     occupied_teams, min_party_size, max_party_size, infants_allowed,
-                    policy_version
+                    policy_version, policy_published_at
                 ) VALUES (102, 17, '2026-08-16', '18:00:00', '19:00:00',
-                    10, 5, 0, 0, 1, 10, TRUE, 2)
+                    10, 5, 0, 0, 1, 10, TRUE, 2, '2026-08-16 10:00:00')
                 """);
     }
 

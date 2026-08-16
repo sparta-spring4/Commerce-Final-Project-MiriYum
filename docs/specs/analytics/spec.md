@@ -43,7 +43,7 @@
 
 ## 동일 기준 시각 snapshot
 
-Dashboard service는 권한을 먼저 검증한 뒤 `Clock`을 한 번만 읽어 `asOf`를 고정한다. 모든 source query에는 같은 `storeId`, `businessDate`, `asOf`를 전달한다. 각 source는 자신의 상태·감사·버전만 읽고 개인정보 없는 집계 DTO를 반환한다.
+Dashboard service는 권한을 먼저 검증한 뒤 `Clock`을 한 번만 읽어 실제 생성 시각 `generatedAt`을 고정하고, 이를 UTC 1분 경계로 내린 값을 `asOf`로 사용한다. 모든 source query에는 같은 `storeId`, `businessDate`, `asOf`를 전달한다. 같은 매장·영업일·권한 version·1분 버킷의 재요청은 최초 저장된 canonical snapshot을 재사용하며, 버킷 안에서 뒤늦게 들어온 source 변경은 다음 분 snapshot에 반영한다. 각 source는 자신의 상태·감사·버전만 읽고 개인정보 없는 집계 DTO를 반환한다.
 
 ```java
 public record StoreDashboardAuthority(
@@ -118,11 +118,13 @@ Store는 공개 탐색 가능한 자원이므로 기존 authorized enumeration �
 ## 중복·정정·재집계
 
 - source는 원 aggregate ID의 `asOf` 기준 최신 유효 version만 사용한다.
+- Reservation 수용량 분모는 DB가 기록한 `policy_published_at <= asOf`인 정책 중 최신 `policy_version`만 사용한다. 현재 정책을 과거 snapshot에 소급 적용하지 않는다.
 - 기술 재시도·동일 command audit·동일 상태 사건은 안정적인 사건 ID/version으로 한 번만 반영한다.
 - snapshot 유일 키는 `(store_id, business_date, as_of, store_authority_version)`이다.
 - metric cell 유일 키는 `(dashboard_snapshot_id, metric_key)`다.
-- 동일 생성 요청 replay는 같은 snapshot을 반환한다. 다른 input checkpoint나 보정 입력은 새 `aggregationVersion`과 새 snapshot을 만든다.
-- 정정은 성공 snapshot을 제자리 덮어쓰지 않는다. 이전 snapshot과 교체 관계를 남기고 최신 게시 pointer만 원자적으로 바꾼다.
+- 동일 1분 버킷 replay는 source가 그 사이 바뀌어도 최초 저장 snapshot을 반환한다. 다른 input checkpoint나 보정 입력은 다음 분 snapshot에서 새 `aggregationVersion`으로 반영한다.
+- 최초 동시 발행은 안정적인 `stores` 행을 `SELECT ... FOR UPDATE`로 잠근 뒤 게시하여 business date별 최신 marker를 하나만 남긴다.
+- snapshot은 성공 후 제자리 덮어쓰지 않는다. 31일을 초과한 header는 게시 transaction에서 정리하고 metric FK의 `ON DELETE CASCADE`로 함께 삭제한다. 삭제된 기간은 재조회 시 source에서 다시 계산할 수 있다.
 - 같은 source checkpoint와 definition version의 전체 재집계와 증분 결과는 값·무결성 digest가 같아야 한다.
 - 부분 metric row를 먼저 최신으로 게시하지 않는다. header와 여섯 metric cell을 한 MySQL transaction에서 게시한다.
 

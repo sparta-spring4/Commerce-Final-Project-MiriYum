@@ -12,7 +12,7 @@
 
 - #385's V48 is on `dev`. Concurrent migration PRs merge first. Reserve V51 for #270 by explicit user direction, merge #270 last, recompute latest `dev` max + 1, and verify the complete clean and upgrade paths.
 - Do not consume Reservation or Waiting Entity/Repository classes from `com.miriyum.domain.analytics`.
-- Capture one `Instant asOf` and require every source DTO and every output metric to contain that exact value.
+- Capture one `Instant generatedAt`, truncate it to a UTC one-minute `asOf`, and require every source DTO and every output metric to contain that exact `asOf`.
 - `value=0` is a measured zero; missing, delayed, quarantined, or invalid-denominator input uses null with a non-COMPLETE status and reason.
 - Reservation no-show candidate and confirmed cells remain `UNAVAILABLE/SOURCE_CONTRACT_MISSING` until a separate #240 integration plan is approved.
 - Foreign existing stores return `403 STORE_003`; actually missing stores return `404 STORE_001`.
@@ -90,7 +90,7 @@ Expected: FAIL because V51 and its tables/column do not exist.
 
 - [ ] **Step 5: Implement V51 and the authority contract**
 
-Add `stores.dashboard_authority_version BIGINT NOT NULL DEFAULT 1` with a positive check. Create `dashboard_analytics_snapshots` and `dashboard_analytics_metric_snapshots` with the exact unique keys above, FK metric rows to the header with `ON DELETE RESTRICT`, CHECK constraints for versions and enum strings, JSON metric payload, nullable source fields, and no consumer/reservation/waiting identifiers.
+Add `stores.dashboard_authority_version BIGINT NOT NULL DEFAULT 1` with a positive check and `reservation_capacity_buckets.policy_published_at` as the durable capacity-policy effectivity boundary. Create `dashboard_analytics_snapshots` and `dashboard_analytics_metric_snapshots` with the exact unique keys above, FK metric rows to the header with `ON DELETE CASCADE`, CHECK constraints for versions and enum strings, JSON metric payload, nullable source fields, and no consumer/reservation/waiting identifiers.
 
 ```java
 public record StoreDashboardAuthority(
@@ -435,7 +435,7 @@ Expected: compile failure because repositories and executor are absent.
 
 - [ ] **Step 5: Implement immutable entities and one transaction publisher**
 
-Require all six metric keys exactly once. Serialize only OpenAPI-approved value objects. On the header unique-key race, finish the failed transaction and load the winner in a new transaction; replay only when every canonical metric input matches, otherwise classify as a conflict instead of returning the wrong snapshot.
+Require all six metric keys exactly once. Serialize only OpenAPI-approved value objects. Lock the stable Store row before checking or replacing the latest marker so concurrent first publishers serialize. Reuse the first stored canonical snapshot for the same one-minute identity, and opportunistically delete snapshots older than 31 days with their cascaded metric cells.
 
 - [ ] **Step 6: Run focused entity/repository tests and verify GREEN**
 

@@ -87,7 +87,9 @@ components:
           format: int64
           minimum: 1
         asOf:
-          $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+          allOf:
+            - $ref: "../mvp1-common/openapi.yaml#/components/schemas/OffsetDateTime"
+          description: 서버가 generatedAt을 UTC 1분 경계로 내린 공통 source 조회 시각이다.
         dataThrough:
           $ref: "#/components/schemas/NullableDataThrough"
         inputCheckpoint:

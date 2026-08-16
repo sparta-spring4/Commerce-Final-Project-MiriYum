@@ -76,6 +76,26 @@ class StoreDashboardAnalyticsServiceTest {
     }
 
     @Test
+    void snapshotBoundaryUsesOneMinuteBucketAndPreservesGenerationTime() {
+        Instant generatedAt = AS_OF.plusSeconds(42).plusNanos(123_000_000L);
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot());
+        service = new StoreDashboardAnalyticsService(
+                storeService, reservationSource, waitingSource,
+                new AnalyticsMetricFailureClassifier(), executor,
+                Clock.fixed(generatedAt, ZoneOffset.UTC),
+                JsonMapper.builder().build());
+
+        service.getDashboard(41L, STORE_ID);
+
+        assertThat(published.get().asOf()).isEqualTo(AS_OF);
+        assertThat(published.get().generatedAt()).isEqualTo(generatedAt);
+        assertThat(published.get().metrics())
+                .extracting(metric -> metric.metadata().asOf())
+                .containsOnly(AS_OF);
+    }
+
+    @Test
     void reservationFailureDoesNotOverwriteWaitingSuccess() {
         given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
                 .willThrow(new DataAccessResourceFailureException("reservation down"));
@@ -93,14 +113,22 @@ class StoreDashboardAnalyticsServiceTest {
     }
 
     private static ReservationAnalyticsSnapshot reservationSnapshot() {
+        return reservationSnapshot(AS_OF);
+    }
+
+    private static ReservationAnalyticsSnapshot reservationSnapshot(Instant asOf) {
         return new ReservationAnalyticsSnapshot(
-                STORE_ID, DATE, AS_OF, 4, 6, 10, 3, 5, 1, 4,
-                "a".repeat(64), AS_OF.minusSeconds(2), 7, false);
+                STORE_ID, DATE, asOf, 4, 6, 10, 3, 5, 1, 4,
+                "a".repeat(64), asOf.minusSeconds(2), 7, false);
     }
 
     private static WaitingAnalyticsSnapshot waitingSnapshot() {
+        return waitingSnapshot(AS_OF);
+    }
+
+    private static WaitingAnalyticsSnapshot waitingSnapshot(Instant asOf) {
         return new WaitingAnalyticsSnapshot(
-                STORE_ID, DATE, AS_OF, 1, 0, 3, 0, 1800L, 2,
-                "b".repeat(64), AS_OF.minusSeconds(1), 9, false);
+                STORE_ID, DATE, asOf, 1, 0, 3, 0, 1800L, 2,
+                "b".repeat(64), asOf.minusSeconds(1), 9, false);
     }
 }

@@ -56,7 +56,7 @@ public class ReservationAnalyticsQueryService {
                 reservationRepository.aggregateDashboardLifecycle(storeId, businessDate, asOf));
         ReservationCapacityBucketRepository.ReservationCapacityOfferAnalytics offers =
                 Objects.requireNonNull(bucketRepository.aggregateDashboardOffers(
-                        storeId, businessDate));
+                        storeId, businessDate, asOf));
         ReservationCapacityAllocationRepository.ReservationCapacityUsageAnalytics usage =
                 Objects.requireNonNull(allocationRepository.aggregateDashboardUsage(
                         storeId, businessDate, asOf));
@@ -94,6 +94,7 @@ public class ReservationAnalyticsQueryService {
                 fulfillmentVersion);
         Instant dataThrough = Stream.of(
                         instant(lifecycle.getDataThroughEpochMicros()),
+                        instant(offers.getDataThroughEpochMicros()),
                         instant(cancellations.getDataThroughEpochMicros()),
                         instant(fulfillments.getDataThroughEpochMicros()))
                 .filter(Objects::nonNull)

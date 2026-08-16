@@ -18,6 +18,7 @@ import com.miriyum.domain.analytics.repository.DashboardMetricSnapshotRepository
 import com.miriyum.domain.analytics.repository.DashboardSnapshotRepository;
 import java.sql.PreparedStatement;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -58,20 +59,16 @@ public class DashboardSnapshotTransactionExecutor {
     @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
     public DashboardSnapshotResponse publish(DashboardSnapshotDraft draft) {
         DashboardSnapshot candidate = DashboardSnapshot.create(draft);
+        lockStore(draft.storeId());
         DashboardSnapshot existing = snapshotRepository
                 .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
                         draft.storeId(), draft.businessDate(), draft.asOf(),
                         draft.storeAuthorityVersion())
                 .orElse(null);
         if (existing != null) {
-            requireCanonicalReplay(existing, draft);
-            return response(existing.publicId(), existing.getGeneratedAt(), draft);
+            return storedResponse(existing);
         }
 
-        Long replacedId = snapshotRepository.findByStoreIdAndBusinessDateAndLatestMarkerTrue(
-                        draft.storeId(), draft.businessDate())
-                .map(DashboardSnapshot::getId)
-                .orElse(null);
         jdbcTemplate.update("""
                 UPDATE dashboard_analytics_snapshots
                 SET latest_marker = NULL, updated_at = UTC_TIMESTAMP(6)
@@ -84,24 +81,17 @@ public class DashboardSnapshotTransactionExecutor {
                 .max()
                 .orElseThrow();
         int inserted = jdbcTemplate.update("""
-                INSERT IGNORE INTO dashboard_analytics_snapshots (
+                INSERT INTO dashboard_analytics_snapshots (
                     public_snapshot_id, store_id, business_date, time_zone_id,
                     as_of, generated_at, store_authority_version, aggregation_version,
-                    replaces_dashboard_snapshot_id, latest_marker, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                    latest_marker, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                 """, snapshotId.toString(), draft.storeId(), draft.businessDate(),
                 draft.timeZoneId(), utc(draft.asOf()), utc(draft.generatedAt()),
-                draft.storeAuthorityVersion(), aggregationVersion, replacedId);
+                draft.storeAuthorityVersion(), aggregationVersion);
 
-        if (inserted == 0) {
-            DashboardSnapshot winner = snapshotRepository
-                    .findByStoreIdAndBusinessDateAndAsOfAndStoreAuthorityVersion(
-                            draft.storeId(), draft.businessDate(), draft.asOf(),
-                            draft.storeAuthorityVersion())
-                    .orElseThrow(() -> new IllegalStateException(
-                            "dashboard snapshot identity conflict"));
-            requireCanonicalReplay(winner, draft);
-            return response(winner.publicId(), winner.getGeneratedAt(), draft);
+        if (inserted != 1) {
+            throw new IllegalStateException("dashboard snapshot insert invariant violated");
         }
 
         long databaseId = jdbcTemplate.queryForObject(
@@ -110,7 +100,26 @@ public class DashboardSnapshotTransactionExecutor {
                 Long.class,
                 snapshotId.toString());
         insertMetrics(databaseId, draft.metrics());
+        pruneExpired(draft.storeId(), draft.generatedAt());
         return response(snapshotId, draft.generatedAt(), draft);
+    }
+
+    private void lockStore(long storeId) {
+        Long lockedStoreId = jdbcTemplate.queryForObject(
+                "SELECT store_id FROM stores WHERE store_id = ? FOR UPDATE",
+                Long.class,
+                storeId);
+        if (lockedStoreId == null || lockedStoreId != storeId) {
+            throw new IllegalStateException("dashboard store lock invariant violated");
+        }
+    }
+
+    private void pruneExpired(long storeId, Instant generatedAt) {
+        jdbcTemplate.update("""
+                DELETE FROM dashboard_analytics_snapshots
+                WHERE store_id = ?
+                  AND generated_at < ?
+                """, storeId, utc(generatedAt.minus(Duration.ofDays(31))));
     }
 
     private void insertMetrics(long dashboardSnapshotId, List<DashboardMetricDraft> metrics) {
@@ -141,60 +150,41 @@ public class DashboardSnapshotTransactionExecutor {
                 });
     }
 
-    private void requireCanonicalReplay(
-            DashboardSnapshot existing,
-            DashboardSnapshotDraft draft
-    ) {
+    private DashboardSnapshotResponse storedResponse(DashboardSnapshot existing) {
         List<DashboardMetricSnapshot> stored = metricRepository
                 .findAllByDashboardSnapshotIdOrderByMetricKeyAsc(existing.getId());
-        Map<String, DashboardMetricDraft> requested = draft.metrics().stream()
-                .collect(Collectors.toMap(DashboardMetricDraft::metricKey, Function.identity()));
         if (stored.size() != DashboardSnapshot.REQUIRED_METRIC_KEYS.size()) {
             throw new IllegalStateException("stored dashboard snapshot is incomplete");
         }
-        for (DashboardMetricSnapshot metric : stored) {
-            DashboardMetricDraft expected = requested.get(metric.getMetricKey());
-            java.util.List<String> mismatches = new java.util.ArrayList<>();
-            if (expected == null) {
-                mismatches.add("key");
-            } else {
-                if (!metric.getDefinitionVersion().equals(
-                        expected.metadata().definitionVersion())) mismatches.add("definition");
-                if (metric.getAggregationVersion()
-                        != expected.metadata().aggregationVersion()) mismatches.add("aggregation");
-                if (!metric.getAsOf().equals(expected.metadata().asOf())) {
-                    mismatches.add("asOf");
-                }
-                if (!java.util.Objects.equals(
-                        metric.getDataThrough(), expected.metadata().dataThrough())) {
-                    mismatches.add("dataThrough");
-                }
-                if (!java.util.Objects.equals(
-                        metric.getInputCheckpoint(), expected.metadata().inputCheckpoint())) {
-                    mismatches.add("checkpoint");
-                }
-                if (metric.getCompleteness() != expected.metadata().completeness()) {
-                    mismatches.add("completeness");
-                }
-                if (metric.isCorrected() != expected.metadata().corrected()) {
-                    mismatches.add("corrected");
-                }
-                if (metric.getReasonCode() != expected.metadata().reasonCode()) {
-                    mismatches.add("reason");
-                }
-                if (!jsonEquivalent(
-                        metric.getValueJson() == null
-                                ? null : objectMapper.readTree(metric.getValueJson()),
-                        expected.value())) {
-                    mismatches.add("value");
-                }
-            }
-            if (!mismatches.isEmpty()) {
-                throw new IllegalStateException(
-                        "dashboard snapshot replay input differs for "
-                                + metric.getMetricKey() + ": " + mismatches);
-            }
-        }
+        List<DashboardMetricDraft> metrics = stored.stream()
+                .map(this::storedDraft)
+                .toList();
+        DashboardSnapshotDraft storedSnapshot = new DashboardSnapshotDraft(
+                existing.getStoreId(),
+                existing.getBusinessDate(),
+                existing.getTimeZoneId(),
+                existing.getAsOf(),
+                existing.getGeneratedAt(),
+                existing.getStoreAuthorityVersion(),
+                metrics);
+        return response(existing.publicId(), existing.getGeneratedAt(), storedSnapshot);
+    }
+
+    private DashboardMetricDraft storedDraft(DashboardMetricSnapshot metric) {
+        MetricMetadata metadata = new MetricMetadata(
+                metric.getDefinitionVersion(),
+                metric.getAggregationVersion(),
+                metric.getAsOf(),
+                metric.getDataThrough(),
+                metric.getInputCheckpoint(),
+                metric.getCompleteness(),
+                metric.isCorrected(),
+                metric.getReasonCode());
+        return new DashboardMetricDraft(
+                metric.getMetricKey(),
+                metric.getValueJson() == null
+                        ? null : objectMapper.readTree(metric.getValueJson()),
+                metadata);
     }
 
     private DashboardSnapshotResponse response(
@@ -244,18 +234,6 @@ public class DashboardSnapshotTransactionExecutor {
 
     private <T> T convert(JsonNode value, Class<T> type) {
         return value == null ? null : objectMapper.treeToValue(value, type);
-    }
-
-    private static boolean jsonEquivalent(JsonNode stored, JsonNode requested) {
-        if (stored == null || requested == null) {
-            return stored == requested;
-        }
-        return stored.equals((left, right) -> {
-            if (left.isNumber() && right.isNumber()) {
-                return left.decimalValue().compareTo(right.decimalValue());
-            }
-            return left.equals(right) ? 0 : 1;
-        }, requested);
     }
 
     private static LocalDateTime utc(Instant instant) {

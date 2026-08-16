@@ -53,7 +53,7 @@ class ReservationAnalyticsQueryServiceTest {
         given(reservationRepository.aggregateDashboardLifecycle(
                 STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(lifecycle);
         given(bucketRepository.aggregateDashboardOffers(
-                STORE_ID, BUSINESS_DATE)).willReturn(offers);
+                STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(offers);
         given(allocationRepository.aggregateDashboardUsage(
                 STORE_ID, BUSINESS_DATE, AS_OF)).willReturn(usage);
         given(cancellationAuditRepository.aggregateDashboardCancellations(
@@ -76,6 +76,8 @@ class ReservationAnalyticsQueryServiceTest {
         given(offers.getOfferedTeamUnits()).willReturn(20L);
         given(offers.getPolicyVersion()).willReturn(7L);
         given(offers.getMaxBucketId()).willReturn(301L);
+        given(offers.getDataThroughEpochMicros())
+                .willReturn(epochMicros(AS_OF.minusSeconds(15)));
         given(cancellations.getMaxAuditId()).willReturn(401L);
         given(cancellations.getDataThroughEpochMicros())
                 .willReturn(epochMicros(AS_OF.minusSeconds(20)));

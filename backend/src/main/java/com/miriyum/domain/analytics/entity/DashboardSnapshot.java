@@ -62,9 +62,6 @@ public class DashboardSnapshot extends BaseEntity {
     @Column(name = "aggregation_version", nullable = false)
     private long aggregationVersion;
 
-    @Column(name = "replaces_dashboard_snapshot_id")
-    private Long replacesDashboardSnapshotId;
-
     @Column(name = "latest_marker")
     private Boolean latestMarker;
 

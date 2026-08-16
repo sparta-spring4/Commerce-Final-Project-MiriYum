@@ -4,6 +4,16 @@ ALTER TABLE stores
     ADD CONSTRAINT ck_stores_dashboard_authority_version
         CHECK (dashboard_authority_version >= 1);
 
+ALTER TABLE reservation_capacity_buckets
+    ADD COLUMN policy_published_at DATETIME(6) NOT NULL
+        DEFAULT CURRENT_TIMESTAMP(6) AFTER policy_version,
+    ADD INDEX ix_reservation_capacity_policy_effectivity (
+        store_id,
+        service_date,
+        policy_published_at,
+        policy_version
+    );
+
 CREATE TABLE dashboard_analytics_snapshots (
     dashboard_snapshot_id BIGINT NOT NULL AUTO_INCREMENT,
     public_snapshot_id CHAR(36) NOT NULL,
@@ -14,7 +24,6 @@ CREATE TABLE dashboard_analytics_snapshots (
     generated_at DATETIME(6) NOT NULL,
     store_authority_version BIGINT NOT NULL,
     aggregation_version BIGINT NOT NULL,
-    replaces_dashboard_snapshot_id BIGINT NULL,
     latest_marker BOOLEAN NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
@@ -29,10 +38,6 @@ CREATE TABLE dashboard_analytics_snapshots (
         FOREIGN KEY (store_id)
         REFERENCES stores (store_id)
         ON DELETE RESTRICT,
-    CONSTRAINT fk_dashboard_analytics_snapshot_replaces
-        FOREIGN KEY (replaces_dashboard_snapshot_id)
-        REFERENCES dashboard_analytics_snapshots (dashboard_snapshot_id)
-        ON DELETE RESTRICT,
     CONSTRAINT ck_dashboard_analytics_snapshot_time_zone
         CHECK (time_zone_id = 'Asia/Seoul'),
     CONSTRAINT ck_dashboard_analytics_snapshot_authority_version
@@ -41,6 +46,8 @@ CREATE TABLE dashboard_analytics_snapshots (
         CHECK (aggregation_version >= 1),
     CONSTRAINT ck_dashboard_analytics_snapshot_latest_marker
         CHECK (latest_marker IS NULL OR latest_marker = TRUE),
+    CONSTRAINT ck_dashboard_analytics_snapshot_minute_boundary
+        CHECK (SECOND(as_of) = 0 AND MICROSECOND(as_of) = 0),
     INDEX ix_dashboard_analytics_snapshot_store_date_generated
         (store_id, business_date, generated_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
@@ -66,7 +73,7 @@ CREATE TABLE dashboard_analytics_metric_snapshots (
     CONSTRAINT fk_dashboard_analytics_metric_snapshot
         FOREIGN KEY (dashboard_snapshot_id)
         REFERENCES dashboard_analytics_snapshots (dashboard_snapshot_id)
-        ON DELETE RESTRICT,
+        ON DELETE CASCADE,
     CONSTRAINT ck_dashboard_analytics_metric_key
         CHECK (metric_key IN (
             'TODAY_RESERVATION_TEAMS',

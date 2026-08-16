@@ -197,20 +197,25 @@ public interface ReservationCapacityBucketRepository
                 COALESCE(SUM(b.max_people), 0) AS offeredPeopleUnits,
                 COALESCE(SUM(b.max_teams), 0) AS offeredTeamUnits,
                 COALESCE(MAX(b.policy_version), 0) AS policyVersion,
-                COALESCE(MAX(b.reservation_capacity_bucket_id), 0) AS maxBucketId
+                COALESCE(MAX(b.reservation_capacity_bucket_id), 0) AS maxBucketId,
+                CAST(UNIX_TIMESTAMP(MAX(b.policy_published_at)) * 1000000 AS SIGNED)
+                    AS dataThroughEpochMicros
             FROM reservation_capacity_buckets b
             WHERE b.store_id = :storeId
               AND b.service_date = :businessDate
+              AND b.policy_published_at <= :asOf
               AND b.policy_version = (
                   SELECT MAX(latest.policy_version)
                   FROM reservation_capacity_buckets latest
                   WHERE latest.store_id = :storeId
                     AND latest.service_date = :businessDate
+                    AND latest.policy_published_at <= :asOf
               )
             """, nativeQuery = true)
     ReservationCapacityOfferAnalytics aggregateDashboardOffers(
             @Param("storeId") long storeId,
-            @Param("businessDate") LocalDate businessDate
+            @Param("businessDate") LocalDate businessDate,
+            @Param("asOf") java.time.Instant asOf
     );
 
     interface ReservationCapacityOfferAnalytics {
@@ -218,5 +223,6 @@ public interface ReservationCapacityBucketRepository
         Long getOfferedTeamUnits();
         Long getPolicyVersion();
         Long getMaxBucketId();
+        Long getDataThroughEpochMicros();
     }
 }

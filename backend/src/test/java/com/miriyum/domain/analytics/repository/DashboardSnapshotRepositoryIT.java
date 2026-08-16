@@ -20,6 +20,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -68,6 +72,7 @@ class DashboardSnapshotRepositoryIT {
 
     @BeforeEach
     void fixture() {
+        jdbc.execute("DROP TRIGGER IF EXISTS delay_dashboard_snapshot_insert");
         jdbc.execute("DELETE FROM dashboard_analytics_metric_snapshots");
         jdbc.execute("DELETE FROM dashboard_analytics_snapshots");
         jdbc.execute("DELETE FROM stores");
@@ -107,25 +112,98 @@ class DashboardSnapshotRepositoryIT {
         assertThat(metricRepository.countByDashboardSnapshotId(databaseId)).isEqualTo(6);
     }
 
+    @Test
+    void sameSnapshotBucketReturnsTheFirstStoredCanonicalValue() {
+        DashboardSnapshotDraft firstDraft = draftWithSixCells();
+        DashboardSnapshotResponse first = executor.publish(firstDraft);
+        DashboardSnapshotDraft changedSourceDraft = draftWithReservationCount(99L, "changed");
+
+        DashboardSnapshotResponse replay = executor.publish(changedSourceDraft);
+
+        assertThat(replay.snapshotId()).isEqualTo(first.snapshotId());
+        assertThat(replay.metrics().todayReservationTeams().value()).isEqualTo(4L);
+        assertThat(snapshotRepository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    void concurrentFirstPublishesSerializeOnTheStoreAndLeaveOneLatestSnapshot()
+            throws Exception {
+        jdbc.execute("""
+                CREATE TRIGGER delay_dashboard_snapshot_insert
+                BEFORE INSERT ON dashboard_analytics_snapshots
+                FOR EACH ROW SET @dashboard_delay = SLEEP(0.2)
+                """);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<DashboardSnapshotResponse> first = pool.submit(() -> {
+                ready.countDown();
+                start.await();
+                return executor.publish(draftAt(AS_OF, 4L, "first"));
+            });
+            Future<DashboardSnapshotResponse> second = pool.submit(() -> {
+                ready.countDown();
+                start.await();
+                return executor.publish(draftAt(
+                        AS_OF.plusSeconds(60), 5L, "second"));
+            });
+            ready.await();
+            start.countDown();
+
+            assertThat(first.get()).isNotNull();
+            assertThat(second.get()).isNotNull();
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS delay_dashboard_snapshot_insert");
+        }
+
+        assertThat(snapshotRepository.count()).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM dashboard_analytics_snapshots
+                WHERE latest_marker = TRUE
+                """, Long.class)).isEqualTo(1L);
+        assertThat(metricRepository.count()).isEqualTo(12L);
+    }
+
+    @Test
+    void publishingPrunesSnapshotsOlderThanThirtyOneDaysWithTheirMetrics() {
+        executor.publish(draftAt(AS_OF.minusSeconds(32L * 24 * 60 * 60), 2L, "old"));
+        executor.publish(draftAt(AS_OF, 4L, "current"));
+
+        assertThat(snapshotRepository.count()).isEqualTo(1L);
+        assertThat(metricRepository.count()).isEqualTo(6L);
+    }
+
     private DashboardSnapshotDraft draftWithSixCells() {
+        return draftWithReservationCount(4L, "checkpoint");
+    }
+
+    private DashboardSnapshotDraft draftWithReservationCount(long reservationCount, String checkpoint) {
+        return draftAt(AS_OF, reservationCount, checkpoint);
+    }
+
+    private DashboardSnapshotDraft draftAt(
+            Instant asOf,
+            long reservationCount,
+            String checkpoint
+    ) {
         MetricMetadata complete = new MetricMetadata(
-                "ANALYTICS-v1", 3L, AS_OF, AS_OF.minusSeconds(1),
-                "checkpoint", COMPLETE, false, null);
+                "ANALYTICS-v1", 3L, asOf, asOf.minusSeconds(1),
+                checkpoint, COMPLETE, false, null);
         MetricMetadata partial = new MetricMetadata(
-                "ANALYTICS-004-v1", 3L, AS_OF, AS_OF.minusSeconds(1),
+                "ANALYTICS-004-v1", 3L, asOf, asOf.minusSeconds(1),
                 "checkpoint", PARTIAL, false, SOURCE_CONTRACT_MISSING);
         MetricMetadata unavailable = new MetricMetadata(
-                "ANALYTICS-004-v1", 1L, AS_OF, null, null,
+                "ANALYTICS-004-v1", 1L, asOf, null, null,
                 UNAVAILABLE, false, SOURCE_CONTRACT_MISSING);
         NoShowValue noShow = new NoShowValue(
                 new CountMetricResponse(null, unavailable),
                 new CountMetricResponse(null, unavailable),
                 new CountMetricResponse(2L, complete));
         return new DashboardSnapshotDraft(
-                17L, LocalDate.of(2026, 8, 16), "Asia/Seoul", AS_OF,
-                AS_OF.plusSeconds(1), 1L, List.of(
+                17L, LocalDate.ofInstant(asOf, java.time.ZoneId.of("Asia/Seoul")),
+                "Asia/Seoul", asOf, asOf.plusSeconds(1), 1L, List.of(
                 new DashboardMetricDraft("TODAY_RESERVATION_TEAMS",
-                        objectMapper.valueToTree(4L), complete),
+                        objectMapper.valueToTree(reservationCount), complete),
                 new DashboardMetricDraft("RESERVATION_RATE",
                         objectMapper.valueToTree(new RateValue(6, 10, new BigDecimal("0.6"))),
                         complete),

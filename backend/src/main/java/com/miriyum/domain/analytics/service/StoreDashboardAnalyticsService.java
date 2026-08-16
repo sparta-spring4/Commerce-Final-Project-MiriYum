@@ -22,6 +22,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
@@ -66,7 +67,8 @@ public class StoreDashboardAnalyticsService {
     public DashboardSnapshotResponse getDashboard(long operatorAccountId, long storeId) {
         StoreDashboardAuthority authority =
                 storeService.requireDashboardAuthority(operatorAccountId, storeId);
-        Instant asOf = clock.instant();
+        Instant generatedAt = clock.instant();
+        Instant asOf = generatedAt.truncatedTo(ChronoUnit.MINUTES);
         LocalDate businessDate = asOf.atZone(ZoneId.of(authority.timeZoneId())).toLocalDate();
 
         ReservationAnalyticsSnapshot reservation = null;
@@ -101,7 +103,7 @@ public class StoreDashboardAnalyticsService {
                 businessDate,
                 authority.timeZoneId(),
                 asOf,
-                asOf,
+                generatedAt,
                 authority.dashboardAuthorityVersion(),
                 metrics));
     }
