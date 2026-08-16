@@ -44,6 +44,14 @@ public class FileMetadataTransactionExecutor {
         return saveTerminalState(metadata);
     }
 
+    /** 바깥 업무·멱등 결과 트랜잭션과 함께 파일 공개 상태를 확정한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public FileMetadata confirmWithinCurrentTransaction(String fileId) {
+        FileMetadata metadata = findMetadata(fileId);
+        metadata.confirm();
+        return saveTerminalState(metadata);
+    }
+
     /** 파일 저장 실패 후 대기 상태의 메타데이터를 실패 상태로 확정한다. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public FileMetadata fail(String fileId) {
@@ -63,6 +71,18 @@ public class FileMetadataTransactionExecutor {
             return metadata;
         }
         metadata.delete(deletedAt);
+        return saveTerminalState(metadata);
+    }
+
+    /** 롤백된 바깥 업무가 남긴 대기 파일을 공개 전에 삭제 상태로 보상한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public FileMetadata discardPendingOrGetDeleted(String fileId, Instant deletedAt) {
+        FileMetadata metadata = fileMetadataRepository.findByFileIdForUpdate(fileId)
+                .orElseThrow(() -> new IllegalStateException("파일 메타데이터를 찾을 수 없습니다."));
+        if (metadata.getStorageStatus() == FileStorageStatus.DELETED) {
+            return metadata;
+        }
+        metadata.discardPending(deletedAt);
         return saveTerminalState(metadata);
     }
 

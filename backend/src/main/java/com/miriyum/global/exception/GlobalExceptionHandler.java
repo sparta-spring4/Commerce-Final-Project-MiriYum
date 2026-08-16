@@ -1,5 +1,6 @@
 package com.miriyum.global.exception;
 
+import com.miriyum.domain.store.error.StoreErrorCode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * MVC 계층에서 발생한 예외를 일관된 API 오류 응답으로 변환한다.
@@ -122,6 +124,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableMessage() {
         return response(CommonErrorCode.MALFORMED_REQUEST);
+    }
+
+    /** multipart 파싱은 컨트롤러 진입 전 발생하므로 전역 경계에서 Store 이미지 크기 계약으로 변환한다. */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded() {
+        return response(StoreErrorCode.PUBLIC_IMAGE_SIZE_EXCEEDED);
     }
 
     @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})

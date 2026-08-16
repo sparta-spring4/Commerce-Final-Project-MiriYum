@@ -23,7 +23,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 /** 파일 메타데이터 저장소의 저장과 조회 계약을 검증한다. */
 @Tag("integration")
-@Tag("integration-shard-a")
+@Tag("integration-shard-b")
 @Testcontainers
 @SpringBootTest(
         classes = MiriyumApplication.class,
