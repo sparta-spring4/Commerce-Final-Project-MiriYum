@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(22);
+        assertThat(ReservationErrorCode.values()).hasSize(25);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -60,6 +60,15 @@ class ReservationErrorCodeTest {
                 Arguments.of(ReservationErrorCode.TIME_POLICY_CONFLICT,
                         HttpStatus.CONFLICT, "RESERVATION_010",
                         "현재 시간 정책 상태에서 요청한 작업을 수행할 수 없습니다."),
+                Arguments.of(ReservationErrorCode.CHECK_IN_QR_UNAVAILABLE,
+                        HttpStatus.CONFLICT, "RESERVATION_011",
+                        "사용할 수 없는 체크인 QR입니다."),
+                Arguments.of(ReservationErrorCode.OUTSIDE_CHECK_IN_WINDOW,
+                        HttpStatus.CONFLICT, "RESERVATION_012",
+                        "현재는 예약 체크인을 완료할 수 없습니다."),
+                Arguments.of(ReservationErrorCode.NO_SHOW_TOO_EARLY,
+                        HttpStatus.CONFLICT, "RESERVATION_013",
+                        "아직 노쇼를 확정할 수 없습니다."),
                 Arguments.of(ReservationErrorCode.WAITING_SETTING_VERSION_CONFLICT,
                         HttpStatus.CONFLICT, "WAITING_001",
                         "조회 후 웨이팅 설정 버전이 변경되었습니다."),

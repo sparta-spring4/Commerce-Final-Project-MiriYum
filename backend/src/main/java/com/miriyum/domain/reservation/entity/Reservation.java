@@ -63,6 +63,9 @@ public class Reservation {
     @Column(name = "fulfilled_at")
     private Instant fulfilledAt;
 
+    @Column(name = "no_show_at")
+    private Instant noShowAt;
+
     protected Reservation() {
     }
 
@@ -162,6 +165,20 @@ public class Reservation {
         Instant validatedFulfilledAt = requireTerminalTimestamp(fulfilledAt, "fulfilledAt");
         this.fulfilledAt = validatedFulfilledAt;
         this.status = ReservationStatus.FULFILLED;
+    }
+
+    /**
+     * 확정 예약을 노쇼 상태로 종결한다.
+     *
+     * @param noShowAt 노쇼 확정 시각
+     * @throws IllegalArgumentException 확정 시각이 없거나 예약 생성 시각보다 이른 경우
+     * @throws ServiceException 현재 상태가 확정이 아닌 경우
+     */
+    public void markNoShow(Instant noShowAt) {
+        requireConfirmed();
+        Instant validatedNoShowAt = requireTerminalTimestamp(noShowAt, "noShowAt");
+        this.noShowAt = validatedNoShowAt;
+        this.status = ReservationStatus.NO_SHOW;
     }
 
     private void requireConfirmed() {
@@ -282,5 +299,9 @@ public class Reservation {
 
     public Instant getFulfilledAt() {
         return fulfilledAt;
+    }
+
+    public Instant getNoShowAt() {
+        return noShowAt;
     }
 }
