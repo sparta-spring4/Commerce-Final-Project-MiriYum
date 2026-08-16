@@ -3,6 +3,7 @@ package com.miriyum.domain.consumer.controller.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.auth.cookie.AuthCookieFactory;
@@ -75,9 +76,10 @@ class ConsumerAuthControllerLogoutTest {
         request.setCookies(
                 new Cookie(NAMESPACE.refreshCookieName(), "refresh-token"),
                 new Cookie(NAMESPACE.csrfCookieName(), CSRF_TOKEN));
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer access-token");
         willThrow(new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE))
                 .given(consumerAuthService)
-                .logout("refresh-token");
+                .logout("refresh-token", "Bearer access-token");
 
         // when & then
         assertThatThrownBy(() -> controller.logout(request, response, CSRF_TOKEN))
@@ -101,6 +103,7 @@ class ConsumerAuthControllerLogoutTest {
 
         // then
         assertThat(expiredRefreshCookieHeader()).isTrue();
+        verify(consumerAuthService).logout("refresh-token", null);
     }
 
     @Test

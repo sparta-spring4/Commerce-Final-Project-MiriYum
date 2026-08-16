@@ -26,7 +26,8 @@ public enum AuthErrorCode implements ErrorCode {
     PLATFORM_OPERATOR_SESSION_INVALID(
             HttpStatus.UNAUTHORIZED,
             "AUTH_015",
-            "플랫폼 운영자 세션이 더 이상 유효하지 않습니다.");
+            "플랫폼 운영자 세션이 더 이상 유효하지 않습니다."),
+    QR_EPOCH_STALE(HttpStatus.CONFLICT, "AUTH_017", "QR 계정 세대가 현재 값과 일치하지 않습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
