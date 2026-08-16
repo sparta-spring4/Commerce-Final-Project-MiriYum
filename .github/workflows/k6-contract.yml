@@ -5,11 +5,17 @@ on:
     branches: [dev, mvp2, main]
     paths:
       - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/.env.example'
       - '.github/workflows/k6-contract.yml'
   push:
     branches: [dev, main]
     paths:
       - 'performance/k6/**'
+      - 'deploy/local/docker-compose.dev.yml'
+      - 'deploy/local/docker-compose.loadtest.yml'
+      - 'deploy/local/.env.example'
       - '.github/workflows/k6-contract.yml'
 
 permissions:
@@ -27,6 +33,61 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify load-test Kakao geocoding secret wiring
+        shell: bash
+        env:
+          MIRIYUM_KAKAO_LOCAL_REST_API_KEY: contract-test-kakao-key
+        run: |
+          set -euo pipefail
+          combined_config="$RUNNER_TEMP/loadtest-compose.json"
+          blank_config="$RUNNER_TEMP/loadtest-compose-blank-key.json"
+          default_config="$RUNNER_TEMP/default-compose.json"
+
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$combined_config"
+          env -u MIRIYUM_KAKAO_LOCAL_REST_API_KEY \
+            docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            -f deploy/local/docker-compose.loadtest.yml \
+            --profile loadtest config --format json > "$blank_config"
+          docker compose --env-file deploy/local/.env.example \
+            -f deploy/local/docker-compose.dev.yml \
+            config --format json > "$default_config"
+
+          COMBINED_CONFIG="$combined_config" BLANK_CONFIG="$blank_config" DEFAULT_CONFIG="$default_config" node --input-type=module -e '
+            import fs from "node:fs";
+            const key = "MIRIYUM_KAKAO_LOCAL_REST_API_KEY";
+            const expected = process.env[key];
+            const combined = JSON.parse(fs.readFileSync(process.env.COMBINED_CONFIG, "utf8"));
+            const blank = JSON.parse(fs.readFileSync(process.env.BLANK_CONFIG, "utf8"));
+            const defaults = JSON.parse(fs.readFileSync(process.env.DEFAULT_CONFIG, "utf8"));
+            const backend = combined.services?.backend?.environment ?? {};
+            if (backend[key] !== expected) {
+              throw new Error(key + " was not forwarded to the load-test backend");
+            }
+            const exposedServices = (config) => Object.entries(config.services ?? {})
+              .filter(([, service]) => Object.hasOwn(service.environment ?? {}, key))
+              .map(([name]) => name)
+              .sort();
+            const combinedExposure = exposedServices(combined);
+            if (combinedExposure.length !== 1 || combinedExposure[0] !== "backend") {
+              throw new Error(key + " must be exposed only to the load-test backend");
+            }
+            const blankBackend = blank.services?.backend?.environment ?? {};
+            if (blankBackend[key] !== "") {
+              throw new Error(key + " must remain optional when the local value is blank");
+            }
+            const blankExposure = exposedServices(blank);
+            if (blankExposure.length !== 1 || blankExposure[0] !== "backend") {
+              throw new Error(key + " blank mapping must remain backend-only");
+            }
+            if (exposedServices(defaults).length !== 0) {
+              throw new Error(key + " must not change the default local stack");
+            }
+          '
 
       - name: Run isolated k6 contracts
         shell: bash
