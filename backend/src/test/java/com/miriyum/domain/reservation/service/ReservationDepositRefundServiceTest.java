@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
@@ -73,7 +77,61 @@ class ReservationDepositRefundServiceTest {
         order.verify(processRepository).saveAndFlush(process);
     }
 
+    @Test
+    void staleClaimResultCannotCompleteReclaimedObligationOrProcess() {
+        ReservationDepositRefundObligationRepository refundRepository =
+                mock(ReservationDepositRefundObligationRepository.class);
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        ReservationDepositRefundObligation obligation = obligation(NOW.minusSeconds(60));
+        obligation.claim("worker-a", NOW.minusSeconds(60), NOW.minusSeconds(30));
+        long staleToken = obligation.getClaimToken();
+        obligation.claim("worker-b", NOW.minusSeconds(20), NOW.plusSeconds(10));
+        given(refundRepository.findByIdForUpdate(501L))
+                .willReturn(Optional.of(obligation));
+        ReservationDepositRefundService service = new ReservationDepositRefundService(
+                refundRepository,
+                processRepository,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofSeconds(30));
+        ReservationDepositRefundService.Claim stale =
+                new ReservationDepositRefundService.Claim(
+                        501L,
+                        99L,
+                        "9001",
+                        4_000L,
+                        "KRW",
+                        1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION",
+                        "worker-a",
+                        staleToken);
+        RefundResult completed = new RefundResult(
+                "7001",
+                "9001",
+                4_000L,
+                4_000L,
+                4_000L,
+                0L,
+                "KRW",
+                RefundStatus.COMPLETED,
+                NOW.minusSeconds(1),
+                NOW);
+
+        assertThat(service.recordCompleted(stale, completed)).isFalse();
+
+        assertThat(obligation.getStatus())
+                .isEqualTo(ReservationDepositRefundObligation.Status.PROCESSING);
+        assertThat(obligation.getLeaseOwner()).isEqualTo("worker-b");
+        verify(processRepository, never()).findByIdForUpdate(99L);
+    }
+
     private static ReservationDepositRefundObligation obligation() {
+        return obligation(NOW);
+    }
+
+    private static ReservationDepositRefundObligation obligation(Instant createdAt) {
         ReservationDepositRefundObligation obligation =
                 ReservationDepositRefundObligation.required(
                         99L,
@@ -84,7 +142,7 @@ class ReservationDepositRefundServiceTest {
                         "reservation-deposit-compensation:99",
                         "123e4567-e89b-12d3-a456-426614174099",
                         "FULL_DEPOSIT_COMPENSATION",
-                        NOW);
+                        createdAt);
         ReflectionTestUtils.setField(obligation, "id", 501L);
         return obligation;
     }

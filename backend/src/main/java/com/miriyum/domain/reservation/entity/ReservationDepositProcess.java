@@ -175,6 +175,15 @@ public class ReservationDepositProcess {
         status = ReservationDepositProcessStatus.COMPENSATING;
     }
 
+    public void completeCompensation(Instant compensatedAt) {
+        Instant occurredAt = requireTime(compensatedAt);
+        if (status != ReservationDepositProcessStatus.COMPENSATING) {
+            throw invalidTransition();
+        }
+        completedAt = occurredAt;
+        status = ReservationDepositProcessStatus.COMPENSATED;
+    }
+
     private static Instant requireTime(Instant value) {
         if (value == null) {
             throw new IllegalArgumentException("time is required");

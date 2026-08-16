@@ -33,4 +33,12 @@ public interface ReservationDepositRefundObligationRepository
     List<ReservationDepositRefundObligation> findClaimableForUpdate(
             @Param("now") Instant now,
             Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select obligation from ReservationDepositRefundObligation obligation
+            where obligation.id = :obligationId
+            """)
+    Optional<ReservationDepositRefundObligation> findByIdForUpdate(
+            @Param("obligationId") long obligationId);
 }

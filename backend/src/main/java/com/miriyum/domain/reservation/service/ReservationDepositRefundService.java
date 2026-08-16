@@ -1,5 +1,7 @@
 package com.miriyum.domain.reservation.service;
 
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
+import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
 import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
@@ -63,6 +65,49 @@ public class ReservationDepositRefundService {
             processRepository.saveAndFlush(process);
             return Claim.from(obligation, owner);
         }).toList();
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
+    public boolean recordCompleted(Claim claim, RefundResult refund) {
+        if (claim == null || refund == null) {
+            throw new IllegalArgumentException("claim and refund are required");
+        }
+        Instant now = clock.instant();
+        ReservationDepositRefundObligation obligation = refundRepository
+                .findByIdForUpdate(claim.obligationId())
+                .orElse(null);
+        if (obligation == null
+                || !obligation.matchesRequired(
+                        claim.processId(),
+                        claim.paymentId(),
+                        claim.refundAmountMinor(),
+                        claim.currency(),
+                        claim.refundPolicyVersion(),
+                        claim.sourceEventId(),
+                        claim.idempotencyKey(),
+                        claim.reasonCode())
+                || !obligation.isOwnedBy(claim.owner(), claim.token(), now)) {
+            return false;
+        }
+        if (refund.status() != RefundStatus.COMPLETED
+                || !claim.paymentId().equals(refund.paymentId())
+                || claim.refundAmountMinor() != refund.requestedAmountMinor()
+                || claim.refundAmountMinor() != refund.completedAmountMinor()
+                || !claim.currency().equals(refund.currency())) {
+            throw new IllegalStateException("completed refund does not satisfy obligation");
+        }
+        ReservationDepositProcess process = processRepository
+                .findByIdForUpdate(claim.processId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "refund obligation process is missing"));
+        obligation.complete(claim.owner(), claim.token(), now);
+        process.completeCompensation(now);
+        refundRepository.save(obligation);
+        processRepository.saveAndFlush(process);
+        return true;
     }
 
     public record Claim(
