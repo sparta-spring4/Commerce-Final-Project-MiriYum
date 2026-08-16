@@ -123,7 +123,8 @@ public class StoreOperatorAuthService {
             long sessionEpoch = refreshTokenManager.captureSessionEpoch(TokenNamespace.STORE_OPERATOR, account.getId());
             StoreOperatorAccount currentAccount = storeOperatorAccountRepository.findById(account.getId())
                     .orElseThrow(() -> new ServiceException(AuthErrorCode.INVALID_CREDENTIALS));
-            if (currentAccount.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+            if (currentAccount.getStatus() != StoreOperatorAccountStatus.ACTIVE
+                    || currentAccount.isPasswordResetRequired()) {
                 throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
             }
             return issueTokenPair(currentAccount.getId(), sessionEpoch);
@@ -148,14 +149,14 @@ public class StoreOperatorAuthService {
                 .orElseThrow(() -> new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID));
         RefreshTokenRotationAttempt attempt = refreshTokenManager.attemptRotate(
                 TokenNamespace.STORE_OPERATOR, parsed, refreshToken);
-        if (attempt.reused() && account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+        if (attempt.reused() && isRestricted(account)) {
             refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
         }
         if (!attempt.rotated()) {
             throw new ServiceException(AuthErrorCode.REFRESH_TOKEN_INVALID);
         }
         TokenPair tokenPair = attempt.tokenPair();
-        if (account.getStatus() != StoreOperatorAccountStatus.ACTIVE) {
+        if (isRestricted(account)) {
             refreshTokenManager.revokeAll(TokenNamespace.STORE_OPERATOR, account.getId());
             throw new ServiceException(AuthErrorCode.ACCOUNT_RESTRICTED);
         }
@@ -185,5 +186,9 @@ public class StoreOperatorAuthService {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private boolean isRestricted(StoreOperatorAccount account) {
+        return account.getStatus() != StoreOperatorAccountStatus.ACTIVE || account.isPasswordResetRequired();
     }
 }

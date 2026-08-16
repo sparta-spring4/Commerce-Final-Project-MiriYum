@@ -1,6 +1,7 @@
 package com.miriyum.domain.platformoperator.enums;
 
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ACCOUNT_APPEAL_REVIEW;
+import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ACCOUNT_PERMANENT_SANCTION_APPROVE;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.ACCOUNT_SANCTION;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.AUDIT_READ;
 import static com.miriyum.domain.platformoperator.enums.PlatformOperatorPermission.BREAK_GLASS_APPROVE;
@@ -26,6 +27,7 @@ public enum PlatformOperatorRole {
             OPERATOR_CREATE,
             OPERATOR_AUTHORITY_MANAGE,
             OPERATOR_SUSPEND,
+            ACCOUNT_PERMANENT_SANCTION_APPROVE,
             PAYMENT_RECOVERY_HIGH_VALUE_APPROVE,
             BREAK_GLASS_APPROVE)),
     ONBOARDING_REVIEWER(Set.of(ONBOARDING_REVIEW, ONBOARDING_EVIDENCE_READ)),
