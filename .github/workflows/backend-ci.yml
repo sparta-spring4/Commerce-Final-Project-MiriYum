@@ -84,11 +84,10 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # #288 2단계에서 샤드를 4개로 늘린 뒤 실측 소요가 4분 42초~6분 3초로 줄었다.
-    # 1단계의 임시 상향 35분을 실측 기준으로 되돌린다. 최댓값의 3배가 넘는 여유이므로
-    # 러너 편차나 Testcontainers 이미지 pull 지연은 흡수하면서, 실제로 멈춘 job은
-    # 20분 안에 중단된다. 통합 테스트가 다시 늘어 이 상한에 닿으면 샤드 수를 조정한다.
-    timeout-minutes: 20
+    # #288 2단계에서 샤드를 4개로 늘렸고, #272의 최신 migration/runtime 검증을 합친
+    # shard A가 동일 SHA에서 두 차례 기존 20분 job 경계에 도달했다. 4-shard 구조는
+    # 유지하되 러너 편차를 흡수하고 실제로 멈춘 job은 25분 안에 중단한다.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

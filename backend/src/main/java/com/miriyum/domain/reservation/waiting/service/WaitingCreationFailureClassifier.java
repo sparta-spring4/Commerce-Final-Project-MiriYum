@@ -9,7 +9,7 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.TransactionTimedOutException;
 
 final class WaitingCreationFailureClassifier {
-    static final String MEMBERSHIP_UNIQUE = "uk_waiting_active_memberships_store_consumer";
+    static final String MEMBERSHIP_UNIQUE = "uk_waiting_active_memberships_consumer_account";
     static final String SEQUENCE_BOOTSTRAP_UNIQUE = "PRIMARY";
     private WaitingCreationFailureClassifier() {}
 

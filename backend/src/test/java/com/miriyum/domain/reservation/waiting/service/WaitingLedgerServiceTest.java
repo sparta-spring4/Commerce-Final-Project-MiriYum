@@ -342,6 +342,32 @@ class WaitingLedgerServiceTest {
     }
 
     @Test
+    @DisplayName("예약 전환 중인 팀 취소는 membership을 한 번 제거하고 하나의 종결 기록을 남긴다")
+    void cancelConvertingTeamRemovesMembershipAndAppendsOneTerminalTransition() {
+        WaitingTeam target = team(TEAM_ID, STORE_ID, WaitingTeamStatus.RESERVATION_CONVERTING);
+        given(authorityPort.requireMutation(OPERATOR_ID, STORE_ID))
+                .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
+        given(teamRepository.findByIdForUpdate(TEAM_ID)).willReturn(Optional.of(target));
+        given(membershipRepository.deleteByWaitingTeamId(TEAM_ID)).willReturn(1L);
+        executeBusinessWork();
+
+        WaitingCommandResult result = service.cancel(
+                OPERATOR_ID,
+                STORE_ID,
+                TEAM_ID,
+                0L,
+                command("WAITING_TEAM_CANCEL", "a".repeat(64)),
+                OCCURRED_AT
+        );
+
+        assertThat(result.data().status()).isEqualTo(WaitingTeamStatus.CANCELLED);
+        assertThat(result.data().version()).isEqualTo(1L);
+        then(membershipRepository).should().deleteByWaitingTeamId(TEAM_ID);
+        then(auditRepository).should().save(any());
+        then(eventRepository).should().save(any());
+    }
+
+    @Test
     @DisplayName("종결 전이에서 활성 membership이 없으면 WAITING_008로 거절한다")
     void terminalTransitionRejectsMissingActiveMembership() {
         WaitingTeam target = team(TEAM_ID, STORE_ID, WaitingTeamStatus.WAITING);
@@ -390,7 +416,7 @@ class WaitingLedgerServiceTest {
     }
 
     @Test
-    @DisplayName("활성 영향은 WAITING CALLED ARRIVED 상태만 집계한다")
+    @DisplayName("활성 영향은 WAITING CALLED ARRIVED RESERVATION_CONVERTING 상태를 집계한다")
     void activeImpactCountsOnlyActiveStatuses() {
         given(authorityPort.requireRead(OPERATOR_ID, STORE_ID))
                 .willReturn(new WaitingStoreAuthority(STORE_ID, ZoneId.of("Asia/Seoul")));
@@ -407,7 +433,8 @@ class WaitingLedgerServiceTest {
         assertThat(statuses.getValue()).containsExactlyInAnyOrder(
                 WaitingTeamStatus.WAITING,
                 WaitingTeamStatus.CALLED,
-                WaitingTeamStatus.ARRIVED
+                WaitingTeamStatus.ARRIVED,
+                WaitingTeamStatus.RESERVATION_CONVERTING
         );
         assertThat(impact).isEqualTo(new WaitingActiveTeamImpact(STORE_ID, 7L));
     }
@@ -562,6 +589,8 @@ class WaitingLedgerServiceTest {
         } else if (status == WaitingTeamStatus.ARRIVED) {
             team.call(0L, OCCURRED_AT);
             team.arrive(1L, OCCURRED_AT.plusSeconds(60));
+        } else if (status == WaitingTeamStatus.RESERVATION_CONVERTING) {
+            ReflectionTestUtils.setField(team, "status", status);
         }
         return team;
     }

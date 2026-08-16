@@ -6,8 +6,10 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentHistorySlice;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentPreparation;
 import com.miriyum.domain.payment.dto.PaymentContracts.PaymentResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.PrepareReservationDepositCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.PrepareWaitingReservationDepositCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.dto.PaymentContracts.VerifiedWaitingReservationDeposit;
 import com.miriyum.domain.payment.port.PaymentProviderClient;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderCancellation;
 import com.miriyum.domain.payment.port.PaymentProviderClient.ProviderPayment;
@@ -49,6 +51,22 @@ public class PaymentService {
                 throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
             }
             return transactions.replayPreparation(command);
+        }
+    }
+
+    /** Prepares a Payment-owned deposit source for a waiting reservation without Reservation access. */
+    public PaymentPreparation prepareWaitingReservationDeposit(
+            PrepareWaitingReservationDepositCommand command
+    ) {
+        boolean callerTransactionActive =
+                TransactionSynchronizationManager.isActualTransactionActive();
+        try {
+            return transactions.prepareWaitingReservationDeposit(command, now());
+        } catch (DataIntegrityViolationException race) {
+            if (callerTransactionActive) {
+                throw new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION);
+            }
+            return transactions.replayWaitingReservationDeposit(command);
         }
     }
 
@@ -122,6 +140,24 @@ public class PaymentService {
 
     public PaymentResult getOwnedPayment(String paymentId, String consumerAccountId) {
         return transactions.getOwnedPayment(paymentId, parsePositiveId(consumerAccountId));
+    }
+
+    public VerifiedWaitingReservationDeposit getVerifiedWaitingReservationDeposit(
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        return transactions.getVerifiedWaitingReservationDeposit(
+                paymentId, waitingTeamId, consumerAccountId);
+    }
+
+    public VerifiedWaitingReservationDeposit getCompletableWaitingReservationDeposit(
+            String paymentId,
+            long waitingTeamId,
+            long consumerAccountId
+    ) {
+        return transactions.getCompletableWaitingReservationDeposit(
+                paymentId, waitingTeamId, consumerAccountId);
     }
 
     public PaymentHistorySlice getConsumerPaymentHistory(PaymentHistoryQuery query) {

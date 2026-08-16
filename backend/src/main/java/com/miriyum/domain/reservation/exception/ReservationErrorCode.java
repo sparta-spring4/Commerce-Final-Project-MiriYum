@@ -84,6 +84,11 @@ public enum ReservationErrorCode implements ErrorCode {
             "WAITING_008",
             "활성 웨이팅 멤버십과 요청 전제가 충돌합니다."
     ),
+    ACCOUNT_ACTIVE_WAITING_EXISTS(
+            HttpStatus.CONFLICT,
+            "WAITING_011",
+            "계정에 이미 활성 웨이팅이 있습니다. 기존 웨이팅을 종료한 후 다시 시도해 주세요."
+    ),
     WAITING_CLOSE_JOB_NOT_READY(
             HttpStatus.CONFLICT,
             "WAITING_009",

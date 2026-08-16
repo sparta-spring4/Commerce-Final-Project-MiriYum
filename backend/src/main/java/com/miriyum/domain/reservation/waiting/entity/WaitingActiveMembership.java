@@ -9,14 +9,14 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 
-/** 같은 소비자와 매장의 활성 웨이팅 한 건 제약을 소유한다. */
+/** 소비자 계정 전체에서 활성 웨이팅 한 건 제약을 소유한다. */
 @Entity
 @Table(
         name = "waiting_active_memberships",
         uniqueConstraints = {
             @UniqueConstraint(
-                    name = "uk_waiting_active_memberships_store_consumer",
-                    columnNames = {"store_id", "consumer_account_id"}
+                    name = "uk_waiting_active_memberships_consumer_account",
+                    columnNames = "consumer_account_id"
             ),
             @UniqueConstraint(
                     name = "uk_waiting_active_memberships_team",

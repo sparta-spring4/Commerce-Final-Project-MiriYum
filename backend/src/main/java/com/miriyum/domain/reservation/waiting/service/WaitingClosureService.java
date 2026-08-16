@@ -23,7 +23,10 @@ import tools.jackson.databind.ObjectMapper;
 public class WaitingClosureService {
     static final int MAX_ITEM_ATTEMPTS = 3;
     private static final List<WaitingTeamStatus> ACTIVE = List.of(
-            WaitingTeamStatus.WAITING, WaitingTeamStatus.CALLED, WaitingTeamStatus.ARRIVED);
+            WaitingTeamStatus.WAITING,
+            WaitingTeamStatus.CALLED,
+            WaitingTeamStatus.ARRIVED,
+            WaitingTeamStatus.RESERVATION_CONVERTING);
 
     private final WaitingStoreAuthorityPort authorityPort;
     private final WaitingTeamRepository teamRepository;
@@ -168,4 +171,5 @@ public class WaitingClosureService {
                 job.getId(), WaitingClosureItemStatus.RECONCILIATION_REQUIRED);
         job.reconcile(completed, failed, reconciliation, now);
     }
+
 }

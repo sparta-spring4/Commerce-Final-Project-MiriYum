@@ -157,7 +157,7 @@ class WaitingOpenApiContractTest {
         assertThat(list(map(schemas.get("WaitingTeamStatus")).get("enum")))
                 .containsExactly(
                         "WAITING", "CALLED", "ARRIVED", "CHECKED_IN", "CANCELLED", "NO_SHOW",
-                        "CLOSED_BY_STORE", "RESERVATION_CONVERTING");
+                        "CLOSED_BY_STORE", "RESERVATION_CONVERTING", "RESERVATION_CONVERTED");
         assertThat(list(map(schemas.get("WaitingClosureJobStatus")).get("enum")))
                 .containsExactly("PENDING", "PROCESSING", "COMPLETED", "RECONCILIATION_REQUIRED");
 
