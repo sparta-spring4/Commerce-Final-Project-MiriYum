@@ -184,6 +184,9 @@ public class MenuHold extends BaseEntity {
         if (status == MenuHoldStatus.FULFILLED) {
             throw new IllegalStateException("fulfilled menu hold cannot be released");
         }
+        if (status == MenuHoldStatus.FORFEITED) {
+            throw new IllegalStateException("forfeited menu hold cannot be released");
+        }
         status = MenuHoldStatus.RELEASED;
         return true;
     }
@@ -202,7 +205,31 @@ public class MenuHold extends BaseEntity {
         if (status == MenuHoldStatus.RELEASED) {
             throw new IllegalStateException("released menu hold cannot be fulfilled");
         }
+        if (status == MenuHoldStatus.FORFEITED) {
+            throw new IllegalStateException("forfeited menu hold cannot be fulfilled");
+        }
         status = MenuHoldStatus.FULFILLED;
+        return true;
+    }
+
+    /**
+     * 확정 홀드를 수량 복구 없이 노쇼 몰수 상태로 종결한다.
+     *
+     * @return 이번 호출이 상태를 전이했으면 {@code true}, 이미 몰수 상태면 {@code false}
+     * @throws IllegalStateException 이미 해제 또는 이행 완료된 홀드인 경우
+     */
+    public boolean forfeit() {
+        requireFinalReservationMode();
+        if (status == MenuHoldStatus.FORFEITED) {
+            return false;
+        }
+        if (status == MenuHoldStatus.RELEASED) {
+            throw new IllegalStateException("released menu hold cannot be forfeited");
+        }
+        if (status == MenuHoldStatus.FULFILLED) {
+            throw new IllegalStateException("fulfilled menu hold cannot be forfeited");
+        }
+        status = MenuHoldStatus.FORFEITED;
         return true;
     }
 
@@ -213,7 +240,8 @@ public class MenuHold extends BaseEntity {
                 || (!hasTemporaryLineage && !hasNoTemporaryLineage)
                 || (status != MenuHoldStatus.CONFIRMED
                 && status != MenuHoldStatus.RELEASED
-                && status != MenuHoldStatus.FULFILLED)) {
+                && status != MenuHoldStatus.FULFILLED
+                && status != MenuHoldStatus.FORFEITED)) {
             throw new IllegalStateException(
                     "menu hold is not connected to a final reservation lifecycle");
         }
