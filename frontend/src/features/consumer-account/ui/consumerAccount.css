@@ -1,0 +1,341 @@
+/* 마이페이지·예약 내역 배치. 토큰은 shared/ui/theme.css가 소유한다. */
+
+.mypage {
+  padding-bottom: var(--space-8);
+}
+
+/* ── 프로필 ───────────────────────────────────────────────────────────── */
+
+.profile {
+  position: relative;
+  overflow: hidden;
+}
+
+/* 카드 오른쪽 위의 옅은 광원. 순수 장식이다. */
+.profile__glow {
+  position: absolute;
+  top: -4rem;
+  right: -4rem;
+  width: 12rem;
+  height: 12rem;
+  background-color: var(--color-primary-fixed);
+  border-radius: var(--radius-full);
+  filter: blur(48px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.profile .mi-card__body {
+  position: relative;
+}
+
+.profile h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.profile h2 .mi-icon {
+  color: var(--color-primary);
+}
+
+.profile__list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-3);
+}
+
+/*
+ * 한 항목은 레이블·값·읽기 전용 표시로 이룬다. `dl` 안에서 묶으려면
+ * `div`로 감싸야 dt/dd 짝이 유지된다.
+ */
+.profile__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.125rem var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-surface-variant);
+}
+
+.profile__entry dt {
+  grid-column: 1;
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+}
+
+.profile__entry dd {
+  grid-column: 1;
+  margin: 0;
+}
+
+.profile__readonly {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-surface-variant);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-sm);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
+}
+
+.profile__row {
+  padding-top: var(--space-2);
+}
+
+.profile__label {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+}
+
+/* 시안은 닉네임만 크게 놓고 옆에 연필 버튼을 붙인다. */
+.profile__nickname {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 0.125rem;
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.profile__edit {
+  color: var(--color-primary);
+}
+
+/* 변경 제한 안내. 색면 위에 아이콘과 함께 둔다. */
+.profile__note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: var(--space-1);
+  padding: 0.375rem var(--space-1);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.profile__note .mi-icon {
+  color: var(--color-warning);
+}
+
+.profile__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+}
+
+.profile__actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* ── 바로 가기 카드 ───────────────────────────────────────────────────── */
+
+.mypage__links {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .mypage__links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+ * 시안의 이동 카드. 큰 아이콘이 카드 오른쪽 아래에 옅게 깔리고, 마우스를
+ * 올리면 카드가 살짝 뜬다.
+ */
+.mypage__link-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow: hidden;
+  min-height: 12rem;
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  color: var(--color-on-surface);
+  transition:
+    transform 250ms ease,
+    box-shadow 250ms ease;
+}
+
+.mypage__link-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-3);
+  text-decoration: none;
+}
+
+.mypage__link-art {
+  position: absolute;
+  right: -1.5rem;
+  bottom: -1.5rem;
+  color: var(--color-primary);
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.mypage__link-art .mi-icon {
+  width: 7.5rem;
+  height: 7.5rem;
+}
+
+.mypage__link-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mypage__link-title {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.mypage__link-text {
+  color: var(--color-on-surface-variant);
+  word-break: keep-all;
+}
+
+.mypage__link-go {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: auto;
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* ── 예약 내역 ────────────────────────────────────────────────────────── */
+
+.reservation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+}
+
+.reservation-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .reservation-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 80rem) {
+  .reservation-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.reservation-list__item .mi-card__body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: var(--space-2);
+}
+
+.reservation-list__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.reservation-list__store {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.reservation-list__store a {
+  color: var(--color-on-surface);
+}
+
+/* 시안의 월·일 타일. 목록에서 날짜를 한눈에 잡아 주는 표식이다. */
+.reservation-list__date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  background-color: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  line-height: 1.1;
+}
+
+.reservation-list__date-month {
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.reservation-list__date-day {
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+}
+
+.reservation-list__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reservation-list__facts p {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* 아이콘을 담는 원. 시안의 `w-8 h-8 rounded-full bg-surface-container`. */
+.reservation-list__fact-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  color: var(--color-outline);
+}
+
+.reservation-list__foot {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-highest);
+}

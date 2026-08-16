@@ -1,0 +1,861 @@
+/*
+ * 매장 검색 폼·결과·상세 배치. 색·간격 값은 theme.css의 토큰만 참조한다.
+ * 홈 고유 배치는 home.css가 소유한다.
+ */
+
+/* ── 검색 폼 ──────────────────────────────────────────────────────────── */
+
+.store-search-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.store-search-form--compact {
+  max-width: 48rem;
+  gap: var(--space-2);
+}
+
+/*
+ * 홈의 검색 필.
+ *
+ * 시안은 흰 카드 하나 안에 입력과 코럴 버튼이 함께 들어간다. 레이블을 위에
+ * 쌓으면 그 형태가 무너지므로, 레이블은 보조기술에만 남기고 시각적으로는
+ * placeholder와 아이콘이 역할을 대신한다.
+ */
+.store-search-form--compact .store-search-form__keyword {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 8px 32px rgba(255, 95, 56, 0.12);
+  transition: box-shadow 250ms ease;
+}
+
+.store-search-form--compact .store-search-form__keyword:focus-within {
+  box-shadow: 0 16px 48px rgba(255, 95, 56, 0.18);
+}
+
+.store-search-form--compact .store-search-form__keyword .mi-field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 필 안에서는 입력의 테두리·배경을 지운다. 카드가 곧 입력의 경계다. */
+.store-search-form--compact .mi-field__control {
+  background: transparent;
+  border-color: transparent;
+  min-height: 3rem;
+}
+
+.store-search-form--compact .mi-field__control:focus {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* 필 안의 돋보기는 코럴이다. 카드가 경계를 그리므로 아이콘만 강조한다. */
+.store-search-form--compact .mi-field__lead {
+  left: var(--space-2);
+  color: var(--color-primary);
+}
+
+.store-search-form--compact .mi-button {
+  border-radius: var(--radius-lg);
+  padding: 0 var(--space-4);
+  min-height: 3rem;
+}
+
+/*
+ * 상세 조건 접기.
+ *
+ * 홈에는 검색 한 줄만 두고 나머지 조건은 펼쳐 볼 수 있게 한다. 시안의 홈이
+ * 검색 진입점 하나로 정리돼 있고, 전체 필터는 결과 화면이 소유한다.
+ */
+.store-search-form__advanced {
+  border-radius: var(--radius-md);
+}
+
+.store-search-form__advanced > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  list-style: none;
+}
+
+.store-search-form__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.store-search-form__advanced > summary::after {
+  content: '▾';
+  transition: transform 200ms ease;
+}
+
+.store-search-form__advanced[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+/*
+ * 펼친 상세 조건은 자기 판 위에 올린다.
+ *
+ * 히어로 배경 위에 입력만 늘어놓으면 검색 필 폭에 눌려 답답하고 배경과
+ * 섞인다. 필과 같은 흰 판에 넉넉한 여백을 줘 한 덩어리로 읽히게 한다.
+ */
+.store-search-form__advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+@media (min-width: 40rem) {
+  .store-search-form__advanced-body {
+    padding: var(--space-4);
+  }
+}
+
+.store-search-form--full .store-search-form__keyword {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 결과 화면의 필터는 20rem 사이드바 안에 들어간다.
+ * 위 3열 grid는 뷰포트 폭을 보므로 좁은 사이드바에서도 3열이 되어 입력이
+ * 뭉개진다. 사이드바 레이아웃은 항상 1열로 둔다.
+ */
+.store-search-form--full .store-search-form__grid {
+  grid-template-columns: 1fr;
+}
+
+.store-search-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 40rem) {
+  .store-search-form__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ── 칩 묶음 ──────────────────────────────────────────────────────────── */
+
+.store-search-form__chip-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.store-search-form__chip-label {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+}
+
+.store-search-form__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.store-search-form__conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+}
+
+.store-search-form__conditions legend {
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+}
+
+.store-search-form__hint {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 검색 결과 ────────────────────────────────────────────────────────── */
+
+.store-search__layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  padding-bottom: var(--space-8);
+}
+
+@media (min-width: 64rem) {
+  .store-search__layout {
+    grid-template-columns: 20rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .store-search__filters {
+    position: sticky;
+    top: var(--space-2);
+  }
+}
+
+.store-search__filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.store-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── 적용한 조건 알약 ─────────────────────────────────────────────────── */
+
+/*
+ * 시안 `_4`의 "예약 조건:" 줄. 흰 판 위에 지금 걸린 조건만 알약으로 늘어놓는다.
+ */
+.store-search__conditions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.store-search__conditions-label {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.store-search__condition-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.store-search__condition {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem var(--space-1) 0.375rem 0.625rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.store-search__condition-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 알약 안이라 44px을 다 줄 수 없다. 대신 알약 전체가 넉넉한 표적이 된다. */
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: inherit;
+  cursor: pointer;
+}
+
+.store-search__condition-clear:hover {
+  background-color: var(--color-surface-variant);
+  color: var(--color-on-surface);
+}
+
+/* ── 결과 머리말 ──────────────────────────────────────────────────────── */
+
+.store-search__results-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.store-search__count {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+/*
+ * 정렬 선택.
+ *
+ * 시안은 테두리 없는 글자 하나로 보인다. 기본 select 화살표를 지우고 아이콘을
+ * 겹치되, select 자체는 그대로 둬 키보드·모바일 기본 동작을 유지한다.
+ */
+.store-search__sort {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-on-surface-variant);
+}
+
+.store-search__sort select {
+  appearance: none;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3) 0 var(--space-1);
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+
+.store-search__sort select:hover {
+  background-color: var(--color-surface-container);
+}
+
+/* 화살표는 장식이라 클릭이 select로 그대로 전달돼야 한다. */
+.store-search__sort > .mi-icon {
+  position: absolute;
+  right: 0.5rem;
+  transform: rotate(90deg);
+  pointer-events: none;
+}
+
+.store-search__list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .store-search__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 시안은 넓은 화면에서 결과를 3열로 놓는다. */
+@media (min-width: 80rem) {
+  .store-search__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * 카드 media. 시안의 사진 자리에 카테고리 일러스트를 둔다.
+ * 이미지가 없는 카테고리는 그라디언트만 남는다.
+ */
+.store-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.store-card__media {
+  position: relative;
+  /* 시안의 `h-48`. 카드 폭이 달라져도 media 높이는 일정하게 둔다. */
+  height: 12rem;
+  background: linear-gradient(145deg, var(--tile-from) 0%, var(--tile-to) 100%);
+}
+
+.store-card__art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 400ms ease;
+}
+
+.store-card:hover .store-card__art {
+  transform: scale(1.05);
+}
+
+/* 뱃지는 media 위에 얹는다. 대비를 위해 반투명 흰 배경을 깐다. */
+.store-card__badges {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.store-card__badges .mi-badge {
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 4px rgba(30, 28, 15, 0.12);
+}
+
+/*
+ * 카드 본문은 세로로 늘어나며 마지막 버튼을 바닥에 붙인다.
+ * 이름 길이가 달라도 격자 안의 버튼 줄이 서로 맞는다.
+ */
+.store-card__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 0.375rem;
+}
+
+.store-card__name {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+}
+
+.store-card__name a {
+  color: var(--color-on-surface);
+}
+
+.store-card__meta,
+.store-card__address,
+.store-card__availability {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.store-card__address,
+.store-card__availability {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+
+/* 아이콘이 첫 줄 글자와 같은 높이에서 시작하게 맞춘다. */
+.store-card__address > .mi-icon,
+.store-card__availability > .mi-icon {
+  margin-top: 0.125rem;
+}
+
+.store-card__availability--available {
+  color: var(--color-status-available);
+  font-weight: 600;
+}
+
+.store-card__availability--unavailable {
+  color: var(--color-status-unavailable);
+  font-weight: 600;
+}
+
+.store-card__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.125rem;
+}
+
+/*
+ * 다음 행동은 카드 맨 아래에 고정한다.
+ *
+ * `margin-top: auto`가 남는 세로 공간을 위로 밀어 격자 안의 버튼 줄을 맞춘다.
+ * 버튼에 직접 margin을 주면 본문과의 최소 간격을 따로 보장할 수 없어
+ * 감싸는 줄을 하나 둔다.
+ */
+.store-card__foot {
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+
+/* ── 매장 상세 ────────────────────────────────────────────────────────── */
+
+.store-detail {
+  padding-bottom: var(--space-8);
+}
+
+/*
+ * 히어로 밴드.
+ *
+ * 시안은 `h-[400px]` 사진 위에 아래에서 위로 옅어지는 그라디언트를 덮고
+ * 그 위에 이름과 주소를 놓는다. 좁은 화면에서는 글자가 들어갈 자리를
+ * 확보하기 위해 높이를 낮춘다.
+ */
+.store-detail__hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 17rem;
+  overflow: hidden;
+  background: linear-gradient(145deg, var(--tile-from) 0%, var(--tile-to) 100%);
+}
+
+@media (min-width: 48rem) {
+  .store-detail__hero {
+    min-height: 25rem;
+  }
+}
+
+.store-detail__hero-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/*
+ * 글자가 놓이는 아래쪽을 배경색까지 끌어올린다. 일러스트의 밝기와 무관하게
+ * 글자 대비가 유지된다.
+ */
+.store-detail__hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--color-surface) 8%,
+    rgba(255, 249, 231, 0.92) 32%,
+    rgba(255, 249, 231, 0.2) 70%,
+    transparent 100%
+  );
+}
+
+.store-detail__hero-inner {
+  position: relative;
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-3);
+}
+
+.store-detail__breadcrumb {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+}
+
+.store-detail__breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem var(--space-1);
+  background-color: rgba(255, 255, 255, 0.75);
+  border-radius: var(--radius-full);
+  color: var(--color-on-surface-variant);
+}
+
+.store-detail__breadcrumb a:hover {
+  background-color: var(--color-surface-container-lowest);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.store-detail__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: var(--space-1);
+}
+
+/* 카테고리는 시안처럼 코럴 알약으로 강조한다. */
+.store-detail__category {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-primary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-on-primary);
+}
+
+.store-detail__hero-inner h1 {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+@media (min-width: 48rem) {
+  .store-detail__hero-inner h1 {
+    font-size: var(--font-size-display-lg);
+    line-height: var(--line-height-display-lg);
+  }
+}
+
+.store-detail__address {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-body-lg);
+  color: var(--color-on-surface-variant);
+}
+
+.store-detail__tags,
+.menu-list__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: var(--space-2);
+}
+
+/* ── 상세 2열 배치 ────────────────────────────────────────────────────── */
+
+.store-detail__layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
+
+/* 시안은 본문과 예약 패널을 나란히 놓고 패널만 따라 붙게 한다. */
+@media (min-width: 64rem) {
+  .store-detail__layout {
+    grid-template-columns: minmax(0, 1fr) 22.5rem;
+    gap: var(--layout-gutter);
+    align-items: start;
+  }
+
+  .store-detail__panel {
+    position: sticky;
+    /* 반투명 sticky 헤더(4rem) 아래에 걸리지 않게 띄운다. */
+    top: 5rem;
+  }
+}
+
+.store-detail__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.store-detail__section {
+  margin: 0;
+}
+
+.store-detail__section h2,
+.store-detail__section-title {
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.store-detail__section-title {
+  margin-bottom: var(--space-2);
+}
+
+.store-detail__description {
+  margin-top: var(--space-2);
+  line-height: 1.7;
+  color: var(--color-on-surface-variant);
+  word-break: keep-all;
+}
+
+/* 아이콘 타일 + 제목. 시안의 정보 항목 머리다. */
+.store-detail__tile {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.store-detail__tile-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+  color: var(--color-primary);
+}
+
+.store-detail__timezone {
+  margin-top: 0.125rem;
+  font-size: var(--font-size-label-sm);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── 예약 패널 ────────────────────────────────────────────────────────── */
+
+.store-detail__panel-card .mi-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.store-detail__panel-title {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-surface-variant);
+  font-size: var(--font-size-headline-md);
+  line-height: var(--line-height-headline-md);
+  font-weight: 700;
+}
+
+.store-detail__panel-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-md);
+}
+
+.store-detail__panel-conditions li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.store-detail__panel-conditions .mi-icon {
+  color: var(--color-primary);
+}
+
+.store-detail__panel-empty,
+.store-detail__panel-link {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.store-detail__panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.store-detail__availability {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.store-detail__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.store-detail__actions .mi-button {
+  width: 100%;
+}
+
+.store-schedule {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-label-md);
+}
+
+.store-schedule th,
+.store-schedule td {
+  padding: var(--space-1);
+  text-align: left;
+  border-bottom: 1px solid var(--color-surface-container-highest);
+}
+
+.store-schedule thead th {
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+}
+
+.store-schedule tbody th {
+  width: 4rem;
+  font-weight: 700;
+}
+
+/* ── 메뉴 ─────────────────────────────────────────────────────────────── */
+
+.menu-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 48rem) {
+  .menu-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 팔지 않는 메뉴는 흐리게 낮춘다. 판매 상태 뱃지가 이유를 문구로 알린다. */
+.menu-list__item--muted {
+  opacity: 0.6;
+}
+
+.menu-list__item .mi-card__body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.375rem;
+}
+
+.menu-list__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.menu-list__name {
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+/* 대표 메뉴 표시. 시안의 BEST 알약 자리다. */
+.menu-list__mark {
+  flex-shrink: 0;
+  padding: 0.125rem var(--space-1);
+  background-color: var(--color-primary-fixed);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-on-primary-fixed);
+}
+
+.menu-list__price {
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.menu-list__description,
+.menu-list__category,
+.menu-list__capabilities {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+.menu-list__description {
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.menu-list__capabilities {
+  font-weight: 600;
+  color: var(--color-on-primary-fixed-variant);
+}
+
+/* 가격과 판매 상태는 카드 맨 아래에서 한 줄로 만난다. */
+.menu-list__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-top: auto;
+  padding-top: var(--space-2);
+}

@@ -1,0 +1,801 @@
+/*
+ * 공용 UI 프리미티브 스타일.
+ *
+ * 토큰은 theme.css가 소유하고 여기서는 참조만 한다.
+ * 기능 폴더는 이 클래스를 재사용하고 자기 화면 고유 배치만 따로 정의한다.
+ */
+
+/* ── Button ───────────────────────────────────────────────────────────── */
+
+.mi-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+  line-height: var(--line-height-label-md);
+  cursor: pointer;
+  transition:
+    box-shadow 150ms ease,
+    transform 150ms ease,
+    background-color 150ms ease;
+}
+
+.mi-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 시안의 촉각적 상승. "Elements lift +2px on hover"가 형태 규칙이다. */
+.mi-button:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+}
+
+.mi-button:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.mi-button--primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.mi-button--secondary {
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+}
+
+.mi-button--ghost {
+  background-color: transparent;
+  border-color: var(--color-outline);
+  color: var(--color-on-surface);
+}
+
+.mi-button--danger {
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.mi-button--sm {
+  min-height: 2.25rem;
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-label-sm);
+}
+
+/*
+ * 시안의 주요 행동 버튼은 `py-4`에 headline-md 글자다. 폼을 마무리하는 한
+ * 자리에만 쓰고, 화면에 여러 개 두지 않는다.
+ */
+.mi-button--lg {
+  min-height: 3.5rem;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-body-lg);
+}
+
+.mi-button--block {
+  width: 100%;
+}
+
+/* ── Icon ─────────────────────────────────────────────────────────────── */
+
+/*
+ * 아이콘은 글자 크기가 아니라 자기 크기를 가진다. 버튼·칩 안에서 글자와
+ * 나란히 놓이므로 줄어들지 않게 고정한다.
+ */
+.mi-icon {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.mi-icon--sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* 아이콘만 있는 원형 버튼. 시안의 `p-2 rounded-full` 자리. */
+.mi-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.mi-icon-button:hover {
+  background-color: var(--color-surface-container);
+  color: var(--color-primary);
+}
+
+/* ── Field (label + control + help/error) ─────────────────────────────── */
+
+.mi-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mi-field__label {
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+/* 필수 표시. 텍스트가 아니라 장식이므로 레이블 문자열에 섞지 않는다. */
+.mi-field__label--required::after {
+  content: '*';
+  margin-left: 0.25rem;
+  color: var(--color-error);
+}
+
+/*
+ * 시안의 입력은 크림빛으로 채운 면이다. 테두리를 완전히 지우면 흰 카드 위에서
+ * 입력 경계가 1.05:1로 사라지므로(WCAG 1.4.11), 시안 문서가 정한 1px 테두리는
+ * 남기고 채움색만 시안 화면의 surface-container-low로 맞춘다.
+ */
+.mi-field__control,
+.mi-field select,
+.mi-field textarea {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0 var(--space-2);
+  background-color: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-body-md);
+  color: var(--color-on-surface);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.mi-field textarea {
+  padding-block: var(--space-1);
+}
+
+/* 시안의 `focus:ring-2 focus:ring-primary/50` + 흰 배경으로의 전환. */
+.mi-field__control:focus,
+.mi-field select:focus,
+.mi-field textarea:focus {
+  background-color: var(--color-surface-container-lowest);
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.mi-field__control[aria-invalid='true'],
+.mi-field select[aria-invalid='true'] {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 2px rgba(186, 26, 26, 0.25);
+}
+
+/* 오류가 난 입력은 레이블도 함께 붉게 둔다. 시안 `_3`의 처리다. */
+.mi-field:has([aria-invalid='true']) .mi-field__label {
+  color: var(--color-error);
+}
+
+/*
+ * 아이콘을 안쪽에 겹치는 입력.
+ *
+ * 아이콘은 장식이라 포인터 이벤트를 받지 않게 두고, 입력에는 아이콘 폭만큼
+ * 안쪽 여백을 준다. 오른쪽 버튼(비밀번호 표시)은 눌려야 하므로 예외다.
+ */
+.mi-field__affix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mi-field__affix--leading > .mi-field__control {
+  padding-left: 2.75rem;
+}
+
+.mi-field__affix--trailing > .mi-field__control {
+  padding-right: 2.75rem;
+}
+
+.mi-field__lead {
+  position: absolute;
+  left: var(--space-2);
+  display: flex;
+  color: var(--color-on-surface-variant);
+  pointer-events: none;
+  transition: color 150ms ease;
+}
+
+.mi-field__affix:focus-within .mi-field__lead {
+  color: var(--color-primary);
+}
+
+.mi-field__trail {
+  position: absolute;
+  right: 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+}
+
+.mi-field__trail:hover {
+  color: var(--color-on-surface);
+}
+
+.mi-field__help {
+  font-size: var(--font-size-label-sm);
+  color: var(--color-on-surface-variant);
+}
+
+.mi-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  font-size: var(--font-size-label-sm);
+  font-weight: 600;
+  color: var(--color-on-error-container);
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────── */
+
+/*
+ * 시안은 층을 테두리가 아니라 색면과 그림자로 만든다("Tonal Layers and
+ * Ambient shadows rather than hard borders"). 흰 카드에 회색 테두리를 두르면
+ * 크림 배경 위에서 층이 두 번 그려져 시안보다 딱딱해 보인다.
+ */
+.mi-card {
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* 컨테이너 반경 24px. 예약 흐름의 큰 단계 카드가 이 값을 쓴다. */
+.mi-card--roomy {
+  border-radius: var(--radius-xl);
+}
+
+.mi-card--interactive {
+  transition:
+    box-shadow 250ms ease,
+    transform 250ms ease;
+}
+
+.mi-card--interactive:hover,
+.mi-card--interactive:focus-within {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-3);
+}
+
+.mi-card__body {
+  padding: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .mi-card__body--roomy {
+    padding: var(--space-4);
+  }
+}
+
+/* ── Chip ─────────────────────────────────────────────────────────────── */
+
+/*
+ * 시안의 선택 칩. 꺼짐은 크림빛 면, 켜짐은 머스터드 면이다.
+ * 켜짐 글자색은 `on-secondary-fixed`(#271900)를 쓴다. 머스터드 위에서
+ * `on-secondary-container`(#6b4b00)보다 대비가 넉넉하다.
+ */
+.mi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.25rem;
+  padding: 0 var(--space-2);
+  background-color: var(--color-surface-container-high);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-family: inherit;
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.mi-chip:hover {
+  background-color: var(--color-surface-variant);
+}
+
+.mi-chip[aria-pressed='true'] {
+  background-color: var(--color-secondary-container);
+  border-color: transparent;
+  color: var(--color-on-secondary-fixed);
+  box-shadow: var(--shadow-1);
+}
+
+.mi-chip[aria-pressed='true']:hover {
+  background-color: var(--color-secondary-fixed-dim);
+}
+
+.mi-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 넓은 필터 탭 변형. 시안 `_14`의 상태 탭이 `px-6`이다. */
+.mi-chip--tab {
+  min-height: 2.5rem;
+  padding: 0 var(--space-3);
+}
+
+/* ── Switch ───────────────────────────────────────────────────────────── */
+
+/*
+ * 켜고 끄는 한 가지 조건. 시안 `_4`의 "예약 가능만 보기" 자리다.
+ *
+ * 네이티브 checkbox를 그대로 쓰고 시각만 바꾼다. 직접 만든 토글은 키보드
+ * 조작과 상태 전달을 다시 구현해야 한다.
+ */
+.mi-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-label-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mi-switch__control {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 1.5rem;
+  margin: 0;
+  appearance: none;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background-color 200ms ease;
+}
+
+.mi-switch__control::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 1.25rem;
+  height: 1.25rem;
+  background-color: var(--color-surface-container-lowest);
+  border-radius: var(--radius-full);
+  box-shadow: 0 1px 3px rgba(30, 28, 15, 0.24);
+  transition: transform 200ms ease;
+}
+
+.mi-switch__control:checked {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.mi-switch__control:checked::after {
+  transform: translateX(1.25rem);
+}
+
+.mi-switch__control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Checkbox ─────────────────────────────────────────────────────────── */
+
+/*
+ * 목록형 선택. 기본 체크박스는 브라우저마다 크기와 색이 달라 시안의 크림빛
+ * 면과 어울리지 않는다. 체크 표시는 배경 이미지가 아니라 clip-path로 그려
+ * 색상 대비 설정에서도 사라지지 않게 한다.
+ */
+.mi-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-body-md);
+  cursor: pointer;
+}
+
+.mi-checkbox__control {
+  position: relative;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  appearance: none;
+  background-color: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.mi-checkbox__control:checked {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.mi-checkbox__control:checked::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-on-primary);
+  clip-path: polygon(
+    16% 52%,
+    38% 74%,
+    84% 26%,
+    92% 34%,
+    38% 88%,
+    8% 58%
+  );
+}
+
+.mi-checkbox__control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Badge ────────────────────────────────────────────────────────────── */
+
+.mi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem var(--space-1);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.mi-badge--neutral {
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+}
+
+.mi-badge--positive {
+  background-color: #e3f2e4;
+  color: var(--color-status-available);
+}
+
+.mi-badge--negative {
+  background-color: var(--color-error-container);
+  color: var(--color-status-unavailable);
+}
+
+.mi-badge--attention {
+  background-color: var(--color-secondary-fixed);
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+/* 알약 모양 태그. 상호작용하지 않는 표시라 버튼과 구분된다. */
+.mi-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-label-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Counter (− n +) ──────────────────────────────────────────────────── */
+
+/*
+ * 수량·인원 조절. 시안은 크림빛 알약 안에 흰 원형 버튼 두 개를 둔다.
+ * 값은 `output`으로 읽히게 하고 버튼에는 각각 이름을 준다.
+ */
+.mi-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.25rem;
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-full);
+}
+
+.mi-counter__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  background-color: var(--color-surface-container-lowest);
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-1);
+  color: var(--color-on-surface);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.mi-counter__button:not(:disabled):hover {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.mi-counter__button:disabled {
+  box-shadow: none;
+  color: var(--color-outline);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.mi-counter__value {
+  min-width: 2.25rem;
+  text-align: center;
+  font-size: var(--font-size-body-lg);
+  font-weight: 700;
+}
+
+/* ── Alert ────────────────────────────────────────────────────────────── */
+
+/*
+ * 시안은 배너 왼쪽에 상태 아이콘을 둔다. 아이콘은 색을 보강할 뿐이고
+ * 뜻은 언제나 제목 문구가 전달한다.
+ */
+.mi-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body-md);
+}
+
+.mi-alert__icon {
+  grid-row: 1 / -1;
+  margin-top: 0.125rem;
+}
+
+.mi-alert--error {
+  background-color: var(--color-error-container);
+  border-color: var(--color-error);
+  color: var(--color-on-error-container);
+}
+
+.mi-alert--warning {
+  background-color: var(--color-secondary-fixed);
+  border-color: var(--color-secondary-fixed-dim);
+  color: var(--color-on-secondary-fixed-variant);
+}
+
+.mi-alert--info {
+  background-color: var(--color-surface-container);
+  border-color: var(--color-outline-variant);
+  color: var(--color-on-surface-variant);
+}
+
+.mi-alert__title {
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+}
+
+.mi-alert__actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: 0.25rem;
+}
+
+/* ── Spinner / loading ────────────────────────────────────────────────── */
+
+.mi-spinner {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--color-outline-variant);
+  border-top-color: var(--color-primary);
+  border-radius: var(--radius-full);
+  animation: mi-spin 700ms linear infinite;
+}
+
+@keyframes mi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mi-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+
+.mi-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-3);
+  text-align: center;
+  color: var(--color-on-surface-variant);
+}
+
+.mi-empty__title {
+  font-size: var(--font-size-headline-md);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+/* ── Pagination ───────────────────────────────────────────────────────── */
+
+.mi-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.mi-pagination__status {
+  font-size: var(--font-size-label-md);
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Layout helpers ───────────────────────────────────────────────────── */
+
+/*
+ * 가로 여백만 담당한다.
+ *
+ * `padding: 0 X` 단축 속성을 쓰면 위·아래 padding도 0으로 덮어쓴다. 같은
+ * 요소에 붙은 화면 클래스가 세로 padding을 선언해도 명시도가 같아 번들 순서가
+ * 승자를 정하고, 실제로 히어로의 세로 여백이 전부 0이 돼 펼친 검색 패널이
+ * 섹션 끝에 딱 붙었다. `padding-inline`은 세로 padding을 건드리지 않는다.
+ */
+.mi-container {
+  width: 100%;
+  max-width: var(--layout-container-max);
+  margin-inline: auto;
+  padding-inline: var(--layout-margin-mobile);
+}
+
+@media (min-width: 48rem) {
+  .mi-container {
+    padding-inline: var(--layout-margin-desktop);
+  }
+}
+
+/*
+ * 좁은 컨테이너 변형.
+ *
+ * 기능 CSS에서 `.mi-container`와 같은 요소에 max-width를 다시 선언하면 두
+ * 규칙의 명시도가 같아 번들 순서가 승자를 정한다. 실제로 로그인 카드가
+ * 1280px로 벌어졌다. 변형을 같은 파일에서 정의해 순서를 고정한다.
+ */
+.mi-container--narrow {
+  max-width: 48rem;
+}
+
+.mi-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mi-section {
+  padding: var(--space-4) 0;
+}
+
+/*
+ * 화면 제목.
+ *
+ * 시안은 화면의 첫 제목을 display-lg로 크게 놓는다. 모바일에서는 같은 크기가
+ * 두 줄을 넘겨 읽기 어려우므로 headline-lg로 떨어뜨린다.
+ */
+.mi-page-head {
+  padding: var(--space-4) 0 var(--space-3);
+}
+
+.mi-page-head__title {
+  font-size: var(--font-size-headline-lg);
+  line-height: var(--line-height-headline-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+@media (min-width: 48rem) {
+  .mi-page-head {
+    padding-top: var(--space-6);
+  }
+
+  .mi-page-head__title {
+    font-size: var(--font-size-display-lg);
+    line-height: var(--line-height-display-lg);
+  }
+}
+
+.mi-page-head__lead {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-body-lg);
+  line-height: var(--line-height-body-lg);
+  color: var(--color-on-surface-variant);
+  word-break: keep-all;
+}
+
+/*
+ * 배경 광원.
+ *
+ * 시안 여러 화면이 코럴·머스터드 원을 크게 흐려 배경에 깐다. 순수 장식이라
+ * 포인터를 받지 않고 보조기술에서도 숨긴다. 부모에 `position: relative`와
+ * `overflow: hidden`이 필요하다.
+ */
+.mi-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.mi-ambient::before,
+.mi-ambient::after {
+  content: '';
+  position: absolute;
+  border-radius: var(--radius-full);
+  filter: blur(80px);
+}
+
+.mi-ambient::before {
+  top: -10%;
+  right: -10%;
+  width: 31.25rem;
+  height: 31.25rem;
+  background-color: rgba(255, 180, 162, 0.28);
+}
+
+.mi-ambient::after {
+  bottom: -10%;
+  left: -10%;
+  width: 37.5rem;
+  height: 37.5rem;
+  background-color: rgba(254, 183, 0, 0.16);
+}
+
+/* 광원 위에 얹히는 실제 내용. */
+.mi-ambient-content {
+  position: relative;
+  z-index: 1;
+}

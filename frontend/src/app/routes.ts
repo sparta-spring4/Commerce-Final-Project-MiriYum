@@ -10,7 +10,20 @@ export type Shell = 'public' | 'consumer' | 'storeOperator'
 
 export const ROUTES = {
   home: '/',
+  stores: '/stores',
+  storeDetail: '/stores/:storeId',
   consumerSignIn: '/sign-in',
+  consumerSignUp: '/sign-up',
+  consumerKakaoCallback: '/auth/kakao/callback',
+  consumerKakaoSignUp: '/auth/kakao/sign-up',
+  myPage: '/mypage',
+  myReservations: '/mypage/reservations',
+  reservationCreate: '/stores/:storeId/reserve',
+  reservationDetail: '/reservations/:reservationId',
+  reservationComplete: '/reservations/:reservationId/complete',
+  pickupCreate: '/stores/:storeId/pickup',
+  pickupDetail: '/pickup-reservations/:pickupReservationId',
+  pickupComplete: '/pickup-reservations/:pickupReservationId/complete',
   storeOperatorSignIn: '/store-operator/sign-in',
   forbidden: '/forbidden',
 } as const
@@ -31,7 +44,11 @@ export interface NavigationItem {
  * 웨이팅·결제·리뷰·채팅처럼 뒤 단계 기능의 항목은 넣지 않는다.
  */
 export const NAVIGATION: Record<Shell, NavigationItem[]> = {
-  public: [{ label: '매장 검색', path: ROUTES.home }],
-  consumer: [{ label: '매장 검색', path: ROUTES.home }],
+  public: [{ label: '매장 찾기', path: ROUTES.stores }],
+  consumer: [
+    { label: '매장 찾기', path: ROUTES.stores },
+    { label: '내 예약', path: ROUTES.myReservations },
+    { label: '마이페이지', path: ROUTES.myPage },
+  ],
   storeOperator: [],
 }
