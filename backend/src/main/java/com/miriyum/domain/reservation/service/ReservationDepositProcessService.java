@@ -92,15 +92,7 @@ public class ReservationDepositProcessService {
                 || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
                 && now.isBefore(process.getExpiresAt())
                 && !process.isAbandonmentRequested()) {
-            holdTransitionPrimitive.transition(
-                    new ReservationHoldContracts.TransitionCommand(
-                            process.getReservationHoldId(),
-                            ReservationHoldStatus.RECONCILIATION_REQUIRED,
-                            "reservation-deposit-protect:" + processId + ":" + idempotencyKey,
-                            "CONSUMER",
-                            consumerAccountId,
-                            now,
-                            null));
+            protectResources(process, processId, consumerAccountId, idempotencyKey, now);
         }
         if (payment.status() == PaymentStatus.READY
                 && !now.isBefore(process.getExpiresAt())
@@ -152,8 +144,31 @@ public class ReservationDepositProcessService {
             processRepository.saveAndFlush(process);
             return ReservationDepositCommandResult.terminated(toResponse(process));
         }
+        if ((payment.status() == PaymentStatus.CONFIRMING
+                || payment.status() == PaymentStatus.RECONCILIATION_REQUIRED)
+                && now.isBefore(process.getExpiresAt())) {
+            protectResources(process, processId, consumerAccountId, idempotencyKey, now);
+        }
         processRepository.saveAndFlush(process);
         return ReservationDepositCommandResult.pending(toResponse(process));
+    }
+
+    private void protectResources(
+            ReservationDepositProcess process,
+            long processId,
+            long consumerAccountId,
+            String idempotencyKey,
+            Instant requestedAt
+    ) {
+        holdTransitionPrimitive.transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        process.getReservationHoldId(),
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        "reservation-deposit-protect:" + processId + ":" + idempotencyKey,
+                        "CONSUMER",
+                        consumerAccountId,
+                        requestedAt,
+                        null));
     }
 
     private static ReservationRequestResponse toResponse(ReservationDepositProcess process) {

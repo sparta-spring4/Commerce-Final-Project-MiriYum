@@ -261,6 +261,54 @@ class ReservationDepositProcessServiceTest {
     }
 
     @Test
+    void confirmingAbandonmentPersistsIntentAndProtectsResources() {
+        ReservationDepositProcessRepository processRepository =
+                mock(ReservationDepositProcessRepository.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositFinalizationPrimitive finalizationPrimitive =
+                mock(ReservationDepositFinalizationPrimitive.class);
+        ReservationHoldTransitionPrimitive holdTransitionPrimitive =
+                mock(ReservationHoldTransitionPrimitive.class);
+        ReservationMenuHoldPort menuHoldPort = mock(ReservationMenuHoldPort.class);
+        ReservationDepositProcess process = depositProcess();
+        given(processRepository.findByIdAndConsumerAccountIdForUpdate(
+                PROCESS_ID, CONSUMER_ID)).willReturn(Optional.of(process));
+        given(paymentService.getOwnedPayment("9001", String.valueOf(CONSUMER_ID)))
+                .willReturn(paymentResult(
+                        PaymentStatus.CONFIRMING,
+                        PaymentAttemptStatus.PENDING,
+                        null));
+        ReservationDepositProcessService service = new ReservationDepositProcessService(
+                processRepository,
+                paymentService,
+                finalizationPrimitive,
+                holdTransitionPrimitive,
+                menuHoldPort,
+                Clock.fixed(NOW, ZoneId.of("UTC")));
+
+        ReservationDepositCommandResult result = service.abandonOwned(
+                PROCESS_ID,
+                CONSUMER_ID,
+                "123e4567-e89b-12d3-a456-426614174004");
+
+        assertThat(result.httpStatus()).isEqualTo(202);
+        assertThat(result.reservationRequest().abandonmentRequested()).isTrue();
+        assertThat(process.getStatus())
+                .isEqualTo(ReservationDepositProcessStatus.AWAITING_PAYMENT);
+        verify(holdTransitionPrimitive).transition(
+                new ReservationHoldContracts.TransitionCommand(
+                        HOLD_ID,
+                        ReservationHoldStatus.RECONCILIATION_REQUIRED,
+                        "reservation-deposit-protect:99:123e4567-e89b-12d3-a456-426614174004",
+                        "CONSUMER",
+                        CONSUMER_ID,
+                        NOW,
+                        null));
+        verify(processRepository).saveAndFlush(process);
+        verify(finalizationPrimitive, never()).finalizeResources(any());
+    }
+
+    @Test
     void finalizationCopiesHeldCapacityWithoutMutatingOccupiedTotals() {
         ReservationHoldRepository holdRepository = mock(ReservationHoldRepository.class);
         ReservationHoldCapacityAllocationRepository holdAllocationRepository =
