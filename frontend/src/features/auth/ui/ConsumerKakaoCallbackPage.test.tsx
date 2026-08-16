@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import { http } from 'msw'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -6,6 +7,9 @@ import { ROUTES } from '../../../app/routes'
 import { successResponse } from '../../../test/msw/envelope'
 import { server } from '../../../test/msw/server'
 import { TestQueryProvider } from '../../../test/TestQueryProvider'
+import { consumerAccountKeys } from '../../consumer-account'
+import { pickupKeys } from '../../pickup-reservations/api/queries'
+import { reservationKeys } from '../../reservations/api/queries'
 import { ConsumerAuthProvider, useConsumerAuth } from '../ConsumerAuthProvider'
 import { unauthenticatedConsumer } from '../test/handlers'
 import { ConsumerKakaoCallbackPage } from './ConsumerKakaoCallbackPage'
@@ -13,25 +17,48 @@ import { ConsumerKakaoSignUpPage } from './ConsumerKakaoSignUpPage'
 
 const KAKAO_SESSION_PATH = '/api/v1/consumers/auth/kakao/sessions'
 
-function AuthenticatedProbe() {
+function AuthStatusProbe() {
   const { status } = useConsumerAuth()
   return <p data-testid="auth-status">{status}</p>
 }
 
 function renderCallback(route: string) {
-  return render(
-    <TestQueryProvider>
+  let queryClient: QueryClient | null = null
+
+  const rendered = render(
+    <TestQueryProvider onReady={(client) => { queryClient = client }}>
       <ConsumerAuthProvider>
         <MemoryRouter initialEntries={[route]}>
+          <AuthStatusProbe />
           <Routes>
             <Route path={ROUTES.consumerKakaoCallback} element={<ConsumerKakaoCallbackPage />} />
             <Route path={ROUTES.consumerKakaoSignUp} element={<ConsumerKakaoSignUpPage />} />
-            <Route path={ROUTES.home} element={<AuthenticatedProbe />} />
+            <Route path={ROUTES.home} element={<p>홈</p>} />
           </Routes>
         </MemoryRouter>
       </ConsumerAuthProvider>
     </TestQueryProvider>,
   )
+
+  if (queryClient === null) {
+    throw new Error('TestQueryProvider가 QueryClient를 넘겨주지 않았습니다.')
+  }
+
+  return { ...rendered, queryClient: queryClient as QueryClient }
+}
+
+function seedProtectedCache(queryClient: QueryClient) {
+  queryClient.setQueryData(consumerAccountKeys.me(), { nickname: '이전 사용자' })
+  queryClient.setQueryData(reservationKeys.detail('r-1'), { storeName: '이전 사용자' })
+  queryClient.setQueryData(pickupKeys.detail('p-1'), { storeName: '이전 사용자' })
+}
+
+function protectedCache(queryClient: QueryClient) {
+  return [
+    queryClient.getQueryData(consumerAccountKeys.me()),
+    queryClient.getQueryData(reservationKeys.detail('r-1')),
+    queryClient.getQueryData(pickupKeys.detail('p-1')),
+  ]
 }
 
 describe('일반 사용자 카카오 콜백', () => {
@@ -72,6 +99,35 @@ describe('일반 사용자 카카오 콜백', () => {
 
     expect(await screen.findByRole('heading', { name: '카카오로 가입하기' })).toBeInTheDocument()
     expect(window.location.search).not.toContain('temporary-ticket')
+  })
+
+  it('카카오 콜백도 인증 상태 전환 전에 이전 보호 캐시를 지운다', async () => {
+    let resolveSession: (() => void) | undefined
+    const sessionResponse = new Promise<void>((resolve) => {
+      resolveSession = resolve
+    })
+
+    server.use(
+      unauthenticatedConsumer,
+      http.post(KAKAO_SESSION_PATH, async () => {
+        await sessionResponse
+        return successResponse({
+          status: 'AUTHENTICATED',
+          accessToken: 'kakao-access-token',
+          tokenType: 'Bearer',
+          expiresIn: 900,
+        })
+      }),
+    )
+
+    const { queryClient } = renderCallback('/auth/kakao/callback?code=authorization-code&state=signed-state')
+    await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated'))
+    seedProtectedCache(queryClient)
+
+    resolveSession?.()
+
+    await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'))
+    expect(protectedCache(queryClient)).toEqual([undefined, undefined, undefined])
   })
 
   it('code 또는 state가 없으면 세션 API를 호출하지 않고 다시 시작하도록 안내한다', async () => {

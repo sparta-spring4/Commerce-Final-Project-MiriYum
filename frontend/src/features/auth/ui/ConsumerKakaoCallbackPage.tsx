@@ -34,9 +34,9 @@ export function ConsumerKakaoCallbackPage() {
       state,
       redirectUri: kakaoRedirectUri(),
     })
-      .then((result) => {
+      .then(async (result) => {
         if (result.status === 'AUTHENTICATED' && result.accessToken !== undefined) {
-          completeKakaoSignIn(result.accessToken)
+          await completeKakaoSignIn(result.accessToken)
           void navigate(ROUTES.home, { replace: true })
           return
         }

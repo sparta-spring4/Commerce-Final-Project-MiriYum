@@ -71,7 +71,7 @@ export function ConsumerKakaoSignUpPage() {
       if (result.status !== 'AUTHENTICATED' || result.accessToken === undefined) {
         throw new Error('Kakao sign-up did not authenticate the consumer')
       }
-      completeKakaoSignIn(result.accessToken)
+      await completeKakaoSignIn(result.accessToken)
       void navigate(ROUTES.home, { replace: true })
     } catch (error) {
       const conflict = kakaoConflictFieldError(error)
@@ -98,8 +98,8 @@ export function ConsumerKakaoSignUpPage() {
           <TextField label="휴대전화 번호" type="tel" name="phoneNumber" autoComplete="tel" required help="010으로 시작하는 11자리 번호" leadingIcon={<Icon name="phone" />} value={form.phoneNumber} error={fieldErrors.phoneNumber ?? null} onChange={(event) => update({ phoneNumber: event.target.value })} />
           <TextField label="닉네임" name="nickname" autoComplete="nickname" required help="2~20자, 한글·영문·숫자와 공백, _, -" leadingIcon={<Icon name="person" />} value={form.nickname} error={fieldErrors.nickname ?? null} onChange={(event) => update({ nickname: event.target.value })} />
           <div className="mi-field auth-form__consent">
-            <label className="mi-checkbox"><input type="checkbox" className="mi-checkbox__control" name="ageConfirmed" checked={form.ageConfirmed} onChange={(event) => update({ ageConfirmed: event.target.checked })} />(필수) 만 14세 이상입니다.</label>
-            {fieldErrors.ageConfirmed !== undefined && <p className="mi-field__error">{fieldErrors.ageConfirmed}</p>}
+            <label className="mi-checkbox"><input type="checkbox" className="mi-checkbox__control" name="ageConfirmed" checked={form.ageConfirmed} aria-invalid={fieldErrors.ageConfirmed !== undefined || undefined} aria-describedby={fieldErrors.ageConfirmed !== undefined ? 'kakao-age-confirmed-error' : undefined} onChange={(event) => update({ ageConfirmed: event.target.checked })} />(필수) 만 14세 이상입니다.</label>
+            {fieldErrors.ageConfirmed !== undefined && <p id="kakao-age-confirmed-error" className="mi-field__error">{fieldErrors.ageConfirmed}</p>}
           </div>
           {formError !== null && <Alert tone="error" title={formError} />}
           <Button type="submit" variant="primary" size="lg" block loading={submitting}>가입 완료</Button>

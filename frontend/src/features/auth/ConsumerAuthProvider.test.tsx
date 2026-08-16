@@ -26,7 +26,7 @@ import {
 const PROTECTED_PATH = '/api/v1/consumers/me'
 
 function Probe() {
-  const { status, apiClient, signIn, signOut, signOutNotice } =
+  const { status, apiClient, signIn, completeKakaoSignIn, signOut, signOutNotice } =
     useConsumerAuth()
 
   return (
@@ -43,6 +43,14 @@ function Probe() {
       </button>
       <button type="button" onClick={() => void signOut()}>
         로그아웃
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void completeKakaoSignIn('kakao-access-token')
+        }}
+      >
+        카카오 로그인 완료
       </button>
       <button
         type="button"
@@ -572,6 +580,19 @@ describe('일반 사용자 인증 shell', () => {
     fireEvent.click(screen.getByRole('button', { name: '로그인' }))
     await waitFor(() => expect(status()).toBe('authenticated'))
 
+    expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
+  })
+
+  it('카카오 로그인 완료도 인증 상태 전환 전에 이전 보호 캐시를 지운다', async () => {
+    server.use(unauthenticatedConsumer)
+
+    const { queryClient } = renderProvider()
+    await waitFor(() => expect(status()).toBe('unauthenticated'))
+
+    seedProtectedCache(queryClient, '이전 사용자')
+    fireEvent.click(screen.getByRole('button', { name: '카카오 로그인 완료' }))
+
+    await waitFor(() => expect(status()).toBe('authenticated'))
     expect(cachedOwners(queryClient)).toEqual([undefined, undefined, undefined])
   })
 })

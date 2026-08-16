@@ -47,7 +47,7 @@ export interface ConsumerAuthContextValue {
   /** 보호 API 호출용 client. Access Token과 401 재발급이 이미 걸려 있다. */
   apiClient: ApiClient
   signIn: (credentials: LoginRequest) => Promise<void>
-  completeKakaoSignIn: (accessToken: string) => void
+  completeKakaoSignIn: (accessToken: string) => Promise<void>
   signOut: () => Promise<SignOutOutcome>
   /**
    * 마지막 로그아웃에서 서버 폐기를 확인하지 못했을 때만 채워진다.
@@ -253,12 +253,20 @@ export function ConsumerAuthProvider({ children }: { children: ReactNode }) {
    * Refresh Token은 서버가 HttpOnly 쿠키로 설정하므로 이 함수에서 받거나 저장하지 않는다.
    */
   const completeKakaoSignIn = useCallback(
-    (accessToken: string) => {
+    async (accessToken: string) => {
       sessionGeneration.current += 1
+
+      const generation = sessionGeneration.current
+      await clearConsumerProtectedQueries(queryClient)
+
+      // 캐시 정리 중 로그아웃했다면 늦게 도착한 카카오 결과를 남기지 않는다.
+      if (generation !== sessionGeneration.current) {
+        return
+      }
+
       accessTokenRef.current = accessToken
       setStatus('authenticated')
       setSignOutNotice(null)
-      void clearConsumerProtectedQueries(queryClient)
     },
     [queryClient],
   )
