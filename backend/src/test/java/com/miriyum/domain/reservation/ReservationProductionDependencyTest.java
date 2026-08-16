@@ -2,12 +2,14 @@ package com.miriyum.domain.reservation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.miriyum.domain.reservation.dto.ReservationHoldContracts;
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
 import com.miriyum.domain.reservation.service.ReservationHoldCreationPrimitive;
 import com.miriyum.domain.reservation.service.ReservationHoldService;
+import com.miriyum.domain.reservation.service.ReservationHoldTransitionPrimitive;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthority;
 import com.miriyum.domain.reservation.waiting.service.WaitingStoreAuthorityPort;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
@@ -49,6 +51,23 @@ class ReservationProductionDependencyTest {
         assertThat(Stream.of(ReservationHoldService.class.getDeclaredFields())
                 .anyMatch(field -> field.getType()
                         == ReservationHoldCreationPrimitive.class))
+                .isTrue();
+    }
+
+    @Test
+    void reservationHoldTransitionUsesTheMandatorySharedPrimitive()
+            throws NoSuchMethodException {
+        Transactional transaction = ReservationHoldTransitionPrimitive.class
+                .getMethod(
+                        "transition",
+                        ReservationHoldContracts.TransitionCommand.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.propagation()).isEqualTo(Propagation.MANDATORY);
+        assertThat(Stream.of(ReservationHoldService.class.getDeclaredFields())
+                .anyMatch(field -> field.getType()
+                        == ReservationHoldTransitionPrimitive.class))
                 .isTrue();
     }
 
