@@ -6,6 +6,8 @@ import com.miriyum.domain.reservation.waiting.dto.WaitingTeamSnapshot;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActiveMembership;
 import com.miriyum.domain.reservation.waiting.entity.WaitingActorType;
 import com.miriyum.domain.reservation.waiting.entity.WaitingQueueSequence;
+import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
+import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSource;
 import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
@@ -13,6 +15,7 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTransitionAudit;
 import com.miriyum.domain.reservation.waiting.repository.WaitingActiveMembershipRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingQueueSequenceRepository;
+import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingStatusEventRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTeamRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingTransitionAuditRepository;
@@ -47,6 +50,7 @@ public class WaitingCreationService {
     private final WaitingActiveMembershipRepository membershipRepository;
     private final WaitingTransitionAuditRepository auditRepository;
     private final WaitingStatusEventRepository eventRepository;
+    private final WaitingSettingRepository settingRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final WaitingCreationTransactionExecutor transactionExecutor;
     private final ObjectMapper objectMapper;
@@ -63,19 +67,22 @@ public class WaitingCreationService {
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository,
             WaitingStatusEventRepository eventRepository,
+            WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor,
             WaitingCreationTransactionExecutor transactionExecutor,
             ObjectMapper objectMapper,
             Clock clock
     ) {
         this(sequenceRepository, teamRepository, membershipRepository, auditRepository,
-                eventRepository, idempotencyExecutor, transactionExecutor, objectMapper, clock,
+                eventRepository, settingRepository, idempotencyExecutor, transactionExecutor,
+                objectMapper, clock,
                 WaitingCreationService::defaultDelayMillis, Thread::sleep);
     }
 
     WaitingCreationService(WaitingQueueSequenceRepository sequenceRepository,
             WaitingTeamRepository teamRepository, WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository,
+            WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, WaitingCreationTransactionExecutor transactionExecutor,
             ObjectMapper objectMapper, Clock clock, IntToLongFunction retryDelayMillis,
             RetrySleeper retrySleeper) {
@@ -84,6 +91,7 @@ public class WaitingCreationService {
         this.membershipRepository = Objects.requireNonNull(membershipRepository);
         this.auditRepository = Objects.requireNonNull(auditRepository);
         this.eventRepository = Objects.requireNonNull(eventRepository);
+        this.settingRepository = Objects.requireNonNull(settingRepository);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.transactionExecutor = Objects.requireNonNull(transactionExecutor);
         this.objectMapper = Objects.requireNonNull(objectMapper);
@@ -130,6 +138,12 @@ public class WaitingCreationService {
     ) {
         return transactionExecutor.execute(() -> {
             IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+                    WaitingSetting setting = settingRepository.findByStoreIdForUpdate(storeId)
+                            .orElseThrow(WaitingCreationService::receptionClosed);
+                    if (!setting.isEnabled()
+                            || setting.getReceptionMode() == WaitingReceptionMode.PAUSED) {
+                        throw receptionClosed();
+                    }
                     if (membershipRepository.findByConsumerAccountId(consumerAccountId).isPresent()) {
                         throw membershipConflict();
                     }
@@ -215,5 +229,9 @@ public class WaitingCreationService {
 
     private static ServiceException membershipConflict() {
         return new ServiceException(ReservationErrorCode.ACCOUNT_ACTIVE_WAITING_EXISTS);
+    }
+
+    private static ServiceException receptionClosed() {
+        return new ServiceException(ReservationErrorCode.WAITING_RECEPTION_CLOSED);
     }
 }

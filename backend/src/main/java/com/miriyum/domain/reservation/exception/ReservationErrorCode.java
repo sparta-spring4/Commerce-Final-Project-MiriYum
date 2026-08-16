@@ -108,6 +108,11 @@ public enum ReservationErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "WAITING_010",
             "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다."
+    ),
+    WAITING_RECEPTION_CLOSED(
+            HttpStatus.CONFLICT,
+            "WAITING_012",
+            "현재 매장은 신규 웨이팅 접수를 받지 않습니다."
     );
 
     private final HttpStatus httpStatus;

@@ -99,7 +99,7 @@ public class WaitingSettingService {
     private BusinessResult<?> apply(long operatorId, long storeId,
             IdempotencyKey key, WaitingSettingUpdateRequest request) {
         Instant now = clock.instant();
-        WaitingSetting setting = settingRepository.findByStoreId(storeId).orElse(null);
+        WaitingSetting setting = settingRepository.findByStoreIdForUpdate(storeId).orElse(null);
         long currentVersion = setting == null ? 0L : setting.getVersion();
         if (currentVersion != request.expectedVersion()) {
             throw new ServiceException(ReservationErrorCode.WAITING_SETTING_VERSION_CONFLICT);

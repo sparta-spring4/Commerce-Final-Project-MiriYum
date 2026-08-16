@@ -31,7 +31,7 @@ class ReservationErrorCodeTest {
     @DisplayName("예약 오류 외부 코드는 중복되지 않는다")
     void doesNotContainDuplicateExternalCodes() {
         // when & then
-        assertThat(ReservationErrorCode.values()).hasSize(21);
+        assertThat(ReservationErrorCode.values()).hasSize(22);
         assertThat(ReservationErrorCode.values())
                 .extracting(ReservationErrorCode::getCode)
                 .doesNotHaveDuplicates();
@@ -92,7 +92,10 @@ class ReservationErrorCodeTest {
                         "웨이팅 종결 작업이 아직 완료되지 않았거나 재확인이 필요합니다."),
                 Arguments.of(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED,
                         HttpStatus.CONFLICT, "WAITING_010",
-                        "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다.")
+                        "웨이팅 종결 작업 항목 처리 중 실패가 발생했습니다."),
+                Arguments.of(ReservationErrorCode.WAITING_RECEPTION_CLOSED,
+                        HttpStatus.CONFLICT, "WAITING_012",
+                        "현재 매장은 신규 웨이팅 접수를 받지 않습니다.")
         );
     }
 }

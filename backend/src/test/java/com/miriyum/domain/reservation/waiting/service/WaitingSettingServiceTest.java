@@ -76,7 +76,7 @@ class WaitingSettingServiceTest {
 
     @Test
     void keepActiveCreatesVersionOneAndDoesNotStartAClosureJob() {
-        given(settings.findByStoreId(22L)).willReturn(Optional.empty());
+        given(settings.findByStoreIdForUpdate(22L)).willReturn(Optional.empty());
         given(closures.inspectActiveTeams(33L, 22L))
                 .willReturn(new WaitingActiveTeamImpact(22L, 2L));
 
@@ -93,7 +93,7 @@ class WaitingSettingServiceTest {
 
     @Test
     void closeActiveTeamsBindsTheNewVersionAndReturnsAcceptedJob() {
-        given(settings.findByStoreId(22L)).willReturn(Optional.empty());
+        given(settings.findByStoreIdForUpdate(22L)).willReturn(Optional.empty());
         given(closures.inspectActiveTeams(33L, 22L))
                 .willReturn(new WaitingActiveTeamImpact(22L, 2L));
         WaitingClosureJobSnapshot job = new WaitingClosureJobSnapshot(
@@ -112,7 +112,7 @@ class WaitingSettingServiceTest {
 
     @Test
     void activeTeamsRequireAnExplicitDisableAction() {
-        given(settings.findByStoreId(22L)).willReturn(Optional.empty());
+        given(settings.findByStoreIdForUpdate(22L)).willReturn(Optional.empty());
         given(closures.inspectActiveTeams(33L, 22L))
                 .willReturn(new WaitingActiveTeamImpact(22L, 1L));
 
@@ -128,7 +128,7 @@ class WaitingSettingServiceTest {
     void staleExpectedVersionDoesNotMutateOrInspectTeams() {
         WaitingSetting current = WaitingSetting.create(
                 22L, true, WaitingReceptionMode.AUTO, 60, NOW.minusSeconds(1));
-        given(settings.findByStoreId(22L)).willReturn(Optional.of(current));
+        given(settings.findByStoreIdForUpdate(22L)).willReturn(Optional.of(current));
 
         assertThatThrownBy(() -> service.replace(33L, 22L, KEY,
                 request(0L, false, WaitingReceptionMode.PAUSED, 60,

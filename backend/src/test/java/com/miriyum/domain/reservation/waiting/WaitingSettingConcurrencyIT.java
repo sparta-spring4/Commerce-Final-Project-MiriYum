@@ -1,23 +1,27 @@
 package com.miriyum.domain.reservation.waiting;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 
 import com.miriyum.MiriyumApplication;
+import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.waiting.dto.*;
 import com.miriyum.domain.reservation.waiting.entity.*;
 import com.miriyum.domain.reservation.waiting.repository.*;
 import com.miriyum.domain.reservation.waiting.service.*;
 import com.miriyum.global.exception.ServiceException;
 import com.miriyum.global.idempotency.IdempotencyKey;
-import java.time.ZoneId;
+import java.time.*;
 import java.util.List;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -51,19 +55,33 @@ class WaitingSettingConcurrencyIT {
     @Autowired WaitingSettingService service;
     @Autowired WaitingSettingRepository settings;
     @Autowired WaitingSettingAuditRepository audits;
+    @Autowired WaitingCreationService creationService;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean WaitingStoreAuthorityPort authority;
     @MockitoBean WaitingClosureService closures;
 
     @BeforeEach
     void fixture() {
+        jdbc.execute("DELETE FROM waiting_status_events");
+        jdbc.execute("DELETE FROM waiting_transition_audits");
+        jdbc.execute("DELETE FROM waiting_active_memberships");
+        jdbc.execute("DELETE FROM waiting_teams");
+        jdbc.execute("DELETE FROM waiting_queue_sequences");
         jdbc.execute("DELETE FROM waiting_setting_audits");
         jdbc.execute("DELETE FROM waiting_settings");
         jdbc.execute("DELETE FROM idempotency_commands");
         jdbc.execute("DELETE FROM store_tag_assignment");
         jdbc.execute("DELETE FROM stores");
         jdbc.execute("DELETE FROM store_operator_accounts");
+        jdbc.execute("DELETE FROM consumer_accounts");
         insertStoreFixture();
+        jdbc.update("""
+                INSERT INTO consumer_accounts (
+                    consumer_account_id, email, password_hash, name, status, created_at, updated_at
+                ) VALUES (41, 'setting-race-consumer@example.com', 'hash', '설정 경합 사용자',
+                    'ACTIVE', NOW(6), NOW(6))
+                """);
         given(authority.requireRead(anyLong(), anyLong()))
                 .willAnswer(invocation -> new WaitingStoreAuthority(
                         invocation.getArgument(1), ZoneId.of("Asia/Seoul")));
@@ -94,6 +112,52 @@ class WaitingSettingConcurrencyIT {
 
         assertThat(settings.findByStoreId(22L).orElseThrow().getVersion()).isEqualTo(2L);
         assertThat(audits.countByStoreId(22L)).isEqualTo(2L);
+    }
+
+    @Test
+    void committedDisableFencesWaitingCreationThatStartedWhileTheSettingWasLocked() throws Exception {
+        service.replace(31L, 22L, key(10), new WaitingSettingUpdateRequest(
+                0L, true, WaitingReceptionMode.MANUAL, 60, null));
+        CountDownLatch disabledButUncommitted = new CountDownLatch(1);
+        CountDownLatch allowCommit = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> disabler = executor.submit(() ->
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        WaitingSetting setting = settings.findByStoreIdForUpdate(22L).orElseThrow();
+                        setting.replace(1L, false, WaitingReceptionMode.PAUSED, 60, Instant.now());
+                        settings.saveAndFlush(setting);
+                        disabledButUncommitted.countDown();
+                        await(allowCommit);
+                    }));
+            assertThat(disabledButUncommitted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<RuntimeException> creator = executor.submit(() -> {
+                try {
+                    creationService.create(22L, 41L, LocalDate.of(2026, 8, 16), 2,
+                            WaitingSource.REMOTE, key(11));
+                    return null;
+                } catch (RuntimeException failure) {
+                    return failure;
+                }
+            });
+            assertThatThrownBy(() -> creator.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            allowCommit.countDown();
+            disabler.get(5, TimeUnit.SECONDS);
+            RuntimeException failure = creator.get(5, TimeUnit.SECONDS);
+            assertThat(failure).isInstanceOfSatisfying(ServiceException.class, exception ->
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(ReservationErrorCode.WAITING_RECEPTION_CLOSED));
+        } finally {
+            allowCommit.countDown();
+        }
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_teams", Long.class)).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM waiting_active_memberships", Long.class)).isZero();
+        assertThat(settings.findByStoreId(22L).orElseThrow().isEnabled()).isFalse();
     }
 
     private Attempt attempt(CountDownLatch ready, CountDownLatch start, IdempotencyKey key,

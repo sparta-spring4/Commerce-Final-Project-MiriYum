@@ -136,6 +136,19 @@ HAVING COUNT(*) > 1;
 - `disableAction`은 `enabled=false` 요청에서만 허용한다. 활성화 요청에 포함하면
   `400 COMMON_001`이다.
 
+## 신규 접수 설정 gate
+
+일반 사용자 팀 생성은 원장 행을 만들기 전에 같은 트랜잭션에서 현재 매장의 설정 행을
+잠근다. 설정 행이 없거나 `enabled=false`이거나 `receptionMode=PAUSED`이면 팀, 활성
+membership, 순번, 감사와 상태 이벤트를 만들지 않고 `409 WAITING_012
+WAITING_RECEPTION_CLOSED`를 반환한다. 설정 교체도 같은 설정 행을 먼저 잠가 생성과
+직렬화한다. 생성이 먼저 확정된 뒤의 `KEEP_ACTIVE`는 그 팀을 유지하고, 비활성화 또는
+일시중지가 먼저 확정되면 뒤늦은 생성은 실패 폐쇄한다.
+
+현재 활성 OpenAPI에는 일반 사용자 팀 생성 path가 없으므로 #271은 해당 HTTP path를
+추가하지 않는다. `WAITING_012`는 향후 consumer operation이 연결할 공개 Reservation 오류
+계약이며 현재 runtime의 `WaitingCreationService`에서도 동일한 wire code를 사용한다.
+
 ## 비활성화와 활성 팀
 
 Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전과 활성 팀 수를 확인할 수
@@ -149,6 +162,9 @@ Frontend는 비활성화 전에 `GET .../deactivation-impact`로 현재 버전�
 - `CLOSE_ACTIVE_TEAMS`는 먼저 새 설정 버전으로 비활성화한 뒤 Issue #272의 공개 Service를
   통해 그 버전에 결박된 비동기 일괄 종결 작업을 생성하고 작업 snapshot과 `202 Accepted`를
   반환한다. 설정 저장과 작업 생성은 하나의 트랜잭션으로 확정한다.
+- 종결 worker는 각 claim 처리 시 job의 `storeId/settingsVersion`과 현재 설정의 동일 version,
+  `enabled=false`를 설정 행 잠금 아래 다시 확인한다. 설정이 재활성화됐거나 더 최신 version이면
+  팀, membership, 감사와 이벤트를 바꾸지 않고 해당 stale 항목만 완료해 재시도하지 않는다.
 
 활성 팀이 없으면 `disableAction` 없이 비활성화할 수 있다. `disableAction`이 제공된 경우에도
 서버는 명령 시점의 활성 팀과 권한을 다시 확인한다. `RESERVATION_CONVERTING`도 활성 팀이므로

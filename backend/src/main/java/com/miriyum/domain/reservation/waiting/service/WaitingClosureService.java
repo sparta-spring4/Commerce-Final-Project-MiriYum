@@ -32,6 +32,7 @@ public class WaitingClosureService {
     private final WaitingTeamRepository teamRepository;
     private final WaitingClosureJobRepository jobRepository;
     private final WaitingClosureJobItemRepository itemRepository;
+    private final WaitingSettingRepository settingRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -42,6 +43,7 @@ public class WaitingClosureService {
     @Autowired
     public WaitingClosureService(WaitingStoreAuthorityPort authorityPort, WaitingTeamRepository teamRepository,
             WaitingClosureJobRepository jobRepository, WaitingClosureJobItemRepository itemRepository,
+            WaitingSettingRepository settingRepository,
             IdempotencyExecutor idempotencyExecutor, ObjectMapper objectMapper, Clock clock,
             WaitingActiveMembershipRepository membershipRepository,
             WaitingTransitionAuditRepository auditRepository, WaitingStatusEventRepository eventRepository) {
@@ -49,6 +51,7 @@ public class WaitingClosureService {
         this.teamRepository = Objects.requireNonNull(teamRepository);
         this.jobRepository = Objects.requireNonNull(jobRepository);
         this.itemRepository = Objects.requireNonNull(itemRepository);
+        this.settingRepository = Objects.requireNonNull(settingRepository);
         this.idempotencyExecutor = Objects.requireNonNull(idempotencyExecutor);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.clock = Objects.requireNonNull(clock);
@@ -128,6 +131,13 @@ public class WaitingClosureService {
         if (!item.isOwnedBy(claim.owner(), claim.token(), now)) return false;
         WaitingClosureJob job = jobRepository.findByIdForUpdate(item.getWaitingClosureJobId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_NOT_FOUND));
+        WaitingSetting setting = settingRepository.findByStoreIdForUpdate(job.getStoreId()).orElse(null);
+        if (setting == null || setting.isEnabled()
+                || setting.getVersion() != job.getSettingsVersion()) {
+            item.complete(claim.owner(), claim.token(), now);
+            reconcile(job, now);
+            return true;
+        }
         WaitingTeam team = teamRepository.findByIdForUpdate(item.getWaitingTeamId())
                 .orElseThrow(() -> new ServiceException(ReservationErrorCode.WAITING_CLOSE_JOB_ITEM_FAILED));
         if (ACTIVE.contains(team.getStatus())) {

@@ -1,10 +1,10 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.then;
 
 import com.miriyum.MiriyumApplication;
 import com.miriyum.domain.reservation.waiting.dto.*;
@@ -52,10 +52,11 @@ class WaitingSettingServiceIT {
     @Autowired WaitingSettingAuditRepository audits;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean WaitingStoreAuthorityPort authority;
-    @MockitoBean WaitingClosureService closures;
 
     @BeforeEach
     void fixture() {
+        jdbc.execute("DELETE FROM waiting_closure_job_items");
+        jdbc.execute("DELETE FROM waiting_closure_jobs");
         jdbc.execute("DELETE FROM waiting_setting_audits");
         jdbc.execute("DELETE FROM waiting_settings");
         jdbc.execute("DELETE FROM idempotency_commands");
@@ -87,21 +88,36 @@ class WaitingSettingServiceIT {
 
     @Test
     void closeActionCreatesThePublicClosureJobAfterVersionedDisable() {
-        given(closures.inspectActiveTeams(31L, 22L))
-                .willReturn(new WaitingActiveTeamImpact(22L, 2L));
-        WaitingClosureJobSnapshot job = new WaitingClosureJobSnapshot(
-                "91", "22", WaitingClosureJobStatus.PENDING, 2, 0, 0, 0,
-                Instant.parse("2026-08-16T00:00:00Z"), null);
-        given(closures.startClosure(31L, 22L, KEY, 1L))
-                .willReturn(new WaitingClosureCommandResult(202, job));
-
         WaitingSettingCommandResult result = service.replace(31L, 22L, KEY,
                 new WaitingSettingUpdateRequest(0L, false, WaitingReceptionMode.PAUSED,
                         60, WaitingDisableAction.CLOSE_ACTIVE_TEAMS));
 
         assertThat(result.httpStatus()).isEqualTo(202);
         assertThat(settings.findByStoreId(22L).orElseThrow().getVersion()).isEqualTo(1L);
-        then(closures).should().startClosure(31L, 22L, KEY, 1L);
+        assertThat(result.data()).isInstanceOf(WaitingClosureJobSnapshot.class);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_closure_jobs", Long.class))
+                .isOne();
+    }
+
+    @Test
+    void versionedDisableAndRealClosureJobRollBackTogether() {
+        jdbc.update("""
+                INSERT INTO waiting_closure_jobs (
+                    store_id, settings_version, status, target_team_count,
+                    completed_team_count, failed_team_count,
+                    reconciliation_required_team_count, version, created_at, completed_at
+                ) VALUES (22, 1, 'COMPLETED', 0, 0, 0, 0, 0, NOW(6), NOW(6))
+                """);
+
+        assertThatThrownBy(() -> service.replace(31L, 22L, KEY,
+                new WaitingSettingUpdateRequest(0L, false, WaitingReceptionMode.PAUSED,
+                        60, WaitingDisableAction.CLOSE_ACTIVE_TEAMS)))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_settings", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_setting_audits", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM waiting_closure_jobs", Long.class)).isOne();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM idempotency_commands", Long.class)).isZero();
     }
 
     private void insertStoreFixture() {

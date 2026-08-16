@@ -53,7 +53,8 @@ class WaitingCreationFailureClassifierTest {
         WaitingCreationService service = new WaitingCreationService(
                 mock(WaitingQueueSequenceRepository.class), mock(WaitingTeamRepository.class),
                 mock(WaitingActiveMembershipRepository.class), mock(WaitingTransitionAuditRepository.class),
-                mock(WaitingStatusEventRepository.class), mock(IdempotencyExecutor.class), transactions,
+                mock(WaitingStatusEventRepository.class), mock(WaitingSettingRepository.class),
+                mock(IdempotencyExecutor.class), transactions,
                 new ObjectMapper(), Clock.fixed(Instant.parse("2026-08-12T00:00:00Z"), ZoneOffset.UTC),
                 attempt -> 0L, millis -> { throw new InterruptedException("stop"); });
 
