@@ -93,8 +93,9 @@ public class PublicImageService {
             if (confirmedImages("STORE", storeId, FileStoragePurpose.STORE_IMAGE).size() >= STORE_IMAGE_LIMIT) {
                 throw new ServiceException(StoreErrorCode.PUBLIC_IMAGE_LIMIT_EXCEEDED);
             }
-            FileStorageMetadata stored = store(image, new FileStorageOwner("STORE", storeId),
+            FileStorageMetadata stored = storePending(image, new FileStorageOwner("STORE", storeId),
                     FileStoragePurpose.STORE_IMAGE, storeObjectKey(storeId, image));
+            registerBeforeCommitConfirmation(stored.fileId());
             registerRollbackCleanup(stored.fileId());
             PublicImageResponse response = PublicImageResponse.from(stored);
             return success(HttpStatus.CREATED, "STORE_IMAGE", stored.fileId().toString(), response);
@@ -119,15 +120,16 @@ public class PublicImageService {
             requireLockedStoreOwnership(operatorAccountId, storeId);
             FileStorageMetadata previous = requireConfirmedImage(
                     imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE);
-            FileStorageMetadata stored = store(image, new FileStorageOwner("STORE", storeId),
+            FileStorageMetadata stored = storePending(image, new FileStorageOwner("STORE", storeId),
                     FileStoragePurpose.STORE_IMAGE, storeObjectKey(storeId, image));
+            registerBeforeCommitConfirmation(stored.fileId());
             registerRollbackCleanup(stored.fileId());
             registerCommittedReplacementCleanup(previous.fileId());
             PublicImageResponse response = PublicImageResponse.from(stored);
             return success(HttpStatus.OK, "STORE_IMAGE", stored.fileId().toString(), response);
         });
         if (outcome.replayed()) {
-            retryDeletedReplacementObjectCleanup(operatorAccountId, storeId, imageId);
+            retryReplacementObjectCleanup(operatorAccountId, storeId, imageId);
         }
         return result(outcome);
     }
@@ -200,7 +202,7 @@ public class PublicImageService {
         }
     }
 
-    private FileStorageMetadata store(
+    private FileStorageMetadata storePending(
             ValidatedPublicImage image,
             FileStorageOwner owner,
             FileStoragePurpose purpose,
@@ -216,7 +218,7 @@ public class PublicImageService {
                 checksum(image.bytes()), FileStorageVisibility.PUBLIC, FileStorageStatus.PENDING,
                 purpose.name() + "_PUBLIC", now, null);
         try (ByteArrayInputStream content = new ByteArrayInputStream(image.bytes())) {
-            return facade.store(metadata, new FileStorageRequest(
+            return facade.storePending(metadata, new FileStorageRequest(
                     objectKey, image.contentType(), image.bytes().length, content));
         } catch (IOException exception) {
             throw new IllegalStateException("메모리 입력 스트림을 닫지 못했습니다.", exception);
@@ -278,10 +280,7 @@ public class PublicImageService {
         }
     }
 
-    /**
-     * 파일 메타데이터는 외부 저장소 일관성을 위해 독립 트랜잭션으로 먼저 확정한다.
-     * 바깥 멱등 트랜잭션이 롤백되면 새 공개 파일을 즉시 삭제 상태로 보상한다.
-     */
+    /** 바깥 트랜잭션이 롤백되면 공개 전 대기 파일을 삭제 상태로 보상한다. */
     private void registerRollbackCleanup(UUID imageId) {
         requireTransactionSynchronization();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -289,13 +288,44 @@ public class PublicImageService {
             public void afterCompletion(int status) {
                 if (status == STATUS_ROLLED_BACK) {
                     try {
-                        deleteAfterReplacement(imageId);
+                        discardPending(imageId);
                     } catch (ServiceException exception) {
                         log.warn("event=store_public_image_rollback_cleanup_failed image_id={}", imageId);
                     }
                 }
             }
         });
+    }
+
+    /** 멱등 결과가 기록된 뒤 같은 바깥 트랜잭션 안에서만 새 파일을 공개한다. */
+    private void registerBeforeCommitConfirmation(UUID imageId) {
+        requireTransactionSynchronization();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void beforeCommit(boolean readOnly) {
+                FileStorageFacade facade = fileStorageFacadeProvider.getIfAvailable();
+                if (facade == null) {
+                    throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+                }
+                try {
+                    facade.confirmWithinCurrentTransaction(imageId);
+                } catch (RuntimeException exception) {
+                    throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+                }
+            }
+        });
+    }
+
+    private void discardPending(UUID imageId) {
+        FileStorageFacade facade = fileStorageFacadeProvider.getIfAvailable();
+        if (facade == null) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
+        try {
+            facade.discardPending(imageId, clock.instant());
+        } catch (RuntimeException exception) {
+            throw new ServiceException(CommonErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     /** 기존 이미지는 새 결과와 멱등 기록이 커밋된 뒤에만 외부 객체 정리를 시작한다. */
@@ -315,14 +345,17 @@ public class PublicImageService {
         }
     }
 
-    private void retryDeletedReplacementObjectCleanup(
+    /**
+     * 이전 정리 시 메타데이터 전이가 실패해 CONFIRMED에 남은 경우와
+     * 객체 삭제만 실패해 DELETED에 남은 경우를 같은 멱등 재시도에서 함께 정리한다.
+     */
+    private void retryReplacementObjectCleanup(
             long operatorAccountId,
             long storeId,
             UUID imageId
     ) {
         requireLockedStoreOwnership(operatorAccountId, storeId);
         findDeletableImage(imageId, "STORE", storeId, FileStoragePurpose.STORE_IMAGE)
-                .filter(metadata -> metadata.status() == FileStorageStatus.DELETED)
                 .ifPresent(metadata -> tryDeleteAfterReplacement(metadata.fileId()));
     }
 

@@ -150,28 +150,28 @@ class PublicImageServiceTest {
     }
 
     @Test
-    void replacementReplaysNewImageAndRetriesOldObjectCleanupWithSameIdempotencyKey() {
+    void replacementReplaysNewImageAndRetriesConfirmedOldObjectCleanupWithSameIdempotencyKey() {
         UUID previousImageId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
         UUID replacementImageId = UUID.fromString("223e4567-e89b-12d3-a456-426614174000");
         IdempotencyKey key = IdempotencyKey.parse("323e4567-e89b-12d3-a456-426614174000");
         FileMetadata previous = storeImage(previousImageId);
         previous.confirm();
-        FileMetadata deletedPrevious = storeImage(previousImageId);
-        deletedPrevious.confirm();
-        deletedPrevious.delete(Instant.parse("2026-08-15T00:00:00Z"));
         FileMetadata replacement = storeImage(replacementImageId);
-        replacement.confirm();
+        FileMetadata confirmedReplacement = storeImage(replacementImageId);
+        confirmedReplacement.confirm();
         FileStorageFacade facade = org.mockito.Mockito.mock(FileStorageFacade.class);
         AtomicReference<IdempotentOutcome> savedOutcome = new AtomicReference<>();
 
         given(storeRepository.findByIdForUpdate(7L)).willReturn(Optional.of(store));
         given(fileMetadataRepository.findById(previousImageId.toString()))
-                .willReturn(Optional.of(previous), Optional.of(deletedPrevious));
+                .willReturn(Optional.of(previous), Optional.of(previous));
         given(fileStorageFacadeProvider.getIfAvailable()).willReturn(facade);
-        given(facade.store(any(), any())).willReturn(replacement.toPublicMetadata());
+        given(facade.storePending(any(), any())).willReturn(replacement.toPublicMetadata());
+        given(facade.confirmWithinCurrentTransaction(replacementImageId))
+                .willReturn(confirmedReplacement.toPublicMetadata());
         given(facade.delete(previousImageId, Instant.parse("2026-08-15T00:00:00Z")))
                 .willThrow(new IllegalStateException("저장소 삭제 실패"))
-                .willReturn(deletedPrevious.toPublicMetadata());
+                .willReturn(previous.toPublicMetadata());
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
             IdempotentOutcome replay = savedOutcome.get();
             if (replay != null) {
@@ -192,6 +192,9 @@ class PublicImageServiceTest {
         PublicImageCommandResult first = service.replaceStoreImage(
                 11L, 7L, previousImageId, key, pngFile());
         then(facade).should(never()).delete(previousImageId, Instant.parse("2026-08-15T00:00:00Z"));
+        TransactionSynchronizationManager.getSynchronizations().forEach(
+                synchronization -> synchronization.beforeCommit(false));
+        then(facade).should().confirmWithinCurrentTransaction(replacementImageId);
         TransactionSynchronizationManager.getSynchronizations().forEach(
                 TransactionSynchronization::afterCommit);
         TransactionSynchronizationManager.clearSynchronization();
@@ -265,9 +268,9 @@ class PublicImageServiceTest {
     }
 
     @Test
-    void removesConfirmedUploadWhenOuterIdempotencyTransactionRollsBack() {
+    void keepsUploadUnpublishedWhenOuterIdempotencyTransactionRollsBackAndCompensationFails() {
         UUID uploadedImageId = UUID.fromString("223e4567-e89b-12d3-a456-426614174000");
-        FileStorageMetadata uploaded = confirmedStoreImage(uploadedImageId, pngBytes()).toPublicMetadata();
+        FileStorageMetadata uploaded = storeImage(uploadedImageId).toPublicMetadata();
         FileStorageFacade facade = org.mockito.Mockito.mock(FileStorageFacade.class);
         TransactionSynchronizationManager.initSynchronization();
 
@@ -278,7 +281,9 @@ class PublicImageServiceTest {
                         FileStorageVisibility.PUBLIC, FileStorageStatus.CONFIRMED))
                 .willReturn(List.of());
         given(fileStorageFacadeProvider.getIfAvailable()).willReturn(facade);
-        given(facade.store(any(), any())).willReturn(uploaded);
+        given(facade.storePending(any(), any())).willReturn(uploaded);
+        given(facade.discardPending(uploadedImageId, Instant.parse("2026-08-15T00:00:00Z")))
+                .willThrow(new IllegalStateException("보상 상태 전이 실패"));
         given(idempotencyExecutor.execute(any(), any())).willAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Supplier<BusinessResult<PublicImageResponse>> work = invocation.getArgument(1);
@@ -294,7 +299,8 @@ class PublicImageServiceTest {
         TransactionSynchronizationManager.getSynchronizations().forEach(
                 synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
 
-        then(facade).should().delete(uploadedImageId, Instant.parse("2026-08-15T00:00:00Z"));
+        then(facade).should().discardPending(uploadedImageId, Instant.parse("2026-08-15T00:00:00Z"));
+        then(facade).should(never()).confirmWithinCurrentTransaction(uploadedImageId);
     }
 
     private FileMetadata storeImage(UUID imageId) {
