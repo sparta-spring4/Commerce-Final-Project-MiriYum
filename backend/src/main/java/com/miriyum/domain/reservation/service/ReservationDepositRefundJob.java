@@ -79,16 +79,16 @@ public class ReservationDepositRefundJob {
                 refundService.recordRetryableFailure(claim, RETRY_DELAY);
                 continue;
             }
-            if (refund.status() == RefundStatus.RECONCILIATION_REQUIRED) {
-                refundService.recordReconciliationRequired(claim, refund);
-                continue;
-            }
-            if (refund.status() == RefundStatus.FAILED) {
-                refundService.recordRetryableFailure(claim, RETRY_DELAY);
-                continue;
-            }
-            if (refundService.recordCompleted(claim, refund)) {
-                completed++;
+            switch (refund.status()) {
+                case REQUESTED, VALIDATING, PROCESSING, FAILED ->
+                        refundService.recordRetryableFailure(claim, RETRY_DELAY);
+                case RECONCILIATION_REQUIRED ->
+                        refundService.recordReconciliationRequired(claim, refund);
+                case COMPLETED -> {
+                    if (refundService.recordCompleted(claim, refund)) {
+                        completed++;
+                    }
+                }
             }
         }
         return completed;

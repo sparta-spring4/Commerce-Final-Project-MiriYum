@@ -17,6 +17,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -263,6 +265,100 @@ class ReservationDepositRefundJobTest {
         assertThat(job.runOnce("worker-a", 10)).isZero();
 
         then(refundService).should().recordRetryableFailure(claim, RETRY_DELAY);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = RefundStatus.class,
+            names = {"REQUESTED", "VALIDATING", "PROCESSING"})
+    void requeuesNonTerminalRefundAndContinuesWithFollowingClaim(
+            RefundStatus nonTerminalStatus
+    ) {
+        ReservationDepositRefundService refundService =
+                mock(ReservationDepositRefundService.class);
+        PaymentService paymentService = mock(PaymentService.class);
+        ReservationDepositRefundService.Claim nonTerminalClaim =
+                new ReservationDepositRefundService.Claim(
+                        501L,
+                        99L,
+                        "9001",
+                        4_000L,
+                        "KRW",
+                        1L,
+                        "reservation-deposit-compensation:99",
+                        "123e4567-e89b-12d3-a456-426614174099",
+                        "FULL_DEPOSIT_COMPENSATION",
+                        "worker-a",
+                        1L);
+        ReservationDepositRefundService.Claim completedClaim =
+                new ReservationDepositRefundService.Claim(
+                        502L,
+                        100L,
+                        "9002",
+                        5_000L,
+                        "KRW",
+                        1L,
+                        "reservation-deposit-compensation:100",
+                        "123e4567-e89b-12d3-a456-426614174100",
+                        "FULL_DEPOSIT_COMPENSATION",
+                        "worker-a",
+                        1L);
+        RequestRefundCommand nonTerminalCommand = new RequestRefundCommand(
+                "9001",
+                "reservation-deposit-compensation:99",
+                4_000L,
+                "FULL_DEPOSIT_COMPENSATION",
+                1L,
+                "123e4567-e89b-12d3-a456-426614174099");
+        RequestRefundCommand completedCommand = new RequestRefundCommand(
+                "9002",
+                "reservation-deposit-compensation:100",
+                5_000L,
+                "FULL_DEPOSIT_COMPENSATION",
+                1L,
+                "123e4567-e89b-12d3-a456-426614174100");
+        RefundResult nonTerminal = new RefundResult(
+                "7001",
+                "9001",
+                4_000L,
+                0L,
+                0L,
+                4_000L,
+                "KRW",
+                nonTerminalStatus,
+                Instant.parse("2026-08-16T12:00:00Z"),
+                null);
+        RefundResult completed = new RefundResult(
+                "7002",
+                "9002",
+                5_000L,
+                5_000L,
+                5_000L,
+                0L,
+                "KRW",
+                RefundStatus.COMPLETED,
+                Instant.parse("2026-08-16T12:00:00Z"),
+                Instant.parse("2026-08-16T12:00:01Z"));
+        given(refundService.claimDue("worker-a", 10))
+                .willReturn(List.of(nonTerminalClaim, completedClaim));
+        given(paymentService.requestRefund(nonTerminalCommand)).willReturn(nonTerminal);
+        given(paymentService.requestRefund(completedCommand)).willReturn(completed);
+        given(refundService.recordCompleted(nonTerminalClaim, nonTerminal))
+                .willThrow(new IllegalStateException(
+                        "completed refund does not satisfy obligation"));
+        given(refundService.recordCompleted(completedClaim, completed)).willReturn(true);
+        ReservationDepositRefundJob job = new ReservationDepositRefundJob(
+                refundService, paymentService);
+
+        assertThat(job.runOnce("worker-a", 10)).isEqualTo(1);
+
+        var order = inOrder(refundService, paymentService);
+        order.verify(refundService).claimDue("worker-a", 10);
+        order.verify(paymentService).requestRefund(nonTerminalCommand);
+        order.verify(refundService)
+                .recordRetryableFailure(nonTerminalClaim, RETRY_DELAY);
+        order.verify(paymentService).requestRefund(completedCommand);
+        order.verify(refundService).recordCompleted(completedClaim, completed);
     }
 
     private static void assertSchedulerBean(String beanName) {
