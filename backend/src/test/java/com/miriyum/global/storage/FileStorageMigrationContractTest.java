@@ -14,7 +14,7 @@ class FileStorageMigrationContractTest {
 
         assertThat(Files.exists(migrationDirectory.resolve("V32__create_file_metadata.sql"))).isTrue();
         assertThat(Files.exists(migrationDirectory.resolve("V42__enforce_file_metadata_purpose_visibility.sql"))).isTrue();
-        assertThat(Files.exists(migrationDirectory.resolve("V54__add_file_metadata_reconciliation_indexes.sql"))).isTrue();
+        assertThat(Files.exists(migrationDirectory.resolve("V55__add_file_metadata_reconciliation_indexes.sql"))).isTrue();
         assertThat(Files.exists(migrationDirectory.resolve("V31__create_file_metadata.sql"))).isFalse();
     }
 }
