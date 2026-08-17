@@ -74,7 +74,7 @@ class ReservationDepositMigrationTest {
 
             assertThat(upgraded.info().applied())
                     .extracting(MigrationInfo::getScript)
-                    .contains("V54__create_reservation_deposit_runtime.sql");
+                    .contains("V56__create_reservation_deposit_runtime.sql");
             try (Connection connection = mysql.createConnection("")) {
                 assertThat(singleString(connection, """
                         SELECT JSON_OBJECT(
