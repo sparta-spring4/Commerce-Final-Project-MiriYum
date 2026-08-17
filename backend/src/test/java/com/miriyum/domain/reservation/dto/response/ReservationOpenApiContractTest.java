@@ -273,7 +273,7 @@ class ReservationOpenApiContractTest {
     }
 
     @Test
-    void depositRequestOperationsStayPostMvp1AndExposeStrictContracts() throws IOException {
+    void depositRequestOperationsAreRuntimeActiveAndExposeStrictContracts() throws IOException {
         Map<String, Object> document = load(
                 Path.of("..", "docs", "specs", "reservation", "openapi.yaml")
         );
@@ -283,6 +283,12 @@ class ReservationOpenApiContractTest {
         String finalizationPath = requestPath + "/finalizations";
         String abandonmentPath = requestPath + "/abandonments";
         assertThat(paths).containsKeys(requestPath, finalizationPath, abandonmentPath);
+        for (String path : List.of(requestPath, finalizationPath, abandonmentPath)) {
+            assertThat(map(paths.get(path))).doesNotContainKeys(
+                    "x-miriyum-runtime-status",
+                    "x-miriyum-owner-issue"
+            );
+        }
 
         Map<String, Object> create = map(map(paths.get(
                 "/api/v1/consumers/me/reservations"
