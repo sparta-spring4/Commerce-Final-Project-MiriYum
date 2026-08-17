@@ -127,4 +127,17 @@ An ordinary push to `dev` deploys only to staging after `Backend CI` succeeds. T
 
 If an image push succeeds but a later SSM deployment step fails, rerun the failed workflow instead of deleting or overwriting the immutable ECR tag. The workflow checks whether the same SHA tag already exists and reuses it, then retries only the remaining deployment path.
 
+### Reservation deposit worker rollback
+
+`MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED` is a startup-time switch for the reservation deposit process and refund workers. The staging Compose and production ECS templates set it to `true` for normal operation. Changing the value does not stop workers in containers or tasks that are already running.
+
+Use this order when an image rollback must not start new reservation deposit claims:
+
+1. Set `MIRIYUM_RESERVATION_DEPOSIT_WORKER_ENABLED=false` in the staging server-local `.env`, or register a production ECS task definition revision whose backend container has the value `false`.
+2. Deploy that disabled revision before changing the image. Verify the replacement backend containers or tasks received `false` without printing the rest of their environment.
+3. Wait until every previously enabled backend container or ECS task has stopped or drained. Do not declare new claims stopped while an enabled instance is still running.
+4. Deploy the selected previous image while keeping the worker value `false`, then perform the environment's normal health verification.
+
+Re-enabling the worker also requires a new container or task revision with the value set explicitly to `true`. Do not treat an environment-file or task-definition edit by itself as a runtime state change.
+
 The workflow uses the separate `staging-backend` marker when deciding the last successful backend image. This is intentionally separate from the shared `staging` Environment so a future frontend CD cannot make a backend deployment look newer. It also makes manual rollback explicit: the selected `inputs.image_tag` is the SHA recorded by the marker. After each deployment, record the GitHub Actions run URL, ECR image digest, SSM command ID, and EC2 loopback health result. Until those four runtime results exist, deployment evidence remains `NOT RUN`.
