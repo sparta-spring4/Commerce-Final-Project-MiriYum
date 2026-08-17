@@ -3,7 +3,9 @@ set -eu
 
 certificate="/etc/letsencrypt/live/${STAGING_DOMAIN}/fullchain.pem"
 
-if [ -r "${certificate}" ]; then
+if [ "${MIRIYUM_STAGING_FORCE_HTTP:-false}" = "true" ]; then
+    template="/opt/miriyum-nginx-templates/http.conf.template"
+elif [ -r "${certificate}" ]; then
     template="/opt/miriyum-nginx-templates/https.conf.template"
 else
     template="/opt/miriyum-nginx-templates/http.conf.template"

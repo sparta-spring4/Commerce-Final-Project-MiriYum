@@ -31,7 +31,7 @@ set +a
 ./certbot.sh issue
 ```
 
-The Nginx container restarts after Certbot succeeds and selects the TLS configuration.
+The Nginx container restarts after Certbot succeeds and selects the TLS configuration. If certificate issuance, certificate verification, or the TLS transition fails, the helper force-recreates Nginx with the HTTP-only configuration and exits non-zero.
 
 ## Verify
 
@@ -43,7 +43,19 @@ curl.exe -I https://staging-api.miriyum.click/api/v1/consumers/auth/token-refres
 curl.exe -I https://staging-api.miriyum.click/actuator/health
 ```
 
-The first request should redirect to HTTPS. The second should reach the API and can validly return an API-level `401` or `405`. The final request must remain `404`; Actuator health is intentionally private.
+The first request should redirect to HTTPS. The second should reach the API and can validly return an API-level `401` or `405`. The final request must remain `404`; Actuator health is intentionally private on both HTTP and HTTPS.
+
+## Recover HTTP-only Nginx
+
+If the initial issuance or TLS transition fails, the helper already triggers this recovery automatically. Use the command below only when an operator needs to restore the HTTP-only configuration explicitly:
+
+```sh
+cd /opt/miriyum
+set -a
+. ./.env
+set +a
+./certbot.sh recover-http
+```
 
 ## Renew
 

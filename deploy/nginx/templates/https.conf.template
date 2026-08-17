@@ -9,8 +9,13 @@ server {
         try_files $uri =404;
     }
 
+    # Actuator is intentionally private on both HTTP and HTTPS ingress paths.
+    location /actuator/ {
+        return 404;
+    }
+
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://${STAGING_DOMAIN}$request_uri;
     }
 }
 

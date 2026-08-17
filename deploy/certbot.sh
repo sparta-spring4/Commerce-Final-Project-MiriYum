@@ -29,8 +29,13 @@ run_certbot() {
         "${CERTBOT_IMAGE}" "$@"
 }
 
+recover_http() {
+    # Do not leave Nginx in a broken TLS state when certificate issuance or reload fails.
+    MIRIYUM_STAGING_FORCE_HTTP=true compose up -d --force-recreate nginx
+}
+
 issue() {
-    run_certbot certonly \
+    if ! run_certbot certonly \
         --webroot \
         --webroot-path /var/www/certbot \
         --domain "${STAGING_DOMAIN}" \
@@ -38,11 +43,20 @@ issue() {
         --agree-tos \
         --non-interactive \
         --no-eff-email \
-        --keep-until-expiring
+        --keep-until-expiring; then
+        recover_http
+        return 1
+    fi
 
-    test -r "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/fullchain.pem"
+    if ! test -r "${LETSENCRYPT_DIR}/live/${STAGING_DOMAIN}/fullchain.pem"; then
+        recover_http
+        return 1
+    fi
     # Restart runs the Nginx selector again so it can switch from HTTP-only to TLS.
-    compose restart nginx
+    if ! compose restart nginx; then
+        recover_http
+        return 1
+    fi
 }
 
 renew() {
@@ -51,13 +65,17 @@ renew() {
 }
 
 case "${1:-}" in
-    issue|renew)
+    issue|renew|recover-http)
         require_configuration
         prepare_directories
-        "$1"
+        if [ "$1" = "recover-http" ]; then
+            recover_http
+        else
+            "$1"
+        fi
         ;;
     *)
-        echo "Usage: $0 {issue|renew}" >&2
+        echo "Usage: $0 {issue|renew|recover-http}" >&2
         exit 64
         ;;
 esac
