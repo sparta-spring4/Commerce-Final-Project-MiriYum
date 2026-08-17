@@ -44,6 +44,12 @@ export default function () {
       throws(() => assertSafeTarget('local', 'https://api.example.test', ['api.example.test'])),
     'unreviewed external host cannot be selected as staging': () =>
       throws(() => assertSafeTarget('staging', 'https://staging.example.test', ['staging.example.test'])),
+    'reviewed staging host requires HTTPS and an explicit caller allowlist': () =>
+      !throws(() => assertSafeTarget(
+        'staging',
+        'https://staging-api.miriyum.click',
+        ['staging-api.miriyum.click'],
+      )),
     'zero load input is rejected': () =>
       throws(() => parsePositiveInt('MAX_VUS', '0', 100)),
     'load above its hard ceiling is rejected': () =>
