@@ -31,12 +31,12 @@ class WaitingAutoOpenMigrationTest {
             new MySQLContainer(DockerImageName.parse("mysql:8.0.40"));
 
     @Test
-    void appliesV50WithExactLedgerColumnsAndIndexes() throws Exception {
+    void appliesV51WithExactLedgerColumnsAndIndexes() throws Exception {
         Flyway flyway = migrate();
 
         assertThat(flyway.info().applied()).anyMatch(migration ->
-                "50".equals(String.valueOf(migration.getVersion()))
-                        && "V50__create_waiting_auto_open_runtime.sql"
+                "51".equals(String.valueOf(migration.getVersion()))
+                        && "V51__create_waiting_auto_open_runtime.sql"
                         .equals(migration.getScript()));
 
         try (Connection connection = connection()) {
