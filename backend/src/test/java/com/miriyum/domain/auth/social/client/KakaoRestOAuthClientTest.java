@@ -13,13 +13,18 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.miriyum.domain.auth.social.config.KakaoOAuthProperties;
 import com.miriyum.domain.auth.exception.AuthErrorCode;
 import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -33,6 +38,8 @@ class KakaoRestOAuthClientTest {
 
     private MockRestServiceServer server;
     private KakaoRestOAuthClient client;
+    private Logger logger;
+    private ListAppender<ILoggingEvent> logAppender;
 
     @BeforeEach
     void setUp() {
@@ -42,6 +49,16 @@ class KakaoRestOAuthClientTest {
                 new KakaoOAuthProperties(true, "rest-api-key", "client-secret", REDIRECT_URI),
                 new ObjectMapper(),
                 builder.build());
+        logger = (Logger) LoggerFactory.getLogger(KakaoRestOAuthClient.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        logger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void tearDown() {
+        logger.detachAppender(logAppender);
+        logAppender.stop();
     }
 
     @Test
@@ -92,6 +109,34 @@ class KakaoRestOAuthClientTest {
                 .isInstanceOf(ServiceException.class)
                 .extracting(exception -> ((ServiceException) exception).getErrorCode())
                 .isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("카카오 4xx는 오류 코드와 상태만 남기고 OAuth 비밀값은 로그에 남기지 않는다")
+    void logsSafeProviderFailureDetailsForKakaoClientError() {
+        String authorizationCode = "authorization-code-must-not-be-logged";
+        String clientSecret = "client-secret-must-not-be-logged";
+        server.expect(requestTo(TOKEN_URL))
+                .andExpect(method(POST))
+                .andRespond(withStatus(BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"invalid_client\",\"error_description\":\"secret must not be logged\"}"));
+
+        assertThatThrownBy(() -> client.authenticate(authorizationCode, REDIRECT_URI))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(AuthErrorCode.KAKAO_OAUTH_INVALID);
+
+        assertThat(logAppender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("event=kakao_oauth_provider_rejected")
+                        .contains("provider_status=400")
+                        .contains("provider_error=invalid_client")
+                        .doesNotContain(authorizationCode)
+                        .doesNotContain(clientSecret)
+                        .doesNotContain("secret must not be logged"));
         server.verify();
     }
 
