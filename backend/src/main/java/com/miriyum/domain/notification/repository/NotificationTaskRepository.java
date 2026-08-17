@@ -74,7 +74,7 @@ public class NotificationTaskRepository {
                         SELECT notification_id, source_domain, purpose,
                                recipient_account_id, recipient_relation_version,
                                resource_type, resource_id, resource_version, source_state,
-                               expires_at, correlation_id, attempt_count,
+                               expires_at, correlation_id, attempt_count, version,
                                lease_token IS NOT NULL AS lease_recovery
                           FROM notification_tasks
                          WHERE status = 'PENDING'
@@ -98,6 +98,7 @@ public class NotificationTaskRepository {
                         utcInstant(resultSet.getObject("expires_at", LocalDateTime.class)),
                         resultSet.getString("correlation_id"),
                         resultSet.getInt("attempt_count"),
+                        resultSet.getLong("version"),
                         resultSet.getBoolean("lease_recovery")
                 ),
                 utcLocalDateTime(now),
@@ -174,12 +175,15 @@ public class NotificationTaskRepository {
                        lease_until = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
                        attempt_count = attempt_count + 1,
                        version = version + 1
-                 WHERE notification_id = ? AND status = 'PENDING'
+                 WHERE notification_id = ?
+                   AND status = 'PENDING'
+                   AND version = ?
                 """,
                 workerId,
                 leaseToken,
                 leaseDurationMicros,
-                task.notificationId()
+                task.notificationId(),
+                task.taskVersion()
         );
         if (updated != 1) {
             throw new IllegalStateException("notification task lease was not acquired");
@@ -197,7 +201,8 @@ public class NotificationTaskRepository {
                 task.expiresAt(),
                 task.correlationId(),
                 task.attemptCount() + 1,
-                leaseToken
+                leaseToken,
+                task.taskVersion() + 1L
         );
     }
 
@@ -249,11 +254,13 @@ public class NotificationTaskRepository {
                    AND task.status = 'PENDING'
                    AND task.lease_token = ?
                    AND task.lease_until > UTC_TIMESTAMP(6)
+                   AND task.version = ?
                 """,
                 sourceExpiry,
                 title,
                 task.notificationId(),
-                task.leaseToken()
+                task.leaseToken(),
+                task.claimedTaskVersion()
         );
         if (updated != 1) {
             return Optional.empty();
@@ -294,6 +301,7 @@ public class NotificationTaskRepository {
                    AND status = 'PENDING'
                    AND lease_token = ?
                    AND lease_until > UTC_TIMESTAMP(6)
+                   AND version = ?
                    AND (expires_at IS NULL
                         OR TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)) < expires_at)
                 """,
@@ -301,7 +309,80 @@ public class NotificationTaskRepository {
                 reason,
                 task.notificationId(),
                 task.leaseToken(),
+                task.claimedTaskVersion(),
                 retryDelayMicros
+        ) == 1;
+    }
+
+    public boolean scheduleWaitingConversionHold(
+            LeasedTask task,
+            String reason,
+            long retryDelayMillis
+    ) {
+        long retryDelayMicros = Math.multiplyExact(retryDelayMillis, 1_000L);
+        return jdbcTemplate.update("""
+                UPDATE notification_tasks
+                   SET attempt_count = GREATEST(attempt_count - 1, 0),
+                       next_attempt_at = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)),
+                       lease_owner = NULL, lease_token = NULL, lease_until = NULL,
+                       last_error_code = ?, version = version + 1
+                 WHERE notification_id = ?
+                   AND status = 'PENDING'
+                   AND lease_token = ?
+                   AND lease_until > UTC_TIMESTAMP(6)
+                   AND version = ?
+                   AND (expires_at IS NULL
+                        OR TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(6)) < expires_at)
+                """,
+                retryDelayMicros,
+                reason,
+                task.notificationId(),
+                task.leaseToken(),
+                task.claimedTaskVersion(),
+                retryDelayMicros
+        ) == 1;
+    }
+
+    public List<PendingWaitingEntryTask> findPendingWaitingEntryTasksForUpdate(
+            long waitingTeamId
+    ) {
+        return jdbcTemplate.query("""
+                        SELECT notification_id, version, correlation_id,
+                               lease_token IS NOT NULL AS claimed
+                          FROM notification_tasks
+                         WHERE source_domain = 'WAITING'
+                           AND purpose = 'WAITING_ENTRY_IMMINENT'
+                           AND resource_type = 'WAITING_TEAM'
+                           AND resource_id = ?
+                           AND status = 'PENDING'
+                         ORDER BY notification_id
+                         FOR UPDATE
+                        """,
+                (resultSet, rowNumber) -> new PendingWaitingEntryTask(
+                        resultSet.getLong("notification_id"),
+                        resultSet.getLong("version"),
+                        resultSet.getString("correlation_id"),
+                        resultSet.getBoolean("claimed")
+                ),
+                waitingTeamId
+        );
+    }
+
+    public boolean reevaluateWaitingEntryTask(PendingWaitingEntryTask task) {
+        return jdbcTemplate.update("""
+                UPDATE notification_tasks
+                   SET attempt_count = GREATEST(attempt_count - ?, 0),
+                       next_attempt_at = UTC_TIMESTAMP(6),
+                       lease_owner = NULL, lease_token = NULL, lease_until = NULL,
+                       last_error_code = NULL,
+                       version = version + 1
+                 WHERE notification_id = ?
+                   AND status = 'PENDING'
+                   AND version = ?
+                """,
+                task.claimed() ? 1 : 0,
+                task.notificationId(),
+                task.taskVersion()
         ) == 1;
     }
 
@@ -323,13 +404,15 @@ public class NotificationTaskRepository {
                    AND status = 'PENDING'
                    AND lease_token = ?
                    AND lease_until > UTC_TIMESTAMP(6)
+                   AND version = ?
                 """,
                 status,
                 errorCode,
                 title,
                 delivered,
                 task.notificationId(),
-                task.leaseToken()
+                task.leaseToken(),
+                task.claimedTaskVersion()
         ) == 1;
     }
 
@@ -393,6 +476,7 @@ public class NotificationTaskRepository {
             Instant expiresAt,
             String correlationId,
             int attemptCount,
+            long taskVersion,
             boolean leaseRecovery
     ) {
     }
@@ -410,7 +494,16 @@ public class NotificationTaskRepository {
             Instant expiresAt,
             String correlationId,
             int attemptCount,
-            String leaseToken
+            String leaseToken,
+            long claimedTaskVersion
+    ) {
+    }
+
+    public record PendingWaitingEntryTask(
+            long notificationId,
+            long taskVersion,
+            String correlationId,
+            boolean claimed
     ) {
     }
 

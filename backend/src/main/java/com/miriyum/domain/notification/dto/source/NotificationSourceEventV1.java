@@ -115,6 +115,14 @@ public record NotificationSourceEventV1(
                     MENU_SUBSTITUTION_EXPIRED ->
                     sourceDomain == NotificationSourceDomain.MENU_HOLD
                             && resourceType == NotificationResourceType.MENU_SUBSTITUTION_PROPOSAL;
+            case WAITING_ENTRY_IMMINENT,
+                    WAITING_CALLED,
+                    WAITING_CANCELLED,
+                    WAITING_NO_SHOW,
+                    WAITING_CHECKED_IN,
+                    WAITING_CLOSED_BY_STORE ->
+                    sourceDomain == NotificationSourceDomain.WAITING
+                            && resourceType == NotificationResourceType.WAITING_TEAM;
         };
         if (!allowed) {
             throw new IllegalArgumentException("purpose is not owned by sourceDomain and resourceType");

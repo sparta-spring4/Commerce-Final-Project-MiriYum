@@ -82,7 +82,41 @@ class WaitingMigrationTest {
     }
 
     @Test
-    @DisplayName("V51까지 적용하면 Waiting 소유 테이블 열두 개만 존재한다")
+    @DisplayName("Flyway V54가 팀별 1회 입장 임박 사건 원장을 적용한다")
+    void appliesWaitingEntryImminentRuntimeAsFlywayV54() {
+        Flyway flyway = Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .load();
+
+        flyway.migrate();
+
+        assertThat(flyway.info().applied())
+                .anyMatch(migration ->
+                        "54".equals(String.valueOf(migration.getVersion()))
+                                && "V54__create_waiting_entry_imminent_events.sql"
+                                .equals(migration.getScript()));
+    }
+
+    @Test
+    @DisplayName("V54 입장 임박 사건 시각은 마이크로초 정밀도를 보존한다")
+    void preservesEntryImminentEventTimestampPrecision() throws SQLException {
+        migrate();
+
+        assertThat(queryStrings("""
+                SELECT CONCAT(column_name, ':', column_type)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'waiting_entry_imminent_events'
+                  AND column_name IN ('occurred_at', 'created_at')
+                ORDER BY column_name
+                """)).containsExactly(
+                "created_at:datetime(6)",
+                "occurred_at:datetime(6)"
+        );
+    }
+
+    @Test
+    @DisplayName("V54까지 적용하면 Waiting 소유 테이블 열세 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();
 
@@ -92,6 +126,7 @@ class WaitingMigrationTest {
                 "waiting_closure_job_items",
                 "waiting_closure_jobs",
                 "waiting_conversion_compensations",
+                "waiting_entry_imminent_events",
                 "waiting_queue_sequences",
                 "waiting_reception_windows",
                 "waiting_setting_audits",
@@ -116,6 +151,7 @@ class WaitingMigrationTest {
                 "waiting_closure_job_items.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_closure_jobs.store_id->stores.store_id",
                 "waiting_conversion_compensations.waiting_team_id->waiting_teams.waiting_team_id",
+                "waiting_entry_imminent_events.waiting_team_id->waiting_teams.waiting_team_id",
                 "waiting_queue_sequences.store_id->stores.store_id",
                 "waiting_reception_windows.opened_by_job_id->waiting_auto_open_jobs.waiting_auto_open_job_id",
                 "waiting_reception_windows.store_id->stores.store_id",
@@ -167,6 +203,8 @@ class WaitingMigrationTest {
                         + "waiting_closure_job_id,waiting_team_id",
                 "waiting_closure_jobs.uk_waiting_closure_jobs_store_settings="
                         + "store_id,settings_version",
+                "waiting_entry_imminent_events.uk_waiting_entry_imminent_events_team="
+                        + "waiting_team_id",
                 "waiting_teams.uk_waiting_teams_store_date_sequence="
                         + "store_id,business_date,queue_sequence",
                 "waiting_status_events.uk_waiting_status_events_team_sequence="
