@@ -64,6 +64,19 @@ public final class StoreAdministrationContracts {
         }
     }
 
+    public record StoreBaseSettings(
+            OperationStatus operationStatus,
+            Boolean reservationEnabled,
+            Boolean menuHoldEnabled,
+            Boolean pickupEnabled
+    ) {
+        public StoreBaseSettings {
+            if (operationStatus == OperationStatus.CLOSED) {
+                throw new IllegalArgumentException("operator Store base settings are invalid");
+            }
+        }
+    }
+
     public record StoreSnapshot(long storeId, String name, long storeOperatorAccountId,
                                 OperationStatus operationStatus, boolean reservationEnabled,
                                 boolean menuHoldEnabled, boolean pickupEnabled,

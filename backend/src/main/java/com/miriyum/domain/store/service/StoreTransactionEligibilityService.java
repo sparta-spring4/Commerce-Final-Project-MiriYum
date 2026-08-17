@@ -46,6 +46,7 @@ public class StoreTransactionEligibilityService {
             requireReservationTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.RESERVATION);
         if (!store.isReservationEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
@@ -66,6 +67,7 @@ public class StoreTransactionEligibilityService {
             requirePickupTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.PICKUP);
         if (!store.isPickupEnabled()) {
             throw new ServiceException(StoreErrorCode.STORE_STATE_CONFLICT);
         }
@@ -85,6 +87,7 @@ public class StoreTransactionEligibilityService {
     public StoreMenuTransactionEligibility requireMenuTransactionEligibility(long storeId) {
         Store store = loadStore(storeId);
         requireOpenApproved(store);
+        storeAdministrationService.requireFeatureAllowed(storeId, RestrictedFeature.MENU_HOLD);
         return new StoreMenuTransactionEligibility(
                 store.getId(),
                 store.isReservationEnabled(),

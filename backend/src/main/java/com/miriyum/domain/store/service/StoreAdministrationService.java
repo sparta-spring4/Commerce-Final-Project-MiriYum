@@ -6,6 +6,7 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreSnapshot;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreSnapshotPage;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
 import com.miriyum.domain.store.error.StoreErrorCode;
@@ -60,10 +61,26 @@ public class StoreAdministrationService {
                 state.activeRestrictedFeatures());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(propagation = Propagation.MANDATORY)
     public void requireFeatureAllowed(long storeId, RestrictedFeature feature) {
-        Optional<StoreEnforcementState> state = enforcementStates.findByStoreId(storeId);
+        Optional<StoreEnforcementState> state = enforcementStates.findByStoreIdForUpdate(storeId);
         state.ifPresent(value -> value.requireFeatureAllowed(feature));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public EnforcementResult recomposeAfterOperatorUpdate(
+            long storeId,
+            StoreBaseSettings base
+    ) {
+        Store store = stores.findByIdForUpdate(storeId)
+                .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_NOT_FOUND));
+        Optional<StoreEnforcementState> state = enforcementStates.findByStoreIdForUpdate(storeId);
+        if (state.isPresent()) {
+            StoreEnforcementState enforcement = state.orElseThrow();
+            enforcement.updateBase(base);
+            applyEffective(store, enforcement);
+        }
+        return result(store, state.orElse(null));
     }
 
     @Transactional(readOnly = true)
@@ -92,11 +109,8 @@ public class StoreAdministrationService {
         StoreEnforcementState state = enforcementStates.findByStoreIdForUpdate(command.storeId())
                 .orElseThrow(() -> new ServiceException(StoreErrorCode.STORE_ENFORCEMENT_VERSION_CONFLICT));
         state.release(command);
-        store.applyPlatformEnforcement(state.effectiveOperationStatus(), state.effectiveReservationEnabled(),
-                state.effectiveMenuHoldEnabled(), state.effectivePickupEnabled(), state.isStoreManagementAllowed());
-        return new EnforcementResult(store.getId(), state.getEnforcementVersion(), store.getOperationStatus(),
-                store.isReservationEnabled(), store.isMenuHoldEnabled(), store.isPickupEnabled(),
-                state.isWaitingAllowed(), state.isStoreManagementAllowed(), state.activeRestrictedFeatures());
+        applyEffective(store, state);
+        return result(store, state);
     }
 
     @Transactional(readOnly = true)
@@ -115,6 +129,19 @@ public class StoreAdministrationService {
         return new StoreSnapshot(store.getId(),store.getName(),store.getStoreOperatorAccountId(),
                 store.getOperationStatus(),store.isReservationEnabled(),store.isMenuHoldEnabled(),
                 store.isPickupEnabled(),version,store.getCreatedAt());
+    }
+
+    private static void applyEffective(Store store, StoreEnforcementState state) {
+        store.applyPlatformEnforcement(state.effectiveOperationStatus(), state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(), state.effectivePickupEnabled(), state.isStoreManagementAllowed());
+    }
+
+    private static EnforcementResult result(Store store, StoreEnforcementState state) {
+        return new EnforcementResult(store.getId(), state == null ? 0L : state.getEnforcementVersion(),
+                store.getOperationStatus(), store.isReservationEnabled(), store.isMenuHoldEnabled(),
+                store.isPickupEnabled(), state == null || state.isWaitingAllowed(),
+                state == null || state.isStoreManagementAllowed(),
+                state == null ? Set.of() : state.activeRestrictedFeatures());
     }
 
 }

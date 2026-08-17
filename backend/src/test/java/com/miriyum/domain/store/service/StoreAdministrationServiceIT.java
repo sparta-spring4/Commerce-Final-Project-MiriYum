@@ -9,6 +9,7 @@ import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementResult;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.entity.Store;
 import com.miriyum.domain.store.entity.StoreEnforcementState;
 import com.miriyum.domain.store.enums.BusinessType;
@@ -127,7 +128,7 @@ class StoreAdministrationServiceIT {
                 false,
                 true,
                 Set.of(RestrictedFeature.WAITING)));
-        given(enforcementStates.findByStoreId(TARGET_STORE_ID)).willReturn(Optional.of(state));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(state));
 
         assertThatThrownBy(() ->
                 service.requireFeatureAllowed(TARGET_STORE_ID, RestrictedFeature.WAITING))
@@ -217,6 +218,62 @@ class StoreAdministrationServiceIT {
 
         assertThat(result.operationStatus()).isEqualTo(OperationStatus.OPEN);
         assertThat(result.restrictedFeatures()).containsExactly(RestrictedFeature.RESERVATION);
+    }
+
+    @Test
+    void releaseRestoresLatestOperatorModeInsteadOfInitialSnapshot() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        target.update(null, null, null, null, null, null,
+                false, null, null, null);
+        StoreEnforcementState state = StoreEnforcementState.initial(target);
+        state.apply(new EnforcementCommand(
+                TARGET_STORE_ID, 0L, 91L, null,
+                false, true, true, true, true,
+                Set.of(RestrictedFeature.RESERVATION)));
+        target.applyPlatformEnforcement(
+                state.effectiveOperationStatus(),
+                state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(),
+                state.effectivePickupEnabled(),
+                state.isStoreManagementAllowed());
+        target.update(null, null, null, null, null, null,
+                true, null, null, null);
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(state));
+
+        service.recomposeAfterOperatorUpdate(
+                TARGET_STORE_ID,
+                new StoreBaseSettings(OperationStatus.OPEN, true, true, true));
+
+        var result = service.release(new ReleaseCommand(TARGET_STORE_ID, 91L));
+
+        assertThat(result.reservationEnabled()).isTrue();
+    }
+
+    @Test
+    void unrelatedOperatorUpdatePreservesBaseModeHiddenByRestriction() {
+        Store target = openStore(TARGET_STORE_ID, 11L);
+        StoreEnforcementState state = StoreEnforcementState.initial(target);
+        state.apply(new EnforcementCommand(
+                TARGET_STORE_ID, 0L, 91L, null,
+                false, true, true, true, true,
+                Set.of(RestrictedFeature.RESERVATION)));
+        target.applyPlatformEnforcement(
+                state.effectiveOperationStatus(),
+                state.effectiveReservationEnabled(),
+                state.effectiveMenuHoldEnabled(),
+                state.effectivePickupEnabled(),
+                state.isStoreManagementAllowed());
+        given(storeRepository.findByIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(target));
+        given(enforcementStates.findByStoreIdForUpdate(TARGET_STORE_ID)).willReturn(Optional.of(state));
+
+        service.recomposeAfterOperatorUpdate(
+                TARGET_STORE_ID,
+                new StoreBaseSettings(
+                        null, (Boolean) null, (Boolean) null, (Boolean) null));
+        var result = service.release(new ReleaseCommand(TARGET_STORE_ID, 91L));
+
+        assertThat(result.reservationEnabled()).isTrue();
     }
 
     private Store openStore(long storeId, long operatorId) {

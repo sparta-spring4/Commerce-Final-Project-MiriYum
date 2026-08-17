@@ -97,6 +97,9 @@ class StoreServiceTest {
     private StoreGeocodingPort geocodingPort;
 
     @Mock
+    private StoreAdministrationService storeAdministrationService;
+
+    @Mock
     private StoreCommandTransactionExecutor transactionExecutor;
 
     private ObjectMapper objectMapper;
@@ -125,7 +128,8 @@ class StoreServiceTest {
                 transactionExecutor,
                 idempotencyExecutor,
                 objectMapper,
-                FIXED_CLOCK);
+                FIXED_CLOCK,
+                storeAdministrationService);
         menuTransactionFacade = new MenuTransactionFacade(
                 new StoreTransactionEligibilityService(
                         storeRepository, mock(StoreAdministrationService.class)),

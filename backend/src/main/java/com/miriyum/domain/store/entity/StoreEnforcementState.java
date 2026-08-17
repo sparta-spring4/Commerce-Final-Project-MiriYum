@@ -3,6 +3,7 @@ package com.miriyum.domain.store.entity;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.EnforcementCommand;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.RestrictedFeature;
 import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.ReleaseCommand;
+import com.miriyum.domain.store.dto.administration.StoreAdministrationContracts.StoreBaseSettings;
 import com.miriyum.domain.store.enums.OperationStatus;
 import com.miriyum.domain.store.error.StoreErrorCode;
 import com.miriyum.global.entity.BaseEntity;
@@ -118,6 +119,18 @@ public class StoreEnforcementState extends BaseEntity {
                 .filter(value -> value.sanctionId() != command.sanctionId())
                 .toList();
         enforcementVersion++;
+        recompose();
+    }
+
+    public void updateBase(StoreBaseSettings base) {
+        baseOperationStatus = base.operationStatus() == null
+                ? baseOperationStatus : base.operationStatus();
+        baseReservationEnabled = base.reservationEnabled() == null
+                ? baseReservationEnabled : base.reservationEnabled();
+        baseMenuHoldEnabled = base.menuHoldEnabled() == null
+                ? baseMenuHoldEnabled : base.menuHoldEnabled();
+        basePickupEnabled = base.pickupEnabled() == null
+                ? basePickupEnabled : base.pickupEnabled();
         recompose();
     }
 
