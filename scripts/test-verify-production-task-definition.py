@@ -269,6 +269,27 @@ class VerifyProductionTaskDefinitionTest(unittest.TestCase):
 
         self.assertEqual("true", environment["MIRIYUM_VALKEY_SSL_ENABLED"])
 
+    def test_production_task_definition_keeps_waiting_auto_open_disabled_by_default(self):
+        task_definition = json.loads(
+                Path("deploy/ecs/production-task-definition.json").read_text(encoding="utf-8"))
+        environment = {
+                item["name"]: item["value"]
+                for item in task_definition["containerDefinitions"][0]["environment"]
+        }
+
+        self.assertEqual("false", environment["MIRIYUM_WAITING_AUTO_OPEN_ENABLED"])
+        self.assertEqual("", environment["MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_PLANNING_HORIZON"])
+        self.assertEqual("0", environment["MIRIYUM_WAITING_AUTO_OPEN_PLANNING_BATCH_SIZE"])
+        self.assertEqual("0", environment["MIRIYUM_WAITING_AUTO_OPEN_CLAIM_BATCH_SIZE"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_LEASE_DURATION"])
+        self.assertEqual("0", environment["MIRIYUM_WAITING_AUTO_OPEN_MAX_ATTEMPTS"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_INITIAL_RETRY_DELAY"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_MAXIMUM_RETRY_DELAY"])
+        self.assertEqual("0", environment["MIRIYUM_WAITING_AUTO_OPEN_INVALIDATION_BATCH_SIZE"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_POLL_DELAY"])
+        self.assertEqual("PT0S", environment["MIRIYUM_WAITING_AUTO_OPEN_INITIAL_DELAY"])
+
     def test_production_task_definition_uses_canonical_geocoding_secret(self):
         canonical_key = "MIRIYUM_STORE_GEOCODING_REST_API_KEY"
         legacy_key = "MIRIYUM_KAKAO_LOCAL_REST_API_KEY"
