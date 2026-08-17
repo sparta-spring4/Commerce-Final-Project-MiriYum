@@ -12,6 +12,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.PaymentStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
+import com.miriyum.domain.payment.exception.PaymentErrorCode;
 import com.miriyum.domain.payment.service.PaymentService;
 import com.miriyum.domain.reservation.entity.ReservationDepositProcess;
 import com.miriyum.domain.reservation.entity.ReservationDepositRefundObligation;
@@ -20,6 +21,7 @@ import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligat
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
 import com.miriyum.domain.schedule.service.StoreScheduleActivationJob;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -236,6 +238,26 @@ class ReservationDepositRefundRuntimeIT {
         Fixture fixture = createRefundRequiredFixture();
         when(paymentService.requestRefund(any(RequestRefundCommand.class)))
                 .thenReturn(failedRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("RECOVERY_REQUIRED");
+        clock.advance(Duration.ofSeconds(30));
+
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+        verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+    }
+
+    @Test
+    void permanentPaymentErrorIsIsolatedAndNotClaimedAgain() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenThrow(new ServiceException(PaymentErrorCode.REFUND_AMOUNT_EXCEEDED));
 
         assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
 

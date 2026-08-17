@@ -4,6 +4,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.global.exception.ServiceException;
 import java.time.Duration;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +76,9 @@ public class ReservationDepositRefundJob {
                                 claim.reasonCode(),
                                 claim.refundPolicyVersion(),
                                 claim.idempotencyKey()));
+            } catch (ServiceException failure) {
+                refundService.recordRecoveryRequired(claim);
+                continue;
             } catch (RuntimeException failure) {
                 refundService.recordRetryableFailure(claim, RETRY_DELAY);
                 continue;

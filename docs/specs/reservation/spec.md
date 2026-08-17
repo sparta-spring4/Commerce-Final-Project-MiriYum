@@ -229,7 +229,7 @@
 - process·refund scheduled worker와 전용 scheduler는 `miriyum.reservation.deposit-worker.enabled=true`를 명시한 환경에서만 생성한다. property 누락과 `false`에서는 비동기 신규 claim을 시작하지 않으며 배포 환경의 명시적 활성화·중단 배선은 #404가 소유한다.
 - 예약금 계산 근거는 Store 설정 revision·비율·통화·예약 인원·계산 정책 버전·계산된 최종 예약금·대표 메뉴 설정 version·대표 메뉴 가격 합계·대표 메뉴 수와 계산에 사용한 각 대표 메뉴 ID·게시 version·기본 가격을 불변 snapshot으로 보존한다. 공개 DTO의 값만 복사하고 이후 Store 설정이나 Menu 원본 변경으로 갱신하지 않는다.
 - 결제 성공 뒤 자원 확정 불가 또는 포기·반환 뒤 늦은 `PAID`는 process와 같은 트랜잭션에 정확히 한 건의 `ReservationDepositRefundObligation`을 기록한다. obligation은 process·불변 원인 사건, `paymentId`, 전액·통화·환불 정책 버전, 안정적인 Payment 환불 멱등 키와 작업 임대·재시도 정보만 소유한다. process와 원인 사건 조합뿐 아니라 `process + paymentId + FULL_DEPOSIT_COMPENSATION` 조합에 최대 한 obligation만 허용하며 포기·만료·자원 확정 실패·late PAID의 여러 원인 사건은 같은 obligation의 append-only 감사 근거로 연결한다.
-- 커밋 뒤 `PaymentService.requestRefund(...)`를 호출한다. Payment 환불 원장이 실제 금전 결과의 유일한 원본이고 obligation은 요청 의무만 나타낸다. `REQUESTED`·`VALIDATING`·`PROCESSING`만 같은 의무로 재대기한다. 동일 멱등 키의 명시적 `FAILED`와 결과 불명확은 새 환불을 만들지 않고 obligation `RECONCILIATION_REQUIRED`, process `RECOVERY_REQUIRED`로 격리해 운영 대사를 기다린다.
+- 커밋 뒤 `PaymentService.requestRefund(...)`를 호출한다. Payment 환불 원장이 실제 금전 결과의 유일한 원본이고 obligation은 요청 의무만 나타낸다. `REQUESTED`·`VALIDATING`·`PROCESSING`과 일시적 기술 예외만 같은 의무로 재대기한다. 동일 멱등 키의 명시적 `FAILED`, 결과 불명확, Payment의 결정적 `ServiceException`은 새 환불을 만들지 않고 obligation `RECONCILIATION_REQUIRED`, process `RECOVERY_REQUIRED`로 격리해 운영 대사를 기다린다.
 
 ### 오류와 검증 경계
 

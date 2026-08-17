@@ -146,6 +146,17 @@ public class ReservationDepositRefundService {
             propagation = Propagation.REQUIRES_NEW,
             isolation = Isolation.READ_COMMITTED,
             timeout = 5)
+    public boolean recordRecoveryRequired(Claim claim) {
+        if (claim == null) {
+            throw new IllegalArgumentException("claim is required");
+        }
+        return isolateForRecovery(claim);
+    }
+
+    @Transactional(
+            propagation = Propagation.REQUIRES_NEW,
+            isolation = Isolation.READ_COMMITTED,
+            timeout = 5)
     public boolean recordReconciliationRequired(Claim claim, RefundResult refund) {
         if (claim == null || refund == null) {
             throw new IllegalArgumentException("claim and refund are required");
@@ -158,6 +169,10 @@ public class ReservationDepositRefundService {
             throw new IllegalStateException(
                     "recovery-required refund does not match obligation");
         }
+        return isolateForRecovery(claim);
+    }
+
+    private boolean isolateForRecovery(Claim claim) {
         Instant now = clock.instant();
         ReservationDepositRefundObligation obligation = refundRepository
                 .findByIdForUpdate(claim.obligationId())
