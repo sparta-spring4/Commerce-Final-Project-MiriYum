@@ -1,6 +1,7 @@
 package com.miriyum.domain.analytics.service;
 
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.COMPLETE;
+import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.PARTIAL;
 import static com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricCompleteness.UNAVAILABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -110,6 +111,58 @@ class StoreDashboardAnalyticsServiceTest {
                 .isEqualTo(COMPLETE);
         assertThat(metrics.get("NO_SHOW_STATUS").value()
                 .path("waitingConfirmed").path("value").longValue()).isEqualTo(2L);
+        assertThat(metrics.get("NO_SHOW_STATUS").value()
+                .path("reservationConfirmed").path("value").isNull()).isTrue();
+    }
+
+    @Test
+    void composesConfirmedSourcesWithoutPretendingCandidateExists() {
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot());
+
+        service.getDashboard(41L, STORE_ID);
+
+        DashboardMetricDraft noShow = metric("NO_SHOW_STATUS");
+        assertThat(noShow.value().path("reservationCandidate").path("value").isNull()).isTrue();
+        assertThat(noShow.value().path("reservationConfirmed").path("value").longValue())
+                .isEqualTo(1L);
+        assertThat(noShow.value().path("reservationConfirmed").path("completeness").textValue())
+                .isEqualTo("COMPLETE");
+        assertThat(noShow.value().path("waitingConfirmed").path("value").longValue())
+                .isEqualTo(2L);
+        assertThat(noShow.metadata().definitionVersion()).isEqualTo("analytics-004-no-show-v2");
+        assertThat(noShow.metadata().completeness()).isEqualTo(PARTIAL);
+        assertThat(noShow.metadata().aggregationVersion()).isEqualTo(9L);
+        assertThat(noShow.metadata().dataThrough()).isEqualTo(AS_OF.minusSeconds(1));
+        assertThat(noShow.metadata().inputCheckpoint())
+                .isEqualTo("2fcd6f736e634ca3427ac1877c6c7c229d94fd445082e1a668384038b043ed2e");
+        assertThat(noShow.metadata().corrected()).isFalse();
+    }
+
+    @Test
+    void waitingFailureDoesNotHideReservationConfirmed() {
+        given(reservationSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willReturn(reservationSnapshot());
+        given(waitingSource.getDashboardSnapshot(STORE_ID, DATE, AS_OF))
+                .willThrow(new DataAccessResourceFailureException("waiting down"));
+
+        service.getDashboard(41L, STORE_ID);
+
+        DashboardMetricDraft noShow = metric("NO_SHOW_STATUS");
+        assertThat(noShow.value().path("reservationConfirmed").path("value").longValue())
+                .isEqualTo(1L);
+        assertThat(noShow.value().path("reservationConfirmed").path("completeness").textValue())
+                .isEqualTo("COMPLETE");
+        assertThat(noShow.value().path("waitingConfirmed").path("value").isNull()).isTrue();
+        assertThat(noShow.value().path("waitingConfirmed").path("completeness").textValue())
+                .isEqualTo("UNAVAILABLE");
+    }
+
+    private DashboardMetricDraft metric(String key) {
+        return published.get().metrics().stream()
+                .filter(metric -> metric.metricKey().equals(key))
+                .findFirst()
+                .orElseThrow();
     }
 
     private static ReservationAnalyticsSnapshot reservationSnapshot() {
@@ -118,7 +171,7 @@ class StoreDashboardAnalyticsServiceTest {
 
     private static ReservationAnalyticsSnapshot reservationSnapshot(Instant asOf) {
         return new ReservationAnalyticsSnapshot(
-                STORE_ID, DATE, asOf, 4, 6, 10, 3, 5, 1, 4,
+                STORE_ID, DATE, asOf, 4, 6, 10, 3, 5, 1, 4, 1,
                 "a".repeat(64), asOf.minusSeconds(2), 7, false);
     }
 

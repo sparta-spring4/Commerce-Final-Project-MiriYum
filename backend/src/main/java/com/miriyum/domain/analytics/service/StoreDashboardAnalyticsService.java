@@ -18,12 +18,18 @@ import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
 import com.miriyum.domain.store.service.StoreService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -36,7 +42,13 @@ public class StoreDashboardAnalyticsService {
     private static final String CAPACITY_DEFINITION = "ANALYTICS-002-v1";
     private static final String CANCELLATION_DEFINITION = "ANALYTICS-003-v1";
     private static final String WAITING_DEFINITION = "ANALYTICS-004-waiting-v1";
-    private static final String NO_SHOW_DEFINITION = "ANALYTICS-004-v1";
+    private static final String NO_SHOW_DEFINITION = "analytics-004-no-show-v2";
+    private static final String NO_SHOW_CANDIDATE_DEFINITION =
+            "analytics-004-reservation-no-show-candidate-v1";
+    private static final String RESERVATION_NO_SHOW_DEFINITION =
+            "analytics-004-reservation-no-show-confirmed-v1";
+    private static final String WAITING_NO_SHOW_DEFINITION =
+            "analytics-004-waiting-no-show-confirmed-v1";
 
     private final StoreService storeService;
     private final ReservationAnalyticsQueryService reservationSource;
@@ -97,7 +109,7 @@ public class StoreDashboardAnalyticsService {
                 reservationRate(reservation, reservationFailure, asOf, true),
                 cancellationRate(reservation, reservationFailure, asOf),
                 waitingMetric(waiting, waitingFailure, asOf),
-                noShowMetric(waiting, waitingFailure, asOf));
+                noShowMetric(reservation, reservationFailure, waiting, waitingFailure, asOf));
         return executor.publish(new DashboardSnapshotDraft(
                 storeId,
                 businessDate,
@@ -196,41 +208,88 @@ public class StoreDashboardAnalyticsService {
     }
 
     private DashboardMetricDraft noShowMetric(
-            WaitingAnalyticsSnapshot source,
+            ReservationAnalyticsSnapshot reservation,
+            MetricReasonCode reservationFailure,
+            WaitingAnalyticsSnapshot waiting,
             MetricReasonCode waitingFailure,
             Instant asOf
     ) {
         MetricMetadata missing = incomplete(
-                NO_SHOW_DEFINITION, 1L, asOf, null, null, false,
+                NO_SHOW_CANDIDATE_DEFINITION, 1L, asOf, null, null, false,
                 MetricCompleteness.UNAVAILABLE,
                 MetricReasonCode.SOURCE_CONTRACT_MISSING);
-        CountMetricResponse waitingConfirmed;
-        MetricMetadata top;
-        if (source == null) {
+        CountMetricResponse reservationConfirmed;
+        if (reservation == null) {
             MetricMetadata failed = incomplete(
-                    WAITING_DEFINITION, 1L, asOf, null, null, false,
+                    RESERVATION_NO_SHOW_DEFINITION, 1L, asOf, null, null, false,
+                    completeness(reservationFailure), reservationFailure);
+            reservationConfirmed = new CountMetricResponse(null, failed);
+        } else {
+            MetricMetadata reservationMetadata = complete(
+                    RESERVATION_NO_SHOW_DEFINITION, reservation.sourceVersion(), asOf,
+                    reservation.dataThrough(), reservation.inputCheckpoint(),
+                    reservation.corrected());
+            reservationConfirmed = new CountMetricResponse(
+                    reservation.confirmedNoShowTeams(), reservationMetadata);
+        }
+
+        CountMetricResponse waitingConfirmed;
+        if (waiting == null) {
+            MetricMetadata failed = incomplete(
+                    WAITING_NO_SHOW_DEFINITION, 1L, asOf, null, null, false,
                     completeness(waitingFailure), waitingFailure);
             waitingConfirmed = new CountMetricResponse(null, failed);
-            top = incomplete(NO_SHOW_DEFINITION, 1L, asOf, null, null, false,
-                    MetricCompleteness.PARTIAL,
-                    MetricReasonCode.SOURCE_CONTRACT_MISSING);
         } else {
             MetricMetadata waitingMetadata = complete(
-                    WAITING_DEFINITION, source.sourceVersion(), asOf,
-                    source.dataThrough(), source.inputCheckpoint(), source.corrected());
+                    WAITING_NO_SHOW_DEFINITION, waiting.sourceVersion(), asOf,
+                    waiting.dataThrough(), waiting.inputCheckpoint(), waiting.corrected());
             waitingConfirmed = new CountMetricResponse(
-                    source.confirmedNoShowTeams(), waitingMetadata);
-            top = incomplete(NO_SHOW_DEFINITION, source.sourceVersion(), asOf,
-                    source.dataThrough(), source.inputCheckpoint(), source.corrected(),
-                    MetricCompleteness.PARTIAL,
-                    MetricReasonCode.SOURCE_CONTRACT_MISSING);
+                    waiting.confirmedNoShowTeams(), waitingMetadata);
         }
+
+        long version = Math.max(
+                reservation == null ? 1L : reservation.sourceVersion(),
+                waiting == null ? 1L : waiting.sourceVersion());
+        Instant dataThrough = Stream.of(
+                        reservation == null ? null : reservation.dataThrough(),
+                        waiting == null ? null : waiting.dataThrough())
+                .filter(Objects::nonNull)
+                .max(Instant::compareTo)
+                .orElse(null);
+        String checkpoint = combinedNoShowCheckpoint(reservation, waiting);
+        boolean corrected = (reservation != null && reservation.corrected())
+                || (waiting != null && waiting.corrected());
+        MetricMetadata top = incomplete(
+                NO_SHOW_DEFINITION, version, asOf, dataThrough, checkpoint, corrected,
+                MetricCompleteness.PARTIAL,
+                MetricReasonCode.SOURCE_CONTRACT_MISSING);
         NoShowValue value = new NoShowValue(
                 new CountMetricResponse(null, missing),
-                new CountMetricResponse(null, missing),
+                reservationConfirmed,
                 waitingConfirmed);
         return new DashboardMetricDraft(
                 "NO_SHOW_STATUS", objectMapper.valueToTree(value), top);
+    }
+
+    private static String combinedNoShowCheckpoint(
+            ReservationAnalyticsSnapshot reservation,
+            WaitingAnalyticsSnapshot waiting
+    ) {
+        if (reservation == null && waiting == null) {
+            return null;
+        }
+        String raw = NO_SHOW_DEFINITION
+                + ":reservation=" + (reservation == null
+                        ? "unavailable" : reservation.inputCheckpoint())
+                + ":waiting=" + (waiting == null
+                        ? "unavailable" : waiting.inputCheckpoint());
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(raw.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
+        }
     }
 
     private static DashboardMetricDraft unavailable(

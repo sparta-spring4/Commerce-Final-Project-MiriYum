@@ -122,12 +122,18 @@ class AnalyticsOpenApiContractTest {
         Map<String, Object> categories = map(noShow.get("value"));
 
         assertUnavailableBecauseContractMissing(map(categories.get("reservationCandidate")));
-        assertUnavailableBecauseContractMissing(map(categories.get("reservationConfirmed")));
+        assertThat(map(categories.get("reservationConfirmed")))
+                .containsEntry("value", 1)
+                .containsEntry("completeness", "COMPLETE")
+                .containsEntry("reasonCode", null);
         assertThat(map(categories.get("waitingConfirmed")))
                 .containsEntry("value", 2)
                 .containsEntry("completeness", "COMPLETE")
                 .containsEntry("reasonCode", null);
-        assertThat(noShow).containsEntry("completeness", "PARTIAL");
+        assertThat(noShow)
+                .containsEntry("definitionVersion", "analytics-004-no-show-v2")
+                .containsEntry("completeness", "PARTIAL")
+                .containsEntry("reasonCode", "SOURCE_CONTRACT_MISSING");
     }
 
     @Test

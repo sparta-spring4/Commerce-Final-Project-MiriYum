@@ -681,25 +681,25 @@ Otherwise do not create an empty commit.
 - `reservationCandidate`: null, `UNAVAILABLE`, `SOURCE_CONTRACT_MISSING`.
 - `reservationConfirmed`: measured non-negative count, `COMPLETE`, no reason.
 - `waitingConfirmed`: independently measured as before.
-- top-level `noShow`: `ANALYTICS-004-v2`, `PARTIAL`, `SOURCE_CONTRACT_MISSING` because the candidate source is absent.
+- top-level `noShow`: `analytics-004-no-show-v2`, `PARTIAL`, `SOURCE_CONTRACT_MISSING` because the candidate source is absent.
 
-- [ ] **Step 1: Make the OpenAPI example assert the new state**
+- [x] **Step 1: Make the OpenAPI example assert the new state**
 
 Use a hand-checkable example with `reservationConfirmed.value = 1`, `waitingConfirmed.value = 2`, and the candidate unavailable. Keep the top-level value object present and partial.
 
-- [ ] **Step 2: Change the OpenAPI and controller tests before runtime code**
+- [x] **Step 2: Change the OpenAPI and controller tests before runtime code**
 
 ```java
 assertUnavailableBecauseContractMissing(map(categories.get("reservationCandidate")));
 assertCompleteCount(map(categories.get("reservationConfirmed")), 1L);
 assertCompleteCount(map(categories.get("waitingConfirmed")), 2L);
-assertThat(noShow.get("definitionVersion")).isEqualTo("ANALYTICS-004-v2");
+assertThat(noShow.get("definitionVersion")).isEqualTo("analytics-004-no-show-v2");
 assertThat(noShow.get("completeness")).isEqualTo("PARTIAL");
 ```
 
 The controller stub must return the same three-cell shape; it must not turn a missing candidate into zero.
 
-- [ ] **Step 3: Run the focused contract tests and verify RED**
+- [x] **Step 3: Run the focused contract tests and verify RED**
 
 ```powershell
 cd backend
@@ -742,19 +742,19 @@ public record ReservationAnalyticsSnapshot(
 **Repository interface:** keep the foreign ledger private to Reservation and return only a scalar projection.
 
 ```java
-interface DashboardNoShowAggregate {
-    long getConfirmedNoShowTeams();
-    long getMaxAuditId();
-    Instant getDataThrough();
+interface ReservationNoShowAnalytics {
+    Long getConfirmedNoShowTeams();
+    Long getMaxAuditId();
+    Long getDataThroughEpochMicros();
 }
 
-DashboardNoShowAggregate aggregateDashboardNoShows(
+ReservationNoShowAnalytics aggregateDashboardNoShows(
         long storeId, LocalDate businessDate, Instant asOf);
 ```
 
 The native MySQL query must join `reservation_no_show_audits` to `reservations` by Reservation ID, filter both the target `store_id` and `reservations.service_date`, and require `audit.occurred_at <= :asOf`. Count the unique audit rows guaranteed by #240's unique Reservation constraint. Return `COALESCE(MAX(a.reservation_no_show_audit_id), 0)` and maximum `occurred_at`.
 
-- [ ] **Step 1: Write the failing source unit tests**
+- [x] **Step 1: Write the failing source unit tests**
 
 Add a repository projection fixture and assert:
 
@@ -767,7 +767,7 @@ assertThat(snapshot.corrected()).isFalse();
 
 Also reject a negative confirmed count and a confirmed count greater than `everConfirmedTeams` in the DTO invariant tests.
 
-- [ ] **Step 2: Run the unit test and verify RED**
+- [x] **Step 2: Run the unit test and verify RED**
 
 ```powershell
 .\gradlew.bat test --tests com.miriyum.domain.reservation.service.ReservationAnalyticsQueryServiceTest --console=plain
@@ -775,11 +775,11 @@ Also reject a negative confirmed count and a confirmed count greater than `everC
 
 Expected: compile failure because the DTO field, repository aggregate and service dependency do not exist.
 
-- [ ] **Step 3: Write the failing actual-MySQL `asOf` test**
+- [x] **Step 3: Write the failing actual-MySQL `asOf` test**
 
 Insert one no-show audit before `asOf`, one after `asOf` for the same KST business date, one for another store, and one for another service date. Assert the earlier snapshot counts only the first audit and a later snapshot counts both in-scope audits. Assert the later max audit ID changes sourceVersion/inputCheckpoint and the later occurred time advances dataThrough.
 
-- [ ] **Step 4: Run the integration class and verify RED**
+- [x] **Step 4: Run the integration class and verify RED**
 
 ```powershell
 .\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.service.ReservationAnalyticsQueryServiceIT --console=plain
@@ -787,15 +787,15 @@ Insert one no-show audit before `asOf`, one after `asOf` for the same KST busine
 
 Expected: compile or assertion failure until the audit aggregate is wired.
 
-- [ ] **Step 5: Implement the minimal Reservation contract**
+- [x] **Step 5: Implement the minimal Reservation contract**
 
 Inject `ReservationNoShowAuditRepository` into `ReservationAnalyticsQueryService` and execute the audit aggregate inside the existing repeatable-read transaction. Set `confirmedNoShowTeams` from the projection. Incorporate max audit ID into the stable Reservation source version and opaque checkpoint, and maximum audit occurrence into dataThrough. Preserve `corrected=false`; #240 publishes no correction meaning.
 
-- [ ] **Step 6: Run the focused source tests and verify GREEN**
+- [x] **Step 6: Run the focused source tests and verify GREEN**
 
 Run Steps 2 and 4. Expected: PASS.
 
-- [ ] **Step 7: Commit the producer-owned contract slice**
+- [x] **Step 7: Commit the producer-owned contract slice**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/reservation/dto/contract/ReservationAnalyticsSnapshot.java backend/src/main/java/com/miriyum/domain/reservation/repository/ReservationNoShowAuditRepository.java backend/src/main/java/com/miriyum/domain/reservation/service/ReservationAnalyticsQueryService.java backend/src/test/java/com/miriyum/domain/reservation/service/ReservationAnalyticsQueryServiceTest.java backend/src/test/java/com/miriyum/domain/reservation/service/ReservationAnalyticsQueryServiceIT.java
@@ -811,14 +811,14 @@ git commit -m "feat(reservation): publish confirmed no-show analytics"
 - Modify: `backend/src/test/java/com/miriyum/domain/analytics/AnalyticsOpenApiContractTest.java`
 
 **Composition:**
-- Change `NO_SHOW_DEFINITION` to `ANALYTICS-004-v2`.
+- Change `NO_SHOW_DEFINITION` to `analytics-004-no-show-v2` and use the active OpenAPI's source-specific definition strings for all three subcells.
 - Pass both Reservation and Waiting results/failures into `noShowMetric`.
 - Build three subcells separately: static unavailable candidate, Reservation confirmed from its source or its classified failure, and Waiting confirmed from its source or its classified failure.
 - Compute top sourceVersion as the maximum available source version; dataThrough as the maximum available source data-through; corrected as logical OR.
 - Compute the top checkpoint as a deterministic SHA-256 over a stable definition prefix plus the two opaque source checkpoints. Never expose or parse either producer checkpoint.
 - Keep top completeness `PARTIAL/SOURCE_CONTRACT_MISSING` even when both confirmed sources are complete, because the candidate contract remains missing.
 
-- [ ] **Step 1: Write the failing happy-path and failure-isolation tests**
+- [x] **Step 1: Write the failing happy-path and failure-isolation tests**
 
 ```java
 @Test
@@ -840,7 +840,7 @@ void waitingFailureDoesNotHideReservationConfirmed() { /* waiting unavailable; c
 
 Also assert different Reservation and Waiting checkpoints produce a stable combined checkpoint, max aggregation version/dataThrough, and corrected OR.
 
-- [ ] **Step 2: Run the analytics unit tests and verify RED**
+- [x] **Step 2: Run the analytics unit tests and verify RED**
 
 ```powershell
 .\gradlew.bat test --tests com.miriyum.domain.analytics.service.StoreDashboardAnalyticsServiceTest --tests com.miriyum.domain.analytics.controller.StoreDashboardAnalyticsControllerTest --tests com.miriyum.domain.analytics.AnalyticsOpenApiContractTest --console=plain
@@ -848,11 +848,11 @@ Also assert different Reservation and Waiting checkpoints produce a stable combi
 
 Expected: failures from the unmeasured Reservation confirmed cell and v1 definition.
 
-- [ ] **Step 3: Implement only the independent no-show composition**
+- [x] **Step 3: Implement only the independent no-show composition**
 
 Reuse the existing failure classifier and metadata constructors. Do not catch authorization/store failures and do not import Reservation entities or repositories into Analytics. Persist the unchanged six top-level metric keys; the no-show JSON value contains the three subcells.
 
-- [ ] **Step 4: Run focused runtime and boundary tests and verify GREEN**
+- [x] **Step 4: Run focused runtime and boundary tests and verify GREEN**
 
 ```powershell
 .\gradlew.bat test --tests com.miriyum.domain.analytics.service.StoreDashboardAnalyticsServiceTest --tests com.miriyum.domain.analytics.controller.StoreDashboardAnalyticsControllerTest --tests com.miriyum.domain.analytics.AnalyticsOpenApiContractTest --tests com.miriyum.architecture.AudienceOpenApiContractTest --tests com.miriyum.architecture.DomainPackageArchitectureTest --console=plain
@@ -860,7 +860,7 @@ Reuse the existing failure classifier and metadata constructors. Do not catch au
 
 Expected: PASS, including foreign Entity/Repository dependency enforcement.
 
-- [ ] **Step 5: Commit the consumer slice**
+- [x] **Step 5: Commit the consumer slice**
 
 ```powershell
 git add -- backend/src/main/java/com/miriyum/domain/analytics/service/StoreDashboardAnalyticsService.java backend/src/test/java/com/miriyum/domain/analytics/service/StoreDashboardAnalyticsServiceTest.java backend/src/test/java/com/miriyum/domain/analytics/controller/StoreDashboardAnalyticsControllerTest.java backend/src/test/java/com/miriyum/domain/analytics/AnalyticsOpenApiContractTest.java docs/specs/analytics/openapi.yaml
@@ -869,7 +869,7 @@ git commit -m "feat(analytics): compose confirmed reservation no-shows"
 
 ### Task 11: Verify and publish the phase-2 slice
 
-- [ ] **Step 1: Re-run only affected actual-MySQL integration classes**
+- [x] **Step 1: Re-run only affected actual-MySQL integration classes**
 
 ```powershell
 .\gradlew.bat integrationTest --tests com.miriyum.domain.reservation.service.ReservationAnalyticsQueryServiceIT --tests com.miriyum.domain.analytics.service.StoreDashboardAnalyticsServiceIT --tests com.miriyum.domain.analytics.controller.StoreDashboardAnalyticsHttpIT --console=plain
@@ -877,7 +877,7 @@ git commit -m "feat(analytics): compose confirmed reservation no-shows"
 
 Expected: PASS. Do not run local `build`, `check`, full `integrationTest`, or all integration shards.
 
-- [ ] **Step 2: Lint and bundle the active contract**
+- [x] **Step 2: Lint and bundle the active contract**
 
 ```powershell
 cd ..
@@ -887,7 +887,7 @@ npx --yes @redocly/cli@2.35.1 bundle analytics --output NUL
 
 Expected: both commands exit 0. On the known Windows Node shutdown assertion, retry once and report both attempts honestly.
 
-- [ ] **Step 3: Verify the exact scope**
+- [x] **Step 3: Verify the exact scope**
 
 ```powershell
 git diff --name-only origin/dev...HEAD

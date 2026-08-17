@@ -68,7 +68,9 @@ class StoreDashboardAnalyticsControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.metrics.noShow.completeness").value("PARTIAL"))
                 .andExpect(jsonPath(
-                        "$.data.metrics.noShow.value.reservationConfirmed.value").isEmpty())
+                        "$.data.metrics.noShow.value.reservationCandidate.value").isEmpty())
+                .andExpect(jsonPath(
+                        "$.data.metrics.noShow.value.reservationConfirmed.value").value(1))
                 .andExpect(jsonPath(
                         "$.data.metrics.noShow.value.waitingConfirmed.value").value(2));
     }
@@ -106,18 +108,22 @@ class StoreDashboardAnalyticsControllerTest {
 
     private static DashboardSnapshotResponse snapshot() {
         MetricMetadata missing = new MetricMetadata(
-                "ANALYTICS-004-v1", 1, AS_OF, null, null,
+                "analytics-004-reservation-no-show-candidate-v1", 1, AS_OF, null, null,
                 UNAVAILABLE, false, SOURCE_CONTRACT_MISSING);
+        MetricMetadata reservation = new MetricMetadata(
+                "analytics-004-reservation-no-show-confirmed-v1", 3, AS_OF, AS_OF,
+                "reservation-checkpoint",
+                COMPLETE, false, null);
         MetricMetadata waiting = new MetricMetadata(
-                "ANALYTICS-004-waiting-v1", 2, AS_OF, AS_OF, "checkpoint",
+                "analytics-004-waiting-no-show-confirmed-v1", 2, AS_OF, AS_OF, "checkpoint",
                 COMPLETE, false, null);
         MetricMetadata partial = new MetricMetadata(
-                "ANALYTICS-004-v1", 2, AS_OF, AS_OF, "checkpoint",
+                "analytics-004-no-show-v2", 3, AS_OF, AS_OF, "combined-checkpoint",
                 PARTIAL, false, SOURCE_CONTRACT_MISSING);
         NoShowMetricResponse noShow = new NoShowMetricResponse(
                 new NoShowValue(
                         new CountMetricResponse(null, missing),
-                        new CountMetricResponse(null, missing),
+                        new CountMetricResponse(1L, reservation),
                         new CountMetricResponse(2L, waiting)),
                 partial);
         return new DashboardSnapshotResponse(
