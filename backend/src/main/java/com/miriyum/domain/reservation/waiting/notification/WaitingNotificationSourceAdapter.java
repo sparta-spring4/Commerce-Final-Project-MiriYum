@@ -1,9 +1,9 @@
 package com.miriyum.domain.reservation.waiting.notification;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
 import com.miriyum.domain.notification.port.WaitingNotificationSource;
-import com.miriyum.domain.reservation.waiting.entity.WaitingEntryImminentEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeam;
 import com.miriyum.domain.reservation.waiting.entity.WaitingTeamStatus;
@@ -41,23 +41,26 @@ public class WaitingNotificationSourceAdapter implements WaitingNotificationSour
 
     @Override
     public NotificationSourceContextV1 readContext(
+            NotificationPurpose purpose,
             String resourceId,
             long expectedVersion,
             String recipientAccountId
     ) {
-        return readContext(resourceId, expectedVersion, recipientAccountId, false);
+        return readContext(purpose, resourceId, expectedVersion, recipientAccountId, false);
     }
 
     @Override
     public NotificationSourceContextV1 readContextForDelivery(
+            NotificationPurpose purpose,
             String resourceId,
             long expectedVersion,
             String recipientAccountId
     ) {
-        return readContext(resourceId, expectedVersion, recipientAccountId, true);
+        return readContext(purpose, resourceId, expectedVersion, recipientAccountId, true);
     }
 
     private NotificationSourceContextV1 readContext(
+            NotificationPurpose purpose,
             String resourceId,
             long expectedVersion,
             String recipientAccountId,
@@ -79,12 +82,18 @@ public class WaitingNotificationSourceAdapter implements WaitingNotificationSour
             if (!Objects.equals(team.getConsumerAccountId(), recipientId)) {
                 return empty(NotificationSourceReadResult.NOT_ELIGIBLE);
             }
-            Optional<WaitingEntryImminentEvent> entry = entries.findByWaitingTeamId(teamId)
-                    .filter(value -> value.getEventSequence() == expectedVersion);
-            if (entry.isPresent()) {
-                return entryContext(team, expectedVersion);
+            if (purpose == NotificationPurpose.WAITING_ENTRY_IMMINENT) {
+                return entries.findByWaitingTeamId(teamId)
+                        .filter(value -> value.getEventSequence() == expectedVersion)
+                        .map(ignored -> entryContext(team, expectedVersion))
+                        .orElseGet(() -> empty(NotificationSourceReadResult.NOT_ELIGIBLE));
+            }
+            WaitingTeamStatus purposeStatus = statusForPurpose(purpose);
+            if (purposeStatus == null) {
+                return empty(NotificationSourceReadResult.NOT_ELIGIBLE);
             }
             return statuses.findByWaitingTeamIdAndEventSequence(teamId, expectedVersion)
+                    .filter(event -> event.getPublicStatus() == purposeStatus)
                     .map(event -> statusContext(team, event, expectedVersion))
                     .orElseGet(() -> empty(NotificationSourceReadResult.NOT_ELIGIBLE));
         } catch (DataAccessException unavailable) {
@@ -181,6 +190,20 @@ public class WaitingNotificationSourceAdapter implements WaitingNotificationSour
 
     private static OffsetDateTime offset(Instant value) {
         return value == null ? null : OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
+    private static WaitingTeamStatus statusForPurpose(NotificationPurpose purpose) {
+        if (purpose == null) {
+            return null;
+        }
+        return switch (purpose) {
+            case WAITING_CALLED -> WaitingTeamStatus.CALLED;
+            case WAITING_CANCELLED -> WaitingTeamStatus.CANCELLED;
+            case WAITING_NO_SHOW -> WaitingTeamStatus.NO_SHOW;
+            case WAITING_CHECKED_IN -> WaitingTeamStatus.CHECKED_IN;
+            case WAITING_CLOSED_BY_STORE -> WaitingTeamStatus.CLOSED_BY_STORE;
+            default -> null;
+        };
     }
 
     private static Long parsePublicId(String value) {

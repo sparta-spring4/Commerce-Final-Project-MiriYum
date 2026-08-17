@@ -2,6 +2,7 @@ package com.miriyum.domain.notification.service;
 
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
 import com.miriyum.domain.notification.dto.source.NotificationSourceReadResult;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
@@ -36,30 +37,33 @@ public class NotificationSourceRegistry {
 
     public NotificationSourceContextV1 readContext(
             NotificationSourceDomain sourceDomain,
+            NotificationPurpose purpose,
             NotificationResourceType resourceType,
             long resourceId,
             long resourceVersion,
             long recipientAccountId
     ) {
         return readContext(
-                sourceDomain, resourceType, resourceId, resourceVersion,
+                sourceDomain, purpose, resourceType, resourceId, resourceVersion,
                 recipientAccountId, false);
     }
 
     public NotificationSourceContextV1 readContextForDelivery(
             NotificationSourceDomain sourceDomain,
+            NotificationPurpose purpose,
             NotificationResourceType resourceType,
             long resourceId,
             long resourceVersion,
             long recipientAccountId
     ) {
         return readContext(
-                sourceDomain, resourceType, resourceId, resourceVersion,
+                sourceDomain, purpose, resourceType, resourceId, resourceVersion,
                 recipientAccountId, true);
     }
 
     private NotificationSourceContextV1 readContext(
             NotificationSourceDomain sourceDomain,
+            NotificationPurpose purpose,
             NotificationResourceType resourceType,
             long resourceId,
             long resourceVersion,
@@ -96,8 +100,9 @@ public class NotificationSourceRegistry {
                 yield waitingSource
                         .map(source -> delivery
                                 ? source.readContextForDelivery(
-                                        resource, resourceVersion, recipient)
-                                : source.readContext(resource, resourceVersion, recipient))
+                                        purpose, resource, resourceVersion, recipient)
+                                : source.readContext(
+                                        purpose, resource, resourceVersion, recipient))
                         .orElseGet(NotificationSourceRegistry::temporarilyUnavailable);
             }
         };

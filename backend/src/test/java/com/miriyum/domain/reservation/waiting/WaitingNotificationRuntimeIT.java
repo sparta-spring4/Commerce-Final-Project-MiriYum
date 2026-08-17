@@ -2,6 +2,7 @@ package com.miriyum.domain.reservation.waiting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -235,7 +236,8 @@ class WaitingNotificationRuntimeIT {
             Object result = invocation.callRealMethod();
             sourceReturned.countDown();
             return result;
-        }).when(waitingSource).readContextForDelivery(anyString(), anyLong(), anyString());
+        }).when(waitingSource).readContextForDelivery(
+                any(NotificationPurpose.class), anyString(), anyLong(), anyString());
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var transition = executor.submit(() -> {

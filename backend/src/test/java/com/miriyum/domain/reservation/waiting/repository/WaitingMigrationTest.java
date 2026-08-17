@@ -98,6 +98,24 @@ class WaitingMigrationTest {
     }
 
     @Test
+    @DisplayName("V54 입장 임박 사건 시각은 마이크로초 정밀도를 보존한다")
+    void preservesEntryImminentEventTimestampPrecision() throws SQLException {
+        migrate();
+
+        assertThat(queryStrings("""
+                SELECT CONCAT(column_name, ':', column_type)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'waiting_entry_imminent_events'
+                  AND column_name IN ('occurred_at', 'created_at')
+                ORDER BY column_name
+                """)).containsExactly(
+                "created_at:datetime(6)",
+                "occurred_at:datetime(6)"
+        );
+    }
+
+    @Test
     @DisplayName("V54까지 적용하면 Waiting 소유 테이블 열한 개만 존재한다")
     void createsExactWaitingLedgerTableSet() throws SQLException {
         migrate();

@@ -785,15 +785,17 @@ class NotificationTaskWorkerIntegrationTest {
         @Override
         @Transactional(propagation = Propagation.MANDATORY)
         public NotificationSourceContextV1 readContextForDelivery(
+                NotificationPurpose purpose,
                 String resourceId,
                 long expectedVersion,
                 String recipientAccountId
         ) {
-            return readContext(resourceId, expectedVersion, recipientAccountId);
+            return readContext(purpose, resourceId, expectedVersion, recipientAccountId);
         }
 
         @Override
         public NotificationSourceContextV1 readContext(
+                NotificationPurpose purpose,
                 String resourceId,
                 long expectedVersion,
                 String recipientAccountId

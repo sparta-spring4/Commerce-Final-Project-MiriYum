@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.miriyum.domain.notification.config.NotificationSettings;
 import com.miriyum.domain.notification.dto.source.NotificationSourceContextV1;
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
@@ -71,6 +72,7 @@ class NotificationDeliveryServiceTest {
 
         assertThat(registry.readContext(
                 NotificationSourceDomain.PICKUP,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 21L,
                 3L,
@@ -79,6 +81,7 @@ class NotificationDeliveryServiceTest {
         verifyNoInteractions(menuHold);
         assertThatThrownBy(() -> registry.readContext(
                 NotificationSourceDomain.MENU_HOLD,
+                NotificationPurpose.PICKUP_RESERVATION_CONFIRMED,
                 NotificationResourceType.PICKUP_RESERVATION,
                 21L,
                 3L,
@@ -94,14 +97,19 @@ class NotificationDeliveryServiceTest {
         WaitingNotificationSource waiting = mock(WaitingNotificationSource.class);
         NotificationSourceContextV1 context = mock(NotificationSourceContextV1.class);
         NotificationSourceContextV1 deliveryContext = mock(NotificationSourceContextV1.class);
-        given(waiting.readContext("31", 4L, "11")).willReturn(context);
-        given(waiting.readContextForDelivery("31", 4L, "11")).willReturn(deliveryContext);
+        given(waiting.readContext(
+                NotificationPurpose.WAITING_CALLED, "31", 4L, "11"))
+                .willReturn(context);
+        given(waiting.readContextForDelivery(
+                NotificationPurpose.WAITING_CALLED, "31", 4L, "11"))
+                .willReturn(deliveryContext);
         NotificationSourceRegistry registry = new NotificationSourceRegistry(
                 Optional.of(reservation), Optional.of(menuHold), Optional.of(pickup),
                 Optional.of(waiting));
 
         assertThat(registry.readContext(
                 NotificationSourceDomain.WAITING,
+                NotificationPurpose.WAITING_CALLED,
                 NotificationResourceType.WAITING_TEAM,
                 31L,
                 4L,
@@ -109,6 +117,7 @@ class NotificationDeliveryServiceTest {
         )).isSameAs(context);
         assertThat(registry.readContextForDelivery(
                 NotificationSourceDomain.WAITING,
+                NotificationPurpose.WAITING_CALLED,
                 NotificationResourceType.WAITING_TEAM,
                 31L,
                 4L,

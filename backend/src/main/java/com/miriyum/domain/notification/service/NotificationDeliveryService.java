@@ -128,12 +128,14 @@ public class NotificationDeliveryService {
             context = lockedWaitingDelivery
                     ? sourceRegistry.readContextForDelivery(
                             task.sourceDomain(),
+                            task.purpose(),
                             task.resourceType(),
                             task.resourceId(),
                             task.resourceVersion(),
                             task.recipientAccountId())
                     : sourceRegistry.readContext(
                             task.sourceDomain(),
+                            task.purpose(),
                             task.resourceType(),
                             task.resourceId(),
                             task.resourceVersion(),
