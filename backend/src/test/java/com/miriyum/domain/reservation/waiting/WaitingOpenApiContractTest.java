@@ -34,6 +34,28 @@ class WaitingOpenApiContractTest {
             "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}", Set.of("get"));
 
     @Test
+    void autoOpenWorkerAddsNoHttpPathOperationOrSchema() throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+
+        assertThat(paths.keySet()).allSatisfy(path ->
+                assertThat(path.toLowerCase()).doesNotContain("auto-open", "auto_open"));
+        assertThat(schemas.keySet()).allSatisfy(schema ->
+                assertThat(schema).doesNotContain(
+                        "WaitingAutoOpen", "WaitingReceptionWindow"));
+        for (Object pathItemValue : paths.values()) {
+            for (Object operationValue : map(pathItemValue).values()) {
+                Map<String, Object> operation = map(operationValue);
+                if (operation.containsKey("operationId")) {
+                    assertThat(operation.get("operationId").toString())
+                            .doesNotContain("AutoOpen", "autoOpen");
+                }
+            }
+        }
+    }
+
+    @Test
     void storeOperatorWaitingSettingsKeepTheApprovedContract() throws IOException {
         Map<String, Object> document = load(CONTRACT);
 
