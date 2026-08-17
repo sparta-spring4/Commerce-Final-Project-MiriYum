@@ -20,6 +20,20 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("github.event.workflow_run.head_branch == 'main'", self.workflow)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", self.workflow)
 
+    def test_automatic_deployment_requires_the_current_repository_and_main_sha(self):
+        self.assertIn(
+            "github.event.workflow_run.head_repository.full_name == github.repository", self.workflow)
+        self.assertIn('repos/$GITHUB_REPOSITORY/git/ref/heads/main', self.workflow)
+        self.assertIn('[ "$current_main_sha" != "$WORKFLOW_SHA" ]', self.workflow)
+        self.assertIn('Skipping stale CI revision $WORKFLOW_SHA', self.workflow)
+
+    def test_production_approval_and_activation_gates_are_preserved(self):
+        self.assertIn("environment: production", self.workflow)
+        self.assertIn("vars.PRODUCTION_ECS_DEPLOYMENT_ENABLED == 'true'", self.workflow)
+        self.assertIn("Verify main is unchanged after production approval", self.workflow)
+        self.assertIn('[ "$current_main_sha" != "$DEPLOY_SHA" ]', self.workflow)
+        self.assertIn('Skipping stale CI revision $DEPLOY_SHA after production approval', self.workflow)
+
     def test_manual_deployment_validates_main_history_and_exact_ci(self):
         self.assertIn("permissions:\n      actions: read\n      contents: read", self.workflow)
         self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'", self.workflow)
