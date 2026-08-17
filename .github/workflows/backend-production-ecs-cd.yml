@@ -1,4 +1,4 @@
-# main CI를 통과한 immutable SHA 이미지를 ECR에 push하고, 현재 ECS 설정을 보존한 채 이미지만 교체한다.
+# 기본 브랜치(dev)가 main CI를 통과한 immutable SHA 이미지를 ECR에 push하고, 현재 ECS 설정을 보존한 채 이미지만 교체한다.
 name: Backend CD (Production ECS)
 
 on:
@@ -41,7 +41,7 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      github.event_name == 'workflow_dispatch'
     outputs:
       deployable: ${{ steps.source.outputs.deployable }}
       image_tag: ${{ steps.source.outputs.image_tag }}
@@ -67,6 +67,25 @@ jobs:
             image_tag="$WORKFLOW_SHA"
           else
             image_tag="$MANUAL_TAG"
+
+            if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Only a full 40-character Git SHA image tag can be deployed."
+              exit 1
+            fi
+
+            main_relationship=$(gh api "repos/$GITHUB_REPOSITORY/compare/$image_tag...main" --jq '.status')
+            if [ "$main_relationship" != "ahead" ] && [ "$main_relationship" != "identical" ]; then
+              echo "::error::Manual deployment SHA must be contained in the current main history."
+              exit 1
+            fi
+
+            successful_main_ci_runs=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$image_tag&event=push&status=completed&per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "Backend CI" and .head_branch == "main" and .conclusion == "success")] | length')
+            if [ "$successful_main_ci_runs" -lt 1 ]; then
+              echo "::error::Manual deployment requires a successful Backend CI run for this main SHA."
+              exit 1
+            fi
           fi
 
           if ! [[ "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
@@ -192,6 +211,14 @@ jobs:
             --query taskDefinition \
             --output json > current-task-definition.json
 
+          target_container_count=$(jq --arg container "$ECS_CONTAINER_NAME" \
+            '[.containerDefinitions[] | select(.name == $container)] | length' \
+            current-task-definition.json)
+          if [ "$target_container_count" != "1" ]; then
+            echo "::error::Expected exactly one $ECS_CONTAINER_NAME container in the current task definition."
+            exit 1
+          fi
+
           jq --arg image "$IMAGE_URI" --arg container "$ECS_CONTAINER_NAME" '
             .containerDefinitions |= map(
               if .name == $container then .image = $image else . end
@@ -207,6 +234,17 @@ jobs:
                 .deregisteredAt
               )
           ' current-task-definition.json > next-task-definition.json
+
+          updated_container_count=$(jq --arg container "$ECS_CONTAINER_NAME" \
+            '[.containerDefinitions[] | select(.name == $container)] | length' \
+            next-task-definition.json)
+          updated_image=$(jq -r --arg container "$ECS_CONTAINER_NAME" \
+            '.containerDefinitions[] | select(.name == $container) | .image' \
+            next-task-definition.json)
+          if [ "$updated_container_count" != "1" ] || [ "$updated_image" != "$IMAGE_URI" ]; then
+            echo "::error::The next task definition does not contain the selected backend image."
+            exit 1
+          fi
 
           task_definition_arn=$(aws ecs register-task-definition \
             --cli-input-json file://next-task-definition.json \

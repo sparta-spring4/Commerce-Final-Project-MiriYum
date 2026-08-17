@@ -199,5 +199,8 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-backend-cd-workflow.ps1
 
+      - name: Verify production ECS CD workflow contract
+        run: python3 scripts/test-production-ecs-cd-workflow.py
+
       - name: Verify CloudWatch observability contract
         run: python3 scripts/test-cloudwatch-observability.py
