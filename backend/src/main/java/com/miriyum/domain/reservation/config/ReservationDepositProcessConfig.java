@@ -63,7 +63,7 @@ public class ReservationDepositProcessConfig {
     @ConditionalOnProperty(
             name = "miriyum.reservation.deposit-worker.enabled",
             havingValue = "true",
-            matchIfMissing = true)
+            matchIfMissing = false)
     ProcessScheduledWorker reservationDepositProcessScheduledWorker(
             ReservationDepositProcessJob job
     ) {
@@ -74,7 +74,7 @@ public class ReservationDepositProcessConfig {
     @ConditionalOnProperty(
             name = "miriyum.reservation.deposit-worker.enabled",
             havingValue = "true",
-            matchIfMissing = true)
+            matchIfMissing = false)
     RefundScheduledWorker reservationDepositRefundScheduledWorker(
             ReservationDepositRefundJob job
     ) {
@@ -88,7 +88,7 @@ public class ReservationDepositProcessConfig {
     @ConditionalOnProperty(
             name = "miriyum.reservation.deposit-worker.enabled",
             havingValue = "true",
-            matchIfMissing = true)
+            matchIfMissing = false)
     ThreadPoolTaskScheduler reservationDepositProcessScheduler() {
         return scheduler("reservation-deposit-process-");
     }
@@ -100,7 +100,7 @@ public class ReservationDepositProcessConfig {
     @ConditionalOnProperty(
             name = "miriyum.reservation.deposit-worker.enabled",
             havingValue = "true",
-            matchIfMissing = true)
+            matchIfMissing = false)
     ThreadPoolTaskScheduler reservationDepositRefundScheduler() {
         return scheduler("reservation-deposit-refund-");
     }

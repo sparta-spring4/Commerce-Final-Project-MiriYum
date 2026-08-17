@@ -12,10 +12,33 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.Scheduled;
 
 class ReservationDepositProcessJobTest {
+
+    @Test
+    void missingEnablementKeepsWorkersAndSchedulersDisabled() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(ReservationDepositProcessConfig.class)
+                .withBean(
+                        ReservationDepositProcessJob.class,
+                        () -> mock(ReservationDepositProcessJob.class))
+                .withBean(
+                        ReservationDepositRefundJob.class,
+                        () -> mock(ReservationDepositRefundJob.class))
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            ReservationDepositProcessConfig.ProcessScheduledWorker.class);
+                    assertThat(context).doesNotHaveBean(
+                            ReservationDepositProcessConfig.RefundScheduledWorker.class);
+                    assertThat(context).doesNotHaveBean(
+                            "reservationDepositProcessScheduler");
+                    assertThat(context).doesNotHaveBean(
+                            "reservationDepositRefundScheduler");
+                });
+    }
 
     @Test
     void conditionalScheduledWorkerUsesDedicatedSchedulerAndStableLeaseOwner()
