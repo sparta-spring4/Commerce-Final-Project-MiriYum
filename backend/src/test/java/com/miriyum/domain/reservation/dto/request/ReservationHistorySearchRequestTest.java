@@ -35,9 +35,10 @@ class ReservationHistorySearchRequestTest {
     @CsvSource({
         "CONFIRMED, CONFIRMED",
         "CANCELLED, CANCELLED",
-        "FULFILLED, FULFILLED"
+        "FULFILLED, FULFILLED",
+        "NO_SHOW, NO_SHOW"
     })
-    @DisplayName("1차 MVP 예약 상태만 조회 조건으로 허용한다")
+    @DisplayName("공개 예약 상태를 조회 조건으로 허용한다")
     void acceptsApprovedReservationStatuses(
             String rawStatus,
             ReservationHistorySearchRequest.Status expected
@@ -73,8 +74,8 @@ class ReservationHistorySearchRequestTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"REQUESTED", "NO_SHOW", ""})
-    @DisplayName("1차 MVP 예약 상태가 아니면 COMMON_001로 거절한다")
+    @ValueSource(strings = {"REQUESTED", ""})
+    @DisplayName("공개 예약 상태가 아니면 COMMON_001로 거절한다")
     void invalidStatusIsRejected(String status) {
         assertValidationFailed(() ->
                 ReservationHistorySearchRequest.from(status, 0, 20, null));

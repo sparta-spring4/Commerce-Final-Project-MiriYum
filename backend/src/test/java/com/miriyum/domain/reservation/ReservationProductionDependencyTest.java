@@ -3,6 +3,10 @@ package com.miriyum.domain.reservation;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miriyum.domain.reservation.port.ReservationMenuHoldPort;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrEpochService;
+import com.miriyum.domain.auth.qrepoch.ConsumerQrEpochSnapshot;
+import com.miriyum.domain.reservation.repository.ReservationCheckInAuditRepository;
+import com.miriyum.domain.reservation.repository.ReservationNoShowAuditRepository;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldResult;
 import com.miriyum.domain.reservation.port.dto.ReservationMenuHoldTerminationPresence;
 import com.miriyum.domain.reservation.repository.ReservationHoldTransitionAuditRepository;
@@ -53,6 +57,19 @@ class ReservationProductionDependencyTest {
         assertThat(ReservationMenuHoldPort.class.getMethod(
                 "fulfill", long.class, String.class).getReturnType())
                 .isEqualTo(ReservationMenuHoldResult.class);
+        assertThat(ReservationMenuHoldPort.class.getMethod(
+                "forfeit", long.class, String.class).getReturnType())
+                .isEqualTo(ReservationMenuHoldResult.class);
+    }
+
+    @Test
+    void qrVisitConsumesOnlyTheApprovedAuthEpochContract() throws NoSuchMethodException {
+        assertThat(ConsumerQrEpochService.class.getMethod(
+                "captureCurrent", Long.class).getReturnType())
+                .isEqualTo(ConsumerQrEpochSnapshot.class);
+        assertThat(ConsumerQrEpochService.class.getMethod(
+                "requireCurrent", Long.class, ConsumerQrEpochSnapshot.class).getReturnType())
+                .isEqualTo(void.class);
     }
 
     @Test
@@ -182,6 +199,23 @@ class ReservationProductionDependencyTest {
                 "deleteById",
                 "deleteAllInBatch",
                 "deleteAllByIdInBatch"
+        );
+    }
+
+    @Test
+    void visitAuditRepositoriesExposeNoDeleteOrUpdateApi() {
+        assertAppendOnly(ReservationCheckInAuditRepository.class);
+        assertAppendOnly(ReservationNoShowAuditRepository.class);
+    }
+
+    private static void assertAppendOnly(Class<?> repositoryType) {
+        Set<String> methods = Stream.of(repositoryType.getMethods())
+                .map(method -> method.getName())
+                .collect(java.util.stream.Collectors.toSet());
+        assertThat(JpaRepository.class.isAssignableFrom(repositoryType)).isFalse();
+        assertThat(methods).doesNotContain(
+                "delete", "deleteAll", "deleteAllById", "deleteById",
+                "deleteAllInBatch", "deleteAllByIdInBatch"
         );
     }
 

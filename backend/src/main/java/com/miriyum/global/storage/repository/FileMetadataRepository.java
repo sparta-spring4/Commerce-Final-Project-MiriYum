@@ -30,6 +30,13 @@ public interface FileMetadataRepository extends JpaRepository<FileMetadata, Stri
             FileStorageVisibility visibility,
             Collection<FileStorageStatus> storageStatuses);
 
+    List<FileMetadata> findAllByOwnerTypeAndOwnerIdInAndPurposeAndVisibilityAndStorageStatusOrderByCreatedAtAsc(
+            String ownerType,
+            Collection<Long> ownerIds,
+            FileStoragePurpose purpose,
+            FileStorageVisibility visibility,
+            FileStorageStatus storageStatus);
+
     Optional<FileMetadata> findByFileIdAndVisibilityAndStorageStatus(
             String fileId,
             FileStorageVisibility visibility,
