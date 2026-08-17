@@ -41,6 +41,25 @@ export const storeOperatorKeys = {
     [...storeOperatorKeys.reservationPages(storeId), query] as const,
   reservation: (storeId: string, reservationId: string) =>
     [...storeOperatorKeys.reservations(storeId), reservationId] as const,
+  /*
+   * 웨이팅(#411). 매장 접두사 아래에 두어 매장이 바뀌면 예약·메뉴와 함께
+   * 한 번에 격리된다. 설정과 원장은 서로 무효화 범위가 다르므로 갈라 둔다.
+   */
+  waitingSettings: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'waiting-settings'] as const,
+  waitingDisableImpact: (storeId: string) =>
+    [...storeOperatorKeys.waitingSettings(storeId), 'disable-impact'] as const,
+  waitingClosureJob: (storeId: string, jobId: string) =>
+    [...storeOperatorKeys.waitingSettings(storeId), 'closure-job', jobId] as const,
+  waitingTeams: (storeId: string) =>
+    [...storeOperatorKeys.store(storeId), 'waiting-teams'] as const,
+  /** 목록 페이지는 상세와 따로 무효화한다. 이유는 예약 목록과 같다. */
+  waitingTeamPages: (storeId: string) =>
+    [...storeOperatorKeys.waitingTeams(storeId), 'page'] as const,
+  waitingTeamPage: (storeId: string, query: object) =>
+    [...storeOperatorKeys.waitingTeamPages(storeId), query] as const,
+  waitingTeam: (storeId: string, waitingTeamId: string) =>
+    [...storeOperatorKeys.waitingTeams(storeId), waitingTeamId] as const,
 }
 
 type CatalogName = 'store-categories' | 'store-tags' | 'menu-categories'

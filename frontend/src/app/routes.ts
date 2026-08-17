@@ -44,6 +44,11 @@ export const ROUTES = {
   storeOperatorReservations: '/store-operator/stores/:storeId/reservations',
   storeOperatorReservation:
     '/store-operator/stores/:storeId/reservations/:reservationId',
+  storeOperatorWaitingSettings:
+    '/store-operator/stores/:storeId/waiting-settings',
+  storeOperatorWaitingTeams: '/store-operator/stores/:storeId/waiting-teams',
+  storeOperatorWaitingTeam:
+    '/store-operator/stores/:storeId/waiting-teams/:waitingTeamId',
   forbidden: '/forbidden',
 } as const
 
@@ -126,6 +131,18 @@ export function storeOperatorNavigation(
     {
       label: '예약 목록',
       path: fillPath(ROUTES.storeOperatorReservations, params),
+    },
+    /*
+     * 웨이팅은 고도화 계약(#271·#272)이 열린 뒤에 붙었다. 실시간 구독(#250)은
+     * 아직 없으므로 목록은 중앙 snapshot 재조회로만 갱신한다.
+     */
+    {
+      label: '웨이팅 설정',
+      path: fillPath(ROUTES.storeOperatorWaitingSettings, params),
+    },
+    {
+      label: '웨이팅 목록',
+      path: fillPath(ROUTES.storeOperatorWaitingTeams, params),
     },
   ]
 }

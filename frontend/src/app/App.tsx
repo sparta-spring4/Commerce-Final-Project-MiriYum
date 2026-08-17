@@ -38,6 +38,11 @@ import {
   StoreOperatorSignUpPage,
 } from '../features/store-operator'
 import {
+  WaitingSettingsPage,
+  WaitingTeamDetailPage,
+  WaitingTeamsPage,
+} from '../features/store-waiting'
+import {
   ReservationCapacityPage,
   ReservationTimePolicyPage,
   StoreReservationDetailPage,
@@ -229,6 +234,22 @@ export default function App() {
                     <Route
                       path={ROUTES.storeOperatorReservation}
                       element={<StoreReservationDetailPage />}
+                    />
+                    {/*
+                      웨이팅 고도화(#411). 실시간 구독(#250)은 계약이 없어
+                      목록·상세는 중앙 snapshot 재조회로만 갱신한다.
+                    */}
+                    <Route
+                      path={ROUTES.storeOperatorWaitingSettings}
+                      element={<WaitingSettingsPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorWaitingTeams}
+                      element={<WaitingTeamsPage />}
+                    />
+                    <Route
+                      path={ROUTES.storeOperatorWaitingTeam}
+                      element={<WaitingTeamDetailPage />}
                     />
                   </Route>
                 </Route>
