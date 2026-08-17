@@ -21,6 +21,7 @@ import com.miriyum.domain.reservation.entity.ReservationTimePolicyVersion;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
@@ -77,6 +78,9 @@ class ReservationCapacityPublicationServiceTest {
     private ReservationHoldRepository reservationHoldRepository;
 
     @Mock
+    private ReservationDepositProcessRepository depositProcessRepository;
+
+    @Mock
     private IdempotencyExecutor idempotencyExecutor;
 
     private ObjectMapper objectMapper;
@@ -92,6 +96,7 @@ class ReservationCapacityPublicationServiceTest {
                 capacityBucketRepository,
                 reservationRepository,
                 reservationHoldRepository,
+                depositProcessRepository,
                 idempotencyExecutor,
                 objectMapper
         );
@@ -300,6 +305,37 @@ class ReservationCapacityPublicationServiceTest {
         });
     }
 
+    @Test
+    @DisplayName("확정 예약과 연결된 선점은 새 정책 버킷에 한 번만 이월한다")
+    void deduplicatesLinkedHoldWhenFinalReservationIsInTheLockedResult() {
+        // given
+        Reservation reservation = confirmedReservation();
+        ReservationHold linkedHold = hold(
+                ReservationHoldStatus.ACTIVE,
+                PartyComposition.of(3, 1, 1),
+                LocalTime.of(18, 15),
+                30,
+                0
+        );
+        ReflectionTestUtils.setField(linkedHold, "id", 401L);
+        ReservationCapacitiesRequest request = new ReservationCapacitiesRequest(List.of(
+                bucket(18, 0, 18, 30, 20, 5)
+        ));
+        givenReadyPublication(List.of(reservation), List.of(linkedHold), request);
+        given(depositProcessRepository.findLinkedHoldIdsForFinalReservations(
+                List.of(301L),
+                List.of(401L)
+        )).willReturn(List.of(401L));
+        givenSuccessfulSave();
+
+        // when
+        ReservationCapacityCommandResult result = replace(request);
+
+        // then
+        assertThat(result.data().buckets().getFirst().occupiedPeople()).isEqualTo(5);
+        assertThat(result.data().buckets().getFirst().occupiedTeams()).isEqualTo(1);
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = ReservationHoldStatus.class,
@@ -325,6 +361,8 @@ class ReservationCapacityPublicationServiceTest {
         // then
         assertThat(result.data().buckets().getFirst().occupiedPeople()).isEqualTo(3);
         assertThat(result.data().buckets().getFirst().occupiedTeams()).isEqualTo(1);
+        then(depositProcessRepository).should(never())
+                .findLinkedHoldIdsForFinalReservations(any(), any());
     }
 
     @ParameterizedTest
@@ -408,6 +446,7 @@ class ReservationCapacityPublicationServiceTest {
                 storeService,
                 reservationRepository,
                 reservationHoldRepository,
+                depositProcessRepository,
                 capacityBucketRepository
         );
         order.verify(storeService).requireSchedulePublicationAuthority(OPERATOR_ID, STORE_ID);
@@ -420,6 +459,8 @@ class ReservationCapacityPublicationServiceTest {
                         STORE_ID,
                         SERVICE_DATE
                 );
+        order.verify(depositProcessRepository)
+                .findLinkedHoldIdsForFinalReservations(any(), any());
         order.verify(capacityBucketRepository).findLatestPolicyBucketsForUpdate(
                 STORE_ID,
                 SERVICE_DATE
@@ -547,6 +588,12 @@ class ReservationCapacityPublicationServiceTest {
                         STORE_ID,
                         SERVICE_DATE
                 )).willReturn(holds);
+        if (!reservations.isEmpty() && !holds.isEmpty()) {
+            given(depositProcessRepository.findLinkedHoldIdsForFinalReservations(
+                    any(),
+                    any()
+            )).willReturn(List.of());
+        }
         given(capacityBucketRepository.findLatestPolicyBucketsForUpdate(
                 STORE_ID,
                 SERVICE_DATE
@@ -784,6 +831,11 @@ class ReservationCapacityPublicationServiceTest {
                 new ReservationCancellationPolicyVersion(1L),
                 "hold-command-" + status + "-" + startTime,
                 Instant.parse("2026-08-01T00:00:00Z")
+        );
+        ReflectionTestUtils.setField(
+                hold,
+                "id",
+                Integer.toUnsignedLong(hold.getCreationCommandId().hashCode()) + 1L
         );
         switch (status) {
             case ACTIVE -> {

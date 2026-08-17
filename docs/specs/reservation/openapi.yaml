@@ -104,8 +104,6 @@ paths:
         "403":
           $ref: "#/components/responses/AccountRestricted"
   /api/v1/consumers/me/reservation-requests/{reservationRequestId}:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 238
     get:
       tags: [Reservation]
       summary: 본인 예약금 요청 최신 상태 조회
@@ -131,8 +129,6 @@ paths:
         "404":
           $ref: "#/components/responses/ReservationRequestNotFound"
   /api/v1/consumers/me/reservation-requests/{reservationRequestId}/finalizations:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 238
     post:
       tags: [Reservation]
       summary: 본인 예약금 요청 최종 확정
@@ -175,8 +171,6 @@ paths:
         "409":
           $ref: "#/components/responses/ReservationRequestConflict"
   /api/v1/consumers/me/reservation-requests/{reservationRequestId}/abandonments:
-    x-miriyum-runtime-status: contract-only
-    x-miriyum-owner-issue: 238
     post:
       tags: [Reservation]
       summary: 본인 예약금 요청 포기
