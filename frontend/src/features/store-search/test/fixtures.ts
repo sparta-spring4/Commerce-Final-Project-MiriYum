@@ -49,6 +49,7 @@ export function publicMenu(overrides: Partial<PublicMenu> = {}): PublicMenu {
     menuId: '01JBQ8Z4T7K2N9V6M3P5R8W1MA',
     name: '트러플 크림 파파델레',
     description: '자가제면 파파델레와 포르치니 크림',
+    imageUrl: null,
     price: 32000,
     representative: true,
     primaryCategoryCode: 'PASTA',
