@@ -19,6 +19,19 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
 
+    @Query("""
+            select reservation.id
+            from Reservation reservation
+            where reservation.storeId = :storeId
+              and reservation.status = :#{T(com.miriyum.domain.reservation.entity.ReservationStatus).CONFIRMED}
+              and reservation.timeSnapshot.serviceEndAt > :now
+            order by reservation.id
+            """)
+    List<Long> findConfirmedFutureIdsByStoreId(
+            @Param("storeId") long storeId,
+            @Param("now") Instant now
+    );
+
     /**
      * Locks confirmed reservations for one consumer and store whose service interval overlaps
      * the requested half-open interval. This is called after the Store serialization lock and

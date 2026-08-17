@@ -17,15 +17,18 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.type.SqlTypes;
 
 /** UPDATE·DELETE 경로 없이 append만 허용하는 플랫폼 운영자 감사 원장 행이다. */
 @Entity
+@Immutable
 @Table(name = "platform_operator_audit_events")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -135,6 +138,26 @@ public class PlatformOperatorAuditEvent {
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 
+    @Column(name = "store_sanction_id")
+    private Long storeSanctionId;
+
+    @Column(name = "store_id")
+    private Long storeId;
+
+    @Column(name = "store_sanction_version")
+    private Long storeSanctionVersion;
+
+    @Column(name = "store_enforcement_version")
+    private Long storeEnforcementVersion;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "before_snapshot", columnDefinition = "json")
+    private Map<String, Object> beforeSnapshot;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "after_snapshot", columnDefinition = "json")
+    private Map<String, Object> afterSnapshot;
+
     public static PlatformOperatorAuditEvent create(
             long actorId,
             long authorityVersion,
@@ -207,6 +230,30 @@ public class PlatformOperatorAuditEvent {
         event.correctedTargetType = optionalText(correctedTargetType, 50, "correctedTargetType");
         event.correctedTargetId = optionalText(correctedTargetId, 100, "correctedTargetId");
         event.correctedReason = correctedReason;
+        return event;
+    }
+
+    public static PlatformOperatorAuditEvent createStore(
+            long actorId, long authorityVersion, Set<PlatformOperatorRole> actorRoles,
+            Set<PlatformOperatorPermission> actorPermissions, PlatformOperatorAuditAction action,
+            PlatformOperatorAuditOutcome outcome, PlatformOperatorAuditReason reason,
+            String targetType, String targetId, Long storeId, String caseId, long caseVersion,
+            Long sanctionId, Long sanctionVersion, Long enforcementVersion, String idempotencyKey,
+            Map<String, Object> beforeSnapshot, Map<String, Object> afterSnapshot,
+            String correlationId, Instant occurredAt) {
+        PlatformOperatorAuditEvent event = base(actorId, authorityVersion, actorRoles, actorPermissions,
+                action, outcome, reason, targetType, targetId, AdminCaseType.STORE_ENFORCEMENT,
+                caseId, caseVersion, idempotencyKey, correlationId, occurredAt);
+        event.beforeRoles = Set.of();
+        event.afterRoles = Set.of();
+        event.beforePermissions = Set.of();
+        event.afterPermissions = Set.of();
+        event.storeId = storeId;
+        event.storeSanctionId = sanctionId;
+        event.storeSanctionVersion = sanctionVersion;
+        event.storeEnforcementVersion = enforcementVersion;
+        event.beforeSnapshot = Map.copyOf(beforeSnapshot);
+        event.afterSnapshot = Map.copyOf(afterSnapshot);
         return event;
     }
 
