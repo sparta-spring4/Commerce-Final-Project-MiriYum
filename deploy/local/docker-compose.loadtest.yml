@@ -2,7 +2,6 @@
 services:
   backend:
     environment:
-      MIRIYUM_DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       MIRIYUM_VALKEY_HOST: valkey
       MIRIYUM_VALKEY_PORT: 6379
       MIRIYUM_VALKEY_PASSWORD: ${MIRIYUM_VALKEY_PASSWORD:?MIRIYUM_VALKEY_PASSWORD is required}

@@ -5,7 +5,6 @@ import com.miriyum.domain.notification.dto.source.NotificationPurpose;
 import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import com.miriyum.domain.notification.entity.NotificationTaskStatus;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -116,7 +115,9 @@ public class NotificationTaskRepository {
             HistoryBoundary boundary,
             int limit
     ) {
-        Timestamp occurredAt = boundary == null ? null : Timestamp.from(boundary.occurredAt());
+        LocalDateTime occurredAt = boundary == null
+                ? null
+                : utcLocalDateTime(boundary.occurredAt());
         Long notificationId = boundary == null ? null : boundary.notificationId();
         return jdbcTemplate.query("""
                         SELECT task.notification_id, task.source_domain, task.purpose,
@@ -147,9 +148,9 @@ public class NotificationTaskRepository {
                         resultSet.getLong("resource_id"),
                         resultSet.getLong("resource_version"),
                         resultSet.getString("title"),
-                        instant(resultSet.getTimestamp("occurred_at")),
-                        instant(resultSet.getTimestamp("created_at")),
-                        instant(resultSet.getTimestamp("delivered_at"))
+                        utcInstant(resultSet.getObject("occurred_at", LocalDateTime.class)),
+                        utcInstant(resultSet.getObject("created_at", LocalDateTime.class)),
+                        utcInstant(resultSet.getObject("delivered_at", LocalDateTime.class))
                 ),
                 recipientAccountId,
                 occurredAt,
@@ -374,10 +375,6 @@ public class NotificationTaskRepository {
 
     private static Instant utcInstant(LocalDateTime value) {
         return value == null ? null : value.toInstant(ZoneOffset.UTC);
-    }
-
-    private static Instant instant(Timestamp value) {
-        return value == null ? null : value.toInstant();
     }
 
     public record StoredTask(long notificationId, String payloadFingerprint, boolean inserted) {

@@ -45,7 +45,7 @@
 
 이 기준선 수집 당시에는 기본 JDBC 세션의 `NOW()`보다 예약 알림 `scheduled_at`이 약 9시간 뒤로 기록되어 작업이 `PENDING`에 머무는 것을 관찰했다. 저장소를 변경하지 않고 일회성 worker의 JDBC session timezone만 `Asia/Seoul`로 강제했을 때 해당 6건이 `DELIVERED`로 수렴하고 smoke·baseline이 통과했다. 따라서 이 수치는 알림 조회 API 기준선으로만 사용한다.
 
-[#359](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/359)부터 Notification repository는 offset 입력을 UTC `DATETIME`으로 저장하고 worker가 읽을 때 UTC `Instant`로 복원하며, local loadtest·staging JDBC URL도 UTC를 사용한다. 다른 도메인의 timestamp 의미를 바꿀 수 있는 전역 session 초기화는 추가하지 않는다. 공통 `application.yml`의 worker 기본값은 계속 비활성이다. local loadtest override와 staging Compose에서만 `enabled`, policy version, 환경별 worker ID, batch, lease, max attempts, retry, poll, initial delay의 전체 묶음을 제공해 worker를 활성화한다. 일회성 session timezone override로 worker를 실행하거나 환경변수 일부만 채우는 방식은 사용하지 않는다.
+[#359](https://github.com/sparta-spring4/Commerce-Final-Project-MiriYum/issues/359)부터 Notification repository는 offset 입력을 UTC `DATETIME`으로 저장하고 worker·history가 읽을 때 UTC `Instant`로 복원한다. local loadtest와 staging JDBC URL은 기존 `Asia/Seoul` 계약을 유지하며, 다른 도메인의 timestamp 의미를 바꿀 수 있는 전역 datasource timezone 변경은 추가하지 않는다. 공통 `application.yml`의 worker 기본값은 계속 비활성이다. local loadtest override와 staging Compose에서만 `enabled`, policy version, 환경별 worker ID, batch, lease, max attempts, retry, poll, initial delay의 전체 묶음을 제공해 worker를 활성화한다. 일회성 session timezone override로 worker를 실행하거나 환경변수 일부만 채우는 방식은 사용하지 않는다.
 
 네 시나리오의 두 baseline은 각자 동일 smoke 증거와 fixture fingerprint를 사용해 threshold를 통과했고 expected/unexpected 4xx·5xx·dropped iteration은 모두 0이었다. 모든 예약 fixture는 실행 후 공개 취소 API로 정리했다. 이 local 결과만으로 #286의 SQL 병목이나 실서비스 SLO를 주장하지 않는다.
 
