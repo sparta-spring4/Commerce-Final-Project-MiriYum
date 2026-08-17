@@ -22,6 +22,8 @@ paths:
     $ref: "./platform-operator-auth/openapi.yaml#/paths/~1api~1v1~1platform-operators~1auth~1initial-password"
   /api/v1/platform-operators/reauthentication-approvals:
     $ref: "./platform-operator-authorization/openapi.yaml#/paths/~1api~1v1~1platform-operators~1reauthentication-approvals"
+  /api/v1/platform-operators/me:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1me"
   /api/v1/platform-operators/members:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1members"
   /api/v1/platform-operators/members/{accountType}/{accountId}:
@@ -40,6 +42,8 @@ paths:
     $ref: "./member-support/openapi.yaml#/paths/~1api~1v1~1platform-operators~1member-sanctions~1{sanctionId}~1additional-approvals"
   /api/v1/platform-operators/accounts:
     $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts"
+  /api/v1/platform-operators/accounts/{operatorId}:
+    $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}"
   /api/v1/platform-operators/accounts/{operatorId}/authority:
     $ref: "./platform-operator-management-audit/openapi.yaml#/paths/~1api~1v1~1platform-operators~1accounts~1{operatorId}~1authority"
   /api/v1/platform-operators/accounts/{operatorId}/suspension:
