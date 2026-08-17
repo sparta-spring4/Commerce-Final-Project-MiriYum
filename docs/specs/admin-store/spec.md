@@ -162,6 +162,7 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 ### 계약
 
+- `docs/05-functional-requirements.md` (ADMIN-007 소유 정본에서 admin-store 활성 spec을 명시적으로 연결)
 - `docs/specs/admin-store/spec.md`
 - `docs/specs/admin-store/openapi.yaml`
 - `docs/superpowers/specs/2026-08-17-pr-382-store-sanction-review-remediation-design.md`
@@ -237,7 +238,6 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/controller/PlatformOperatorStoreControllerTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionCaseServiceTest.java`
-- `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/AdminStoreQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionImpactServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionCommandServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/adminstore/service/StoreSanctionExpiryServiceTest.java`
@@ -256,7 +256,6 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 - `backend/src/test/java/com/miriyum/domain/payment/service/StorePaymentImpactQueryServiceTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/service/PlatformOperatorAuditWriterTest.java`
 - `backend/src/test/java/com/miriyum/domain/platformoperator/PlatformOperatorOpenApiContractTest.java`
-- `backend/src/test/java/com/miriyum/architecture/DomainPackageArchitectureTest.java`
 
 ## 9. #278 병합 후 통합과 검증
 
