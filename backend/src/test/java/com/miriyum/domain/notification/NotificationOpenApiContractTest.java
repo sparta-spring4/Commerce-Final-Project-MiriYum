@@ -2,6 +2,9 @@ package com.miriyum.domain.notification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.miriyum.domain.notification.dto.source.NotificationPurpose;
+import com.miriyum.domain.notification.dto.source.NotificationResourceType;
+import com.miriyum.domain.notification.dto.source.NotificationSourceDomain;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -39,6 +42,17 @@ class NotificationOpenApiContractTest {
                 .noneMatch(path -> path.toLowerCase().contains("waiting")
                         || path.toLowerCase().contains("stream")
                         || path.toLowerCase().contains("sse"));
+    }
+
+    @Test
+    void productionEnumsMatchThePublishedWaitingContract() {
+        assertThat(NotificationSourceDomain.valueOf("WAITING"))
+                .isEqualTo(NotificationSourceDomain.WAITING);
+        assertThat(NotificationResourceType.valueOf("WAITING_TEAM"))
+                .isEqualTo(NotificationResourceType.WAITING_TEAM);
+        assertThat(java.util.Arrays.stream(NotificationPurpose.values())
+                .map(Enum::name))
+                .containsAll(WAITING_PURPOSES);
     }
 
     @SuppressWarnings("unchecked")

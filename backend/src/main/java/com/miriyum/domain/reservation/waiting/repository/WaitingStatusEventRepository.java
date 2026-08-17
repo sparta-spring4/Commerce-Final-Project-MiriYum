@@ -4,9 +4,12 @@ import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEvent;
 import com.miriyum.domain.reservation.waiting.entity.WaitingStatusEventPublicationState;
 import java.time.Instant;
 import java.time.LocalDate;
+import jakarta.persistence.LockModeType;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -68,4 +71,14 @@ public interface WaitingStatusEventRepository extends JpaRepository<WaitingStatu
         Long getMaxEventSequence();
         Long getDataThroughEpochMicros();
     }
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<WaitingStatusEvent> findFirstByPublicationStateOrderByIdAsc(
+            WaitingStatusEventPublicationState publicationState
+    );
+
+    Optional<WaitingStatusEvent> findByWaitingTeamIdAndEventSequence(
+            long waitingTeamId,
+            long eventSequence
+    );
 }
