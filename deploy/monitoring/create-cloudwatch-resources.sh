@@ -194,6 +194,16 @@ put_alarm "miriyum-staging-refresh-risk-event-marker-long-stay" \
   --threshold 0 \
   --comparison-operator GreaterThanThreshold
 
+put_alarm "miriyum-staging-auth-valkey-memory-collection-failed" \
+  --namespace "$NAMESPACE" \
+  --metric-name AuthValkeyMemoryCollectionFailure \
+  --dimensions "Name=InstanceId,Value=$EC2_INSTANCE_ID" \
+  --statistic Sum \
+  --period 300 \
+  --evaluation-periods 1 \
+  --threshold 0 \
+  --comparison-operator GreaterThanThreshold
+
 put_alarm "miriyum-staging-reservation-hold-reconciliation-stalled" \
   --namespace "$NAMESPACE" \
   --metric-name ReservationHoldReconciliationStalled \
@@ -310,6 +320,41 @@ dashboard_body=$(cat <<EOF
         "stat": "Sum",
         "metrics": [
           ["MiriYum/Staging", "RefreshTokenRiskEventMarkerLongStay"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 18,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory capacity",
+        "period": 60,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyUsedMemoryBytes", "InstanceId", "$EC2_INSTANCE_ID"],
+          [".", "AuthValkeyMaxMemoryBytes", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 24,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "region": "$AWS_REGION",
+        "title": "MiriYum Auth Valkey memory utilization",
+        "period": 60,
+        "stat": "Maximum",
+        "metrics": [
+          ["MiriYum/Staging", "AuthValkeyMemoryUtilizationPercent", "InstanceId", "$EC2_INSTANCE_ID"]
         ]
       }
     }
