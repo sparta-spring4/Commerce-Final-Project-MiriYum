@@ -21,12 +21,13 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
         havingValue = "true")
 public class WaitingAutoOpenSchedulingConfig {
 
-    @Bean
+    @Bean(defaultCandidate = false)
     ThreadPoolTaskScheduler waitingAutoOpenTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
         scheduler.setThreadNamePrefix("waiting-auto-open-");
         scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(5);
         return scheduler;
     }
 

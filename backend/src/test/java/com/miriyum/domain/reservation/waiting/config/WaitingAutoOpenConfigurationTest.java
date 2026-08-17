@@ -9,8 +9,17 @@ import com.miriyum.domain.reservation.waiting.service.WaitingAutoOpenService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 class WaitingAutoOpenConfigurationTest {
 
@@ -43,6 +52,48 @@ class WaitingAutoOpenConfigurationTest {
     }
 
     @Test
+    void enabledKeepsTheApplicationSchedulerSeparateFromTheAutoOpenScheduler() {
+        runner.withConfiguration(AutoConfigurations.of(TaskSchedulingAutoConfiguration.class))
+                .withPropertyValues(validProperties())
+                .run(context -> {
+                    assertThat(context).hasBean("taskScheduler");
+                    assertThat(context).hasBean("waitingAutoOpenTaskScheduler");
+                    assertThat(context.getBean("taskScheduler"))
+                            .isNotSameAs(context.getBean("waitingAutoOpenTaskScheduler"));
+                });
+    }
+
+    @Test
+    void shutdownWaitsForAnExecutingAutoOpenTaskToFinish() throws Exception {
+        ThreadPoolTaskScheduler scheduler = new WaitingAutoOpenSchedulingConfig()
+                .waitingAutoOpenTaskScheduler();
+        ExecutorService shutdownExecutor = Executors.newSingleThreadExecutor();
+        CountDownLatch taskStarted = new CountDownLatch(1);
+        CountDownLatch releaseTask = new CountDownLatch(1);
+        scheduler.initialize();
+
+        try {
+            scheduler.execute(() -> {
+                taskStarted.countDown();
+                await(releaseTask);
+            });
+            assertThat(taskStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> shutdown = shutdownExecutor.submit(scheduler::shutdown);
+
+            org.junit.jupiter.api.Assertions.assertThrows(
+                    TimeoutException.class,
+                    () -> shutdown.get(200, TimeUnit.MILLISECONDS));
+            releaseTask.countDown();
+            shutdown.get(1, TimeUnit.SECONDS);
+        } finally {
+            releaseTask.countDown();
+            scheduler.shutdown();
+            shutdownExecutor.shutdownNow();
+        }
+    }
+
+    @Test
     void enabledZeroConfigurationFailsStartup() {
         runner.withPropertyValues(
                         "miriyum.waiting.auto-open.enabled=true",
@@ -66,5 +117,14 @@ class WaitingAutoOpenConfigurationTest {
             "miriyum.waiting.auto-open.poll-delay=PT5S",
             "miriyum.waiting.auto-open.initial-delay=PT10S"
         };
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        }
     }
 }
