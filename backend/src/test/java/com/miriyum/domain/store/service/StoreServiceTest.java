@@ -330,6 +330,15 @@ class StoreServiceTest {
     }
 
     @Test
+    void publicDisplayNameLookupReturnsOnlyTheStoreName() {
+        Store store = transactionStore();
+        given(storeRepository.findById(STORE_ID)).willReturn(Optional.of(store));
+
+        assertThat(storeService.findDisplayName(STORE_ID)).contains("미리윰");
+        assertThat(storeService.findDisplayName(0L)).isEmpty();
+    }
+
+    @Test
     void schedulePublicationAuthorityRejectsClosedStore() {
         Store store = storeOwnedBy(OPERATOR_ID);
         store.close();

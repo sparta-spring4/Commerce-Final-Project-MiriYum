@@ -15,7 +15,9 @@ import com.miriyum.domain.notification.dto.source.NotificationResourceType;
 import com.miriyum.domain.notification.port.MenuHoldNotificationSource;
 import com.miriyum.domain.notification.port.PickupNotificationSource;
 import com.miriyum.domain.notification.port.ReservationNotificationSource;
+import com.miriyum.domain.notification.port.WaitingNotificationSource;
 import com.miriyum.domain.notification.service.NotificationTaskRecorder;
+import com.miriyum.domain.notification.service.WaitingNotificationReevaluationService;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
@@ -30,7 +32,9 @@ class NotificationProductionDependencyTest {
                 NotificationTaskRecorder.class,
                 ReservationNotificationSource.class,
                 MenuHoldNotificationSource.class,
-                PickupNotificationSource.class
+                PickupNotificationSource.class,
+                WaitingNotificationSource.class,
+                WaitingNotificationReevaluationService.class
         );
 
         assertThat(boundaries).allSatisfy(boundary ->
@@ -77,8 +81,9 @@ class NotificationProductionDependencyTest {
     }
 
     private void usesNotificationTypesOnly(Method method) {
-        assertThat(method.getReturnType().getPackageName())
-                .startsWith("com.miriyum.domain.notification");
+        assertThat(method.getReturnType() == void.class
+                || method.getReturnType().getPackageName()
+                .startsWith("com.miriyum.domain.notification")).isTrue();
         assertThat(method.getParameterTypes())
                 .allMatch(type -> type.isPrimitive()
                         || type.getPackageName().equals("java.lang")
