@@ -30,9 +30,24 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
     def test_production_approval_and_activation_gates_are_preserved(self):
         self.assertIn("environment: production", self.workflow)
         self.assertIn("vars.PRODUCTION_ECS_DEPLOYMENT_ENABLED == 'true'", self.workflow)
-        self.assertIn("Verify main is unchanged after production approval", self.workflow)
+        self.assertIn("Verify selected main revision after production approval", self.workflow)
         self.assertIn('[ "$current_main_sha" != "$DEPLOY_SHA" ]', self.workflow)
         self.assertIn('Skipping stale CI revision $DEPLOY_SHA after production approval', self.workflow)
+
+    def test_approval_revalidation_covers_manual_deployments(self):
+        approval_step = self.workflow.split(
+            "- name: Verify selected main revision after production approval", 1
+        )[1].split("- name: Validate deployment configuration", 1)[0]
+
+        self.assertNotIn("if:", approval_step)
+        self.assertIn("DEPLOY_SHA: ${{ needs.verify-source.outputs.image_tag }}", approval_step)
+        self.assertIn("compare/$DEPLOY_SHA...main", approval_step)
+        self.assertIn(
+            'actions/runs?head_sha=$DEPLOY_SHA&event=push&status=completed', approval_step
+        )
+
+        deploy_job = self.workflow.split("  deploy:", 1)[1].split("    steps:", 1)[0]
+        self.assertIn("actions: read", deploy_job)
 
     def test_manual_deployment_validates_main_history_and_exact_ci(self):
         self.assertIn("permissions:\n      actions: read\n      contents: read", self.workflow)
