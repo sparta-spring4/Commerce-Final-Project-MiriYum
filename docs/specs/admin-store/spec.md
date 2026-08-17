@@ -164,6 +164,8 @@ wire contract는 같은 디렉터리 OpenAPI가 정본이다. 오류 code는 `AD
 
 - `docs/specs/admin-store/spec.md`
 - `docs/specs/admin-store/openapi.yaml`
+- `docs/superpowers/specs/2026-08-17-pr-382-store-sanction-review-remediation-design.md`
+- `docs/superpowers/plans/2026-08-17-pr-382-store-sanction-review-remediation.md`
 - `docs/specs/platform-operator-management-audit/openapi.yaml` (`#278` 공통 `AdminReasonCode`가 참조하는 enum에 `STORE_ENFORCEMENT`를 추가)
 - `docs/specs/README.md`
 - `docs/specs/platform-operator-openapi.yaml`
