@@ -118,6 +118,19 @@ miriyum:
       poll-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_POLL_DELAY_MS:60000}
       initial-delay-ms: ${MIRIYUM_NOTIFICATION_WORKER_INITIAL_DELAY_MS:60000}
   waiting:
+    auto-open:
+      enabled: ${MIRIYUM_WAITING_AUTO_OPEN_ENABLED:false}
+      worker-id: ${MIRIYUM_WAITING_AUTO_OPEN_WORKER_ID:}
+      planning-horizon: ${MIRIYUM_WAITING_AUTO_OPEN_PLANNING_HORIZON:PT0S}
+      planning-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_PLANNING_BATCH_SIZE:0}
+      claim-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_CLAIM_BATCH_SIZE:0}
+      lease-duration: ${MIRIYUM_WAITING_AUTO_OPEN_LEASE_DURATION:PT0S}
+      max-attempts: ${MIRIYUM_WAITING_AUTO_OPEN_MAX_ATTEMPTS:0}
+      initial-retry-delay: ${MIRIYUM_WAITING_AUTO_OPEN_INITIAL_RETRY_DELAY:PT0S}
+      maximum-retry-delay: ${MIRIYUM_WAITING_AUTO_OPEN_MAXIMUM_RETRY_DELAY:PT0S}
+      invalidation-batch-size: ${MIRIYUM_WAITING_AUTO_OPEN_INVALIDATION_BATCH_SIZE:0}
+      poll-delay: ${MIRIYUM_WAITING_AUTO_OPEN_POLL_DELAY:PT0S}
+      initial-delay: ${MIRIYUM_WAITING_AUTO_OPEN_INITIAL_DELAY:PT0S}
     closure:
       enabled: ${MIRIYUM_WAITING_CLOSURE_ENABLED:false}
     compensation:
