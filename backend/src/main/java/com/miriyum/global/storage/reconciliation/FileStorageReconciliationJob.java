@@ -51,6 +51,7 @@ public class FileStorageReconciliationJob {
                 continue;
             }
             FileMetadata metadata = claimed.get();
+            attempted++;
             try {
                 fileStorageFacade.deleteForReconciliation(
                         metadata.toPublicMetadata(), metadata.getObjectCleanupClaimToken(), now);
