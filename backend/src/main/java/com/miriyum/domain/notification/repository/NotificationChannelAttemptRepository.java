@@ -27,7 +27,7 @@ public class NotificationChannelAttemptRepository {
         requireSingleUpdate(jdbcTemplate.update("""
                 UPDATE notification_channel_attempts
                    SET status = 'PROCESSING', attempt_count = attempt_count + 1,
-                       last_attempted_at = NOW(6), failure_code = NULL
+                       last_attempted_at = UTC_TIMESTAMP(6), failure_code = NULL
                  WHERE notification_id = ?
                    AND channel = 'IN_APP'
                    AND status IN ('PENDING', 'PROCESSING')

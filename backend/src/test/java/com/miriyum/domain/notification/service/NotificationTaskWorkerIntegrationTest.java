@@ -141,6 +141,20 @@ class NotificationTaskWorkerIntegrationTest {
     }
 
     @Test
+    void channelAttemptTimestampUsesUtcClockWhenSessionUsesPlusNine() {
+        record("channel-attempt-utc-1");
+
+        assertThat(worker.deliverDueBatch()).isOne();
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT ABS(TIMESTAMPDIFF(
+                    SECOND, last_attempted_at, UTC_TIMESTAMP(6)
+                )) < 5
+                FROM notification_channel_attempts
+                """, Boolean.class)).isTrue();
+    }
+
+    @Test
     void plusNineFutureNotificationIsNotDeliveredEarlyWhenDatabaseSessionUsesPlusNine() {
         OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.ofHours(9))
                 .minusSeconds(1)
