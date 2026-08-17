@@ -1,6 +1,6 @@
 # 기능 명세: 일반 예약
 
-> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약 runtime 비활성, Issue #240 체크인·노쇼 활성)
+> 문서 상태: 4단계 승인 (Issue #238 예약금 조정 계약·runtime 활성, Issue #240 체크인·노쇼 활성)
 > 적용 단계: 1차 MVP (취소 V1은 1·2차 MVP 공통), 고도화 예약금 계약·회전형 QR 체크인·운영자 노쇼
 > 도메인 소유자: 3번 팀원 — 예약
 > 협업 검토: 2번 팀원 — 매장·운영시간·소속, 4번 팀원 — 선택 메뉴 홀드·수량 복구
@@ -188,7 +188,7 @@
 
 ## 예약금 결제 후 최종 확정
 
-> 활성화 단계: Issue #238 — contract-only 승인, runtime exact allowlist 확정 전 구현 비활성
+> 활성화 단계: Issue #238 — 승인된 exact allowlist의 runtime 활성
 
 ### 소유권과 선행 계약
 
@@ -226,9 +226,10 @@
 
 - `ReservationDepositProcess`는 ReservationHold와 1:1, 최종 Reservation과 0..1로 연결한다. Payment 공개 `paymentId`는 0..1 불변·유일 참조로 저장하되 Payment 테이블 물리 FK를 만들지 않는다. 공개 ID 조회 실패에는 연결을 삭제하지 않고 `RECOVERY_REQUIRED`를 유지한다.
 - process는 조정 상태·상태 버전, worker 임대·fencing·다음 실행 시각, 확정·포기·환불의 안정적인 내부 operation ID, 생성·갱신·종결·포기 요청 시각을 보존하며 종결 뒤 삭제하지 않는다.
+- process·refund scheduled worker와 전용 scheduler는 `miriyum.reservation.deposit-worker.enabled=true`를 명시한 환경에서만 생성한다. property 누락과 `false`에서는 비동기 신규 claim을 시작하지 않으며 배포 환경의 명시적 활성화·중단 배선은 #404가 소유한다.
 - 예약금 계산 근거는 Store 설정 revision·비율·통화·예약 인원·계산 정책 버전·계산된 최종 예약금·대표 메뉴 설정 version·대표 메뉴 가격 합계·대표 메뉴 수와 계산에 사용한 각 대표 메뉴 ID·게시 version·기본 가격을 불변 snapshot으로 보존한다. 공개 DTO의 값만 복사하고 이후 Store 설정이나 Menu 원본 변경으로 갱신하지 않는다.
 - 결제 성공 뒤 자원 확정 불가 또는 포기·반환 뒤 늦은 `PAID`는 process와 같은 트랜잭션에 정확히 한 건의 `ReservationDepositRefundObligation`을 기록한다. obligation은 process·불변 원인 사건, `paymentId`, 전액·통화·환불 정책 버전, 안정적인 Payment 환불 멱등 키와 작업 임대·재시도 정보만 소유한다. process와 원인 사건 조합뿐 아니라 `process + paymentId + FULL_DEPOSIT_COMPENSATION` 조합에 최대 한 obligation만 허용하며 포기·만료·자원 확정 실패·late PAID의 여러 원인 사건은 같은 obligation의 append-only 감사 근거로 연결한다.
-- 커밋 뒤 `PaymentService.requestRefund(...)`를 호출한다. Payment 환불 원장이 실제 금전 결과의 유일한 원본이고 obligation은 요청 의무만 나타낸다. 결과 불명확에는 새 환불을 만들지 않고 같은 의무로 조회·대사하며 자동 해소할 수 없으면 `RECOVERY_REQUIRED`를 유지한다.
+- 커밋 뒤 `PaymentService.requestRefund(...)`를 호출한다. Payment 환불 원장이 실제 금전 결과의 유일한 원본이고 obligation은 요청 의무만 나타낸다. `REQUESTED`·`VALIDATING`·`PROCESSING`, `COMMON_008`·`COMMON_012` `ServiceException`, 그 밖의 일시적 기술 예외만 같은 의무로 재대기한다. 동일 멱등 키의 명시적 `FAILED`, 결과 불명확, 그 밖의 Payment 업무 `ServiceException`은 새 환불을 만들지 않고 obligation `RECONCILIATION_REQUIRED`, process `RECOVERY_REQUIRED`로 격리해 운영 대사를 기다린다.
 
 ### 오류와 검증 경계
 
