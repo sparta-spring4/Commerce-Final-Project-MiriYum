@@ -84,9 +84,9 @@ jobs:
   integration-test:
     name: integration-test-${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # 4-shard 구조는 유지한다. 최근 A shard가 24분 30초까지 소요되어 runner 편차만으로
-    # 25분 상한에 취소될 수 있으므로, 재분배 전까지 30분으로 여유를 둔다.
-    timeout-minutes: 30
+    # 4-shard 구조는 유지한다. B shard가 30분 상한에 취소된 실측이 있어,
+    # 별도 재분배 전까지 runner 편차와 Testcontainers 기동 시간을 포함해 40분을 허용한다.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
