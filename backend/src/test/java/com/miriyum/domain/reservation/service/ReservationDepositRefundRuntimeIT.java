@@ -21,6 +21,7 @@ import com.miriyum.domain.reservation.repository.ReservationDepositRefundObligat
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.Calculation;
 import com.miriyum.domain.reservation.service.ReservationDepositCalculator.ItemSnapshot;
 import com.miriyum.domain.schedule.service.StoreScheduleActivationJob;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Clock;
 import java.time.Duration;
@@ -271,6 +272,36 @@ class ReservationDepositRefundRuntimeIT {
 
         assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
         verify(paymentService, times(1)).requestRefund(any(RequestRefundCommand.class));
+    }
+
+    @Test
+    void retryablePaymentServiceErrorRequeuesUntilCompleted() {
+        Fixture fixture = createRefundRequiredFixture();
+        when(paymentService.requestRefund(any(RequestRefundCommand.class)))
+                .thenThrow(new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION))
+                .thenThrow(new ServiceException(CommonErrorCode.CONCURRENT_MODIFICATION))
+                .thenReturn(completedRefund());
+
+        assertThat(refundJob.runOnce("refund-worker-a", 10)).isZero();
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("REQUIRED");
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-b", 10)).isZero();
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("REQUIRED");
+
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(refundJob.runOnce("refund-worker-c", 10)).isEqualTo(1);
+        assertThat(statusOf("reservation_deposit_refund_obligations",
+                "reservation_deposit_refund_obligation_id",
+                fixture.obligationId())).isEqualTo("COMPLETED");
+        assertThat(statusOf("reservation_deposit_processes",
+                "reservation_deposit_process_id",
+                fixture.processId())).isEqualTo("COMPENSATED");
+        verify(paymentService, times(3)).requestRefund(any(RequestRefundCommand.class));
     }
 
     private Fixture createRefundRequiredFixture() {

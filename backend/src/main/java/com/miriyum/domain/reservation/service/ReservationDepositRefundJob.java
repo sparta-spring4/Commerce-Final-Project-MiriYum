@@ -4,6 +4,7 @@ import com.miriyum.domain.payment.dto.PaymentContracts.RequestRefundCommand;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundResult;
 import com.miriyum.domain.payment.dto.PaymentContracts.RefundStatus;
 import com.miriyum.domain.payment.service.PaymentService;
+import com.miriyum.global.exception.CommonErrorCode;
 import com.miriyum.global.exception.ServiceException;
 import java.time.Duration;
 import java.util.UUID;
@@ -77,7 +78,11 @@ public class ReservationDepositRefundJob {
                                 claim.refundPolicyVersion(),
                                 claim.idempotencyKey()));
             } catch (ServiceException failure) {
-                refundService.recordRecoveryRequired(claim);
+                if (isRetryable(failure)) {
+                    refundService.recordRetryableFailure(claim, RETRY_DELAY);
+                } else {
+                    refundService.recordRecoveryRequired(claim);
+                }
                 continue;
             } catch (RuntimeException failure) {
                 refundService.recordRetryableFailure(claim, RETRY_DELAY);
@@ -96,6 +101,11 @@ public class ReservationDepositRefundJob {
             }
         }
         return completed;
+    }
+
+    private static boolean isRetryable(ServiceException failure) {
+        return failure.getErrorCode() == CommonErrorCode.CONCURRENT_MODIFICATION
+                || failure.getErrorCode() == CommonErrorCode.SERVICE_UNAVAILABLE;
     }
 
     private static int requireBatchSize(Integer batchSize) {
