@@ -113,7 +113,8 @@ public class WaitingLedgerService {
             WaitingTeamStatus before = team.getStatus();
             team.call(expectedVersion, occurredAt);
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     "CALLED", command, occurredAt
             );
             return success(team);
@@ -169,6 +170,31 @@ public class WaitingLedgerService {
         );
     }
 
+    /** 소비자 본인 소유 활성 팀을 동일한 원장 잠금과 멱등 경계에서 취소한다. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, timeout = 5)
+    public WaitingCommandResult cancelByConsumer(
+            long consumerAccountId,
+            long waitingTeamId,
+            long expectedVersion,
+            IdempotencyCommand command,
+            Instant occurredAt
+    ) {
+        IdempotentOutcome outcome = idempotencyExecutor.execute(command, () -> {
+            WaitingTeam team = teamRepository.findByIdForUpdate(waitingTeamId)
+                    .filter(candidate -> candidate.getConsumerAccountId() == consumerAccountId)
+                    .orElseThrow(WaitingLedgerService::notFound);
+            requireVersion(team, expectedVersion);
+            WaitingTeamStatus before = team.getStatus();
+            team.cancel(expectedVersion, occurredAt);
+            removeMembership(team);
+            appendTransition(
+                    team, WaitingActorType.CONSUMER, consumerAccountId,
+                    before, expectedVersion, "CANCELLED_BY_CONSUMER", command, occurredAt);
+            return success(team);
+        });
+        return result(outcome);
+    }
+
     private WaitingCommandResult transition(
             long operatorAccountId,
             long storeId,
@@ -190,7 +216,8 @@ public class WaitingLedgerService {
                 removeMembership(team);
             }
             appendTransition(
-                    team, operatorAccountId, before, expectedVersion,
+                    team, WaitingActorType.STORE_OPERATOR, operatorAccountId,
+                    before, expectedVersion,
                     reason, command, occurredAt
             );
             return success(team);
@@ -245,7 +272,8 @@ public class WaitingLedgerService {
 
     private void appendTransition(
             WaitingTeam team,
-            long operatorAccountId,
+            WaitingActorType actorType,
+            long actorId,
             WaitingTeamStatus before,
             long expectedVersion,
             String reason,
@@ -255,8 +283,8 @@ public class WaitingLedgerService {
         Instant createdAt = clock.instant();
         auditRepository.save(WaitingTransitionAudit.record(
                 team.getId(),
-                WaitingActorType.STORE_OPERATOR,
-                operatorAccountId,
+                actorType,
+                actorId,
                 before,
                 team.getStatus(),
                 expectedVersion,

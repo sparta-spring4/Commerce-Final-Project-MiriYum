@@ -103,6 +103,20 @@ public interface WaitingTeamRepository extends JpaRepository<WaitingTeam, Long> 
             Collection<WaitingTeamStatus> activeStatuses
     );
 
+    @Query("""
+            select count(team)
+            from WaitingTeam team
+            where team.storeId = :storeId
+              and team.businessDate = :businessDate
+              and team.queueSequence < :queueSequence
+              and team.status in ('WAITING', 'CALLED', 'ARRIVED', 'RESERVATION_CONVERTING')
+            """)
+    long countActiveAhead(
+            @Param("storeId") long storeId,
+            @Param("businessDate") LocalDate businessDate,
+            @Param("queueSequence") long queueSequence
+    );
+
     @Query("select team.id from WaitingTeam team where team.storeId = :storeId and team.status in :statuses order by team.id")
     List<Long> findIdsByStoreIdAndStatusIn(@Param("storeId") long storeId,
             @Param("statuses") Collection<WaitingTeamStatus> statuses);

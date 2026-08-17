@@ -464,6 +464,40 @@ version CAS는 Issue #380이 별도로 소유한다.
 `cancelledAt`)만 추가한다. 어떤 운영자 목록·상세·종결 작업 응답에도 consumer ID, 계정 ID,
 전화번호, 좌표, 원본 접수 식별자 또는 멱등 키를 넣지 않는다.
 
+### 소비자 웨이팅 API (#408)
+
+소비자 JWT(`consumer` namespace)만 다음 경계를 호출한다. 운영자 JWT와 인증되지 않은 요청은
+공통 JWT 인증 오류 계약으로 거절한다.
+
+| path | method | 의미 |
+|---|---|---|
+| `/api/v1/consumers/stores/{storeId}/waiting-availability` | `GET` | 중앙 시각 기준 접수 가능 여부와 등록에 사용할 `businessDate` 조회 |
+| `/api/v1/consumers/stores/{storeId}/waiting-teams` | `POST` | `businessDate`, `partySize`로 원격 웨이팅 등록 |
+| `/api/v1/consumers/me/waiting-teams/current` | `GET` | 인증 소비자의 단일 활성 웨이팅 조회 |
+| `/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations` | `POST` | 본인 웨이팅을 `expectedVersion`으로 취소 |
+
+등록과 취소는 표준 UUID `Idempotency-Key`가 필수다. 같은 키와 같은 요청 지문은 최초 HTTP
+상태와 결과를 재생하며, 같은 키를 다른 지문에 재사용하면 `409 COMMON_007`이다. 등록은 기존
+`WaitingCreationService`를 사용하고 source는 `REMOTE`로 고정한다. availability 결과와 등록
+사이에 설정이나 영업 구간이 닫힐 수 있으므로 등록 트랜잭션은 Store/Schedule 접수 게이트를
+다시 잠그고 검사하며, 닫힌 경우 어떤 팀·membership·감사·상태 사건도 기록하지 않는다.
+
+활성 membership은 계정당 하나뿐이다. 서로 다른 매장을 향한 병렬 등록도 DB unique 제약과
+bounded retry를 거쳐 하나만 성공하고 나머지는 `409 WAITING_011`이다. 소비자 취소와 운영자
+call/cancel이 같은 version으로 경합하면 팀 row lock에서 먼저 확정된 전이만 성공하며 나머지는
+`409 WAITING_005`다. 취소 성공은 활성 membership을 제거하고 `CONSUMER` actor 감사를 한 번만
+기록한다.
+
+소비자 snapshot은 `waitingTeamId`, `storeId`, `businessDate`, `status`, `queueSequence`,
+`teamsAhead`, `partySize`, `createdAt`, `calledAt`, `arrivalDeadline`, `arrivedAt`, `cancelledAt`,
+`version`만 공개한다. `teamsAhead`는 같은 매장·영업일의 앞선 활성 FIFO 팀 수를 조회 시점에
+계산한다. 다른 소비자의 팀은 존재 여부와 소유권을 구분하지 않고 `404 WAITING_003`으로
+응답한다. 계정 ID, 운영 메모, 좌표, 원본 식별자, 멱등 키는 반환하지 않는다.
+
+플랫폼 3km 정책은 유지하지만 위치 판정·좌표 수집은 #408 범위에서 제외한다. 따라서 이 API는
+위치를 입력받거나 검증 완료를 주장하지 않으며, 후속 위치 증명 경계가 연결되기 전까지 그 점을
+운영 위험으로 남긴다.
+
 ### 활성 팀 종결 작업과 #271 경계
 
 `PENDING`, `PROCESSING`, `COMPLETED`, `RECONCILIATION_REQUIRED`는 종결 작업 상태 enum이다.

@@ -1,12 +1,14 @@
 package com.miriyum.domain.reservation.waiting.service;
 
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
+import com.miriyum.domain.reservation.waiting.dto.WaitingReceptionAvailability;
 import com.miriyum.domain.reservation.waiting.entity.WaitingReceptionMode;
 import com.miriyum.domain.reservation.waiting.entity.WaitingSetting;
 import com.miriyum.domain.reservation.waiting.repository.WaitingReceptionWindowRepository;
 import com.miriyum.domain.reservation.waiting.repository.WaitingSettingRepository;
 import com.miriyum.global.exception.ServiceException;
 import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -14,6 +16,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /** 현재 Store 영업 구간과 Waiting 설정/오픈 원장을 함께 확인하는 접수 게이트다. */
@@ -67,6 +70,45 @@ public class WaitingReceptionGate {
                 || !manualWindowAccepts(intervals, businessDate, now)) {
             throw closed();
         }
+    }
+
+    /** 쓰기 잠금 없이 현재 등록에 사용할 수 있는 영업일을 실패 폐쇄 방식으로 조회한다. */
+    public WaitingReceptionAvailability inspect(long storeId, Instant now) {
+        if (storeId <= 0 || now == null) {
+            return WaitingReceptionAvailability.closed(storeId);
+        }
+        WaitingSetting setting = settingRepository.findByStoreId(storeId).orElse(null);
+        if (setting == null || !setting.isEnabled()
+                || setting.getReceptionMode() == WaitingReceptionMode.PAUSED) {
+            return WaitingReceptionAvailability.closed(storeId);
+        }
+        List<WaitingOperatingInterval> candidates = intervalPort.findUpcoming(
+                Set.of(storeId),
+                now.minus(Duration.ofDays(1)),
+                now.plus(Duration.ofDays(2)));
+        for (LocalDate businessDate : candidates.stream()
+                .map(WaitingOperatingInterval::businessDate)
+                .distinct()
+                .sorted()
+                .toList()) {
+            List<WaitingOperatingInterval> intervals = candidates.stream()
+                    .filter(interval -> businessDate.equals(interval.businessDate()))
+                    .toList();
+            boolean accepting = setting.getReceptionMode() == WaitingReceptionMode.MANUAL
+                    ? manualWindowAccepts(intervals, businessDate, now)
+                    : setting.getReceptionMode() == WaitingReceptionMode.AUTO
+                            && intervals.stream().anyMatch(interval ->
+                                    windowRepository.existsAccepting(
+                                            storeId,
+                                            interval.businessIntervalKey(),
+                                            businessDate,
+                                            setting.getVersion(),
+                                            now));
+            if (accepting) {
+                return WaitingReceptionAvailability.open(storeId, businessDate);
+            }
+        }
+        return WaitingReceptionAvailability.closed(storeId);
     }
 
     private static boolean manualWindowAccepts(

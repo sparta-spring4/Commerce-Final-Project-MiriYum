@@ -41,6 +41,14 @@ public class ReservationSecurityConfig {
             RESERVATION_REQUEST_ROOT + "/*/finalizations";
     private static final String RESERVATION_REQUEST_ABANDONMENT =
             RESERVATION_REQUEST_ROOT + "/*/abandonments";
+    private static final String CONSUMER_WAITING_STORE_ROOT =
+            "/api/v1/consumers/stores/*/waiting-teams";
+    private static final String CONSUMER_WAITING_AVAILABILITY =
+            "/api/v1/consumers/stores/*/waiting-availability";
+    private static final String CONSUMER_WAITING_ME_ROOT =
+            "/api/v1/consumers/me/waiting-teams";
+    private static final String CONSUMER_WAITING_ME_FAMILY =
+            CONSUMER_WAITING_ME_ROOT + "/**";
     private static final String STORE_RESERVATION_ROOT =
             "/api/v1/store-operators/stores/*/reservations";
     private static final String STORE_RESERVATION_FAMILY = STORE_RESERVATION_ROOT + "/**";
@@ -143,7 +151,11 @@ public class ReservationSecurityConfig {
                         RESERVATION_FAMILY,
                         RESERVATION_HISTORY,
                         RESERVATION_REQUEST_ROOT,
-                        RESERVATION_REQUEST_FAMILY)
+                        RESERVATION_REQUEST_FAMILY,
+                        CONSUMER_WAITING_STORE_ROOT,
+                        CONSUMER_WAITING_AVAILABILITY,
+                        CONSUMER_WAITING_ME_ROOT,
+                        CONSUMER_WAITING_ME_FAMILY)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -158,6 +170,12 @@ public class ReservationSecurityConfig {
                         .requestMatchers(HttpMethod.POST, RESERVATION_REQUEST_ABANDONMENT)
                         .authenticated()
                         .requestMatchers(HttpMethod.POST, RESERVATION_CHECK_IN_QR_GRANT).authenticated()
+                        .requestMatchers(HttpMethod.GET, CONSUMER_WAITING_AVAILABILITY).authenticated()
+                        .requestMatchers(HttpMethod.POST, CONSUMER_WAITING_STORE_ROOT).authenticated()
+                        .requestMatchers(HttpMethod.GET,
+                                CONSUMER_WAITING_ME_ROOT + "/current").authenticated()
+                        .requestMatchers(HttpMethod.POST,
+                                CONSUMER_WAITING_ME_ROOT + "/*/cancellations").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(new JwtAuthenticationEntryPoint(objectMapper))

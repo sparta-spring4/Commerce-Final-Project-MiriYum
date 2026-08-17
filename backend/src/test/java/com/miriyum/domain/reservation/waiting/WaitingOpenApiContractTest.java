@@ -22,6 +22,14 @@ class WaitingOpenApiContractTest {
     private static final String SETTINGS_PATH =
             "/api/v1/store-operators/stores/{storeId}/waiting-settings";
     private static final String DISABLE_IMPACT_PATH = SETTINGS_PATH + "/deactivation-impact";
+    private static final String CONSUMER_AVAILABILITY_PATH =
+            "/api/v1/consumers/stores/{storeId}/waiting-availability";
+    private static final String CONSUMER_CREATE_PATH =
+            "/api/v1/consumers/stores/{storeId}/waiting-teams";
+    private static final String CONSUMER_CURRENT_PATH =
+            "/api/v1/consumers/me/waiting-teams/current";
+    private static final String CONSUMER_CANCEL_PATH =
+            "/api/v1/consumers/me/waiting-teams/{waitingTeamId}/cancellations";
     private static final String IDEMPOTENCY_KEY =
             "../mvp1-common/openapi.yaml#/components/parameters/IdempotencyKey";
     private static final Map<String, Set<String>> LEDGER_OPERATIONS = Map.of(
@@ -70,7 +78,11 @@ class WaitingOpenApiContractTest {
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/arrivals",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/check-ins",
                         "/api/v1/store-operators/stores/{storeId}/waiting-teams/{waitingTeamId}/cancellations",
-                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}");
+                        "/api/v1/store-operators/stores/{storeId}/waiting-closure-jobs/{jobId}",
+                        CONSUMER_AVAILABILITY_PATH,
+                        CONSUMER_CREATE_PATH,
+                        CONSUMER_CURRENT_PATH,
+                        CONSUMER_CANCEL_PATH);
 
         Map<String, Object> settingsPath = map(paths.get(SETTINGS_PATH));
         assertThat(settingsPath).containsOnlyKeys("get", "put");
@@ -123,6 +135,62 @@ class WaitingOpenApiContractTest {
         String serialized = new Yaml().dump(document);
         assertThat(serialized)
                 .doesNotContain("radiusMeters", "radiusKilometers", "1000", "5000");
+    }
+
+    @Test
+    void consumerOperationsExposeProtectedRegistrationCurrentAndCancellationContract()
+            throws IOException {
+        Map<String, Object> document = load(CONTRACT);
+        Map<String, Object> paths = map(document.get("paths"));
+
+        assertThat(map(paths.get(CONSUMER_AVAILABILITY_PATH))).containsOnlyKeys("get");
+        assertThat(map(paths.get(CONSUMER_CREATE_PATH))).containsOnlyKeys("post");
+        assertThat(map(paths.get(CONSUMER_CURRENT_PATH))).containsOnlyKeys("get");
+        assertThat(map(paths.get(CONSUMER_CANCEL_PATH))).containsOnlyKeys("post");
+
+        for (String path : List.of(
+                CONSUMER_AVAILABILITY_PATH,
+                CONSUMER_CREATE_PATH,
+                CONSUMER_CURRENT_PATH,
+                CONSUMER_CANCEL_PATH)) {
+            Map<String, Object> pathItem = map(paths.get(path));
+            Map<String, Object> operation = map(pathItem.values().iterator().next());
+            assertThat(list(operation.get("security")))
+                    .containsExactly(Map.of("bearerAuth", List.of()));
+            assertThat(map(operation.get("responses")).keySet())
+                    .contains("200", "400", "401", "403", "404", "409", "429");
+        }
+
+        Map<String, Object> create = map(map(paths.get(CONSUMER_CREATE_PATH)).get("post"));
+        assertThat(list(create.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+        assertThat(map(map(map(create.get("requestBody")).get("content"))
+                .get("application/json")))
+                .extracting("schema")
+                .isEqualTo(Map.of("$ref", "#/components/schemas/WaitingConsumerCreateRequest"));
+
+        Map<String, Object> cancel = map(map(paths.get(CONSUMER_CANCEL_PATH)).get("post"));
+        assertThat(list(cancel.get("parameters"))).anySatisfy(parameter ->
+                assertThat(map(parameter)).containsEntry("$ref", IDEMPOTENCY_KEY));
+        assertThat(map(map(map(cancel.get("requestBody")).get("content"))
+                .get("application/json")))
+                .extracting("schema")
+                .isEqualTo(Map.of("$ref", "#/components/schemas/WaitingTeamTransitionRequest"));
+
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> createRequest = map(schemas.get("WaitingConsumerCreateRequest"));
+        assertThat(list(createRequest.get("required")))
+                .containsExactly("businessDate", "partySize");
+        assertThat(map(createRequest.get("properties")))
+                .containsOnlyKeys("businessDate", "partySize");
+
+        Map<String, Object> snapshot = map(schemas.get("WaitingConsumerSnapshot"));
+        assertThat(map(snapshot.get("properties"))).containsOnlyKeys(
+                "waitingTeamId", "storeId", "businessDate", "status", "queueSequence",
+                "teamsAhead", "partySize", "createdAt", "calledAt", "arrivalDeadline",
+                "arrivedAt", "cancelledAt", "version");
+        assertThat(snapshot.toString()).doesNotContain(
+                "consumerAccountId", "phone", "contact", "audit", "failure");
     }
 
     @Test
