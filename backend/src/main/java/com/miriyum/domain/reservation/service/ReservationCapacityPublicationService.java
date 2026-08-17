@@ -10,6 +10,7 @@ import com.miriyum.domain.reservation.entity.ReservationHoldStatus;
 import com.miriyum.domain.reservation.entity.ReservationTimeSnapshot;
 import com.miriyum.domain.reservation.exception.ReservationErrorCode;
 import com.miriyum.domain.reservation.repository.ReservationCapacityBucketRepository;
+import com.miriyum.domain.reservation.repository.ReservationDepositProcessRepository;
 import com.miriyum.domain.reservation.repository.ReservationHoldRepository;
 import com.miriyum.domain.reservation.repository.ReservationRepository;
 import com.miriyum.domain.store.service.StoreScheduleAuthority;
@@ -32,7 +33,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -52,6 +55,7 @@ public class ReservationCapacityPublicationService {
     private final ReservationCapacityBucketRepository capacityBucketRepository;
     private final ReservationRepository reservationRepository;
     private final ReservationHoldRepository reservationHoldRepository;
+    private final ReservationDepositProcessRepository depositProcessRepository;
     private final IdempotencyExecutor idempotencyExecutor;
     private final ObjectMapper objectMapper;
 
@@ -62,6 +66,7 @@ public class ReservationCapacityPublicationService {
             ReservationCapacityBucketRepository capacityBucketRepository,
             ReservationRepository reservationRepository,
             ReservationHoldRepository reservationHoldRepository,
+            ReservationDepositProcessRepository depositProcessRepository,
             IdempotencyExecutor idempotencyExecutor,
             ObjectMapper objectMapper
     ) {
@@ -71,6 +76,7 @@ public class ReservationCapacityPublicationService {
         this.capacityBucketRepository = capacityBucketRepository;
         this.reservationRepository = reservationRepository;
         this.reservationHoldRepository = reservationHoldRepository;
+        this.depositProcessRepository = depositProcessRepository;
         this.idempotencyExecutor = idempotencyExecutor;
         this.objectMapper = objectMapper;
     }
@@ -113,6 +119,7 @@ public class ReservationCapacityPublicationService {
                             storeId,
                             serviceDate
                     );
+            Set<Long> linkedHoldIds = linkedHoldIds(confirmed, protectedHolds);
             List<ReservationCapacityBucket> current =
                     capacityBucketRepository.findLatestPolicyBucketsForUpdate(
                             storeId,
@@ -125,7 +132,8 @@ public class ReservationCapacityPublicationService {
                     nextVersion,
                     resolved,
                     confirmed,
-                    protectedHolds
+                    protectedHolds,
+                    linkedHoldIds
             );
             List<ReservationCapacityBucket> saved =
                     capacityBucketRepository.saveAllAndFlush(next);
@@ -246,9 +254,10 @@ public class ReservationCapacityPublicationService {
             long policyVersion,
             List<ResolvedBucket> buckets,
             List<Reservation> confirmed,
-            List<ReservationHold> protectedHolds
+            List<ReservationHold> protectedHolds,
+            Set<Long> linkedHoldIds
     ) {
-        if (confirmed == null || protectedHolds == null) {
+        if (confirmed == null || protectedHolds == null || linkedHoldIds == null) {
             throw conflict();
         }
         protectedHolds.forEach(hold -> validateProtectedHold(hold, storeId, serviceDate));
@@ -276,6 +285,9 @@ public class ReservationCapacityPublicationService {
                 }
             }
             for (ReservationHold hold : protectedHolds) {
+                if (linkedHoldIds.contains(hold.getId())) {
+                    continue;
+                }
                 if (hold.getStartAt().isBefore(resolved.endAt())
                         && hold.getOccupancyEndAt().isAfter(resolved.startAt())) {
                     try {
@@ -306,6 +318,45 @@ public class ReservationCapacityPublicationService {
             ));
         }
         return List.copyOf(created);
+    }
+
+    private Set<Long> linkedHoldIds(
+            List<Reservation> confirmed,
+            List<ReservationHold> protectedHolds
+    ) {
+        if (confirmed == null || protectedHolds == null) {
+            throw conflict();
+        }
+        if (confirmed.isEmpty() || protectedHolds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> finalReservationIds = confirmed.stream()
+                .map(Reservation::getId)
+                .toList();
+        List<Long> reservationHoldIds = protectedHolds.stream()
+                .map(ReservationHold::getId)
+                .toList();
+        if (finalReservationIds.stream().anyMatch(id -> id == null || id <= 0)
+                || reservationHoldIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw conflict();
+        }
+        List<Long> linked = depositProcessRepository
+                .findLinkedHoldIdsForFinalReservations(
+                        finalReservationIds,
+                        reservationHoldIds);
+        if (linked == null) {
+            throw conflict();
+        }
+        Set<Long> eligibleHoldIds = Set.copyOf(reservationHoldIds);
+        Set<Long> deduplicated = new HashSet<>();
+        for (Long holdId : linked) {
+            if (holdId == null
+                    || !eligibleHoldIds.contains(holdId)
+                    || !deduplicated.add(holdId)) {
+                throw conflict();
+            }
+        }
+        return Set.copyOf(deduplicated);
     }
 
     private static void validateProtectedHold(
