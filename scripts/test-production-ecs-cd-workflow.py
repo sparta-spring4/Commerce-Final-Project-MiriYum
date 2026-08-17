@@ -21,6 +21,7 @@ class ProductionEcsCdWorkflowContractTest(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", self.workflow)
 
     def test_manual_deployment_validates_main_history_and_exact_ci(self):
+        self.assertIn("permissions:\n      actions: read\n      contents: read", self.workflow)
         self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'", self.workflow)
         self.assertNotIn("github.ref == 'refs/heads/main'", self.workflow)
         self.assertIn('compare/$image_tag...main', self.workflow)
