@@ -9,8 +9,9 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
-import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
 import com.miriyum.domain.store.dto.contract.StoreDashboardAuthority;
+import com.miriyum.domain.store.dto.contract.StoreServiceProfile;
+import com.miriyum.domain.store.dto.contract.StoreWaitingReceptionProfile;
 import com.miriyum.domain.store.dto.storeoperator.ManagedStoreResponse;
 import com.miriyum.domain.store.dto.storeoperator.StoreCreateRequest;
 import com.miriyum.domain.store.dto.storeoperator.StoreModesRequest;
@@ -238,6 +239,77 @@ class StoreServiceTest {
                 new StoreServiceProfile(STORE_ID, "Asia/Seoul", true),
                 8L,
                 new StoreServiceProfile(8L, "Asia/Seoul", false)));
+    }
+
+    @Test
+    void returnsWaitingReceptionProfilesForOpenAndUnavailableStores() {
+        Store open = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(open, "id", STORE_ID);
+        Store temporarilyClosed = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(temporarilyClosed, "id", 8L);
+        ReflectionTestUtils.setField(
+                temporarilyClosed,
+                "operationStatus",
+                OperationStatus.TEMPORARILY_CLOSED);
+        Store unapproved = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(unapproved, "id", 9L);
+        ReflectionTestUtils.setField(unapproved, "verificationStatus", null);
+        given(storeRepository.findAllById(Set.of(STORE_ID, 8L, 9L)))
+                .willReturn(List.of(open, temporarilyClosed, unapproved));
+
+        Map<Long, StoreWaitingReceptionProfile> profiles =
+                storeService.getWaitingReceptionProfiles(Set.of(STORE_ID, 8L, 9L));
+
+        assertThat(profiles).containsExactlyInAnyOrderEntriesOf(Map.of(
+                STORE_ID,
+                new StoreWaitingReceptionProfile(STORE_ID, "Asia/Seoul", true),
+                8L,
+                new StoreWaitingReceptionProfile(8L, "Asia/Seoul", false),
+                9L,
+                new StoreWaitingReceptionProfile(9L, "Asia/Seoul", false)));
+    }
+
+    @Test
+    void inspectsWaitingReceptionUnderStoreRowLock() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingReceptionProfile profile =
+                storeService.inspectWaitingReceptionForUpdate(STORE_ID);
+
+        assertThat(profile)
+                .isEqualTo(new StoreWaitingReceptionProfile(
+                        STORE_ID,
+                        "Asia/Seoul",
+                        true));
+        then(storeRepository).should().findByIdForUpdate(STORE_ID);
+    }
+
+    @Test
+    void lockedWaitingReceptionInspectionFailsClosedForUnavailableStore() {
+        Store store = storeOwnedBy(OPERATOR_ID);
+        ReflectionTestUtils.setField(store, "id", STORE_ID);
+        ReflectionTestUtils.setField(
+                store,
+                "operationStatus",
+                OperationStatus.TEMPORARILY_CLOSED);
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
+
+        StoreWaitingReceptionProfile profile =
+                storeService.inspectWaitingReceptionForUpdate(STORE_ID);
+
+        assertThat(profile.waitingReceptionEligible()).isFalse();
+    }
+
+    @Test
+    void lockedWaitingReceptionInspectionRejectsMissingStore() {
+        given(storeRepository.findByIdForUpdate(STORE_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> storeService.inspectWaitingReceptionForUpdate(STORE_ID))
+                .isInstanceOf(ServiceException.class)
+                .extracting(exception -> ((ServiceException) exception).getErrorCode())
+                .isEqualTo(StoreErrorCode.STORE_NOT_FOUND);
     }
 
     @Test
