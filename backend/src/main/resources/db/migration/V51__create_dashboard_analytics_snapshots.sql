@@ -49,7 +49,9 @@ CREATE TABLE dashboard_analytics_snapshots (
     CONSTRAINT ck_dashboard_analytics_snapshot_minute_boundary
         CHECK (SECOND(as_of) = 0 AND MICROSECOND(as_of) = 0),
     INDEX ix_dashboard_analytics_snapshot_store_date_generated
-        (store_id, business_date, generated_at)
+        (store_id, business_date, generated_at),
+    INDEX ix_dashboard_analytics_snapshot_retention
+        (generated_at, dashboard_snapshot_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
 
 CREATE TABLE dashboard_analytics_metric_snapshots (

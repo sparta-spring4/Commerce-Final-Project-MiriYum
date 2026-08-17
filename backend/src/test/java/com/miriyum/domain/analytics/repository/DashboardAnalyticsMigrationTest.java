@@ -60,6 +60,11 @@ class DashboardAnalyticsMigrationTest {
                     "dashboard_analytics_metric_snapshots",
                     "uk_dashboard_analytics_metric_key"))
                     .containsExactly("dashboard_snapshot_id", "metric_key");
+            assertThat(indexColumns(
+                    connection,
+                    "dashboard_analytics_snapshots",
+                    "ix_dashboard_analytics_snapshot_retention"))
+                    .containsExactly("generated_at", "dashboard_snapshot_id");
             assertThat(columnNames(connection, "dashboard_analytics_metric_snapshots"))
                     .doesNotContain(
                             "consumer_account_id",
@@ -107,6 +112,25 @@ class DashboardAnalyticsMigrationTest {
                 """)) {
             statement.setString(1, table);
             statement.setString(2, constraint);
+            return rows(statement);
+        }
+    }
+
+    private static List<String> indexColumns(
+            Connection connection,
+            String table,
+            String index
+    ) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT COLUMN_NAME
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND INDEX_NAME = ?
+                ORDER BY SEQ_IN_INDEX
+                """)) {
+            statement.setString(1, table);
+            statement.setString(2, index);
             return rows(statement);
         }
     }

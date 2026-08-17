@@ -124,7 +124,8 @@ Store는 공개 탐색 가능한 자원이므로 기존 authorized enumeration �
 - metric cell 유일 키는 `(dashboard_snapshot_id, metric_key)`다.
 - 동일 1분 버킷 replay는 source가 그 사이 바뀌어도 최초 저장 snapshot을 반환한다. 다른 input checkpoint나 보정 입력은 다음 분 snapshot에서 새 `aggregationVersion`으로 반영한다.
 - 최초 동시 발행은 안정적인 `stores` 행을 `SELECT ... FOR UPDATE`로 잠근 뒤 게시하여 business date별 최신 marker를 하나만 남긴다.
-- snapshot은 성공 후 제자리 덮어쓰지 않는다. 31일을 초과한 header는 게시 transaction에서 정리하고 metric FK의 `ON DELETE CASCADE`로 함께 삭제한다. 삭제된 기간은 재조회 시 source에서 다시 계산할 수 있다.
+- snapshot은 성공 후 제자리 덮어쓰지 않는다. 발행 transaction은 `stores` 행 잠금 안에서 header와 여섯 metric 삽입까지만 수행한다.
+- 31일을 초과한 header는 발행과 분리된 시간당 retention job이 `(generated_at, dashboard_snapshot_id)` 인덱스로 최대 1,000행씩 10개 transaction에서 정리하고, metric FK의 `ON DELETE CASCADE`로 함께 삭제한다. 삭제된 기간은 재조회 시 source에서 다시 계산할 수 있다.
 - 같은 source checkpoint와 definition version의 전체 재집계와 증분 결과는 값·무결성 digest가 같아야 한다.
 - 부분 metric row를 먼저 최신으로 게시하지 않는다. header와 여섯 metric cell을 한 MySQL transaction에서 게시한다.
 
@@ -171,6 +172,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingTeamRepository.java`
 - Modify: `backend/src/main/java/com/miriyum/domain/reservation/waiting/repository/WaitingStatusEventRepository.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/config/AnalyticsSecurityConfig.java`
+- Create: `backend/src/main/java/com/miriyum/domain/analytics/config/DashboardSnapshotRetentionScheduleConfig.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/controller/storeoperator/StoreDashboardAnalyticsController.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/dto/DashboardAnalyticsContracts.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/entity/DashboardSnapshot.java`
@@ -179,6 +181,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/repository/DashboardMetricSnapshotRepository.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/service/AnalyticsMetricFailureClassifier.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/service/DashboardSnapshotTransactionExecutor.java`
+- Create: `backend/src/main/java/com/miriyum/domain/analytics/service/DashboardSnapshotRetentionJob.java`
 - Create: `backend/src/main/java/com/miriyum/domain/analytics/service/StoreDashboardAnalyticsService.java`
 
 ### 향후 runtime test exact allowlist
@@ -194,6 +197,7 @@ Issue #270은 혼합 방식을 채택한다. 범용 Kafka/Outbox나 새 사용�
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/repository/DashboardAnalyticsMigrationTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/repository/DashboardSnapshotRepositoryIT.java`
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/service/AnalyticsMetricFailureClassifierTest.java`
+- Create: `backend/src/test/java/com/miriyum/domain/analytics/service/DashboardSnapshotRetentionJobTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/service/StoreDashboardAnalyticsServiceTest.java`
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/service/StoreDashboardAnalyticsServiceIT.java`
 - Create: `backend/src/test/java/com/miriyum/domain/analytics/controller/StoreDashboardAnalyticsControllerTest.java`

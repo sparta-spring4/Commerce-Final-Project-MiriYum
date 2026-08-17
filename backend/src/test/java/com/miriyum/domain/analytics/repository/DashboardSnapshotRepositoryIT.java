@@ -15,10 +15,13 @@ import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.MetricMetada
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.NoShowValue;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.RateValue;
 import com.miriyum.domain.analytics.dto.DashboardAnalyticsContracts.WaitingValue;
+import com.miriyum.domain.analytics.service.DashboardSnapshotRetentionJob;
 import com.miriyum.domain.analytics.service.DashboardSnapshotTransactionExecutor;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -29,6 +32,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -47,8 +54,10 @@ import tools.jackson.databind.ObjectMapper;
         "miriyum.store.schedule.activation-delay-ms=600000",
         "miriyum.reservation.time-policy.activation-enabled=false",
         "miriyum.reservation.hold-expiration.enabled=false",
-        "miriyum.waiting.closure.initial-delay-ms=600000"
+        "miriyum.waiting.closure.initial-delay-ms=600000",
+        "miriyum.analytics.snapshot-retention.initial-delay-ms=600000"
 })
+@Import(DashboardSnapshotRepositoryIT.FixedClockConfig.class)
 class DashboardSnapshotRepositoryIT {
 
     private static final Instant AS_OF = Instant.parse("2026-08-16T09:00:00Z");
@@ -65,6 +74,7 @@ class DashboardSnapshotRepositoryIT {
     }
 
     @Autowired DashboardSnapshotTransactionExecutor executor;
+    @Autowired DashboardSnapshotRetentionJob retentionJob;
     @Autowired DashboardSnapshotRepository snapshotRepository;
     @Autowired DashboardMetricSnapshotRepository metricRepository;
     @Autowired JdbcTemplate jdbc;
@@ -165,9 +175,20 @@ class DashboardSnapshotRepositoryIT {
     }
 
     @Test
-    void publishingPrunesSnapshotsOlderThanThirtyOneDaysWithTheirMetrics() {
+    void publishingDoesNotRunRetentionInsideTheStoreLock() {
         executor.publish(draftAt(AS_OF.minusSeconds(32L * 24 * 60 * 60), 2L, "old"));
         executor.publish(draftAt(AS_OF, 4L, "current"));
+
+        assertThat(snapshotRepository.count()).isEqualTo(2L);
+        assertThat(metricRepository.count()).isEqualTo(12L);
+    }
+
+    @Test
+    void retentionJobPrunesExpiredSnapshotsWithTheirMetrics() {
+        executor.publish(draftAt(AS_OF.minusSeconds(32L * 24 * 60 * 60), 2L, "old"));
+        executor.publish(draftAt(AS_OF, 4L, "current"));
+
+        retentionJob.pruneExpiredSnapshots();
 
         assertThat(snapshotRepository.count()).isEqualTo(1L);
         assertThat(metricRepository.count()).isEqualTo(6L);
@@ -218,5 +239,14 @@ class DashboardSnapshotRepositoryIT {
                         complete),
                 new DashboardMetricDraft("NO_SHOW_STATUS",
                         objectMapper.valueToTree(noShow), partial)));
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FixedClockConfig {
+        @Bean
+        @Primary
+        Clock dashboardRetentionTestClock() {
+            return Clock.fixed(AS_OF, ZoneOffset.UTC);
+        }
     }
 }

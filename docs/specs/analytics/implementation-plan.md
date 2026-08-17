@@ -435,7 +435,7 @@ Expected: compile failure because repositories and executor are absent.
 
 - [ ] **Step 5: Implement immutable entities and one transaction publisher**
 
-Require all six metric keys exactly once. Serialize only OpenAPI-approved value objects. Lock the stable Store row before checking or replacing the latest marker so concurrent first publishers serialize. Reuse the first stored canonical snapshot for the same one-minute identity, and opportunistically delete snapshots older than 31 days with their cascaded metric cells.
+Require all six metric keys exactly once. Serialize only OpenAPI-approved value objects. Lock the stable Store row before checking or replacing the latest marker so concurrent first publishers serialize. Reuse the first stored canonical snapshot for the same one-minute identity. Keep retention outside that lock: an hourly job uses the `(generated_at, dashboard_snapshot_id)` range index and deletes at most ten 1,000-row batches in independent transactions; metric cells follow through `ON DELETE CASCADE`.
 
 - [ ] **Step 6: Run focused entity/repository tests and verify GREEN**
 

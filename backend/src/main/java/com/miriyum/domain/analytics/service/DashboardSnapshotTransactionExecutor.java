@@ -18,7 +18,6 @@ import com.miriyum.domain.analytics.repository.DashboardMetricSnapshotRepository
 import com.miriyum.domain.analytics.repository.DashboardSnapshotRepository;
 import java.sql.PreparedStatement;
 import java.sql.Types;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -100,7 +99,6 @@ public class DashboardSnapshotTransactionExecutor {
                 Long.class,
                 snapshotId.toString());
         insertMetrics(databaseId, draft.metrics());
-        pruneExpired(draft.storeId(), draft.generatedAt());
         return response(snapshotId, draft.generatedAt(), draft);
     }
 
@@ -112,14 +110,6 @@ public class DashboardSnapshotTransactionExecutor {
         if (lockedStoreId == null || lockedStoreId != storeId) {
             throw new IllegalStateException("dashboard store lock invariant violated");
         }
-    }
-
-    private void pruneExpired(long storeId, Instant generatedAt) {
-        jdbcTemplate.update("""
-                DELETE FROM dashboard_analytics_snapshots
-                WHERE store_id = ?
-                  AND generated_at < ?
-                """, storeId, utc(generatedAt.minus(Duration.ofDays(31))));
     }
 
     private void insertMetrics(long dashboardSnapshotId, List<DashboardMetricDraft> metrics) {
