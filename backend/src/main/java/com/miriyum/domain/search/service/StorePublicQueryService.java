@@ -23,10 +23,14 @@ import com.miriyum.domain.search.model.ReservationSearchCondition;
 import com.miriyum.domain.search.repository.PublicStoreSnapshot;
 import com.miriyum.domain.search.repository.StorePublicReadRepository;
 import com.miriyum.global.exception.ServiceException;
+import com.miriyum.global.storage.FileStorageOwner;
+import com.miriyum.global.storage.FileStoragePurpose;
+import com.miriyum.global.storage.service.FileStorageFacade;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,23 +42,26 @@ public class StorePublicQueryService {
     private final StoreScheduleQueryService scheduleQueryService;
     private final ReservationService reservationService;
     private final RepresentativeMenuQueryService representativeMenuQueryService;
+    private final ObjectProvider<FileStorageFacade> fileStorageFacadeProvider;
 
     public StorePublicQueryService(
             StorePublicReadRepository publicReadRepository,
             StoreScheduleQueryService scheduleQueryService,
             ReservationService reservationService,
-            RepresentativeMenuQueryService representativeMenuQueryService
+            RepresentativeMenuQueryService representativeMenuQueryService,
+            ObjectProvider<FileStorageFacade> fileStorageFacadeProvider
     ) {
         this.publicReadRepository = publicReadRepository;
         this.scheduleQueryService = scheduleQueryService;
         this.reservationService = reservationService;
         this.representativeMenuQueryService = representativeMenuQueryService;
+        this.fileStorageFacadeProvider = fileStorageFacadeProvider;
     }
 
     public List<PublicMenu> getMenus(long storeId) {
         List<PublicMenu> menus = publicReadRepository.findPublicMenus(storeId);
         requirePublicStore(storeId);
-        return menus;
+        return attachImageUrls(menus);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -81,7 +88,26 @@ public class StorePublicQueryService {
                         store.pickupEnabled()),
                 operatingHours(schedules.operatingHours()),
                 reservationTimeSlots(schedules.reservationTimeSlots()),
-                orderedRepresentativeMenus(menus, representativeMenus), finalAvailability);
+                orderedRepresentativeMenus(attachImageUrls(menus), representativeMenus), finalAvailability);
+    }
+
+    private List<PublicMenu> attachImageUrls(List<PublicMenu> menus) {
+        if (menus.isEmpty()) {
+            return menus;
+        }
+        FileStorageFacade fileStorageFacade = fileStorageFacadeProvider.getIfAvailable();
+        if (fileStorageFacade == null) {
+            return menus;
+        }
+        Map<FileStorageOwner, String> urls = fileStorageFacade.findConfirmedPublicUrls(
+                menus.stream()
+                        .map(menu -> new FileStorageOwner("MENU", Long.parseLong(menu.menuId())))
+                        .toList(),
+                FileStoragePurpose.MENU_IMAGE);
+        return menus.stream()
+                .map(menu -> menu.withImageUrl(
+                        urls.get(new FileStorageOwner("MENU", Long.parseLong(menu.menuId())))))
+                .toList();
     }
 
     private static List<PublicMenu> orderedRepresentativeMenus(
@@ -100,7 +126,7 @@ public class StorePublicQueryService {
 
     private static PublicMenu asRepresentative(PublicMenu menu) {
         return new PublicMenu(
-                menu.menuId(), menu.name(), menu.description(), menu.price(), true,
+                menu.menuId(), menu.name(), menu.description(), menu.imageUrl(), menu.price(), true,
                 menu.primaryCategoryCode(), menu.secondaryCategoryCodes(),
                 menu.localTags(), menu.holdEnabled(),
                 menu.pickupEnabled(), menu.saleStatus());

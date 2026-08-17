@@ -5,7 +5,7 @@
 
 > 문서 상태: 세부 정책 확정
 > 정책 범위: `CHECK-001`~`CHECK-010`
-> 최종 변경일: 2026-07-25
+> 최종 변경일: 2026-08-16
 
 체크인 자격과 수단, 지각, 일부 인원 도착, 노쇼 판정, 귀책, 제재 및 이의 제기를 다룬다.
 
@@ -38,6 +38,35 @@
 - 고도화 공개 예약 상태는 `예약 완료`, `방문 완료`, `취소`, `노쇼`로 제한한다. QR 체크인은 내부적으로 `체크인 요청` → `검증` → `체크인 완료` 전이를 사용하되 사용자에게는 `방문 완료`로 표시한다. `노쇼 후보`, `이의 접수·검토·정정`은 향후 고도화 전까지 공개 상태나 상태 진입 경로로 제공하지 않는다.
 - `향후 고도화`는 정책 폐기나 `TODO` 전환이 아니다. 해당 정책은 확정 상태로 보존하되 고도화 기본 범위의 UI·API·권한과 상태 진입 경로를 제공하지 않는다.
 - 부분 적용 정책은 단계 전용 두 번째 노쇼·환불 규칙을 만들지 않는다. 고도화의 방문 완료·노쇼 결과도 `CHECK-006`·`CHECK-007`과 `PAY-009`의 확정 귀책·환불 경계를 따른다.
+
+## Issue #240 활성 구현 계약
+
+Issue #240은 위 확정 정책 가운데 예약의 회전형 QR 방문 완료와 운영자 직접 노쇼 확정만 활성화한다. 아래 경계는 이 단계의 구현 계약이며, 향후 고도화의 매장별 체크인 창·6시간 후보·24시간 자동 확정·이의·제재 정책을 폐기하거나 선구현하지 않는다.
+
+### QR grant와 공개 경로
+
+- 일반 사용자는 `POST /api/v1/consumers/me/reservations/{reservationId}/check-in-qr-grants`로 본인 `CONFIRMED` 예약의 QR grant를 발급한다. request body와 `Idempotency-Key`는 없고 매 호출은 새 version으로 회전한다.
+- grant는 JWT가 아닌 Reservation 소유의 server-stored opaque credential이다. 서버는 CSPRNG 256-bit 값을 base64url padding 없이 인코딩하고 `rqg_v1_` prefix를 붙이며, MySQL에는 전체 raw token의 SHA-256 digest만 저장한다.
+- raw token은 201 발급 성공 응답 한 번에만 포함한다. 로그·오류·감사·스캔 결과·멱등 결과에는 raw token을 저장하거나 노출하지 않는다.
+- TTL은 정확히 30초이고 유효 구간은 `[issuedAt, expiresAt)`이다. 예약별 current grant 행은 하나이며 `tokenVersion`은 1부터 단조 증가한다. rotation overlap은 없고 병렬 발급에서는 잠금 뒤 확정된 가장 큰 version만 유효하다.
+- 발급 시 Reservation 원장의 일반 사용자 계정과 Auth `ConsumerQrEpochSnapshot`을 결합한다. 스캔은 잠근 Reservation의 계정과 snapshot을 Auth `requireCurrent`로 검증하며 stale·account mismatch는 `AUTH_017`, Valkey·세대 생성 실패는 `COMMON_012`로 실패 폐쇄한다.
+
+### 스캔·노쇼 경계
+
+- 운영자는 `POST /api/v1/store-operators/stores/{storeId}/reservation-check-ins`에 `Idempotency-Key`와 `{ "qrToken": "..." }`을 보내 QR 방문 완료를 확정한다. 성공 상태는 별도 CHECK 상태가 아니라 기존 `Reservation.FULFILLED`다.
+- QR scan window는 서버 중앙 시각 기준 정확히 `[startAt, startAt + 5분)`이다. `startAt + 5분`부터 신규 QR 성공은 허용하지 않는다.
+- 운영자는 `POST /api/v1/store-operators/stores/{storeId}/reservations/{reservationId}/no-shows`에 `Idempotency-Key`와 필수 reason을 보내 `now >= startAt + 5분`인 `CONFIRMED` 예약을 `NO_SHOW`로 확정한다. 시간 경과만으로 자동 전이하지 않는다.
+- reason은 `USER_CAUSE_CANDIDATE`, `STORE_CAUSE_CANDIDATE`, `PLATFORM_EXTERNAL_CAUSE_CANDIDATE`, `UNCLEAR` 중 하나이며 기본값이 없다. 이 분류 자체로 최종 금전 귀책을 확정하지 않는다.
+- 잘 형성됐지만 부재·교체·만료·소비된 QR은 `RESERVATION_011`, scan window 밖은 `RESERVATION_012`, no-show 경계 전은 `RESERVATION_013`으로 거부한다. 필수값 누락·QR 패턴 등 Bean Validation 실패는 `COMMON_001`, 잘못된 JSON·타입·enum·unknown field는 `COMMON_002`다.
+
+### 원자성·감사·후속 범위
+
+- fresh QR scan은 현재 매장 권한과 멱등 claim 뒤 Reservation과 current grant를 차례로 잠그고 digest·version·expiry·미소비·Auth epoch·중앙 시각·상태를 재검증한다. 그 뒤 MenuHold 종결 잠금을 획득해 Reservation·MenuHold를 `FULFILLED`로 만들고 기존 fulfillment audit, QR audit, grant 소비와 멱등 성공 결과를 한 MySQL 트랜잭션에 기록한다.
+- digest로 reservation ID를 찾는 preliminary unlocked lookup은 잠금 대상을 찾는 힌트일 뿐 권한·성공·변경 근거가 아니다. 잠금 뒤 모든 조건을 다시 검증한다.
+- 성공 replay는 현재 운영자·매장 권한만 다시 확인하고 저장된 결과를 반환한다. 이미 성공한 raw QR·expiry·epoch·과거 상태·시간 경계를 다시 검증하지 않는다.
+- fresh no-show는 현재 권한과 멱등 claim 뒤 Reservation과 MenuHold 종결 잠금을 획득하고 `Reservation.NO_SHOW`, `MenuHold.FORFEITED`, 필수 사유 audit와 멱등 결과를 같은 트랜잭션에 기록한다.
+- QR scan, no-show, 기존 직접 방문 완료, 취소는 Reservation 잠금에서 하나의 종결 승자만 남긴다. 후속 상태·감사·grant·MenuHold·멱등 기록 중 하나라도 실패하면 전부 rollback한다.
+- QR 성공과 no-show는 예약 수용량·allocation·메뉴 재고·수량·return ledger·transfer를 조회하거나 복구하지 않는다. Issue #240은 금전 명령이나 `PAY-009` 입력을 실행·enqueue하지 않고 `NO_SHOW` 결과만 기록하며, 금전 연동은 후속 Issue #241이 소유한다.
 
 ## CHECK-001 QR·번호·직원 확인 방식
 
@@ -256,4 +285,5 @@
 | 2026-07-23 | CHECK-001·CHECK-003 | 회전형 QR 발급·검증과 만료·재사용 방지를 1차 MVP에 포함하고 일회 확인번호는 후속 구현으로 유지 | 확정 하위 경계 | 최신 사용자 결정 반영 |
 | 2026-07-27 | CHECK-001~CHECK-010 | 체크인·노쇼 기본 범위를 고도화로 이동하고 고급 자동화 경계를 향후 고도화로 분리 | 확정 하위 경계 | 정책 결정 상태와 단계 포함 여부 분리 |
 | 2026-08-14 | CHECK-003 | Reservation 원장 accountId와 Auth QR epoch snapshot을 결합하고 유효 Consumer 로그아웃 뒤 기존 계정 QR 전체 거부 | 확정 | #305 Auth 계약을 #240 CHECK 소비 경계로 고정하고 payload 신뢰·자동 재발급을 차단 |
+| 2026-08-16 | CHECK-001·CHECK-003·CHECK-005~CHECK-007·CHECK-010 | Issue #240의 30초 opaque 회전 QR, 공통 5분 scan window, 운영자 필수 사유 노쇼, 원자 종결·최소 감사·무복구 경계 확정 | 확정 하위 경계 | Auth epoch·MenuHold FORFEITED 선행 계약을 소비하고 금전은 Issue #241로 분리 |
 | 2026-07-23 | CHECK-005 | 웨이팅 호출 뒤 도착 제한을 CHECK 지각 유예와 분리한 채 WAIT-011의 10분 경계로 변경 | 확정 | WAIT-011 최신 결정 반영 |
